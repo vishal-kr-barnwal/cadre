@@ -86,26 +86,31 @@ git commit -m "conductor(refresh): Sync context with codebase"
      ```
 
 5. **Create `conductor/patterns.md` if Missing:**
-   ```markdown
-   # Codebase Patterns
-   
-   Reusable patterns discovered during development. Read this before starting new work.
-   
-   ## Code Conventions
-   - <patterns related to code style>
-   
-   ## Architecture
-   - <patterns related to architecture decisions>
-   
-   ## Gotchas
-   - <common mistakes to avoid>
-   
-   ## Testing
-   - <patterns for testing approaches>
-   
-   ---
-   Last refreshed: <timestamp>
-   ```
+   - It is normally created by `conductor-setup`. If absent, recreate it by
+     copying `<TEMPLATES_DIR>/patterns.md` (resolve `<TEMPLATES_DIR>` as described
+     in `../template-locator.md`), then merge in the patterns gathered above and
+     update the `Last refreshed:` footer.
+   - If the templates bundle can't be found, fall back to this structure:
+     ```markdown
+     # Codebase Patterns
+
+     Reusable patterns discovered during development. Read this before starting new work.
+
+     ## Code Conventions
+     - <patterns related to code style>
+
+     ## Architecture
+     - <patterns related to architecture decisions>
+
+     ## Gotchas
+     - <common mistakes to avoid>
+
+     ## Testing
+     - <patterns for testing approaches>
+
+     ---
+     Last refreshed: <timestamp>
+     ```
 
 ---
 

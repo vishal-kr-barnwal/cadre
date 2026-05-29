@@ -183,7 +183,21 @@ Present to user:
 
 ### 2.4 Select Code Styleguides (Interactive)
 
-1. **List Available Guides:** Check `templates/code_styleguides/` directory.
+0. **Locate Bundled Templates:** Conductor ships its templates (`workflow.md`,
+   `code_styleguides/`, etc.) alongside the installed commands/skill. Resolve
+   `<TEMPLATES_DIR>` to the FIRST of these paths that exists (check with `ls`):
+   - `templates/` — running inside a Conductor-Beads clone
+   - `.claude/skills/conductor/templates/` or `~/.claude/skills/conductor/templates/` — Claude Code
+   - `.cursor/commands/templates/` or `~/.cursor/commands/templates/` — Cursor
+   - `.agent/workflows/templates/` — Antigravity
+   - `.github/prompts/templates/` — GitHub Copilot
+   - `~/.codex/prompts/templates/` — Codex CLI
+
+   If none exist, tell the user the templates bundle is missing (point them to
+   the Install & Version Guide, `docs/INSTALL.md`) and ask whether to continue
+   with sensible built-in defaults instead of copying files.
+
+1. **List Available Guides:** List the files in `<TEMPLATES_DIR>/code_styleguides/`.
 
 2. **For Greenfield:**
    - Recommend guides based on tech stack with explanation
@@ -197,7 +211,7 @@ Present to user:
      > A) Yes, proceed with suggested guides
      > B) No, I want to add more guides
 
-4. **Copy Files:** `mkdir -p conductor/code_styleguides && cp [selected guides]`
+4. **Copy Files:** `mkdir -p conductor/code_styleguides && cp <TEMPLATES_DIR>/code_styleguides/[selected].md conductor/code_styleguides/`
 
 5. **Commit State:**
    ```json
@@ -208,7 +222,7 @@ Present to user:
 
 ### 2.5 Select Workflow (Interactive)
 
-1. **Copy Initial Workflow:** Copy `templates/workflow.md` to `conductor/workflow.md`
+1. **Copy Initial Workflow:** Copy `<TEMPLATES_DIR>/workflow.md` (resolved in 2.4) to `conductor/workflow.md`
 
 2. **Ask:**
    > "Use default workflow or customize?"
@@ -228,7 +242,11 @@ Present to user:
      - B) Commit Message
    - Update `conductor/workflow.md` based on responses
 
-4. **Commit State:**
+4. **Create Project Patterns File:** Copy `<TEMPLATES_DIR>/patterns.md` (resolved
+   in 2.4) to `conductor/patterns.md`. This is the project's institutional
+   knowledge file; tracks read it before starting and append to it on completion.
+
+5. **Commit State:**
    ```json
    {"last_successful_step": "2.5_workflow"}
    ```
@@ -272,16 +290,24 @@ Present to user:
      - If A: Set `beads_available = false`, skip to Section 3.0
      - If B: Retry the command
      - If C: HALT and wait for user
-   - Create `conductor/beads.json`:
+   - Create `conductor/beads.json` from the template: copy
+     `<TEMPLATES_DIR>/beads.json` (resolved in 2.4) to `conductor/beads.json`,
+     then set `"mode"` to `"stealth"` if the user chose stealth (B); leave it
+     `"normal"` for full integration (A). This is the canonical schema — do not
+     hand-write a different set of keys:
      ```json
      {
        "enabled": true,
-       "mode": "normal|stealth",
-       "sync": "bidirectional",
+       "mode": "normal",
+       "memoryStrategy": "beads-primary",
        "epicPrefix": "conductor",
        "autoCreateTasks": true,
-       "autoSyncOnComplete": true,
-       "compactOnArchive": true
+       "compactOnPhaseComplete": true,
+       "pushOnTaskComplete": false,
+       "pushOnPhaseComplete": true,
+       "pushOnTrackComplete": true,
+       "worktreePerTrack": true,
+       "worktreePerWorker": true
      }
      ```
    - Announce: "Beads integration enabled in [normal/stealth] mode."

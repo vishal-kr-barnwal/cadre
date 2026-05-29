@@ -159,16 +159,21 @@ Step 6: Verify artifacts
 - Resume from any step if interrupted
 - Check `last_successful_step` to see progress
 
-**Beads config**: `conductor/beads.json`
+**Beads config**: `conductor/beads.json` (copied from the bundled template;
+setup sets `mode`)
 ```json
 {
   "enabled": true,
-  "mode": "normal|stealth",
-  "sync": "bidirectional",
+  "mode": "normal",
+  "memoryStrategy": "beads-primary",
   "epicPrefix": "conductor",
   "autoCreateTasks": true,
-  "autoSyncOnComplete": true,
-  "compactOnArchive": true
+  "compactOnPhaseComplete": true,
+  "pushOnTaskComplete": false,
+  "pushOnPhaseComplete": true,
+  "pushOnTrackComplete": true,
+  "worktreePerTrack": true,
+  "worktreePerWorker": true
 }
 ```
 

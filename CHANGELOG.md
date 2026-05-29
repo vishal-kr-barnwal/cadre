@@ -11,6 +11,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] — 2026-05-30
+
+### Fixed
+- **Templates are now bundled with every install, on every CLI.** `conductor-setup`
+  referenced `templates/code_styleguides/` and `templates/workflow.md` as
+  project-root paths, but the `templates/` directory was never shipped with the
+  installed commands — so setup could not find the style guides or workflow
+  template on any platform (including Claude Code installed standalone). The
+  generator now bundles the canonical `templates/` directory into each command
+  set (`.codex/prompts/`, `.cursor/commands/`, `.agent/workflows/`,
+  `.github/prompts/`) and into the Claude skill
+  (`.claude/skills/conductor/templates/`).
+- **`conductor-setup` discovers the templates directory at runtime** by probing
+  the known install locations (including `~/.codex/prompts/templates/` for
+  Codex's global prompts), so it resolves correctly regardless of CLI or install
+  scope. The probe logic is shared via `references/template-locator.md`, bundled
+  into every command set.
+- **`patterns.md` and `learnings.md` are now created from their templates.**
+  Previously only `workflow.md` and the style guides came from `templates/`;
+  `patterns.md` (project) and `learnings.md` (per track) were generated inline
+  with stripped-down structures that had drifted from the richer template files,
+  and `templates/patterns.md` / `templates/learnings.md` were effectively unused.
+  `conductor-setup` now creates `conductor/patterns.md` from
+  `<TEMPLATES_DIR>/patterns.md`, `conductor-newtrack` creates each track's
+  `learnings.md` from `<TEMPLATES_DIR>/learnings.md` (substituting `{{track_id}}`),
+  and the `conductor-implement` / `conductor-refresh` fallbacks copy from the
+  template too.
+- **`beads.json` schema reconciled to a single source of truth.** Three
+  divergent schemas existed (the `templates/beads.json` bundle, the inline block
+  written by `conductor-setup`, and the README/docs examples). All are now
+  aligned to the schema `conductor-setup` actually writes — `memoryStrategy`,
+  `compactOnPhaseComplete`, the `pushOn*` flags, and `worktreePer*` — with the
+  stale `sync` / `autoSyncOnComplete` / `compactOnArchive` / `stealthMode` keys
+  removed. `conductor-setup` now copies `conductor/beads.json` from
+  `templates/beads.json` and only sets `mode` (`normal`/`stealth`).
+
+---
+
 ## [0.3.0] — 2026-05-30
 
 Multi-platform release. The full 16-command suite now ships for four additional
@@ -111,6 +149,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
+[0.3.1]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.1
 [0.3.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.0
 [0.2.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.2.0
 [0.1.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.1.0

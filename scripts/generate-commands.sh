@@ -30,7 +30,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 SRC_DIR=".claude/commands"
-REF_SRC=".claude/skills/conductor/references/beads-error-handler.md"
+# Reference files that command bodies link to (path `references/<name>`); each is
+# copied into every platform's references/ dir so the link resolves locally.
+REF_SRCS=(
+  ".claude/skills/conductor/references/beads-error-handler.md"
+  ".claude/skills/conductor/references/template-locator.md"
+)
+TEMPLATES_SRC="templates"                  # canonical templates (single source)
+SKILL_DIR=".claude/skills/conductor"       # Claude skill; templates bundled here
 
 CODEX_DIR=".codex/prompts"
 CURSOR_DIR=".cursor/commands"
@@ -152,21 +159,43 @@ generate_platform() {
   done
 }
 
-# Copy the shared reference file into each platform dir under references/ so the
-# `references/beads-error-handler.md` path in command bodies resolves locally.
+# Copy the shared reference files into each platform dir under references/ so the
+# `references/<name>` links in command bodies resolve locally.
 copy_reference() {
-  local dir
+  local dir ref dest
   for dir in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR"; do
-    local dest
-    dest="$(out_path "$dir/references/beads-error-handler.md")"
-    mkdir -p "$(dirname "$dest")"
-    cp "$REF_SRC" "$dest"
+    for ref in "${REF_SRCS[@]}"; do
+      dest="$(out_path "$dir/references/$(basename "$ref")")"
+      mkdir -p "$(dirname "$dest")"
+      cp "$ref" "$dest"
+    done
+  done
+}
+
+# Bundle the canonical templates/ directory (workflow.md, code_styleguides/, …)
+# with every command set so `conductor-setup` can find them after install. It is
+# copied into each platform's command dir and into the Claude skill, matching the
+# install locations that `conductor-setup`'s template-discovery step probes.
+copy_templates() {
+  local dir dest
+  for dir in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR" "$SKILL_DIR"; do
+    dest="$(out_path "$dir/templates")"
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    cp -R "$TEMPLATES_SRC/." "$dest/"
   done
 }
 
 main() {
-  if [[ ! -f "$REF_SRC" ]]; then
-    echo "error: missing $REF_SRC" >&2
+  local ref
+  for ref in "${REF_SRCS[@]}"; do
+    if [[ ! -f "$ref" ]]; then
+      echo "error: missing $ref" >&2
+      exit 1
+    fi
+  done
+  if [[ ! -d "$TEMPLATES_SRC" ]]; then
+    echo "error: missing $TEMPLATES_SRC/ directory" >&2
     exit 1
   fi
 
@@ -174,6 +203,7 @@ main() {
     generate_platform "$platform"
   done
   copy_reference
+  copy_templates
 
   local count
   count="$(ls "$SRC_DIR"/conductor-*.md | wc -l | tr -d ' ')"
@@ -182,15 +212,17 @@ main() {
     if diff -rq "$GEN_ROOT/$CODEX_DIR" "$REPO_ROOT/$CODEX_DIR" >/dev/null 2>&1 \
        && diff -rq "$GEN_ROOT/$CURSOR_DIR" "$REPO_ROOT/$CURSOR_DIR" >/dev/null 2>&1 \
        && diff -rq "$GEN_ROOT/$ANTIGRAVITY_DIR" "$REPO_ROOT/$ANTIGRAVITY_DIR" >/dev/null 2>&1 \
-       && diff -rq "$GEN_ROOT/$COPILOT_DIR" "$REPO_ROOT/$COPILOT_DIR" >/dev/null 2>&1; then
-      echo "✓ Generated commands are up to date."
+       && diff -rq "$GEN_ROOT/$COPILOT_DIR" "$REPO_ROOT/$COPILOT_DIR" >/dev/null 2>&1 \
+       && diff -rq "$GEN_ROOT/$SKILL_DIR/templates" "$REPO_ROOT/$SKILL_DIR/templates" >/dev/null 2>&1; then
+      echo "✓ Generated commands and bundled templates are up to date."
     else
-      echo "✗ Generated commands are stale. Run: bash scripts/generate-commands.sh" >&2
+      echo "✗ Generated output is stale. Run: bash scripts/generate-commands.sh" >&2
       exit 1
     fi
   else
     echo "✓ Generated $count commands each for: Codex, Cursor, Antigravity, GitHub Copilot."
-    echo "  .codex/prompts/ .cursor/commands/ .agent/workflows/ .github/prompts/"
+    echo "  Bundled references/ and templates/ into every command set + the Claude skill."
+    echo "  .codex/prompts/ .cursor/commands/ .agent/workflows/ .github/prompts/ .claude/skills/conductor/templates/"
   fi
 }
 

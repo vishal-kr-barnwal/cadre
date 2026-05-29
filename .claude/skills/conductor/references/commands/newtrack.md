@@ -256,20 +256,27 @@ Create a new track for: $ARGUMENTS
         > "Would you like to seed learnings from a previous track? (Enter track_id or 'skip')"
       - If selected: Copy relevant patterns from archived track's `learnings.md`
    
-   c. **Create `learnings.md`:**
-      ```markdown
-      # Track Learnings: <track_id>
-      
-      Patterns, gotchas, and context discovered during implementation.
-      
-      ## Codebase Patterns (Inherited)
-      
-      <patterns from conductor/patterns.md or archived tracks>
-      
-      ---
-      
-      <!-- Learnings from implementation will be appended below -->
-      ```
+   c. **Create `learnings.md` from template:**
+      - Resolve `<TEMPLATES_DIR>` as described in `../template-locator.md`.
+      - Copy `<TEMPLATES_DIR>/learnings.md` to
+        `conductor/tracks/<track_id>/learnings.md`, replacing every `{{track_id}}`
+        with the real track id.
+      - Under the `## Codebase Patterns (Inherited)` heading, insert the patterns
+        gathered above (from `conductor/patterns.md` or archived tracks).
+      - If `<TEMPLATES_DIR>` can't be found, fall back to this minimal structure:
+        ```markdown
+        # Track Learnings: <track_id>
+
+        Patterns, gotchas, and context discovered during implementation.
+
+        ## Codebase Patterns (Inherited)
+
+        <patterns from conductor/patterns.md or archived tracks>
+
+        ---
+
+        <!-- Learnings from implementation will be appended below -->
+        ```
 
 10. **Update Tracks File:**
    - Announce: "Updating the tracks file."

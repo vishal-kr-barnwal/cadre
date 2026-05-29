@@ -501,14 +501,18 @@ Thread: $AMP_CURRENT_THREAD_ID (if available)
      ```markdown
      - <pattern description> (from: <track_id>, <date>)
      ```
-   - If `conductor/patterns.md` doesn't exist, create it with this structure:
+   - If `conductor/patterns.md` doesn't exist (it is normally created by
+     `conductor-setup`), recreate it by copying `<TEMPLATES_DIR>/patterns.md`
+     (resolve `<TEMPLATES_DIR>` as described in `references/template-locator.md`),
+     then append the selected patterns. If the templates bundle can't be found,
+     fall back to this minimal structure:
      ```markdown
      # Codebase Patterns
-     
+
      Reusable patterns discovered during development. Read this before starting new work.
-     
+
      ---
-     
+
      - <pattern> (from: <track_id>, <date>)
      ```
 

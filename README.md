@@ -4,7 +4,7 @@
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 0.3.0
+**Version:** 0.3.1
 
 ## What is Conductor-Beads?
 
@@ -206,14 +206,22 @@ When prompted, pick the mode that fits your repo:
 | **Normal** | `bd init` | The whole team uses Beads. `.beads/` is committed to the repo so everyone shares the task graph. |
 | **Stealth** | `bd init --stealth` | Personal use on a shared repo. `.beads/` is gitignored and stays local. |
 
-The choice is recorded in `conductor/beads.json`:
+The choice is recorded in `conductor/beads.json` (copied from the bundled
+template; setup sets `mode`):
 
 ```json
 {
   "enabled": true,
   "mode": "normal",
-  "sync": "bidirectional",
-  "compactOnArchive": true
+  "memoryStrategy": "beads-primary",
+  "epicPrefix": "conductor",
+  "autoCreateTasks": true,
+  "compactOnPhaseComplete": true,
+  "pushOnTaskComplete": false,
+  "pushOnPhaseComplete": true,
+  "pushOnTrackComplete": true,
+  "worktreePerTrack": true,
+  "worktreePerWorker": true
 }
 ```
 

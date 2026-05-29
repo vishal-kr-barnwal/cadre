@@ -69,13 +69,21 @@ When user runs `/conductor-setup`:
    # OR for shared repos:
    bd init --stealth    # Keep Beads local-only
    ```
-3. **Create linking config** in `conductor/beads.json`:
+3. **Create linking config** in `conductor/beads.json` (copied from the bundled
+   template; `conductor-setup` sets `mode` to `normal` or `stealth`):
    ```json
    {
      "enabled": true,
      "mode": "stealth",
-     "sync": "bidirectional",
-     "epicPrefix": "conductor"
+     "memoryStrategy": "beads-primary",
+     "epicPrefix": "conductor",
+     "autoCreateTasks": true,
+     "compactOnPhaseComplete": true,
+     "pushOnTaskComplete": false,
+     "pushOnPhaseComplete": true,
+     "pushOnTrackComplete": true,
+     "worktreePerTrack": true,
+     "worktreePerWorker": true
    }
    ```
 
@@ -289,17 +297,36 @@ Resolution: Add to plan.md under "Unplanned Tasks" section
 
 ### conductor/beads.json
 
+This is the canonical schema, written by `conductor-setup` from the bundled
+`templates/beads.json`. `mode` is the only field setup changes (`normal` vs
+`stealth`).
+
 ```json
 {
   "enabled": true,
-  "mode": "stealth|normal",
-  "sync": "bidirectional|conductor-to-beads|manual",
+  "mode": "normal",
+  "memoryStrategy": "beads-primary",
   "epicPrefix": "conductor",
   "autoCreateTasks": true,
-  "autoSyncOnComplete": true,
-  "compactOnArchive": true
+  "compactOnPhaseComplete": true,
+  "pushOnTaskComplete": false,
+  "pushOnPhaseComplete": true,
+  "pushOnTrackComplete": true,
+  "worktreePerTrack": true,
+  "worktreePerWorker": true
 }
 ```
+
+| Key | Meaning |
+|-----|---------|
+| `enabled` | Beads integration active |
+| `mode` | `normal` commits `.beads/`; `stealth` keeps it local-only |
+| `memoryStrategy` | `beads-primary` — Beads is the source of truth for task status |
+| `epicPrefix` | Prefix for Beads epic IDs created per track |
+| `autoCreateTasks` | Create Beads tasks automatically from plan.md |
+| `compactOnPhaseComplete` | Compact Beads history at each phase boundary |
+| `pushOnTaskComplete` / `pushOnPhaseComplete` / `pushOnTrackComplete` | When to push (Conductor never pushes on task complete by default) |
+| `worktreePerTrack` / `worktreePerWorker` | Isolate tracks/parallel workers in their own git worktrees |
 
 ### Detection Logic
 

@@ -184,7 +184,23 @@ platform-specific variant:
 | Frontmatter | none | none | `description` | `description` + `agent: agent` |
 | `$ARGUMENTS` | kept (native) | described in prose | described in prose | described in prose |
 | `references/beads-error-handler.md` | copied into `references/` | copied into `references/` | copied into `references/` | copied into `references/` |
+| `templates/` bundle | copied into `templates/` | copied into `templates/` | copied into `templates/` | copied into `templates/` |
 | File extension | `.md` | `.md` | `.md` | `.prompt.md` |
+
+### Templates bundling
+
+`conductor-setup` copies starter files (`workflow.md`, `code_styleguides/`, …)
+into your project. Those live in the canonical `templates/` directory, and the
+generator bundles a copy into **every** command set — `.codex/prompts/templates/`,
+`.cursor/commands/templates/`, `.agent/workflows/templates/`,
+`.github/prompts/templates/` — plus the Claude skill at
+`.claude/skills/conductor/templates/`. Because each platform's install command
+copies its whole directory, the templates ship with the commands.
+
+`conductor-setup` then **discovers** the templates directory at runtime by
+probing those install locations (and `~/.codex/prompts/templates/` for Codex's
+global prompts), so it works regardless of which tool or install scope you use.
+Edit templates only in the canonical `templates/` directory and regenerate.
 
 Generated files carry an `AUTO-GENERATED` marker. **Do not hand-edit them** —
 edit the Claude command and regenerate. To verify the committed output is in
