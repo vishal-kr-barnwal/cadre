@@ -202,12 +202,8 @@ Implement track: $ARGUMENTS
           --json
         ```
       - For each task with no unmet dependencies, dispatch one worker sub-agent
-        using **your platform's parallel sub-agent mechanism** (see
-        `../parallel-execution.md` — Claude Code: `Task` tool; OpenAI Codex:
-        `worker` agent type; Cursor: `/multitask`; Antigravity: Agent Manager;
-        GitHub Copilot: `/fleet` or VS Code subagents). If the platform has no
-        parallel primitive, run the wave's tasks sequentially yourself, one per
-        worktree. Each worker runs with this prompt:
+        with the **`Task` tool** (one call per worker; calls are awaitable). See
+        `../parallel-execution.md`. Each worker runs with this prompt:
         ```
         You are a Conductor sub-agent implementing a single task.
         

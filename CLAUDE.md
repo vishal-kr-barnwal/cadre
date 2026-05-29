@@ -29,6 +29,7 @@ Conductor-Beads/
 ├── scripts/
 │   ├── install.sh          # Interactive installer (detect CLIs, global/project)
 │   ├── generate-commands.sh # Generates the 4 platforms above from .claude/commands/
+│   ├── agent-refs/         # Masters for per-agent-sliced references (AGENT blocks)
 │   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration
 ├── templates/              # Workflow and styleguide templates
 ├── docs/                   # Documentation (see docs/INSTALL.md)

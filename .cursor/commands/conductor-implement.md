@@ -237,14 +237,11 @@ Implement track: the input provided with this command (the text typed after the 
           --json
         ```
       - For each task in the current wave (no unmet dependencies), dispatch one
-        worker sub-agent using **your platform's parallel sub-agent mechanism**.
-        See `references/parallel-execution.md` for the exact call per tool —
-        Claude Code uses the `Task` tool; OpenAI Codex spawns parallel agents with
-        the `worker` agent type; Cursor uses `/multitask`; Antigravity uses the
-        Agent Manager; GitHub Copilot uses `/fleet` (Copilot CLI) or parallel
-        subagents (VS Code). **If the platform has no parallel primitive, execute
-        the wave's tasks sequentially yourself, one per worktree.** Each worker
-        runs with this prompt:
+        worker sub-agent.
+        Use **`/multitask`** to run one subagent per task in parallel (git-worktree isolated); see `references/parallel-execution.md`.
+        **If your tool has no parallel sub-agent primitive, execute the wave's
+        tasks sequentially yourself, one per worktree.** Each worker runs with
+        this prompt:
         ```
         You are a Conductor sub-agent implementing a single task.
 

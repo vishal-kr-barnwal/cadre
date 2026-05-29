@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.4] — 2026-05-30
+
+### Changed
+- **Per-agent slicing of multi-platform references (token optimization).**
+  Previously every command bundle carried all five platforms' parallel-dispatch
+  and template-locator instructions and the agent picked its slice at runtime.
+  Now the generator emits **only the running tool's** content:
+  - `references/parallel-execution.md` and `references/template-locator.md` are
+    sliced from masters in `scripts/agent-refs/` (with `<!-- AGENT:<name> -->`
+    blocks) so each platform — Claude included — gets just the shared text plus
+    its own block (≈57→36 and ≈46→27 lines per bundle).
+  - The one-line worker-dispatch sentence in `conductor-implement` is substituted
+    per platform (Claude `Task`, Codex `worker`, Cursor `/multitask`, Antigravity
+    Agent Manager, Copilot `/fleet`) instead of listing all five.
+  - `references/beads-error-handler.md` stays agnostic (copied verbatim).
+  Edit the masters in `scripts/agent-refs/` and regenerate; `--check` now also
+  guards the sliced Claude references.
+
+---
+
 ## [0.3.3] — 2026-05-30
 
 ### Fixed
@@ -180,6 +200,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
+[0.3.4]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.4
 [0.3.3]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.3
 [0.3.2]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.2
 [0.3.1]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.1

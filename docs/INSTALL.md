@@ -206,9 +206,22 @@ platform-specific variant:
 |-----------|-------|--------|-------------|---------|
 | Frontmatter | none | none | `description` | `description` + `agent: agent` |
 | `$ARGUMENTS` | kept (native) | described in prose | described in prose | described in prose |
-| `references/beads-error-handler.md` | copied into `references/` | copied into `references/` | copied into `references/` | copied into `references/` |
+| Worker-dispatch sentence | `worker` agent type | `/multitask` | Agent Manager | `/fleet` |
+| `references/beads-error-handler.md` (agnostic) | copied verbatim | copied verbatim | copied verbatim | copied verbatim |
+| `references/parallel-execution.md`, `template-locator.md` (sliced) | only Codex's section | only Cursor's | only Antigravity's | only Copilot's |
 | `templates/` bundle | copied into `templates/` | copied into `templates/` | copied into `templates/` | copied into `templates/` |
 | File extension | `.md` | `.md` | `.md` | `.prompt.md` |
+
+### Per-agent slicing (token optimization)
+
+To avoid shipping every tool's instructions to every tool, the multi-platform
+references are **sliced per agent**. Their masters live in `scripts/agent-refs/`
+with `<!-- AGENT:<name> -->` blocks; the generator emits a copy to each platform
+(Claude included) containing only the shared text plus that platform's block.
+The one-line worker-dispatch sentence in `conductor-implement` is likewise
+substituted per platform. Net result: a Codex bundle never carries Cursor's or
+Copilot's parallel/locator instructions. Edit the masters in `scripts/agent-refs/`
+(not the generated `references/` copies) and regenerate.
 
 ### Templates bundling
 

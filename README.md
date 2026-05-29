@@ -4,7 +4,7 @@
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 0.3.3
+**Version:** 0.3.4
 
 ## What is Conductor-Beads?
 
