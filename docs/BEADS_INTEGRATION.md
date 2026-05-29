@@ -376,7 +376,7 @@ Beads provides robust coordination for Conductor's parallel task execution featu
 │  2. For each parallel task:                                      │
 │     bd update <task_id> --status in_progress                     │
 │       --assignee worker_<N>_<name> --json                        │
-│  3. Spawn workers via Task()                                     │
+│  3. Spawn workers (per-platform; see parallel-execution.md)      │
 └─────────────────────────────────────────────────────────────────┘
                               │
             ┌─────────────────┼─────────────────┐

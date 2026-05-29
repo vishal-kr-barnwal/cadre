@@ -207,7 +207,20 @@ function detectConflicts(tasks: ParallelTask[]): Conflict[] {
 
 ## Worker Spawning
 
-### Using Claude's Task() Tool
+The worker prompt below is platform-agnostic; only the **dispatch mechanism**
+differs per tool. See [`parallel-execution.md`](../.claude/skills/conductor/references/parallel-execution.md)
+(bundled with every command set) for the full table:
+
+| Platform | Dispatch |
+|----------|----------|
+| **Claude Code** | `Task` tool, one call per worker (awaitable) |
+| **OpenAI Codex CLI** | spawn parallel agents with the `worker` agent type; manage via `/agent` |
+| **Cursor** | `/multitask` (or Agent-Mode "Parallelize"); subagents in git worktrees |
+| **Google Antigravity** | Agent Manager spawns one dynamic subagent per task |
+| **GitHub Copilot** | Copilot CLI `/fleet` (parallel subagents, worktree-isolated) or `/delegate`; VS Code parallel subagents |
+| **No parallel primitive** | sequential fallback — one agent runs each task in its worktree |
+
+### Example: Claude Code's Task() Tool
 
 ```markdown
 Task({ 

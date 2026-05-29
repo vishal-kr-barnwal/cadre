@@ -249,7 +249,7 @@ repo/
 2. **Build dependency graph**: Extract `files:` and `depends:` annotations
 3. **Detect file conflicts**: Warn if any two tasks claim the same file
 4. **Create worktrees**: `bd worktree create .worktrees/<track>_worker_<N> --branch track_<id>_worker_<N>`
-5. **Spawn wave-0 workers**: Task() agents for tasks with no dependencies
+5. **Spawn wave-0 workers**: one worker per task with no dependencies, dispatched with your platform's parallel sub-agent mechanism (see `parallel-execution.md`)
    - Workers fetch context via `bd show <task_id>` (not embedded spec)
    - Workers complete with `bd close --continue` (auto-advances Beads dep graph)
 6. **Next wave via Beads**: `bd ready --parent <id>` finds newly unblocked tasks → spawn next wave

@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.3] — 2026-05-30
+
+### Fixed
+- **Parallel worker dispatch is now platform-aware.** `conductor-implement`
+  hardcoded Claude Code's `Task({…})` sub-agent call for spawning parallel
+  workers, so the generated Codex, Cursor, Antigravity, and Copilot commands told
+  the agent to call a primitive that doesn't exist on those tools. The spawn step
+  now points to a new bundled reference, `references/parallel-execution.md`, which
+  maps the worker-dispatch step to each tool's real mechanism — Claude Code `Task`
+  tool, OpenAI Codex `worker` agent type, Cursor `/multitask`, Antigravity Agent
+  Manager, GitHub Copilot `/fleet` (Copilot CLI) or VS Code subagents — with a
+  **sequential fallback** for platforms that have no parallel primitive. The
+  worker prompt itself is unchanged and platform-agnostic.
+- Updated `docs/PARALLEL_EXECUTION.md` and `docs/BEADS_INTEGRATION.md` to describe
+  per-platform dispatch instead of `Task()` only.
+
+---
+
 ## [0.3.2] — 2026-05-30
 
 ### Added
@@ -162,6 +180,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
+[0.3.3]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.3
 [0.3.2]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.2
 [0.3.1]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.1
 [0.3.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.0

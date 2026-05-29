@@ -201,13 +201,16 @@ Implement track: $ARGUMENTS
           --notes "PARALLEL WORKER: Started" \
           --json
         ```
-      - For each task with no unmet dependencies, spawn a sub-agent using Task():
+      - For each task with no unmet dependencies, dispatch one worker sub-agent
+        using **your platform's parallel sub-agent mechanism** (see
+        `../parallel-execution.md` — Claude Code: `Task` tool; OpenAI Codex:
+        `worker` agent type; Cursor: `/multitask`; Antigravity: Agent Manager;
+        GitHub Copilot: `/fleet` or VS Code subagents). If the platform has no
+        parallel primitive, run the wave's tasks sequentially yourself, one per
+        worktree. Each worker runs with this prompt:
         ```
-        Task({
-          description: "Implement: <task_name>",
-          prompt: "
-            You are a Conductor sub-agent implementing a single task.
-            
+        You are a Conductor sub-agent implementing a single task.
+        
             ## Context
             - Track: <track_id>
             - Phase: <phase_name>
@@ -246,8 +249,6 @@ Implement track: $ARGUMENTS
             - Commit created with proper message
             - parallel_state.json updated
             - Beads synced (if enabled)
-          "
-        })
         ```
       - Record each spawned worker in `parallel_state.json`:
         ```json

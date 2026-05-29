@@ -237,14 +237,19 @@ Implement track: $ARGUMENTS
           --notes "PARALLEL WORKER: Starting in .worktrees/<track_id>_worker_<N>" \
           --json
         ```
-      - For each task in the current wave (no unmet dependencies), spawn a sub-agent:
+      - For each task in the current wave (no unmet dependencies), dispatch one
+        worker sub-agent using **your platform's parallel sub-agent mechanism**.
+        See `references/parallel-execution.md` for the exact call per tool —
+        Claude Code uses the `Task` tool; OpenAI Codex spawns parallel agents with
+        the `worker` agent type; Cursor uses `/multitask`; Antigravity uses the
+        Agent Manager; GitHub Copilot uses `/fleet` (Copilot CLI) or parallel
+        subagents (VS Code). **If the platform has no parallel primitive, execute
+        the wave's tasks sequentially yourself, one per worktree.** Each worker
+        runs with this prompt:
         ```
-        Task({
-          description: "Implement: <task_name>",
-          prompt: "
-            You are a Conductor sub-agent implementing a single task.
+        You are a Conductor sub-agent implementing a single task.
 
-            ## Identity
+        ## Identity
             - Worker ID: <worker_id>
             - Working directory: .worktrees/<track_id>_worker_<N>_<name>/
             - All file reads/writes MUST use this path as your root.
@@ -277,8 +282,6 @@ Implement track: $ARGUMENTS
             - Commit created with proper message
             - Beads task closed with structured note
             - parallel_state.json updated (audit log)
-          "
-        })
         ```
       - Record each spawned worker in `parallel_state.json` workers array:
         ```json
@@ -295,7 +298,8 @@ Implement track: $ARGUMENTS
         ```
 
       **c6. Wave-Model Monitoring (replaces 30s polling):**
-      - Task() calls are awaitable — wait for all current wave workers to complete.
+      - Wait for all workers in the current wave to finish before starting the
+        next wave, using your platform's mechanism (see `references/parallel-execution.md`).
       - After each wave completes, use Beads (not parallel_state.json) to find the next wave:
         ```bash
         bd ready --parent <epic_id> --json
@@ -303,7 +307,7 @@ Implement track: $ARGUMENTS
         - Any newly ready tasks (whose `depends_on` workers just closed via `--continue`) form the next wave.
         - Spawn next wave workers (repeat c5).
       - Handle worker failures:
-        - If a Task() returns with an error or worker's parallel_state entry stays `in_progress` after Task() resolves:
+        - If a worker reports an error, or its parallel_state entry is still `in_progress` after it finishes:
           - Announce: "Worker <worker_id> failed: <error>"
           - **If Beads enabled:** Reset for retry: `bd update <beads_task_id> --assignee "" --status open --json`
           - Ask user: "Retry worker? A) Yes  B) Skip task  C) Stop"

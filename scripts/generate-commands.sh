@@ -35,6 +35,7 @@ SRC_DIR=".claude/commands"
 REF_SRCS=(
   ".claude/skills/conductor/references/beads-error-handler.md"
   ".claude/skills/conductor/references/template-locator.md"
+  ".claude/skills/conductor/references/parallel-execution.md"
 )
 TEMPLATES_SRC="templates"                  # canonical templates (single source)
 SKILL_DIR=".claude/skills/conductor"       # Claude skill; templates bundled here
