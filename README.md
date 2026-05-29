@@ -15,6 +15,8 @@ Conductor-Beads integrates two powerful systems:
 
 Together, they enable AI agents to manage long-horizon development tasks without losing context across sessions.
 
+> 📋 Full version history is in the **[Changelog](CHANGELOG.md)**.
+
 ## What's New in v0.3.0
 
 ### Multi-platform support

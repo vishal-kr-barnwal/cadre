@@ -201,7 +201,8 @@ This exits non-zero if any generated file is stale.
 ## Versioning policy
 
 Conductor-Beads uses [semantic versioning](https://semver.org/). The version is
-declared in `README.md` (the `**Version:**` line).
+declared in `README.md` (the `**Version:**` line). Per-release changes are
+recorded in the [Changelog](../CHANGELOG.md).
 
 | Bump | When |
 |------|------|
