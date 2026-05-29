@@ -9,7 +9,7 @@ Conductor-Beads is a unified toolkit for **Context-Driven Development** that com
 - **Conductor**: Spec-first planning, human-readable context, TDD workflow
 - **Beads**: Dependency-aware task graph, cross-session memory, agent-optimized output
 
-It works with both Gemini CLI (via extension) and Claude Code (via commands and skills).
+It works with Claude Code (commands + skills) and four other AI coding tools — OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot — via generated command sets.
 
 ## Architecture
 
@@ -17,39 +17,52 @@ It works with both Gemini CLI (via extension) and Claude Code (via commands and 
 ```
 Conductor-Beads/
 ├── .claude/
-│   ├── commands/           # Claude Code slash commands (16 commands)
+│   ├── commands/           # Claude Code slash commands (16 commands) — CANONICAL SOURCE
 │   └── skills/             # Claude Code skills
 │       ├── conductor/      # Context-driven development skill
 │       ├── beads/          # Persistent task memory skill
 │       └── skill-creator/  # Skill creation guide
-├── commands/conductor/     # Gemini CLI TOML commands (16 commands)
+├── .codex/prompts/         # OpenAI Codex CLI commands (generated)
+├── .cursor/                # Cursor commands + rule (generated)
+├── .agent/workflows/       # Google Antigravity workflows (generated)
+├── .github/prompts/        # GitHub Copilot prompt files (generated)
+├── scripts/
+│   ├── generate-commands.sh # Generates the 4 platforms above from .claude/commands/
+│   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration
 ├── templates/              # Workflow and styleguide templates
-├── docs/                   # Documentation
-├── CLAUDE.md               # This file
-├── GEMINI.md               # Gemini CLI context
-└── gemini-extension.json   # Gemini extension manifest
+├── docs/                   # Documentation (see docs/INSTALL.md)
+├── CLAUDE.md               # This file (Claude Code context)
+└── AGENTS.md               # Codex + Antigravity context
 ```
+
+> **Generated command sets** (`.codex/`, `.cursor/commands/`, `.agent/`,
+> `.github/prompts/`) are derived from `.claude/commands/` by
+> `scripts/generate-commands.sh`. Edit the canonical Claude command and
+> regenerate — do not hand-edit generated files. CI can run
+> `bash scripts/generate-commands.sh --check` to detect drift.
 
 ### Commands
 
-| Gemini CLI | Claude Code | Purpose |
-|------------|-------------|---------|
-| `/conductor:setup` | `/conductor-setup` | Initialize project with context files and first track |
-| `/conductor:newTrack` | `/conductor-newtrack` | Create feature/bug track with spec and plan |
-| `/conductor:implement` | `/conductor-implement` | Execute tasks from track's plan (TDD workflow) |
-| `/conductor:status` | `/conductor-status` | Display progress overview |
-| `/conductor:revert` | `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
-| `/conductor:validate` | `/conductor-validate` | Validate project integrity and fix issues |
-| `/conductor:block` | `/conductor-block` | Mark task as blocked with reason |
-| `/conductor:skip` | `/conductor-skip` | Skip current task with justification |
-| `/conductor:revise` | `/conductor-revise` | Update spec/plan when implementation reveals issues |
-| `/conductor:archive` | `/conductor-archive` | Archive completed tracks |
-| `/conductor:export` | `/conductor-export` | Generate project summary export |
-| `/conductor:handoff` | `/conductor-handoff` | Create context handoff for section transfer |
-| `/conductor:refresh` | `/conductor-refresh` | Sync context docs with current codebase state |
-| `/conductor:formula` | `/conductor-formula` | List and manage track templates (Beads formulas) |
-| `/conductor:wisp` | `/conductor-wisp` | Create ephemeral exploration track (no audit trail) |
-| `/conductor:distill` | `/conductor-distill` | Extract reusable template from completed track |
+All platforms (Claude Code, Codex CLI, Cursor, Antigravity, Copilot) invoke the same command name.
+
+| Command | Purpose |
+|---------|---------|
+| `/conductor-setup` | Initialize project with context files and first track |
+| `/conductor-newtrack` | Create feature/bug track with spec and plan |
+| `/conductor-implement` | Execute tasks from track's plan (TDD workflow) |
+| `/conductor-status` | Display progress overview |
+| `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
+| `/conductor-validate` | Validate project integrity and fix issues |
+| `/conductor-block` | Mark task as blocked with reason |
+| `/conductor-skip` | Skip current task with justification |
+| `/conductor-revise` | Update spec/plan when implementation reveals issues |
+| `/conductor-archive` | Archive completed tracks |
+| `/conductor-export` | Generate project summary export |
+| `/conductor-handoff` | Create context handoff for section transfer |
+| `/conductor-refresh` | Sync context docs with current codebase state |
+| `/conductor-formula` | List and manage track templates (Beads formulas) |
+| `/conductor-wisp` | Create ephemeral exploration track (no audit trail) |
+| `/conductor-distill` | Extract reusable template from completed track |
 
 ### Skills
 
@@ -154,15 +167,16 @@ At phase completion:
 
 ## Development Notes
 
-- Commands are defined as Markdown (`.claude/commands/`) or TOML (`commands/conductor/`)
+- Canonical commands are Markdown in `.claude/commands/`; the Codex, Cursor, Antigravity, and Copilot sets are generated from them by `scripts/generate-commands.sh`
 - Skills use SKILL.md format with references/ subdirectory
 - State is tracked in JSON files (setup_state.json, implement_state.json, metadata.json)
 - Git notes used for audit trails
 - Commands validate setup before executing
-- Both Gemini CLI and Claude Code use the same `conductor/` directory structure (interoperable)
+- All supported platforms operate on the same `conductor/` directory structure (interoperable)
 
 ## Documentation
 
+- [Install & Version Guide](docs/INSTALL.md) - Per-platform install + compatibility matrix + versioning policy
 - [Manual Workflow Guide](docs/manual-workflow-guide.md) - Step-by-step command reference
 - [Beads Integration](docs/BEADS_INTEGRATION.md) - How Conductor and Beads work together
 - [Parallel Execution](docs/PARALLEL_EXECUTION.md) - Parallel task execution design

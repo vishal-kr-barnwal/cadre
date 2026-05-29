@@ -4,7 +4,7 @@
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 
 ## What is Conductor-Beads?
 
@@ -14,6 +14,19 @@ Conductor-Beads integrates two powerful systems:
 - **Beads** provides the memory — persistent task tracking that survives conversation compaction
 
 Together, they enable AI agents to manage long-horizon development tasks without losing context across sessions.
+
+## What's New in v0.3.0
+
+### Multi-platform support
+- **Four new platforms** — the full 16-command suite now ships for **OpenAI Codex CLI**, **Cursor**, **Google Antigravity**, and **GitHub Copilot**, alongside Claude Code.
+- **Single source of truth** — the new [`scripts/generate-commands.sh`](scripts/generate-commands.sh) derives the Codex, Cursor, Antigravity, and Copilot command sets from the canonical Claude Code commands, so all platforms stay in sync. Run `--check` in CI to catch stale output.
+- **Per-platform context files** — `AGENTS.md` (Codex + Antigravity), `.github/copilot-instructions.md` (Copilot), and `.cursor/rules/conductor.mdc` (Cursor) join the existing `CLAUDE.md`.
+- **New [Install & Version Guide](docs/INSTALL.md)** — a compatibility matrix and per-platform install steps for all five tools, plus the versioning policy.
+
+### Removed
+- **Gemini CLI support dropped** — the Gemini extension (`gemini-extension.json`), TOML commands (`commands/conductor/`), and `GEMINI.md` have been removed in favor of **Google Antigravity**, which now covers the Google ecosystem via `.agent/workflows/`.
+
+> All platforms operate on the same `conductor/` and `.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor, implement in Claude Code).
 
 ## What's New in v0.2.0
 
@@ -55,9 +68,16 @@ See [`scripts/migrate-v2.sh`](scripts/migrate-v2.sh) for full details.
 
 ## Supported Platforms
 
-- **Gemini CLI** - via extension commands (TOML)
-- **Claude Code** - via slash commands and skills
-- **Agent Skills compatible CLIs** - via skills specification
+| Platform | How | Invoke |
+|----------|-----|--------|
+| **Claude Code** | slash commands + skills | `/conductor-setup` |
+| **OpenAI Codex CLI** | custom prompts | `/conductor-setup` |
+| **Cursor** | commands + rule | `/conductor-setup` |
+| **Google Antigravity** | workflows | `/conductor-setup` |
+| **GitHub Copilot** | prompt files | `/conductor-setup` |
+| **Agent Skills compatible CLIs** | skills specification | — |
+
+See the **[Install & Version Guide](docs/INSTALL.md)** for the full compatibility matrix and per-platform setup. Installation summaries are below.
 
 ---
 
@@ -110,11 +130,49 @@ cp -r Conductor-Beads/.claude/skills   your-project/.claude/skills
 
 > **Smaller context window?** Copy only the `conductor` skill (`.claude/skills/conductor`) — it already includes Beads integration. Add the `beads` and `skill-creator` skills only if you want standalone Beads usage or to build your own skills.
 
-### Gemini CLI
+### OpenAI Codex CLI
+
+Codex loads custom prompts globally from `~/.codex/prompts/`:
 
 ```bash
-gemini extensions install https://github.com/vishal-kr-barnwal/Conductor-Beads --auto-update
+mkdir -p ~/.codex/prompts
+cp -r .codex/prompts/* ~/.codex/prompts/
+cp AGENTS.md your-project/AGENTS.md   # project context
 ```
+
+Invoke `/conductor-setup` from the slash menu. Codex expands `$ARGUMENTS`, so `/conductor-newtrack Add OAuth login` works.
+
+### Cursor
+
+```bash
+mkdir -p your-project/.cursor/commands your-project/.cursor/rules
+cp -r .cursor/commands/* your-project/.cursor/commands/
+cp .cursor/rules/conductor.mdc your-project/.cursor/rules/
+```
+
+Type `/` in the Agent input and pick `conductor-setup`. The `.mdc` rule loads Conductor conventions automatically.
+
+### Google Antigravity
+
+```bash
+mkdir -p your-project/.agent/workflows
+cp -r .agent/workflows/* your-project/.agent/workflows/
+cp AGENTS.md your-project/AGENTS.md
+```
+
+Invoke `/conductor-setup`; Antigravity matches the workflow file name.
+
+### GitHub Copilot
+
+```bash
+mkdir -p your-project/.github/prompts
+cp -r .github/prompts/* your-project/.github/prompts/
+cp .github/copilot-instructions.md your-project/.github/copilot-instructions.md
+```
+
+In Copilot Chat, type `/` then `conductor-setup`. Enable prompt files in VS Code with `"chat.promptFiles": true` if needed.
+
+> The Codex, Cursor, Antigravity, and Copilot command sets are generated from the Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
 
 ---
 
@@ -123,11 +181,7 @@ gemini extensions install https://github.com/vishal-kr-barnwal/Conductor-Beads -
 Run the setup command once in your project directory — it does everything:
 
 ```bash
-# Claude Code
 /conductor-setup
-
-# Gemini CLI
-/conductor:setup
 ```
 
 Setup will:
@@ -168,11 +222,7 @@ The choice is recorded in `conductor/beads.json`:
 ### Creating a New Track
 
 ```bash
-# Claude Code
 /conductor-newtrack "Add user authentication"
-
-# Gemini CLI
-/conductor:newTrack "Add user authentication"
 ```
 
 This creates:
@@ -184,11 +234,7 @@ This creates:
 ### Implementing a Track
 
 ```bash
-# Claude Code
 /conductor-implement
-
-# Gemini CLI
-/conductor:implement
 ```
 
 The workflow:
@@ -230,11 +276,7 @@ See [Parallel Execution Design](docs/PARALLEL_EXECUTION.md) for details.
 ### Checking Status
 
 ```bash
-# Claude Code
 /conductor-status
-
-# Gemini CLI
-/conductor:status
 ```
 
 Shows:
@@ -246,24 +288,26 @@ Shows:
 
 ## Commands Reference
 
-| Gemini CLI | Claude Code | Description |
-|------------|-------------|-------------|
-| `/conductor:setup` | `/conductor-setup` | Initialize project context |
-| `/conductor:newTrack` | `/conductor-newtrack` | Create feature/bug track |
-| `/conductor:implement` | `/conductor-implement` | Execute tasks from plan |
-| `/conductor:status` | `/conductor-status` | Show progress overview |
-| `/conductor:revert` | `/conductor-revert` | Git-aware revert |
-| `/conductor:validate` | `/conductor-validate` | Validate project integrity |
-| `/conductor:block` | `/conductor-block` | Mark task as blocked |
-| `/conductor:skip` | `/conductor-skip` | Skip current task |
-| `/conductor:revise` | `/conductor-revise` | Update spec/plan |
-| `/conductor:archive` | `/conductor-archive` | Archive completed tracks |
-| `/conductor:export` | `/conductor-export` | Generate project summary |
-| `/conductor:handoff` | `/conductor-handoff` | Create context handoff |
-| `/conductor:refresh` | `/conductor-refresh` | Sync context with codebase |
-| — | `/conductor-formula` | List/manage track templates |
-| — | `/conductor-wisp` | Ephemeral exploration track |
-| — | `/conductor-distill` | Extract template from track |
+The same command name works on every supported platform (Claude Code, Codex CLI, Cursor, Antigravity, Copilot).
+
+| Command | Description |
+|---------|-------------|
+| `/conductor-setup` | Initialize project context |
+| `/conductor-newtrack` | Create feature/bug track |
+| `/conductor-implement` | Execute tasks from plan |
+| `/conductor-status` | Show progress overview |
+| `/conductor-revert` | Git-aware revert |
+| `/conductor-validate` | Validate project integrity |
+| `/conductor-block` | Mark task as blocked |
+| `/conductor-skip` | Skip current task |
+| `/conductor-revise` | Update spec/plan |
+| `/conductor-archive` | Archive completed tracks |
+| `/conductor-export` | Generate project summary |
+| `/conductor-handoff` | Create context handoff |
+| `/conductor-refresh` | Sync context with codebase |
+| `/conductor-formula` | List/manage track templates |
+| `/conductor-wisp` | Ephemeral exploration track |
+| `/conductor-distill` | Extract template from track |
 
 ### Essential Beads Commands
 
@@ -326,14 +370,17 @@ Skills provide:
 ```
 Conductor-Beads/
 ├── .claude/
-│   ├── commands/        # Claude Code slash commands (16)
+│   ├── commands/        # Claude Code slash commands (16) — canonical source
 │   └── skills/          # Skills (conductor, beads, skill-creator)
-├── commands/conductor/  # Gemini CLI TOML commands (16)
+├── .codex/prompts/      # OpenAI Codex CLI commands (generated)
+├── .cursor/             # Cursor commands + rule (generated)
+├── .agent/workflows/    # Google Antigravity workflows (generated)
+├── .github/prompts/     # GitHub Copilot prompt files (generated)
+├── scripts/             # generate-commands.sh, migrate-v2.sh
 ├── templates/           # Workflow and styleguide templates
-├── docs/                # Documentation
+├── docs/                # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md            # Claude Code context
-├── GEMINI.md            # Gemini CLI context
-└── gemini-extension.json
+└── AGENTS.md            # Codex + Antigravity context
 ```
 
 ### Generated Project Structure

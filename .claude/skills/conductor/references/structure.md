@@ -77,28 +77,10 @@ Plan.md can include annotations for parallel task execution:
 | `<!-- depends: task1, task2 -->` | After task line | Task dependencies within phase |
 | `<!-- parallel-group: name -->` | After task line | Optional grouping |
 
-## Gemini CLI Compatibility
+## Cross-platform compatibility
 
-Projects set up with Gemini CLI's Conductor extension use identical structure.
-The only differences are command syntax:
-
-| Gemini CLI | Claude Code | Purpose |
-|------------|-------------|---------|
-| `/conductor:setup` | `/conductor-setup` | Initialize project with context files and first track |
-| `/conductor:newTrack` | `/conductor-newtrack` | Create feature/bug track with spec and plan |
-| `/conductor:implement` | `/conductor-implement` | Execute tasks from track's plan (TDD workflow) |
-| `/conductor:status` | `/conductor-status` | Display progress overview |
-| `/conductor:revert` | `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
-| `/conductor:validate` | `/conductor-validate` | Validate project integrity and fix issues |
-| `/conductor:block` | `/conductor-block` | Mark task as blocked with reason |
-| `/conductor:skip` | `/conductor-skip` | Skip current task with justification |
-| `/conductor:revise` | `/conductor-revise` | Update spec/plan when implementation reveals issues |
-| `/conductor:archive` | `/conductor-archive` | Archive completed tracks |
-| `/conductor:export` | `/conductor-export` | Generate project summary export |
-| `/conductor:handoff` | `/conductor-handoff` | Create context handoff for section transfer |
-| `/conductor:refresh` | `/conductor-refresh` | Sync context docs with current codebase state |
-| `/conductor:formula` | `/conductor-formula` | List and manage track templates (Beads formulas) |
-| `/conductor:wisp` | `/conductor-wisp` | Create ephemeral exploration track (no audit trail) |
-| `/conductor:distill` | `/conductor-distill` | Extract reusable template from completed track |
-
-Files, workflows, and state management are fully compatible.
+The same `conductor/` structure is used by every supported tool — Claude Code,
+OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot — and all of
+them invoke the same command name (e.g. `/conductor-setup`, `/conductor-newtrack`,
+`/conductor-implement`). Files, workflows, and state management are fully
+compatible across tools, so you can mix them on one repo.

@@ -10,7 +10,7 @@ Conductor helps you plan before you build - creating specs, implementation plans
 
 ```bash
 # Add the marketplace
-/plugin marketplace add gemini-cli-extensions/conductor
+/plugin marketplace add vishal-kr-barnwal/Conductor-Beads
 
 # Install the plugin
 /plugin install conductor
@@ -61,7 +61,7 @@ The skill follows the Agent Skills spec with full frontmatter:
 - `name`: conductor
 - `description`: Context-driven development methodology
 - `license`: Apache-2.0
-- `compatibility`: Claude Code, Gemini CLI, any Agent Skills compatible CLI
+- `compatibility`: Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, GitHub Copilot, any Agent Skills compatible CLI
 - `metadata`: version, author, repository, keywords
 
 ### Option 3: Manual Installation
@@ -77,12 +77,12 @@ cp -r /path/to/conductor/.claude/commands/* ~/.claude/commands/
 cp -r /path/to/conductor/.claude/skills/* ~/.claude/skills/
 ```
 
-### Option 4: Gemini CLI
+### Option 4: Other platforms (Codex, Cursor, Antigravity, Copilot)
 
-If using Gemini CLI instead of Claude Code:
-```bash
-gemini extensions install https://github.com/gemini-cli-extensions/conductor
-```
+The same 16 commands ship for OpenAI Codex CLI, Cursor, Google Antigravity, and
+GitHub Copilot. See the [Install & Version Guide](../docs/INSTALL.md) for
+per-platform setup. They are generated from these Claude commands by
+`scripts/generate-commands.sh`.
 
 ## Commands
 
@@ -167,30 +167,16 @@ Throughout conductor files:
 - `[!]` - Blocked (followed by reason)
 - `[-]` - Skipped (followed by reason)
 
-## Gemini CLI Interoperability
+## Cross-platform interoperability
 
-Projects work with both Gemini CLI and Claude Code:
+Projects work across every supported tool — Claude Code, OpenAI Codex CLI,
+Cursor, Google Antigravity, and GitHub Copilot. All of them invoke the same
+command name (e.g. `/conductor-setup`) and operate on the same `conductor/` and
+`.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor,
+implement in Claude Code) with full compatibility.
 
-| Gemini CLI | Claude Code |
-|------------|-------------|
-| `/conductor:setup` | `/conductor-setup` |
-| `/conductor:newTrack` | `/conductor-newtrack` |
-| `/conductor:implement` | `/conductor-implement` |
-| `/conductor:status` | `/conductor-status` |
-| `/conductor:revert` | `/conductor-revert` |
-| `/conductor:validate` | `/conductor-validate` |
-| `/conductor:block` | `/conductor-block` |
-| `/conductor:skip` | `/conductor-skip` |
-| `/conductor:revise` | `/conductor-revise` |
-| `/conductor:archive` | `/conductor-archive` |
-| `/conductor:export` | `/conductor-export` |
-| `/conductor:handoff` | `/conductor-handoff` |
-| `/conductor:refresh` | `/conductor-refresh` |
-| `/conductor:formula` | `/conductor-formula` |
-| `/conductor:wisp` | `/conductor-wisp` |
-| `/conductor:distill` | `/conductor-distill` |
-
-Same `conductor/` directory structure, full compatibility.
+See the [Install & Version Guide](../docs/INSTALL.md) for the compatibility
+matrix and per-platform setup.
 
 ## File Structure
 
@@ -247,9 +233,9 @@ Same `conductor/` directory structure, full compatibility.
 
 ## Links
 
-- [GitHub Repository](https://github.com/gemini-cli-extensions/conductor)
+- [GitHub Repository](https://github.com/vishal-kr-barnwal/Conductor-Beads)
+- [Install & Version Guide](../docs/INSTALL.md)
 - [Agent Skills Specification](https://agentskills.io)
-- [Gemini CLI Extensions](https://geminicli.com/docs/extensions/)
 
 ## License
 

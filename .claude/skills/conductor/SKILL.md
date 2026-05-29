@@ -10,7 +10,7 @@ description: |
   - User invokes `/conductor-*` commands (setup, newtrack, implement, status, revert, validate, block, skip, revise, archive, export, handoff, refresh, formula, wisp, distill)
   - User mentions documentation is outdated or wants to sync context with codebase changes
   
-  Interoperable with Gemini CLI extension and Claude Code commands.
+  Interoperable across Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot.
   Integrates with Beads for persistent task memory across sessions.
 ---
 

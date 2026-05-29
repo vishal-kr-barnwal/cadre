@@ -107,7 +107,7 @@ bd --version
 
 ## Command Workflows
 
-### 1. `/conductor-setup` (or `/conductor:setup`)
+### 1. `/conductor-setup`
 
 **Purpose**: Initialize a new project with Conductor methodology.
 
@@ -174,7 +174,7 @@ Step 6: Verify artifacts
 
 ---
 
-### 2. `/conductor-newtrack` (or `/conductor:newTrack`)
+### 2. `/conductor-newtrack`
 
 **Purpose**: Create a new feature or bug fix track.
 
@@ -223,7 +223,7 @@ conductor/tracks/<shortname_YYYYMMDD>/
 
 ---
 
-### 3. `/conductor-implement` (or `/conductor:implement`)
+### 3. `/conductor-implement`
 
 **Purpose**: Execute tasks from a track's plan.
 
@@ -300,7 +300,7 @@ Step 8: Track completion
 
 ---
 
-### 4. `/conductor-status` (or `/conductor:status`)
+### 4. `/conductor-status`
 
 **Purpose**: Display project progress overview.
 
@@ -328,7 +328,7 @@ Step 3 (If Beads enabled):
 
 ---
 
-### 5. `/conductor-validate` (or `/conductor:validate`)
+### 5. `/conductor-validate`
 
 **Purpose**: Check project integrity and fix issues.
 
@@ -362,7 +362,7 @@ Step 4: If staleness detected
 
 ---
 
-### 6. `/conductor-block` (or `/conductor:block`)
+### 6. `/conductor-block`
 
 **Purpose**: Mark a task as blocked.
 
@@ -394,7 +394,7 @@ Step 4: Updates applied
 
 ---
 
-### 7. `/conductor-skip` (or `/conductor:skip`)
+### 7. `/conductor-skip`
 
 **Purpose**: Skip current task and move to next.
 
@@ -416,7 +416,7 @@ Step 4: Implementation moves to next task
 
 ---
 
-### 8. `/conductor-revise` (or `/conductor:revise`)
+### 8. `/conductor-revise`
 
 **Purpose**: Update spec/plan when implementation reveals issues.
 
@@ -449,7 +449,7 @@ Step 5: Approve changes
 
 ---
 
-### 9. `/conductor-revert` (or `/conductor:revert`)
+### 9. `/conductor-revert`
 
 **Purpose**: Git-aware revert of work.
 
@@ -477,7 +477,7 @@ Step 4: Confirm revert
 
 ---
 
-### 10. `/conductor-archive` (or `/conductor:archive`)
+### 10. `/conductor-archive`
 
 **Purpose**: Move completed tracks to archive.
 
@@ -500,7 +500,7 @@ Step 4: Tracks moved to conductor/archive/
 
 ---
 
-### 11. `/conductor-export` (or `/conductor:export`)
+### 11. `/conductor-export`
 
 **Purpose**: Generate project summary report.
 
@@ -527,7 +527,7 @@ Step 4: Report generated
 
 ---
 
-### 12. `/conductor-refresh` (or `/conductor:refresh`)
+### 12. `/conductor-refresh`
 
 **Purpose**: Sync context docs with current codebase.
 
@@ -561,7 +561,7 @@ Step 4: Approve changes
 
 ---
 
-### 13. `/conductor-handoff` (or `/conductor:handoff`)
+### 13. `/conductor-handoff`
 
 **Purpose**: Create context handoff for transferring implementation to next section/session.
 
@@ -612,7 +612,7 @@ conductor/tracks/<track_id>/
 
 ---
 
-### 14. `/conductor-formula` (or `/conductor:formula`)
+### 14. `/conductor-formula`
 
 **Purpose**: List and manage track workflow templates (Beads formulas).
 
@@ -658,7 +658,7 @@ Step 3: For "show <name>" subcommand
 
 ---
 
-### 15. `/conductor-wisp` (or `/conductor:wisp`)
+### 15. `/conductor-wisp`
 
 **Purpose**: Create ephemeral exploration track (no audit trail).
 
@@ -706,7 +706,7 @@ bd mol burn <wisp>                  # Delete without trace
 
 ---
 
-### 16. `/conductor-distill` (or `/conductor:distill`)
+### 16. `/conductor-distill`
 
 **Purpose**: Extract reusable template from completed track.
 

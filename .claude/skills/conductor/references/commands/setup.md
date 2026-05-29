@@ -67,7 +67,7 @@ Present to user:
      > Please respond with A or B.
    - If denied, halt and await instructions.
    - **Code Analysis:**
-     - Respect `.gitignore` and `.geminiignore` patterns
+     - Respect `.gitignore` and any agent ignore patterns (e.g. `.aiexclude`)
      - Analyze README.md, package.json, directory structure
      - Extract: Programming Language, Frameworks, Database Drivers
      - Infer: Architecture type (Monorepo, Microservices, MVC)
