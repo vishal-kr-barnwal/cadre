@@ -91,55 +91,36 @@ bd --version
 
 ### Claude Code
 
-**Full Installation** (all skills):
-```bash
-# Clone the repository
-git clone https://github.com/NguyenSiTrung/Conductor-Beads.git
+Clone the repo once, then copy the commands and skills into your config:
 
-# Copy commands and skills to your global config
+```bash
+git clone https://github.com/vishal-kr-barnwal/Conductor-Beads.git
+
+# Global install (available in every project)
 cp -r Conductor-Beads/.claude/commands/* ~/.claude/commands/
-cp -r Conductor-Beads/.claude/skills/* ~/.claude/skills/
+cp -r Conductor-Beads/.claude/skills/*   ~/.claude/skills/
 ```
 
-**Minimal Installation** (conductor only, smaller context):
+To scope the install to a single project instead, copy into that project's `.claude/`:
+
 ```bash
-git clone https://github.com/NguyenSiTrung/Conductor-Beads.git
-
-# Copy only commands and conductor skill
-cp -r Conductor-Beads/.claude/commands/* ~/.claude/commands/
-mkdir -p ~/.claude/skills
-cp -r Conductor-Beads/.claude/skills/conductor ~/.claude/skills/
+cp -r Conductor-Beads/.claude/commands your-project/.claude/commands
+cp -r Conductor-Beads/.claude/skills   your-project/.claude/skills
 ```
 
-**Project-Local Installation**:
-```bash
-# Full - copy entire .claude folder
-cp -r Conductor-Beads/.claude your-project/
-
-# Minimal - conductor only
-mkdir -p your-project/.claude/skills
-cp -r Conductor-Beads/.claude/commands your-project/.claude/
-cp -r Conductor-Beads/.claude/skills/conductor your-project/.claude/skills/
-```
-
-| Installation | Includes | Best For |
-|--------------|----------|----------|
-| **Full** | conductor, beads, skill-creator skills | Standalone Beads usage, skill development |
-| **Minimal** | conductor skill only (has Beads integration) | Most projects, smaller context window |
+> **Smaller context window?** Copy only the `conductor` skill (`.claude/skills/conductor`) — it already includes Beads integration. Add the `beads` and `skill-creator` skills only if you want standalone Beads usage or to build your own skills.
 
 ### Gemini CLI
 
 ```bash
-gemini extensions install https://github.com/NguyenSiTrung/Conductor-Beads --auto-update
+gemini extensions install https://github.com/vishal-kr-barnwal/Conductor-Beads --auto-update
 ```
 
 ---
 
 ## Setup Guide
 
-### Step 1: Initialize Your Project
-
-Run the setup command in your project directory:
+Run the setup command once in your project directory — it does everything:
 
 ```bash
 # Claude Code
@@ -149,46 +130,36 @@ Run the setup command in your project directory:
 /conductor:setup
 ```
 
-This creates the `conductor/` directory with:
-- `product.md` - Product vision and goals
-- `tech-stack.md` - Technology choices
-- `workflow.md` - Development standards (TDD, commits)
-- `tracks.md` - Master track list
+Setup will:
 
-### Step 2: Initialize Beads
+1. Scaffold the `conductor/` directory:
+   - `product.md` — product vision and goals
+   - `tech-stack.md` — technology choices
+   - `workflow.md` — development standards (TDD, commits)
+   - `tracks.md` — master track list
+2. **Prompt you to choose a Beads mode** and initialize it for you (runs `bd init`, creates `.beads/`, writes `conductor/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
 
-After Conductor setup, initialize Beads for persistent memory:
+You don't need to run `bd init` yourself — setup handles it.
 
-```bash
-# Standard mode (commits to repo)
-bd init
+### Beads mode
 
-# Stealth mode (local-only, for shared repos)
-bd init --stealth
-```
+When prompted, pick the mode that fits your repo:
 
-This creates `.beads/` directory for dependency-aware task tracking.
+| Mode | What setup runs | When to use |
+|------|-----------------|-------------|
+| **Normal** | `bd init` | The whole team uses Beads. `.beads/` is committed to the repo so everyone shares the task graph. |
+| **Stealth** | `bd init --stealth` | Personal use on a shared repo. `.beads/` is gitignored and stays local. |
 
-### Step 3: Configuration
+The choice is recorded in `conductor/beads.json`:
 
-After setup, `conductor/beads.json` controls integration:
 ```json
 {
   "enabled": true,
-  "mode": "stealth",
+  "mode": "normal",
   "sync": "bidirectional",
   "compactOnArchive": true
 }
 ```
-
-**Mode Options:**
-
-| Mode | Command | Description |
-|------|---------|-------------|
-| `"normal"` | `bd init` | Full integration. Commits `.beads/` to repo. Team members see tasks. |
-| `"stealth"` | `bd init --stealth` | Local only. `.beads/` is gitignored. Personal use on shared repos. |
-
-Use **stealth** when working on a shared repository where you don't want to commit Beads data. Use **normal** when the whole team uses Beads.
 
 ---
 
@@ -355,9 +326,9 @@ Skills provide:
 ```
 Conductor-Beads/
 ├── .claude/
-│   ├── commands/        # Claude Code slash commands (17)
+│   ├── commands/        # Claude Code slash commands (16)
 │   └── skills/          # Skills (conductor, beads, skill-creator)
-├── commands/conductor/  # Gemini CLI TOML commands (17)
+├── commands/conductor/  # Gemini CLI TOML commands (16)
 ├── templates/           # Workflow and styleguide templates
 ├── docs/                # Documentation
 ├── CLAUDE.md            # Claude Code context

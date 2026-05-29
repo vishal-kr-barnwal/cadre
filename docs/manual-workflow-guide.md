@@ -250,7 +250,7 @@ Step 4: Resume check
    - Otherwise start from first task
 
 Step 5: Beads integration (if enabled)
-   - Run bd ready --epic <epic_id> to see available tasks
+   - Run bd ready --parent <epic_id> to see available tasks
    - Use Beads to select next task with no blockers
 
 Step 6: For each task, follow TDD workflow:
@@ -771,7 +771,7 @@ When Beads integration is enabled, use these commands alongside Conductor:
 | Command | Purpose |
 |---------|---------|
 | `bd ready` | List tasks with no blockers |
-| `bd ready --epic <id>` | List ready tasks for specific track |
+| `bd ready --parent <id>` | List ready tasks for specific track |
 | `bd show <id>` | View task details and notes |
 | `bd show <id> --notes` | View notes (survives compaction) |
 | `bd update <id> --status in_progress` | Start working on task |

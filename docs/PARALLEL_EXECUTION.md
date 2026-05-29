@@ -378,7 +378,7 @@ for task in parallel_tasks:
 # (Each worker gets its beads_task_id in the prompt)
 
 # 3. After all workers complete - aggregate and verify
-bd ready --epic <epic_id> --json  # Verify all complete
+bd ready --parent <epic_id> --json  # Verify all complete
 bd note <epic_id> "PARALLEL PHASE COMPLETE: <phase>
 WORKERS: <N> succeeded
 COMMITS: <sha_list>" --json

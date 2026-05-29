@@ -1,8 +1,7 @@
 # Conductor + Beads Integration
 
 > **Status**: Implemented  
-> **Version**: 0.1.0  
-> **Date**: 2024-12-26
+> **Version**: 0.2.0
 
 ## Overview
 
@@ -132,7 +131,7 @@ Combined Workflow:
    bd prime
    
 3. Query Beads for ready tasks:
-   bd ready --epic bd-a3f8
+   bd ready --parent bd-a3f8
    → Shows tasks with no blockers
 
 4. Select task and mark in-progress with context:
@@ -171,7 +170,7 @@ Output combines both sources:
 - [~] auth_20241226 - Add user authentication
 
 ## Task Progress (from Beads)
-bd ready --epic bd-a3f8
+bd ready --parent bd-a3f8
 
 Ready to work:
   bd-a3f8.2  P1  Implement JWT middleware
@@ -370,7 +369,7 @@ Beads provides robust coordination for Conductor's parallel task execution featu
 ┌─────────────────────────────────────────────────────────────────┐
 │                     COORDINATOR                                   │
 │  4. bd dolt push (push all worker changes to remote)             │
-│  5. bd ready --epic <id> (verify all complete)                   │
+│  5. bd ready --parent <id> (verify all complete)                   │
 │  6. Aggregate results to plan.md                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -424,7 +423,7 @@ for task_id in <parallel_tasks>:
 **After All Workers Complete:**
 ```bash
 # Verify completion
-bd ready --epic <epic_id> --json
+bd ready --parent <epic_id> --json
 # Should return empty (all tasks done) or only sequential tasks
 
 # Update epic notes for session resume
@@ -502,11 +501,11 @@ For human-in-the-loop checkpoints (gates are created automatically via formula s
 # List open gates
 bd gate list
 
-# Check and auto-resolve eligible gates
-bd gate check
+# Auto-close gates whose condition is met (timer elapsed, CI passed, etc.)
+bd gate eval
 
-# Manually resolve a gate after review
-bd gate resolve <gate-id>
+# Approve a human-in-the-loop gate after review
+bd gate approve <gate-id>
 ```
 
 ### Cross-Project Dependencies
