@@ -67,6 +67,29 @@ cd Conductor-Beads
 
 ---
 
+## Automated install
+
+The quickest path is the interactive installer, which detects your CLIs, lets
+you choose tools, and installs globally or into a project:
+
+```bash
+bash scripts/install.sh              # interactive
+bash scripts/install.sh --all --global
+bash scripts/install.sh --project=DIR --yes claude codex
+bash scripts/install.sh --dry-run    # preview only
+```
+
+| Flag | Effect |
+|------|--------|
+| `--global` | Install into `~/` (home config) |
+| `--project[=DIR]` | Install into `DIR` (default: current directory) |
+| `--all` | Select every detected tool (implies `--yes`) |
+| `-y`, `--yes` | Skip the confirmation prompt |
+| `--dry-run` | Print actions without writing |
+| positional `claude codex cursor antigravity copilot` | Preselect tools |
+
+The manual per-platform steps below do the same copies by hand.
+
 ## Per-platform installation
 
 ### Claude Code

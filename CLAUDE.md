@@ -27,6 +27,7 @@ Conductor-Beads/
 ├── .agent/workflows/       # Google Antigravity workflows (generated)
 ├── .github/prompts/        # GitHub Copilot prompt files (generated)
 ├── scripts/
+│   ├── install.sh          # Interactive installer (detect CLIs, global/project)
 │   ├── generate-commands.sh # Generates the 4 platforms above from .claude/commands/
 │   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration
 ├── templates/              # Workflow and styleguide templates

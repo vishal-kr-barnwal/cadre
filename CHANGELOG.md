@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.2] — 2026-05-30
+
+### Added
+- **Interactive installer, `scripts/install.sh`.** Detects which supported CLIs
+  are present (Claude Code, Codex, Cursor, Antigravity, Copilot), lets you pick
+  which to set up, and installs either **globally** (`~/`) or into a **project**
+  directory. Supports `--all`, `--global`, `--project[=DIR]`, `-y/--yes`,
+  `--dry-run`, and positional tool names for non-interactive use. Bundled
+  `templates/` and `references/` ride along, and existing context files
+  (`AGENTS.md`, `copilot-instructions.md`) are never overwritten.
+
+---
+
 ## [0.3.1] — 2026-05-30
 
 ### Fixed
@@ -149,6 +162,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
+[0.3.2]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.2
 [0.3.1]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.1
 [0.3.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.0
 [0.2.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.2.0

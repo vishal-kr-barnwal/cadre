@@ -4,7 +4,7 @@
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 0.3.1
+**Version:** 0.3.2
 
 ## What is Conductor-Beads?
 
@@ -110,6 +110,28 @@ bd --version
 ---
 
 ## Installation
+
+### Quick install (recommended)
+
+Clone the repo and run the installer. It detects which supported CLIs you have,
+lets you pick which to set up, and installs them either **globally** (`~/`) or
+into a **project** directory:
+
+```bash
+git clone https://github.com/vishal-kr-barnwal/Conductor-Beads.git
+cd Conductor-Beads
+bash scripts/install.sh
+```
+
+```bash
+# Non-interactive examples
+bash scripts/install.sh --all --global         # every detected tool, globally
+bash scripts/install.sh --project=~/my-app claude codex   # selected tools, into a project
+bash scripts/install.sh --dry-run              # preview without writing anything
+```
+
+Prefer to copy things yourself? The per-platform manual steps are below and in
+the [Install & Version Guide](docs/INSTALL.md).
 
 ### Claude Code
 
