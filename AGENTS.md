@@ -28,13 +28,15 @@ The Conductor commands are available as slash commands (Codex custom prompts in
 - `/conductor-setup` — initialize the project (context files + first track)
 - `/conductor-newtrack` — create a feature/bug track with spec and plan
 - `/conductor-implement` — execute a track's plan with the TDD workflow
-- `/conductor-status` — show progress
-- `/conductor-revert`, `/conductor-validate`, `/conductor-block`,
-  `/conductor-skip`, `/conductor-revise`, `/conductor-archive`,
-  `/conductor-export`, `/conductor-handoff`, `/conductor-refresh`
-- `/conductor-formula` — manage track templates (Beads formulas)
-- `/conductor-wisp` — ephemeral exploration track (no audit trail)
-- `/conductor-distill` — extract a reusable template from a completed track
+- `/conductor-status` — show progress (`--export` writes a project summary)
+- `/conductor-review` — review a track's diff before shipping (quality gate)
+- `/conductor-ship` — rebase a reviewed track onto main, push, prepare the PR
+- `/conductor-release` — cut a local release (changelog + version tag)
+- `/conductor-revert`, `/conductor-validate`, `/conductor-flag`,
+  `/conductor-revise`, `/conductor-archive`,
+  `/conductor-handoff`, `/conductor-refresh`
+- `/conductor-formula` — manage track templates: `list` / `show` / `create`
+  (distill from a track) / `wisp` (ephemeral exploration, no audit trail)
 
 > **Codex** expands `$ARGUMENTS` / `$1`…`$9` in custom prompts. **Antigravity**
 > appends any text typed after the workflow name. Both behaviors are handled by

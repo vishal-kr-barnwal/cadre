@@ -1,5 +1,5 @@
 ---
-description: List and manage track workflow templates (Beads formulas)
+description: Manage track templates (Beads formulas) — list, show, create, wisp
 agent: agent
 ---
 
@@ -13,6 +13,12 @@ CRITICAL: Validate every tool call. If any fails, halt and announce the failure.
 # Conductor Formula
 
 Manage track workflow templates: the input provided with this command (the text typed after the command name)
+
+Subcommands:
+- `list` (default) — list available formulas
+- `show <name>` — show a formula's structure and variables
+- `create <track_id>` — distill a reusable template from a completed track
+- `wisp [formula]` — start an ephemeral exploration (no audit trail)
 
 ---
 
@@ -47,21 +53,21 @@ Manage track workflow templates: the input provided with this command (the text 
    - Extract formula name
    - Go to section 4.0 (Show Formula Details)
 
-   **If "create":**
-   - Announce: "To create a new formula, use `/conductor-distill <track_id>` to extract a template from a completed track."
-   - HALT
+   **If "create [track_id] [--as <name>]":**
+   - Go to section 6.0 (Create Template from Track)
+
+   **If "wisp [formula] [--var key=value]":**
+   - Go to section 7.0 (Ephemeral Exploration Wisp)
 
    **Otherwise:**
    - Announce available subcommands:
-     > "Usage: /conductor-formula [list|show <name>]"
+     > "Usage: /conductor-formula [list|show <name>|create <track_id>|wisp [formula]]"
      > 
      > **Subcommands:**
      > - `list` - List all available formulas (default)
      > - `show <name>` - Show formula structure and variables
-     > 
-     > **Related commands:**
-     > - `/conductor-distill <track_id>` - Create formula from completed track
-     > - `/conductor-wisp` - Create ephemeral exploration track
+     > - `create <track_id>` - Extract a template from a completed track
+     > - `wisp [formula]` - Create an ephemeral exploration track
    - HALT
 
 ---
@@ -81,7 +87,7 @@ Manage track workflow templates: the input provided with this command (the text 
      > 
      > **To create a formula:**
      > 1. Complete a track using `/conductor-implement`
-     > 2. Run `/conductor-distill <track_id>` to extract a reusable template
+     > 2. Run `/conductor-formula create <track_id>` to extract a reusable template
      > 
      > **Or use Beads directly:**
      > ```bash
@@ -98,8 +104,7 @@ Manage track workflow templates: the input provided with this command (the text 
    > **Usage:**
    > - `/conductor-formula show <name>` - View formula details
    > - `bd mol pour <name>` - Create persistent track from formula
-   > - `bd mol wisp <name>` - Create ephemeral exploration from formula
-   > - `/conductor-wisp <name>` - Quick ephemeral track
+   > - `/conductor-formula wisp <name>` - Quick ephemeral track
 
 ---
 
@@ -139,8 +144,7 @@ Manage track workflow templates: the input provided with this command (the text 
    > bd mol pour <name> --var key=value
    > 
    > # Create ephemeral exploration (no audit trail)
-   > bd mol wisp <name> --var key=value
-   > /conductor-wisp <name> --var key=value
+   > /conductor-formula wisp <name> --var key=value
    > ```
 
 ---
@@ -164,5 +168,117 @@ After listing or showing formulas, include:
 > 
 > **Workflow:**
 > 1. Create and complete a track: `/conductor-newtrack` → `/conductor-implement`
-> 2. Extract as formula: `/conductor-distill <track_id>`
-> 3. Reuse for new work: `bd mol pour <formula>` or `/conductor-wisp <formula>`
+> 2. Extract as formula: `/conductor-formula create <track_id>`
+> 3. Reuse for new work: `bd mol pour <formula>` or `/conductor-formula wisp <formula>`
+
+---
+
+## 6.0 CREATE TEMPLATE FROM TRACK (`create`)
+
+**PROTOCOL: Extract a reusable template from a completed track's Beads epic.**
+
+### 6.1 Track Selection
+
+**If track_id provided:**
+- Validate track exists in `conductor/tracks/<track_id>/`
+- Load `conductor/tracks/<track_id>/metadata.json`
+
+**If no track_id:**
+1. Read `conductor/tracks.md`, find tracks marked `[x]` (completed).
+2. If completed tracks found, present a numbered list and ask the user to choose.
+3. If none:
+   > "⚠️ No completed tracks found. Complete a track with `/conductor-implement` first."
+   - HALT
+
+### 6.2 Validate Track
+1. If the track is NOT `[x]` in `tracks.md`: warn and offer to extract anyway or complete first (HALT if they choose to complete first).
+2. Read `metadata.json` for `beads_epic`. If none:
+   > "⚠️ This track has no Beads integration. Templates are extracted from Beads epics."
+   - HALT
+
+### 6.3 Determine Template Name
+- If `--as <name>` provided, use it.
+- Otherwise derive a kebab-case name from the track description and confirm.
+
+### 6.4 Analyze Track for Variables
+Read `spec.md` and `plan.md`; identify specific names, versions, paths that should
+become `{{variables}}`. Propose them in a table and let the user adjust.
+
+### 6.5 Extract Template
+```bash
+bd mol distill <beads_epic_id> \
+  --as "<template_name>" \
+  --var <value1>=<var1> \
+  --var <value2>=<var2> \
+  --json
+```
+- **Success:** capture proto ID, announce name/proto/variables, and show usage
+  (`bd mol pour <name>` and `/conductor-formula wisp <name>`,
+  `/conductor-formula show <name>`).
+- **Failure:** display the error and follow the Beads Error Handler Protocol
+  (see `references/beads-error-handler.md`); suggest manual extraction as fallback.
+
+### 6.6 Register with Conductor (Optional)
+1. Create `conductor/templates/<template_name>/` if absent.
+2. Write `metadata.json` (name, beads_proto, source_track, variables, created_at, created_from).
+3. Copy `spec.md` → `spec.template.md` and `plan.md` → `plan.template.md`, replacing
+   specific values with `{{variable}}` placeholders.
+4. Announce registration.
+
+### 6.7 Cleanup
+Offer to **Archive** (run `/conductor-archive <track_id>`), **Keep**, or **Delete**
+the source track (confirm before deleting).
+
+---
+
+## 7.0 EPHEMERAL EXPLORATION WISP (`wisp`)
+
+**PROTOCOL: Create an ephemeral exploration track with no audit trail.**
+
+Wisps are **ephemeral** workflow instances that:
+- Live in the Dolt `wisps` table (excluded from sync via `dolt_ignore`)
+- Are **never** synced to git and leave no permanent audit trail
+- Are ideal for exploration, debugging, quick fixes, patrol/health checks
+
+Use persistent tracks (`bd mol pour` / `/conductor-newtrack`) instead when work
+needs an audit trail, spans sessions, or requires team coordination.
+
+### 7.1 Parse Arguments
+- **Formula name provided:** use it; capture any `--var key=value`.
+- **No formula name:** run `bd formula list --json`. If formulas exist, present them
+  and ask the user to choose or describe an exploration. If none, ask what to explore
+  and go to 7.3 (ad-hoc).
+
+### 7.2 Create Wisp from Formula
+```bash
+bd mol wisp <formula_name> [--var key=value ...] --json
+```
+- **Success:** report wisp ID + formula, show `bd mol current`, and remind the user
+  it won't sync to git. Navigation: `bd mol current`, `bd close <step> --continue`,
+  `bd mol squash <wisp>` (save summary), `bd mol burn <wisp>` (delete without trace).
+- **Failure:** display the error and suggest alternatives.
+
+### 7.3 Create Ad-hoc Wisp
+```bash
+bd create "Exploration: <user_description>" -t epic -p 3 --json
+bd mol wisp <epic_id> --json
+```
+Announce the wisp ID/topic. Add discovered work with
+`bd create "<finding>" --deps discovered-from:<wisp_id> --json`. Finish with
+`bd mol squash <wisp_id>` (digest) or `bd mol burn <wisp_id>` (no trace).
+
+### 7.4 Wisp Management
+| Action | Command |
+|--------|---------|
+| List wisps | `bd mol wisp list` |
+| Current step | `bd mol current` |
+| Complete step | `bd close <step> --continue` |
+| Save with summary | `bd mol squash <wisp> --summary "..."` |
+| Delete completely | `bd mol burn <wisp>` |
+| Clean up orphans | `bd mol wisp gc` |
+
+### 7.5 Transition to Persistent Track
+If the exploration found work worth keeping, offer to:
+- **Convert** to a persistent track via `/conductor-newtrack` (then burn the wisp),
+- **Create follow-up issues** (`bd create … --deps discovered-from:<parent>`),
+- **Squash** with a digest, or **Burn** to discard.

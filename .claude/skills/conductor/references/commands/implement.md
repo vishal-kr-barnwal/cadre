@@ -377,7 +377,7 @@ Implement track: $ARGUMENTS
       | **Spec Issue** | Requirement wrong, missing, impossible, edge case not covered | Trigger Revise workflow for spec → update spec.md → log in revisions.md → then fix |
       | **Plan Issue** | Missing task, wrong order, task too big/small, dependency missing | Trigger Revise workflow for plan → update plan.md → log in revisions.md → continue |
       | **Discovered Work** | Bug found, improvement needed, follow-up task | If Beads: `bd create "<issue>" --deps discovered-from:<current_task_id> --json` |
-      | **Blocked** | External dependency, need user input, waiting on API | Mark as blocked, suggest `/conductor-block` |
+      | **Blocked** | External dependency, need user input, waiting on API | Mark as blocked, suggest `/conductor-flag blocked` |
       
       **Agent MUST announce:** "This issue reveals [spec/plan problem | implementation bug | discovered work]. [Triggering revision | Fixing directly | Created follow-up task]."
       
@@ -524,19 +524,27 @@ Thread: $AMP_CURRENT_THREAD_ID (if available)
 
 ## 7.0 TRACK CLEANUP
 
-**PROTOCOL: Offer to archive or delete completed track.**
+**PROTOCOL: Walk the ship pipeline for the completed track.**
 
 1. **Execution Trigger:** ONLY execute after track successfully implemented AND documentation sync complete.
 
-2. **Ask for User Choice:**
-   > "Track '<track_description>' is now complete. What would you like to do?"
+2. **Recommend the ship pipeline:** the recommended flow before archiving is
+   `review → ship → archive`. Surface it:
+   > "Track '<track_description>' is now complete. Recommended next steps:
+   > 1. `/conductor-review` — review the track diff (quality gate)
+   > 2. `/conductor-ship` — rebase onto main, push, open the PR
+   > 3. `/conductor-archive` — local cleanup + learnings once the PR is up
+   > (and `/conductor-release` once enough tracks have shipped)"
+
+3. **Ask for User Choice (cleanup now):**
+   > "Or handle the track folder now:"
    > A) **Archive** - Move to `conductor/archive/` and remove from tracks file
    > B) **Delete** - Permanently delete folder and remove from tracks file
-   > C) **Skip** - Leave in tracks file
+   > C) **Skip** - Leave in tracks file (recommended until reviewed + shipped)
    >
    > Please enter A, B, or C.
 
-3. **Handle User Response:**
+4. **Handle User Response:**
 
    **If A (Archive):**
    - Create `conductor/archive/` if not exists

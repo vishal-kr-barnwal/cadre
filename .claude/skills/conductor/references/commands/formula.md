@@ -2,6 +2,12 @@
 
 Manage track workflow templates: $ARGUMENTS
 
+Subcommands:
+- `list` (default) — list available formulas
+- `show <name>` — show a formula's structure and variables
+- `create <track_id>` — distill a reusable template from a completed track
+- `wisp [formula]` — start an ephemeral exploration (no audit trail)
+
 ---
 
 ## 1.0 BEADS CHECK
@@ -26,31 +32,17 @@ Manage track workflow templates: $ARGUMENTS
 
 **PROTOCOL: Determine action from arguments.**
 
-1. **Parse $ARGUMENTS:**
+1. **Parse arguments:**
 
-   **If empty or "list":**
-   - Go to section 3.0 (List Formulas)
+   **If empty or "list":** → section 3.0 (List Formulas)
 
-   **If "show <name>":**
-   - Extract formula name
-   - Go to section 4.0 (Show Formula Details)
+   **If "show <name>":** extract the name → section 4.0 (Show Formula Details)
 
-   **If "create":**
-   - Announce: "To create a new formula, use `/conductor-distill <track_id>` to extract a template from a completed track."
-   - HALT
+   **If "create [track_id] [--as <name>]":** → section 6.0 (Create Template from Track)
 
-   **Otherwise:**
-   - Announce available subcommands:
-     > "Usage: /conductor-formula [list|show <name>]"
-     > 
-     > **Subcommands:**
-     > - `list` - List all available formulas (default)
-     > - `show <name>` - Show formula structure and variables
-     > 
-     > **Related commands:**
-     > - `/conductor-distill <track_id>` - Create formula from completed track
-     > - `/conductor-wisp` - Create ephemeral exploration track
-   - HALT
+   **If "wisp [formula] [--var key=value]":** → section 7.0 (Ephemeral Exploration Wisp)
+
+   **Otherwise:** announce usage and the four subcommands, then HALT.
 
 ---
 
@@ -69,7 +61,7 @@ Manage track workflow templates: $ARGUMENTS
      > 
      > **To create a formula:**
      > 1. Complete a track using `/conductor-implement`
-     > 2. Run `/conductor-distill <track_id>` to extract a reusable template
+     > 2. Run `/conductor-formula create <track_id>` to extract a reusable template
      > 
      > **Or use Beads directly:**
      > ```bash
@@ -86,8 +78,7 @@ Manage track workflow templates: $ARGUMENTS
    > **Usage:**
    > - `/conductor-formula show <name>` - View formula details
    > - `bd mol pour <name>` - Create persistent track from formula
-   > - `bd mol wisp <name>` - Create ephemeral exploration from formula
-   > - `/conductor-wisp <name>` - Quick ephemeral track
+   > - `/conductor-formula wisp <name>` - Quick ephemeral track
 
 ---
 
@@ -106,38 +97,15 @@ Manage track workflow templates: $ARGUMENTS
      > "Run `/conductor-formula list` to see available formulas."
    - HALT
 
-3. **Display Structure:**
-   > "## Formula: <name>"
-   > 
-   > **Description:** <description>
-   > 
-   > ### Variables
-   > | Variable | Default | Description |
-   > |----------|---------|-------------|
-   > | `{{var1}}` | `<default>` | `<desc>` |
-   > 
-   > ### Phases
-   > ```
-   > <phase_tree>
-   > ```
-   > 
-   > ### Usage Examples
-   > ```bash
-   > # Create persistent track (auditable, synced to git)
-   > bd mol pour <name> --var key=value
-   > 
-   > # Create ephemeral exploration (no audit trail)
-   > bd mol wisp <name> --var key=value
-   > /conductor-wisp <name> --var key=value
-   > ```
+3. **Display Structure:** name, description, variables table, phase tree, and usage
+   examples (`bd mol pour <name> --var key=value` and
+   `/conductor-formula wisp <name> --var key=value`).
 
 ---
 
 ## 5.0 CONDUCTOR INTEGRATION NOTES
 
 **PROTOCOL: Explain how formulas work with Conductor.**
-
-After listing or showing formulas, include:
 
 > ### How Formulas Work with Conductor
 > 
@@ -152,5 +120,95 @@ After listing or showing formulas, include:
 > 
 > **Workflow:**
 > 1. Create and complete a track: `/conductor-newtrack` → `/conductor-implement`
-> 2. Extract as formula: `/conductor-distill <track_id>`
-> 3. Reuse for new work: `bd mol pour <formula>` or `/conductor-wisp <formula>`
+> 2. Extract as formula: `/conductor-formula create <track_id>`
+> 3. Reuse for new work: `bd mol pour <formula>` or `/conductor-formula wisp <formula>`
+
+---
+
+## 6.0 CREATE TEMPLATE FROM TRACK (`create`)
+
+**PROTOCOL: Extract a reusable template from a completed track's Beads epic.**
+
+### 6.1 Track Selection
+- **track_id provided:** validate `conductor/tracks/<track_id>/` exists; load `metadata.json`.
+- **No track_id:** list `[x]` tracks from `tracks.md` and ask the user to choose; if
+  none, instruct them to complete a track first and HALT.
+
+### 6.2 Validate Track
+1. If the track is NOT `[x]`: warn and offer to extract anyway or complete first (HALT if completing first).
+2. Read `metadata.json` for `beads_epic`. If none:
+   > "⚠️ This track has no Beads integration. Templates are extracted from Beads epics."
+   - HALT
+
+### 6.3 Determine Template Name
+- `--as <name>` if provided, else derive a kebab-case name and confirm.
+
+### 6.4 Analyze Track for Variables
+Read `spec.md` and `plan.md`; propose `{{variables}}` for specific names/versions/paths
+in a table and let the user adjust.
+
+### 6.5 Extract Template
+```bash
+bd mol distill <beads_epic_id> --as "<template_name>" --var <value>=<var> --json
+```
+- **Success:** capture proto ID; announce name/proto/variables; show usage
+  (`bd mol pour`, `/conductor-formula wisp <name>`, `/conductor-formula show <name>`).
+- **Failure:** show error; follow the Beads Error Handler Protocol; suggest manual fallback.
+
+### 6.6 Register with Conductor (Optional)
+Create `conductor/templates/<template_name>/` with `metadata.json`, `spec.template.md`,
+`plan.template.md` (specific values replaced by `{{variable}}` placeholders); announce.
+
+### 6.7 Cleanup
+Offer to **Archive** (run `/conductor-archive <track_id>`), **Keep**, or **Delete** the
+source track (confirm before deleting).
+
+---
+
+## 7.0 EPHEMERAL EXPLORATION WISP (`wisp`)
+
+**PROTOCOL: Create an ephemeral exploration track with no audit trail.**
+
+Wisps are **ephemeral** workflow instances that live in the Dolt `wisps` table
+(excluded from sync via `dolt_ignore`), are **never** synced to git, and leave no
+audit trail — ideal for exploration, debugging, quick fixes, patrol/health checks.
+Use persistent tracks instead when work needs an audit trail, spans sessions, or
+requires team coordination.
+
+### 7.1 Parse Arguments
+- **Formula name provided:** use it; capture any `--var key=value`.
+- **No formula name:** run `bd formula list --json`; if formulas exist, present and ask
+  the user to choose or describe an exploration; if none, ask what to explore → 7.3.
+
+### 7.2 Create Wisp from Formula
+```bash
+bd mol wisp <formula_name> [--var key=value ...] --json
+```
+- **Success:** report wisp ID + formula; show `bd mol current`; remind it won't sync to
+  git. Navigation: `bd mol current`, `bd close <step> --continue`, `bd mol squash <wisp>`,
+  `bd mol burn <wisp>`.
+- **Failure:** display the error and suggest alternatives.
+
+### 7.3 Create Ad-hoc Wisp
+```bash
+bd create "Exploration: <user_description>" -t epic -p 3 --json
+bd mol wisp <epic_id> --json
+```
+Announce the wisp ID/topic; add discovered work with
+`bd create "<finding>" --deps discovered-from:<wisp_id> --json`; finish with
+`bd mol squash <wisp_id>` (digest) or `bd mol burn <wisp_id>` (no trace).
+
+### 7.4 Wisp Management
+| Action | Command |
+|--------|---------|
+| List wisps | `bd mol wisp list` |
+| Current step | `bd mol current` |
+| Complete step | `bd close <step> --continue` |
+| Save with summary | `bd mol squash <wisp> --summary "..."` |
+| Delete completely | `bd mol burn <wisp>` |
+| Clean up orphans | `bd mol wisp gc` |
+
+### 7.5 Transition to Persistent Track
+If the exploration found work worth keeping, offer to **Convert** to a persistent track
+via `/conductor-newtrack` (then burn the wisp), **Create follow-up issues**
+(`bd create … --deps discovered-from:<parent>`), **Squash** with a digest, or **Burn**.

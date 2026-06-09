@@ -67,45 +67,11 @@ For each selected track:
    - Keep `learnings.md` in the archived track folder
    - Future tracks can reference via `/conductor-newtrack`
 
-## 3.5 Flush Dolt + Rebase + Prepare PR
-
-For each archived track:
-
-1. **Flush pending Dolt state:**
-   ```bash
-   bd dolt push
-   ```
-   - Ensures any uncommitted Dolt working-set changes are persisted before git operations.
-   - **If `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-
-2. **Commit flushed Dolt state** (if `.beads/` has changes):
-   ```bash
-   git diff --quiet .beads/ || (git add .beads/ && git commit -m "conductor(beads): sync dolt state before archive <track_id>")
-   ```
-
-3. **Rebase track branch onto main:**
-   ```bash
-   git rebase main track/<track_id>
-   ```
-   - If conflict arises in `.beads/` during rebase:
-     ```bash
-     git checkout --ours .beads/
-     git add .beads/
-     git rebase --continue
-     ```
-   - This syncs the track branch with main's latest Beads state before the PR.
-
-4. **Push rebased branch:**
-   ```bash
-   git push origin track/<track_id> --force-with-lease
-   ```
-
-5. **Announce PR guidance:**
-   > "Branch `track/<track_id>` is rebased on main and pushed.
-   > Create a PR from `track/<track_id>` into main via your team's PR process.
-   > After the PR is merged, delete the branch:
-   >   `git branch -d track/<track_id>`
-   >   `git push origin --delete track/<track_id>`"
+> **Shipping is a separate step.** Rebasing the track branch onto main, pushing, and
+> preparing the PR are handled by `/conductor-ship`, which should run *before* archive
+> (the recommended flow is `implement → review → ship → archive`). Archive is purely
+> local cleanup + knowledge capture and never pushes. If the track was not shipped yet,
+> suggest `/conductor-ship <track_id>` first.
 
 ## 4. Commit
 

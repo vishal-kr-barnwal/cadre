@@ -27,19 +27,18 @@ Context-Driven Development for Claude Code. Measure twice, code once.
 | `/conductor-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
 | `/conductor-newtrack [description]` | Create a new feature/bug track with spec and plan |
 | `/conductor-implement [track_id]` | Execute tasks from track's plan following TDD workflow |
-| `/conductor-status` | Display progress overview |
+| `/conductor-status [--export]` | Display progress overview (or export a project summary) |
 | `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
 | `/conductor-validate` | Run validation checks on project structure and state |
-| `/conductor-block` | Mark current task/track as blocked with reason |
-| `/conductor-skip` | Skip current task with justification |
+| `/conductor-flag <blocked\|skipped>` | Flag the current task as blocked or skipped with a reason |
 | `/conductor-revise` | Update spec/plan when implementation reveals issues |
-| `/conductor-archive` | Archive completed tracks |
-| `/conductor-export` | Export project summary |
+| `/conductor-review [track_id]` | Review a track's diff before shipping (quality gate) |
+| `/conductor-ship [track_id]` | Rebase a reviewed track onto main, push it, prepare the PR |
+| `/conductor-archive` | Archive completed tracks (local cleanup + learnings) |
+| `/conductor-release [bump]` | Cut a local release — changelog + version tag |
 | `/conductor-handoff` | Create context handoff for section transfer |
 | `/conductor-refresh [scope]` | Sync context docs with current codebase state |
-| `/conductor-formula [list\|show <name>]` | List and manage track templates (Beads formulas) |
-| `/conductor-wisp [formula_name]` | Create ephemeral exploration track (no audit trail) |
-| `/conductor-distill <track_id>` | Extract reusable template from completed track |
+| `/conductor-formula [list\|show\|create\|wisp]` | Manage track templates: list, show, create, ephemeral wisp |
 
 ---
 
@@ -64,19 +63,18 @@ Each command has a full step-by-step protocol. **Read the linked file before exe
 | `/conductor-setup` | [commands/setup.md](commands/setup.md) | Brownfield/greenfield detection → product.md → tech-stack.md → workflow.md → initial track → Beads init |
 | `/conductor-newtrack` | [commands/newtrack.md](commands/newtrack.md) | Interactive spec generation → plan generation → parallel analysis → track artifacts → Beads epic sync |
 | `/conductor-implement` | [commands/implement.md](commands/implement.md) | Track selection → context loading → parallel/sequential execution → TDD → learnings capture → doc sync |
-| `/conductor-status` | [commands/status.md](commands/status.md) | Progress calculation → priority grouping → parallel worker status → Beads status |
+| `/conductor-status` | [commands/status.md](commands/status.md) | Progress calculation → priority grouping → parallel worker status → Beads status (`--export` writes a summary) |
 | `/conductor-revert` | [commands/revert.md](commands/revert.md) | Target selection → git reconciliation → execution plan → revert + verify → Beads sync |
 | `/conductor-validate` | [commands/validate.md](commands/validate.md) | Core files check → tracks consistency → orphan detection → parallel validation → Beads validation |
-| `/conductor-block` | [commands/block.md](commands/block.md) | Identify task → get reason → update plan `[!]` → Beads sync |
-| `/conductor-skip` | [commands/skip.md](commands/skip.md) | Find current task → get reason → update plan → advance state → Beads sync |
+| `/conductor-flag` | [commands/flag.md](commands/flag.md) | Determine mode → identify task → get reason → update plan `[!]`/`[ ]` → Beads sync |
 | `/conductor-revise` | [commands/revise.md](commands/revise.md) | Parallel check → determine type → create revision record → update docs → log as learning → Beads sync |
-| `/conductor-archive` | [commands/archive.md](commands/archive.md) | Find completed → extract learnings → move to archive → Beads compaction |
-| `/conductor-export` | [commands/export.md](commands/export.md) | Gather info → generate summary → save options → Beads statistics |
+| `/conductor-review` | [commands/review.md](commands/review.md) | Select track → compute diff → delegate to /code-review → record findings → route to ship or revise |
+| `/conductor-ship` | [commands/ship.md](commands/ship.md) | Select reviewed track → flush Dolt → rebase onto main → push → PR guidance |
+| `/conductor-archive` | [commands/archive.md](commands/archive.md) | Find completed → extract learnings → tear down worktree → move to archive → Beads compaction |
+| `/conductor-release` | [commands/release.md](commands/release.md) | Determine range + version → build changelog → write CHANGELOG.md → local commit + tag |
 | `/conductor-handoff` | [commands/handoff.md](commands/handoff.md) | Parallel check → gather context → create handoff doc with learnings → Beads context save |
 | `/conductor-refresh` | [commands/refresh.md](commands/refresh.md) | Analyze drift → present report → apply updates → consolidate learnings → Beads drift check |
-| `/conductor-formula` | [commands/formula.md](commands/formula.md) | Beads check → list/show formulas → integration notes |
-| `/conductor-wisp` | [commands/wisp.md](commands/wisp.md) | Beads check → create from formula or ad-hoc → wisp management → transition options |
-| `/conductor-distill` | [commands/distill.md](commands/distill.md) | Beads check → track selection → variable analysis → template extraction → cleanup |
+| `/conductor-formula` | [commands/formula.md](commands/formula.md) | Beads check → list/show/create/wisp subcommands → integration notes |
 
 ---
 

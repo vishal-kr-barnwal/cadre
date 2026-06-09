@@ -265,8 +265,9 @@ Enable integration via `conductor/beads.json`:
 | `/conductor-newtrack` | `bd create` (epic + tasks) | Create epic with linked tasks |
 | `/conductor-implement` | `bd ready` → `bd update` → `bd done` | Get next task, track progress, complete |
 | `/conductor-status` | `bd ready`, `bd show` | Show available tasks, epic status |
-| `/conductor-block` | `bd update --status blocked` | Mark task blocked with reason |
-| `/conductor-skip` | `bd update --status skipped` | Skip task with justification |
+| `/conductor-flag blocked` | `bd update --status blocked` | Mark task blocked with reason |
+| `/conductor-flag skipped` | `bd update --status skipped` / `bd close` | Skip task with justification |
+| `/conductor-ship` | `bd dolt push` | Flush Dolt state before rebase/push |
 | `/conductor-archive` | `bd admin compact --auto` | Archive completed epics |
 
 ### Example Flow

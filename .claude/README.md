@@ -38,23 +38,22 @@ skills/conductor/
     ├── learnings-system.md     # Ralph-style knowledge capture
     ├── patterns-template.md    # Template for conductor/patterns.md
     ├── learnings-template.md   # Template for track learnings.md
-    └── commands/               # Full step-by-step protocols for all 16 commands
+    └── commands/               # Full step-by-step protocols for all 15 commands
         ├── setup.md
         ├── newtrack.md
         ├── implement.md
         ├── status.md
         ├── revert.md
         ├── validate.md
-        ├── block.md
-        ├── skip.md
+        ├── flag.md
         ├── revise.md
+        ├── review.md
+        ├── ship.md
         ├── archive.md
-        ├── export.md
+        ├── release.md
         ├── handoff.md
         ├── refresh.md
-        ├── formula.md
-        ├── wisp.md
-        └── distill.md
+        └── formula.md
 ```
 
 The skill follows the Agent Skills spec with full frontmatter:
@@ -79,7 +78,7 @@ cp -r /path/to/conductor/.claude/skills/* ~/.claude/skills/
 
 ### Option 4: Other platforms (Codex, Cursor, Antigravity, Copilot)
 
-The same 16 commands ship for OpenAI Codex CLI, Cursor, Google Antigravity, and
+The same 15 commands ship for OpenAI Codex CLI, Cursor, Google Antigravity, and
 GitHub Copilot. See the [Install & Version Guide](../docs/INSTALL.md) for
 per-platform setup. They are generated from these Claude commands by
 `scripts/generate-commands.sh`.
@@ -91,19 +90,18 @@ per-platform setup. They are generated from these Claude commands by
 | `/conductor-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
 | `/conductor-newtrack [desc]` | Create new feature/bug track with spec and plan |
 | `/conductor-implement [id]` | Execute tasks from track's plan (TDD workflow) |
-| `/conductor-status` | Display progress overview |
+| `/conductor-status [--export]` | Display progress overview (or export a summary) |
 | `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
 | `/conductor-validate` | Validate project integrity |
-| `/conductor-block` | Mark task as blocked with reason |
-| `/conductor-skip` | Skip current task with justification |
+| `/conductor-flag <blocked\|skipped>` | Flag the current task as blocked or skipped |
 | `/conductor-revise` | Update spec/plan when issues found |
-| `/conductor-archive` | Archive completed tracks |
-| `/conductor-export` | Export project summary |
+| `/conductor-review` | Review a track's diff before shipping (quality gate) |
+| `/conductor-ship` | Rebase a reviewed track onto main, push, prepare the PR |
+| `/conductor-archive` | Archive completed tracks (local cleanup + learnings) |
+| `/conductor-release` | Cut a local release — changelog + version tag |
 | `/conductor-handoff` | Create context handoff for session transfer |
 | `/conductor-refresh` | Sync context docs with codebase state |
-| `/conductor-formula` | List and manage track templates (Beads formulas) |
-| `/conductor-wisp` | Create ephemeral exploration track (no audit trail) |
-| `/conductor-distill` | Extract reusable template from completed track |
+| `/conductor-formula` | Manage track templates: list, show, create, ephemeral wisp |
 
 ## Skill (Auto-Activation)
 
@@ -182,23 +180,22 @@ matrix and per-platform setup.
 
 ```
 .claude/
-├── commands/                     # Claude Code slash commands (16)
+├── commands/                     # Claude Code slash commands (15)
 │   ├── conductor-setup.md
 │   ├── conductor-newtrack.md
 │   ├── conductor-implement.md
 │   ├── conductor-status.md
 │   ├── conductor-revert.md
 │   ├── conductor-validate.md
-│   ├── conductor-block.md
-│   ├── conductor-skip.md
+│   ├── conductor-flag.md
 │   ├── conductor-revise.md
+│   ├── conductor-review.md
+│   ├── conductor-ship.md
 │   ├── conductor-archive.md
-│   ├── conductor-export.md
+│   ├── conductor-release.md
 │   ├── conductor-handoff.md
 │   ├── conductor-refresh.md
-│   ├── conductor-formula.md
-│   ├── conductor-wisp.md
-│   └── conductor-distill.md
+│   └── conductor-formula.md
 ├── skills/
 │   ├── conductor/                # Context-driven development skill
 │   │   ├── SKILL.md              # Entry point (overview, intent mapping, command routing)

@@ -1,6 +1,6 @@
 # Install & Version Guide
 
-Conductor-Beads ships the same 16 commands to five AI coding tools. This guide
+Conductor-Beads ships the same 15 commands to five AI coding tools. This guide
 covers installation for each platform and explains how versioning and command
 generation work.
 

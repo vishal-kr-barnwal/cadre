@@ -191,10 +191,10 @@ bd show bd-a3f8.3 --deps
   Blocked by: bd-a3f8.2 (in progress)
 ```
 
-### Phase 5: Blocking & Dependencies (`/conductor-block` + `bd dep`)
+### Phase 5: Blocking & Dependencies (`/conductor-flag blocked` + `bd dep`)
 
 ```
-User: /conductor-block - External API not ready
+User: /conductor-flag blocked - External API not ready
 
 Actions:
 1. Conductor marks task [B] in plan.md
@@ -259,9 +259,10 @@ bd dolt push                      # Push changes to remote
 | `/conductor-newtrack` | `bd create` (epic + tasks) | Create track + epic with `--design`, `--acceptance` |
 | `/conductor-implement` | `bd ready`, `bd update`, `bd close` | Query ready, track progress, complete |
 | `/conductor-status` | `bd ready`, `bd show` | Combine outputs, read notes for context |
-| `/conductor-block` | `bd update --status blocked` | Sync both with structured notes |
-| `/conductor-skip` | `bd close` or `bd update` | Mark in both based on skip reason |
+| `/conductor-flag blocked` | `bd update --status blocked` | Sync both with structured notes |
+| `/conductor-flag skipped` | `bd close` or `bd update` | Mark in both based on skip reason |
 | `/conductor-handoff` | `bd note`, `bd dolt push` | Save context + push to remote |
+| `/conductor-ship` | `bd dolt push` | Flush Dolt before rebase/push |
 | `/conductor-revert` | `bd reopen` | Sync status |
 | `/conductor-archive` | `bd compact --auto` | Archive track + compact |
 
@@ -515,10 +516,10 @@ Conductor tracks can be extracted as reusable templates:
 | **Mol** | Persistent track | `bd mol pour <proto>` |
 | **Wisp** | Ephemeral exploration | `bd mol wisp <proto>` |
 
-**New Conductor Commands:**
-- `/conductor-formula` - List available templates
-- `/conductor-wisp` - Quick ephemeral exploration
-- `/conductor-distill` - Extract template from completed track
+**Conductor Commands (all under `/conductor-formula`):**
+- `/conductor-formula list` - List available templates
+- `/conductor-formula wisp` - Quick ephemeral exploration
+- `/conductor-formula create` - Extract template from completed track
 
 ### Gates (v0.40+)
 

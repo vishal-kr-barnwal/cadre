@@ -327,19 +327,18 @@ The same command name works on every supported platform (Claude Code, Codex CLI,
 | `/conductor-setup` | Initialize project context |
 | `/conductor-newtrack` | Create feature/bug track |
 | `/conductor-implement` | Execute tasks from plan |
-| `/conductor-status` | Show progress overview |
+| `/conductor-status` | Show progress overview (`--export` writes a summary) |
 | `/conductor-revert` | Git-aware revert |
 | `/conductor-validate` | Validate project integrity |
-| `/conductor-block` | Mark task as blocked |
-| `/conductor-skip` | Skip current task |
+| `/conductor-flag` | Flag a task as blocked or skipped |
 | `/conductor-revise` | Update spec/plan |
+| `/conductor-review` | Review a track's diff before shipping |
+| `/conductor-ship` | Rebase reviewed track, push, prepare PR |
 | `/conductor-archive` | Archive completed tracks |
-| `/conductor-export` | Generate project summary |
+| `/conductor-release` | Cut a local release (changelog + tag) |
 | `/conductor-handoff` | Create context handoff |
 | `/conductor-refresh` | Sync context with codebase |
-| `/conductor-formula` | List/manage track templates |
-| `/conductor-wisp` | Ephemeral exploration track |
-| `/conductor-distill` | Extract template from track |
+| `/conductor-formula` | Track templates: list/show/create/wisp |
 
 ### Essential Beads Commands
 
@@ -491,17 +490,20 @@ flowchart TD
     end
 
     subgraph ISSUES[Issue Handling]
-        N -->|Blocked| U["conductor-block"]
-        U --> V["conductor-skip"]
-        V --> L
+        N -->|Blocked/Skip| U["conductor-flag"]
+        U --> L
         M -->|Spec Wrong| W["conductor-revise"]
         W --> M
     end
 
     subgraph DONE[Completion]
-        T --> X["conductor-archive"]
-        T --> Y["conductor-export"]
+        T --> RV["conductor-review"]
+        RV --> SH["conductor-ship"]
+        SH --> X["conductor-archive"]
+        X --> RL["conductor-release"]
     end
+
+    K -.-> EX["conductor-status --export"]
 
     K -.-> Z["conductor-status"]
     K -.-> AA["conductor-validate"]

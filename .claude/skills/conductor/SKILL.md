@@ -7,7 +7,7 @@ description: |
   - Files like `conductor/tracks.md`, `conductor/product.md`, `conductor/workflow.md` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
-  - User invokes `/conductor-*` commands (setup, newtrack, implement, status, revert, validate, block, skip, revise, archive, export, handoff, refresh, formula, wisp, distill)
+  - User invokes `/conductor-*` commands (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, archive, release, handoff, refresh, formula)
   - User mentions documentation is outdated or wants to sync context with codebase changes
   
   Interoperable across Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot.
@@ -87,7 +87,7 @@ fi
 1. **On new session**: Check for in-progress tracks, offer to resume
 2. **On task completion**: Suggest next task or phase verification
 3. **On blocked detection**: Alert user and suggest alternatives
-4. **On all tasks complete**: Congratulate and offer archive/cleanup
+4. **On all tasks complete**: Congratulate and walk the ship pipeline — suggest `/conductor-review`, then `/conductor-ship`, then `/conductor-archive` (and `/conductor-release` once enough tracks have shipped)
 5. **On stale context detected**: If setup >2 days old or significant codebase changes detected, suggest `/conductor-refresh`
 6. **On Beads available**: If `bd` CLI detected during setup, offer integration
 7. **On implement start**: Read `patterns.md` and announce pattern count
@@ -106,16 +106,18 @@ fi
 | "What's the status?" | `/conductor-status` |
 | "Undo that" / "Revert" | `/conductor-revert` |
 | "Check for issues" | `/conductor-validate` |
-| "This is blocked" | `/conductor-block` |
-| "Skip this task" | `/conductor-skip` |
+| "This is blocked" / "Skip this task" | `/conductor-flag <blocked\|skipped>` |
 | "This needs revision" / "Spec is wrong" | `/conductor-revise` |
+| "Review this" / "Check the diff before merge" | `/conductor-review [track_id]` |
+| "Ship it" / "Open the PR" / "Push the branch" | `/conductor-ship [track_id]` |
 | "Save context" / "Handoff" / "Transfer to next section" | `/conductor-handoff` |
 | "Archive completed" | `/conductor-archive` |
-| "Export summary" | `/conductor-export` |
+| "Cut a release" / "Update the changelog" / "Tag a version" | `/conductor-release [bump]` |
+| "Export summary" | `/conductor-status --export` |
 | "Docs are outdated" / "Sync with codebase" | `/conductor-refresh` |
 | "List templates" / "Show formulas" | `/conductor-formula` |
-| "Quick exploration" / "Ephemeral track" | `/conductor-wisp [formula]` |
-| "Extract template" / "Create reusable pattern" | `/conductor-distill [track_id]` |
+| "Quick exploration" / "Ephemeral track" | `/conductor-formula wisp [formula]` |
+| "Extract template" / "Create reusable pattern" | `/conductor-formula create [track_id]` |
 
 ## Command Execution
 
@@ -129,23 +131,22 @@ When a user invokes any `/conductor-*` command, **read the corresponding command
 | `/conductor-status` | [references/commands/status.md](references/commands/status.md) |
 | `/conductor-revert` | [references/commands/revert.md](references/commands/revert.md) |
 | `/conductor-validate` | [references/commands/validate.md](references/commands/validate.md) |
-| `/conductor-block` | [references/commands/block.md](references/commands/block.md) |
-| `/conductor-skip` | [references/commands/skip.md](references/commands/skip.md) |
+| `/conductor-flag` | [references/commands/flag.md](references/commands/flag.md) |
 | `/conductor-revise` | [references/commands/revise.md](references/commands/revise.md) |
+| `/conductor-review` | [references/commands/review.md](references/commands/review.md) |
+| `/conductor-ship` | [references/commands/ship.md](references/commands/ship.md) |
 | `/conductor-archive` | [references/commands/archive.md](references/commands/archive.md) |
-| `/conductor-export` | [references/commands/export.md](references/commands/export.md) |
+| `/conductor-release` | [references/commands/release.md](references/commands/release.md) |
 | `/conductor-handoff` | [references/commands/handoff.md](references/commands/handoff.md) |
 | `/conductor-refresh` | [references/commands/refresh.md](references/commands/refresh.md) |
 | `/conductor-formula` | [references/commands/formula.md](references/commands/formula.md) |
-| `/conductor-wisp` | [references/commands/wisp.md](references/commands/wisp.md) |
-| `/conductor-distill` | [references/commands/distill.md](references/commands/distill.md) |
 
 **Important:** Always read the full command reference before executing. Each file contains the complete protocol with error handling, Beads integration, and user interaction flows.
 
 ## References
 
 - **Workflow overview**: [references/workflows.md](references/workflows.md) - Commands table, Beads overview, state files, status markers, parallel execution
-- **Command protocols**: [references/commands/](references/commands/) - Full step-by-step execution details for all 16 commands
+- **Command protocols**: [references/commands/](references/commands/) - Full step-by-step execution details for all 15 commands
 - **Directory structure**: [references/structure.md](references/structure.md) - File layout and status markers
 - **Beads integration**: [references/beads-integration.md](references/beads-integration.md) - Session protocol, CLI commands, chemistry patterns
 - **Learnings system**: [references/learnings-system.md](references/learnings-system.md) - Ralph-style knowledge capture details

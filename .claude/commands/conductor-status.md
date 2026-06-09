@@ -1,10 +1,16 @@
 ---
-description: Display current Conductor project progress
+description: Display current Conductor project progress (add --export to write a summary)
+argument-hint: [--export]
 ---
 
 # Conductor Status
 
-Show the current status of this Conductor project.
+Show the current status of this Conductor project: $ARGUMENTS
+
+## 0. Mode
+
+If `$ARGUMENTS` contains `--export`, run the **Export** flow in section 9 instead
+of the on-screen summary. Otherwise show the live status (sections 1-8).
 
 ## 1. Check Setup
 
@@ -169,3 +175,32 @@ Based on status:
    ```bash
    bd mol current  # Molecule step status
    ```
+
+---
+
+## 9. EXPORT (`--export`)
+
+**Run only when `$ARGUMENTS` contains `--export`.** Generate a comprehensive,
+shareable project summary instead of the on-screen status.
+
+1. **Gather Information:** Read all conductor files:
+   - `product.md`, `tech-stack.md`, `workflow.md`
+   - `tracks.md` and all track specs/plans
+
+2. **Generate Summary** — markdown with:
+   - Product overview
+   - Tech stack summary
+   - All tracks (completed, in-progress, pending)
+   - Statistics (from the progress counts in section 3)
+
+3. **Beads Statistics (if available):**
+   - Run the standard Beads availability check (see `references/beads-error-handler.md`)
+   - If available: run `bd stats` and append total issues, completion rate, and
+     distribution by status. If a `bd` command fails: follow the Beads Error Handler Protocol.
+
+4. **Save Options:**
+   - `conductor/export_YYYYMMDD.md`
+   - Overwrite `README.md`
+   - Print only
+
+5. **Output:** Save and confirm.

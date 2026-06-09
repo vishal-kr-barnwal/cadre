@@ -367,56 +367,66 @@ Step 4: If staleness detected
 
 ---
 
-### 6. `/conductor-block`
+### 6. `/conductor-flag`
 
-**Purpose**: Mark a task as blocked.
+**Purpose**: Flag the current task as **blocked** or **skipped** (merges the former
+`/conductor-block` and `/conductor-skip`).
 
-**When to use**: Task cannot proceed due to external dependency.
+**When to use**: A task cannot proceed (blocked on an external dependency) or should
+be set aside (skipped — not applicable, or deferred).
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /conductor-block
+Step 1: Run the command with a mode
+   /conductor-flag blocked      # waiting on something external
+   /conductor-flag skipped      # set the task aside
 
-Step 2: Select blocked task
-   - Choose from in-progress or pending tasks
+Step 2: Select / confirm the task (defaults to the in-progress task)
 
-Step 3: Provide reason
-   - "Waiting for API credentials"
-   - "Blocked by team review"
+Step 3: Provide a reason
+   - blocked: "Waiting for API credentials", "Blocked by team review"
+   - skipped: will-complete-later | no-longer-needed | blocked-by-external
 
 Step 4: Updates applied
-   - Task marked [!] in plan.md
-   - If Beads: bd update <task_id> --status blocked
-   - Reason recorded in blockers.md
+   - blocked → task marked [!] in plan.md (+ bd update <id> --status blocked)
+   - skipped → [x] (SKIPPED) or reset to [ ], advance to next task,
+     update implement_state.json (+ bd close / bd update)
 ```
 
-**Blocker format in plan.md**:
+**Blocked format in plan.md**:
 ```markdown
 - [!] Task name [BLOCKED: Waiting for API credentials]
 ```
 
 ---
 
-### 7. `/conductor-skip`
+### 7. `/conductor-review`
 
-**Purpose**: Skip current task and move to next.
+**Purpose**: Review a track's diff before shipping — the quality gate between
+implement and ship.
 
-**When to use**: Task is not applicable or should be deferred.
+**When to use**: A track's tasks are complete and you want a code review before
+pushing/opening a PR.
 
 **Manual workflow**:
 
 ```
 Step 1: Run the command
-   /conductor-skip
+   /conductor-review [track_id]
 
-Step 2: Confirm task to skip
+Step 2: Conductor computes the diff
+   - git diff main...track/<track_id>
 
-Step 3: Provide justification
-   - Recorded in plan.md and skipped.md
+Step 3: Review is delegated to the /code-review skill
+   - plus track checks: acceptance criteria met? all tasks real? tests passing?
 
-Step 4: Implementation moves to next task
+Step 4: Findings recorded
+   - Appended to the track's learnings.md (verdict + findings)
+
+Step 5: Routed to next step
+   - Ready to ship → suggests /conductor-ship
+   - Changes requested → suggests /conductor-revise or /conductor-flag
 ```
 
 ---
@@ -505,29 +515,26 @@ Step 4: Tracks moved to conductor/archive/
 
 ---
 
-### 11. `/conductor-export`
+### 11. `/conductor-status --export`
 
-**Purpose**: Generate project summary report.
+**Purpose**: Generate a project summary report (formerly `/conductor-export`, now a
+mode of `/conductor-status`).
 
 **When to use**: Documentation, handoff, review.
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /conductor-export
+Step 1: Run the command with the flag
+   /conductor-status --export
 
-Step 2: Select export format
-   A) Markdown summary
-   B) JSON data
-   C) HTML report
+Step 2: Conductor gathers all conductor/ files + progress stats
+   - plus Beads statistics (bd stats) if available
 
-Step 3: Choose scope
-   A) Full project
-   B) Specific tracks
-
-Step 4: Report generated
-   - Output to conductor/exports/
+Step 3: Choose save option
+   A) conductor/export_YYYYMMDD.md
+   B) Overwrite README.md
+   C) Print only
 ```
 
 ---
@@ -658,14 +665,17 @@ Step 3: For "show <name>" subcommand
 
 **Usage:**
 - bd mol pour <name> - Create persistent track
-- /conductor-wisp <name> - Create ephemeral exploration
+- /conductor-formula wisp <name> - Create ephemeral exploration
 ```
+
+The `create` and `wisp` subcommands are documented in sections 15 and 16.
 
 ---
 
-### 15. `/conductor-wisp`
+### 15. `/conductor-formula wisp`
 
-**Purpose**: Create ephemeral exploration track (no audit trail).
+**Purpose**: Create an ephemeral exploration track, no audit trail (formerly
+`/conductor-wisp`).
 
 **When to use**: 
 - Quick exploration before committing to a full track
@@ -679,9 +689,9 @@ Step 3: For "show <name>" subcommand
 
 ```
 Step 1: Run the command
-   /conductor-wisp                    # Interactive mode
-   /conductor-wisp auth-module        # Use specific formula
-   /conductor-wisp auth --var name=payments
+   /conductor-formula wisp                    # Interactive mode
+   /conductor-formula wisp auth-module        # Use specific formula
+   /conductor-formula wisp auth --var name=payments
 
 Step 2: Formula selection
    - If provided, use specified formula
@@ -689,7 +699,7 @@ Step 2: Formula selection
 
 Step 3: Wisp creation
    - Runs: bd mol wisp <formula> [--var key=value]
-   - Creates ephemeral instance in .beads-wisp/
+   - Creates ephemeral instance (Dolt wisps table, never synced to git)
 
 Step 4: Work in wisp
    - bd mol current (see current step)
@@ -711,9 +721,10 @@ bd mol burn <wisp>                  # Delete without trace
 
 ---
 
-### 16. `/conductor-distill`
+### 16. `/conductor-formula create`
 
-**Purpose**: Extract reusable template from completed track.
+**Purpose**: Extract a reusable template from a completed track (formerly
+`/conductor-distill`).
 
 **When to use**: 
 - Track completed successfully
@@ -728,8 +739,8 @@ bd mol burn <wisp>                  # Delete without trace
 
 ```
 Step 1: Run the command
-   /conductor-distill auth_20241219
-   /conductor-distill auth_20241219 --as "auth-module"
+   /conductor-formula create auth_20241219
+   /conductor-formula create auth_20241219 --as "auth-module"
 
 Step 2: Track validation
    - Track must be completed [x]
@@ -764,7 +775,61 @@ Step 6: Cleanup options
 
 # Create from template
 bd mol pour <template> --var module_name=payments
-/conductor-wisp <template> --var module_name=cache
+/conductor-formula wisp <template> --var module_name=cache
+```
+
+---
+
+### 17. `/conductor-ship`
+
+**Purpose**: Rebase a reviewed track onto main, push it, and prepare the PR. The only
+Conductor step that pushes to a remote.
+
+**When to use**: After `/conductor-review` clears a track and before `/conductor-archive`.
+
+**Manual workflow**:
+
+```
+Step 1: Run the command
+   /conductor-ship [track_id]
+
+Step 2: Gate
+   - Confirms the track has a "Ready to ship" review entry in learnings.md
+
+Step 3: Sync + push
+   - bd dolt push (flush Dolt), commit .beads/ if changed
+   - git rebase main track/<track_id>   (.beads/ conflicts → --ours)
+   - git push origin track/<track_id> --force-with-lease
+
+Step 4: PR guidance
+   - Announces branch is pushed; create the PR via your team's process
+```
+
+---
+
+### 18. `/conductor-release`
+
+**Purpose**: Cut a local release — changelog entry + version tag across shipped/
+archived tracks. Local only; never pushes.
+
+**When to use**: Enough tracks have shipped to warrant a versioned release.
+
+**Manual workflow**:
+
+```
+Step 1: Run the command
+   /conductor-release            # suggest a bump
+   /conductor-release minor      # or major|patch|<version>
+
+Step 2: Determine range + version
+   - From last git tag to HEAD; semver bump from change types
+
+Step 3: Build + write CHANGELOG.md
+   - Grouped by Conventional-Commit type; confirm before writing
+
+Step 4: Commit + tag (local)
+   - git commit -m "chore(release): <version>" && git tag -a <version>
+   - Does NOT push — run `git push && git push origin <version>` when ready
 ```
 
 ---
@@ -799,13 +864,14 @@ When Beads integration is enabled, use these commands alongside Conductor:
 | `bd mol squash <id>` | Compress completed molecule |
 | `bd mol distill <epic> --as "Name"` | Extract template from work |
 
-### New Conductor Commands
+### Template Commands (under `/conductor-formula`)
 
 | Command | Purpose |
 |---------|---------|
-| `/conductor-formula` | List and manage track templates |
-| `/conductor-wisp` | Create ephemeral exploration track |
-| `/conductor-distill` | Extract reusable template from track |
+| `/conductor-formula list` | List and manage track templates |
+| `/conductor-formula show <name>` | Show a template's structure and variables |
+| `/conductor-formula create <track_id>` | Extract reusable template from a completed track |
+| `/conductor-formula wisp [formula]` | Create ephemeral exploration track |
 
 ### Session Resume with Beads
 

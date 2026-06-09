@@ -17,7 +17,7 @@ It works with Claude Code (commands + skills) and four other AI coding tools —
 ```
 Conductor-Beads/
 ├── .claude/
-│   ├── commands/           # Claude Code slash commands (16 commands) — CANONICAL SOURCE
+│   ├── commands/           # Claude Code slash commands (15 commands) — CANONICAL SOURCE
 │   └── skills/             # Claude Code skills
 │       ├── conductor/      # Context-driven development skill
 │       ├── beads/          # Persistent task memory skill
@@ -52,19 +52,18 @@ All platforms (Claude Code, Codex CLI, Cursor, Antigravity, Copilot) invoke the 
 | `/conductor-setup` | Initialize project with context files and first track |
 | `/conductor-newtrack` | Create feature/bug track with spec and plan |
 | `/conductor-implement` | Execute tasks from track's plan (TDD workflow) |
-| `/conductor-status` | Display progress overview |
+| `/conductor-status` | Display progress overview (`--export` writes a project summary) |
 | `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
 | `/conductor-validate` | Validate project integrity and fix issues |
-| `/conductor-block` | Mark task as blocked with reason |
-| `/conductor-skip` | Skip current task with justification |
+| `/conductor-flag` | Flag the current task as blocked or skipped with a reason |
 | `/conductor-revise` | Update spec/plan when implementation reveals issues |
-| `/conductor-archive` | Archive completed tracks |
-| `/conductor-export` | Generate project summary export |
+| `/conductor-review` | Review a track's diff before shipping (quality gate) |
+| `/conductor-ship` | Rebase a reviewed track onto main, push it, prepare the PR |
+| `/conductor-archive` | Archive completed tracks (local cleanup + learnings) |
+| `/conductor-release` | Cut a local release — changelog + version tag |
 | `/conductor-handoff` | Create context handoff for section transfer |
 | `/conductor-refresh` | Sync context docs with current codebase state |
-| `/conductor-formula` | List and manage track templates (Beads formulas) |
-| `/conductor-wisp` | Create ephemeral exploration track (no audit trail) |
-| `/conductor-distill` | Extract reusable template from completed track |
+| `/conductor-formula` | Manage track templates: list, show, create, ephemeral wisp |
 
 ### Skills
 

@@ -14,10 +14,10 @@ command name, e.g. `/conductor-setup`, `/conductor-newtrack`,
 is treated as the command's input.
 
 Full set: `conductor-setup`, `conductor-newtrack`, `conductor-implement`,
-`conductor-status`, `conductor-revert`, `conductor-validate`, `conductor-block`,
-`conductor-skip`, `conductor-revise`, `conductor-archive`, `conductor-export`,
-`conductor-handoff`, `conductor-refresh`, `conductor-formula`, `conductor-wisp`,
-`conductor-distill`.
+`conductor-status` (`--export`), `conductor-revert`, `conductor-validate`,
+`conductor-flag`, `conductor-revise`, `conductor-review`, `conductor-ship`,
+`conductor-archive`, `conductor-release`, `conductor-handoff`,
+`conductor-refresh`, `conductor-formula` (`list`/`show`/`create`/`wisp`).
 
 ## Tracks
 
