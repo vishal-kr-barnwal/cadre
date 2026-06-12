@@ -91,7 +91,9 @@ If any track's `metadata.json` has a `worktree_path` field (indicating parallel 
 
 **Status:** Running | Aggregating | Complete
 
-**Active Worktrees** (from `git worktree list`):
+**Active Worktrees** (from `git worktree list`; **polyrepo:** run per submodule
+with `git -C <submodule_path> worktree list` — worker worktrees live under
+`.worktrees/<track_id>/<repo>_worker_<N>_<name>`):
 - 🟢 .worktrees/<track_id>_worker_0_auth: branch track_<id>_worker_0 (commit: abc1234)
 - 🔵 .worktrees/<track_id>_worker_1_config: branch track_<id>_worker_1 (in progress)
 
@@ -103,6 +105,28 @@ If any track's `metadata.json` has a `worktree_path` field (indicating parallel 
 - IN PROGRESS: <from epic notes>
 - NEXT: <from epic notes>
 ```
+
+## 5b. Repos Panel (Polyrepo only)
+
+**Run only when `conductor/repos.json` exists with `mode: "polyrepo"`** (skip in
+monorepo mode). Read `repos.json` + `config.json` and, for each enabled repo, use
+`git -C <submodule_path>` to report state:
+
+```
+### Repos (polyrepo — sync: shared, PRs: github)
+
+| Repo | Enabled | Track branch | Ahead/Behind base | Worktree |
+|------|---------|--------------|-------------------|----------|
+| api  | ✅      | track/<id>   | +3 / -0           | .worktrees/<id>/api |
+| web  | ✅      | track/<id>   | +1 / -0           | .worktrees/<id>/web |
+
+Default repo: api
+```
+
+- Ahead/behind from `git -C <submodule_path> rev-list --left-right --count origin/<base>...track/<id>`.
+- If a track has open PRs (`metadata.json.repos[*].pr_url` / `control_pr_url`),
+  list them and their merge-train status. Plan-derived progress (sections 3-4)
+  is unchanged.
 
 ## 6. Suggestions
 

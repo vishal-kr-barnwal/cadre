@@ -22,12 +22,20 @@ Initialize this project with context-driven development. Follow this workflow pr
    - If it does NOT exist, this is a new project. Proceed to Section 1.1.
    - If it exists, read its content.
 
-2. **Resume Based on State:** Let `last_successful_step` be `STEP`:
+2. **Resume Based on State:** Let `last_successful_step` be `STEP`. Also read the
+   optional `topology` key (`"monorepo"` | `"polyrepo"`); it is set at Section 2.0a
+   and governs whether polyrepo-only steps run on resume.
+   - If `STEP` is `"2.0a_topology"`:
+     - If `topology` is `"polyrepo"`: Announce "Resuming: Topology selected (polyrepo). Next: Submodule registration." → Proceed to **Section 2.0b**
+     - Else: Announce "Resuming: Topology selected. Next: Product Guide." → Proceed to **Section 2.1**
+   - If `STEP` is `"2.0b_repos_manifest"`: Announce "Resuming: Submodules registered. Next: Product Guide." → Proceed to **Section 2.1**
    - If `STEP` is `"2.1_product_guide"`: Announce "Resuming: Product Guide complete. Next: Product Guidelines." → Proceed to **Section 2.2**
    - If `STEP` is `"2.2_product_guidelines"`: Announce "Resuming: Guidelines complete. Next: Tech Stack." → Proceed to **Section 2.3**
    - If `STEP` is `"2.3_tech_stack"`: Announce "Resuming: Tech Stack complete. Next: Code Styleguides." → Proceed to **Section 2.4**
    - If `STEP` is `"2.4_code_styleguides"`: Announce "Resuming: Styleguides complete. Next: Workflow." → Proceed to **Section 2.5**
    - If `STEP` is `"2.5_workflow"`: Announce "Resuming: Scaffolding complete. Next: Beads Integration." → Proceed to **Section 2.7**
+   - If `STEP` is `"2.7_beads_polyrepo"`: Announce "Resuming: Beads complete. Next: Sync Mode & PR Provider." → Proceed to **Section 2.7b**
+   - If `STEP` is `"2.7b_sync_mode"`: Announce "Resuming: Sync mode configured. Next: Finalize." → Proceed to **Section 2.8**
    - If `STEP` is `"complete"`:
      - Announce: "Project already initialized. Use `/conductor-newtrack` or `/conductor-implement`."
      - **HALT** the setup process.
@@ -82,7 +90,7 @@ Present to user:
      - Extract: Programming Language, Frameworks, Database Drivers
      - Infer: Architecture type (Monorepo, Microservices, MVC)
      - Summarize project goal from README header or package description
-   - Proceed to **Section 2.1**
+   - Proceed to **Section 2.0a**
 
    **IF GREENFIELD:**
    - Announce: "New project will be initialized."
@@ -93,7 +101,80 @@ Present to user:
      - Execute: `mkdir -p conductor`
      - Create `conductor/setup_state.json`: `{"last_successful_step": ""}`
      - Write response to `conductor/product.md` under `# Initial Concept`
-   - Proceed to **Section 2.1**
+   - Proceed to **Section 2.0a**
+
+---
+
+### 2.0a Topology Selection (Interactive)
+
+**PROTOCOL: Choose whether this project is a single repository (monorepo) or a
+multi-repo control plane (polyrepo). This decides whether polyrepo-only steps run.**
+
+1. **Ask:**
+   > "How is this project's code organized?"
+   > A) **Single repository (monorepo)** — all code lives in this one repo *(default; behaves exactly as today)*
+   > B) **Polyrepo / control repo** — this repo orchestrates work across several product repos (git submodules)
+   >
+   > Please respond with A or B.
+
+2. **Persist the choice** in `conductor/setup_state.json` (merge, don't overwrite
+   other keys). First ensure the dir/state file exist (brownfield may not have
+   created them yet): `mkdir -p conductor` and, if `setup_state.json` is absent,
+   initialize it as `{"last_successful_step": ""}`. Then:
+   - For A: set `"topology": "monorepo"`.
+   - For B: set `"topology": "polyrepo"`.
+   - Set `"last_successful_step": "2.0a_topology"`.
+
+3. **Branch:**
+   - **If A (monorepo):** Announce "Single-repo project — polyrepo steps skipped."
+     → Proceed to **Section 2.1**. *(All later sections behave exactly as today;
+     no `repos.json`/`config.json` are written unless the user later opts in via
+     `/conductor-refresh`.)*
+   - **If B (polyrepo):** → Proceed to **Section 2.0b**.
+
+---
+
+### 2.0b Submodule Registration & Manifest (Polyrepo only)
+
+**PROTOCOL: Register the product repos as submodules and write the manifest. Run
+only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the model.**
+
+1. **Discover existing submodules:**
+   - Read `.gitmodules` if present and run `git submodule status`.
+   - List any submodules found (name, path, URL).
+
+2. **Offer to add repos (gated):**
+   - **Ask:** "Which product repos should this control plane manage? For each, give
+     a short name and clone URL (or confirm the ones already detected)."
+   - For each new repo the user supplies, with explicit confirmation, run:
+     ```bash
+     git submodule add <url> repos/<name>
+     ```
+   - If the user declines to add submodules now, proceed with whatever is already
+     registered (they can add more later via `/conductor-refresh`).
+
+3. **Pick the default repo:**
+   - **Ask:** "Which repo is the `default_repo` (tasks with no `<!-- repo: -->`
+     annotation route here)?" — list the registered repos as options.
+
+4. **Write `conductor/repos.json`:** Resolve `<TEMPLATES_DIR>` per
+   `references/template-locator.md`, copy `<TEMPLATES_DIR>/repos.json` to
+   `conductor/repos.json`, then fill it from `.gitmodules` + the answers:
+   - `mode`: `"polyrepo"`
+   - `control_repo.name`: this repo's name; `control_repo.path`: `"."`
+   - `default_repo`: the chosen default
+   - `repos[]`: one entry per submodule (`name`, `submodule_path`, `url`,
+     `default_branch` (probe with `git -C repos/<name> symbolic-ref --short HEAD`
+     or default `main`), `enabled: true`).
+   - `.gitmodules` stays authoritative for path+URL; `repos.json` layers Conductor
+     metadata on top.
+
+5. **Commit State** (merge keys):
+   ```json
+   {"last_successful_step": "2.0b_repos_manifest", "topology": "polyrepo"}
+   ```
+
+6. **Continue:** Proceed to **Section 2.1**.
 
 ---
 
@@ -312,6 +393,10 @@ Present to user:
      }
      ```
    - Announce: "Beads integration enabled in [normal/stealth] mode."
+   - **Polyrepo note (`topology == "polyrepo"`):** run `bd init` at the **control
+     repo root** only (this step is already correct). Submodules get **no** own
+     `.beads/` — every member-repo task lives in the control plane's single shared
+     Dolt graph. Do not initialize Beads inside any `repos/<name>` submodule.
 
 3a. **Configure `.gitattributes` for Beads (Full Integration only):**
    - **If mode A (full integration):**
@@ -326,10 +411,85 @@ Present to user:
      - Announce: "Configured `.gitattributes`: `.beads/` conflicts auto-resolve on PR merge"
    - **If mode B (stealth):** Skip — `.beads/` is not tracked in git.
 
-4. **Commit State:**
-   ```json
-   {"last_successful_step": "complete"}
+4. **Commit State** (topology-aware — see Section 1.0 resume map):
+   - **If `topology == "polyrepo"`:** write
+     `{"last_successful_step": "2.7_beads_polyrepo", "topology": "polyrepo"}` and
+     proceed to **Section 2.7b**.
+   - **Else (monorepo — unchanged behavior):** write
+     `{"last_successful_step": "complete"}` and proceed to **Section 2.8**.
+
+---
+
+### 2.7b Sync Mode & PR Provider (Polyrepo only)
+
+**PROTOCOL: Configure how the control plane is shared and how cross-repo PRs are
+opened. Run only when `topology == "polyrepo"`. See `references/conductor-sync.md`
+and `references/polyrepo-git.md`.**
+
+1. **Choose sync mode:**
+   > "How should this control plane (conductor/ + Beads task graph) be shared?"
+   > A) **Shared** — push/pull `conductor/` + Beads to a remote so teammates see the same tracks/tasks *(product CODE still stays local until you land it)*
+   > B) **Local** — keep everything local *(today's behavior)*
+   >
+   > Please respond with A or B.
+
+2. **Choose PR provider:**
+   > "Where are the product repos hosted?"
+   > A) **GitHub** (uses `gh`)
+   > B) **GitLab** (uses `glab`)
+   >
+   > *Auto-detect hint:* inspect a product repo's remote — run
+   > `git -C repos/<default_repo> remote get-url origin` and pre-select the
+   > provider whose host it matches (`github.com` → GitHub, `gitlab.*` → GitLab),
+   > but still confirm with the user.
+
+3. **Merge train:**
+   > "Enable the cross-repo merge train (auto-merges the PR group once every
+   > sibling PR is approved + CI-green, product repos first, control repo last)?"
+   > A) Yes, auto-fire (recommended)
+   > B) Yes, but manual trigger only (no auto-fire)
+   > C) No merge train
+
+4. **Probe control remote/branch:** determine `control_remote` (default `origin`)
+   and `control_branch` (`git symbolic-ref --short HEAD`, default `main`).
+
+5. **Write `conductor/config.json`:** copy `<TEMPLATES_DIR>/config.json` to
+   `conductor/config.json`, then set:
+   - `sync_mode`: `"shared"` (A) or `"local"` (B)
+   - `control_remote`, `control_branch` from step 4
+   - `pr_provider`: `"github"` or `"gitlab"`
+   - `merge_train.enabled`: false only if C; `merge_train.auto_fire`: true for A,
+     false for B/C.
+
+6. **Scaffold the merge-train CI (only if `merge_train.enabled`):** copy from
+   `<TEMPLATES_DIR>/ci/` the file matching `pr_provider` into the control repo:
+   - GitHub → `.github/workflows/conductor-merge-train.yml`
+   - GitLab → `.gitlab-ci.yml` (if one already exists, tell the user to `include:`
+     the template instead of overwriting; copy it as
+     `conductor-merge-train.gitlab-ci.yml` and print include guidance).
+   - `git add` the scaffolded file.
+   - **Print the cross-repo token + branch-protection prerequisites** from the
+     template header: a PAT/App token (GitHub) or group token (GitLab) with write
+     access to every product repo, stored as `CONDUCTOR_TRAIN_TOKEN`; and required
+     approvals + status checks on each product repo's default branch and the
+     control branch.
+
+7. **Extend `.gitattributes` for shared state (only if `sync_mode == "shared"`):**
+   append (skip lines already present), then `git add .gitattributes`:
    ```
+   # Regenerable per-track state — union both sides rather than conflict
+   conductor/tracks/**/implement_state.json merge=union
+   conductor/tracks/**/parallel_state.json  merge=union
+   ```
+   Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal merge so
+   structural conflicts surface intentionally.
+
+8. **Commit State:**
+   ```json
+   {"last_successful_step": "2.7b_sync_mode", "topology": "polyrepo"}
+   ```
+
+9. **Continue:** Proceed to **Section 2.8**.
 
 ---
 
@@ -337,5 +497,12 @@ Present to user:
 
 1. **Announce Completion:** "Project setup completed! You can now initiate a track using the `newTrack` command."
 2. **Commit Files:** `git add conductor && git commit -m "conductor(setup): Add conductor setup files"`
-3. **Next Steps:** "Run `/conductor-newtrack` to begin work."
+   - In polyrepo mode this also stages `repos.json`, `config.json`, `.gitmodules`,
+     and any scaffolded CI file.
+3. **Publish control plane (polyrepo + `sync_mode == "shared"` only):** this is
+   the first publish of the control plane — follow the sync postamble in
+   `references/conductor-sync.md`: `bd dolt push` then
+   `git push <control_remote> <control_branch>`. In `local` mode (or monorepo),
+   do **not** push — commits stay local as today.
+4. **Next Steps:** "Run `/conductor-newtrack` to begin work."
 

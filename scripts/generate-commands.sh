@@ -42,6 +42,8 @@ AGNOSTIC_REF=".claude/skills/conductor/references/beads-error-handler.md"
 SLICED_REFS=(
   "scripts/agent-refs/parallel-execution.md"
   "scripts/agent-refs/template-locator.md"
+  "scripts/agent-refs/polyrepo-git.md"
+  "scripts/agent-refs/conductor-sync.md"
 )
 
 TEMPLATES_SRC="templates"                  # canonical templates (single source)

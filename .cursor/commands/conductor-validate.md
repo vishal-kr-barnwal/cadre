@@ -49,6 +49,31 @@ For tracks with parallel execution annotations:
 - Check `git branch --list 'track_<track_id>_worker_*'` for orphan branches (branch exists but worktree was removed)
 - Report stale worktrees/branches as ❌ Errors (offer auto-cleanup in step 7)
 
+## 5b. Polyrepo Manifest & Submodule Integrity
+
+**Run only when `conductor/repos.json` exists with `mode: "polyrepo"`** (skip
+silently in monorepo mode). See `references/polyrepo-git.md`.
+
+- **Manifest ↔ `.gitmodules` parity:** every `repos[].submodule_path` has a
+  matching `.gitmodules` entry (and vice-versa). Report drift (added/removed
+  submodules not reflected in `repos.json`).
+- **Submodules initialized:** `git submodule status` shows each enabled repo
+  checked out (no leading `-`). Flag uninitialized submodules.
+- **Paths exist:** each `submodule_path` exists on disk.
+- **`default_repo` valid:** it names a real entry in `repos`.
+- **Annotations valid:** every `<!-- repo: <name> -->` in every `plan.md`
+  references a known `repos[].name`. Report unknown repo annotations as ❌ Errors.
+- **Per-repo worktrees:** for each `metadata.json.repos[*].worktree_path`, verify
+  the path exists and is on branch `git_branch`.
+- **Orphan per-repo branches:** in each submodule,
+  `git -C <submodule_path> branch --list 'track/*'` / `'track_*_worker_*'` whose
+  worktree no longer exists = stale orphan.
+- **`config.json` sanity:** `pr_provider` is `github` or `gitlab`;
+  `sync_mode` is `shared` or `local`; if `merge_train.enabled`, the matching CI
+  file exists in the control repo.
+
+Reuse the existing orphan/auto-fix scaffolding (step 7) for cleanup offers.
+
 ## 6. Report
 
 Present summary with:

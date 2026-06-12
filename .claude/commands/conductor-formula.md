@@ -241,6 +241,12 @@ Wisps are **ephemeral** workflow instances that:
 Use persistent tracks (`bd mol pour` / `/conductor-newtrack`) instead when work
 needs an audit trail, spans sessions, or requires team coordination.
 
+> **Polyrepo:** wisps are Beads-only and create no git worktree. If a wisp leads
+> you to touch code, do it in the relevant submodule checkout (default: the
+> `default_repo` from `conductor/repos.json`) and remember those edits are not
+> part of any track branch — promote to a persistent track (7.5) before
+> committing anything you want to keep.
+
 ### 7.1 Parse Arguments
 - **Formula name provided:** use it; capture any `--var key=value`.
 - **No formula name:** run `bd formula list --json`. If formulas exist, present them

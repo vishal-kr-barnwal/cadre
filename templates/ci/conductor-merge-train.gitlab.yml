@@ -1,0 +1,125 @@
+# Conductor cross-repo merge train (GitLab CI).
+#
+# Scaffolded into the CONTROL repo by /conductor-setup when pr_provider == "gitlab"
+# and merge_train.enabled. Either commit this as `.gitlab-ci.yml` or `include:` it
+# from an existing pipeline.
+#
+# What it does: when every Merge Request in a track group (label
+# `conductor-track:<id>`, across the control project + product submodule projects)
+# is APPROVED and pipeline-GREEN, it merges them in a fixed order — PRODUCT
+# projects first, then bumps each submodule gitlink to the merged SHA on the
+# control track branch, then merges the CONTROL MR LAST. No true cross-project
+# atomic merge exists, so on any failure it HALTS, leaves already-merged product
+# MRs in place, comments the failure, and re-fires when the failing project is
+# green again.
+#
+# PREREQUISITES:
+#   - CONDUCTOR_TRAIN_TOKEN: a GROUP access token (or PAT) with `api` + `write_repository`
+#     scope and Developer+ on EVERY product project, set as a masked CI/CD variable.
+#   - `glab` available in the runner image, or use the REST API via curl (token in
+#     CONDUCTOR_TRAIN_TOKEN). The job below uses `glab`.
+#   - Branch protection / approval rules on each product project's default branch
+#     and the control branch. GitLab's own "Merge when pipeline succeeds" and
+#     merge trains are complementary; this job is the cross-project coordinator.
+
+stages:
+  - merge-train
+
+conductor-merge-train:
+  stage: merge-train
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  rules:
+    # GitLab has no cross-project "sibling MR approved" webhook, so this job is
+    # driven by: a recurring **pipeline schedule** (set CONDUCTOR_TRACK on the
+    # schedule, or leave it unset to scan — see note below), a **manual run**
+    # (CI → Run pipeline → web), or an external **trigger** (e.g. a webhook from a
+    # product project on approval). This is the "re-fires when green" mechanism on
+    # GitLab — a schedule every few minutes is the simplest setup.
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+  variables:
+    GITLAB_TOKEN: $CONDUCTOR_TRAIN_TOKEN
+  script:
+    - apk add --no-cache jq git bash >/dev/null 2>&1 || true
+    - |
+      set -euo pipefail
+      export GITLAB_HOST="${CI_SERVER_HOST}"
+      PREFIX="$(jq -r '.merge_train.group_label_prefix // "conductor-track"' conductor/config.json)"
+      AUTO_FIRE="$(jq -r '.merge_train.auto_fire // true' conductor/config.json)"
+      TRACK="${CONDUCTOR_TRACK:-}"
+      if [ -z "$TRACK" ]; then echo "Set CONDUCTOR_TRACK (CI/CD var or trigger) to the track id."; exit 0; fi
+      # Honor auto_fire: on a scheduled run, only proceed when auto_fire is on.
+      # Manual (web) / trigger runs always proceed (explicit human/system intent).
+      if [ "$AUTO_FIRE" != "true" ] && [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
+        echo "auto_fire disabled; scheduled runs are skipped. Trigger manually to land."; exit 0
+      fi
+      LABEL="${PREFIX}:${TRACK}"
+      META="conductor/tracks/${TRACK}/metadata.json"
+      if [ ! -f "$META" ]; then echo "No metadata for $TRACK; abort."; exit 1; fi
+      echo "Track=$TRACK Label=$LABEL auto_fire=$AUTO_FIRE"
+
+      # mr_ready PROJECT IID -> approved AND pipeline success
+      mr_ready() {
+        local proj="$1" iid="$2" approved pipe
+        approved="$(glab api "projects/$(printf '%s' "$proj" | sed 's#/#%2F#g')/merge_requests/${iid}/approvals" --jq '.approved // false')"
+        pipe="$(glab api "projects/$(printf '%s' "$proj" | sed 's#/#%2F#g')/merge_requests/${iid}" --jq '.pipeline.status // .head_pipeline.status // "unknown"')"
+        [ "$approved" = "true" ] && [ "$pipe" = "success" ]
+      }
+
+      mapfile -t REPO_NAMES < <(jq -r '.repos | keys[]' "$META")
+      CONTROL_PROJ="${CI_PROJECT_PATH}"
+      CONTROL_MR="$(jq -r '.control_pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+
+      # Phase 1: verify every sibling MR approved + green
+      for name in "${REPO_NAMES[@]}"; do
+        proj="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
+        iid="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+        [ -z "$iid" ] && continue
+        mr_ready "$proj" "$iid" || { echo "Product MR $proj!$iid not ready; halting."; exit 0; }
+      done
+      if [ -n "$CONTROL_MR" ]; then mr_ready "$CONTROL_PROJ" "$CONTROL_MR" || { echo "Control MR not ready; halting."; exit 0; }; fi
+
+      git config user.name "conductor-merge-train"
+      git config user.email "conductor-merge-train@users.noreply.gitlab.com"
+      BRANCH="track/${TRACK}"
+      git fetch origin "$BRANCH" && git checkout "$BRANCH"
+
+      # Phase 2: merge product MRs, bump submodules
+      for name in "${REPO_NAMES[@]}"; do
+        proj="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
+        iid="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+        sub="$(jq -r --arg n "$name" '.repos[$n].submodule_path // empty' "$META")"
+        [ -z "$iid" ] && continue
+        mr_ready "$proj" "$iid" || { echo "REGRESSED: $proj!$iid. Halting."; exit 1; }
+        enc="$(printf '%s' "$proj" | sed 's#/#%2F#g')"
+        glab api --method PUT "projects/${enc}/merge_requests/${iid}/merge" -f squash=true >/dev/null
+        target="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.target_branch')"
+        new_sha="$(glab api "projects/${enc}/repository/branches/${target}" --jq '.commit.id')"
+        echo "  ${name} -> ${new_sha}"
+        # Fetch the target branch ref (fetch-by-bare-SHA is rejected by many hosts),
+        # which now contains the just-merged commit, then pin the gitlink to it.
+        git -C "$sub" fetch origin "$target" || git submodule update --init "$sub"
+        git -C "$sub" checkout "$new_sha"
+        git add "$sub"
+      done
+
+      # Phase 3: commit + push submodule bumps
+      if ! git diff --cached --quiet; then
+        git commit -m "conductor(train): bump submodules to merged SHAs for ${TRACK}"
+        git push "https://oauth2:${CONDUCTOR_TRAIN_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${BRANCH}"
+      fi
+
+      # Phase 4: merge control MR LAST
+      if [ -n "$CONTROL_MR" ]; then
+        enc="$(printf '%s' "$CONTROL_PROJ" | sed 's#/#%2F#g')"
+        for i in $(seq 1 30); do
+          if mr_ready "$CONTROL_PROJ" "$CONTROL_MR"; then
+            glab api --method PUT "projects/${enc}/merge_requests/${CONTROL_MR}/merge" -f squash=true >/dev/null
+            echo "Merge train complete for ${TRACK}."; exit 0
+          fi
+          sleep 20
+        done
+        glab mr note "$CONTROL_MR" -m "⚠️ conductor merge-train: product MRs merged and submodules bumped, but the control MR pipeline did not go green in time. Re-run when CI passes." || true
+        echo "Control MR not green after bump; product MRs already merged. Halting (re-fires later)."; exit 1
+      fi

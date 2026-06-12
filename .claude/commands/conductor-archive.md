@@ -6,6 +6,13 @@ description: Archive completed tracks
 
 Archive completed tracks to clean up the project.
 
+## 0. Topology Check
+Read `conductor/repos.json` and `conductor/config.json`. If `repos.json` is
+absent or `mode` ≠ `"polyrepo"` → monorepo mode; every step behaves as today. If
+`mode == "polyrepo"`, worktree teardown and the safety-net branch push are
+**per-repo** (see `references/polyrepo-git.md`). If `sync_mode == "shared"`, run
+the sync preamble and, at the end, the postamble (push the control plane).
+
 ## 1. Find Completed Tracks
 List all `[x]` tracks from `tracks.md`.
 
@@ -17,16 +24,34 @@ List all `[x]` tracks from `tracks.md`.
 ## 3. Archive Process
 For each selected track:
 1. Create `conductor/archive/` if needed
-2. **Teardown worktree (if exists):**
-   - Read `conductor/tracks/<track_id>/metadata.json` for `worktree_path` and `git_branch`
-   - If `worktree_path` exists on disk:
+2. **Ensure branches pushed (safety net) + teardown worktree:**
+
+   **a. Ensure branches pushed (so `/conductor-land` has heads to open PRs from):**
+   - **MONOREPO:** the push is handled by `/conductor-ship`; archive does not push.
+   - **POLYREPO:** for each entry in `metadata.json.repos`, make sure the per-repo
+     track branch is on its remote (idempotent if `/conductor-land` already pushed):
+     ```bash
+     git -C <submodule_path> push origin track/<track_id> --force-with-lease
+     ```
+     This is a safety net only — archive **never opens PRs** (that is
+     `/conductor-land`) and never pushes product *code* beyond the already-committed
+     track branch.
+
+   **b. Teardown worktree (if exists):**
+   - Read `conductor/tracks/<track_id>/metadata.json` for worktree(s) and branch(es).
+   - **MONOREPO (flat fields):** if `worktree_path` exists on disk:
      ```bash
      bd worktree remove .worktrees/<track_id>
      ```
      - This atomically removes the git worktree AND the `.beads` redirect file.
      - **If `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
        - Degraded fallback: `git worktree remove .worktrees/<track_id> --force`
-   - **Do not delete** `track/<track_id>` — the branch must persist for the PR process. It will be deleted by the team after the PR is merged.
+   - **POLYREPO (`repos` map):** loop over each repo and remove its worktree in
+     submodule context:
+     ```bash
+     git -C <submodule_path> worktree remove <worktree_path> --force
+     ```
+   - **Do not delete** `track/<track_id>` (in any repo) — the branch must persist for the PR process. It will be deleted by the team after the PR is merged.
 3. **Check for stale parallel state**: If `parallel_state.json` exists, warn and clean up
 4. **Extract learnings before archiving** (see step 3a)
 5. Move track folder to archive
@@ -67,8 +92,14 @@ For each selected track:
 > **Shipping is a separate step.** Rebasing the track branch onto main, pushing, and
 > preparing the PR are handled by `/conductor-ship`, which should run *before* archive
 > (the recommended flow is `implement → review → ship → archive`). Archive is purely
-> local cleanup + knowledge capture and never pushes. If the track was not shipped yet,
+> local cleanup + knowledge capture and never pushes (the polyrepo safety-net branch
+> push in step 3.2a is the only exception). If the track was not shipped yet,
 > suggest `/conductor-ship <track_id>` first.
+>
+> **POLYREPO:** the ship step is `/conductor-land` (opens + links the cross-repo PR
+> group and runs the merge train). Archive should run *after* the train has merged
+> the group. If the track has not landed yet, suggest `/conductor-land <track_id>`
+> first.
 
 ## 4. Commit
 
@@ -123,3 +154,8 @@ git commit -m "conductor(archive): archive <track_id> [, <track_id2> ...]"
    git diff --quiet .beads/ || (git add .beads/ && git commit -m "conductor(beads): compact dolt history post-archive")
    ```
    - Skip if `.beads/` has no changes after compaction.
+
+6. **Publish control plane (polyrepo + `sync_mode: "shared"` only):** run the sync
+   postamble from `references/conductor-sync.md` — `bd dolt push` then
+   `git push <control_remote> <control_branch>` — so teammates see the archived
+   state. In `local`/monorepo mode, commits stay local.

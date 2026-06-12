@@ -333,7 +333,8 @@ The same command name works on every supported platform (Claude Code, Codex CLI,
 | `/conductor-flag` | Flag a task as blocked or skipped |
 | `/conductor-revise` | Update spec/plan |
 | `/conductor-review` | Review a track's diff before shipping |
-| `/conductor-ship` | Rebase reviewed track, push, prepare PR |
+| `/conductor-ship` | Rebase reviewed track, push, prepare PR (monorepo) |
+| `/conductor-land` | Polyrepo: open + link cross-repo PR group; merge train lands it |
 | `/conductor-archive` | Archive completed tracks |
 | `/conductor-release` | Cut a local release (changelog + tag) |
 | `/conductor-handoff` | Create context handoff |

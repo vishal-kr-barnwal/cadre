@@ -30,6 +30,16 @@ git diff main...<git_branch> --stat   # summary for the report
 If the branch is absent (work was done directly on the current branch), fall back to
 the track's commit range from `plan.md` task SHAs, or `git diff main...HEAD`.
 
+**POLYREPO (`metadata.json` has a `repos` map):** the track spans several repos.
+Compute the diff **per repo** in submodule context and review them together:
+```bash
+# for each repo in metadata.json.repos:
+git -C <submodule_path> diff <base_branch>...track/<track_id> --stat
+git -C <submodule_path> diff <base_branch>...track/<track_id>
+```
+Plus the control-repo diff for the `conductor/` state changes. Report findings
+grouped by repo so the reviewer sees each repo's surface distinctly.
+
 If there are no changes, report that and stop.
 
 ## 4. Run the Review

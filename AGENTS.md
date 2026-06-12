@@ -30,7 +30,8 @@ The Conductor commands are available as slash commands (Codex custom prompts in
 - `/conductor-implement` — execute a track's plan with the TDD workflow
 - `/conductor-status` — show progress (`--export` writes a project summary)
 - `/conductor-review` — review a track's diff before shipping (quality gate)
-- `/conductor-ship` — rebase a reviewed track onto main, push, prepare the PR
+- `/conductor-ship` — rebase a reviewed track onto main, push, prepare the PR (monorepo)
+- `/conductor-land` — polyrepo: open + link the cross-repo PR group; merge train lands it
 - `/conductor-release` — cut a local release (changelog + version tag)
 - `/conductor-revert`, `/conductor-validate`, `/conductor-flag`,
   `/conductor-revise`, `/conductor-archive`,
@@ -67,7 +68,21 @@ Phases annotated with `<!-- execution: parallel -->` spawn sub-agents. Tasks
 declare exclusive file ownership with `<!-- files: ... -->` and dependencies
 with `<!-- depends: taskN -->`. State is tracked in `parallel_state.json`.
 
+## Polyrepo (opt-in)
+
+If `conductor/repos.json` exists with `mode: "polyrepo"`, this is a **control
+repo** orchestrating product repos that are registered as **git submodules**.
+Tasks carry a `<!-- repo: <name> -->` annotation (absent → `default_repo`);
+branches, commits, worktrees, and reverts are per-repo
+(`.worktrees/<id>/<repo>/`). `/conductor-land` opens one PR per touched repo plus
+a control-repo PR (provider from `conductor/config.json` `pr_provider`:
+GitHub/GitLab) and a generated merge train lands them product-repos-first,
+control-repo-last. Absent `repos.json` → everything is single-repo as before. See
+`docs/POLYREPO.md`.
+
 ## Git Policy
 
 **Conductor commits locally but never pushes automatically.** Users decide when
-and how to push to remotes.
+and how to push to remotes. In polyrepo **shared** sync mode the *control plane*
+(`conductor/` + Beads graph) is pushed/pulled for collaboration, but **product
+code stays local** until `/conductor-land`.

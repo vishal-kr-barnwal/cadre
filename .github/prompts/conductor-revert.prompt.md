@@ -29,6 +29,15 @@ Revert Conductor work: the input provided with this command (the text typed afte
 2. **Verify Track Content:** Check if `conductor/tracks.md` is not empty
    - If empty: HALT with same message as above
 
+3. **Topology check:** Read `conductor/repos.json`. If absent or `mode` ≠
+   `"polyrepo"` → monorepo mode; every step behaves as today. If
+   `mode == "polyrepo"` → reverts are **per-repo chains** (see
+   `references/polyrepo-git.md`): each recorded SHA belongs to the repo named by
+   its task's `<!-- repo: -->` annotation, and reverts run inside that repo. This
+   is the highest-risk polyrepo operation — group by repo, revert reverse-order
+   within each repo, and **halt on the first conflict in any repo.** If
+   `config.json` `sync_mode == "shared"`, run the sync preamble first.
+
 ---
 
 ## 2.0 PHASE 1: INTERACTIVE TARGET SELECTION & CONFIRMATION
@@ -100,11 +109,16 @@ Revert Conductor work: the input provided with this command (the text typed afte
 
 1. **Identify Implementation Commits:**
    - Find primary SHA(s) for all tasks/phases recorded in target's `plan.md`
+   - **POLYREPO:** for each task, read its `<!-- repo: -->` annotation (absent →
+     `default_repo`) and tag the SHA with that repo. A multi-repo task records
+     `repo:sha` pairs (`api:abc1234 web:def5678`) — split them per repo. Search
+     for each SHA in **that repo's** history (`git -C <submodule_path> cat-file -t <sha>`),
+     not the control repo. Build a **per-repo SHA list**.
 
    **Handle "Ghost" Commits (Rewritten History):**
-   - If SHA from plan is NOT found in Git:
+   - If SHA from plan is NOT found in Git (in its repo for polyrepo):
      - Announce this to user
-     - Search Git log for commit with highly similar message
+     - Search Git log (the relevant repo) for commit with highly similar message
      - Ask user to confirm it as the replacement
      - If not confirmed, HALT
 
@@ -118,6 +132,8 @@ Revert Conductor work: the input provided with this command (the text typed afte
      - Use `git log -- conductor/tracks.md`
      - Find commit that first introduced `## [ ] Track: <Track Description>` line
      - Add this "track creation" commit SHA to revert list
+     - **POLYREPO:** the track-creation / tracks.md commit lives in the **control
+       repo** — revert it there, separately from the per-repo product chains.
 
 4. **Compile and Analyze Final List:**
    - Create comprehensive list of ALL SHAs to revert
@@ -138,6 +154,13 @@ Revert Conductor work: the input provided with this command (the text typed afte
    >   - `<sha_code_commit>` ('feat: Add user profile')
    >   - `<sha_plan_commit>` ('conductor(plan): Mark task complete')
    > * **Action:** I will run `git revert` on these commits in reverse order.
+   - **POLYREPO:** present the commits **grouped by repo**, plus the control-repo
+     commits separately, so the user sees exactly what reverts where. Make clear
+     each repo reverts independently and a conflict in one repo halts the whole
+     operation (already-reverted repos stay reverted):
+     > * **repo `api`:** `<sha>` ('feat: login endpoint')
+     > * **repo `web`:** `<sha>` ('feat: login form')
+     > * **control repo:** `<sha>` ('conductor(plan): mark complete'), `<sha>` (track creation)
 
 2. **Final Go/No-Go:**
    > "**Do you want to proceed?**"
@@ -155,18 +178,29 @@ Revert Conductor work: the input provided with this command (the text typed afte
 **GOAL: Execute revert, verify plan state, handle errors gracefully.**
 
 1. **Execute Reverts:**
-   - Run `git revert --no-edit <sha>` for each commit
-   - **Order:** Start from most recent, work backward
+   - **MONOREPO:** run `git revert --no-edit <sha>` for each commit, most recent
+     first, working backward.
+   - **POLYREPO — per-repo chains (see `references/polyrepo-git.md`):** process one
+     repo at a time. Within each repo, revert its SHAs reverse-chronologically:
+     ```bash
+     git -C <submodule_path> revert --no-edit <sha>   # newest first, per repo
+     ```
+     After all product repos succeed, revert the **control-repo** commits
+     (plan-update + track-creation) in the control repo. **Never interleave repos**
+     — finish one repo's chain before starting the next.
 
 2. **Handle Conflicts:**
    - If revert fails due to merge conflict:
-     - HALT immediately
-     - Show conflicting files
+     - **HALT immediately — do NOT continue to any other repo.** Already-reverted
+       repos stay reverted; report exactly which repo halted and what remains.
+     - Show conflicting files (and the repo, in polyrepo mode)
      - Provide clear instructions:
-       > "Merge conflict detected in: [files]"
+       > "Merge conflict detected in repo `<repo>`: [files]"
        > "Options:"
-       > 1. Resolve manually and run `git revert --continue`
-       > 2. Abort with `git revert --abort`
+       > 1. Resolve manually and run `git -C <submodule_path> revert --continue`
+       > 2. Abort with `git -C <submodule_path> revert --abort`
+     - **Do not reopen Beads tasks** until every repo's chain has completed
+       successfully (see Section 7.0).
 
 3. **Verify Plan State:**
    - After all reverts succeed, read relevant `plan.md` file(s)
@@ -187,7 +221,9 @@ Revert Conductor work: the input provided with this command (the text typed afte
 **PROTOCOL: If reverting an entire track, clean up its worktree and branch.**
 
 1. **Check metadata for worktree:**
-   - Read `conductor/tracks/<track_id>/metadata.json` for `worktree_path` and `git_branch`
+   - Read `conductor/tracks/<track_id>/metadata.json`.
+
+   **MONOREPO (flat fields):**
    - If `worktree_path` is set and exists on disk:
      ```bash
      bd worktree remove .worktrees/<track_id>
@@ -196,6 +232,14 @@ Revert Conductor work: the input provided with this command (the text typed afte
        - Degraded fallback: `git worktree remove .worktrees/<track_id> --force`
    - Delete the branch: `git branch -D track/<track_id>`
    - Announce: "Worktree `.worktrees/<track_id>` and branch `track/<track_id>` removed."
+
+   **POLYREPO (`repos` map):** loop over `metadata.json.repos`; for each repo:
+   ```bash
+   git -C <submodule_path> worktree remove <worktree_path> --force
+   git -C <submodule_path> branch -D track/<track_id>
+   ```
+   Announce each. Then remove the control-repo's own track branch/worktree if one
+   exists (flat fields).
 
 ---
 
@@ -206,8 +250,13 @@ Revert Conductor work: the input provided with this command (the text typed afte
 1. **Availability check:** → See Beads Error Handler Protocol (references/beads-error-handler.md)
 
 2. **Sync Revert Actions:**
+   - **POLYREPO GUARD:** only run this section once **every** repo's revert chain
+     has completed successfully. If any repo halted on conflict (Section 5.0 step
+     2), do NOT reopen tasks — leave Beads as-is so the partial state is visible.
    - Reopen reverted tasks: `bd reopen <task_id> --reason "Reverted" --json`
    - Add note: `bd note <epic_id> "REVERT: <summary>" --json`
    - For task/phase revert: reopen only affected tasks
    - For track revert: `bd reopen <epic_id> --reason "Track reverted" --json`
    - **If any `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
+   - **Shared mode:** run the sync postamble (`bd dolt push` + control-plane push)
+     from `references/conductor-sync.md` so teammates see the revert.

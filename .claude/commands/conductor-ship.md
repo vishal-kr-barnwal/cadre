@@ -12,6 +12,12 @@ It syncs the track branch with `main`, pushes it, and hands off to the team's PR
 process. Shipping is the only Conductor step that pushes to a remote — archive stays
 local.
 
+> **Polyrepo:** this command handles the **single-repo (monorepo)** case only. If
+> `conductor/repos.json` exists with `mode: "polyrepo"`, stop and use
+> `/conductor-land <track_id>` instead — it pushes each repo's branch, opens one
+> PR per touched repo plus the control-repo PR, links them as a group, and lets
+> the merge train land them (product repos first, control repo last).
+
 ## 1. Verify Setup & Select Track
 
 - If `conductor/tracks.md` doesn't exist, tell the user to run `/conductor-setup` first.

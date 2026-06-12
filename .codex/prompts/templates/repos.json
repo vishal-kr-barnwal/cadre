@@ -1,0 +1,14 @@
+{
+  "mode": "polyrepo",
+  "control_repo": { "name": "REPLACE_control_repo_name", "path": "." },
+  "default_repo": "REPLACE_default_repo_name",
+  "repos": [
+    {
+      "name": "REPLACE_repo_name",
+      "submodule_path": "repos/REPLACE_repo_name",
+      "url": "git@host:org/REPLACE_repo_name.git",
+      "default_branch": "main",
+      "enabled": true
+    }
+  ]
+}

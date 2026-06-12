@@ -1,0 +1,61 @@
+# Control-Plane Sync (shared mode)
+
+Conductor's **control plane** is everything that describes the work, not the
+work itself: `conductor/` (tracks.md, repos.json, config.json, all
+`tracks/<id>/*`) plus the Beads Dolt DB under `.beads/`. In polyrepo mode this
+all lives in the **control repo**.
+
+Sync behavior is governed by `conductor/config.json`:
+
+- **Absent, or `"sync_mode": "local"`** → today's behavior. Commits stay local;
+  nothing is pulled or pushed automatically. **Skip this entire file.**
+- **`"sync_mode": "shared"`** → the control plane is shared with teammates via
+  `control_remote`/`control_branch`. Follow the preamble and postamble below.
+
+> **Product-repo CODE is never auto-pushed regardless of sync mode.** Shared mode
+> shares orchestration state only. Code branches go up only at `/conductor-land`
+> (or archive's safety-net push).
+
+## Sync preamble (top of every command that mutates control-plane state)
+
+Run before reading/modifying `conductor/` or Beads:
+
+1. `git pull --rebase <control_remote> <control_branch>` on the control repo.
+2. `bd dolt pull` to sync the shared task graph.
+3. `.beads/**` conflicts auto-resolve via the `merge=ours` driver (Dolt owns its
+   own history). Do not hand-merge `.beads/`.
+4. State-file conflicts in regenerable JSON (`implement_state.json`,
+   `parallel_state.json`) auto-resolve via the `merge=union` driver.
+5. **Spec/plan/manifest conflicts** (`spec.md`, `plan.md`, `repos.json`,
+   `config.json`) are surfaced to the user — **never auto-clobber them.** Stop and
+   ask how to resolve.
+6. Submodule pointer refresh is **optional and gated** (default off):
+   `git submodule update --init --remote` is offered in `/conductor-refresh`, not
+   run automatically here.
+
+If `pull_on_command_start` is `false` in config, skip the pull but still run the
+postamble push after mutation.
+
+## Sync postamble (after a command mutates control-plane state)
+
+1. Commit the `conductor/` changes in the control repo as usual.
+2. Make the Beads Dolt push **mandatory** (not optional) in shared mode — Dolt is
+   the canonical shared task graph; tracks.md / state JSON are its human-readable
+   mirror. Run the `bd dolt push` that `beads.json` `pushOn*` triggers would fire,
+   even if that trigger is set to optional.
+3. `git push <control_remote> <control_branch>` to publish the control plane.
+4. On push rejection (someone else pushed): re-run the preamble (pull --rebase +
+   dolt pull), resolve per the rules above, then push again.
+
+## `.gitattributes` (added in shared mode)
+
+```
+# Beads Dolt DB — keep main's version on merge; Dolt manages its own history
+.beads/** merge=ours
+# Regenerable per-track state — union both sides rather than conflict
+conductor/tracks/**/implement_state.json merge=union
+conductor/tracks/**/parallel_state.json  merge=union
+```
+
+Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal merge so
+structural conflicts surface intentionally rather than being silently merged.

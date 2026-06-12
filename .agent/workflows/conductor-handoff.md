@@ -16,8 +16,10 @@ Create a comprehensive context handoff document when you need to transfer implem
 
 ## 1a. Parallel Execution Check
 
-If `metadata.json` has a `worktree_path` field:
+If `metadata.json` has a `worktree_path` field (or a `repos` map in polyrepo mode):
 - Run `git worktree list` to check which worker worktrees are still active
+  (**polyrepo:** run `git -C <submodule_path> worktree list` for each repo in the
+  `repos` map — worker worktrees live under `.worktrees/<track_id>/<repo>_worker_*`)
 - If active worktrees exist:
   > "⚠️ This track has parallel workers currently running:"
   > [List active worktrees from `git worktree list`]
@@ -80,6 +82,11 @@ Create `conductor/tracks/<track_id>/handoff_<YYYYMMDD_HHMMSS>.md` with:
 - **Thread URL:** Current Amp thread URL ($AMP_CURRENT_THREAD_ID) for context retrieval
 - **Git Branch:** `git_branch` from `metadata.json` (e.g., `track/<track_id>`)
 - **Worktree Path:** `worktree_path` from `metadata.json` (if track has a dedicated worktree)
+- **Repos (polyrepo):** if `metadata.json` has a `repos` map, include a per-repo
+  table — repo name, `submodule_path`, `git_branch`, `worktree_path`, and each
+  repo's `git -C <submodule_path> log --oneline -3` — so the next session can
+  resume work in the right repo. Note the `sync_mode` and `pr_provider` from
+  `config.json`.
 - **Beads Context:** Output of `bd show <epic_id>` — COMPLETED/IN PROGRESS/NEXT/KEY DECISIONS from epic notes
 - **Progress Summary:** Overall %, current phase/task, completed/remaining tasks
 - **Parallel Execution State:** (if applicable) Active worktrees from `git worktree list`, `bd ready --parent` output
@@ -175,6 +182,9 @@ Display:
      STATUS: <in_progress|pending>
      PROGRESS: <description of work done so far>" --json
      ```
+     - **Polyrepo:** use the per-repo worker shape instead —
+       `WORKTREE: .worktrees/<track_id>/<repo>_worker_<N>_<name>` and add a
+       `REPO: <repo>` line so the next session resumes in the right submodule.
    - Update epic with parallel state summary:
      ```bash
      bd note <epic_id> "PARALLEL_HANDOFF: <N> workers active
@@ -190,5 +200,8 @@ Display:
    ```bash
    bd dolt push  # Ensures changes reach remote immediately
    ```
+   - **Polyrepo + `sync_mode: "shared"`:** also push the control plane
+     (`git push <control_remote> <control_branch>`) so a teammate can pick up the
+     handoff — see `references/conductor-sync.md`. Product code stays local.
 
 **Benefit:** Beads notes survive context compaction, enabling seamless session resume.

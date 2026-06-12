@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Polyrepo support (opt-in, additive).** Conductor can now orchestrate work
+  across multiple product repos from a dedicated **control repo**, alongside the
+  existing monorepo mode (unchanged when no `conductor/repos.json` is present).
+  - **Topology selection at `/conductor-setup`** — single-repo (default) or
+    control-repo with product repos registered as **git submodules**.
+  - New manifests `conductor/repos.json` (submodule map + `default_repo`) and
+    `conductor/config.json` (`sync_mode`, `pr_provider`, `merge_train`).
+  - **Per-repo work:** tasks carry a `<!-- repo: <name> -->` annotation;
+    branches, commits, worktrees, parallel workers, and reverts are per-repo
+    (`metadata.json.repos` map; worktrees under `.worktrees/<id>/<repo>/`).
+  - **Cross-repo PRs + merge train:** new **`/conductor-land`** opens one PR per
+    touched repo plus the control-repo PR, links them by label
+    `conductor-track:<id>`, and a generated CI **merge train** (GitHub or GitLab,
+    chosen at setup) lands them **product-repos-first, control-repo-last**.
+  - **GitHub/GitLab detection** — `pr_provider` chosen at setup (auto-detected
+    from a product remote) drives `gh`/`glab` usage and which merge-train CI is
+    scaffolded.
+  - **Shared sync mode** — control plane (`conductor/` + Beads Dolt graph) is
+    pushed/pulled for team collaboration; product code stays local until landed.
+  - New references `polyrepo-git.md`, `conductor-sync.md`; CI templates under
+    `templates/ci/`; guide at `docs/POLYREPO.md`.
+- All `conductor-*` commands updated to branch on topology; monorepo behavior is
+  byte-for-byte unchanged.
+
 ## [0.3.4] — 2026-05-30
 
 ### Changed

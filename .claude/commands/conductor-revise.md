@@ -55,12 +55,26 @@ Append to `conductor/tracks/<track_id>/revisions.md`:
 - **Task-level parallel changes:**
   - Update `<!-- files: ... -->` and `<!-- depends: ... -->` annotations
   - If parallel phase removed: Mark for sequential execution or update annotations
+- **Polyrepo repo-targeting changes (`repos.json` mode only):**
+  - A revision may add, remove, or change a task's `<!-- repo: <name> -->`
+    annotation. The name must match a `repos[].name`.
+  - **If a task now targets a repo with no worktree/branch yet** (a repo not in
+    `metadata.json.repos`): warn the user and **offer to create that repo's
+    worktree** (`references/polyrepo-git.md`), then add the entry to
+    `metadata.json.repos`. Do not silently retarget a task to a repo that has no
+    branch.
+  - **If a task's repo changed** after it had commits in the old repo: flag it —
+    the old SHA still belongs to the old repo; the user must decide whether to
+    revert it there (`/conductor-revert`) before re-implementing in the new repo.
 
 ## 6. Commit
 ```bash
 git add conductor/tracks/<track_id>/
 git commit -m "conductor(revise): Update spec/plan for <track_id>"
 ```
+- **Polyrepo + `sync_mode: "shared"`:** also offer to toggle `sync_mode` here (the
+  "later overridable" path, mirroring `/conductor-refresh`), then run the sync
+  postamble (`bd dolt push` + control-plane push) so teammates see the revision.
 
 ## 7. Announce
 Report what was revised and suggest `/conductor-implement` to continue.

@@ -20,6 +20,8 @@ If no argument, ask:
 - `product` - product.md only
 - `workflow` - workflow.md only
 - `track [id]` - Specific track
+- `repos` - **Polyrepo only:** reconcile `repos.json` ↔ `.gitmodules`, toggle
+  `sync_mode` / per-repo `enabled` (see section 8b)
 
 ## 3. Analyze Drift
 
@@ -120,6 +122,37 @@ git commit -m "conductor(refresh): Sync context with codebase"
 
 ---
 
+## 8b. REPOS & SYNC RECONCILE (Polyrepo only)
+
+**Run when `conductor/repos.json` exists with `mode: "polyrepo"` and the scope is
+`all` or `repos`.** This is the "later overridable" path for the topology/sync
+choices made at setup. See `references/polyrepo-git.md` and `references/conductor-sync.md`.
+
+1. **Reconcile manifest vs `.gitmodules`:**
+   - Submodules in `.gitmodules` not in `repos.json` → offer to **add** entries
+     (prompt for `default_branch`/`enabled`).
+   - Entries in `repos.json` whose submodule was removed → offer to **remove** or
+     mark `enabled: false`.
+   - Probe each repo's remote host and confirm `pr_provider` still matches
+     (`git -C <submodule_path> remote get-url origin`).
+
+2. **Toggle sync mode:**
+   - Show current `config.json.sync_mode`; offer to switch `local` ↔ `shared`.
+   - Switching to `shared`: add the shared-state `.gitattributes` drivers (see
+     `references/conductor-sync.md`) and publish the control plane for the first time.
+   - Switching to `local`: stop auto-pushing; leave existing remote state intact.
+
+3. **Toggle per-repo `enabled`:** let the user enable/disable specific repos
+   (disabled repos are skipped by newtrack/implement/status/land).
+
+4. **Optional submodule pointer refresh (gated, default off):**
+   `git submodule update --init --remote` — offer it here only (never automatic).
+
+5. **Commit + publish:** commit `repos.json`/`config.json`/`.gitattributes`
+   changes; in shared mode run the sync postamble (`bd dolt push` + control-plane push).
+
+---
+
 ## 9. BEADS DRIFT CHECK
 
 **PROTOCOL: Include Beads status in drift analysis.**
@@ -132,6 +165,10 @@ git commit -m "conductor(refresh): Sync context with codebase"
    - Tasks done in Beads but `[ ]` in plan.md
    - Tasks `[x]` in plan.md but open in Beads
    - Orphaned Beads tasks
+   - **Shared mode:** also reconcile `tracks.md` from Beads — Dolt is the canonical
+     shared task graph, so a teammate may have added/closed tracks that
+     `tracks.md` doesn't yet reflect. Surface tracks present in Beads but missing
+     from `tracks.md` (and vice-versa) and offer to sync.
    - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
 
 3. **Offer Sync Options:**

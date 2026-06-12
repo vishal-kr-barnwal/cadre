@@ -28,6 +28,16 @@ Example:
 
 All tasks follow a strict lifecycle:
 
+> **Polyrepo note.** If this project is in polyrepo mode (a
+> `conductor/repos.json` with `"mode": "polyrepo"` exists), branches, commits,
+> and worktrees are **per-repo**. Each task carries a `<!-- repo: <name> -->`
+> annotation naming which submodule it targets (absent → `default_repo`); its
+> tests, implementation, and commit all happen inside *that repo's* worktree,
+> and the recorded SHA belongs to that repo. The control repo only holds
+> `conductor/` state. Product code is never pushed by `/conductor-implement`;
+> branches go up at `/conductor-land` for the cross-repo PR group. In monorepo
+> mode (no `repos.json`) everything below is single-repo as usual.
+
 ### Standard Task Workflow
 
 1. **Select Task:** Choose the next available task from `plan.md` in sequential order

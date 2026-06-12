@@ -30,6 +30,13 @@ Create a new track for: the input provided with this command (the text typed aft
    - Announce: "Conductor is not set up. Please run `/conductor-setup` first."
    - Do NOT proceed.
 
+3. **Topology check:** Read `conductor/repos.json`. If absent or `mode` ≠
+   `"polyrepo"`, this is **monorepo mode** — every step below behaves exactly as
+   today; ignore the polyrepo-only notes. If `mode == "polyrepo"`, follow
+   `references/polyrepo-git.md` for the per-repo branch/worktree model and the
+   repo annotation. If `conductor/config.json` has `sync_mode: "shared"`, run the
+   sync preamble from `references/conductor-sync.md` before mutating any state.
+
 ---
 
 ## 2.0 NEW TRACK INITIALIZATION
@@ -191,6 +198,27 @@ Create a new track for: the input provided with this command (the text typed aft
       - Keep all phases as default sequential (no annotations needed)
       - Announce: "All phases and tasks will execute sequentially."
 
+3.5. **Annotate Target Repos (POLYREPO ONLY — skip in monorepo mode):**
+   - For each task, decide which product repo it touches and append a
+     `<!-- repo: <name> -->` annotation (parallel to `<!-- files: -->`). The name
+     MUST match a `repos[].name` in `conductor/repos.json`.
+   - Tasks that belong to the `default_repo` may omit the annotation (it defaults
+     there), but prefer being explicit for clarity.
+   - **Prefer one repo per task.** If a task genuinely spans two repos, split it
+     into per-repo tasks; only annotate a single task with multiple repos as a
+     last resort.
+   - Confirm the union of target repos with the user — these become the per-repo
+     branches/worktrees created in step 10a.
+   - Example:
+     ```markdown
+     - [ ] Task 1: Add /login endpoint
+       <!-- repo: api -->
+       <!-- files: src/auth/login.ts -->
+     - [ ] Task 2: Build login form
+       <!-- repo: web -->
+       <!-- files: src/pages/login.tsx -->
+     ```
+
 4. **User Confirmation:**
    > "I've drafted the implementation plan. Please review:"
    > ```markdown
@@ -253,6 +281,19 @@ Create a new track for: the input provided with this command (the text typed aft
    ```
    Populate with actual values from steps 3-5.
 
+   **POLYREPO ONLY:** also add a `repos` map — one entry per target repo from the
+   union computed in step 3.5. Keep the flat `git_branch`/`worktree_path` fields
+   for compatibility (they point at the control repo's branch). Resolve each
+   repo's `submodule_path`/`default_branch` from `conductor/repos.json`. **Always
+   include `submodule_path`** — `/conductor-land` and the merge-train CI read it to
+   target the right submodule:
+   ```json
+   "repos": {
+     "api": { "submodule_path": "repos/api", "git_branch": "track/<track_id>", "worktree_path": ".worktrees/<track_id>/api", "base_branch": "main" },
+     "web": { "submodule_path": "repos/web", "git_branch": "track/<track_id>", "worktree_path": ".worktrees/<track_id>/web", "base_branch": "main" }
+   }
+   ```
+
 8. **Write Files:**
    - `conductor/tracks/<track_id>/spec.md`
    - `conductor/tracks/<track_id>/plan.md`
@@ -305,12 +346,14 @@ Create a new track for: the input provided with this command (the text typed aft
      ```
 
 10a. **Scaffold Commit + Create Worktree:**
-   - Stage and commit all conductor files to main:
+   - Stage and commit all conductor files to the **control repo** (main):
      ```bash
      git add conductor/tracks/<track_id>/
      git add conductor/tracks.md
      git commit -m "conductor(newtrack): scaffold <track_id>"
      ```
+
+   **MONOREPO MODE (no `repos.json`):**
    - Create the worktree (track branch now inherits all scaffold files):
      ```bash
      bd worktree create .worktrees/<track_id> --branch track/<track_id>
@@ -318,6 +361,20 @@ Create a new track for: the input provided with this command (the text typed aft
    - **If `bd` command fails:** → Follow Beads Error Handler Protocol (see references/beads-error-handler.md)
      - Degraded fallback: `git checkout -b track/<track_id>`
    - Announce: "Worktree ready at `.worktrees/<track_id>` on branch `track/<track_id>`"
+
+   **POLYREPO MODE (`repos.json` with `mode: "polyrepo"`):** create **one
+   worktree per target repo** (see `references/polyrepo-git.md`). For each entry
+   in `metadata.json.repos`:
+   - Ensure the submodule is initialized: `git submodule update --init <submodule_path>`.
+   - Fetch + create the per-repo worktree in submodule context:
+     ```bash
+     git -C <submodule_path> fetch origin <base_branch>
+     git -C <submodule_path> worktree add <abs path .worktrees/<track_id>/<repo>> -b track/<track_id> origin/<base_branch>
+     ```
+   - **Fallback** (if worktree-of-submodule fails): `git -C <submodule_path> checkout -b track/<track_id> origin/<base_branch>` and record that submodule path as the worktree path (degraded mode in `references/polyrepo-git.md`).
+   - Announce each: "Worktree ready at `.worktrees/<track_id>/<repo>` on branch `track/<track_id>` (repo: <repo>)."
+   - The conductor scaffold stays committed to the **control repo** only — product
+     worktrees start clean from each repo's base branch.
 
 11. **Announce Completion:**
     > "New track '<track_id>' has been created and added to the tracks file. Run `/conductor-implement` to start."
@@ -414,6 +471,8 @@ Create a new track for: the input provided with this command (the text typed aft
      WORKTREE: .worktrees/<track_id>
      KEY CONSTRAINTS: <main technical decisions from spec>" --json
      ```
+   - **Polyrepo:** replace the `WORKTREE:` line with a `REPOS:` line listing each
+     target repo and its worktree (e.g. `REPOS: api=.worktrees/<id>/api, web=.worktrees/<id>/web`).
    - This note seeds the epic with enough context to recover a session after compaction.
 
 8. **Announce:** "Track synced to Beads as epic <epic_id>."
@@ -421,10 +480,11 @@ Create a new track for: the input provided with this command (the text typed aft
 9. **Parallel Execution Notes (if parallel enabled):**
    - For each task in a parallel phase, add file ownership to Beads notes:
      ```bash
-     bd note <task_id> "PARALLEL_ENABLED: true"
+     bd note <task_id> "PARALLEL_ENABLED: true
      FILES_OWNED: <comma-separated file list from <!-- files: --> annotation>
      DEPENDS_ON: <task dependencies from <!-- depends: --> annotation>" --json
      ```
+     (Polyrepo: also add a `REPO: <repo>` line from the task's `<!-- repo: -->`.)
    - This enables workers to query their exclusive files from Beads
 
 **ERROR HANDLING:** If any `bd` command fails during steps 2-8:
@@ -437,3 +497,12 @@ Create a new track for: the input provided with this command (the text typed aft
 - If A: Skip remaining Beads steps, announce track created without Beads sync
 - If B: Retry the failed command
 - If C: HALT and wait for user
+
+---
+
+## 3.0 SYNC POSTAMBLE (polyrepo + shared mode only)
+
+If `conductor/config.json` has `sync_mode: "shared"`, publish the control plane
+per `references/conductor-sync.md`: `bd dolt push` then
+`git push <control_remote> <control_branch>`. In `local` mode (or monorepo),
+commits stay local — do not push.

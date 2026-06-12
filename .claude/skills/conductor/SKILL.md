@@ -7,8 +7,9 @@ description: |
   - Files like `conductor/tracks.md`, `conductor/product.md`, `conductor/workflow.md` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
-  - User invokes `/conductor-*` commands (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, archive, release, handoff, refresh, formula)
+  - User invokes `/conductor-*` commands (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula)
   - User mentions documentation is outdated or wants to sync context with codebase changes
+  - Project is a polyrepo control repo (`conductor/repos.json` with mode "polyrepo") spanning git-submodule product repos
   
   Interoperable across Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot.
   Integrates with Beads for persistent task memory across sessions.

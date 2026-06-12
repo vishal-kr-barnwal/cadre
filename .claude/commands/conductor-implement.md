@@ -28,6 +28,16 @@ Implement track: $ARGUMENTS
    - Announce: "Conductor is not set up. Please run `/conductor-setup` first."
    - Do NOT proceed.
 
+3. **Topology + sync check:** Read `conductor/repos.json` and `conductor/config.json`.
+   - `repos.json` absent or `mode` ≠ `"polyrepo"` → **monorepo mode**; every step
+     below behaves exactly as today — ignore polyrepo-only notes.
+   - `mode == "polyrepo"` → follow `references/polyrepo-git.md`: each task routes
+     to its `<!-- repo: -->` target (absent → `default_repo`), and branches /
+     worktrees / commits are **per-repo**.
+   - `config.json` `sync_mode == "shared"` → run the **sync preamble** from
+     `references/conductor-sync.md` now (pull control plane + `bd dolt pull`)
+     before reading or mutating any state.
+
 ---
 
 ## 2.0 TRACK SELECTION
@@ -133,6 +143,8 @@ Implement track: $ARGUMENTS
         - Use Beads ready list to suggest next task
 
 3c. **Switch to Track Worktree:**
+
+   **MONOREPO MODE (no `repos.json`):**
    - Read `conductor/tracks/<track_id>/metadata.json` → get `worktree_path` and `git_branch`
    - **If worktree_path exists on disk:**
      - Announce: "Switching to worktree `<worktree_path>` on branch `<git_branch>`"
@@ -145,6 +157,19 @@ Implement track: $ARGUMENTS
      - Announce: "Switched to `<git_branch>` (worktree missing — degraded mode)"
    - **HALT if neither path succeeds:**
      - Announce: "Cannot switch to track branch `<git_branch>`. Please check git state." → await user
+
+   **POLYREPO MODE (`metadata.json` has a `repos` map):**
+   - Do **not** pick a single working root here — the working root is
+     **per-task**, resolved from each task's `<!-- repo: -->` annotation when the
+     task runs (see step 5). Instead, **verify all repo worktrees**:
+     - For each entry in `metadata.json.repos`, confirm `worktree_path` exists and
+       `git -C <worktree_path> branch --show-current` == `git_branch`. On mismatch
+       or missing worktree, offer to recreate it per `references/polyrepo-git.md`
+       (or fall back to the submodule checkout in degraded mode), or HALT.
+   - **Per-task working-root rule (used throughout step 5):** resolve the task's
+     repo → look up `metadata.json.repos[<repo>].worktree_path` → use **that** path
+     as the working root for that task. The working root switches per task as tasks
+     target different repos. All commits for the task happen in that repo's worktree.
 
 4. **Check and Load Resume State:**
 
@@ -201,7 +226,10 @@ Implement track: $ARGUMENTS
       - Create execution order respecting dependencies
       
       **c3. Detect File Conflicts:**
-      - Check if any two tasks claim the same file in `files:` annotation
+      - Check if any two tasks claim the same file in `files:` annotation.
+      - **POLYREPO:** compare `(repo, file)` tuples, not bare paths — the same
+        relative path in two different repos is **not** a conflict. Resolve each
+        task's repo from its `<!-- repo: -->` annotation first.
       - If conflicts detected:
         > "⚠️ File conflict detected: [files] claimed by multiple tasks"
         > "A) Make conflicting tasks sequential (recommended)"
@@ -212,11 +240,21 @@ Implement track: $ARGUMENTS
         - If C: HALT
       
       **c4. Initialize Worker Worktrees (replaces file_locks):**
-      - For each parallel task, create an isolated git worktree with Beads redirect:
+      - **MONOREPO:** for each parallel task, create an isolated git worktree with Beads redirect:
         ```bash
         bd worktree create .worktrees/<track_id>_worker_<N>_<sanitized_name> \
           --branch track_<track_id>_worker_<N>_<sanitized_name>
         ```
+      - **POLYREPO:** resolve each task's repo, then create the worker worktree in
+        that repo's submodule context (see `references/polyrepo-git.md`):
+        ```bash
+        git -C <submodule_path> worktree add \
+          .worktrees/<track_id>/<repo>_worker_<N>_<sanitized_name> \
+          -b track_<track_id>_worker_<N>_<sanitized_name> origin/<base_branch>
+        ```
+        Two workers targeting different repos never collide even with identical
+        relative paths. The control plane's single `.beads/` DB still coordinates
+        all workers — copy/point a `.beads` redirect into each worker worktree.
       - `bd worktree` auto-configures a `.beads` redirect file in each worktree pointing to the root `.beads/` database. All workers share one Dolt DB — no file_locks needed.
       - **If `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
       - Create `conductor/tracks/<track_id>/parallel_state.json` as an **audit log only** (not used for coordination):
@@ -290,6 +328,7 @@ Implement track: $ARGUMENTS
           "worker_id": "worker_<N>_<sanitized_name>",
           "task": "<task_description>",
           "beads_task_id": "<beads_id>",
+          "repo": "<repo name (polyrepo) or omit in monorepo>",
           "worktree": ".worktrees/<track_id>_worker_<N>_<sanitized_name>",
           "branch": "track_<track_id>_worker_<N>_<sanitized_name>",
           "depends_on": ["<task_id>"],
@@ -314,14 +353,25 @@ Implement track: $ARGUMENTS
           - Ask user: "Retry worker? A) Yes  B) Skip task  C) Stop"
 
       **c7. Aggregate Results (merge worktrees, one dolt push):**
-      - After all waves complete, merge each worker's branch into the track branch in completion order:
+      - **MONOREPO:** merge each worker's branch into the track branch in completion order:
         ```bash
         # For each worker in order:
         git merge --no-ff track_<track_id>_worker_<N>_<name> \
           -m "conductor(parallel): merge worker_<N>: <task_description>"
         bd worktree remove .worktrees/<track_id>_worker_<N>_<name>
         ```
-      - **If merge conflict:** HALT immediately. Show conflicting files and ask user to resolve before continuing.
+      - **POLYREPO:** merge each worker's branch into **its own repo's** `track/<id>`
+        branch, in that repo's git context (group workers by `repo` from
+        parallel_state):
+        ```bash
+        # For each worker in order, in its repo:
+        git -C <submodule_path> merge --no-ff track_<track_id>_worker_<N>_<name> \
+          -m "conductor(parallel): merge worker_<N> (<repo>): <task_description>"
+        git -C <submodule_path> worktree remove .worktrees/<track_id>/<repo>_worker_<N>_<name>
+        ```
+        Never merge a worker branch from one repo into another repo's branch.
+      - **If merge conflict:** HALT immediately. Show conflicting files (and the
+        repo) and ask the user to resolve before continuing.
       - **If Beads enabled:** After all merges:
         ```bash
         bd dolt push  # One push for all workers combined
@@ -343,8 +393,16 @@ Implement track: $ARGUMENTS
       **d2. Iterate Through Tasks:** Loop through each task in `plan.md` one by one.
 
       **d3. For Each Task:**
+          - **i-0. Resolve Task Repo & Working Root (POLYREPO ONLY):** Read the
+            task's `<!-- repo: -->` annotation (absent → `default_repo`). Look up
+            `metadata.json.repos[<repo>].worktree_path` and use **that** path as the
+            working root for this task (all reads/writes/tests/commits happen there).
+            The working root switches per task across repos. In monorepo mode, the
+            single track worktree from 3c is the root as before.
           - **i. Defer to Workflow:** `workflow.md` is the **single source of truth** for task lifecycle. Follow its "Task Workflow" section for implementation, testing, and committing.
-           - **CRITICAL: NEVER run `git push`. All commits stay local. Users decide when to push.**
+           - **CRITICAL: NEVER run `git push`. All commits stay local. Users decide when to push.** In polyrepo mode this applies to every product-repo
+             worktree — product code is pushed only by `/conductor-land` (or
+             archive's safety-net push), never here.
            - **i-a. Beads Task Start (If Enabled):** After marking task `[~]` in progress:
              - **ONLY if `beads_enabled` is true:**
                - Generate task key from phase index and task index (e.g., `phase1_task1` for first task in first phase)
@@ -364,10 +422,10 @@ Implement track: $ARGUMENTS
                - If found:
                  - Add structured completion notes:
                    ```bash
-                   bd note <beads_task_id> 'COMPLETED: <description>'
+                   bd note <beads_task_id> "COMPLETED: <description>
                    COMMIT: <sha_7chars>
                    FILES CHANGED: <list>
-                   KEY DECISION: <if any>"
+                   KEY DECISION: <if any>" --json
                    ```
                  - Close with auto-advance: `bd close <beads_task_id> --continue --reason "Task completed"`
                    (The `--continue` flag auto-advances to next step if available)
@@ -400,6 +458,12 @@ Implement track: $ARGUMENTS
           bd dolt push
           ```
           - **If any command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
+        - **Control-plane sync (polyrepo + `sync_mode: "shared"` only):** after the
+          phase checkpoint commit to `conductor/`, run the sync postamble in
+          `references/conductor-sync.md` — `bd dolt push` is **mandatory** here (not
+          optional), then `git push <control_remote> <control_branch>`. **Product
+          code is never pushed** at phase completion. In `local`/monorepo mode,
+          commits stay local as today.
         - **Check phase graph for next ready phases:**
           - If other phases now have all dependencies met → Go back to step 5a2
           - If next sequential phase is ready → Process it
@@ -599,6 +663,10 @@ Thread: $AMP_CURRENT_THREAD_ID (if available)
    > 2. `/conductor-ship` — rebase onto main, push, open the PR
    > 3. `/conductor-archive` — local cleanup + learnings once the PR is up
    > (and `/conductor-release` once enough tracks have shipped)"
+   - **POLYREPO:** the ship step is `/conductor-land` instead of `/conductor-ship`
+     — it opens one PR per touched repo **plus** the control-repo PR, links them as
+     a group, and the merge train merges them (product repos first, control repo
+     last). Surface: "2. `/conductor-land` — open + link the cross-repo PR group".
 
 3. **Ask for User Choice (cleanup now):**
    > "Or handle the track folder now:"

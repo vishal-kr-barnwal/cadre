@@ -16,6 +16,11 @@ This spec defines how Conductor's context-driven development methodology integra
 2. **Beads owns execution** - Task tracking, dependencies, and persistent memory
 3. **Bidirectional sync** - Changes in either system reflect in both
 4. **Graceful degradation** - If Beads unavailable, user can choose to continue without it
+5. **One graph in polyrepo** - In polyrepo mode the Beads Dolt DB at the control
+   repo is the **single shared task graph for all product repos** (submodules get
+   no own `.beads/`). In `sync_mode: "shared"` Dolt is the canonical source teammates
+   pull/push; `tracks.md` and the state JSON are its human-readable mirror. See
+   [POLYREPO.md](POLYREPO.md).
 
 ## Architecture
 

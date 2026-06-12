@@ -550,11 +550,23 @@ Phase 3 waits for both Phase 1 and Phase 2 to complete.
 
 ---
 
+## Polyrepo: repo-scoped parallelism
+
+In polyrepo mode (see [POLYREPO.md](POLYREPO.md)) parallel execution is
+**repo-scoped**: file-conflict detection compares `(repo, file)` tuples (identical
+relative paths in different repos do not conflict); worker worktrees live per repo
+at `.worktrees/<track_id>/<repo>_worker_<N>_<name>/` created in submodule context;
+each worker branch merges into **its own repo's** `track/<id>` branch; and
+`parallel_state.json` worker entries record a `repo` field. The single shared Beads
+Dolt graph still coordinates all workers regardless of repo.
+
+---
+
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `/conductor-implement` | Now supports parallel phases |
+| `/conductor-implement` | Now supports parallel phases (repo-scoped in polyrepo) |
 | `/conductor-newtrack` | Asks about parallel execution |
 | `/conductor-status` | Shows parallel worker status |
 | `/conductor-validate` | Validates parallel annotations |

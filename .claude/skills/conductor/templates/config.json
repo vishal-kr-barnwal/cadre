@@ -1,0 +1,12 @@
+{
+  "sync_mode": "local",
+  "control_remote": "origin",
+  "control_branch": "main",
+  "pull_on_command_start": true,
+  "pr_provider": "github",
+  "merge_train": {
+    "enabled": true,
+    "auto_fire": true,
+    "group_label_prefix": "conductor-track"
+  }
+}

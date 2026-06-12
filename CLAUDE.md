@@ -17,7 +17,7 @@ It works with Claude Code (commands + skills) and four other AI coding tools —
 ```
 Conductor-Beads/
 ├── .claude/
-│   ├── commands/           # Claude Code slash commands (15 commands) — CANONICAL SOURCE
+│   ├── commands/           # Claude Code slash commands (16 commands) — CANONICAL SOURCE
 │   └── skills/             # Claude Code skills
 │       ├── conductor/      # Context-driven development skill
 │       ├── beads/          # Persistent task memory skill
@@ -58,7 +58,8 @@ All platforms (Claude Code, Codex CLI, Cursor, Antigravity, Copilot) invoke the 
 | `/conductor-flag` | Flag the current task as blocked or skipped with a reason |
 | `/conductor-revise` | Update spec/plan when implementation reveals issues |
 | `/conductor-review` | Review a track's diff before shipping (quality gate) |
-| `/conductor-ship` | Rebase a reviewed track onto main, push it, prepare the PR |
+| `/conductor-ship` | Rebase a reviewed track onto main, push it, prepare the PR (monorepo) |
+| `/conductor-land` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
 | `/conductor-archive` | Archive completed tracks (local cleanup + learnings) |
 | `/conductor-release` | Cut a local release — changelog + version tag |
 | `/conductor-handoff` | Create context handoff for section transfer |
@@ -110,6 +111,19 @@ A track is a logical unit of work (feature or bug fix). Each track has:
 - Unique ID format: `shortname_YYYYMMDD` (e.g., `auth_20241226`)
 - Status markers: `[ ]` new, `[~]` in progress, `[x]` completed, `[!]` blocked, `[-]` skipped
 - Own directory with spec, plan, metadata, and state files
+
+### Topology: Monorepo vs Polyrepo (New!)
+Conductor runs in one of two topologies, chosen at `/conductor-setup`:
+- **Monorepo (default):** no `conductor/repos.json`; all commands behave as they
+  always have. Fully backward compatible.
+- **Polyrepo:** a `conductor/repos.json` with `mode: "polyrepo"` makes the current
+  repo a **control repo** holding `conductor/` + `.beads/` + `.gitmodules`; product
+  code lives in **git submodules**. A track spans multiple repos via per-task
+  `<!-- repo: <name> -->` annotations; branches/commits/worktrees/reverts are
+  per-repo. `/conductor-land` opens one PR per touched repo + a control-repo PR,
+  linked by label `conductor-track:<id>`, and a generated **merge train** lands
+  them product-repos-first, control-repo-last. PR provider (GitHub/GitLab) and sync
+  mode (shared/local) live in `conductor/config.json`. See [docs/POLYREPO.md](docs/POLYREPO.md).
 
 ### Parallel Execution (New!)
 Phases can execute tasks in parallel using sub-agents:
@@ -177,6 +191,7 @@ At phase completion:
 
 ## Documentation
 
+- [Polyrepo Guide](docs/POLYREPO.md) - Control-repo model, submodules, cross-repo PRs + merge train, sync modes
 - [Install & Version Guide](docs/INSTALL.md) - Per-platform install + compatibility matrix + versioning policy
 - [Manual Workflow Guide](docs/manual-workflow-guide.md) - Step-by-step command reference
 - [Beads Integration](docs/BEADS_INTEGRATION.md) - How Conductor and Beads work together

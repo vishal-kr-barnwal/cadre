@@ -1,0 +1,171 @@
+# Conductor cross-repo merge train (GitHub Actions).
+#
+# Scaffolded into the CONTROL repo at .github/workflows/conductor-merge-train.yml
+# by /conductor-setup when pr_provider == "github" and merge_train.enabled.
+#
+# What it does: when every PR in a track group (label `conductor-track:<id>`,
+# spread across the control repo + product submodule repos) is APPROVED and
+# CI-GREEN, it merges them in a fixed order — PRODUCT repos first, then bumps
+# each submodule gitlink to the freshly-merged SHA on the control track branch,
+# then merges the CONTROL PR LAST. The control PR is the single "seal" commit;
+# there is no true cross-repo atomic merge, so on any failure it HALTS, leaves
+# already-merged product PRs in place, comments the failure, and re-fires once
+# the failing repo is green again.
+#
+# PREREQUISITE — cross-repo token: the default GITHUB_TOKEN cannot act on other
+# repos. Provide a PAT or GitHub App installation token (scopes: repo, workflow,
+# read:org) with write access to EVERY product repo, stored as the
+# `CONDUCTOR_TRAIN_TOKEN` secret in this control repo.
+#
+# Also configure branch protection on every product repo's default branch and on
+# the control branch: require approvals + the relevant status checks. The train
+# only automates the merge click; protection is what enforces review/CI.
+
+name: conductor-merge-train
+
+# TRIGGER MODEL: pull_request_review / check_suite fire only for events in THIS
+# (control) repo — i.e. when the CONTROL PR is reviewed or its checks complete, the
+# job derives the track from that PR's group label and tries to land. A review/green
+# on a PRODUCT repo does NOT fire this workflow. To auto-fire on product-repo
+# approvals, either (a) have each product repo send a `repository_dispatch` to this
+# repo on approval (carrying the track id), or (b) dispatch manually with the track
+# id, or (c) add a `schedule:` and extend the job to scan open control-repo PRs for
+# group labels (the job is idempotent + re-runnable). Re-running `/conductor-land`
+# also re-checks status from your machine.
+on:
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+  # schedule:
+  #   - cron: "*/5 * * * *"   # uncomment for auto-fire on product-repo approvals
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "Track id to attempt to land (e.g. auth_20260609)"
+        required: true
+
+concurrency:
+  group: conductor-merge-train
+  cancel-in-progress: false
+
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout control repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CONDUCTOR_TRAIN_TOKEN }}
+          submodules: false
+          fetch-depth: 0
+
+      - name: Run merge train
+        env:
+          GH_TOKEN: ${{ secrets.CONDUCTOR_TRAIN_TOKEN }}
+          EVENT_TRACK: ${{ github.event.inputs.track }}
+        run: |
+          set -euo pipefail
+
+          # --- Resolve the track id and the group label -------------------------
+          PREFIX="$(jq -r '.merge_train.group_label_prefix // "conductor-track"' conductor/config.json)"
+          AUTO_FIRE="$(jq -r '.merge_train.auto_fire // true' conductor/config.json)"
+          CONTROL_REPO="${GITHUB_REPOSITORY}"
+
+          # Derive the candidate track from the triggering PR's labels, or from
+          # the manual dispatch input.
+          TRACK="${EVENT_TRACK:-}"
+          if [ -z "$TRACK" ]; then
+            PR_NUMBER="$(jq -r '.pull_request.number // .check_suite.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")"
+            if [ -n "$PR_NUMBER" ]; then
+              TRACK="$(gh pr view "$PR_NUMBER" --repo "$CONTROL_REPO" --json labels \
+                       --jq ".labels[].name | select(startswith(\"${PREFIX}:\")) | sub(\"${PREFIX}:\"; \"\")" || true)"
+            fi
+          fi
+          if [ -z "$TRACK" ]; then echo "No track group on this event; nothing to do."; exit 0; fi
+          LABEL="${PREFIX}:${TRACK}"
+          echo "Track=$TRACK  Label=$LABEL  auto_fire=$AUTO_FIRE"
+          if [ "$AUTO_FIRE" != "true" ] && [ -z "$EVENT_TRACK" ]; then
+            echo "auto_fire disabled; only workflow_dispatch may land. Exiting."; exit 0
+          fi
+
+          # --- Helper: is a PR approved AND all required checks green? -----------
+          pr_ready() { # repo  pr_number
+            local repo="$1" num="$2"
+            local decision state
+            decision="$(gh pr view "$num" --repo "$repo" --json reviewDecision --jq '.reviewDecision')"
+            state="$(gh pr view "$num" --repo "$repo" --json statusCheckRollup \
+                     --jq '[.statusCheckRollup[]?.conclusion // .statusCheckRollup[]?.state] | map(select(. != null and . != "SUCCESS" and . != "NEUTRAL" and . != "SKIPPED")) | length')"
+            [ "$decision" = "APPROVED" ] && [ "$state" = "0" ]
+          }
+
+          # --- Gather the group from metadata.json ------------------------------
+          META="conductor/tracks/${TRACK}/metadata.json"
+          if [ ! -f "$META" ]; then echo "No metadata for $TRACK; abort."; exit 1; fi
+
+          mapfile -t REPO_NAMES < <(jq -r '.repos | keys[]' "$META")
+          CONTROL_PR="$(jq -r '.control_pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+
+          # --- Phase 1: verify EVERY sibling PR is approved + green -------------
+          echo "::group::Pre-flight verification"
+          for name in "${REPO_NAMES[@]}"; do
+            repo="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
+            pr="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+            [ -z "$pr" ] && continue
+            echo "check $repo#$pr"
+            pr_ready "$repo" "$pr" || { echo "Product PR $repo#$pr not ready; halting."; exit 0; }
+          done
+          if [ -n "$CONTROL_PR" ]; then
+            pr_ready "$CONTROL_REPO" "$CONTROL_PR" || { echo "Control PR not ready; halting."; exit 0; }
+          fi
+          echo "::endgroup::"
+
+          # --- Phase 2: merge each PRODUCT PR, capture new default-branch SHA ---
+          git config user.name  "conductor-merge-train"
+          git config user.email "conductor-merge-train@users.noreply.github.com"
+          BRANCH="track/${TRACK}"
+          git fetch origin "$BRANCH" && git checkout "$BRANCH"
+
+          for name in "${REPO_NAMES[@]}"; do
+            repo="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
+            pr="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+            sub="$(jq -r --arg n "$name" '.repos[$n].submodule_path // empty' "$META")"
+            [ -z "$pr" ] && continue
+            echo "::group::Merge product $repo#$pr"
+            pr_ready "$repo" "$pr" || { echo "REGRESSED before merge: $repo#$pr. Halting."; exit 1; }
+            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false
+            # New default-branch SHA after merge
+            base="$(gh pr view "$pr" --repo "$repo" --json baseRefName --jq '.baseRefName')"
+            new_sha="$(gh api "repos/${repo}/git/ref/heads/${base}" --jq '.object.sha')"
+            echo "  ${name} -> ${new_sha}"
+            # Bump the submodule gitlink on the control track branch
+            # Fetch the base branch ref (fetch-by-bare-SHA is rejected by many hosts),
+            # which now contains the just-merged commit, then pin the gitlink to it.
+            git -C "$sub" fetch origin "$base" || git submodule update --init "$sub"
+            git -C "$sub" checkout "$new_sha"
+            git add "$sub"
+            echo "::endgroup::"
+          done
+
+          # --- Phase 3: commit submodule bumps, push control track branch ------
+          if ! git diff --cached --quiet; then
+            git commit -m "conductor(train): bump submodules to merged SHAs for ${TRACK}"
+            git push origin "$BRANCH"
+          fi
+
+          # --- Phase 4: re-await control PR check on bumped commit, merge LAST -
+          if [ -n "$CONTROL_PR" ]; then
+            echo "Waiting for control PR #$CONTROL_PR checks on bumped commit..."
+            for i in $(seq 1 30); do
+              if pr_ready "$CONTROL_REPO" "$CONTROL_PR"; then
+                gh pr merge "$CONTROL_PR" --repo "$CONTROL_REPO" --squash --delete-branch
+                echo "Merge train complete for ${TRACK}."
+                exit 0
+              fi
+              sleep 20
+            done
+            gh pr comment "$CONTROL_PR" --repo "$CONTROL_REPO" \
+              --body "⚠️ conductor merge-train: product PRs merged and submodules bumped, but the control PR's checks did not go green in time. Re-run when CI passes."
+            echo "Control PR not green after bump; product PRs already merged. Halting (re-fires later)."
+            exit 1
+          fi
