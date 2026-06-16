@@ -400,16 +400,17 @@ Create a new track for: $ARGUMENTS
         <!-- Learnings from implementation will be appended below -->
         ```
 
-10. **Update Tracks File:**
+10. **Regenerate Tracks Index:**
    - Announce: "Updating the tracks file."
-   - Append to `conductor/tracks.md`:
-     ```markdown
-
-     ---
-
-     ## [ ] Track: <Track Description>
-     *Link: [./conductor/tracks/<track_id>/](./conductor/tracks/<track_id>/)*
-     ```
+   - `conductor/tracks.md` is a DERIVED INDEX, never hand-edited. The new track's
+     `metadata.json` already carries `"status": "new"` (step 2.4.7), which is the
+     single source of truth. Do NOT append a `## [ ] Track:` block in place.
+   - Instead, regenerate the index per `/conductor-status --regen-index`: it scans
+     every `conductor/tracks/*/metadata.json` and rebuilds the marked region
+     (`<!-- conductor:index:start -->` … `<!-- conductor:index:end -->`) from each
+     track's status + name, preserving any human-authored preamble. The new track
+     (marker `[ ]` from status `new`) appears in the regenerated region
+     automatically. Do not inline the algorithm here — defer to that mode.
 
 10a. **Scaffold Commit + Create Worktree:**
    - Stage and commit all conductor files to the **control repo** (main):

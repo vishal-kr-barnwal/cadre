@@ -67,8 +67,12 @@ Implement track: the input provided with this command (the text typed after the 
 4. **Check Dependencies:**
    - Read `conductor/tracks/<track_id>/metadata.json`
    - If `depends_on` array is not empty:
-     - For each dependency, check status in `conductor/tracks.md`
-     - If ANY not `[x]` (completed):
+     - For each dependency, check its status. The single source of truth is each
+       dependency track's `conductor/tracks/<dep_id>/metadata.json` `"status"`
+       field — prefer reading it directly (`"completed"` ⇔ marker `[x]`).
+       `conductor/tracks.md` remains a valid human-readable mirror, so reading the
+       `[x]` marker there still works either way.
+     - If ANY not `completed` (i.e. not `[x]`):
        > "⚠️ This track has incomplete dependencies:"
        > [List blocking tracks]
        > "Do you want to proceed anyway?"
@@ -87,7 +91,20 @@ Implement track: the input provided with this command (the text typed after the 
 1. **Announce Action:** State which track you're beginning to implement.
 
 2. **Update Status to 'In Progress':**
-   - In `conductor/tracks.md`, change `## [ ] Track:` to `## [~] Track:` for selected track
+   - `conductor/tracks.md` is a DERIVED INDEX — never flip its marker in place
+     (no `sed`/Edit on the `## [..] Track:` line).
+   - **Step a — write the source of truth:** set this track's `metadata.json`
+     `"status"` to `"in_progress"` with key-scoped jq (preserves every other key):
+     ```bash
+     jq '.status = "in_progress"' conductor/tracks/<track_id>/metadata.json > tmp.$$ \
+       && mv tmp.$$ conductor/tracks/<track_id>/metadata.json
+     ```
+   - **Step b — regenerate the index:** then regenerate the index per
+     `/conductor-status --regen-index` (it rebuilds only the region between
+     `<!-- conductor:index:start -->` and `<!-- conductor:index:end -->` from each
+     track's metadata status + name, preserving the preamble). The selected track's
+     `## [~] Track:` line appears in the regenerated region automatically. Do not
+     inline the algorithm here — defer to that mode.
 
 3. **Load Track Context:**
    - Identify track folder from tracks file link → get `<track_id>`
@@ -456,7 +473,18 @@ Implement track: the input provided with this command (the text typed after the 
       4. Commit revision before continuing
 
 6. **Finalize Track:**
-   - After all tasks complete, update `conductor/tracks.md`: `## [~]` → `## [x]`
+   - After all tasks complete, mark the track completed via the WRITE protocol
+     (never flip the `conductor/tracks.md` marker in place — no `sed`/Edit):
+     - **Step a — write the source of truth:** set this track's `metadata.json`
+       `"status"` to `"completed"` with key-scoped jq:
+       ```bash
+       jq '.status = "completed"' conductor/tracks/<track_id>/metadata.json > tmp.$$ \
+         && mv tmp.$$ conductor/tracks/<track_id>/metadata.json
+       ```
+     - **Step b — regenerate the index:** then regenerate the index per
+       `/conductor-status --regen-index`. The track's line is rebuilt as
+       `## [x] Track:` in the marked region from its metadata; the preamble is
+       preserved. Do not inline the algorithm — defer to that mode.
    - **Clean Up State:** Delete `conductor/tracks/<track_id>/implement_state.json`
    - **Elevate Patterns:** Prompt for pattern consolidation (see step 5e)
    - Announce track fully complete

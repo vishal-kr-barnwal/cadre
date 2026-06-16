@@ -13,7 +13,16 @@ absent or `mode` ≠ `"polyrepo"` → monorepo mode; every step behaves as today
 the sync preamble and, at the end, the postamble (push the control plane).
 
 ## 1. Find Completed Tracks
-List all `[x]` tracks from `tracks.md`.
+Select completed tracks by reading the **source of truth**: scan every
+`conductor/tracks/<id>/metadata.json` and keep those whose `status == "completed"`.
+`tracks.md` remains a correct human-readable mirror (its `## [x] Track:` lines), so
+a quick glance there still works — but the authoritative selection is the per-track
+`metadata.json` status, e.g.:
+```bash
+for m in conductor/tracks/*/metadata.json; do
+  [ "$(jq -r '.status // "new"' "$m")" = "completed" ] && dirname "$m"
+done
+```
 
 ## 2. Select Tracks
 - Archive all completed
@@ -63,9 +72,24 @@ For each selected track:
    ```
    In monorepo/`local` mode there is no lease; this is a silent no-op.
 5. **Extract learnings before archiving** (see step 3a)
-6. Move track folder to archive
-7. Remove from `tracks.md`
-8. Add archive comment
+6. **Set the terminal status (source of truth):** before moving the folder, write
+   the archived state to THAT track's `metadata.json` via a key-scoped jq write
+   (never a full-file rewrite), so concurrent sibling writes are not clobbered:
+   ```bash
+   tmp=$(mktemp)
+   jq '.status = "archived"' conductor/tracks/<track_id>/metadata.json > "$tmp" \
+     && mv "$tmp" conductor/tracks/<track_id>/metadata.json
+   ```
+7. Move track folder to `conductor/archive/<track_id>/` (this carries the updated
+   `metadata.json` with it, so the live `conductor/tracks/*` scan no longer sees it)
+8. **Regenerate the derived index** — do NOT hand-edit `tracks.md` markers. Rebuild
+   the index from per-track metadata by running the procedure for
+   `/conductor-status --regen-index` (see `conductor-status.md`). Because the
+   archived track's folder has moved out of `conductor/tracks/`, the regenerated
+   body no longer lists it — its `## [x] Track:` line drops out automatically. This
+   is idempotent and bd-independent. (Run once after all selected tracks have been
+   moved, or after each — either way the final index is the same.)
+9. Add archive comment
 
 ### 3a. Extract Learnings Before Archiving
 
