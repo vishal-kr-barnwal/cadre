@@ -1,6 +1,6 @@
 # Beads Error Handler Protocol
 
-Shared error handling for all Conductor commands that use `bd` CLI commands.
+Shared error handling for all Cadre commands that use `bd` CLI commands.
 
 ## Standard Error Response
 
@@ -14,7 +14,7 @@ When any `bd` command fails, present this to the user:
 **If A selected:**
 - Set `beads_enabled = false` for the remainder of this session
 - All task tracking via `plan.md` markers only (`[ ]`, `[~]`, `[x]`, `[!]`)
-- Conductor workflows continue normally — no Beads state updates
+- Cadre workflows continue normally — no Beads state updates
 - Announce: "Continuing in file-only mode. Beads will not be updated this session."
 
 **If B selected:**
@@ -42,7 +42,7 @@ When `beads_enabled = false` (set by option A or initial unavailability):
 
 ## Usage in Commands
 
-Every Conductor command that calls `bd` should reference this protocol instead of inlining the A/B/C options. Example:
+Every Cadre command that calls `bd` should reference this protocol instead of inlining the A/B/C options. Example:
 
 ```markdown
 Run: bd update <task_id> --status in_progress --json
@@ -52,13 +52,13 @@ Run: bd update <task_id> --status in_progress --json
 
 ## Availability Check (Run First)
 
-Before any `bd` command in any Conductor flow:
+Before any `bd` command in any Cadre flow:
 
 ```bash
 BEADS_AVAILABLE=false
 if which bd > /dev/null 2>&1; then
-  if [ -f conductor/beads.json ]; then
-    if grep -q '"enabled"[[:space:]]*:[[:space:]]*true' conductor/beads.json 2>/dev/null; then
+  if [ -f cadre/beads.json ]; then
+    if grep -q '"enabled"[[:space:]]*:[[:space:]]*true' cadre/beads.json 2>/dev/null; then
       BEADS_AVAILABLE=true
     fi
   fi

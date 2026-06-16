@@ -1,12 +1,12 @@
 # Parallel Worker Dispatch
 
-Conductor runs a phase's independent tasks as parallel **workers**, each in its
+Cadre runs a phase's independent tasks as parallel **workers**, each in its
 own git worktree, coordinated through Beads (the shared Dolt DB) using a **wave
 model**: dispatch every task whose dependencies are met, wait for the wave to
 finish, then dispatch the next wave.
 
 The *worker prompt* (identity, task, TDD steps, completion sequence) is supplied
-by `conductor-implement`. This file covers **how to dispatch a worker on this
+by `cadre-implement`. This file covers **how to dispatch a worker on this
 tool**.
 
 ## Dispatching each worker
@@ -58,9 +58,9 @@ optimization.
 
 ## Coordinator mechanics (run these in order)
 
-`conductor-implement` hands you a phase marked `<!-- execution: parallel -->`.
+`cadre-implement` hands you a phase marked `<!-- execution: parallel -->`.
 Drive the whole wave loop here; the *worker prompt* stays inline in
-`conductor-implement`. The steps below are platform-agnostic — the only
+`cadre-implement`. The steps below are platform-agnostic — the only
 platform-specific part is **how you dispatch** (see "Dispatching each worker"
 above). In **polyrepo** mode, all per-repo branch/worktree routing defers to
 `polyrepo-git.md` — resolve each task's `<!-- repo: -->` first.
@@ -90,7 +90,7 @@ Check whether any two tasks claim the same file in their `files:` annotation.
     warning. C: HALT.
 
 (The **cross-person** overlap check against other operators' in-progress tasks —
-shared mode only — is performed by `conductor-implement` before it hands you the
+shared mode only — is performed by `cadre-implement` before it hands you the
 phase.)
 
 ### 3. Initialize worker worktrees (replaces file_locks)
@@ -115,7 +115,7 @@ phase.)
   to the root `.beads/` database. All workers share one Dolt DB — no file_locks.
 - **If `bd` fails:** → follow the Beads Error Handler Protocol
   (`beads-error-handler.md`).
-- Create `conductor/tracks/<track_id>/parallel_state.json` as an **audit log only**
+- Create `cadre/tracks/<track_id>/parallel_state.json` as an **audit log only**
   (not used for coordination):
   ```json
   {
@@ -132,7 +132,7 @@ phase.)
 
 - **If Beads enabled:** pre-assign this wave's tasks before dispatch. The assignee
   is the **worker label** for this wave (`worker_<N>_<name>`) — never the literal
-  "conductor":
+  "cadre":
   ```bash
   bd update <beads_task_id> --status in_progress \
     --assignee worker_<N>_<name> \
@@ -141,7 +141,7 @@ phase.)
   ```
 - Dispatch one worker per task in the wave using your platform's mechanism (see
   "Dispatching each worker" above), handing each the inline worker prompt from
-  `conductor-implement`.
+  `cadre-implement`.
 - Record each spawned worker in `parallel_state.json`'s `workers` array:
   ```json
   {
@@ -182,7 +182,7 @@ phase.)
   ```bash
   # For each worker in order:
   git merge --no-ff track_<track_id>_worker_<N>_<name> \
-    -m "conductor(parallel): merge worker_<N>: <task_description>"
+    -m "cadre(parallel): merge worker_<N>: <task_description>"
   bd worktree remove .worktrees/<track_id>_worker_<N>_<name>
   ```
 - **POLYREPO:** merge each worker's branch into **its own repo's** `track/<id>`
@@ -191,7 +191,7 @@ phase.)
   ```bash
   # For each worker in order, in its repo:
   git -C <submodule_path> merge --no-ff track_<track_id>_worker_<N>_<name> \
-    -m "conductor(parallel): merge worker_<N> (<repo>): <task_description>"
+    -m "cadre(parallel): merge worker_<N> (<repo>): <task_description>"
   git -C <submodule_path> worktree remove .worktrees/<track_id>/<repo>_worker_<N>_<name>
   ```
   Never merge a worker branch from one repo into another repo's branch.
@@ -205,5 +205,5 @@ phase.)
   WORKERS: <N> succeeded
   COMMITS: <sha_list>" --json
   ```
-- Hand control back to `conductor-implement` to mark the plan tasks `[x]`, append
+- Hand control back to `cadre-implement` to mark the plan tasks `[x]`, append
   commit SHAs, delete `parallel_state.json`, and process the next ready phase.

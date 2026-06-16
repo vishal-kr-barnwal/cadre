@@ -8,6 +8,6 @@
   "merge_train": {
     "enabled": true,
     "auto_fire": true,
-    "group_label_prefix": "conductor-track"
+    "group_label_prefix": "cadre-track"
   }
 }

@@ -2,7 +2,7 @@
   "enabled": true,
   "mode": "normal",
   "memoryStrategy": "beads-primary",
-  "epicPrefix": "conductor",
+  "epicPrefix": "cadre",
   "autoCreateTasks": true,
   "compactOnPhaseComplete": true,
   "pushOnTaskComplete": false,

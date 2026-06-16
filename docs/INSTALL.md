@@ -1,6 +1,6 @@
 # Install & Version Guide
 
-Conductor-Beads ships the same 16 commands to five AI coding tools. This guide
+Cadre ships the same 16 commands to five AI coding tools. This guide
 covers installation for each platform and explains how versioning and command
 generation work.
 
@@ -23,17 +23,17 @@ Current release: **v0.3.4** (multi-platform support, plus the team-scale SDLC ta
 
 | Platform | Min. version | Commands directory | Command format | Invoke | Context file | Source of truth |
 |----------|--------------|--------------------|----------------|--------|--------------|-----------------|
-| **Claude Code** | 1.0+ | `.claude/commands/` | Markdown + frontmatter, `$ARGUMENTS` | `/conductor-setup` | `CLAUDE.md` | ✅ canonical |
-| **OpenAI Codex CLI** | custom prompts | `~/.codex/prompts/` | Markdown, `$ARGUMENTS`/`$1`…`$9` | `/conductor-setup` | `AGENTS.md` | generated |
-| **Cursor** | 1.6+ | `.cursor/commands/` | Plain Markdown (no frontmatter) | `/conductor-setup` | `.cursor/rules/*.mdc` | generated |
-| **Google Antigravity** | workflows support | `.agent/workflows/` | Markdown + YAML frontmatter | `/conductor-setup` | `AGENTS.md` | generated |
-| **GitHub Copilot** | prompt files (VS Code / CLI) | `.github/prompts/` | `*.prompt.md` + YAML frontmatter | `/conductor-setup` | `.github/copilot-instructions.md` | generated |
+| **Claude Code** | 1.0+ | `.claude/commands/` | Markdown + frontmatter, `$ARGUMENTS` | `/cadre-setup` | `CLAUDE.md` | ✅ canonical |
+| **OpenAI Codex CLI** | custom prompts | `~/.codex/prompts/` | Markdown, `$ARGUMENTS`/`$1`…`$9` | `/cadre-setup` | `AGENTS.md` | generated |
+| **Cursor** | 1.6+ | `.cursor/commands/` | Plain Markdown (no frontmatter) | `/cadre-setup` | `.cursor/rules/*.mdc` | generated |
+| **Google Antigravity** | workflows support | `.agent/workflows/` | Markdown + YAML frontmatter | `/cadre-setup` | `AGENTS.md` | generated |
+| **GitHub Copilot** | prompt files (VS Code / CLI) | `.github/prompts/` | `*.prompt.md` + YAML frontmatter | `/cadre-setup` | `.github/copilot-instructions.md` | generated |
 
 > The **Claude Code** `.claude/commands/*.md` files are the single source of
 > truth. Codex, Cursor, Antigravity, and Copilot command sets are generated from
 > them by [`scripts/generate-commands.sh`](../scripts/generate-commands.sh).
 
-All five platforms operate on the **same** `conductor/` and `.beads/`
+All five platforms operate on the **same** `cadre/` and `.beads/`
 directories, so you can mix tools on one repository (e.g. plan in Cursor,
 implement in Claude Code).
 
@@ -55,14 +55,14 @@ Verify:
 bd --version
 ```
 
-Beads integration is always attempted. If `bd` is unavailable, Conductor prompts
+Beads integration is always attempted. If `bd` is unavailable, Cadre prompts
 you to continue without persistent memory.
 
 Clone the repo once — every install below copies from it:
 
 ```bash
-git clone https://github.com/vishal-kr-barnwal/Conductor-Beads.git
-cd Conductor-Beads
+git clone https://github.com/vishal-kr-barnwal/Cadre.git
+cd Cadre
 ```
 
 ---
@@ -106,8 +106,8 @@ cp -r .claude/commands your-project/.claude/commands
 cp -r .claude/skills   your-project/.claude/skills
 ```
 
-Context lives in `CLAUDE.md`. Invoke with `/conductor-setup`,
-`/conductor-newtrack`, etc.
+Context lives in `CLAUDE.md`. Invoke with `/cadre-setup`,
+`/cadre-newtrack`, etc.
 
 ### OpenAI Codex CLI
 
@@ -119,7 +119,7 @@ mkdir -p ~/.codex/prompts
 cp -r .codex/prompts/* ~/.codex/prompts/
 ```
 
-Add Conductor context to your project so Codex knows the conventions. Copy the
+Add Cadre context to your project so Codex knows the conventions. Copy the
 template `AGENTS.md` into the project root (or run `/init` and paste the
 relevant sections):
 
@@ -127,9 +127,9 @@ relevant sections):
 cp AGENTS.md your-project/AGENTS.md
 ```
 
-Invoke from the Codex slash menu: type `/` then `conductor-setup` (or
-`/prompts:conductor-setup`). Codex expands `$ARGUMENTS` and `$1`…`$9`, so
-`/conductor-newtrack Add OAuth login` passes the description through.
+Invoke from the Codex slash menu: type `/` then `cadre-setup` (or
+`/prompts:cadre-setup`). Codex expands `$ARGUMENTS` and `$1`…`$9`, so
+`/cadre-newtrack Add OAuth login` passes the description through.
 
 > **Note:** OpenAI marks custom prompts as deprecated in favor of Skills, but
 > they remain fully supported. If you prefer Skills, the same Markdown bodies
@@ -144,15 +144,15 @@ Cursor commands are per-project Markdown files (or user-global in
 # Project-scoped
 mkdir -p your-project/.cursor/commands your-project/.cursor/rules
 cp -r .cursor/commands/* your-project/.cursor/commands/
-cp .cursor/rules/conductor.mdc your-project/.cursor/rules/
+cp .cursor/rules/cadre.mdc your-project/.cursor/rules/
 
 # Or user-global (all projects)
 mkdir -p ~/.cursor/commands
 cp -r .cursor/commands/* ~/.cursor/commands/
 ```
 
-The `.cursor/rules/conductor.mdc` rule loads the Conductor conventions
-automatically. In the Agent input, type `/` and pick `conductor-setup`; any text
+The `.cursor/rules/cadre.mdc` rule loads the Cadre conventions
+automatically. In the Agent input, type `/` and pick `cadre-setup`; any text
 you type after the command name becomes its input.
 
 ### Google Antigravity
@@ -165,7 +165,7 @@ cp -r .agent/workflows/* your-project/.agent/workflows/
 cp AGENTS.md your-project/AGENTS.md
 ```
 
-Invoke a workflow with `/conductor-setup` (Antigravity matches the workflow file
+Invoke a workflow with `/cadre-setup` (Antigravity matches the workflow file
 name). `AGENTS.md` supplies the project context/rules.
 
 > To let a workflow auto-run shell steps without confirmation, add a `// turbo`
@@ -185,7 +185,7 @@ cp .github/copilot-instructions.md your-project/.github/copilot-instructions.md
 
 Enable prompt files in VS Code if needed
 (`"chat.promptFiles": true` in settings). In Copilot Chat, type `/` then
-`conductor-setup`. The frontmatter sets `agent: agent` so each command runs in
+`cadre-setup`. The frontmatter sets `agent: agent` so each command runs in
 agent mode.
 
 ---
@@ -193,7 +193,7 @@ agent mode.
 ## How commands are generated
 
 The Codex, Cursor, Antigravity, and Copilot command sets are **generated** from
-the canonical Claude Code commands in `.claude/commands/conductor-*.md` by:
+the canonical Claude Code commands in `.claude/commands/cadre-*.md` by:
 
 ```bash
 bash scripts/generate-commands.sh
@@ -218,22 +218,22 @@ To avoid shipping every tool's instructions to every tool, the multi-platform
 references are **sliced per agent**. Their masters live in `scripts/agent-refs/`
 with `<!-- AGENT:<name> -->` blocks; the generator emits a copy to each platform
 (Claude included) containing only the shared text plus that platform's block.
-The one-line worker-dispatch sentence in `conductor-implement` is likewise
+The one-line worker-dispatch sentence in `cadre-implement` is likewise
 substituted per platform. Net result: a Codex bundle never carries Cursor's or
 Copilot's parallel/locator instructions. Edit the masters in `scripts/agent-refs/`
 (not the generated `references/` copies) and regenerate.
 
 ### Templates bundling
 
-`conductor-setup` copies starter files (`workflow.md`, `code_styleguides/`, …)
+`cadre-setup` copies starter files (`workflow.md`, `code_styleguides/`, …)
 into your project. Those live in the canonical `templates/` directory, and the
 generator bundles a copy into **every** command set — `.codex/prompts/templates/`,
 `.cursor/commands/templates/`, `.agent/workflows/templates/`,
 `.github/prompts/templates/` — plus the Claude skill at
-`.claude/skills/conductor/templates/`. Because each platform's install command
+`.claude/skills/cadre/templates/`. Because each platform's install command
 copies its whole directory, the templates ship with the commands.
 
-`conductor-setup` then **discovers** the templates directory at runtime by
+`cadre-setup` then **discovers** the templates directory at runtime by
 probing those install locations (and `~/.codex/prompts/templates/` for Codex's
 global prompts), so it works regardless of which tool or install scope you use.
 Edit templates only in the canonical `templates/` directory and regenerate.
@@ -249,23 +249,23 @@ bash scripts/generate-commands.sh --check
 This exits non-zero if any generated file is stale.
 
 A ready-made drift gate ships at
-`templates/ci/conductor-monorepo-check.{github,gitlab}.yml` — drop the one for
+`templates/ci/cadre-monorepo-check.{github,gitlab}.yml` — drop the one for
 your CI into place and it runs `generate-commands.sh --check` (plus `bash -n` on
 the command scripts) on every PR. The `templates/` directory now includes a
 `ci/` subdirectory carrying both this monorepo-check and the polyrepo
-merge-train workflows (`conductor-merge-train.{github,gitlab}.yml`).
+merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
 
 ---
 
 ## Versioning policy
 
-Conductor-Beads uses [semantic versioning](https://semver.org/). The version is
+Cadre uses [semantic versioning](https://semver.org/). The version is
 declared in `README.md` (the `**Version:**` line). Per-release changes are
 recorded in the [Changelog](../CHANGELOG.md).
 
 | Bump | When |
 |------|------|
-| **Major** (`x.0.0`) | Breaking changes to the `conductor/` directory layout, command behavior, or Beads schema that require migration. |
+| **Major** (`x.0.0`) | Breaking changes to the `cadre/` directory layout, command behavior, or Beads schema that require migration. |
 | **Minor** (`0.x.0`) | New commands, new platform support, or new opt-in features. Backward compatible. |
 | **Patch** (`0.0.x`) | Bug fixes and documentation. |
 

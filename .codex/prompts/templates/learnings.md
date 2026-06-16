@@ -4,7 +4,7 @@ Patterns, gotchas, and context discovered during implementation.
 
 ## Codebase Patterns (Inherited)
 
-<!-- Patterns copied from conductor/patterns.md or similar archived tracks -->
+<!-- Patterns copied from cadre/patterns.md or similar archived tracks -->
 
 ---
 

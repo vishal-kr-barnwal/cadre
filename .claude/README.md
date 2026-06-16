@@ -1,8 +1,8 @@
-# Conductor for Claude Code
+# Cadre for Claude Code
 
 Context-driven development for AI coding assistants. **Measure twice, code once.**
 
-Conductor helps you plan before you build - creating specs, implementation plans, and tracking progress through "tracks" (features, bugs, improvements).
+Cadre helps you plan before you build - creating specs, implementation plans, and tracking progress through "tracks" (features, bugs, improvements).
 
 ## Installation
 
@@ -10,10 +10,10 @@ Conductor helps you plan before you build - creating specs, implementation plans
 
 ```bash
 # Add the marketplace
-/plugin marketplace add vishal-kr-barnwal/Conductor-Beads
+/plugin marketplace add vishal-kr-barnwal/Cadre
 
 # Install the plugin
-/plugin install conductor
+/plugin install cadre
 
 # Verify installation
 /help
@@ -21,7 +21,7 @@ Conductor helps you plan before you build - creating specs, implementation plans
 
 This installs:
 - **16 slash commands** for direct invocation
-- **1 skill** that auto-activates for conductor projects
+- **1 skill** that auto-activates for cadre projects
 
 ### Option 2: Agent Skills Compatible CLI
 
@@ -29,23 +29,23 @@ If your CLI supports the [Agent Skills specification](https://agentskills.io):
 
 ```bash
 # Point to the skill directory
-skills/conductor/
+skills/cadre/
 ├── SKILL.md                    # Entry point - overview, intent mapping, command routing
 └── references/
     ├── workflows.md            # Workflow overview, state files, Beads & parallel overview
     ├── structure.md            # Directory structure reference
     ├── beads-integration.md    # Beads session protocol, CLI commands, chemistry
     ├── learnings-system.md     # Ralph-style knowledge capture
-    ├── patterns-template.md    # Template for conductor/patterns.md
+    ├── patterns-template.md    # Template for cadre/patterns.md
     └── learnings-template.md   # Template for track learnings.md
 ```
 
 > Command protocols are not duplicated under the skill. Each command's full
-> step-by-step protocol lives in the canonical `.claude/commands/conductor-*.md`
+> step-by-step protocol lives in the canonical `.claude/commands/cadre-*.md`
 > (16 commands); `SKILL.md` links to them directly.
 
 The skill follows the Agent Skills spec with full frontmatter:
-- `name`: conductor
+- `name`: cadre
 - `description`: Context-driven development methodology
 - `license`: Apache-2.0
 - `compatibility`: Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, GitHub Copilot, any Agent Skills compatible CLI
@@ -55,13 +55,13 @@ The skill follows the Agent Skills spec with full frontmatter:
 
 Copy to your project:
 ```bash
-cp -r /path/to/conductor/.claude your-project/
+cp -r /path/to/cadre/.claude your-project/
 ```
 
 Or for global access (all projects):
 ```bash
-cp -r /path/to/conductor/.claude/commands/* ~/.claude/commands/
-cp -r /path/to/conductor/.claude/skills/* ~/.claude/skills/
+cp -r /path/to/cadre/.claude/commands/* ~/.claude/commands/
+cp -r /path/to/cadre/.claude/skills/* ~/.claude/skills/
 ```
 
 ### Option 4: Other platforms (Codex, Cursor, Antigravity, Copilot)
@@ -75,41 +75,41 @@ per-platform setup. They are generated from these Claude commands by
 
 | Command | Description |
 |---------|-------------|
-| `/conductor-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
-| `/conductor-newtrack [desc]` | Create new feature/bug track with spec and plan |
-| `/conductor-implement [id]` | Execute tasks from track's plan (TDD workflow) |
-| `/conductor-status [--export]` | Display progress overview (or export a summary) |
-| `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
-| `/conductor-validate` | Validate project integrity |
-| `/conductor-flag <blocked\|skipped>` | Flag the current task as blocked or skipped |
-| `/conductor-revise` | Update spec/plan when issues found |
-| `/conductor-review` | Review a track's diff before shipping (quality gate) |
-| `/conductor-ship` | Rebase a reviewed track onto main, push, prepare the PR |
-| `/conductor-archive` | Archive completed tracks (local cleanup + learnings) |
-| `/conductor-release` | Cut a local release — changelog + version tag |
-| `/conductor-handoff` | Create context handoff for session transfer |
-| `/conductor-refresh` | Sync context docs with codebase state |
-| `/conductor-formula` | Manage track templates: list, show, create, ephemeral wisp |
+| `/cadre-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
+| `/cadre-newtrack [desc]` | Create new feature/bug track with spec and plan |
+| `/cadre-implement [id]` | Execute tasks from track's plan (TDD workflow) |
+| `/cadre-status [--export]` | Display progress overview (or export a summary) |
+| `/cadre-revert` | Git-aware revert of tracks, phases, or tasks |
+| `/cadre-validate` | Validate project integrity |
+| `/cadre-flag <blocked\|skipped>` | Flag the current task as blocked or skipped |
+| `/cadre-revise` | Update spec/plan when issues found |
+| `/cadre-review` | Review a track's diff before shipping (quality gate) |
+| `/cadre-ship` | Rebase a reviewed track onto main, push, prepare the PR |
+| `/cadre-archive` | Archive completed tracks (local cleanup + learnings) |
+| `/cadre-release` | Cut a local release — changelog + version tag |
+| `/cadre-handoff` | Create context handoff for session transfer |
+| `/cadre-refresh` | Sync context docs with codebase state |
+| `/cadre-formula` | Manage track templates: list, show, create, ephemeral wisp |
 
 ## Skill (Auto-Activation)
 
-The conductor skill automatically activates when Claude detects:
-- A `conductor/` directory in the project
+The cadre skill automatically activates when Claude detects:
+- A `cadre/` directory in the project
 - References to tracks, specs, plans
 - Context-driven development keywords
 
 You can also use natural language:
 - "Help me plan the authentication feature"
 - "What's the current project status?"
-- "Set up this project with Conductor"
+- "Set up this project with Cadre"
 - "Create a spec for the dark mode feature"
 
 ## How It Works
 
 ### 1. Setup
-Run `/conductor-setup` to initialize your project with:
+Run `/cadre-setup` to initialize your project with:
 ```
-conductor/
+cadre/
 ├── product.md           # What you're building and for whom
 ├── tech-stack.md        # Technology choices and constraints
 ├── workflow.md          # Development standards (TDD, commits)
@@ -119,9 +119,9 @@ conductor/
 ```
 
 ### 2. Create Tracks
-Run `/conductor-newtrack "Add user authentication"` to create:
+Run `/cadre-newtrack "Add user authentication"` to create:
 ```
-conductor/tracks/auth_20241219/
+cadre/tracks/auth_20241219/
 ├── metadata.json        # Track type, status, dates, priority
 ├── spec.md              # Requirements and acceptance criteria
 ├── plan.md              # Phased implementation plan
@@ -129,7 +129,7 @@ conductor/tracks/auth_20241219/
 ```
 
 ### 3. Implement
-Run `/conductor-implement` to execute the plan:
+Run `/cadre-implement` to execute the plan:
 - Follows TDD: Write tests → Implement → Refactor
 - Commits after each task with conventional messages
 - Updates plan.md with progress and commit SHAs
@@ -137,7 +137,7 @@ Run `/conductor-implement` to execute the plan:
 - Verifies at phase completion
 
 ### 4. Track Progress
-Run `/conductor-status` to see:
+Run `/cadre-status` to see:
 - Overall project progress with priority grouping
 - Current active track and task
 - Parallel worker status (if active)
@@ -146,7 +146,7 @@ Run `/conductor-status` to see:
 
 ## Status Markers
 
-Throughout conductor files:
+Throughout cadre files:
 - `[ ]` - Pending/New
 - `[~]` - In Progress
 - `[x]` - Completed (with commit SHA)
@@ -157,7 +157,7 @@ Throughout conductor files:
 
 Projects work across every supported tool — Claude Code, OpenAI Codex CLI,
 Cursor, Google Antigravity, and GitHub Copilot. All of them invoke the same
-command name (e.g. `/conductor-setup`) and operate on the same `conductor/` and
+command name (e.g. `/cadre-setup`) and operate on the same `cadre/` and
 `.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor,
 implement in Claude Code) with full compatibility.
 
@@ -169,23 +169,23 @@ matrix and per-platform setup.
 ```
 .claude/
 ├── commands/                     # Claude Code slash commands (15)
-│   ├── conductor-setup.md
-│   ├── conductor-newtrack.md
-│   ├── conductor-implement.md
-│   ├── conductor-status.md
-│   ├── conductor-revert.md
-│   ├── conductor-validate.md
-│   ├── conductor-flag.md
-│   ├── conductor-revise.md
-│   ├── conductor-review.md
-│   ├── conductor-ship.md
-│   ├── conductor-archive.md
-│   ├── conductor-release.md
-│   ├── conductor-handoff.md
-│   ├── conductor-refresh.md
-│   └── conductor-formula.md
+│   ├── cadre-setup.md
+│   ├── cadre-newtrack.md
+│   ├── cadre-implement.md
+│   ├── cadre-status.md
+│   ├── cadre-revert.md
+│   ├── cadre-validate.md
+│   ├── cadre-flag.md
+│   ├── cadre-revise.md
+│   ├── cadre-review.md
+│   ├── cadre-ship.md
+│   ├── cadre-archive.md
+│   ├── cadre-release.md
+│   ├── cadre-handoff.md
+│   ├── cadre-refresh.md
+│   └── cadre-formula.md
 ├── skills/
-│   ├── conductor/                # Context-driven development skill
+│   ├── cadre/                # Context-driven development skill
 │   │   ├── SKILL.md              # Entry point (overview, intent mapping, command routing)
 │   │   └── references/
 │   │       ├── workflows.md      # Workflow overview, state files, Beads & parallel overview
@@ -194,7 +194,7 @@ matrix and per-platform setup.
 │   │       ├── learnings-system.md
 │   │       ├── patterns-template.md
 │   │       └── learnings-template.md
-│   │       # Command protocols live in canonical .claude/commands/conductor-*.md (16)
+│   │       # Command protocols live in canonical .claude/commands/cadre-*.md (16)
 │   ├── beads/                    # Persistent task memory skill
 │   └── skill-creator/            # Skill development guide
 └── README.md                     # This file
@@ -202,7 +202,7 @@ matrix and per-platform setup.
 
 ## Links
 
-- [GitHub Repository](https://github.com/vishal-kr-barnwal/Conductor-Beads)
+- [GitHub Repository](https://github.com/vishal-kr-barnwal/Cadre)
 - [Install & Version Guide](../docs/INSTALL.md)
 - [Agent Skills Specification](https://agentskills.io)
 

@@ -29,13 +29,13 @@ Example:
 All tasks follow a strict lifecycle:
 
 > **Polyrepo note.** If this project is in polyrepo mode (a
-> `conductor/repos.json` with `"mode": "polyrepo"` exists), branches, commits,
+> `cadre/repos.json` with `"mode": "polyrepo"` exists), branches, commits,
 > and worktrees are **per-repo**. Each task carries a `<!-- repo: <name> -->`
 > annotation naming which submodule it targets (absent → `default_repo`); its
 > tests, implementation, and commit all happen inside *that repo's* worktree,
 > and the recorded SHA belongs to that repo. The control repo only holds
-> `conductor/` state. Product code is never pushed by `/conductor-implement`;
-> branches go up at `/conductor-land` for the cross-repo PR group. In monorepo
+> `cadre/` state. Product code is never pushed by `/cadre-implement`;
+> branches go up at `/cadre-land` for the cross-repo PR group. In monorepo
 > mode (no `repos.json`) everything below is single-repo as usual.
 
 ### Standard Task Workflow
@@ -89,7 +89,7 @@ All tasks follow a strict lifecycle:
 
 11. **Commit Plan Update:**
     - **Action:** Stage the modified `plan.md` file.
-    - **Action:** Commit this change with a descriptive message (e.g., `conductor(plan): Mark task 'Create user model' as complete`).
+    - **Action:** Commit this change with a descriptive message (e.g., `cadre(plan): Mark task 'Create user model' as complete`).
 
 ### Phase Completion Verification and Checkpointing Protocol
 
@@ -142,7 +142,7 @@ All tasks follow a strict lifecycle:
 
 6.  **Create Checkpoint Commit:**
     -   Stage all changes. If no changes occurred in this step, proceed with an empty commit.
-    -   Perform the commit with a clear and concise message (e.g., `conductor(checkpoint): Checkpoint end of Phase X`).
+    -   Perform the commit with a clear and concise message (e.g., `cadre(checkpoint): Checkpoint end of Phase X`).
 
 7.  **Attach Auditable Verification Report using Git Notes:**
     -   **Step 8.1: Draft Note Content:** Create a detailed verification report including the automated test command, the manual verification steps, and the user's confirmation.
@@ -155,7 +155,7 @@ All tasks follow a strict lifecycle:
 
 9. **Commit Plan Update:**
     - **Action:** Stage the modified `plan.md` file.
-    - **Action:** Commit this change with a descriptive message following the format `conductor(plan): Mark phase '<PHASE NAME>' as complete`.
+    - **Action:** Commit this change with a descriptive message following the format `cadre(plan): Mark phase '<PHASE NAME>' as complete`.
 
 10.  **Announce Completion:** Inform the user that the phase is complete and the checkpoint has been created, with the detailed verification report attached as a git note.
 
@@ -335,7 +335,7 @@ A task is complete when:
 - [ ] Backup created
 
 ### Git Push Policy
-**IMPORTANT:** Conductor commits locally but **NEVER pushes automatically**.
+**IMPORTANT:** Cadre commits locally but **NEVER pushes automatically**.
 - All commits remain local until the user explicitly pushes
 - Users decide when and how to push to remote repositories
 - This allows for commit squashing, rebase, or other git workflows before pushing

@@ -1,18 +1,18 @@
-# Conductor + Beads Integration
+# Cadre + Beads Integration
 
 > **Status**: Implemented  
 > **Version**: 0.2.0
 
 ## Overview
 
-This spec defines how Conductor's context-driven development methodology integrates with Beads' persistent task memory system, creating a unified workflow that combines:
+This spec defines how Cadre's context-driven development methodology integrates with Beads' persistent task memory system, creating a unified workflow that combines:
 
-- **Conductor**: Spec-first planning, human-readable context, TDD workflow
+- **Cadre**: Spec-first planning, human-readable context, TDD workflow
 - **Beads**: Dependency-aware graph, cross-session memory, agent-optimized output
 
 ## Design Principles
 
-1. **Conductor owns planning** - Specs, product vision, and phase organization
+1. **Cadre owns planning** - Specs, product vision, and phase organization
 2. **Beads owns execution** - Task tracking, dependencies, and persistent memory
 3. **Bidirectional sync** - Changes in either system reflect in both
 4. **Graceful degradation** - If Beads unavailable, user can choose to continue without it
@@ -31,7 +31,7 @@ This spec defines how Conductor's context-driven development methodology integra
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Conductor Skill                            │
+│                   Cadre Skill                            │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │ product.md  │  │ tech-stack  │  │     workflow.md     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
@@ -63,25 +63,25 @@ This spec defines how Conductor's context-driven development methodology integra
 
 ## Workflow Integration
 
-### Phase 1: Setup (`/conductor-setup` + `bd init`)
+### Phase 1: Setup (`/cadre-setup` + `bd init`)
 
-When user runs `/conductor-setup`:
+When user runs `/cadre-setup`:
 
-1. **Conductor creates** standard context files
+1. **Cadre creates** standard context files
 2. **If Beads available**, also run:
    ```bash
    bd init              # Initialize .beads/ directory
    # OR for shared repos:
    bd init --stealth    # Keep Beads local-only
    ```
-3. **Create linking config** in `conductor/beads.json` (copied from the bundled
-   template; `conductor-setup` sets `mode` to `normal` or `stealth`):
+3. **Create linking config** in `cadre/beads.json` (copied from the bundled
+   template; `cadre-setup` sets `mode` to `normal` or `stealth`):
    ```json
    {
      "enabled": true,
      "mode": "stealth",
      "memoryStrategy": "beads-primary",
-     "epicPrefix": "conductor",
+     "epicPrefix": "cadre",
      "autoCreateTasks": true,
      "compactOnPhaseComplete": true,
      "pushOnTaskComplete": false,
@@ -92,15 +92,15 @@ When user runs `/conductor-setup`:
    }
    ```
 
-### Phase 2: Track Creation (`/conductor-newtrack` + `bd create`)
+### Phase 2: Track Creation (`/cadre-newtrack` + `bd create`)
 
 When creating a new track:
 
 ```
-User: /conductor-newtrack Add user authentication
+User: /cadre-newtrack Add user authentication
 
-Conductor Actions:
-1. Create conductor/tracks/auth_20241226/
+Cadre Actions:
+1. Create cadre/tracks/auth_20241226/
 2. Generate spec.md with requirements
 3. Generate plan.md with phased tasks
 
@@ -119,7 +119,7 @@ Beads Actions:
    bd dep add bd-a3f8.2 bd-a3f8.1  # .2 blocked by .1
 ```
 
-**Metadata linkage** in `conductor/tracks/auth_20241226/metadata.json`:
+**Metadata linkage** in `cadre/tracks/auth_20241226/metadata.json`:
 ```json
 {
   "id": "auth_20241226",
@@ -131,15 +131,15 @@ Beads Actions:
 }
 ```
 
-### Phase 3: Implementation (`/conductor-implement` + `bd ready`)
+### Phase 3: Implementation (`/cadre-implement` + `bd ready`)
 
 When implementing:
 
 ```
-User: /conductor-implement auth_20241226
+User: /cadre-implement auth_20241226
 
 Combined Workflow:
-1. Conductor loads spec.md and plan.md for context
+1. Cadre loads spec.md and plan.md for context
 2. Get AI-optimized context:
    bd prime
    
@@ -152,7 +152,7 @@ Combined Workflow:
      --notes "Started: Write auth tests
    APPROACH: JWT with RS256 for key rotation"
 
-5. Execute TDD workflow (from Conductor):
+5. Execute TDD workflow (from Cadre):
    - Write failing tests (Red)
    - Implement to pass (Green)
    - Refactor
@@ -167,19 +167,19 @@ Combined Workflow:
    bd close bd-a3f8.1 --continue --reason "Task completed"
    (The --continue flag auto-advances to next step)
    
-8. Conductor updates plan.md with commit SHA
+8. Cadre updates plan.md with commit SHA
 ```
 
-### Phase 4: Status & Progress (`/conductor-status` + `bd show`)
+### Phase 4: Status & Progress (`/cadre-status` + `bd show`)
 
 ```
-User: /conductor-status
+User: /cadre-status
 
 Output combines both sources:
 
 # Project Status
 
-## Active Tracks (from Conductor)
+## Active Tracks (from Cadre)
 - [~] auth_20241226 - Add user authentication
 
 ## Task Progress (from Beads)
@@ -196,13 +196,13 @@ bd show bd-a3f8.3 --deps
   Blocked by: bd-a3f8.2 (in progress)
 ```
 
-### Phase 5: Blocking & Dependencies (`/conductor-flag blocked` + `bd dep`)
+### Phase 5: Blocking & Dependencies (`/cadre-flag blocked` + `bd dep`)
 
 ```
-User: /conductor-flag blocked - External API not ready
+User: /cadre-flag blocked - External API not ready
 
 Actions:
-1. Conductor marks task [B] in plan.md
+1. Cadre marks task [B] in plan.md
 2. Beads records blocker:
    bd update bd-a3f8.2 --status blocked --note "External API not ready"
    
@@ -219,11 +219,11 @@ Agent Session Start:
 1. bd ready                    # What can I work on?
 2. bd show bd-a3f8.1           # Get full context: notes, design, acceptance
 3. Read notes for: COMPLETED, IN PROGRESS, NEXT, KEY DECISIONS
-4. Load conductor/tracks/auth_20241226/spec.md for context
+4. Load cadre/tracks/auth_20241226/spec.md for context
 5. Resume work
 ```
 
-Beads' persistent notes survive conversation compaction, while Conductor's markdown provides human-readable context.
+Beads' persistent notes survive conversation compaction, while Cadre's markdown provides human-readable context.
 
 ### Structured Notes Format
 
@@ -262,41 +262,41 @@ bd dolt push                      # Push changes to remote
 
 ## Command Mapping
 
-| Conductor Command | Beads Equivalent | Integration |
+| Cadre Command | Beads Equivalent | Integration |
 |-------------------|------------------|-------------|
-| `/conductor-setup` | `bd init` | Run both |
-| `/conductor-newtrack` | `bd create` (epic + tasks) | Create track + epic with `--design`, `--acceptance` |
-| `/conductor-implement` | `bd ready`, `bd update`, `bd close` | Query ready, track progress, complete |
-| `/conductor-status` | `bd ready`, `bd show` | Combine outputs, read notes for context |
-| `/conductor-flag blocked` | `bd update --status blocked` | Sync both with structured notes |
-| `/conductor-flag skipped` | `bd close` or `bd update` | Mark in both based on skip reason |
-| `/conductor-handoff` | `bd note`, `bd dolt push` | Save context + push to remote |
-| `/conductor-ship` | `bd dolt push` | Flush Dolt before rebase/push |
-| `/conductor-revert` | `bd reopen` | Sync status |
-| `/conductor-archive` | `bd compact --auto` | Archive track + compact |
+| `/cadre-setup` | `bd init` | Run both |
+| `/cadre-newtrack` | `bd create` (epic + tasks) | Create track + epic with `--design`, `--acceptance` |
+| `/cadre-implement` | `bd ready`, `bd update`, `bd close` | Query ready, track progress, complete |
+| `/cadre-status` | `bd ready`, `bd show` | Combine outputs, read notes for context |
+| `/cadre-flag blocked` | `bd update --status blocked` | Sync both with structured notes |
+| `/cadre-flag skipped` | `bd close` or `bd update` | Mark in both based on skip reason |
+| `/cadre-handoff` | `bd note`, `bd dolt push` | Save context + push to remote |
+| `/cadre-ship` | `bd dolt push` | Flush Dolt before rebase/push |
+| `/cadre-revert` | `bd reopen` | Sync status |
+| `/cadre-archive` | `bd compact --auto` | Archive track + compact |
 
 ## Data Synchronization
 
-### Conductor → Beads (Plan Changes)
+### Cadre → Beads (Plan Changes)
 
 When `plan.md` is edited:
 1. Detect new/removed/reordered tasks
 2. Create/close Beads issues accordingly
 3. Update dependency graph for new order
 
-### Beads → Conductor (Status Changes)
+### Beads → Cadre (Status Changes)
 
 When `bd close` or `bd update` runs:
 1. Update corresponding task in `plan.md`
 2. Add commit SHA if available
 3. Update the track's `metadata.json` `status` (the single source of truth for
    track status) if the epic is complete — never hand-flip the `tracks.md` marker;
-   regenerate the cache via `/conductor-status --regen-index`
+   regenerate the cache via `/cadre-status --regen-index`
 
 ### Conflict Resolution
 
 Priority: **`metadata.json` `status` is the authoritative source of truth for
-track status** (`tracks.md` is a derived cache that mirrors it). Conductor owns
+track status** (`tracks.md` is a derived cache that mirrors it). Cadre owns
 specs and plans. In `sync_mode: "shared"` the Beads Dolt graph is the canonical
 store that `metadata.json`, `tracks.md`, and the state JSON all mirror — pull/push
 it to reconcile teammates.
@@ -304,7 +304,7 @@ it to reconcile teammates.
 ```
 Conflict: plan.md says [x], metadata.json/Beads says the task is active
 Resolution: Reconcile plan.md against metadata.json (agent likely still working),
-            then run /conductor-status --regen-index — do not silently rewrite plan.md
+            then run /cadre-status --regen-index — do not silently rewrite plan.md
 
 Conflict: Beads has task not in plan.md
 Resolution: Add to plan.md under "Unplanned Tasks" section
@@ -312,9 +312,9 @@ Resolution: Add to plan.md under "Unplanned Tasks" section
 
 ## Configuration
 
-### conductor/beads.json
+### cadre/beads.json
 
-This is the canonical schema, written by `conductor-setup` from the bundled
+This is the canonical schema, written by `cadre-setup` from the bundled
 `templates/beads.json`. `mode` is the only field setup changes (`normal` vs
 `stealth`).
 
@@ -323,7 +323,7 @@ This is the canonical schema, written by `conductor-setup` from the bundled
   "enabled": true,
   "mode": "normal",
   "memoryStrategy": "beads-primary",
-  "epicPrefix": "conductor",
+  "epicPrefix": "cadre",
   "autoCreateTasks": true,
   "compactOnPhaseComplete": true,
   "pushOnTaskComplete": false,
@@ -342,13 +342,13 @@ This is the canonical schema, written by `conductor-setup` from the bundled
 | `epicPrefix` | Prefix for Beads epic IDs created per track |
 | `autoCreateTasks` | Create Beads tasks automatically from plan.md |
 | `compactOnPhaseComplete` | Compact Beads history at each phase boundary |
-| `pushOnTaskComplete` / `pushOnPhaseComplete` / `pushOnTrackComplete` | When to push (Conductor never pushes on task complete by default) |
+| `pushOnTaskComplete` / `pushOnPhaseComplete` / `pushOnTrackComplete` | When to push (Cadre never pushes on task complete by default) |
 | `worktreePerTrack` / `worktreePerWorker` | Isolate tracks/parallel workers in their own git worktrees |
 
 ### Detection Logic
 
 Skill activation checks:
-1. Does `conductor/` exist? → Load Conductor
+1. Does `cadre/` exist? → Load Cadre
 2. Does `.beads/` exist? → Also load Beads integration
 3. Both present? → Use combined workflow
 
@@ -356,20 +356,20 @@ Skill activation checks:
 
 > All phases below are shipped (this spec is **Status: Implemented**). Two
 > team-scale refinements layer on top: task **assignees use the git committer
-> identity** (`user.email` → `user.name`, never a literal `conductor`), and
-> `/conductor-review` stamps the Beads epic with a `review:ready` or
-> `review:changes` label that `/conductor-ship` and `/conductor-land` gate on.
+> identity** (`user.email` → `user.name`, never a literal `cadre`), and
+> `/cadre-review` stamps the Beads epic with a `review:ready` or
+> `review:changes` label that `/cadre-ship` and `/cadre-land` gate on.
 
 ### Phase 1: Basic Integration (MVP)
-- [x] Add `bd init` to `/conductor-setup`
-- [x] Create epic on `/conductor-newtrack`
-- [x] Query `bd ready` in `/conductor-implement`
+- [x] Add `bd init` to `/cadre-setup`
+- [x] Create epic on `/cadre-newtrack`
+- [x] Query `bd ready` in `/cadre-implement`
 - [x] Sync completion status
 
 ### Phase 2: Full Sync
 - [x] Bidirectional plan.md ↔ Beads sync
 - [x] Dependency graph from phase order
-- [x] Status aggregation in `/conductor-status`
+- [x] Status aggregation in `/cadre-status`
 
 ### Phase 3: Advanced Features
 - [x] Beads compaction on archive
@@ -378,7 +378,7 @@ Skill activation checks:
 
 ## Parallel Execution Integration
 
-Beads provides robust coordination for Conductor's parallel task execution feature.
+Beads provides robust coordination for Cadre's parallel task execution feature.
 
 ### Why Beads is Ideal for Parallel Execution
 
@@ -515,7 +515,7 @@ bd update <task_id> --status blocked \
 
 ## Benefits
 
-| Capability | Conductor Only | With Beads |
+| Capability | Cadre Only | With Beads |
 |------------|----------------|------------|
 | Cross-session memory | Git notes | Persistent graph |
 | Dependency tracking | Phase order | Full DAG |
@@ -529,19 +529,19 @@ bd update <task_id> --status blocked \
 
 ### Molecules (Workflow Templates)
 
-Conductor tracks can be extracted as reusable templates:
+Cadre tracks can be extracted as reusable templates:
 
-| Beads Concept | Conductor Mapping | Command |
+| Beads Concept | Cadre Mapping | Command |
 |---------------|-------------------|---------|
 | **Formula** | Track template source | `bd formula list` |
 | **Proto** | Frozen template | `bd cook <formula>` |
 | **Mol** | Persistent track | `bd mol pour <proto>` |
 | **Wisp** | Ephemeral exploration | `bd mol wisp <proto>` |
 
-**Conductor Commands (all under `/conductor-formula`):**
-- `/conductor-formula list` - List available templates
-- `/conductor-formula wisp` - Quick ephemeral exploration
-- `/conductor-formula create` - Extract template from completed track
+**Cadre Commands (all under `/cadre-formula`):**
+- `/cadre-formula list` - List available templates
+- `/cadre-formula wisp` - Quick ephemeral exploration
+- `/cadre-formula create` - Extract template from completed track
 
 ### Gates (v0.40+)
 
@@ -574,12 +574,12 @@ bd dep add <issue> external:project-a:auth-api
 
 2. **Sync frequency** - Real-time vs. on-command sync?
 
-3. **Skill loading** - Load both skills separately or create unified `conductor-beads` skill?
+3. **Skill loading** - Load both skills separately or create unified `cadre-beads` skill?
 
 4. **Fallback behavior** - ~~If `bd` not installed, silent skip or prompt to install?~~ **Resolved**: Always attempt Beads; prompt user to choose if unavailable.
 
 ## References
 
-- [Conductor Skill](../.claude/skills/conductor/SKILL.md)
+- [Cadre Skill](../.claude/skills/cadre/SKILL.md)
 - [Beads Documentation](https://github.com/steveyegge/beads)
 - [Beads Agent Instructions](https://github.com/steveyegge/beads/blob/main/AGENT_INSTRUCTIONS.md)

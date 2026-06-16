@@ -1,0 +1,43 @@
+---
+description: Cadre context-driven development conventions
+alwaysApply: true
+---
+
+# Cadre (Cursor Rule)
+
+This project uses **Cadre** for Context-Driven Development:
+spec-first planning (Cadre) plus a dependency-aware, persistent task graph
+(Beads).
+
+## Commands
+
+Cadre commands are available as Cursor **commands** in `.cursor/commands/`.
+Type `/` in the Agent input and pick one, e.g. `/cadre-setup`,
+`/cadre-newtrack`, `/cadre-implement`, `/cadre-status`. Any text
+typed after the command name is the command's input.
+
+## Tracks
+
+A **track** is a unit of work (feature or bug) under
+`cadre/tracks/<track_id>/` with `spec.md`, `plan.md`, `metadata.json`, and
+`learnings.md`. The master list is `cadre/tracks.md`. Status markers:
+`[ ]` new, `[~]` in progress, `[x]` done, `[!]` blocked, `[-]` skipped.
+
+When the user mentions "the plan", they mean `cadre/tracks.md` or a track's
+`cadre/tracks/<track_id>/plan.md`.
+
+## TDD workflow
+
+Mark a task `[~]`, write a failing test (Red), implement to pass (Green),
+refactor, keep coverage above 80%, then commit with
+`<type>(<scope>): <description>` and record the commit SHA in `plan.md`.
+
+## Beads
+
+If `.beads/` exists, this project uses Beads for persistent memory. Use
+`bd ready` to find unblocked tasks; each track maps to a Beads epic; notes
+survive context compaction. Degrade gracefully if `bd` is unavailable.
+
+## Git policy
+
+**Commit locally; never push automatically.** The user decides when to push.

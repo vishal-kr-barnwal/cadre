@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh — Install the Conductor-Beads commands for your AI coding CLIs.
+# install.sh — Install the Cadre commands for your AI coding CLIs.
 #
 # Detects the supported tools on this machine, lets you pick which ones to set
 # up, and installs either globally (into your home config, e.g. ~/.claude/) or
@@ -140,7 +140,7 @@ install_agent() {
         copy_dir "$REPO_ROOT/.cursor/rules" "$base/.cursor/rules"
         ok "Cursor rule → $base/.cursor/rules"
       else
-        note "Cursor's context rule (.cursor/rules/conductor.mdc) is project-scoped; add it per project."
+        note "Cursor's context rule (.cursor/rules/cadre.mdc) is project-scoped; add it per project."
       fi
       ;;
     antigravity)
@@ -188,7 +188,7 @@ done
 
 # ------------------------------------------------------------------------ banner
 say ""
-say "${BOLD}${CYAN}Conductor-Beads installer${RESET}"
+say "${BOLD}${CYAN}Cadre installer${RESET}"
 say "${DIM}Source: $REPO_ROOT${RESET}"
 $DRY_RUN && warn "dry-run mode: no files will be written"
 say ""
@@ -268,7 +268,7 @@ else
   PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
   BASE="$PROJECT_DIR"
   if [ "$BASE" = "$REPO_ROOT" ]; then
-    warn "target is the Conductor-Beads repo itself — you probably want a different project."
+    warn "target is the Cadre repo itself — you probably want a different project."
   fi
 fi
 
@@ -292,5 +292,5 @@ for a in $SELECTED; do
 done
 
 say ""
-ok "Done. Run ${BOLD}/conductor-setup${RESET}${GREEN}${RESET} in your project to get started."
+ok "Done. Run ${BOLD}/cadre-setup${RESET}${GREEN}${RESET} in your project to get started."
 $DRY_RUN && warn "dry-run: nothing was actually written."
