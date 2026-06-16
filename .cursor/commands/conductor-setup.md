@@ -3,7 +3,6 @@
 <!-- 
 SYSTEM DIRECTIVE: You are an AI agent. Follow these instructions precisely.
 CRITICAL: Validate every tool call. If any fails, halt and announce the failure.
-CRITICAL: When determining model complexity, ALWAYS select the "flash" model.
 -->
 
 # Conductor Setup
