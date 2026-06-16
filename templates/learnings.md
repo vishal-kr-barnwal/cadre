@@ -12,7 +12,8 @@ Patterns, gotchas, and context discovered during implementation.
 <!-- Format for each entry:
 
 ## [YYYY-MM-DD HH:MM] - Phase N Task M: <task_name>
-Thread: <amp_thread_url>
+key: <track_id>:p<i>:t<j>:<sha7>
+Session/thread ref if available
 - **Implemented:** <brief description of what was done>
 - **Files changed:** <list of files modified/created>
 - **Commit:** <sha_7chars>

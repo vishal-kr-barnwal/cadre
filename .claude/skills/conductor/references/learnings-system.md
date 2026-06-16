@@ -51,7 +51,8 @@ Patterns, gotchas, and context discovered during implementation.
 ---
 
 ## [2025-01-09 14:30] - Phase 1 Task 2: Add auth middleware
-Thread: Session/thread ref if available
+key: auth_20250109:p1:t2:abc1234
+Session/thread ref if available
 - **Implemented:** JWT validation middleware
 - **Files changed:** src/auth/middleware.ts, src/auth/types.ts
 - **Commit:** abc1234
@@ -62,7 +63,8 @@ Thread: Session/thread ref if available
 ---
 
 ## [2025-01-09 15:45] - REVISION #1
-Thread: Session/thread ref if available
+key: auth_20250109:rev1
+Session/thread ref if available
 - **Type:** Plan
 - **Trigger:** Discovered need for rate limiting middleware
 - **Learning:**
@@ -89,7 +91,7 @@ Thread: Session/thread ref if available
 
 2. **After Each Task:**
    - Append entry to `learnings.md`
-   - Include: timestamp, thread URL, files, commit, learnings
+   - Include: a mandatory first-line `key: <track_id>:p<i>:t<j>:<sha7>` dedup key, then a session/thread ref if available, timestamp, files, commit, learnings
 
 3. **At Phase Completion:**
    - Review learnings from this phase

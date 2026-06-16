@@ -34,6 +34,7 @@ Context-Driven Development for Claude Code. Measure twice, code once.
 | `/conductor-revise` | Update spec/plan when implementation reveals issues |
 | `/conductor-review [track_id]` | Review a track's diff before shipping (quality gate) |
 | `/conductor-ship [track_id]` | Rebase a reviewed track onto main, push it, prepare the PR |
+| `/conductor-land [track_id]` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
 | `/conductor-archive` | Archive completed tracks (local cleanup + learnings) |
 | `/conductor-release [bump]` | Cut a local release — changelog + version tag |
 | `/conductor-handoff` | Create context handoff for section transfer |
@@ -50,7 +51,7 @@ You are Conductor, a context-driven development assistant. Parse the user's comm
 
 1. Identify the command from the slash command invoked
 2. If `/conductor-help` or unknown: show the usage table above
-3. Otherwise, **read the full command protocol** from the corresponding file in [commands/](commands/) and execute it step-by-step
+3. Otherwise, **read the full command protocol** from the corresponding file in [../../../commands/](../../../commands/) and execute it step-by-step
 
 ---
 
@@ -60,21 +61,22 @@ Each command has a full step-by-step protocol. **Read the linked file before exe
 
 | Command | Protocol File | Summary |
 |---------|--------------|---------|
-| `/conductor-setup` | [commands/setup.md](commands/setup.md) | Brownfield/greenfield detection → product.md → tech-stack.md → workflow.md → initial track → Beads init |
-| `/conductor-newtrack` | [commands/newtrack.md](commands/newtrack.md) | Interactive spec generation → plan generation → parallel analysis → track artifacts → Beads epic sync |
-| `/conductor-implement` | [commands/implement.md](commands/implement.md) | Track selection → context loading → parallel/sequential execution → TDD → learnings capture → doc sync |
-| `/conductor-status` | [commands/status.md](commands/status.md) | Progress calculation → priority grouping → parallel worker status → Beads status (`--export` writes a summary) |
-| `/conductor-revert` | [commands/revert.md](commands/revert.md) | Target selection → git reconciliation → execution plan → revert + verify → Beads sync |
-| `/conductor-validate` | [commands/validate.md](commands/validate.md) | Core files check → tracks consistency → orphan detection → parallel validation → Beads validation |
-| `/conductor-flag` | [commands/flag.md](commands/flag.md) | Determine mode → identify task → get reason → update plan `[!]`/`[ ]` → Beads sync |
-| `/conductor-revise` | [commands/revise.md](commands/revise.md) | Parallel check → determine type → create revision record → update docs → log as learning → Beads sync |
-| `/conductor-review` | [commands/review.md](commands/review.md) | Select track → compute diff → delegate to /code-review → record findings → route to ship or revise |
-| `/conductor-ship` | [commands/ship.md](commands/ship.md) | Select reviewed track → flush Dolt → rebase onto main → push → PR guidance |
-| `/conductor-archive` | [commands/archive.md](commands/archive.md) | Find completed → extract learnings → tear down worktree → move to archive → Beads compaction |
-| `/conductor-release` | [commands/release.md](commands/release.md) | Determine range + version → build changelog → write CHANGELOG.md → local commit + tag |
-| `/conductor-handoff` | [commands/handoff.md](commands/handoff.md) | Parallel check → gather context → create handoff doc with learnings → Beads context save |
-| `/conductor-refresh` | [commands/refresh.md](commands/refresh.md) | Analyze drift → present report → apply updates → consolidate learnings → Beads drift check |
-| `/conductor-formula` | [commands/formula.md](commands/formula.md) | Beads check → list/show/create/wisp subcommands → integration notes |
+| `/conductor-setup` | [../../../commands/conductor-setup.md](../../../commands/conductor-setup.md) | Brownfield/greenfield detection → product.md → tech-stack.md → workflow.md → initial track → Beads init |
+| `/conductor-newtrack` | [../../../commands/conductor-newtrack.md](../../../commands/conductor-newtrack.md) | Interactive spec generation → plan generation → parallel analysis → track artifacts → Beads epic sync |
+| `/conductor-implement` | [../../../commands/conductor-implement.md](../../../commands/conductor-implement.md) | Track selection → context loading → parallel/sequential execution → TDD → learnings capture → doc sync |
+| `/conductor-status` | [../../../commands/conductor-status.md](../../../commands/conductor-status.md) | Progress calculation → priority grouping → parallel worker status → Beads status (`--export` writes a summary) |
+| `/conductor-revert` | [../../../commands/conductor-revert.md](../../../commands/conductor-revert.md) | Target selection → git reconciliation → execution plan → revert + verify → Beads sync |
+| `/conductor-validate` | [../../../commands/conductor-validate.md](../../../commands/conductor-validate.md) | Core files check → tracks consistency → orphan detection → parallel validation → Beads validation |
+| `/conductor-flag` | [../../../commands/conductor-flag.md](../../../commands/conductor-flag.md) | Determine mode → identify task → get reason → update plan `[!]`/`[ ]` → Beads sync |
+| `/conductor-revise` | [../../../commands/conductor-revise.md](../../../commands/conductor-revise.md) | Parallel check → determine type → create revision record → update docs → log as learning → Beads sync |
+| `/conductor-review` | [../../../commands/conductor-review.md](../../../commands/conductor-review.md) | Select track → compute diff → delegate to /code-review → record findings → route to ship or revise |
+| `/conductor-ship` | [../../../commands/conductor-ship.md](../../../commands/conductor-ship.md) | Select reviewed track → flush Dolt → rebase onto main → push → PR guidance |
+| `/conductor-land` | [../../../commands/conductor-land.md](../../../commands/conductor-land.md) | Polyrepo: open + link the cross-repo PR group → merge train lands product repos first, control repo last |
+| `/conductor-archive` | [../../../commands/conductor-archive.md](../../../commands/conductor-archive.md) | Find completed → extract learnings → tear down worktree → move to archive → Beads compaction |
+| `/conductor-release` | [../../../commands/conductor-release.md](../../../commands/conductor-release.md) | Determine range + version → build changelog → write CHANGELOG.md → local commit + tag |
+| `/conductor-handoff` | [../../../commands/conductor-handoff.md](../../../commands/conductor-handoff.md) | Parallel check → gather context → create handoff doc with learnings → Beads context save |
+| `/conductor-refresh` | [../../../commands/conductor-refresh.md](../../../commands/conductor-refresh.md) | Analyze drift → present report → apply updates → consolidate learnings → Beads drift check |
+| `/conductor-formula` | [../../../commands/conductor-formula.md](../../../commands/conductor-formula.md) | Beads check → list/show/create/wisp subcommands → integration notes |
 
 ---
 
