@@ -256,6 +256,10 @@ bd note <epic_id> "..."           # Save context
 bd dolt push                      # Push changes to remote
 ```
 
+> **Push cadence** is governed by `config.json` `sync_mode`: mandatory in
+> `shared` mode (teammates pull/push the canonical Dolt graph), local-only
+> otherwise. See [POLYREPO.md](POLYREPO.md).
+
 ## Command Mapping
 
 | Conductor Command | Beads Equivalent | Integration |
@@ -285,15 +289,22 @@ When `plan.md` is edited:
 When `bd close` or `bd update` runs:
 1. Update corresponding task in `plan.md`
 2. Add commit SHA if available
-3. Update `tracks.md` status if epic complete
+3. Update the track's `metadata.json` `status` (the single source of truth for
+   track status) if the epic is complete — never hand-flip the `tracks.md` marker;
+   regenerate the cache via `/conductor-status --regen-index`
 
 ### Conflict Resolution
 
-Priority: **Beads is source of truth for status**, Conductor is source of truth for specs.
+Priority: **`metadata.json` `status` is the authoritative source of truth for
+track status** (`tracks.md` is a derived cache that mirrors it). Conductor owns
+specs and plans. In `sync_mode: "shared"` the Beads Dolt graph is the canonical
+store that `metadata.json`, `tracks.md`, and the state JSON all mirror — pull/push
+it to reconcile teammates.
 
 ```
-Conflict: plan.md says [x], Beads says active
-Resolution: Update plan.md to match Beads (agent likely working)
+Conflict: plan.md says [x], metadata.json/Beads says the task is active
+Resolution: Reconcile plan.md against metadata.json (agent likely still working),
+            then run /conductor-status --regen-index — do not silently rewrite plan.md
 
 Conflict: Beads has task not in plan.md
 Resolution: Add to plan.md under "Unplanned Tasks" section
@@ -343,21 +354,27 @@ Skill activation checks:
 
 ## Implementation Phases
 
+> All phases below are shipped (this spec is **Status: Implemented**). Two
+> team-scale refinements layer on top: task **assignees use the git committer
+> identity** (`user.email` → `user.name`, never a literal `conductor`), and
+> `/conductor-review` stamps the Beads epic with a `review:ready` or
+> `review:changes` label that `/conductor-ship` and `/conductor-land` gate on.
+
 ### Phase 1: Basic Integration (MVP)
-- [ ] Add `bd init` to `/conductor-setup`
-- [ ] Create epic on `/conductor-newtrack`
-- [ ] Query `bd ready` in `/conductor-implement`
-- [ ] Sync completion status
+- [x] Add `bd init` to `/conductor-setup`
+- [x] Create epic on `/conductor-newtrack`
+- [x] Query `bd ready` in `/conductor-implement`
+- [x] Sync completion status
 
 ### Phase 2: Full Sync
-- [ ] Bidirectional plan.md ↔ Beads sync
-- [ ] Dependency graph from phase order
-- [ ] Status aggregation in `/conductor-status`
+- [x] Bidirectional plan.md ↔ Beads sync
+- [x] Dependency graph from phase order
+- [x] Status aggregation in `/conductor-status`
 
 ### Phase 3: Advanced Features
-- [ ] Beads compaction on archive
-- [ ] Cross-track dependencies via Beads
-- [ ] Team sync via git + Beads
+- [x] Beads compaction on archive
+- [x] Cross-track dependencies via Beads
+- [x] Team sync via git + Beads
 
 ## Parallel Execution Integration
 

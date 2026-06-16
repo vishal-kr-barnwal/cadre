@@ -37,24 +37,12 @@ skills/conductor/
     ├── beads-integration.md    # Beads session protocol, CLI commands, chemistry
     ├── learnings-system.md     # Ralph-style knowledge capture
     ├── patterns-template.md    # Template for conductor/patterns.md
-    ├── learnings-template.md   # Template for track learnings.md
-    └── commands/               # Full step-by-step protocols for all 15 commands
-        ├── setup.md
-        ├── newtrack.md
-        ├── implement.md
-        ├── status.md
-        ├── revert.md
-        ├── validate.md
-        ├── flag.md
-        ├── revise.md
-        ├── review.md
-        ├── ship.md
-        ├── archive.md
-        ├── release.md
-        ├── handoff.md
-        ├── refresh.md
-        └── formula.md
+    └── learnings-template.md   # Template for track learnings.md
 ```
+
+> Command protocols are not duplicated under the skill. Each command's full
+> step-by-step protocol lives in the canonical `.claude/commands/conductor-*.md`
+> (16 commands); `SKILL.md` links to them directly.
 
 The skill follows the Agent Skills spec with full frontmatter:
 - `name`: conductor
@@ -78,7 +66,7 @@ cp -r /path/to/conductor/.claude/skills/* ~/.claude/skills/
 
 ### Option 4: Other platforms (Codex, Cursor, Antigravity, Copilot)
 
-The same 15 commands ship for OpenAI Codex CLI, Cursor, Google Antigravity, and
+The same 16 commands ship for OpenAI Codex CLI, Cursor, Google Antigravity, and
 GitHub Copilot. See the [Install & Version Guide](../docs/INSTALL.md) for
 per-platform setup. They are generated from these Claude commands by
 `scripts/generate-commands.sh`.
@@ -205,24 +193,8 @@ matrix and per-platform setup.
 │   │       ├── beads-integration.md
 │   │       ├── learnings-system.md
 │   │       ├── patterns-template.md
-│   │       ├── learnings-template.md
-│   │       └── commands/         # Full protocols (what agents read to execute commands)
-│   │           ├── setup.md      # (397 lines)
-│   │           ├── newtrack.md   # (390 lines)
-│   │           ├── implement.md  # (566 lines)
-│   │           ├── status.md     # (178 lines)
-│   │           ├── revert.md     # (196 lines)
-│   │           ├── validate.md   # (92 lines)
-│   │           ├── block.md      # (48 lines)
-│   │           ├── skip.md       # (59 lines)
-│   │           ├── revise.md     # (155 lines)
-│   │           ├── archive.md    # (97 lines)
-│   │           ├── export.md     # (51 lines)
-│   │           ├── handoff.md    # (193 lines)
-│   │           ├── refresh.md    # (141 lines)
-│   │           ├── formula.md    # (156 lines)
-│   │           ├── wisp.md       # (214 lines)
-│   │           └── distill.md    # (242 lines)
+│   │       └── learnings-template.md
+│   │       # Command protocols live in canonical .claude/commands/conductor-*.md (16)
 │   ├── beads/                    # Persistent task memory skill
 │   └── skill-creator/            # Skill development guide
 └── README.md                     # This file

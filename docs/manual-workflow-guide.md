@@ -329,7 +329,22 @@ Step 3 (If Beads enabled):
    - Shows blocked tasks from Beads
 ```
 
-**No state file**: Read-only command.
+**Modes** (otherwise bare status is the default):
+
+| Flag | Effect |
+|------|--------|
+| *(none)* | Live overview. **Read-only and local** — reads `tracks.md` + `plan.md`, no per-track scan, no sync. |
+| `--export` | Write a project summary report (see §11). |
+| `--team` | Team View: WIP grouped by owner, with leases + review state (scans per-track `metadata.json`). |
+| `--mine` | Live status filtered to tracks whose `metadata.json.owner` is your git identity. |
+| `--repos` | Fleet Board (polyrepo only): per-repo branches, ahead/behind, PRs, merge order. |
+| `--regen-index` | Rebuild the derived `tracks.md` index from each track's `metadata.json.status` (the source of truth). |
+
+`--team`, `--mine`, and `--repos` are the only modes that read per-track
+`metadata.json` (for ownership, leases, review state).
+
+**No state file**: Read-only command (apart from `--regen-index`, which rewrites
+the `tracks.md` cache, and `--export`, which writes a summary).
 
 ---
 
@@ -423,11 +438,23 @@ Step 3: Review is delegated to the /code-review skill
 
 Step 4: Findings recorded
    - Appended to the track's learnings.md (verdict + findings)
+   - Structured verdict written to metadata.json:
+       review: { verdict, blocking_count, date, reviewer }
+       (verdict ∈ approved | changes_requested; reviewer = git identity)
+   - Beads label set: review:ready (clean) or review:changes (blocking)
 
 Step 5: Routed to next step
-   - Ready to ship → suggests /conductor-ship
+   - Ready to ship → suggests /conductor-ship (or /conductor-land in polyrepo)
    - Changes requested → suggests /conductor-revise or /conductor-flag
 ```
+
+**Review gate:** `metadata.review` is what `/conductor-ship` and `/conductor-land`
+enforce — `verdict: "approved"` with `blocking_count: 0` clears the gate;
+`changes_requested` or any blocking findings make them refuse.
+
+**Self-review warning:** if the reviewer's git identity equals the track owner,
+Conductor warns ("you are reviewing your own track — consider a second reviewer")
+but still records the verdict (the warning is non-blocking).
 
 ---
 
@@ -588,6 +615,8 @@ Step 4: Approve changes
 ```
 Step 1: Run the command
    /conductor-handoff
+   # goal-first prose for a human teammate:
+   /conductor-handoff --for-teammate
 
 Step 2: Context gathering
    - Current phase and task position
@@ -598,24 +627,30 @@ Step 3: Provide additional context
    - Key implementation decisions
    - Unresolved issues or blockers
 
-Step 4: Handoff document generated
-   - Progress summary
-   - Code changes summary
-   - Context for next section
-   - Resume instructions
+Step 4: Handoff document written
+   - Single rolling conductor/HANDOFF.md, overwritten/trimmed in place
+   - Default: machine summary (progress, code changes, resume instructions)
+   - --for-teammate: replaces the machine dump with goal-first prose
+     (what/why, current state, next step, gotchas)
 
 Step 5: State updated
    - section_count incremented
-   - handoff_history updated
+   - owner / last_updated set from git identity
    - implement_state.json saved
 ```
 
 **Generated artifacts**:
 ```
-conductor/tracks/<track_id>/
-├── handoff_YYYYMMDD_HHMMSS.md  # Section handoff document
-└── implement_state.json         # Updated with section tracking
+conductor/
+├── HANDOFF.md                   # Single rolling handoff (not per-timestamp)
+└── tracks/<track_id>/
+    └── implement_state.json     # Updated with section tracking
 ```
+
+The handoff is a **single rolling `conductor/HANDOFF.md`** that is overwritten and
+trimmed on each run — there are no per-timestamp `handoff_*.md` files. The
+`--for-teammate` mode writes goal-first prose into that same file instead of the
+machine dump.
 
 **Auto-detection**: The implement command will suggest handoff when:
 - 5+ tasks completed without handoff
@@ -793,8 +828,10 @@ Conductor step that pushes to a remote.
 Step 1: Run the command
    /conductor-ship [track_id]
 
-Step 2: Gate
-   - Confirms the track has a "Ready to ship" review entry in learnings.md
+Step 2: Review gate (enforced — reads metadata.review)
+   - changes_requested OR blocking_count > 0 → REFUSE (halt; resolve and re-review)
+   - review absent → soft prompt (confirm a "Ready to ship" entry, ask to proceed)
+   - verdict approved AND blocking_count == 0 → proceed
 
 Step 3: Sync + push
    - bd dolt push (flush Dolt), commit .beads/ if changed
@@ -802,8 +839,16 @@ Step 3: Sync + push
    - git push origin track/<track_id> --force-with-lease
 
 Step 4: PR guidance
-   - Announces branch is pushed; create the PR via your team's process
+   - config.json "auto_open": false (default) → prepare only: print the
+     create-PR command for your team's process
+   - config.json "auto_open": true → open the PR with the host CLI
+     (gh / glab; falls back to printing the command if the CLI is unauthenticated)
 ```
+
+**Review gate:** `/conductor-ship` refuses to rebase or push when the track's
+`metadata.review.verdict` is `changes_requested` or `blocking_count > 0`. An
+absent `review` block falls back to today's soft prompt; a clean approved review
+proceeds without further confirmation.
 
 ---
 
@@ -899,13 +944,16 @@ bd show <task-id> --notes
 |------|---------|----------|
 | `setup_state.json` | Setup progress | `conductor/` |
 | `beads.json` | Beads integration config | `conductor/` |
+| `config.json` | Sync mode, PR provider, `auto_open`, merge train (polyrepo/shared) | `conductor/` |
+| `repos.json` | Submodule manifest + `mode: "polyrepo"` (polyrepo only) | `conductor/` |
 | `refresh_state.json` | Refresh progress | `conductor/` |
+| `tracks.md` | **Derived** track index — rebuilt by `/conductor-status --regen-index`; never hand-edit | `conductor/` |
+| `HANDOFF.md` | Single rolling handoff (overwritten/trimmed each run) | `conductor/` |
 | `implement_state.json` | Phase-aware implementation resume | `conductor/tracks/<id>/` |
-| `metadata.json` | Track configuration + Beads epic ID | `conductor/tracks/<id>/` |
+| `metadata.json` | Track config + Beads epic ID; **source of truth for `status`**; also holds `owner`/`reviewer`/`review`/`lease`/`merge_order` | `conductor/tracks/<id>/` |
 | `blockers.md` | Block history log | `conductor/tracks/<id>/` |
 | `skipped.md` | Skipped tasks log | `conductor/tracks/<id>/` |
 | `revisions.md` | Revision history | `conductor/tracks/<id>/` |
-| `handoff_*.md` | Section handoff documents | `conductor/tracks/<id>/` |
 
 ---
 
@@ -921,7 +969,10 @@ bd show <task-id> --notes
 
 5. **Commit frequently** - each task should have its own commit
 
-6. **Keep plan.md updated** - status markers are the source of truth
+6. **Source of truth:** `metadata.json.status` is the single source of truth for a
+   track's status — `conductor/tracks.md` is a **derived cache** rebuilt by
+   `/conductor-status --regen-index`, so never hand-edit its markers. `plan.md`
+   checkboxes track per-task progress within a track.
 
 7. **Add notes to Beads** - they survive context compaction
 

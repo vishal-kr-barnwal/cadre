@@ -31,7 +31,7 @@ Conductor-Beads/
 │   ├── generate-commands.sh # Generates the 4 platforms above from .claude/commands/
 │   ├── agent-refs/         # Masters for per-agent-sliced references (AGENT blocks)
 │   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration
-├── templates/              # Workflow and styleguide templates
+├── templates/              # Workflow and styleguide templates + ci/ (merge-train + monorepo drift-check)
 ├── docs/                   # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md               # This file (Claude Code context)
 └── AGENTS.md               # Codex + Antigravity context
@@ -41,7 +41,10 @@ Conductor-Beads/
 > `.github/prompts/`) are derived from `.claude/commands/` by
 > `scripts/generate-commands.sh`. Edit the canonical Claude command and
 > regenerate — do not hand-edit generated files. CI can run
-> `bash scripts/generate-commands.sh --check` to detect drift.
+> `bash scripts/generate-commands.sh --check` to detect drift. Ready-made
+> drift-gate workflows ship at
+> `templates/ci/conductor-monorepo-check.{github,gitlab}.yml` (they run
+> `generate-commands.sh --check` + `bash -n` on PRs).
 
 ### Commands
 
@@ -52,7 +55,7 @@ All platforms (Claude Code, Codex CLI, Cursor, Antigravity, Copilot) invoke the 
 | `/conductor-setup` | Initialize project with context files and first track |
 | `/conductor-newtrack` | Create feature/bug track with spec and plan |
 | `/conductor-implement` | Execute tasks from track's plan (TDD workflow) |
-| `/conductor-status` | Display progress overview (`--export` writes a project summary) |
+| `/conductor-status` | Display progress overview (`--export` writes a project summary; `--team`/`--mine` filter by assignee; `--repos` shows the polyrepo fleet board; `--regen-index` rebuilds `tracks.md` from `metadata.json.status`) |
 | `/conductor-revert` | Git-aware revert of tracks, phases, or tasks |
 | `/conductor-validate` | Validate project integrity and fix issues |
 | `/conductor-flag` | Flag the current task as blocked or skipped with a reason |
@@ -84,20 +87,23 @@ project/
 │   ├── product-guidelines.md # Brand/style guidelines
 │   ├── tech-stack.md        # Technology choices
 │   ├── workflow.md          # Development workflow (TDD, commits)
-│   ├── tracks.md            # Master track list with status
+│   ├── tracks.md            # DERIVED human-readable index (regenerated from metadata.json.status via /conductor-status --regen-index)
 │   ├── patterns.md          # Consolidated learnings (Ralph-style)
 │   ├── beads.json           # Beads integration config
-│   ├── setup_state.json     # Resume state for setup
-│   ├── refresh_state.json   # Context refresh tracking
+│   ├── config.json          # Project config (PR provider, sync mode, "auto_open")
+│   ├── repos.json           # Polyrepo topology + submodule manifest (polyrepo only)
+│   ├── HANDOFF.md           # Single rolling handoff doc (trimmed; --for-teammate prose mode)
+│   ├── .gitignore           # Git-ignores agent-local state (setup/refresh/non-shared state)
+│   ├── setup_state.json     # Resume state for setup (agent-local, git-ignored)
+│   ├── refresh_state.json   # Context refresh tracking (agent-local, git-ignored)
 │   ├── code_styleguides/    # Language-specific style guides
 │   └── tracks/
 │       └── <track_id>/
-│           ├── metadata.json     # Track config + Beads epic ID
+│           ├── metadata.json     # Track config + Beads epic ID + status (source of truth), owner, reviewer, review, lease, merge_order
 │           ├── spec.md           # Requirements
 │           ├── plan.md           # Phased task list
 │           ├── learnings.md      # Patterns/gotchas discovered (Ralph-style)
 │           ├── implement_state.json # Resume state (if in progress)
-│           ├── handoff_*.md      # Section handoff documents
 │           ├── blockers.md       # Block history log
 │           ├── skipped.md        # Skipped tasks log
 │           └── revisions.md      # Revision history log
@@ -108,9 +114,24 @@ project/
 
 ### Tracks
 A track is a logical unit of work (feature or bug fix). Each track has:
-- Unique ID format: `shortname_YYYYMMDD` (e.g., `auth_20241226`)
+- Unique ID format: `shortname_YYYYMMDD` (e.g., `auth_20241226`). Same-day duplicate IDs get a `-<2char base36>` suffix; on a push/Dolt conflict the track is re-suffixed (dir + `metadata.track_id` + branch + Beads epic/label) and `tracks.md` is rebuilt via `--regen-index`.
 - Status markers: `[ ]` new, `[~]` in progress, `[x]` completed, `[!]` blocked, `[-]` skipped
+- **`metadata.json.status` is the single source of truth for track status.** `tracks.md` is a derived human-readable cache rebuilt by `/conductor-status --regen-index` — never hand-edit its markers.
 - Own directory with spec, plan, metadata, and state files
+
+### Review Gate (New!)
+A track must pass review before it ships. `/conductor-review` writes
+`metadata.review` (`verdict` ∈ `approved` | `changes_requested`, `blocking_count`,
+`date`, `reviewer`) and sets the Beads label `review:ready` or `review:changes`.
+`/conductor-ship` and `/conductor-land` then **refuse** to proceed on
+`changes_requested` or `blocking_count > 0`; an absent `review` block yields a soft
+prompt (warns the track is unreviewed today), and a clean approval proceeds.
+
+### Identity & Leases (New!)
+Assignees use the git committer identity (`user.email` → `user.name`), never a
+literal `conductor`. `metadata.json` records `owner` and `reviewer`. In **shared**
+sync mode a track can hold an advisory `lease` (a no-op in monorepo/local mode);
+stale leases are swept by `/conductor-validate`.
 
 ### Topology: Monorepo vs Polyrepo (New!)
 Conductor runs in one of two topologies, chosen at `/conductor-setup`:
@@ -122,8 +143,13 @@ Conductor runs in one of two topologies, chosen at `/conductor-setup`:
   `<!-- repo: <name> -->` annotations; branches/commits/worktrees/reverts are
   per-repo. `/conductor-land` opens one PR per touched repo + a control-repo PR,
   linked by label `conductor-track:<id>`, and a generated **merge train** lands
-  them product-repos-first, control-repo-last. PR provider (GitHub/GitLab) and sync
-  mode (shared/local) live in `conductor/config.json`. See [docs/POLYREPO.md](docs/POLYREPO.md).
+  them product-repos-first, control-repo-last (order from `metadata.merge_order`).
+  The train uses **merge commits with squash disabled as a guardrail** — a squashed
+  merge has no deterministic, immediately-available commit to pin the submodule
+  gitlink to, so the gitlink pins to the merge commit (`mergeCommit.oid` on GitHub,
+  `.merge_commit_sha` on GitLab). PR provider (GitHub/GitLab), sync mode
+  (shared/local), and `"auto_open"` (default `false`) live in `conductor/config.json`.
+  See [docs/POLYREPO.md](docs/POLYREPO.md).
 
 ### Parallel Execution (New!)
 Phases can execute tasks in parallel using sub-agents:
@@ -184,6 +210,7 @@ At phase completion:
 
 - Canonical commands are Markdown in `.claude/commands/`; the Codex, Cursor, Antigravity, and Copilot sets are generated from them by `scripts/generate-commands.sh`
 - Skills use SKILL.md format with references/ subdirectory
+- Skills no longer bundle their own command-reference copies — each `SKILL.md` links command names directly to the canonical `.claude/commands/conductor-*.md`
 - State is tracked in JSON files (setup_state.json, implement_state.json, metadata.json)
 - Git notes used for audit trails
 - Commands validate setup before executing

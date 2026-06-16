@@ -66,9 +66,14 @@ annotation routes there.
   "control_branch": "main",
   "pull_on_command_start": true,
   "pr_provider": "github",
+  "auto_open": false,
   "merge_train": { "enabled": true, "auto_fire": true, "group_label_prefix": "conductor-track" }
 }
 ```
+
+`auto_open` (default `false`) controls whether `/conductor-ship` opens the PR for
+you or only prepares + prints the create-PR command; `/conductor-land` always
+opens the cross-repo group.
 
 Absent `config.json` → `local` → today's behavior (nothing auto-pushed).
 
@@ -111,6 +116,14 @@ prompt. Setup then:
   reverse-order within each repo, halting on the first conflict in any repo (Beads
   tasks reopen only after every repo succeeds).
 
+> **Collision-proof track IDs.** Same-day duplicate IDs get a `-<2-char base36>`
+> suffix at creation (`auth_20260615` → `auth_20260615-b`). If a push or
+> `bd dolt push` surfaces a remote that already owns the ID, the track is
+> re-suffixed in lockstep — the `conductor/tracks/<id>/` directory,
+> `metadata.track_id`, every `track/<id>` branch, and the Beads epic title +
+> `conductor-track:<id>` label all move together — then the index is rebuilt with
+> `/conductor-status --regen-index`.
+
 ---
 
 ## Cross-repo PRs & the merge train
@@ -134,13 +147,26 @@ The generated **merge-train CI** in the control repo lands the group once
 **every** labelled PR is approved and CI-green:
 
 1. Re-verify all sibling PRs are approved + green.
-2. Merge each **product** PR in `metadata.merge_order` (product-first; the
-   alphabetical remainder follows; absent → alphabetical), capturing each merged
-   PR's **merge-commit** SHA.
+2. Merge each **product** PR with a **merge commit** in `metadata.merge_order`
+   (product-first; the alphabetical remainder follows; absent → alphabetical;
+   de-duped), capturing each merged PR's deterministic **merge-commit** SHA
+   (GitHub `mergeCommit.oid`, GitLab `.merge_commit_sha`).
 3. On the control track branch, bump each submodule gitlink to that merged SHA;
    commit + push.
 4. Re-await the control PR's check on the bumped commit, then merge the **control
    PR last**.
+
+> **CRITICAL — the train merges with merge commits; squash is disabled as a
+> guardrail.** A squashed merge has no deterministic, immediately-available commit
+> to pin the submodule gitlink to, so the train merges every product PR/MR with a
+> merge commit and pins the gitlink to that merge SHA (GitHub `mergeCommit.oid`,
+> GitLab `.merge_commit_sha`). `/conductor-land`'s preflight probes each product
+> repo's merge methods and **warns + offers to enable merge commits / disable
+> squash** before opening any PR; a squash-only product repo cannot give the train
+> a stable gitlink target. On GitLab the train is serialized through
+> `resource_group: conductor-merge-train` so two tracks never land concurrently.
+> The CI honors `metadata.json.merge_order` (product-first, control-last by
+> default; de-duped) for the merge sequence.
 
 **No native cross-repo trigger.** Neither host has an "all siblings approved"
 event spanning repos. With `auto_fire: true` the control workflow runs on the
@@ -182,14 +208,31 @@ task graph. **Product-repo code always stays local** until you land it.
 
 - Mutating commands run a **sync preamble** (`git pull --rebase` + `bd dolt pull`)
   and a **postamble** (`bd dolt push` + control-plane push).
-- `.gitattributes` drivers keep state merges painless:
+- `.gitattributes` pins the auto-resolvable state files to one side so their
+  merges stay painless:
   ```
   .beads/** merge=ours
-  conductor/tracks/**/implement_state.json merge=union
-  conductor/tracks/**/parallel_state.json  merge=union
+  conductor/tracks/**/parallel_state.json  merge=ours
   ```
-  `repos.json` / `config.json` / `spec.md` / `plan.md` stay on normal merge so
-  structural conflicts surface intentionally.
+  The Dolt DB files and the ephemeral `parallel_state.json` resolve to the
+  incoming side rather than text-merging. `implement_state.json` stays on
+  **normal merge** (no attribute) so a genuine resume-state divergence surfaces as
+  a conflict instead of being clobbered; `repos.json` / `config.json` / `spec.md` /
+  `plan.md` likewise stay on normal merge so structural conflicts surface
+  intentionally.
+- **Register the `ours` driver once** (`git config merge.ours.driver true`) — it
+  is idempotent and Conductor re-asserts it, but an *unregistered* `ours` driver
+  makes git fall back to its default text merge, which injects conflict markers
+  straight into the Dolt DB files.
+
+> Advisory **track leases.** In shared mode each track's `metadata.json` may carry
+> an advisory `lease` object (`{ owner, host, acquired_at, heartbeat_at }`) so
+> teammates can see who is actively driving a track. It is **advisory only** —
+> nothing blocks on it — and is **swept** by `/conductor-validate` (a heartbeat
+> older than ~3h is cleared to `null`). Leases are **absent in monorepo and
+> `local` mode** (no-op there). `owner` and `reviewer` on `metadata.json` are
+> populated from the running git identity (`git config user.email`, falling back
+> to `user.name`), never a literal `"conductor"`.
 
 Toggle `sync_mode` and per-repo `enabled` later via `/conductor-refresh repos`.
 
@@ -205,7 +248,7 @@ Toggle `sync_mode` and per-repo `enabled` later via `/conductor-refresh repos`.
 | `revert` | Per-repo revert chains, halt-on-first-conflict |
 | `land` *(new)* | Review gate + all-or-nothing preflight, then open + link the cross-repo PR group; merge train lands it |
 | `archive` | Per-repo worktree teardown + safety-net branch push; no PRs |
-| `status` | Repos panel (branches, ahead/behind, PRs) |
+| `status` | Repos panel (branches, ahead/behind, PRs); `--repos` renders the **Fleet Board** |
 | `validate` | `repos.json`↔`.gitmodules` parity, submodule init, annotation validity |
 | `handoff` | Per-repo branch/worktree tables; push control plane |
 | `refresh` | `repos` scope: reconcile manifest, toggle sync/enabled |

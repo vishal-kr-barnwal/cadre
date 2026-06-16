@@ -17,6 +17,18 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 > 📋 Full version history is in the **[Changelog](CHANGELOG.md)**.
 
+## What's New in v0.3.x
+
+### Team-scale workflow
+
+- **An SDLC tail** — once a track is implemented, it flows through **review → ship/land → archive → release**. `/conductor-review` is an **enforced quality gate**: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `/conductor-ship` (monorepo) and `/conductor-land` (polyrepo) **refuse to proceed** on `changes_requested` or any blocking findings. A missing review prompts you to confirm; a clean approval proceeds.
+- **`tracks.md` is now a derived cache** — `metadata.json.status` is the **single source of truth** for a track's status. Never hand-edit the markers in `tracks.md`; rebuild it with `/conductor-status --regen-index`.
+- **New status modes** — `/conductor-status` gains `--mine` (your tracks), `--team` (per-person board), `--repos` (polyrepo fleet board), and `--regen-index` (rebuild the index), alongside the existing `--export`.
+- **Per-person identity + advisory leases** — assignees now use your git committer identity (`user.email` → `user.name`) rather than a literal `conductor`. `metadata.json` gained `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In **shared** sync mode a track can hold an **advisory lease** (a no-op in monorepo and local modes; stale leases are swept by `/conductor-validate`).
+- **Collision-proof track IDs** — same-day duplicate IDs get a short base36 suffix, and a push/Dolt conflict triggers a clean re-suffix (directory, `metadata.track_id`, branch, and Beads epic/label) followed by `--regen-index`.
+- **`/conductor-ship` can open the PR** — set `"auto_open": true` in `conductor/config.json` (default `false` = prepare only).
+- **Merge train uses merge commits** — squash is **disabled as a guardrail** (a squashed merge has no deterministic commit to pin the submodule gitlink to). Product PRs/MRs merge with a merge commit and the control repo pins the gitlink to it; `/conductor-land` preflight warns and offers to disable squash on product repos. See the [Polyrepo Guide](docs/POLYREPO.md).
+
 ## What's New in v0.3.0
 
 ### Multi-platform support
@@ -214,7 +226,7 @@ Setup will:
    - `product.md` — product vision and goals
    - `tech-stack.md` — technology choices
    - `workflow.md` — development standards (TDD, commits)
-   - `tracks.md` — master track list
+   - `tracks.md` — derived track index (a cache rebuilt from each track's `metadata.json` via `/conductor-status --regen-index`; `metadata.json.status` is the source of truth, so never hand-edit the markers)
 2. **Prompt you to choose a Beads mode** and initialize it for you (runs `bd init`, creates `.beads/`, writes `conductor/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
 
 You don't need to run `bd init` yourself — setup handles it.
@@ -316,6 +328,13 @@ Shows:
 - Ready tasks (from Beads)
 - Blocked items
 
+Status modes:
+- `--mine` — only tracks you own (matched against your git committer identity)
+- `--team` — a per-person board across all owners
+- `--repos` — a polyrepo fleet board (per-repo PR/merge state)
+- `--regen-index` — rebuild the derived `conductor/tracks.md` from each track's `metadata.json` (the source of truth)
+- `--export` — write a project summary to disk
+
 ---
 
 ## Commands Reference
@@ -327,7 +346,7 @@ The same command name works on every supported platform (Claude Code, Codex CLI,
 | `/conductor-setup` | Initialize project context |
 | `/conductor-newtrack` | Create feature/bug track |
 | `/conductor-implement` | Execute tasks from plan |
-| `/conductor-status` | Show progress overview (`--export` writes a summary) |
+| `/conductor-status` | Show progress overview (`--mine`/`--team`/`--repos` boards, `--regen-index` rebuilds `tracks.md`, `--export` writes a summary) |
 | `/conductor-revert` | Git-aware revert |
 | `/conductor-validate` | Validate project integrity |
 | `/conductor-flag` | Flag a task as blocked or skipped |
@@ -425,17 +444,21 @@ your-project/
 │   ├── product.md           # Product vision
 │   ├── tech-stack.md        # Technology choices
 │   ├── workflow.md          # Development standards
-│   ├── tracks.md            # Master track list
+│   ├── tracks.md            # Derived track index (cache; rebuilt from metadata.json via --regen-index)
 │   ├── patterns.md          # Consolidated learnings (Ralph-style)
 │   ├── beads.json           # Beads integration config
+│   ├── HANDOFF.md           # Single rolling handoff (trimmed; --for-teammate writes prose)
+│   ├── .gitignore           # Ignores agent-local state (setup/refresh/implement state)
+│   ├── repos.json           # Polyrepo only: control-repo topology + submodule map
+│   ├── config.json          # Polyrepo only: PR provider, sync mode, auto_open
 │   └── tracks/
 │       └── <track_id>/
 │           ├── spec.md      # Requirements
 │           ├── plan.md      # Task list
 │           ├── learnings.md # Patterns/gotchas discovered
-│           └── metadata.json
+│           └── metadata.json # Source of truth: status, owner, reviewer, review, lease, merge_order
 ├── .beads/                  # Beads Dolt DB (if initialized)
-├── .gitattributes           # .beads/** merge=ours (added by setup)
+├── .gitattributes           # .beads/** merge=ours + parallel_state.json merge=ours (added by setup)
 └── .worktrees/              # Git worktrees (flat — no nesting)
     ├── <track_id>/          # Track worktree (branch: track/<track_id>)
     └── <track_id>_worker_0_<name>/  # Parallel worker (branch: track_<id>_worker_0_<name>)
@@ -450,6 +473,9 @@ Throughout conductor files:
 - `[~]` - In Progress
 - `[x]` - Completed
 - `[!]` - Blocked
+- `[-]` - Skipped
+
+These markers in `tracks.md` are derived from each track's `metadata.json.status` (the source of truth) — never hand-edit them; rebuild with `/conductor-status --regen-index`.
 
 ---
 

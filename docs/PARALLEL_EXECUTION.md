@@ -271,6 +271,12 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
 
 ## Conductor-Implement Changes
 
+> The coordinator mechanics below now live in the sliced reference
+> [`parallel-execution.md`](../.claude/skills/conductor/references/parallel-execution.md)
+> (bundled with every command set), not inline in `conductor-implement.md`. The
+> per-worker prompt stays inline in `conductor-implement.md`. This section
+> documents the design.
+
 ### Phase Processing (Updated)
 
 ```markdown

@@ -1,6 +1,6 @@
 # Install & Version Guide
 
-Conductor-Beads ships the same 15 commands to five AI coding tools. This guide
+Conductor-Beads ships the same 16 commands to five AI coding tools. This guide
 covers installation for each platform and explains how versioning and command
 generation work.
 
@@ -19,7 +19,7 @@ generation work.
 
 ## Version & compatibility matrix
 
-Current release: **v0.3.0** (multi-platform support).
+Current release: **v0.3.4** (multi-platform support, plus the team-scale SDLC tail — review → ship/land → archive → release with an enforced review gate — and polyrepo cross-repo PRs with a merge-commit merge train).
 
 | Platform | Min. version | Commands directory | Command format | Invoke | Context file | Source of truth |
 |----------|--------------|--------------------|----------------|--------|--------------|-----------------|
@@ -247,6 +247,13 @@ bash scripts/generate-commands.sh --check
 ```
 
 This exits non-zero if any generated file is stale.
+
+A ready-made drift gate ships at
+`templates/ci/conductor-monorepo-check.{github,gitlab}.yml` — drop the one for
+your CI into place and it runs `generate-commands.sh --check` (plus `bash -n` on
+the command scripts) on every PR. The `templates/` directory now includes a
+`ci/` subdirectory carrying both this monorepo-check and the polyrepo
+merge-train workflows (`conductor-merge-train.{github,gitlab}.yml`).
 
 ---
 
