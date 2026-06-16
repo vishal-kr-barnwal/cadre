@@ -17,66 +17,19 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 > 📋 Full version history is in the **[Changelog](CHANGELOG.md)**.
 
-## What's New in v1.0.0
+## Key Capabilities
 
-### Team-scale workflow
+**Spec-first SDLC.** Every track flows through plan → implement (TDD) → **review → ship (monorepo) / land (polyrepo) → archive → release**. `/cadre-review` is an enforced quality gate: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `/cadre-ship` / `/cadre-land` refuse to proceed on `changes_requested` or blocking findings.
 
-- **An SDLC tail** — once a track is implemented, it flows through **review → ship/land → archive → release**. `/cadre-review` is an **enforced quality gate**: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `/cadre-ship` (monorepo) and `/cadre-land` (polyrepo) **refuse to proceed** on `changes_requested` or any blocking findings. A missing review prompts you to confirm; a clean approval proceeds.
-- **`tracks.md` is now a derived cache** — `metadata.json.status` is the **single source of truth** for a track's status. Never hand-edit the markers in `tracks.md`; rebuild it with `/cadre-status --regen-index`.
-- **New status modes** — `/cadre-status` gains `--mine` (your tracks), `--team` (per-person board), `--repos` (polyrepo fleet board), and `--regen-index` (rebuild the index), alongside the existing `--export`.
-- **Per-person identity + advisory leases** — assignees now use your git committer identity (`user.email` → `user.name`) rather than a literal `cadre`. `metadata.json` gained `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In **shared** sync mode a track can hold an **advisory lease** (a no-op in monorepo and local modes; stale leases are swept by `/cadre-validate`).
-- **Collision-proof track IDs** — same-day duplicate IDs get a short base36 suffix, and a push/Dolt conflict triggers a clean re-suffix (directory, `metadata.track_id`, branch, and Beads epic/label) followed by `--regen-index`.
-- **`/cadre-ship` can open the PR** — set `"auto_open": true` in `cadre/config.json` (default `false` = prepare only).
-- **Merge train uses merge commits** — squash is **disabled as a guardrail** (a squashed merge has no deterministic commit to pin the submodule gitlink to). Product PRs/MRs merge with a merge commit and the control repo pins the gitlink to it; `/cadre-land` preflight warns and offers to disable squash on product repos. See the [Polyrepo Guide](docs/POLYREPO.md).
+**Five AI coding tools, one source of truth.** The 16-command suite runs on Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot. The non-Claude sets are generated from the canonical Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh) (run `--check` in CI to catch drift). All tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Cursor, implement in Claude Code).
 
-## What's New in v0.3.0
+**Built for teams.**
+- **Per-person identity + advisory leases** — assignees use your git committer identity (`user.email` → `user.name`); `metadata.json` carries `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In shared sync mode a track can hold an advisory lease (a no-op in monorepo/local modes; stale leases swept by `/cadre-validate`).
+- **`tracks.md` is a derived cache** — `metadata.json.status` is the single source of truth; rebuild the index with `/cadre-status --regen-index` (a `tracks.md` merge conflict resolves by re-running it). Never hand-edit the markers.
+- **Status boards** — `/cadre-status --mine` / `--team` / `--repos` (polyrepo fleet board) / `--export`.
+- **Collision-proof track IDs** — same-day duplicates get a short base36 suffix; a push/Dolt conflict triggers a clean re-suffix.
 
-### Multi-platform support
-- **Four new platforms** — the full 16-command suite now ships for **OpenAI Codex CLI**, **Cursor**, **Google Antigravity**, and **GitHub Copilot**, alongside Claude Code.
-- **Single source of truth** — the new [`scripts/generate-commands.sh`](scripts/generate-commands.sh) derives the Codex, Cursor, Antigravity, and Copilot command sets from the canonical Claude Code commands, so all platforms stay in sync. Run `--check` in CI to catch stale output.
-- **Per-platform context files** — `AGENTS.md` (Codex + Antigravity), `.github/copilot-instructions.md` (Copilot), and `.cursor/rules/cadre.mdc` (Cursor) join the existing `CLAUDE.md`.
-- **New [Install & Version Guide](docs/INSTALL.md)** — a compatibility matrix and per-platform install steps for all five tools, plus the versioning policy.
-
-### Removed
-- **Gemini CLI support dropped** — the Gemini extension (`gemini-extension.json`), TOML commands (`commands/cadre/`), and `GEMINI.md` have been removed in favor of **Google Antigravity**, which now covers the Google ecosystem via `.agent/workflows/`.
-
-> All platforms operate on the same `cadre/` and `.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor, implement in Claude Code).
-
-## What's New in v0.2.0
-
-### Bug Fixes
-- **`implement` now works on the track branch** — previously all work happened on `main`. The command now switches to the track worktree before any file operations or commits.
-- **`newtrack` creates worktree after scaffold commit** — the track branch is now cut from a commit that already includes spec.md, plan.md, and metadata.json.
-- **Flat worker worktree paths** — parallel worker worktrees are now siblings (`.worktrees/<track_id>_worker_<N>_<name>`) instead of nested children (`.worktrees/<track_id>/worker_<N>_<name>`), which git requires.
-- **`bd ready --parent` flag** — corrected from `--epic` which does not exist in the Beads CLI.
-
-### New Features
-- **`.beads/` merge conflict auto-resolution** — `cadre-setup` now adds `.beads/** merge=ours` to `.gitattributes` so PR merges never conflict on the Dolt database.
-- **Archive rebase + PR guidance** — `cadre-archive` now rebases the track branch onto main, resolves `.beads/` conflicts automatically, and guides PR creation instead of auto-merging.
-- **Explicit archive commit staging** — archive commits now explicitly stage deleted track files (`git rm -r`) to avoid ghost entries.
-- **Dolt state flush in archive** — `bd dolt push` is called before rebasing to ensure no pending Dolt changes are lost.
-
-### Migration from v0.1.0
-
-If you have existing projects set up with v0.1.0, run the migration script from your **project root**:
-
-```bash
-# Dry-run first (shows what would change, no writes)
-bash /path/to/Cadre/scripts/migrate-v2.sh --dry-run
-
-# Apply migration
-bash /path/to/Cadre/scripts/migrate-v2.sh
-```
-
-**What the migration script fixes:**
-| Issue | Fix Applied |
-|-------|-------------|
-| Nested worker worktrees | `git worktree move` to flat paths |
-| Missing `.beads/` merge strategy | Adds `.beads/** merge=ours` to `.gitattributes` |
-| Stale `parallel_state.json` paths | Updates stored worktree paths via `sed` |
-| Track branch missing scaffold files | Warns with exact `git cherry-pick` commands to fix |
-
-See [`scripts/migrate-v2.sh`](scripts/migrate-v2.sh) for full details.
+**Monorepo and polyrepo.** A polyrepo control repo orchestrates work across product-repo submodules; `/cadre-land` opens the cross-repo PR group and a merge train lands it product-repos-first, control-repo-last. The train uses **merge commits (squash disabled as a guardrail)** so each submodule gitlink pins to a deterministic merge commit. See the [Polyrepo Guide](docs/POLYREPO.md).
 
 ---
 
@@ -288,9 +241,9 @@ The workflow:
 4. **Track progress** - Updates plan.md and Beads status
 5. **Verify** - Manual verification at phase boundaries
 
-### Parallel Task Execution (New!)
+### Parallel Task Execution
 
-For phases with independent tasks, Cadre can now execute them in parallel using sub-agents:
+For phases with independent tasks, Cadre can execute them in parallel using sub-agents:
 
 ```markdown
 ## Phase 1: Core Setup
