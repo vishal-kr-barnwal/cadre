@@ -595,7 +595,7 @@ flowchart TB
 **Learnings Entry Format:**
 ```markdown
 ## [2025-01-09 14:30] - Phase 1 Task 2: Add auth middleware
-Thread: https://ampcode.com/threads/T-xxx
+Session/thread ref if available
 - **Implemented:** JWT validation middleware
 - **Files changed:** src/auth/middleware.ts, src/auth/types.ts
 - **Commit:** abc1234

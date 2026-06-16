@@ -51,7 +51,7 @@ Patterns, gotchas, and context discovered during implementation.
 ---
 
 ## [2025-01-09 14:30] - Phase 1 Task 2: Add auth middleware
-Thread: https://ampcode.com/threads/T-xxx
+Thread: Session/thread ref if available
 - **Implemented:** JWT validation middleware
 - **Files changed:** src/auth/middleware.ts, src/auth/types.ts
 - **Commit:** abc1234
@@ -62,7 +62,7 @@ Thread: https://ampcode.com/threads/T-xxx
 ---
 
 ## [2025-01-09 15:45] - REVISION #1
-Thread: https://ampcode.com/threads/T-xxx
+Thread: Session/thread ref if available
 - **Type:** Plan
 - **Trigger:** Discovered need for rate limiting middleware
 - **Learning:**
