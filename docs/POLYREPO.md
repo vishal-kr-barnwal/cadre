@@ -118,21 +118,38 @@ prompt. Setup then:
 `/conductor-land <track_id>` is the polyrepo ship step (monorepo uses
 `/conductor-ship`). It:
 
-1. Pushes each repo's `track/<id>` branch (and the control branch).
-2. Opens **one PR per touched product repo** plus the **control-repo PR**.
-3. Applies a shared group label `conductor-track:<id>` to all of them and
-   cross-links their bodies.
-4. Records PR URLs + `repo_slug` in `metadata.json`.
+1. **Enforces the review gate** — reads `metadata.review`; refuses if the verdict
+   is `changes_requested` or any blocking findings remain (absent → soft prompt).
+2. **Runs an all-or-nothing preflight** over **every** touched repo (submodule
+   initialized, `submodule_path` matches `.gitmodules`, PR base exists on remote,
+   track branch not behind base — offering a rebase, never a force) and halts
+   before opening any PR if a check fails.
+3. Pushes each repo's `track/<id>` branch (and the control branch).
+4. Opens **one PR per touched product repo** plus the **control-repo PR**.
+5. Applies a shared group label `conductor-track:<id>` to all of them and
+   cross-links their bodies (re-applying a dropped control-PR label on GitHub).
+6. Records PR URLs + `repo_slug` in `metadata.json` with key-scoped writes.
 
-The generated **merge-train CI** in the control repo then fires (auto, when
-`auto_fire: true`) once **every** labelled PR is approved and CI-green:
+The generated **merge-train CI** in the control repo lands the group once
+**every** labelled PR is approved and CI-green:
 
 1. Re-verify all sibling PRs are approved + green.
-2. Merge each **product** PR, capturing its new default-branch SHA.
-3. On the control track branch, bump each submodule gitlink to the merged SHA;
+2. Merge each **product** PR in `metadata.merge_order` (product-first; the
+   alphabetical remainder follows; absent → alphabetical), capturing each merged
+   PR's **merge-commit** SHA.
+3. On the control track branch, bump each submodule gitlink to that merged SHA;
    commit + push.
 4. Re-await the control PR's check on the bumped commit, then merge the **control
    PR last**.
+
+**No native cross-repo trigger.** Neither host has an "all siblings approved"
+event spanning repos. With `auto_fire: true` the control workflow runs on the
+**control PR's own** review/check events and on a schedule/dispatch — a review or
+green on a *product* repo does **not** by itself fire the train. So the train is
+**not** automatically re-fired on each product approval; trigger it via the
+control PR's next event, `workflow_dispatch` (GitHub) / a pipeline run with
+`CONDUCTOR_TRACK=<id>` (GitLab), or by re-running `/conductor-land`. With
+`auto_fire: false`, only manual/dispatch runs land the group.
 
 **Why product-first, control-last:** the control PR bumps submodule gitlinks to
 the freshly-merged product SHAs. Merging it earlier would point submodules at
@@ -140,9 +157,12 @@ unmerged commits. The control PR is the single "seal" commit for the snapshot.
 
 **No true atomicity.** Neither GitHub nor GitLab offers cross-repo atomic merge.
 On partial failure the train halts, leaves already-merged product PRs in place,
-comments on the control PR, and **re-fires** once the failing repo is green again
-(already-merged product PRs are idempotent). Re-run `/conductor-land` to re-check
-status.
+and comments on the control PR naming the landed vs blocking repos. It does **not**
+re-fire itself — **someone or CI must re-trigger** it (the control PR's next
+review/check event, a `workflow_dispatch` / pipeline run, or re-running
+`/conductor-land`). On re-trigger the train is **idempotent**: it skips
+already-merged product PRs and reconstructs the submodule gitlink bumps, so
+re-firing after the failing repo is green safely completes the landing.
 
 ### Prerequisites
 
@@ -183,7 +203,7 @@ Toggle `sync_mode` and per-repo `enabled` later via `/conductor-refresh repos`.
 | `newtrack` | `<!-- repo: -->` annotations, `metadata.repos` map, per-repo worktrees |
 | `implement` | Per-task repo routing, per-repo commits/SHAs, repo-scoped parallel, sync preamble |
 | `revert` | Per-repo revert chains, halt-on-first-conflict |
-| `land` *(new)* | Open + link the cross-repo PR group; merge train lands it |
+| `land` *(new)* | Review gate + all-or-nothing preflight, then open + link the cross-repo PR group; merge train lands it |
 | `archive` | Per-repo worktree teardown + safety-net branch push; no PRs |
 | `status` | Repos panel (branches, ahead/behind, PRs) |
 | `validate` | `repos.json`↔`.gitmodules` parity, submodule init, annotation validity |
