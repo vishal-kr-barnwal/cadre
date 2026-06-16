@@ -62,10 +62,10 @@ If you have existing projects set up with v0.1.0, run the migration script from 
 
 ```bash
 # Dry-run first (shows what would change, no writes)
-bash /path/to/cadre-beads/scripts/migrate-v2.sh --dry-run
+bash /path/to/Cadre/scripts/migrate-v2.sh --dry-run
 
 # Apply migration
-bash /path/to/cadre-beads/scripts/migrate-v2.sh
+bash /path/to/Cadre/scripts/migrate-v2.sh
 ```
 
 **What the migration script fixes:**
@@ -493,7 +493,8 @@ flowchart TD
     end
 
     subgraph PLANNING[Planning]
-        E --> F["cadre-newtrack"]
+        FM["cadre-formula"] --> F["cadre-newtrack"]
+        E --> F
         F --> G[spec + plan]
         G --> H{Approved?}
         H -->|No| I["cadre-revise"]
@@ -525,15 +526,18 @@ flowchart TD
 
     subgraph DONE[Completion]
         T --> RV["cadre-review"]
-        RV --> SH["cadre-ship"]
+        RV -->|monorepo| SH["cadre-ship"]
+        RV -->|polyrepo| LD["cadre-land (merge train)"]
         SH --> X["cadre-archive"]
+        LD --> X
         X --> RL["cadre-release"]
     end
 
     K -.-> EX["cadre-status --export"]
-
     K -.-> Z["cadre-status"]
     K -.-> AA["cadre-validate"]
+    K -.-> RF["cadre-refresh"]
+    K -.-> RVT["cadre-revert"]
 ```
 
 ### Session Resume Flow (with Beads)
@@ -564,9 +568,9 @@ flowchart LR
 
 | Pattern | Command Flow |
 |---------|--------------|
-| **Happy Path** | `setup` → `bd init` → `newtrack` → `implement` → `archive` |
+| **Happy Path** | `setup` → `bd init` → `newtrack` → `implement` → `review` → `ship` (or `land`) → `archive` → `release` |
 | **Multi-Section** | `implement` → *(5+ tasks)* → `handoff` → *(new session)* → `implement` |
-| **Handle Blockers** | `implement` → `block` → `skip` or wait → `implement` |
+| **Handle Blockers** | `implement` → `flag` (blocked) → `flag` (skipped) or wait → `implement` |
 | **Mid-Track Changes** | `implement` → `revise` → `implement` |
 | **Session Resume** | `bd ready` → `bd show --notes` → load spec → `implement` |
 | **Monitoring** | `status` / `validate` *(anytime)* |

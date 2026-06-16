@@ -84,7 +84,8 @@ per-platform setup. They are generated from these Claude commands by
 | `/cadre-flag <blocked\|skipped>` | Flag the current task as blocked or skipped |
 | `/cadre-revise` | Update spec/plan when issues found |
 | `/cadre-review` | Review a track's diff before shipping (quality gate) |
-| `/cadre-ship` | Rebase a reviewed track onto main, push, prepare the PR |
+| `/cadre-ship` | Rebase a reviewed track onto main, push, prepare the PR (monorepo) |
+| `/cadre-land` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
 | `/cadre-archive` | Archive completed tracks (local cleanup + learnings) |
 | `/cadre-release` | Cut a local release — changelog + version tag |
 | `/cadre-handoff` | Create context handoff for session transfer |

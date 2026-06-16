@@ -16,7 +16,8 @@ flowchart TD
     end
 
     subgraph TRACK[Per Track]
-        F --> G["newtrack"]
+        FM["formula"] --> G["newtrack"]
+        F --> G
         G --> H[spec + plan]
         H --> I{Approve?}
         I -->|Revise| J["revise"]
@@ -39,36 +40,45 @@ flowchart TD
     end
 
     subgraph ISSUES[Handle Issues]
-        N -->|Blocked| U["block"]
-        U --> V["skip"]
-        V --> L
+        N -->|Blocked/Skip| U["flag blocked / flag skipped"]
+        U --> L
+        M -->|Spec Wrong| RVS["revise"]
+        RVS --> M
     end
 
-    subgraph DONE[Cleanup]
-        T --> W["archive"]
-        T --> X["export"]
+    subgraph DONE[Completion]
+        T --> RV["review"]
+        RV -->|monorepo| SH["ship"]
+        RV -->|polyrepo| LD["land (merge train)"]
+        SH --> W["archive"]
+        LD --> W
+        W --> RL["release"]
         W --> Y{New Track?}
         Y -->|Yes| G
     end
 
+    K -.-> X["status --export"]
     K -.-> Z["status"]
     K -.-> AA["validate"]
+    K -.-> RFR["refresh"]
+    K -.-> RVT["revert"]
 ```
 
 ### Quick Reference
 
 | Workflow | Commands |
 |----------|----------|
-| **Standard** | `setup` → `bd init` → `newtrack` → `implement` → `archive` |
+| **Standard** | `setup` → `bd init` → `newtrack` → `implement` → `review` → `ship` (or `land`) → `archive` → `release` |
 | **Multi-Section** | `implement` → `handoff` → *(new session)* → `implement` |
 | **Parallel Tasks** | `newtrack` (enable parallel) → `implement` (spawns workers) |
 | **Session Resume** | `bd ready` → `bd show --notes` → `implement` |
-| **Blocked Task** | `block` → `skip` or wait → continue |
+| **Blocked Task** | `flag blocked` → `flag skipped` or wait → continue |
 | **Plan Changes** | `revise` → continue `implement` |
+| **Undo Work** | `revert` (track / phase / task) |
 | **Check Status** | `status` or `validate` anytime |
 | **Sync Context** | `refresh` when codebase drifts |
-| **Templates** | `formula list` → `wisp` or `bd mol pour` |
-| **Create Template** | complete track → `distill` → `formula show` |
+| **Templates** | `formula list` → `formula wisp` or `bd mol pour` |
+| **Create Template** | complete track → `formula create` → `formula show` |
 
 ## Why Manual Mode?
 
@@ -852,7 +862,42 @@ proceeds without further confirmation.
 
 ---
 
-### 18. `/cadre-release`
+### 18. `/cadre-land`
+
+**Purpose**: Polyrepo only. Open and link the cross-repo PR group for a track, then let the merge train land it. The polyrepo counterpart to `/cadre-ship`.
+
+**When to use**: After `/cadre-review` clears a track, in a polyrepo control repo (`cadre/repos.json` with `mode: "polyrepo"`).
+
+**Manual workflow**:
+
+```
+Step 1: Run the command
+   /cadre-land [track_id]
+
+Step 2: Review gate (enforced — same as ship; reads metadata.review)
+   - changes_requested OR blocking_count > 0 → REFUSE
+   - review absent → soft prompt; approved + 0 blocking → proceed
+
+Step 3: Preflight (all-or-nothing, before opening any PR)
+   - validate every touched repo (submodule initialized, base branch exists,
+     track branch not behind base); warn + offer to disable squash on product
+     repos (the merge train needs merge commits to pin the submodule gitlink)
+
+Step 4: Open + link the PR group
+   - one PR per touched product repo + the control-repo PR, all labeled
+     cadre-track:<id>; metadata.json records each pr_url (key-scoped writes)
+
+Step 5: Merge train (CI)
+   - lands the group product-repos-first, control-repo-last, using merge commits;
+     pins each submodule gitlink to the merge commit; honors metadata.merge_order;
+     idempotent on re-fire; posts a half-landed status comment on the control PR
+```
+
+**Review gate:** identical to `/cadre-ship` — refuses on `changes_requested` / `blocking_count > 0`; absent review falls back to a soft prompt.
+
+---
+
+### 19. `/cadre-release`
 
 **Purpose**: Cut a local release — changelog entry + version tag across shipped/
 archived tracks. Local only; never pushes.

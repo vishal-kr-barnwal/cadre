@@ -45,10 +45,11 @@ The Cadre commands are available as slash commands (Codex custom prompts in
   the verdict is `changes_requested` or `blocking_count > 0`.
 - `/cadre-ship` — rebase a reviewed track onto main, push, prepare the PR
   (monorepo). PR opening is opt-in via `cadre/config.json` `auto_open`
-  (default `false` = prepare only). The merge train lands product PRs with merge
-  commits (squash is disabled as a guardrail, so the submodule gitlink can pin to
-  a deterministic merge commit).
-- `/cadre-land` — polyrepo: open + link the cross-repo PR group; merge train lands it
+  (default `false` = prepare only).
+- `/cadre-land` — polyrepo: open + link the cross-repo PR group; the merge train
+  lands them product-repos-first, control-repo-last using merge commits (squash
+  disabled as a guardrail, so each submodule gitlink pins to a deterministic merge
+  commit)
 - `/cadre-release` — cut a local release (changelog + version tag)
 - `/cadre-revert`, `/cadre-validate`, `/cadre-flag`,
   `/cadre-revise`, `/cadre-archive`, `/cadre-refresh`
@@ -56,7 +57,8 @@ The Cadre commands are available as slash commands (Codex custom prompts in
   in place, not a per-timestamp file); `--for-teammate` writes a goal-first prose
   handoff instead of the machine dump
 - `/cadre-formula` — manage track templates: `list` / `show` / `create`
-  (distill from a track) / `wisp` (ephemeral exploration, no audit trail)
+  (extract a reusable template from a completed track) / `wisp` (ephemeral
+  exploration, no audit trail)
 
 > **Codex** expands `$ARGUMENTS` / `$1`…`$9` in custom prompts. **Antigravity**
 > appends any text typed after the workflow name. Both behaviors are handled by

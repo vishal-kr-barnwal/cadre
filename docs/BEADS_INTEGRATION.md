@@ -271,7 +271,8 @@ bd dolt push                      # Push changes to remote
 | `/cadre-flag blocked` | `bd update --status blocked` | Sync both with structured notes |
 | `/cadre-flag skipped` | `bd close` or `bd update` | Mark in both based on skip reason |
 | `/cadre-handoff` | `bd note`, `bd dolt push` | Save context + push to remote |
-| `/cadre-ship` | `bd dolt push` | Flush Dolt before rebase/push |
+| `/cadre-ship` | `bd dolt push` | Flush Dolt before rebase/push (monorepo) |
+| `/cadre-land` | `bd dolt push` | Flush Dolt before opening the cross-repo PR group (polyrepo) |
 | `/cadre-revert` | `bd reopen` | Sync status |
 | `/cadre-archive` | `bd compact --auto` | Archive track + compact |
 
@@ -574,7 +575,7 @@ bd dep add <issue> external:project-a:auth-api
 
 2. **Sync frequency** - Real-time vs. on-command sync?
 
-3. **Skill loading** - Load both skills separately or create unified `cadre-beads` skill?
+3. **Skill loading** - Load the `cadre` and `beads` skills separately or merge them into a single combined skill?
 
 4. **Fallback behavior** - ~~If `bd` not installed, silent skip or prompt to install?~~ **Resolved**: Always attempt Beads; prompt user to choose if unavailable.
 
