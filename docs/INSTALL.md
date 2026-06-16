@@ -19,7 +19,7 @@ generation work.
 
 ## Version & compatibility matrix
 
-Current release: **v0.3.4** (multi-platform support, plus the team-scale SDLC tail — review → ship/land → archive → release with an enforced review gate — and polyrepo cross-repo PRs with a merge-commit merge train).
+Current release: **v1.0.0** — renamed to **Cadre** (was Conductor-Beads), plus a team-scale SDLC tail (review → ship/land → archive → release with an enforced review gate), polyrepo cross-repo PRs with a no-squash merge-commit merge train, and a derived `tracks.md` index.
 
 | Platform | Min. version | Commands directory | Command format | Invoke | Context file | Source of truth |
 |----------|--------------|--------------------|----------------|--------|--------------|-----------------|

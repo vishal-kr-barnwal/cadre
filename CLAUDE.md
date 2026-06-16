@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Cadre is a unified toolkit for **Context-Driven Development** that combines:
+Cadre is a unified toolkit for **Context-Driven Development** that combines two halves:
 
-- **Cadre**: Spec-first planning, human-readable context, TDD workflow
+- **Spec-first planning** (the Cadre methodology): human-readable context, tracks, TDD workflow
 - **Beads**: Dependency-aware task graph, cross-session memory, agent-optimized output
 
 It works with Claude Code (commands + skills) and four other AI coding tools — OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot — via generated command sets.

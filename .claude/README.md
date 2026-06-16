@@ -168,7 +168,7 @@ matrix and per-platform setup.
 
 ```
 .claude/
-├── commands/                     # Claude Code slash commands (15)
+├── commands/                     # Claude Code slash commands (16)
 │   ├── cadre-setup.md
 │   ├── cadre-newtrack.md
 │   ├── cadre-implement.md
@@ -179,6 +179,7 @@ matrix and per-platform setup.
 │   ├── cadre-revise.md
 │   ├── cadre-review.md
 │   ├── cadre-ship.md
+│   ├── cadre-land.md
 │   ├── cadre-archive.md
 │   ├── cadre-release.md
 │   ├── cadre-handoff.md

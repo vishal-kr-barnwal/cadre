@@ -4,20 +4,20 @@
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 0.3.4
+**Version:** 1.0.0
 
 ## What is Cadre?
 
-Cadre integrates two powerful systems:
+Cadre brings together two complementary halves:
 
-- **Cadre** provides the methodology — specs, plans, tracks, and TDD workflows
-- **Beads** provides the memory — persistent task tracking that survives conversation compaction
+- **Spec-first planning** — specs, plans, tracks, and TDD workflows (the Cadre methodology)
+- **Beads** — persistent task memory that survives conversation compaction
 
 Together, they enable AI agents to manage long-horizon development tasks without losing context across sessions.
 
 > 📋 Full version history is in the **[Changelog](CHANGELOG.md)**.
 
-## What's New in v0.3.x
+## What's New in v1.0.0
 
 ### Team-scale workflow
 
@@ -427,8 +427,8 @@ Cadre/
 ├── .cursor/             # Cursor commands + rule (generated)
 ├── .agent/workflows/    # Google Antigravity workflows (generated)
 ├── .github/prompts/     # GitHub Copilot prompt files (generated)
-├── scripts/             # generate-commands.sh, migrate-v2.sh
-├── templates/           # Workflow and styleguide templates
+├── scripts/             # install.sh, generate-commands.sh, migrate-to-cadre.sh
+├── templates/           # Workflow + styleguide templates, ci/ (merge-train + drift-check)
 ├── docs/                # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md            # Claude Code context
 └── AGENTS.md            # Codex + Antigravity context
