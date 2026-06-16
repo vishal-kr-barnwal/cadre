@@ -4,7 +4,7 @@
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 1.0.0
+**Version:** 2.0.0
 
 ## What is Cadre?
 
@@ -21,7 +21,7 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 **Spec-first SDLC.** Every track flows through plan → implement (TDD) → **review → ship (monorepo) / land (polyrepo) → archive → release**. `/cadre-review` is an enforced quality gate: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `/cadre-ship` / `/cadre-land` refuse to proceed on `changes_requested` or blocking findings.
 
-**Five AI coding tools, one source of truth.** The 16-command suite runs on Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot. The non-Claude sets are generated from the canonical Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh) (run `--check` in CI to catch drift). All tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Cursor, implement in Claude Code).
+**Two AI coding tools, one source of truth.** The 16-command suite runs on Claude Code and OpenAI Codex CLI. The Codex set is generated from the canonical Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh) (run `--check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
 
 **Built for teams.**
 - **Per-person identity + advisory leases** — assignees use your git committer identity (`user.email` → `user.name`); `metadata.json` carries `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In shared sync mode a track can hold an advisory lease (a no-op in monorepo/local modes; stale leases swept by `/cadre-validate`).
@@ -39,9 +39,6 @@ Together, they enable AI agents to manage long-horizon development tasks without
 |----------|-----|--------|
 | **Claude Code** | slash commands + skills | `/cadre-setup` |
 | **OpenAI Codex CLI** | custom prompts | `/cadre-setup` |
-| **Cursor** | commands + rule | `/cadre-setup` |
-| **Google Antigravity** | workflows | `/cadre-setup` |
-| **GitHub Copilot** | prompt files | `/cadre-setup` |
 | **Agent Skills compatible CLIs** | skills specification | — |
 
 See the **[Install & Version Guide](docs/INSTALL.md)** for the full compatibility matrix and per-platform setup. Installation summaries are below.
@@ -131,37 +128,7 @@ cp AGENTS.md your-project/AGENTS.md   # project context
 
 Invoke `/cadre-setup` from the slash menu. Codex expands `$ARGUMENTS`, so `/cadre-newtrack Add OAuth login` works.
 
-### Cursor
-
-```bash
-mkdir -p your-project/.cursor/commands your-project/.cursor/rules
-cp -r .cursor/commands/* your-project/.cursor/commands/
-cp .cursor/rules/cadre.mdc your-project/.cursor/rules/
-```
-
-Type `/` in the Agent input and pick `cadre-setup`. The `.mdc` rule loads Cadre conventions automatically.
-
-### Google Antigravity
-
-```bash
-mkdir -p your-project/.agent/workflows
-cp -r .agent/workflows/* your-project/.agent/workflows/
-cp AGENTS.md your-project/AGENTS.md
-```
-
-Invoke `/cadre-setup`; Antigravity matches the workflow file name.
-
-### GitHub Copilot
-
-```bash
-mkdir -p your-project/.github/prompts
-cp -r .github/prompts/* your-project/.github/prompts/
-cp .github/copilot-instructions.md your-project/.github/copilot-instructions.md
-```
-
-In Copilot Chat, type `/` then `cadre-setup`. Enable prompt files in VS Code with `"chat.promptFiles": true` if needed.
-
-> The Codex, Cursor, Antigravity, and Copilot command sets are generated from the Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
+> The Codex command set is generated from the Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
 
 ---
 
@@ -292,7 +259,7 @@ Status modes:
 
 ## Commands Reference
 
-The same command name works on every supported platform (Claude Code, Codex CLI, Cursor, Antigravity, Copilot).
+The same command name works on every supported platform (Claude Code, Codex CLI).
 
 | Command | Description |
 |---------|-------------|
@@ -377,14 +344,11 @@ Cadre/
 │   ├── commands/        # Claude Code slash commands (16) — canonical source
 │   └── skills/          # Skills (cadre, beads, skill-creator)
 ├── .codex/prompts/      # OpenAI Codex CLI commands (generated)
-├── .cursor/             # Cursor commands + rule (generated)
-├── .agent/workflows/    # Google Antigravity workflows (generated)
-├── .github/prompts/     # GitHub Copilot prompt files (generated)
 ├── scripts/             # install.sh, generate-commands.sh, migrate-to-cadre.sh
 ├── templates/           # Workflow + styleguide templates, ci/ (merge-train + drift-check)
 ├── docs/                # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md            # Claude Code context
-└── AGENTS.md            # Codex + Antigravity context
+└── AGENTS.md            # Codex context
 ```
 
 ### Generated Project Structure
@@ -400,7 +364,6 @@ your-project/
 │   ├── tracks.md            # Derived track index (cache; rebuilt from metadata.json via --regen-index)
 │   ├── patterns.md          # Consolidated learnings (Ralph-style)
 │   ├── beads.json           # Beads integration config
-│   ├── HANDOFF.md           # Single rolling handoff (trimmed; --for-teammate writes prose)
 │   ├── .gitignore           # Ignores agent-local state (setup/refresh/implement state)
 │   ├── repos.json           # Polyrepo only: control-repo topology + submodule map
 │   ├── config.json          # Polyrepo only: PR provider, sync mode, auto_open
@@ -409,6 +372,7 @@ your-project/
 │           ├── spec.md      # Requirements
 │           ├── plan.md      # Task list
 │           ├── learnings.md # Patterns/gotchas discovered
+│           ├── HANDOFF.md   # Per-track rolling handoff (trimmed; --for-teammate writes prose)
 │           └── metadata.json # Source of truth: status, owner, reviewer, review, lease, merge_order
 ├── .beads/                  # Beads Dolt DB (if initialized)
 ├── .gitattributes           # .beads/** merge=ours + parallel_state.json merge=ours (added by setup)

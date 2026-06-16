@@ -9,7 +9,7 @@ Cadre is a unified toolkit for **Context-Driven Development** that combines two 
 - **Spec-first planning** (the Cadre methodology): human-readable context, tracks, TDD workflow
 - **Beads**: Dependency-aware task graph, cross-session memory, agent-optimized output
 
-It works with Claude Code (commands + skills) and four other AI coding tools — OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot — via generated command sets.
+It works with Claude Code (commands + skills) and OpenAI Codex CLI (via a generated command set).
 
 ## Architecture
 
@@ -23,25 +23,21 @@ Cadre/
 │       ├── beads/          # Persistent task memory skill
 │       └── skill-creator/  # Skill creation guide
 ├── .codex/prompts/         # OpenAI Codex CLI commands (generated)
-├── .cursor/                # Cursor commands + rule (generated)
-├── .agent/workflows/       # Google Antigravity workflows (generated)
-├── .github/prompts/        # GitHub Copilot prompt files (generated)
 ├── scripts/
 │   ├── install.sh          # Interactive installer (detect CLIs, global/project)
-│   ├── generate-commands.sh # Generates the 4 platforms above from .claude/commands/
+│   ├── generate-commands.sh # Generates the Codex command set from .claude/commands/
 │   ├── agent-refs/         # Masters for per-agent-sliced references (AGENT blocks)
 │   ├── migrate-to-cadre.sh # Migrate an existing conductor/ project to cadre/
 │   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration (legacy)
-├── templates/              # Workflow and styleguide templates + ci/ (merge-train + monorepo drift-check)
+├── templates/              # Workflow/styleguide templates + ci/ (merge-train + drift-check) + scripts/ (cadre-regen-index.sh, bundled & run in place)
 ├── docs/                   # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md               # This file (Claude Code context)
-└── AGENTS.md               # Codex + Antigravity context
+└── AGENTS.md               # Codex context
 ```
 
-> **Generated command sets** (`.codex/`, `.cursor/commands/`, `.agent/`,
-> `.github/prompts/`) are derived from `.claude/commands/` by
-> `scripts/generate-commands.sh`. Edit the canonical Claude command and
-> regenerate — do not hand-edit generated files. CI can run
+> **Generated command set** (`.codex/prompts/`) is derived from
+> `.claude/commands/` by `scripts/generate-commands.sh`. Edit the canonical
+> Claude command and regenerate — do not hand-edit generated files. CI can run
 > `bash scripts/generate-commands.sh --check` to detect drift. Ready-made
 > drift-gate workflows ship at
 > `templates/ci/cadre-monorepo-check.{github,gitlab}.yml` (they run
@@ -49,19 +45,19 @@ Cadre/
 
 ### Commands
 
-All platforms (Claude Code, Codex CLI, Cursor, Antigravity, Copilot) invoke the same command name.
+All platforms (Claude Code, Codex CLI) invoke the same command name.
 
 | Command | Purpose |
 |---------|---------|
 | `/cadre-setup` | Initialize project with context files and first track |
 | `/cadre-newtrack` | Create feature/bug track with spec and plan |
 | `/cadre-implement` | Execute tasks from track's plan (TDD workflow) |
-| `/cadre-status` | Display progress overview (`--export` writes a project summary; `--team`/`--mine` filter by assignee; `--repos` shows the polyrepo fleet board; `--regen-index` rebuilds `tracks.md` from `metadata.json.status`) |
-| `/cadre-revert` | Git-aware revert of tracks, phases, or tasks |
+| `/cadre-status` | Display progress overview (`--export` writes a project summary; `--team`/`--mine` filter by assignee; `--repos` shows the polyrepo fleet board; `--available`/`--unowned` shows unblocked work to pick up; `--regen-index` rebuilds `tracks.md` from `metadata.json.status`) |
+| `/cadre-revert` | Git-aware revert of tracks, phases, or tasks (ownership-guarded) |
 | `/cadre-validate` | Validate project integrity and fix issues |
-| `/cadre-flag` | Flag the current task as blocked or skipped with a reason |
-| `/cadre-revise` | Update spec/plan when implementation reveals issues |
-| `/cadre-review` | Review a track's diff before shipping (quality gate) |
+| `/cadre-flag` | Flag the current task as blocked or skipped with a reason (commits + propagates in shared mode) |
+| `/cadre-revise` | Update spec/plan when implementation reveals issues (ownership-guarded) |
+| `/cadre-review` | Review a track's diff before shipping (quality gate); `--request [@reviewer]` assigns a reviewer |
 | `/cadre-ship` | Rebase a reviewed track onto main, push it, prepare the PR (monorepo) |
 | `/cadre-land` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
 | `/cadre-archive` | Archive completed tracks (local cleanup + learnings) |
@@ -91,9 +87,8 @@ project/
 │   ├── tracks.md            # DERIVED human-readable index (regenerated from metadata.json.status via /cadre-status --regen-index)
 │   ├── patterns.md          # Consolidated learnings (Ralph-style)
 │   ├── beads.json           # Beads integration config
-│   ├── config.json          # Project config (PR provider, sync mode, "auto_open")
+│   ├── config.json          # Project config (PR provider, sync mode, "auto_open", "require_second_reviewer")
 │   ├── repos.json           # Polyrepo topology + submodule manifest (polyrepo only)
-│   ├── HANDOFF.md           # Single rolling handoff doc (trimmed; --for-teammate prose mode)
 │   ├── .gitignore           # Git-ignores agent-local state (setup/refresh/non-shared state)
 │   ├── setup_state.json     # Resume state for setup (agent-local, git-ignored)
 │   ├── refresh_state.json   # Context refresh tracking (agent-local, git-ignored)
@@ -104,6 +99,7 @@ project/
 │           ├── spec.md           # Requirements
 │           ├── plan.md           # Phased task list
 │           ├── learnings.md      # Patterns/gotchas discovered (Ralph-style)
+│           ├── HANDOFF.md        # Per-track rolling handoff (trimmed; --for-teammate prose mode)
 │           ├── implement_state.json # Resume state (if in progress)
 │           ├── blockers.md       # Block history log
 │           ├── skipped.md        # Skipped tasks log
@@ -123,16 +119,27 @@ A track is a logical unit of work (feature or bug fix). Each track has:
 ### Review Gate (New!)
 A track must pass review before it ships. `/cadre-review` writes
 `metadata.review` (`verdict` ∈ `approved` | `changes_requested`, `blocking_count`,
-`date`, `reviewer`) and sets the Beads label `review:ready` or `review:changes`.
-`/cadre-ship` and `/cadre-land` then **refuse** to proceed on
-`changes_requested` or `blocking_count > 0`; an absent `review` block yields a soft
-prompt (warns the track is unreviewed today), and a clean approval proceeds.
+`date`, `reviewer`, `coverage`, `self_reviewed`) and sets the Beads label
+`review:ready` or `review:changes` (`/cadre-review --request` assigns a reviewer and
+sets `review:requested`). `coverage` carries the machine-measured number from
+`/cadre-implement`'s coverage gate (no longer self-asserted prose). `/cadre-ship`
+and `/cadre-land` then **refuse** to proceed on `changes_requested`,
+`blocking_count > 0`, or (when `config.json` `require_second_reviewer` is set) a
+`self_reviewed` approval; they also **re-read the verdict immediately before
+pushing** to close the review→ship TOCTOU window. An absent `review` block yields a
+soft prompt, and a clean approval proceeds.
 
-### Identity & Leases (New!)
+### Identity, Ownership & Leases (New!)
 Assignees use the git committer identity (`user.email` → `user.name`), never a
-literal `cadre`. `metadata.json` records `owner` and `reviewer`. In **shared**
-sync mode a track can hold an advisory `lease` (a no-op in monorepo/local mode);
-stale leases are swept by `/cadre-validate`.
+literal `cadre`. `metadata.json` records `owner` and `reviewer`. A **topology-
+independent ownership guard** (`references/ownership-guard.md`) runs before any
+track mutation — `/cadre-implement` (at selection), `/cadre-flag`, `/cadre-revise`,
+`/cadre-revert`, `/cadre-handoff` — so two people can't clobber the same track even
+in the **default monorepo** mode where the advisory `lease` is a no-op. In
+**shared** sync mode a track can additionally hold a `lease`; stale leases (older
+than the canonical **30-minute** window shared by implement and validate) are swept
+by `/cadre-validate`. Resolution of the active track is always from
+`metadata.json.status` (source of truth), never the derived `tracks.md` cache.
 
 ### Topology: Monorepo vs Polyrepo (New!)
 Cadre runs in one of two topologies, chosen at `/cadre-setup`:
@@ -209,7 +216,7 @@ At phase completion:
 
 ## Development Notes
 
-- Canonical commands are Markdown in `.claude/commands/`; the Codex, Cursor, Antigravity, and Copilot sets are generated from them by `scripts/generate-commands.sh`
+- Canonical commands are Markdown in `.claude/commands/`; the Codex set is generated from them by `scripts/generate-commands.sh`
 - Skills use SKILL.md format with references/ subdirectory
 - Skills no longer bundle their own command-reference copies — each `SKILL.md` links command names directly to the canonical `.claude/commands/cadre-*.md`
 - State is tracked in JSON files (setup_state.json, implement_state.json, metadata.json)

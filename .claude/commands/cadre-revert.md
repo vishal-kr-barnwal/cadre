@@ -101,6 +101,18 @@ Revert Cadre work: $ARGUMENTS
 
 ---
 
+## 2.5 OWNERSHIP GUARD
+
+Once the target track is known (and **before** any git reconciliation or revert),
+run the **Ownership Guard** (`references/ownership-guard.md`) for that track.
+Reverting rewinds commits another agent may be building on and resets plan markers,
+so this is the highest-impact place to avoid clobbering a teammate's in-flight work
+— including in the default monorepo topology, where the advisory `lease` is a no-op.
+If the guard halts (the track is held by someone else and the user chose not to take
+over), stop here.
+
+---
+
 ## 3.0 PHASE 2: GIT RECONCILIATION & VERIFICATION
 
 **GOAL: Find ALL actual commits in Git history that correspond to user's confirmed intent.**

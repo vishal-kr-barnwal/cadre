@@ -1,6 +1,6 @@
 # Install & Version Guide
 
-Cadre ships the same 16 commands to five AI coding tools. This guide
+Cadre ships the same 16 commands to two AI coding tools. This guide
 covers installation for each platform and explains how versioning and command
 generation work.
 
@@ -9,9 +9,6 @@ generation work.
 - [Per-platform installation](#per-platform-installation)
   - [Claude Code](#claude-code)
   - [OpenAI Codex CLI](#openai-codex-cli)
-  - [Cursor](#cursor)
-  - [Google Antigravity](#google-antigravity)
-  - [GitHub Copilot](#github-copilot)
 - [How commands are generated](#how-commands-are-generated)
 - [Versioning policy](#versioning-policy)
 
@@ -25,16 +22,13 @@ Current release: **v1.0.0** — renamed to **Cadre** (was Conductor-Beads), plus
 |----------|--------------|--------------------|----------------|--------|--------------|-----------------|
 | **Claude Code** | 1.0+ | `.claude/commands/` | Markdown + frontmatter, `$ARGUMENTS` | `/cadre-setup` | `CLAUDE.md` | ✅ canonical |
 | **OpenAI Codex CLI** | custom prompts | `~/.codex/prompts/` | Markdown, `$ARGUMENTS`/`$1`…`$9` | `/cadre-setup` | `AGENTS.md` | generated |
-| **Cursor** | 1.6+ | `.cursor/commands/` | Plain Markdown (no frontmatter) | `/cadre-setup` | `.cursor/rules/*.mdc` | generated |
-| **Google Antigravity** | workflows support | `.agent/workflows/` | Markdown + YAML frontmatter | `/cadre-setup` | `AGENTS.md` | generated |
-| **GitHub Copilot** | prompt files (VS Code / CLI) | `.github/prompts/` | `*.prompt.md` + YAML frontmatter | `/cadre-setup` | `.github/copilot-instructions.md` | generated |
 
 > The **Claude Code** `.claude/commands/*.md` files are the single source of
-> truth. Codex, Cursor, Antigravity, and Copilot command sets are generated from
-> them by [`scripts/generate-commands.sh`](../scripts/generate-commands.sh).
+> truth. The Codex command set is generated from them by
+> [`scripts/generate-commands.sh`](../scripts/generate-commands.sh).
 
-All five platforms operate on the **same** `cadre/` and `.beads/`
-directories, so you can mix tools on one repository (e.g. plan in Cursor,
+Both platforms operate on the **same** `cadre/` and `.beads/`
+directories, so you can mix tools on one repository (e.g. plan in Codex,
 implement in Claude Code).
 
 ---
@@ -86,7 +80,7 @@ bash scripts/install.sh --dry-run    # preview only
 | `--all` | Select every detected tool (implies `--yes`) |
 | `-y`, `--yes` | Skip the confirmation prompt |
 | `--dry-run` | Print actions without writing |
-| positional `claude codex cursor antigravity copilot` | Preselect tools |
+| positional `claude codex` | Preselect tools |
 
 The manual per-platform steps below do the same copies by hand.
 
@@ -135,82 +129,29 @@ Invoke from the Codex slash menu: type `/` then `cadre-setup` (or
 > they remain fully supported. If you prefer Skills, the same Markdown bodies
 > can be dropped into a Codex skill.
 
-### Cursor
-
-Cursor commands are per-project Markdown files (or user-global in
-`~/.cursor/commands/`).
-
-```bash
-# Project-scoped
-mkdir -p your-project/.cursor/commands your-project/.cursor/rules
-cp -r .cursor/commands/* your-project/.cursor/commands/
-cp .cursor/rules/cadre.mdc your-project/.cursor/rules/
-
-# Or user-global (all projects)
-mkdir -p ~/.cursor/commands
-cp -r .cursor/commands/* ~/.cursor/commands/
-```
-
-The `.cursor/rules/cadre.mdc` rule loads the Cadre conventions
-automatically. In the Agent input, type `/` and pick `cadre-setup`; any text
-you type after the command name becomes its input.
-
-### Google Antigravity
-
-Antigravity discovers workflows in `.agent/workflows/` within your project.
-
-```bash
-mkdir -p your-project/.agent/workflows
-cp -r .agent/workflows/* your-project/.agent/workflows/
-cp AGENTS.md your-project/AGENTS.md
-```
-
-Invoke a workflow with `/cadre-setup` (Antigravity matches the workflow file
-name). `AGENTS.md` supplies the project context/rules.
-
-> To let a workflow auto-run shell steps without confirmation, add a `// turbo`
-> comment on the line above a step. The shipped commands omit this so git
-> operations always ask first — add it yourself if you trust a given step.
-
-### GitHub Copilot
-
-Copilot reads prompt files from `.github/prompts/` and repository instructions
-from `.github/copilot-instructions.md`.
-
-```bash
-mkdir -p your-project/.github/prompts
-cp -r .github/prompts/* your-project/.github/prompts/
-cp .github/copilot-instructions.md your-project/.github/copilot-instructions.md
-```
-
-Enable prompt files in VS Code if needed
-(`"chat.promptFiles": true` in settings). In Copilot Chat, type `/` then
-`cadre-setup`. The frontmatter sets `agent: agent` so each command runs in
-agent mode.
-
 ---
 
 ## How commands are generated
 
-The Codex, Cursor, Antigravity, and Copilot command sets are **generated** from
-the canonical Claude Code commands in `.claude/commands/cadre-*.md` by:
+The Codex command set is **generated** from the canonical Claude Code commands
+in `.claude/commands/cadre-*.md` by:
 
 ```bash
 bash scripts/generate-commands.sh
 ```
 
 This reads each Claude command's frontmatter and body and emits the
-platform-specific variant:
+Codex-specific variant:
 
-| Transform | Codex | Cursor | Antigravity | Copilot |
-|-----------|-------|--------|-------------|---------|
-| Frontmatter | none | none | `description` | `description` + `agent: agent` |
-| `$ARGUMENTS` | kept (native) | described in prose | described in prose | described in prose |
-| Worker-dispatch sentence | `worker` agent type | `/multitask` | Agent Manager | `/fleet` |
-| `references/beads-error-handler.md` (agnostic) | copied verbatim | copied verbatim | copied verbatim | copied verbatim |
-| `references/parallel-execution.md`, `template-locator.md` (sliced) | only Codex's section | only Cursor's | only Antigravity's | only Copilot's |
-| `templates/` bundle | copied into `templates/` | copied into `templates/` | copied into `templates/` | copied into `templates/` |
-| File extension | `.md` | `.md` | `.md` | `.prompt.md` |
+| Transform | Codex |
+|-----------|-------|
+| Frontmatter | none |
+| `$ARGUMENTS` | kept (native) |
+| Worker-dispatch sentence | `worker` agent type |
+| `references/beads-error-handler.md` (agnostic) | copied verbatim |
+| `references/parallel-execution.md`, `template-locator.md` (sliced) | only Codex's section |
+| `templates/` bundle | copied into `templates/` |
+| File extension | `.md` |
 
 ### Per-agent slicing (token optimization)
 
@@ -219,17 +160,15 @@ references are **sliced per agent**. Their masters live in `scripts/agent-refs/`
 with `<!-- AGENT:<name> -->` blocks; the generator emits a copy to each platform
 (Claude included) containing only the shared text plus that platform's block.
 The one-line worker-dispatch sentence in `cadre-implement` is likewise
-substituted per platform. Net result: a Codex bundle never carries Cursor's or
-Copilot's parallel/locator instructions. Edit the masters in `scripts/agent-refs/`
+substituted per platform. Edit the masters in `scripts/agent-refs/`
 (not the generated `references/` copies) and regenerate.
 
 ### Templates bundling
 
 `cadre-setup` copies starter files (`workflow.md`, `code_styleguides/`, …)
 into your project. Those live in the canonical `templates/` directory, and the
-generator bundles a copy into **every** command set — `.codex/prompts/templates/`,
-`.cursor/commands/templates/`, `.agent/workflows/templates/`,
-`.github/prompts/templates/` — plus the Claude skill at
+generator bundles a copy into the Codex command set at
+`.codex/prompts/templates/` — plus the Claude skill at
 `.claude/skills/cadre/templates/`. Because each platform's install command
 copies its whole directory, the templates ship with the commands.
 
@@ -272,8 +211,7 @@ recorded in the [Changelog](../CHANGELOG.md).
 When adding or changing a command:
 
 1. Edit the canonical Claude command in `.claude/commands/`.
-2. Run `bash scripts/generate-commands.sh` to regenerate the Codex, Cursor,
-   Antigravity, and Copilot command sets.
+2. Run `bash scripts/generate-commands.sh` to regenerate the Codex command set.
 3. Bump the version in `README.md`.
 4. Note the change in the README "What's New" section.
 

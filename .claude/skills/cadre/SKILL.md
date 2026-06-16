@@ -11,7 +11,7 @@ description: |
   - User mentions documentation is outdated or wants to sync context with codebase changes
   - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
   
-  Interoperable across Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot.
+  Interoperable across Claude Code and OpenAI Codex CLI.
   Integrates with Beads for persistent task memory across sessions.
 ---
 
@@ -32,16 +32,28 @@ For parallel execution details (annotations, state schema, when to use), see [re
 
 ## Context Loading
 
-When this skill activates, load these files to understand the project:
+Load **lazily**: pull each file only when a command actually needs it, and only
+once per session. Do **not** eagerly read everything on activation — that scales the
+fixed per-session cost with project age (`patterns.md` in particular grows with team
+history, and a long `tracks.md` is rarely needed in full).
+
+**Minimal activation set** (cheap, read once to understand the project):
 1. `cadre/product.md` - Product vision and goals
 2. `cadre/tech-stack.md` - Technology constraints
 3. `cadre/workflow.md` - Development methodology (TDD, commits)
-4. `cadre/tracks.md` - Current work status
-5. `cadre/patterns.md` - **Codebase patterns (read before starting work)**
+
+**Load on demand** (only from the commands that use them):
+- `cadre/tracks.md` — current work status; read the **marked index region only**,
+  not the whole file. Status-aware commands (`/cadre-status`, `/cadre-implement`)
+  resolve status from each track's `metadata.json.status` (the source of truth)
+  rather than this derived cache.
+- `cadre/patterns.md` — **codebase patterns; read before starting work**
+  (`/cadre-implement`, `/cadre-newtrack`). Commands that never use it (e.g.
+  `/cadre-release`, `/cadre-flag`, `/cadre-status`) should not load it.
 
 **Important**: Cadre commits locally but never pushes. Users decide when to push to remote.
 
-For active tracks, also load:
+For active tracks, load when working that track:
 - `cadre/tracks/<track_id>/spec.md`
 - `cadre/tracks/<track_id>/plan.md`
 - `cadre/tracks/<track_id>/learnings.md` - **Patterns/gotchas from this track**
@@ -78,7 +90,7 @@ For Beads overview within workflow context (sync behavior, configuration, gracef
 if which bd > /dev/null 2>&1 && [ -f cadre/beads.json ]; then
   BEADS_ENABLED=$(cat cadre/beads.json | grep -o '"enabled"[[:space:]]*:[[:space:]]*true' || echo "")
   if [ -n "$BEADS_ENABLED" ]; then
-    # Beads is available and enabled - use bd commands (requires Dolt server: bd dolt start)
+    # Beads is available and enabled - use bd commands (embedded Dolt by default; no Dolt SQL server required)
   fi
 fi
 ```

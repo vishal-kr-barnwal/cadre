@@ -30,6 +30,8 @@ local.
   META="cadre/tracks/<track_id>/metadata.json"
   verdict=$(jq -r '.review.verdict // "absent"' "$META")
   blocking=$(jq -r '.review.blocking_count // 0' "$META")
+  self_reviewed=$(jq -r '.review.self_reviewed // false' "$META")
+  require_second=$(jq -r '.require_second_reviewer // false' cadre/config.json 2>/dev/null)
   ```
   - **Absent** (`$verdict == "absent"` — no `review` key, or `null`) → no structured
     gate recorded. Keep the existing soft behavior: confirm the track has been
@@ -41,6 +43,12 @@ local.
     > `$verdict`, blocking findings: `$blocking`). Resolve the findings
     > and re-run `/cadre-review <track_id>` before shipping."
     Then halt — do **not** rebase or push.
+  - **Self-approved while a second reviewer is required** (`$require_second == true`
+    AND `$self_reviewed == true`) → **REFUSE**:
+    > "🚫 Track `<track_id>` was approved by its own owner and
+    > `require_second_reviewer` is set. Have a different reviewer run
+    > `/cadre-review <track_id>` before shipping."
+    Then halt.
   - **Clean** (otherwise — `$verdict` is approved/non-blocking and `$blocking == 0`)
     → the gate is satisfied; proceed without further confirmation.
 
@@ -72,8 +80,18 @@ For the selected track:
      ```
    - This syncs the track branch with main's latest Beads state before the PR.
 
-4. **Push rebased branch:**
+4. **Re-read the review gate, then push (TOCTOU close):** the verdict read in
+   §1 is a point-in-time snapshot; a reviewer may have flipped it to
+   `changes_requested` during the (slow) Dolt-flush + rebase above. **Re-read it
+   from disk immediately before pushing** and abort if it now blocks:
    ```bash
+   META="cadre/tracks/<track_id>/metadata.json"
+   verdict=$(jq -r '.review.verdict // "absent"' "$META")
+   blocking=$(jq -r '.review.blocking_count // 0' "$META")
+   if [ "$verdict" = "changes_requested" ] || [ "$blocking" -gt 0 ]; then
+     echo "🚫 Review flipped to a blocking state (verdict: $verdict, blocking: $blocking) during ship. Aborting push — re-run /cadre-review."
+     exit 1
+   fi
    git push origin track/<track_id> --force-with-lease
    ```
 

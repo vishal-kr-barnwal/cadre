@@ -9,6 +9,17 @@ This is the **quality gate** between `/cadre-implement` and `/cadre-ship`.
 It reviews the track's full diff against `main`, records findings, and either clears
 the track to ship or routes issues back into the plan.
 
+## 0. Mode
+
+- **`--request [@reviewer]`** → **assign a reviewer; do not review.** Record who
+  should review this track and surface it in the team's review queue, then stop (no
+  diff, no verdict). Set `metadata.json.reviewer` to the requested person
+  (key-scoped jq), and if Beads is available add the label `review:requested` to the
+  epic (`bd label add <epic_id> review:requested --json`). `/cadre-status --team`
+  lists tracks `awaiting review` with their assigned reviewer, so review load can be
+  distributed deliberately instead of landing on whoever volunteers.
+- **No flag** (default) → run the full review (sections 1-7) and record the verdict.
+
 ## 1. Verify Setup
 
 If `cadre/tracks.md` doesn't exist, tell the user to run `/cadre-setup` first.
@@ -80,19 +91,37 @@ META="cadre/tracks/<track_id>/metadata.json"
 REVIEWER="$(git config user.email >/dev/null 2>&1 && printf '"%s"' "$(git config user.email)" \
   || { git config user.name >/dev/null 2>&1 && printf '"%s"' "$(git config user.name)"; } \
   || echo null)"
+# Carry the machine-measured coverage recorded by /cadre-implement d5 (null if none).
+COVERAGE="$(jq -r '.last_coverage // "null"' "$META")"
+# self_reviewed: true when the reviewer identity equals the track owner.
+ME="$(git config user.email 2>/dev/null || git config user.name 2>/dev/null || echo)"
+OWNER="$(jq -r '.owner // ""' "$META")"
+SELF=false; [ -n "$ME" ] && [ "$ME" = "$OWNER" ] && SELF=true
+tmp="$(mktemp)"
 jq --arg verdict "<approved|changes_requested>" \
    --argjson blocking <blocking_count> \
    --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
    --argjson reviewer "$REVIEWER" \
-   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer}' \
-   "$META" > "$META.tmp" && mv "$META.tmp" "$META"
+   --argjson coverage "$COVERAGE" \
+   --argjson self "$SELF" \
+   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer, coverage: $coverage, self_reviewed: $self}' \
+   "$META" > "$tmp" && mv "$tmp" "$META"
 ```
 - `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
   or `"changes_requested"` for **Changes requested**.
-- **Self-review warning (non-blocking):** if `metadata.json.owner` equals the
-  reviewer `<git-identity>`, warn the user that they are reviewing their own track
-  ("⚠️ You are the track owner — consider a second reviewer"), but still record the
-  verdict and proceed.
+- `coverage` carries the measured number from `/cadre-implement`'s coverage gate so
+  the recorded verdict reflects a real measurement, not a self-asserted "tests pass".
+  If a track was reviewed with `coverage: null`, note that coverage was never
+  measured.
+- **Self-review (warn, or hard-block when configured):** if `metadata.json.owner`
+  equals the reviewer `<git-identity>`, the operator is reviewing their own track.
+  Read `cadre/config.json` `require_second_reviewer` (default **false**):
+  - **false** (default) → warn only ("⚠️ You are the track owner — consider a second
+    reviewer"), record the verdict, and proceed (unchanged behavior).
+  - **true** → an `approved` self-review is **not** sufficient: record the verdict but
+    set `review.self_reviewed: true`; `/cadre-ship` and `/cadre-land` will refuse to
+    ship until a different reviewer approves. Tell the user a second reviewer is
+    required.
 
 ## 6. Route the Outcome
 

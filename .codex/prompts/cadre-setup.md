@@ -482,6 +482,9 @@ and `references/polyrepo-git.md`.**
    - `auto_open`: leave `false` (template default). Opt-in hook that lets
      `/cadre-ship` auto-open the monorepo PR after a clean push; teams flip it
      to `true` manually. Keep it present so `ship` can read it without a fallback.
+   - `require_second_reviewer`: leave `false` (template default). When a team flips
+     it to `true`, `/cadre-ship` and `/cadre-land` refuse a track approved by its own
+     owner (`review.self_reviewed`), forcing a second reviewer.
    - `control_remote`, `control_branch` from step 4
    - `pr_provider`: `"github"` or `"gitlab"`
    - `merge_train.enabled`: false only if C; `merge_train.auto_fire`: true for A,

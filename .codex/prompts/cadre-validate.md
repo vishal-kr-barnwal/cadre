@@ -131,9 +131,10 @@ For each track whose `metadata.json` carries a non-null `lease` object
 
 - Compute lease age from `lease.heartbeat_at` (fall back to `acquired_at` if
   `heartbeat_at` is absent) against the current UTC time.
-- **Stale threshold: heartbeat older than ~3 hours** (a lease whose holder has
-  clearly gone away — well beyond a normal active session's heartbeat cadence).
-  Treat an unparseable timestamp as stale.
+- **Stale threshold: heartbeat older than the canonical 30-minute window**
+  (see `references/ownership-guard.md`) — the **same** threshold `/cadre-implement`
+  uses for its take-over check, so a lease is never "fresh" to one command and
+  "stale" to another. Treat an unparseable timestamp as stale.
 - Report each stale lease as a ⚠️ Warning naming the track, `lease.owner`,
   `lease.host`, and the heartbeat age, e.g.
   > "Track `<track_id>` holds a stale lease (owner `<owner>` on `<host>`, last

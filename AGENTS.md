@@ -1,9 +1,8 @@
 # Cadre Context (AGENTS.md)
 
-> Shared agent context for **OpenAI Codex CLI** and **Google Antigravity**.
-> Both tools read an `AGENTS.md` file for persistent project instructions.
-> Claude Code reads `CLAUDE.md`, which mirrors this file. Keep the two in sync
-> when you change project conventions.
+> Agent context for **OpenAI Codex CLI**, which reads an `AGENTS.md` file for
+> persistent project instructions. Claude Code reads `CLAUDE.md`, which mirrors
+> this file. Keep the two in sync when you change project conventions.
 
 This project uses **Cadre**, a toolkit for Context-Driven Development:
 spec-first planning (Cadre) plus a dependency-aware, persistent task graph
@@ -30,7 +29,7 @@ regenerate. Marker map: `new` → `[ ]`, `in_progress` → `[~]`, `completed` �
 ## Slash Commands / Workflows
 
 The Cadre commands are available as slash commands (Codex custom prompts in
-`~/.codex/prompts/`, Antigravity workflows in `.agent/workflows/`):
+`~/.codex/prompts/`):
 
 - `/cadre-setup` — initialize the project (context files + first track)
 - `/cadre-newtrack` — create a feature/bug track with spec and plan
@@ -53,16 +52,15 @@ The Cadre commands are available as slash commands (Codex custom prompts in
 - `/cadre-release` — cut a local release (changelog + version tag)
 - `/cadre-revert`, `/cadre-validate`, `/cadre-flag`,
   `/cadre-revise`, `/cadre-archive`, `/cadre-refresh`
-- `/cadre-handoff` — update the single rolling `cadre/HANDOFF.md` (trimmed
-  in place, not a per-timestamp file); `--for-teammate` writes a goal-first prose
+- `/cadre-handoff` — update the per-track rolling `cadre/tracks/<track_id>/HANDOFF.md`
+  (trimmed in place, not a per-timestamp file); `--for-teammate` writes a goal-first prose
   handoff instead of the machine dump
 - `/cadre-formula` — manage track templates: `list` / `show` / `create`
   (extract a reusable template from a completed track) / `wisp` (ephemeral
   exploration, no audit trail)
 
-> **Codex** expands `$ARGUMENTS` / `$1`…`$9` in custom prompts. **Antigravity**
-> appends any text typed after the workflow name. Both behaviors are handled by
-> the generated command files.
+> **Codex** expands `$ARGUMENTS` / `$1`…`$9` in custom prompts. This behavior is
+> handled by the generated command files.
 
 ## TDD Task Workflow
 

@@ -6,8 +6,8 @@
 # sets.
 #
 # What it does: on every pull_request it checks out the repo and runs
-#   1. `bash scripts/generate-commands.sh --check` — regenerates the per-platform
-#      command sets (.codex/.cursor/.agent/.github/prompts) into a scratch dir and
+#   1. `bash scripts/generate-commands.sh --check` — regenerates the Codex
+#      command set (.codex/prompts) into a scratch dir and
 #      fails if the committed output is STALE. The fix is always: edit the
 #      canonical .claude/commands/ source, re-run `bash scripts/generate-commands.sh`,
 #      and commit the regenerated trees.

@@ -5,9 +5,6 @@
 #
 # One source of truth (the Claude `.md` commands) is transformed into:
 #   - Codex CLI         -> .codex/prompts/cadre-*.md
-#   - Cursor            -> .cursor/commands/cadre-*.md
-#   - Antigravity CLI   -> .agent/workflows/cadre-*.md
-#   - GitHub Copilot    -> .github/prompts/cadre-*.prompt.md
 #
 # Each Claude command file has YAML frontmatter (`description:`, optional
 # `argument-hint:`) followed by a Markdown body. The body uses the `$ARGUMENTS`
@@ -44,24 +41,19 @@ SLICED_REFS=(
   "scripts/agent-refs/template-locator.md"
   "scripts/agent-refs/polyrepo-git.md"
   "scripts/agent-refs/cadre-sync.md"
+  "scripts/agent-refs/ownership-guard.md"
 )
 
 TEMPLATES_SRC="templates"                  # canonical templates (single source)
 SKILL_DIR=".claude/skills/cadre"       # Claude skill; templates bundled here
 
 CODEX_DIR=".codex/prompts"
-CURSOR_DIR=".cursor/commands"
-ANTIGRAVITY_DIR=".agent/workflows"
-COPILOT_DIR=".github/prompts"
 
 # references/ directory for each platform (Claude uses the skill's references).
 ref_dir_for() {
   case "$1" in
     claude)      echo "$SKILL_DIR/references" ;;
     codex)       echo "$CODEX_DIR/references" ;;
-    cursor)      echo "$CURSOR_DIR/references" ;;
-    antigravity) echo "$ANTIGRAVITY_DIR/references" ;;
-    copilot)     echo "$COPILOT_DIR/references" ;;
   esac
 }
 
@@ -71,17 +63,8 @@ dispatch_sentence() {
   case "$1" in
     claude)      echo 'Use the **`Task` tool**, one call per worker (calls are awaitable); see `references/parallel-execution.md`.' ;;
     codex)       echo 'Spawn parallel agents with the built-in `worker` agent type — one per task; "wait for all before continuing" (manage with `/agent`); see `references/parallel-execution.md`.' ;;
-    cursor)      echo 'Use **`/multitask`** to run one subagent per task in parallel (git-worktree isolated); see `references/parallel-execution.md`.' ;;
-    antigravity) echo 'Use the **Agent Manager** to spawn one dynamic subagent per task in the wave; see `references/parallel-execution.md`.' ;;
-    copilot)     echo 'Use **`/fleet`** (Copilot CLI) to dispatch one subagent per task in parallel, or parallel subagents in VS Code; see `references/parallel-execution.md`.' ;;
   esac
 }
-
-# Phrase substituted for the literal `$ARGUMENTS` placeholder on platforms that
-# do not perform `$ARGUMENTS` expansion (Cursor, Antigravity, Copilot). On these
-# platforms any text typed after the slash command is appended to the prompt, so
-# we describe that instead of using a token that would survive verbatim.
-ARGS_PHRASE="the input provided with this command (the text typed after the command name)"
 
 MODE="${1:-generate}"
 GEN_ROOT=""
@@ -181,37 +164,6 @@ generate_platform() {
           printf '%s\n' "$body"
         } | write_file "$(out_path "$CODEX_DIR/$name.md")"
         ;;
-      cursor)
-        # Cursor commands are plain Markdown with no frontmatter.
-        {
-          printf '<!-- %s -->\n\n' "$GEN_MARKER"
-          printf '%s\n' "$body"
-        } | sed "s|\$ARGUMENTS|$ARGS_PHRASE|g" \
-          | write_file "$(out_path "$CURSOR_DIR/$name.md")"
-        ;;
-      antigravity)
-        # Antigravity workflows require YAML frontmatter with a description.
-        {
-          printf -- '---\n'
-          printf 'description: %s\n' "$desc"
-          printf -- '---\n\n'
-          printf '<!-- %s -->\n\n' "$GEN_MARKER"
-          printf '%s\n' "$body"
-        } | sed "s|\$ARGUMENTS|$ARGS_PHRASE|g" \
-          | write_file "$(out_path "$ANTIGRAVITY_DIR/$name.md")"
-        ;;
-      copilot)
-        # GitHub Copilot prompt files: `.prompt.md` with YAML frontmatter.
-        {
-          printf -- '---\n'
-          printf 'description: %s\n' "$desc"
-          printf 'agent: agent\n'
-          printf -- '---\n\n'
-          printf '<!-- %s -->\n\n' "$GEN_MARKER"
-          printf '%s\n' "$body"
-        } | sed "s|\$ARGUMENTS|$ARGS_PHRASE|g" \
-          | write_file "$(out_path "$COPILOT_DIR/$name.prompt.md")"
-        ;;
     esac
   done
 }
@@ -221,7 +173,7 @@ generate_platform() {
 # copied verbatim. Claude is included so its skill carries the same slimmed refs.
 copy_reference() {
   local platform refdir master name dest
-  for platform in claude codex cursor antigravity copilot; do
+  for platform in claude codex; do
     refdir="$(ref_dir_for "$platform")"
     for master in "${SLICED_REFS[@]}"; do
       name="$(basename "$master")"
@@ -233,9 +185,9 @@ copy_reference() {
       } > "$dest"
     done
   done
-  # Agnostic ref: Claude already holds the master in its references/; the four
-  # generated platforms get a verbatim copy.
-  for platform in codex cursor antigravity copilot; do
+  # Agnostic ref: Claude already holds the master in its references/; the
+  # generated Codex command set gets a verbatim copy.
+  for platform in codex; do
     refdir="$(ref_dir_for "$platform")"
     dest="$(out_path "$refdir/$(basename "$AGNOSTIC_REF")")"
     mkdir -p "$(dirname "$dest")"
@@ -249,7 +201,7 @@ copy_reference() {
 # install locations that `cadre-setup`'s template-discovery step probes.
 copy_templates() {
   local dir dest
-  for dir in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR" "$SKILL_DIR"; do
+  for dir in "$CODEX_DIR" "$SKILL_DIR"; do
     dest="$(out_path "$dir/templates")"
     rm -rf "$dest"
     mkdir -p "$dest"
@@ -270,7 +222,7 @@ main() {
     exit 1
   fi
 
-  for platform in codex cursor antigravity copilot; do
+  for platform in codex; do
     generate_platform "$platform"
   done
   copy_reference
@@ -281,7 +233,7 @@ main() {
 
   if [[ "$MODE" == "--check" ]]; then
     stale=false
-    for d in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR" "$SKILL_DIR/templates"; do
+    for d in "$CODEX_DIR" "$SKILL_DIR/templates"; do
       diff -rq "$GEN_ROOT/$d" "$REPO_ROOT/$d" >/dev/null 2>&1 || stale=true
     done
     for master in "${SLICED_REFS[@]}"; do
@@ -295,9 +247,9 @@ main() {
       exit 1
     fi
   else
-    echo "✓ Generated $count commands each for: Codex, Cursor, Antigravity, GitHub Copilot."
-    echo "  Bundled references/ and templates/ into every command set + the Claude skill."
-    echo "  .codex/prompts/ .cursor/commands/ .agent/workflows/ .github/prompts/ .claude/skills/cadre/templates/"
+    echo "✓ Generated $count commands for: Codex."
+    echo "  Bundled references/ and templates/ into the Codex command set + the Claude skill."
+    echo "  .codex/prompts/ .claude/skills/cadre/templates/"
   fi
 }
 

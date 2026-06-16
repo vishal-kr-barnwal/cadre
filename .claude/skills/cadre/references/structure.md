@@ -125,8 +125,8 @@ Plan.md can include annotations for parallel task execution:
 
 ## Cross-platform compatibility
 
-The same `cadre/` structure is used by every supported tool — Claude Code,
-OpenAI Codex CLI, Cursor, Google Antigravity, and GitHub Copilot — and all of
-them invoke the same command name (e.g. `/cadre-setup`, `/cadre-newtrack`,
-`/cadre-implement`). Files, workflows, and state management are fully
-compatible across tools, so you can mix them on one repo.
+The same `cadre/` structure is used by every supported tool — Claude Code and
+OpenAI Codex CLI — and both of them invoke the same command name (e.g.
+`/cadre-setup`, `/cadre-newtrack`, `/cadre-implement`). Files, workflows, and
+state management are fully compatible across tools, so you can mix them on one
+repo.

@@ -59,9 +59,27 @@ Implement track: $ARGUMENTS
    - If no match or ambiguous: Inform user, suggest next available track
 
    **If no track name provided:**
-   - Find first track NOT marked `[x]`
-   - Announce: "No track name provided. Selecting next incomplete track: '<description>'"
+   - Resolve each track's status from its `metadata.json.status` (source of truth).
+     **Prefer a `new`, unowned track**; **skip** tracks that are `in_progress` with a
+     *different* non-null `owner` (a teammate is already on it). Select the first
+     available track.
+   - Announce: "No track name provided. Selecting next available track: '<description>'"
+   - If every incomplete track is held by someone else, **list them with their
+     owners and ask** which to take over (or to name a different track) instead of
+     silently colliding on one.
    - If all complete: "No incomplete tracks found. All tasks completed!" → HALT
+
+3b. **Ownership guard & claim at selection (both topologies):**
+   - Compute `<git-identity>` (`git config user.email` → `user.name` → null) and run
+     the **Ownership Guard** (`references/ownership-guard.md`) for the selected
+     track. This is what prevents the **default monorepo** collision where two
+     people both pick the same next track — the advisory `lease` is a no-op there,
+     so the guard relies on `metadata.json.owner` + `implement_state.json` instead.
+   - **Claim immediately** so a second picker hits the guard: stamp
+     `owner = <git-identity>` on `metadata.json` (key-scoped jq) and create
+     `implement_state.json` now (status `starting`, `owner`, `last_updated`) — before
+     doing any work. If the guard reported the track foreign-held and the user chose
+     **Stop**, return to track selection.
 
 4. **Check Dependencies:**
    - Read `cadre/tracks/<track_id>/metadata.json`
@@ -95,8 +113,8 @@ Implement track: $ARGUMENTS
    - **Step a — write the source of truth:** set this track's `metadata.json`
      `"status"` to `"in_progress"` with key-scoped jq (preserves every other key):
      ```bash
-     jq '.status = "in_progress"' cadre/tracks/<track_id>/metadata.json > tmp.$$ \
-       && mv tmp.$$ cadre/tracks/<track_id>/metadata.json
+     META="cadre/tracks/<track_id>/metadata.json"; tmp="$(mktemp)"
+     jq '.status = "in_progress"' "$META" > "$tmp" && mv "$tmp" "$META"
      ```
    - **Step b — regenerate the index:** then regenerate the index per
      `/cadre-status --regen-index` (it rebuilds only the region between
@@ -118,17 +136,38 @@ Implement track: $ARGUMENTS
 
 3a. **Load Context (Beads-first, files as fallback):**
 
-    **Priority order — BEADS FIRST (if enabled):**
-    - **Step 1:** `bd prime` — loads AI-optimized workflow context for the entire project
-    - **Step 1b — Handoff fast-path (resume hint):** If `cadre/HANDOFF.md` (the
-      rolling handoff) exists, read it as a **fast resume hint** — where the last
-      session left off and what's next. This is advisory only: **Beads remains the
-      source of truth**; if HANDOFF.md and Beads disagree, trust Beads.
-    - **Step 2:** `bd show <beads_epic>` — read the `notes` field for prior session state
-      (COMPLETED, IN PROGRESS, NEXT, KEY DECISIONS from previous sessions)
-    - **Step 3:** `bd ready --parent <beads_epic>` — find all unblocked tasks now
-    - **Announce:** "📊 **Beads Context:** X tasks ready, last session: [notes summary]"
-    - **If any `bd` command fails:** → Follow Beads Error Handler Protocol (see references/beads-error-handler.md)
+    This is the **single** Beads-context load — prime exactly **once** (the prior
+    split into two steps re-primed redundantly, and the order was wrong: it primed
+    before checking that `bd` exists).
+
+    **Step 1 — Detect `bd` BEFORE priming:** Run `which bd`.
+    - **If NOT found:**
+      > "⚠️ Beads CLI (`bd`) is not installed. Beads provides persistent task memory across sessions."
+      > "A) Continue without Beads integration"
+      > "B) Stop - I'll install Beads first"
+      - If A: set `beads_enabled = false`, skip to **FILE FALLBACK** below.
+      - If B: HALT and wait for user.
+    - **If found:** set `beads_enabled = true`.
+
+    **Step 2 — Prime once + load epic context (if `beads_enabled`):**
+    - **`bd prime`** — AI-optimized workflow context. Call it **once here** (Beads
+      hooks may already auto-prime; do not call it again later in this command).
+    - Read `cadre/tracks/<track_id>/metadata.json` for `beads_epic` and `beads_tasks`
+      (the mapping of plan task names → Beads IDs, e.g. `"phase1_task1": "bd-a3f8.1.1"`).
+    - If `beads_epic` exists:
+      - **`bd show <beads_epic>`** — read `notes` for prior session state (COMPLETED,
+        IN PROGRESS, NEXT, KEY DECISIONS).
+      - **`bd ready --parent <beads_epic>`** — unblocked tasks now; use it to suggest
+        the next task.
+      - **Announce:** "📊 **Beads Context:** X tasks ready, Y blocked; last session: [notes summary]"
+    - **If any `bd` command fails:** → Follow Beads Error Handler Protocol (see
+      references/beads-error-handler.md).
+
+    **Step 1b — Handoff fast-path (resume hint):** If
+    `cadre/tracks/<track_id>/HANDOFF.md` (the track's rolling handoff) exists, read
+    it as a **fast resume hint** — where the last session left off and what's next.
+    Advisory only: **Beads remains the source of truth**; if the handoff and Beads
+    disagree, trust Beads.
 
     **FILE FALLBACK (if Beads disabled or degraded):**
     - **Read Project Patterns:** If `cadre/patterns.md` exists:
@@ -139,32 +178,6 @@ Implement track: $ARGUMENTS
     - **Read Previous Track Learnings (optional):** For similar tracks in archive:
       - Scan `cadre/archive/` for tracks with similar names/descriptions
       - Read their `learnings.md` for relevant patterns
-
-3b. **Beads Context:**
-    - **Check for Beads CLI:** Run `which bd`
-    - **If NOT found:**
-      > "⚠️ Beads CLI (`bd`) is not installed. Beads provides persistent task memory across sessions."
-      > "A) Continue without Beads integration"
-      > "B) Stop - I'll install Beads first"
-      - If A: Set `beads_enabled = false`, continue to step 4
-      - If B: HALT and wait for user
-    - **If found:** Set `beads_enabled = true`
-    - **Load Beads Context (if enabled):**
-      - **Run `bd prime`** to get AI-optimized workflow context
-      - Read `cadre/tracks/<track_id>/metadata.json` for `beads_epic` and `beads_tasks` fields
-      - Store `beads_tasks` mapping (maps plan task names to Beads IDs like `"phase1_task1": "bd-a3f8.1.1"`)
-      - If `beads_epic` exists:
-        - Run `bd ready --parent <beads_epic>` to show tasks with no blockers
-        - **If command fails:**
-          > "⚠️ Beads command failed: <error message>"
-          > "A) Continue without Beads integration"
-          > "B) Retry the failed command"
-          > "C) Stop - I'll fix the issue first"
-          - If A: Set `beads_enabled = false`, continue
-          - If B: Retry the command
-          - If C: HALT and wait for user
-        - Display: "📊 **Beads Status:** X tasks ready, Y blocked"
-        - Use Beads ready list to suggest next task
 
 3c. **Switch to Track Worktree:**
 
@@ -247,8 +260,8 @@ Implement track: $ARGUMENTS
    - **No existing lease, or `lease.owner` == `<git-identity>`:** claim/refresh
      silently (set/update `acquired_at` on first claim, always bump
      `heartbeat_at`).
-   - **Foreign lease with a fresh `heartbeat_at`** (within the staleness window,
-     e.g. last ~15 min):
+   - **Foreign lease with a fresh `heartbeat_at`** (within the canonical staleness
+     window — **30 min**, see `references/ownership-guard.md`):
      > "⚠️ <lease.owner> holds this track (heartbeat <heartbeat_at>)."
      > A) Take over - steal the lease  B) Pick another track  C) Cancel
      - If A: overwrite `lease` with your identity. If B: return to step 2. If C: HALT.
@@ -450,7 +463,21 @@ Implement track: $ARGUMENTS
        - If B: Change `[!]` to `[~]` and proceed
 
       **d5. Self-Check & Issue Handling:**
-      - After implementation, run tests, linting, type checks
+      - After implementation, run tests, linting, type checks.
+      - **Machine-verified coverage gate (do not self-assert):** the TDD bar in
+        `workflow.md` (default >80%) must be **measured**, not claimed. Run the
+        project's coverage tool (from `workflow.md` / `tech-stack.md`), **parse the
+        reported percentage**, and:
+        - If it is **below** the `workflow.md` threshold → treat as an issue: do not
+          mark the task `[x]`; either add the missing tests (preferred) or, if the
+          gap is intentional, require an explicit user override and note it.
+        - Record the **measured number** so the review gate can read it: stamp
+          `metadata.json` `last_coverage` (key-scoped jq:
+          `jq --argjson c <pct> '.last_coverage=$c'`) — `/cadre-review` copies it
+          into `review.coverage`. "Tests pass, coverage >80%" must be a recorded
+          measurement, never free prose.
+        - If no coverage tool is configured in `workflow.md`, say so explicitly
+          (don't silently treat the bar as met) and proceed only with user awareness.
       - If issues found, analyze the root cause:
       
       **Issue Analysis Decision Tree:**
@@ -481,8 +508,8 @@ Implement track: $ARGUMENTS
      - **Step a — write the source of truth:** set this track's `metadata.json`
        `"status"` to `"completed"` with key-scoped jq:
        ```bash
-       jq '.status = "completed"' cadre/tracks/<track_id>/metadata.json > tmp.$$ \
-         && mv tmp.$$ cadre/tracks/<track_id>/metadata.json
+       META="cadre/tracks/<track_id>/metadata.json"; tmp="$(mktemp)"
+       jq '.status = "completed"' "$META" > "$tmp" && mv "$tmp" "$META"
        ```
      - **Step b — regenerate the index:** then regenerate the index per
        `/cadre-status --regen-index`. The track's line is rebuilt as

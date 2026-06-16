@@ -6,8 +6,20 @@
 Update specifications and plans when implementation reveals issues, requirements change, or scope adjustments are needed.
 
 ## 1. Identify Track
-- Find active track (marked `[~]` in tracks.md)
+- **Resolve the active track from the source of truth, not the derived cache.**
+  Scan each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"` (in
+  shared mode, filter to the one whose `owner`/`assignee` equals `<git-identity>`),
+  exactly as `/cadre-status` does. The `[~]` marker in `cadre/tracks.md` is a
+  human-readable mirror that can lag (between a status write and the next
+  regen-index, or after a merge); use it **only** as a fallback when no metadata
+  reports `in_progress`, and warn that the index looks stale if the two disagree.
+  Resolving from the stale cache here is dangerous because revise **mutates**
+  spec/plan and can clear assignees — picking the wrong track corrupts live work.
 - If no active track, ask which track to revise
+- **Ownership guard:** before mutating, run the Ownership Guard
+  (`references/ownership-guard.md`) for the resolved track — it stops you from
+  revising a track a teammate is mid-implementation on, in monorepo mode too. If it
+  halts, stop here.
 - Read `metadata.json` — check `worktree_path` field for active parallel execution
 
 ## 1a. Parallel Execution Check

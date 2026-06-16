@@ -28,6 +28,9 @@ Any remaining text after the mode is the reason.
   `metadata.json.status == "in_progress"` (the source of truth; fall back to the
   `[~]` track in `tracks.md` only if no metadata says so). Then find the in-progress
   (`[~]`) task in that track's `plan.md`.
+- **Ownership guard:** before changing the plan or metadata, run the Ownership Guard
+  (`references/ownership-guard.md`) for the resolved track; if it halts, stop. Don't
+  flag a track a teammate is actively implementing without taking it over.
 
 ## 3. Get Reason
 If no reason was supplied in the arguments, ask for it.
@@ -104,6 +107,26 @@ Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skip
 
 Then regenerate the index per `/cadre-status --regen-index` so `tracks.md`
 reflects the new track marker.
+
+## 6.5 Commit & Propagate (so teammates see the flag)
+
+A blocked/skipped state is a **coordination signal** — often it names who you're
+waiting on — so it must reach the team immediately, not sit uncommitted in your
+working tree (where teammates, including the person being waited on, can't see it
+and may duplicate the work). This was previously the only control-plane-mutating
+command with no commit/sync. After updating the plan, metadata, and regenerating
+the index:
+
+```bash
+git add cadre/tracks/<track_id>/ cadre/tracks.md
+git commit -m "cadre(flag): <blocked|skipped> <task> in <track_id> — <reason>"
+```
+
+- **Shared sync mode** (`cadre/config.json` `sync_mode == "shared"`): also run the
+  sync postamble (`references/cadre-sync.md`) — `bd dolt push` then
+  `git push <control_remote> <control_branch>` — so the blocker/skip propagates to
+  teammates right away (matching `/cadre-revise` and `/cadre-handoff`). In
+  `local`/monorepo mode the commit stays local, as elsewhere.
 
 ## 7. Confirm
 - `blocked`: announce the task is blocked and on what.

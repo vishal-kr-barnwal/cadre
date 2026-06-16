@@ -215,9 +215,6 @@ differs per tool. See [`parallel-execution.md`](../.claude/skills/cadre/referenc
 |----------|----------|
 | **Claude Code** | `Task` tool, one call per worker (awaitable) |
 | **OpenAI Codex CLI** | spawn parallel agents with the `worker` agent type; manage via `/agent` |
-| **Cursor** | `/multitask` (or Agent-Mode "Parallelize"); subagents in git worktrees |
-| **Google Antigravity** | Agent Manager spawns one dynamic subagent per task |
-| **GitHub Copilot** | Copilot CLI `/fleet` (parallel subagents, worktree-isolated) or `/delegate`; VS Code parallel subagents |
 | **No parallel primitive** | sequential fallback — one agent runs each task in its worktree |
 
 ### Example: Claude Code's Task() Tool
@@ -379,7 +376,7 @@ Beads provides robust coordination for parallel task execution with its concurre
 |---------|---------|
 | **Hash-based IDs** | No collision when parallel workers create tasks |
 | **Assignee field** | Each worker claims exclusive ownership |
-| **SQLite transactions** | Serializes concurrent writes safely |
+| **Dolt transactions** | Serializes concurrent writes safely |
 | **`bd ready --assignee`** | Workers query only their assigned tasks |
 | **`bd dolt push`** | Push changes to remote |
 
@@ -430,10 +427,10 @@ bd close <beads_task_id> --reason "Task completed" --json
 
 | Scenario | How Beads Handles It |
 |----------|---------------------|
-| Multiple workers update simultaneously | SQLite BEGIN IMMEDIATE serializes writes |
+| Multiple workers update simultaneously | Dolt transactions serialize writes |
 | Same task updated by two workers | Avoided by unique `--assignee` per task |
 | Parallel `bd create` calls | Hash-based IDs guarantee no collision |
-| Rapid status changes | SQLite transactions serialize all writes safely |
+| Rapid status changes | Dolt transactions serialize all writes safely |
 | Worker crashes mid-update | Coordinator clears assignee for retry |
 
 ### Error Recovery

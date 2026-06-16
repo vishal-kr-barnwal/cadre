@@ -387,7 +387,7 @@ Beads provides robust coordination for Cadre's parallel task execution feature.
 |---------|-------------------------------|
 | **Hash-based IDs** | No collision when parallel workers create tasks |
 | **Assignee field** | Each worker claims exclusive ownership |
-| **SQLite transactions** | Serializes concurrent writes safely |
+| **Dolt transactions** | Serializes concurrent writes safely |
 | **`bd ready --assignee`** | Workers query only their assigned tasks |
 | **`bd dolt push`** | Push changes to remote |
 
@@ -488,10 +488,10 @@ NEXT: <next_sequential_phase>" --json
 
 | Scenario | How Beads Handles It |
 |----------|---------------------|
-| Multiple workers update simultaneously | SQLite BEGIN IMMEDIATE serializes writes |
+| Multiple workers update simultaneously | Dolt transactions serialize writes |
 | Same task updated by two workers | Avoided by unique `--assignee` per task |
 | Parallel `bd create` calls | Hash-based IDs guarantee no collision |
-| Rapid status changes | SQLite transactions serialize all writes safely |
+| Rapid status changes | Dolt transactions serialize all writes safely |
 | Worker crashes mid-update | Coordinator detects timeout, clears assignee for retry |
 
 ### Error Recovery

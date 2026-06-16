@@ -66,7 +66,13 @@ Read `metadata.json` `review` (written by `/cadre-review`) and enforce it
   > "Track `<track_id>` has an unresolved review (verdict: changes_requested,
   > <n> blocking findings). Resolve them and re-run `/cadre-review` before
   > landing." — then halt without opening any PR.
-- **`review.verdict == "approved"` and `review.blocking_count == 0`** → proceed.
+- **Self-approved while `require_second_reviewer` is set**
+  (`config.json` `require_second_reviewer == true` AND
+  `review.self_reviewed == true`) → **REFUSE**: tell the user the track was approved
+  by its own owner and a different reviewer must run `/cadre-review` first; halt
+  without opening any PR.
+- **`review.verdict == "approved"` and `review.blocking_count == 0`**
+  (and not blocked by the self-review rule above) → proceed.
 
 Reuse the `verdict` / `blocking` values extracted in section-1 step 5 (re-read
 only if metadata changed since):
@@ -74,7 +80,10 @@ only if metadata changed since):
 META="cadre/tracks/<track_id>/metadata.json"
 verdict=$(jq -r '.review.verdict // "absent"' "$META")
 blocking=$(jq -r '.review.blocking_count // 0' "$META")
-# absent -> soft prompt; changes_requested or blocking>0 -> refuse; else proceed
+self_reviewed=$(jq -r '.review.self_reviewed // false' "$META")
+require_second=$(jq -r '.require_second_reviewer // false' cadre/config.json 2>/dev/null)
+# absent -> soft prompt; changes_requested or blocking>0 -> refuse;
+# require_second && self_reviewed -> refuse; else proceed
 ```
 
 ---
@@ -164,6 +173,20 @@ continue to step 3.
 ---
 
 ## 3. Push Per-Repo Branches
+
+**Re-read the review gate first (TOCTOU close).** The verdict checked in §1.5 is a
+point-in-time snapshot; the preflight + sync above can take a while, during which a
+reviewer may flip it. Re-read from disk immediately before the first push and abort
+if it now blocks — do **not** open a partial group against a freshly-blocked track:
+```bash
+META="cadre/tracks/<track_id>/metadata.json"
+verdict=$(jq -r '.review.verdict // "absent"' "$META")
+blocking=$(jq -r '.review.blocking_count // 0' "$META")
+if [ "$verdict" = "changes_requested" ] || [ "$blocking" -gt 0 ]; then
+  echo "🚫 Review flipped to a blocking state (verdict: $verdict, blocking: $blocking) during land. Aborting before any push — re-run /cadre-review."
+  exit 1
+fi
+```
 
 For each entry in `metadata.json.repos` (and the control repo), make sure the
 `track/<track_id>` branch is on its remote so a PR can be opened from it. This is

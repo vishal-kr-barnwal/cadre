@@ -3,7 +3,10 @@
 
 Cadre ships starter templates — `workflow.md`, `patterns.md`, `learnings.md`,
 `beads.json`, and `code_styleguides/` — bundled with the installed commands.
-`cadre-setup` and `cadre-newtrack` copy from them.
+`cadre-setup` and `cadre-newtrack` copy from them. The same bundle also carries
+**helper scripts** under `<TEMPLATES_DIR>/scripts/` that commands run **in place**
+(they are not copied into `cadre/`) — currently `cadre-regen-index.sh`, the
+deterministic `tracks.md` rebuilder behind `/cadre-status --regen-index`.
 
 ## Resolve `<TEMPLATES_DIR>`
 
@@ -25,3 +28,4 @@ sensible built-in defaults instead of copying files.
 | `learnings.md` | `cadre/tracks/<track_id>/learnings.md` | replace `{{track_id}}` with the track id |
 | `code_styleguides/<lang>.md` | `cadre/code_styleguides/` | only the selected guides |
 | `beads.json` | `cadre/beads.json` | setup sets `mode` (`normal`/`stealth`) |
+| `scripts/cadre-regen-index.sh` | *(run in place)* | `bash <TEMPLATES_DIR>/scripts/cadre-regen-index.sh` — rebuilds `tracks.md` |

@@ -2,7 +2,10 @@
 
 Cadre ships starter templates — `workflow.md`, `patterns.md`, `learnings.md`,
 `beads.json`, and `code_styleguides/` — bundled with the installed commands.
-`cadre-setup` and `cadre-newtrack` copy from them.
+`cadre-setup` and `cadre-newtrack` copy from them. The same bundle also carries
+**helper scripts** under `<TEMPLATES_DIR>/scripts/` that commands run **in place**
+(they are not copied into `cadre/`) — currently `cadre-regen-index.sh`, the
+deterministic `tracks.md` rebuilder behind `/cadre-status --regen-index`.
 
 ## Resolve `<TEMPLATES_DIR>`
 
@@ -17,19 +20,6 @@ Probe with `ls` and use the **FIRST** of these paths that exists:
 1. `~/.codex/prompts/templates/` — Codex custom prompts are global
 2. `templates/` — running inside a Cadre clone
 <!-- /AGENT:codex -->
-<!-- AGENT:cursor -->
-1. `.cursor/commands/templates/` — project install
-2. `~/.cursor/commands/templates/` — global install
-3. `templates/` — running inside a Cadre clone
-<!-- /AGENT:cursor -->
-<!-- AGENT:antigravity -->
-1. `.agent/workflows/templates/` — project install
-2. `templates/` — running inside a Cadre clone
-<!-- /AGENT:antigravity -->
-<!-- AGENT:copilot -->
-1. `.github/prompts/templates/` — project install
-2. `templates/` — running inside a Cadre clone
-<!-- /AGENT:copilot -->
 
 If none exist, tell the user the templates bundle is missing (point them to the
 Install & Version Guide, `docs/INSTALL.md`) and ask whether to continue with
@@ -44,3 +34,4 @@ sensible built-in defaults instead of copying files.
 | `learnings.md` | `cadre/tracks/<track_id>/learnings.md` | replace `{{track_id}}` with the track id |
 | `code_styleguides/<lang>.md` | `cadre/code_styleguides/` | only the selected guides |
 | `beads.json` | `cadre/beads.json` | setup sets `mode` (`normal`/`stealth`) |
+| `scripts/cadre-regen-index.sh` | *(run in place)* | `bash <TEMPLATES_DIR>/scripts/cadre-regen-index.sh` — rebuilds `tracks.md` |

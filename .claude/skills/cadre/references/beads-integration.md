@@ -513,8 +513,8 @@ bd update <task_id> --assignee "" --json
 # Check if Beads is available
 which bd
 
-# Start Dolt server (required v0.56+)
-bd dolt start
+# Start Dolt server (legacy only — NOT needed on v1.0.0+, which uses embedded Dolt)
+# bd dolt start
 
 # Initialize integration
 bd init

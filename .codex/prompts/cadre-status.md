@@ -20,6 +20,9 @@ behavior is unchanged):
   tracks whose `metadata.json.owner` equals `<git-identity>` (see Identity below);
   also surface the Team View (section 10) scoped to your own tracks.
 - `--repos` → run the **Fleet Board** in section 11 (polyrepo only).
+- `--available` (alias `--unowned`) → run the **Available Work** board in section 13:
+  the unblocked, unowned work a teammate can pick up. Like `--team`, it performs the
+  full multi-track scan.
 - otherwise → show the live status (sections 1-8) and, in polyrepo mode, the PR
   group / merge-train surface in section 5c.
 
@@ -334,14 +337,17 @@ source is missing, omit that sub-section silently.
      non-null `lease`. Group by `metadata.json.owner` (fallback `assignee`).
    - For `--mine`, filter both sources to `<git-identity>` (owner/assignee match).
 
-2. **Gather the Review Queue.** A track is in the review queue when **either**:
+2. **Gather the Review Queue.** A track is in the review queue when **any** of:
    - `metadata.json.review.verdict == "changes_requested"` **or**
      `metadata.json.review.blocking_count > 0`  → **Changes requested**; or
-   - it carries the Beads label `review:changes` (changes requested) or
-     `review:ready` (cleared, awaiting ship) — query via
-     `bd list --label review:changes --json` / `--label review:ready --json` when
-     `bd` is available.
-   - Annotate each entry with its `metadata.json.reviewer` when set.
+   - it carries the Beads label `review:changes` (changes requested),
+     `review:ready` (cleared, awaiting ship), or `review:requested` (a reviewer was
+     assigned via `/cadre-review --request` but hasn't reviewed yet → **Awaiting
+     review**) — query via `bd list --label review:changes --json` /
+     `--label review:ready --json` / `--label review:requested --json` when `bd` is
+     available.
+   - Annotate each entry with its `metadata.json.reviewer` when set (for
+     **Awaiting review** this is the *assigned* reviewer, so load is visible).
 
 3. **Gather blocked-on edges.**
    - **Beads:** from each in-progress/ready issue's `depends_on`, list the
@@ -459,83 +465,33 @@ Each entry keeps the existing heading shape the repo already uses —
 greps `## [..] Track:` keeps working unchanged. Use `metadata.json.name` for
 `<name>` (fallback to `track_id` if `name` is absent).
 
-**Procedure:**
+**Procedure:** the splice is a deterministic, pure bash/jq program — it carries no
+decisions, so it ships as a **bundled helper script** rather than inline shell.
 
-1. **Collect & sort.** Enumerate `cadre/tracks/*/metadata.json`, deterministically
-   sorted by `track_id` (ascending), and emit one heading line per track:
-
-   ```bash
-   gen_body() {
-     for md in $(ls cadre/tracks/*/metadata.json 2>/dev/null \
-                 | sort -t/ -k3); do
-       jq -r '
-         {new:"[ ]", in_progress:"[~]", completed:"[x]",
-          blocked:"[!]", skipped:"[-]"} as $m
-         | "## \($m[(.status // "new")] // "[ ]") Track: \(.name // .track_id)"
-       ' "$md"
-     done
-   }
-   ```
-
-   (Sorting by `track_id` via the directory path is deterministic because the dir is
-   named for the track id; if you prefer, read `.track_id` from each file and sort on
-   that — both yield the same order.)
-
-2. **Splice into the file, preserving the preamble.**
-   - If `cadre/tracks.md` already contains both
-     `<!-- cadre:index:start -->` and `<!-- cadre:index:end -->`, replace
-     **only** the lines strictly between them with the freshly generated body; keep
-     the preamble above `start` and any trailer below `end` untouched.
-   - If the markers are **absent** (first run, or a legacy hand-maintained file),
-     treat the **entire current file as preamble** and append a fresh marked region
-     after it. Do **not** parse or discard the legacy `## [..] Track:` lines — leave
-     them in the preamble; the new marked region below them becomes the live cache.
-     (Operators may delete the now-duplicated legacy lines by hand later; the command
-     never destroys human content on its own.)
-   - If `tracks.md` does not exist at all, create it containing just the marked region.
-
-   A self-contained, idempotent splice:
+1. **Resolve the bundled script.** Locate `<TEMPLATES_DIR>` per
+   `references/template-locator.md`; the helper is at
+   `<TEMPLATES_DIR>/scripts/cadre-regen-index.sh`. Run it from the project root:
 
    ```bash
-   f=cadre/tracks.md
-   START='<!-- cadre:index:start -->'
-   END='<!-- cadre:index:end -->'
-   bodyf="$(mktemp)"; gen_body > "$bodyf"   # body in a file (portable: no multi-line awk -v)
-   tmp="$(mktemp)"
-   if [ -f "$f" ] && grep -qF "$START" "$f" && grep -qF "$END" "$f"; then
-     # Preserve preamble (through START) + body + trailer (from END onward).
-     awk -v s="$START" -v e="$END" -v bf="$bodyf" '
-       index($0,s){print; while((getline line < bf) > 0) print line; close(bf); skip=1; next}
-       index($0,e){skip=0}
-       !skip{print}
-     ' "$f" > "$tmp"
-   else
-     # No markers: keep whole file (if any) as preamble, append a fresh region.
-     # Guard the boundary: if the legacy preamble lacks a trailing newline, emit
-     # one so START is not concatenated onto the last content line.
-     {
-       if [ -f "$f" ]; then
-         cat "$f"
-         [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ] && printf '\n'
-       fi
-       printf '%s\n' "$START"; cat "$bodyf"; printf '%s\n' "$END"
-     } > "$tmp"
-   fi
-   mv "$tmp" "$f"; rm -f "$bodyf"
+   bash "<TEMPLATES_DIR>/scripts/cadre-regen-index.sh"
    ```
 
-   `awk` prints the `START` line, streams the regenerated body in from `$bf`, then
-   skips the old body until it sees `END` (which it prints) and resumes copying the
-   trailer — so re-running yields a byte-identical file. (The body is passed via a
-   temp file, not `awk -v`, because BSD/macOS `awk` rejects multi-line `-v` values.)
-   In the no-markers branch, `tail -c 1` reads the preamble's final byte: a
-   command-substitution `$(...)` strips a trailing newline, so a non-empty result
-   means the last byte was *not* a newline — emit one separating `\n` before `START`
-   (works on BSD + GNU). Once the markers exist, subsequent runs take the splice
-   branch and stay byte-identical.
+   It enumerates `cadre/tracks/*/metadata.json` (deterministically sorted),
+   emits one `## [<marker>] Track: <name>` line per track (using the marker map
+   above; `name` → fallback `track_id`), and **splices** that body between the
+   sentinels — preserving any human preamble above `start` and trailer below `end`.
+   It is idempotent (re-running yields a byte-identical file), creates the marked
+   region on first run (treating any existing content as preamble, never discarding
+   legacy `## [..] Track:` lines), and prints a one-line summary. **bd-independent.**
 
-3. **Confirm.** Print a one-line summary, e.g.
-   `Regenerated cadre/tracks.md index from N tracks' metadata (preamble preserved).`
+2. **Fallback (only if the bundled script can't be found** — e.g. a partial
+   install): regenerate the marked region by hand from the same contract — for each
+   `cadre/tracks/*/metadata.json` (sorted by `track_id`) emit
+   `## <marker(.status)> Track: <.name // .track_id>` using the marker map above,
+   then replace **only** the lines between `<!-- cadre:index:start -->` and
+   `<!-- cadre:index:end -->` (appending a fresh marked region after the existing
+   file as preamble if the sentinels are absent). Never hand-edit a marker outside
+   the marked region, and never discard human content.
 
 **Shared-mode merge conflicts.** Because the index is **derived**, a Git merge
 conflict in `cadre/tracks.md` is resolved deterministically by **regenerating
@@ -544,3 +500,42 @@ cadre/tracks.md`), then run `/cadre-status --regen-index` to rebuild the
 marked region from each per-track `metadata.json`. Per-track metadata rarely
 collides (each track owns its own file), so the derived index never needs a manual
 merge — this is the whole point of the source-of-truth split.
+
+---
+
+## 13. AVAILABLE WORK (`--available` / `--unowned`)
+
+**Run only when `$ARGUMENTS` contains `--available` or `--unowned`.** The "what
+unblocked work can I pick up?" board — a first-class answer for a teammate (or an
+idle agent) looking for the next thing to start, instead of eyeballing `tracks.md`.
+Like `--team`, this performs the full multi-track scan and degrades gracefully.
+
+1. **Identity:** compute `<git-identity>` (see Identity above).
+
+2. **Select candidates.** A track is **available** when ALL hold:
+   - `metadata.json.status` is `new` (marker `[ ]`) — not in progress, completed,
+     blocked, or skipped; AND
+   - it is **unowned** — `metadata.json.owner` is null/absent (or, shared mode, any
+     `lease` is stale, older than the canonical window in
+     `references/ownership-guard.md`); AND
+   - it has **no incomplete dependencies** — every id in `metadata.json.depends_on`
+     resolves to a track whose `metadata.json.status == "completed"`.
+   - **Beads (preferred):** `bd ready --json` already returns unblocked, unassigned
+     work; intersect it with the new/unowned tracks above when `bd` is available.
+
+3. **Present** (sorted by priority, then `track_id`):
+
+   ```
+   ## Cadre — Available Work   (you: @<git-identity>)
+
+   **🔴 Critical**
+   - [ ] payments_20260618 — Payment Integration  (no deps)  → /cadre-implement payments_20260618
+   **🟡 Medium**
+   - [ ] search_20260617 — Search  (deps met)  → /cadre-implement search_20260617
+
+   Reclaimable (stale lease):
+   - [~] auth_20260615 — held by @alice, lease stale 47m → take over: /cadre-implement auth_20260615
+   ```
+
+   - If nothing is available, print `No unblocked, unowned work right now — every
+     incomplete track is owned or dependency-blocked. See /cadre-status --team.`

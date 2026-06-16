@@ -89,20 +89,6 @@ Create each worktree with `git -C <submodule_path> worktree add <abs_worktree_pa
 Always pass the submodule path with `-C`; do not rely on a worktree helper that
 assumes a top-level repo.
 <!-- /AGENT:codex -->
-<!-- AGENT:cursor -->
-Cursor's worktree automation assumes one repo. In polyrepo mode create
-worktrees yourself with `git -C <submodule_path> worktree add … -b track/<id> <base_branch>`
-and point the subagent at that path explicitly.
-<!-- /AGENT:cursor -->
-<!-- AGENT:antigravity -->
-Create each worktree with `git -C <submodule_path> worktree add … -b track/<id> <base_branch>`,
-then assign the subagent that absolute path as its working root.
-<!-- /AGENT:antigravity -->
-<!-- AGENT:copilot -->
-Create each worktree with `git -C <submodule_path> worktree add … -b track/<id> <base_branch>`.
-`/fleet` worktree isolation is per top-level repo; in polyrepo mode pre-create
-the submodule worktrees and pass each subagent its path.
-<!-- /AGENT:copilot -->
 
 **Degraded fallback (documented):** if worktree-of-submodule proves unreliable
 in your environment, operate directly on the submodule checkout with a per-repo

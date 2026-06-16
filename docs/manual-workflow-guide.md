@@ -638,7 +638,7 @@ Step 3: Provide additional context
    - Unresolved issues or blockers
 
 Step 4: Handoff document written
-   - Single rolling cadre/HANDOFF.md, overwritten/trimmed in place
+   - Per-track rolling cadre/tracks/<track_id>/HANDOFF.md, overwritten/trimmed in place
    - Default: machine summary (progress, code changes, resume instructions)
    - --for-teammate: replaces the machine dump with goal-first prose
      (what/why, current state, next step, gotchas)
@@ -652,15 +652,15 @@ Step 5: State updated
 **Generated artifacts**:
 ```
 cadre/
-├── HANDOFF.md                   # Single rolling handoff (not per-timestamp)
 └── tracks/<track_id>/
+    ├── HANDOFF.md               # Per-track rolling handoff (not per-timestamp)
     └── implement_state.json     # Updated with section tracking
 ```
 
-The handoff is a **single rolling `cadre/HANDOFF.md`** that is overwritten and
-trimmed on each run — there are no per-timestamp `handoff_*.md` files. The
-`--for-teammate` mode writes goal-first prose into that same file instead of the
-machine dump.
+The handoff is a **per-track rolling `cadre/tracks/<track_id>/HANDOFF.md`** that is
+overwritten and trimmed on each run — there are no per-timestamp `handoff_*.md` files,
+and each track keeps its own current handoff. The `--for-teammate` mode writes goal-first
+prose into that same file instead of the machine dump.
 
 **Auto-detection**: The implement command will suggest handoff when:
 - 5+ tasks completed without handoff
@@ -993,7 +993,7 @@ bd show <task-id> --notes
 | `repos.json` | Submodule manifest + `mode: "polyrepo"` (polyrepo only) | `cadre/` |
 | `refresh_state.json` | Refresh progress | `cadre/` |
 | `tracks.md` | **Derived** track index — rebuilt by `/cadre-status --regen-index`; never hand-edit | `cadre/` |
-| `HANDOFF.md` | Single rolling handoff (overwritten/trimmed each run) | `cadre/` |
+| `HANDOFF.md` | Per-track rolling handoff (overwritten/trimmed each run) | `cadre/tracks/<track_id>/` |
 | `implement_state.json` | Phase-aware implementation resume | `cadre/tracks/<id>/` |
 | `metadata.json` | Track config + Beads epic ID; **source of truth for `status`**; also holds `owner`/`reviewer`/`review`/`lease`/`merge_order` | `cadre/tracks/<id>/` |
 | `blockers.md` | Block history log | `cadre/tracks/<id>/` |

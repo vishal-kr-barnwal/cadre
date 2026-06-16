@@ -1,6 +1,7 @@
 {
   "sync_mode": "local",
   "auto_open": false,
+  "require_second_reviewer": false,
   "control_remote": "origin",
   "control_branch": "main",
   "pull_on_command_start": true,

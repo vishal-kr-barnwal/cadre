@@ -21,21 +21,6 @@ Spawn parallel agents — one per task in the wave — using the built-in `worke
 agent type. Tell Codex explicitly: "spawn N agents, one per task; wait for all
 before continuing." Manage running agents with `/agent`.
 <!-- /AGENT:codex -->
-<!-- AGENT:cursor -->
-Use **`/multitask`** (or Agent-Mode "Parallelize") to split the wave into
-subagents, one per task. Cursor runs them in parallel git worktrees (up to 8)
-and joins them automatically; review each before merge.
-<!-- /AGENT:cursor -->
-<!-- AGENT:antigravity -->
-Use the **Agent Manager** to spawn one dynamic subagent per task in the wave,
-each with isolated context. Monitor there and wait for all subagents to finish
-before the next wave.
-<!-- /AGENT:antigravity -->
-<!-- AGENT:copilot -->
-In **Copilot CLI**, use **`/fleet`** to dispatch one subagent per task in
-parallel (git-worktree isolated), or `/delegate` to the cloud coding agent per
-task. In **VS Code** agent mode, spawn parallel context-isolated subagents.
-<!-- /AGENT:copilot -->
 
 If this tool has no parallel sub-agent primitive, fall back to **sequential**
 execution: perform the wave's tasks yourself, one at a time, each inside its own

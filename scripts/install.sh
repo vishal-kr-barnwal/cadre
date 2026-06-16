@@ -9,9 +9,6 @@
 # Supported tools and what gets installed:
 #   Claude Code        .claude/commands/ + .claude/skills/
 #   OpenAI Codex CLI   .codex/prompts/
-#   Cursor             .cursor/commands/ (+ .cursor/rules/ for project scope)
-#   Google Antigravity .agent/workflows/ (+ AGENTS.md for project scope)
-#   GitHub Copilot     .github/prompts/ (+ .github/copilot-instructions.md)
 #
 # Usage:
 #   bash scripts/install.sh                 # interactive
@@ -27,14 +24,14 @@
 #   --dry-run             Print actions without copying anything.
 #   -h, --help            Show this help.
 #
-# Positional args (claude codex cursor antigravity copilot) preselect tools and
+# Positional args (claude codex) preselect tools and
 # skip the interactive menu.
 #
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-ALL_AGENTS="claude codex cursor antigravity copilot"
+ALL_AGENTS="claude codex"
 
 # ---------------------------------------------------------------- presentation
 if [ -t 1 ]; then
@@ -49,16 +46,13 @@ note() { printf '  %s•%s %s\n' "$DIM" "$RESET" "$*"; }
 warn() { printf '  %s!%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
 die()  { printf '%serror:%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
-show_help() { sed -n '3,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+show_help() { sed -n '3,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # ---------------------------------------------------------------- agent helpers
 agent_label() {
   case "$1" in
     claude)      echo "Claude Code" ;;
     codex)       echo "OpenAI Codex CLI" ;;
-    cursor)      echo "Cursor" ;;
-    antigravity) echo "Google Antigravity" ;;
-    copilot)     echo "GitHub Copilot" ;;
   esac
 }
 
@@ -67,9 +61,6 @@ agent_native() {
   case "$1" in
     claude)      echo "global or project" ;;
     codex)       echo "global" ;;
-    cursor)      echo "global or project" ;;
-    antigravity) echo "project" ;;
-    copilot)     echo "project" ;;
   esac
 }
 
@@ -78,9 +69,6 @@ agent_detect() {
   case "$1" in
     claude)      command -v claude      >/dev/null 2>&1 || [ -d "$HOME/.claude" ] ;;
     codex)       command -v codex       >/dev/null 2>&1 || [ -d "$HOME/.codex" ] ;;
-    cursor)      command -v cursor      >/dev/null 2>&1 || [ -d "$HOME/.cursor" ] ;;
-    antigravity) command -v antigravity >/dev/null 2>&1 || [ -d "$HOME/.antigravity" ] || [ -d "$HOME/.gemini" ] ;;
-    copilot)     command -v gh >/dev/null 2>&1 || command -v code >/dev/null 2>&1 || [ -d "$HOME/.config/github-copilot" ] ;;
   esac
 }
 
@@ -89,9 +77,6 @@ agent_sources() {
   case "$1" in
     claude)      echo ".claude/commands .claude/skills" ;;
     codex)       echo ".codex/prompts" ;;
-    cursor)      echo ".cursor/commands" ;;
-    antigravity) echo ".agent/workflows" ;;
-    copilot)     echo ".github/prompts" ;;
   esac
 }
 
@@ -133,34 +118,6 @@ install_agent() {
         note "Codex reads custom prompts from ~/.codex/prompts globally; add AGENTS.md per project for context."
       fi
       ;;
-    cursor)
-      copy_dir "$REPO_ROOT/.cursor/commands" "$base/.cursor/commands"
-      ok "Cursor → $base/.cursor/commands"
-      if [ "$scope" = project ]; then
-        copy_dir "$REPO_ROOT/.cursor/rules" "$base/.cursor/rules"
-        ok "Cursor rule → $base/.cursor/rules"
-      else
-        note "Cursor's context rule (.cursor/rules/cadre.mdc) is project-scoped; add it per project."
-      fi
-      ;;
-    antigravity)
-      copy_dir "$REPO_ROOT/.agent/workflows" "$base/.agent/workflows"
-      ok "Antigravity → $base/.agent/workflows"
-      if [ "$scope" = project ]; then
-        copy_file_safe "$REPO_ROOT/AGENTS.md" "$base/AGENTS.md"
-      else
-        note "Antigravity workflows are normally project-scoped (.agent/workflows in each repo)."
-      fi
-      ;;
-    copilot)
-      copy_dir "$REPO_ROOT/.github/prompts" "$base/.github/prompts"
-      ok "GitHub Copilot → $base/.github/prompts"
-      if [ "$scope" = project ]; then
-        copy_file_safe "$REPO_ROOT/.github/copilot-instructions.md" "$base/.github/copilot-instructions.md"
-      else
-        note "Copilot prompt files are normally project-scoped (.github/prompts in each repo)."
-      fi
-      ;;
   esac
 }
 
@@ -181,7 +138,7 @@ for arg in "$@"; do
     -y|--yes)       ASSUME_YES=true ;;
     --dry-run)      DRY_RUN=true ;;
     -h|--help)      show_help; exit 0 ;;
-    claude|codex|cursor|antigravity|copilot) PRESELECTED="$PRESELECTED $arg" ;;
+    claude|codex) PRESELECTED="$PRESELECTED $arg" ;;
     *) die "unknown option: $arg (try --help)" ;;
   esac
 done
@@ -224,7 +181,7 @@ else
       reply="$(printf '%s' "$reply" | tr ',' ' ')"
       for tok in $reply; do
         case "$tok" in
-          [1-5])
+          [1-2])
             n=0
             for a in $ALL_AGENTS; do
               n=$((n + 1))

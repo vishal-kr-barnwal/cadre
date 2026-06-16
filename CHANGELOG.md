@@ -19,6 +19,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-06-16
+
+Team-scale hardening (10–20 person teams) plus a platform-surface trim. The
+concurrency model was already sound; this round closes the enforcement gaps that
+only bite under concurrent use, and narrows supported platforms to the two that are
+actually maintained. **Major bump:** dropping the Cursor / Antigravity / Copilot
+command sets is a breaking removal of supported integrations (Claude Code and Codex
+projects are unaffected).
+
+### Removed
+- **Dropped Cursor, Google Antigravity, and GitHub Copilot.** Cadre now targets
+  **Claude Code** (canonical commands + skills) and **OpenAI Codex CLI** (generated)
+  only. Deleted the `.cursor/`, `.agent/`, and `.github/prompts/` generated trees;
+  `generate-commands.sh` and `install.sh` no longer emit or install them; the
+  reference masters and docs were sliced down to the two platforms.
+
+### Added
+- **Topology-independent Ownership Guard** (`references/ownership-guard.md`) run
+  before every track mutation — `/cadre-implement` (at selection), `/cadre-flag`,
+  `/cadre-revise`, `/cadre-revert`, `/cadre-handoff`. Prevents two people clobbering
+  the same track even in the **default monorepo** mode, where the advisory `lease`
+  is a no-op.
+- **`/cadre-status --available` / `--unowned`** — a board of unblocked, unowned work
+  a teammate (or idle agent) can pick up, instead of eyeballing `tracks.md`.
+- **`/cadre-review --request [@reviewer]`** — assign a reviewer; surfaced in the
+  `--team` review queue as *Awaiting review* via the `review:requested` label.
+- **`require_second_reviewer` config flag** — `/cadre-ship` and `/cadre-land` refuse
+  a self-approved track when set; `/cadre-review` records `review.self_reviewed`.
+- **Machine-verified coverage gate** in `/cadre-implement` — parses the coverage
+  tool's number, gates on the `workflow.md` threshold, and records
+  `metadata.last_coverage` → `review.coverage` (no longer self-asserted prose).
+
+### Changed
+- **`HANDOFF.md` is now per-track** (`cadre/tracks/<track_id>/HANDOFF.md`), not a
+  project-global singleton — eliminates the concurrent-handoff clobber.
+- **`/cadre-revise` and `/cadre-handoff` resolve the active track from
+  `metadata.json.status`** (source of truth), not the derived `tracks.md` cache —
+  closes a wrong-track-mutation bug.
+- **`/cadre-flag` now commits the blocked/skipped state** and, in shared mode,
+  pushes it (`bd dolt push` + control-plane push) — a blocker was previously
+  invisible to the team until an unrelated later command committed.
+- **`/cadre-ship` and `/cadre-land` re-read the review verdict immediately before
+  pushing** — closes the review→ship TOCTOU window.
+- **Unified lease staleness window to a canonical 30 minutes** across
+  `/cadre-implement` and `/cadre-validate` (was ~15 min vs ~3h).
+- **Skill loads project docs lazily** — a minimal activation set, with `patterns.md`
+  and `tracks.md` pulled on demand, instead of eagerly on every activation.
+- **Extracted the `tracks.md` regen-index program** out of `cadre-status.md` §12
+  into a bundled helper script (`templates/scripts/cadre-regen-index.sh`, shipped
+  with every command set and resolved via the template locator); §12 now invokes it
+  with a compact prose fallback — trimming ~70 lines of inline shell from the
+  hottest-fanned command while staying idempotent and `bd`-independent.
+- **`/cadre-implement` primes Beads once** (merged the redundant double `bd prime`,
+  fixed the prime-before-`which bd` ordering) and uses `mktemp` for metadata writes
+  (was a PID-named `tmp.$$` in the working dir).
+
+### Fixed
+- Corrected **SQLite → Dolt** storage-engine references in
+  `docs/PARALLEL_EXECUTION.md` and `docs/BEADS_INTEGRATION.md`, and reconciled the
+  "Dolt server required" vs "no server required" contradiction between the skill
+  docs.
+
 ## [1.0.0] — 2026-06-16
 
 First stable release under the **Cadre** name (renamed from Conductor-Beads). Adds

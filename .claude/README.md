@@ -48,7 +48,7 @@ The skill follows the Agent Skills spec with full frontmatter:
 - `name`: cadre
 - `description`: Context-driven development methodology
 - `license`: Apache-2.0
-- `compatibility`: Claude Code, OpenAI Codex CLI, Cursor, Google Antigravity, GitHub Copilot, any Agent Skills compatible CLI
+- `compatibility`: Claude Code, OpenAI Codex CLI, any Agent Skills compatible CLI
 - `metadata`: version, author, repository, keywords
 
 ### Option 3: Manual Installation
@@ -64,12 +64,11 @@ cp -r /path/to/cadre/.claude/commands/* ~/.claude/commands/
 cp -r /path/to/cadre/.claude/skills/* ~/.claude/skills/
 ```
 
-### Option 4: Other platforms (Codex, Cursor, Antigravity, Copilot)
+### Option 4: Other platforms (Codex)
 
-The same 16 commands ship for OpenAI Codex CLI, Cursor, Google Antigravity, and
-GitHub Copilot. See the [Install & Version Guide](../docs/INSTALL.md) for
-per-platform setup. They are generated from these Claude commands by
-`scripts/generate-commands.sh`.
+The same 16 commands ship for OpenAI Codex CLI. See the
+[Install & Version Guide](../docs/INSTALL.md) for per-platform setup. They are
+generated from these Claude commands by `scripts/generate-commands.sh`.
 
 ## Commands
 
@@ -156,11 +155,10 @@ Throughout cadre files:
 
 ## Cross-platform interoperability
 
-Projects work across every supported tool — Claude Code, OpenAI Codex CLI,
-Cursor, Google Antigravity, and GitHub Copilot. All of them invoke the same
-command name (e.g. `/cadre-setup`) and operate on the same `cadre/` and
-`.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor,
-implement in Claude Code) with full compatibility.
+Projects work across every supported tool — Claude Code and OpenAI Codex CLI.
+Both invoke the same command name (e.g. `/cadre-setup`) and operate on the same
+`cadre/` and `.beads/` directories, so you can mix tools on one repo (e.g. plan
+in Codex, implement in Claude Code) with full compatibility.
 
 See the [Install & Version Guide](../docs/INSTALL.md) for the compatibility
 matrix and per-platform setup.

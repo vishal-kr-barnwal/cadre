@@ -12,15 +12,30 @@ Pass arguments through `$ARGUMENTS`.
 
 If `$ARGUMENTS` contains `--for-teammate`, run the **Teammate Handoff** flow in
 section 10 — a goal-first prose handoff for another human/agent. It writes that
-prose INTO the single rolling `cadre/HANDOFF.md`, REPLACING the machine dump
-(it skips the §4 / §9 machine-dump sections for that write). There is no second
-file. Otherwise produce the default rolling handoff (sections 1-9), which writes
-the single rolling `cadre/HANDOFF.md` with a trimmed `git log -3` and the
-`owner` / `last_updated` fields.
+prose INTO the track's rolling `cadre/tracks/<track_id>/HANDOFF.md`, REPLACING the
+machine dump (it skips the §4 / §9 machine-dump sections for that write). There is
+no second file. Otherwise produce the default rolling handoff (sections 1-9), which
+writes the track's rolling `cadre/tracks/<track_id>/HANDOFF.md` with a trimmed
+`git log -3` and the `owner` / `last_updated` fields.
+
+> **Per-track handoff (not a project singleton).** The handoff lives **inside the
+> track folder** at `cadre/tracks/<track_id>/HANDOFF.md` — one current handoff per
+> track. This is deliberate: a project-global `cadre/HANDOFF.md` would be clobbered
+> when two people hand off two different in-progress tracks concurrently, and a
+> teammate resuming one track could read a handoff written for another. There is no
+> project-wide handoff file.
 
 ## 1. Identify Active Track
-- Find track marked `[~]` in `cadre/tracks.md`
+- **Resolve the active track from the source of truth, not the derived cache.**
+  Scan each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"` (in
+  shared mode, filter to the one whose `owner`/`assignee` equals `<git-identity>`),
+  as `/cadre-status` does. Use the `[~]` marker in `cadre/tracks.md` only as a
+  fallback when no metadata reports `in_progress`, and warn if the two disagree
+  (the index can lag the per-track status). Picking the wrong track here would
+  write a handoff against a track a teammate is actively working.
 - If no active track, ask user to specify or halt
+- **Ownership guard:** run the Ownership Guard (`references/ownership-guard.md`)
+  for the resolved track before writing/committing the handoff; if it halts, stop.
 - Load `spec.md`, `plan.md`, and `implement_state.json`
 - Read `metadata.json` — check for `worktree_path` field (indicates parallel execution may be in progress)
 
@@ -93,7 +108,7 @@ writes don't clobber):
 
 ## 4. Create Handoff Document
 
-Write a SINGLE rolling `cadre/HANDOFF.md` — overwrite/update it in place each
+Write a SINGLE rolling `cadre/tracks/<track_id>/HANDOFF.md` — overwrite/update it in place each
 time (do NOT create per-timestamp `handoff_<ts>.md` artifacts; there is exactly
 one current handoff at any moment). Keep it bounded. Include:
 
@@ -147,7 +162,7 @@ Before creating handoff document:
 ## 5. Commit Handoff
 
 ```bash
-git add cadre/HANDOFF.md cadre/tracks/<track_id>/
+git add cadre/tracks/<track_id>/
 git commit -m "cadre(handoff): Create section <N> handoff for <track_id>
 
 Progress: <X>% complete
@@ -158,7 +173,7 @@ Next: <next_task_brief>"
 ## 6. Present Summary
 
 Display:
-- Handoff document location (`cadre/HANDOFF.md`)
+- Handoff document location (`cadre/tracks/<track_id>/HANDOFF.md`)
 - Resume command (`/cadre-implement <track_id>`)
 - Next action to take
 - Options: End session, Continue, View full document
@@ -191,7 +206,7 @@ Display:
    DISCOVERED: <new issues found, with beads IDs>
    GIT_BRANCH: track/<track_id>
    WORKTREE: <worktree_path from metadata.json, if set>
-   HANDOFF: Section <N> saved at cadre/HANDOFF.md" --json
+   HANDOFF: Section <N> saved at cadre/tracks/<track_id>/HANDOFF.md" --json
    ```
    - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
 
@@ -235,9 +250,9 @@ Display:
 **Run only when `$ARGUMENTS` contains `--for-teammate`.** Produces a goal-first,
 prose handoff aimed at another human or agent picking up the track — derived from
 `spec.md`, not from raw machine dumps. It writes this prose INTO the single rolling
-`cadre/HANDOFF.md`, REPLACING the machine dump for that write — skip the §4 /
+`cadre/tracks/<track_id>/HANDOFF.md`, REPLACING the machine dump for that write — skip the §4 /
 §9 machine-dump sections. There is no second file; this is the same
-`cadre/HANDOFF.md` the default flow maintains, just with goal-first prose
+`cadre/tracks/<track_id>/HANDOFF.md` the default flow maintains, just with goal-first prose
 instead of the machine content.
 
 1. **Read the spec:** Load `cadre/tracks/<track_id>/spec.md`. The handoff is
@@ -246,7 +261,7 @@ instead of the machine content.
 2. **Compute identity & timestamp:** `<git-identity>` = `git config user.email`
    (fallback `git config user.name`, else null); current `<ISO-8601>` timestamp.
 
-3. **Write prose handoff** to `cadre/HANDOFF.md` (overwrite in place,
+3. **Write prose handoff** to `cadre/tracks/<track_id>/HANDOFF.md` (overwrite in place,
    REPLACING the machine dump — do NOT run the §4 / §9 machine-dump sections for
    this write; there is no second file) with these sections, all in plain prose —
    short paragraphs / tight bullets:
@@ -265,7 +280,7 @@ instead of the machine content.
 4. **SUPPRESS machine dumps:** in `--for-teammate` mode do NOT include raw
    `bd show` output, `git log`, or parallel-worker JSON, and skip the §4 / §9
    machine-dump sections entirely. The teammate handoff is goal-first prose only,
-   written into the single rolling `cadre/HANDOFF.md`.
+   written into the single rolling `cadre/tracks/<track_id>/HANDOFF.md`.
 
-5. **Present:** show the `cadre/HANDOFF.md` location and note that it is a
+5. **Present:** show the `cadre/tracks/<track_id>/HANDOFF.md` location and note that it is a
    teammate-oriented handoff.
