@@ -9,6 +9,15 @@ agent: agent
 
 Create a comprehensive context handoff document when you need to transfer implementation progress to a new section or session. Essential for large tracks that span multiple AI context windows.
 
+Pass arguments through `the input provided with this command (the text typed after the command name)`.
+
+## 0. Mode
+
+If `the input provided with this command (the text typed after the command name)` contains `--for-teammate`, run the **Teammate Handoff** flow in
+section 10 instead of (or in addition to) the rolling `HANDOFF.md` — a goal-first
+prose handoff for another human/agent. Otherwise produce the default rolling
+handoff (sections 1-9). The default (no-arg) output stays byte-identical to today.
+
 ## 1. Identify Active Track
 - Find track marked `[~]` in `conductor/tracks.md`
 - If no active track, ask user to specify or halt
@@ -30,7 +39,7 @@ If `metadata.json` has a `worktree_path` field (or a `repos` map in polyrepo mod
   > "C) Cancel handoff"
 
   - If A: Poll `bd ready --parent <epic_id>` until it returns empty (all tasks closed/blocked), then proceed
-  - If B: Include active worktree list and `bd show <epic_id>` notes in handoff document
+  - If B: Include active worktree list and the 4-line bd summary (see section 4) in handoff document
   - If C: HALT
 
 ## 2. Gather Handoff Context
@@ -42,9 +51,10 @@ If `metadata.json` has a `worktree_path` field (or a `repos` map in polyrepo mod
 
 **Recent Changes:**
 ```bash
-git log --oneline -10
-git diff --name-only HEAD~5
+git log --oneline -3
 ```
+(Keep this bounded — do NOT dump `git diff --name-only HEAD~5`; the rolling
+`HANDOFF.md` is meant to stay small.)
 
 **Unresolved Issues:**
 - Check for `[!]` blocked markers in plan.md
@@ -53,7 +63,9 @@ git diff --name-only HEAD~5
 
 ## 3. Update Implementation State
 
-Update `conductor/tracks/<track_id>/implement_state.json` with section tracking:
+Update `conductor/tracks/<track_id>/implement_state.json` with section tracking
+(use key-scoped jq writes, never a full-file rewrite, so concurrent sibling
+writes don't clobber):
 ```json
 {
   "current_phase": "...",
@@ -62,25 +74,32 @@ Update `conductor/tracks/<track_id>/implement_state.json` with section tracking:
   "completed_phases": ["Phase 1"],
   "section_count": 2,
   "last_handoff": "<ISO timestamp>",
+  "owner": "<git-identity>",
+  "last_updated": "<ISO-8601>",
   "handoff_history": [
     {
       "section": 1,
       "timestamp": "...",
       "phase_at_handoff": "...",
       "task_at_handoff": 5,
-      "handoff_file": "handoff_<timestamp>.md"
+      "handoff_file": "HANDOFF.md"
     }
   ],
   "status": "handed_off"
 }
 ```
+- `<git-identity>` is the value of `git config user.email` (fallback
+  `git config user.name`, else null). Compute it once at the start of this command.
 
 ## 4. Create Handoff Document
 
-Create `conductor/tracks/<track_id>/handoff_<YYYYMMDD_HHMMSS>.md` with:
+Write a SINGLE rolling `conductor/HANDOFF.md` — overwrite/update it in place each
+time (do NOT create per-timestamp `handoff_<ts>.md` artifacts; there is exactly
+one current handoff at any moment). Keep it bounded. Include:
 
-- **Header:** Track info, section number, timestamp, link to previous handoff
-- **Thread URL:** Current Amp thread URL ($AMP_CURRENT_THREAD_ID) for context retrieval
+- **Header:** Track info, section number, timestamp, `owner` (`<git-identity>`),
+  `last_updated` (`<ISO-8601>`)
+- **Session/thread ref if available:** for context retrieval
 - **Git Branch:** `git_branch` from `metadata.json` (e.g., `track/<track_id>`)
 - **Worktree Path:** `worktree_path` from `metadata.json` (if track has a dedicated worktree)
 - **Repos (polyrepo):** if `metadata.json` has a `repos` map, include a per-repo
@@ -88,7 +107,9 @@ Create `conductor/tracks/<track_id>/handoff_<YYYYMMDD_HHMMSS>.md` with:
   repo's `git -C <submodule_path> log --oneline -3` — so the next session can
   resume work in the right repo. Note the `sync_mode` and `pr_provider` from
   `config.json`.
-- **Beads Context:** Output of `bd show <epic_id>` — COMPLETED/IN PROGRESS/NEXT/KEY DECISIONS from epic notes
+- **Beads Context:** a 4-line bd summary (COMPLETED / IN PROGRESS / NEXT / KEY
+  DECISIONS, one line each) distilled from the epic notes — do NOT paste the full
+  `bd show <epic_id>` output.
 - **Progress Summary:** Overall %, current phase/task, completed/remaining tasks
 - **Parallel Execution State:** (if applicable) Active worktrees from `git worktree list`, `bd ready --parent` output
 - **Key Implementation Decisions:** Important choices made during this section
@@ -126,7 +147,7 @@ Before creating handoff document:
 ## 5. Commit Handoff
 
 ```bash
-git add conductor/tracks/<track_id>/
+git add conductor/HANDOFF.md conductor/tracks/<track_id>/
 git commit -m "conductor(handoff): Create section <N> handoff for <track_id>
 
 Progress: <X>% complete
@@ -137,7 +158,7 @@ Next: <next_task_brief>"
 ## 6. Present Summary
 
 Display:
-- Handoff document location
+- Handoff document location (`conductor/HANDOFF.md`)
 - Resume command (`/conductor-implement <track_id>`)
 - Next action to take
 - Options: End session, Continue, View full document
@@ -170,7 +191,7 @@ Display:
    DISCOVERED: <new issues found, with beads IDs>
    GIT_BRANCH: track/<track_id>
    WORKTREE: <worktree_path from metadata.json, if set>
-   HANDOFF: Section <N> saved at conductor/tracks/<track_id>/handoff_<timestamp>.md" --json
+   HANDOFF: Section <N> saved at conductor/HANDOFF.md" --json
    ```
    - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
 
@@ -206,3 +227,39 @@ Display:
      handoff — see `references/conductor-sync.md`. Product code stays local.
 
 **Benefit:** Beads notes survive context compaction, enabling seamless session resume.
+
+---
+
+## 10. TEAMMATE HANDOFF (`--for-teammate`)
+
+**Run only when `the input provided with this command (the text typed after the command name)` contains `--for-teammate`.** Produces a goal-first,
+prose handoff aimed at another human or agent picking up the track — derived from
+`spec.md`, not from raw machine dumps. This is in ADDITION to the rolling
+`conductor/HANDOFF.md`; the default (no-arg) output stays byte-identical to today.
+
+1. **Read the spec:** Load `conductor/tracks/<track_id>/spec.md`. The handoff is
+   written from the track's GOAL outward, not from the git history.
+
+2. **Compute identity & timestamp:** `<git-identity>` = `git config user.email`
+   (fallback `git config user.name`, else null); current `<ISO-8601>` timestamp.
+
+3. **Write prose handoff** to `conductor/HANDOFF.md` (overwrite in place) with
+   these sections, all in plain prose — short paragraphs / tight bullets:
+   - **Header:** track id, owner (`<git-identity>`), `last_updated` (`<ISO-8601>`).
+   - **Goal:** one-paragraph restatement of what the track is trying to achieve
+     (from `spec.md`).
+   - **Decided:** the decisions already locked in — approach, key choices,
+     constraints honored (from `spec.md` + this section's learnings).
+   - **Still-open:** unresolved questions, pending decisions, known blockers
+     (from `blockers.md`, `[!]` markers, and open spec questions).
+   - **Start-here:** the single most useful next action for the teammate, then the
+     next 2-3 concrete steps, phrased so someone with no prior context can begin.
+   - **Run/test:** the literal line `Run/test: see workflow.md` (point the teammate
+     at `conductor/workflow.md` rather than inlining commands).
+
+4. **SUPPRESS machine dumps:** in `--for-teammate` mode do NOT include raw
+   `bd show` output, `git log`, or parallel-worker JSON. The teammate handoff is
+   goal-first prose only. (The Beads sync in section 9 still runs as usual.)
+
+5. **Present:** show the `conductor/HANDOFF.md` location and note that it is a
+   teammate-oriented handoff.

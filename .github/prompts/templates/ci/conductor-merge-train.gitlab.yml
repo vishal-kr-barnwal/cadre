@@ -28,6 +28,9 @@ stages:
 conductor-merge-train:
   stage: merge-train
   image: registry.gitlab.com/gitlab-org/cli:latest
+  # Serialize trains so two pipelines never merge/bump submodules concurrently
+  # (GitLab equivalent of the GitHub `concurrency` group on this workflow).
+  resource_group: conductor-merge-train
   rules:
     # GitLab has no cross-project "sibling MR approved" webhook, so this job is
     # driven by: a recurring **pipeline schedule** (set CONDUCTOR_TRACK on the
@@ -67,17 +70,63 @@ conductor-merge-train:
         [ "$approved" = "true" ] && [ "$pipe" = "success" ]
       }
 
-      mapfile -t REPO_NAMES < <(jq -r '.repos | keys[]' "$META")
+      # Ordered repo list: metadata.merge_order entries first (in their given
+      # order), then the alphabetical remainder. Never drop or duplicate a repo;
+      # a name in merge_order but absent from .repos is ignored, a repo absent
+      # from merge_order falls into the alpha tail.
+      mapfile -t REPO_NAMES < <(jq -r '
+        (.merge_order // []) as $order
+        | (.repos | keys) as $all
+        | ($order | map(select(. as $n | $all | index($n)))) as $head
+        | ($all | map(select(. as $n | $head | index($n) | not)) | sort) as $tail
+        | ($head + $tail)[]
+      ' "$META")
       CONTROL_PROJ="${CI_PROJECT_PATH}"
       CONTROL_MR="$(jq -r '.control_pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
 
-      # Phase 1: verify every sibling MR approved + green
+      # Phase 1: verify every sibling MR approved + green. Also classify each
+      # product MR as landed (already merged) vs blocking (not ready), so a
+      # HALF-LANDED train can surface what is still holding it up on the control
+      # MR instead of failing silently.
+      LANDED=""; BLOCKING=""; HALT=0
       for name in "${REPO_NAMES[@]}"; do
         proj="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
         iid="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
         [ -z "$iid" ] && continue
-        mr_ready "$proj" "$iid" || { echo "Product MR $proj!$iid not ready; halting."; exit 0; }
+        enc="$(printf '%s' "$proj" | sed 's#/#%2F#g')"
+        state="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.state')"
+        if [ "$state" = "merged" ]; then
+          LANDED="${LANDED:+$LANDED, }${name} (${proj}!${iid})"
+          continue
+        fi
+        if ! mr_ready "$proj" "$iid"; then
+          BLOCKING="${BLOCKING:+$BLOCKING, }${name} (${proj}!${iid})"
+          HALT=1
+        fi
       done
+      # If the train is half-landed (>=1 product MR merged) and something is still
+      # blocking, post/refresh a status note on the control MR.
+      if [ "$HALT" = "1" ]; then
+        if [ -n "$LANDED" ] && [ -n "$CONTROL_MR" ]; then
+          cenc="$(printf '%s' "$CONTROL_PROJ" | sed 's#/#%2F#g')"
+          MARKER="<!-- conductor-merge-train:status -->"
+          BODY="${MARKER}
+      🚧 **conductor merge-train — half landed.**
+      Already merged: ${LANDED:-(none)}
+      Still blocking: ${BLOCKING:-(none)}
+
+      The merged product MRs cannot be reverted automatically; the train will
+      re-fire and complete once the blocking projects are approved + green."
+          # Refresh the existing status note if present, else create one.
+          existing="$(glab api "projects/${cenc}/merge_requests/${CONTROL_MR}/notes" --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id // empty" 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            glab api --method PUT "projects/${cenc}/merge_requests/${CONTROL_MR}/notes/${existing}" -f body="$BODY" >/dev/null || true
+          else
+            glab mr note "$CONTROL_MR" -m "$BODY" || true
+          fi
+        fi
+        echo "Product MR(s) not ready (blocking: ${BLOCKING:-?}); halting."; exit 0
+      fi
       if [ -n "$CONTROL_MR" ]; then mr_ready "$CONTROL_PROJ" "$CONTROL_MR" || { echo "Control MR not ready; halting."; exit 0; }; fi
 
       git config user.name "conductor-merge-train"
@@ -91,12 +140,30 @@ conductor-merge-train:
         iid="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
         sub="$(jq -r --arg n "$name" '.repos[$n].submodule_path // empty' "$META")"
         [ -z "$iid" ] && continue
-        mr_ready "$proj" "$iid" || { echo "REGRESSED: $proj!$iid. Halting."; exit 1; }
         enc="$(printf '%s' "$proj" | sed 's#/#%2F#g')"
-        glab api --method PUT "projects/${enc}/merge_requests/${iid}/merge" -f squash=true >/dev/null
         target="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.target_branch')"
-        new_sha="$(glab api "projects/${enc}/repository/branches/${target}" --jq '.commit.id')"
-        echo "  ${name} -> ${new_sha}"
+        # Idempotent re-fire: if this MR is ALREADY merged (e.g. an earlier train
+        # run merged it but then halted on a sibling), do NOT re-merge — but STILL
+        # reconstruct its gitlink bump below so a re-fire converges.
+        mr_state="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.state')"
+        if [ "$mr_state" = "merged" ]; then
+          echo "  $proj!$iid already merged; skipping merge, reconstructing gitlink bump."
+          new_sha="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.merge_commit_sha // .squash_commit_sha // empty')"
+        else
+          mr_ready "$proj" "$iid" || { echo "REGRESSED: $proj!$iid. Halting."; exit 1; }
+          # Capture the MERGE COMMIT from the merge PUT response (.sha for the
+          # merge endpoint, .merge_commit_sha as a fallback) — not the branch head,
+          # which may have advanced past our merge and would silently capture
+          # unrelated commits.
+          merge_resp="$(glab api --method PUT "projects/${enc}/merge_requests/${iid}/merge" -f squash=true)"
+          new_sha="$(printf '%s' "$merge_resp" | jq -r '.sha // .merge_commit_sha // empty')"
+        fi
+        if [ -z "$new_sha" ] || [ "$new_sha" = "null" ]; then
+          # GitLab has not yet populated the merge commit (async squash). Do NOT
+          # bump to a wrong/empty SHA — halt and let the train re-fire.
+          echo "  ${name}: merge commit not yet available; halting to re-fire."; exit 1
+        fi
+        echo "  ${name} -> ${new_sha} (merge commit)"
         # Fetch the target branch ref (fetch-by-bare-SHA is rejected by many hosts),
         # which now contains the just-merged commit, then pin the gitlink to it.
         git -C "$sub" fetch origin "$target" || git submodule update --init "$sub"

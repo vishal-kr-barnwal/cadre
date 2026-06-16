@@ -42,6 +42,27 @@ last** — once every sibling PR is approved and CI-green.
    with a "Ready to ship" verdict. If not, suggest `/conductor-review <track_id>`
    and ask whether to proceed anyway.
 
+### 1.5 Review-Gate Enforcement (machine-readable)
+
+Read `metadata.json` `review` (written by `/conductor-review`) and enforce it
+**before** any push/PR work:
+
+- **`review` absent** → keep today's behavior: the soft confirmation prompt from
+  the section-1 "reviewed?" gate (ask whether to proceed anyway). Do not block.
+- **`review.verdict == "changes_requested"` OR `review.blocking_count > 0`** →
+  **REFUSE.** Print a clear message naming the verdict and blocking count, e.g.
+  > "Track `<track_id>` has an unresolved review (verdict: changes_requested,
+  > <n> blocking findings). Resolve them and re-run `/conductor-review` before
+  > landing." — then halt without opening any PR.
+- **`review.verdict == "approved"` and `review.blocking_count == 0`** → proceed.
+
+```bash
+META="conductor/tracks/<track_id>/metadata.json"
+verdict=$(jq -r '.review.verdict // "absent"' "$META")
+blocking=$(jq -r '.review.blocking_count // 0' "$META")
+# absent -> soft prompt; changes_requested or blocking>0 -> refuse; else proceed
+```
+
 ---
 
 ## 2. Ensure CLI & Auth
@@ -50,6 +71,51 @@ last** — once every sibling PR is approved and CI-green.
 - If the CLI is missing or unauthenticated, switch to **plain-CLI fallback** (step
   6): print the exact PR-create commands for the user to run, and skip the
   automated creation.
+
+---
+
+## 2b. Land Preflight (all-or-nothing) — polyrepo, BEFORE any push/PR
+
+Validate **EVERY** touched repo first. This is a gate: if **any** check fails,
+**halt before opening (or pushing for) ANY PR** — never open a partial group.
+Follow the **preflight asserts in `references/polyrepo-git.md`** (the shared
+preflight-assert snippet) for the per-repo checks; this command just drives the
+loop over `metadata.json.repos` (plus the control repo) and aggregates results.
+
+For each entry in `metadata.json.repos`:
+
+1. **Submodule initialized.** `git submodule status <submodule_path>` is checked
+   out (no leading `-`). If uninitialized, **halt** and tell the user to run
+   `git submodule update --init <submodule_path>` (or `/conductor-validate`).
+2. **`submodule_path` matches `.gitmodules`.** The path recorded in
+   `repos.json`/`metadata.json` must equal the authoritative `.gitmodules` entry
+   (`git config -f .gitmodules --get submodule.<name>.path`). On mismatch,
+   **halt** and point the user at `/conductor-refresh repos`.
+3. **PR base exists on remote.** The base branch — `repos.json` `default_branch`
+   for that repo — must exist on the remote
+   (`git -C <submodule_path> ls-remote --exit-code --heads origin <default_branch>`).
+   If missing, **halt**.
+4. **Track branch not behind base.** Compare `track/<track_id>` against the base.
+   If the track branch is **behind** base
+   (`git -C <submodule_path> rev-list --count track/<track_id>..origin/<default_branch>` > 0),
+   **OFFER a rebase** (`git -C <submodule_path> rebase origin/<default_branch> track/<track_id>`).
+   **Never force-rebase and never force-push** — ask first; if declined, halt.
+
+**Also check the control repo** the same way (base = `config.json`
+`control_branch`).
+
+**Latent divergence flag.** If a repo's `metadata.json` `base_branch` differs
+from its `repos.json` `default_branch`, **warn** — the PR base (step 4) uses
+`repos.json` `default_branch`, but stale `metadata.base_branch` may mislead other
+commands. Surface it so the user can reconcile via `/conductor-refresh repos`.
+
+**Offline / no-network.** If remote queries fail because you are offline
+(`ls-remote` / `rev-list` against `origin` error out on connectivity, not on a
+real mismatch), **warn and proceed** — note that base-existence and behind-base
+checks were skipped, and let the push step surface any real problem.
+
+Only after **all** repos pass (or are warned-and-proceeded while offline) do you
+continue to step 3.
 
 ---
 
@@ -134,6 +200,20 @@ Let `LABEL = <merge_train.group_label_prefix>:<track_id>` (default
    `/conductor-newtrack`; `/conductor-land` adds `repo_slug` + `pr_url`. Record the
    PR/MR URL exactly as the host CLI returns it — GitHub `…/pull/N` or GitLab
    `…/merge_requests/N`; the merge-train CI parses the trailing number either way.)
+
+   **Write each field with a key-scoped `jq`, never a full-file rewrite**, so a
+   concurrent sibling write (or a re-run) doesn't clobber unrelated keys:
+   ```bash
+   # in shared mode, RE-READ metadata from disk immediately before patching
+   # (a teammate may have landed a sibling repo since you loaded it)
+   tmp=$(mktemp)
+   jq --arg r "$repo" --arg url "$pr_url" --arg slug "$repo_slug" \
+     '.repos[$r].pr_url=$url | .repos[$r].repo_slug=$slug' "$META" > "$tmp" && mv "$tmp" "$META"
+   # control PR:
+   jq --arg url "$control_pr_url" '.control_pr_url=$url' "$META" > "$tmp" && mv "$tmp" "$META"
+   ```
+   In **shared mode**, re-read `$META` from disk before each patch (do not reuse a
+   stale in-memory copy) so concurrent sibling writes are preserved.
 3. Commit the metadata update to the control repo; push it in shared mode.
 
 ---
@@ -143,8 +223,10 @@ Let `LABEL = <merge_train.group_label_prefix>:<track_id>` (default
 If step 2 found no usable CLI, do **not** fail — print the exact commands for the
 user to run for each repo and the control repo (the `gh pr create` / `glab mr
 create` lines from step 4, fully substituted), plus the label and cross-link body.
-Tell the user to paste the resulting PR URLs back so you can record them in
-`metadata.json` (step 5.2) on the next run.
+**Keep the `--label "<LABEL>"` flag on every printed command — do not drop it.**
+The merge-train CI keys the whole group off that label; a PR created without it is
+invisible to the train. Tell the user to paste the resulting PR URLs back so you
+can record them in `metadata.json` (step 5.2) on the next run.
 
 ---
 
@@ -160,6 +242,27 @@ When the train fires, it merges product PRs first, bumps the submodule gitlinks 
 the control branch, then merges the control PR last (see
 `templates/ci/conductor-merge-train.*`).
 
+**Merge order.** The CI honors `metadata.json` `merge_order` when present: the
+listed repos merge first in that left-to-right order, then the alphabetical
+remainder, and the control repo last in every case (product-first, control-last).
+Absent `merge_order` → plain alphabetical product order, control last.
+
+**Control-PR label self-heal (GitHub only — gate on `config.json`
+`pr_provider == "github"`).** Before reporting, verify the control PR still
+carries the group label `<prefix>:<track_id>` (default
+`conductor-track:<track_id>`) — labels are occasionally dropped by automation or
+manual edits, and the merge-train CI keys the group off this label:
+```bash
+labels=$(gh pr view "$control_pr" --json labels --jq '.labels[].name')
+case "$labels" in
+  *"$LABEL"*) : ;;                                  # present, nothing to do
+  *) gh pr edit "$control_pr" --add-label "$LABEL" || \
+       echo "WARN: could not re-apply $LABEL to control PR — re-apply manually" ;;
+esac
+```
+Re-applying is **warn-only** — never halt on a failed label edit. (Skip this
+entirely for GitLab / `pr_provider != "github"`.)
+
 **Auto-fire reality check (tell the user):** neither host has a native cross-repo
 "all siblings approved" event. The control-repo workflow fires on the **control
 PR's own** review/check events, and on a schedule/dispatch. A review or green on a
@@ -173,9 +276,12 @@ PR's own** review/check events, and on a schedule/dispatch. A review or green on
 If `merge_train.auto_fire` is false, only manual/dispatch runs land the group.
 
 **On partial failure** (a product PR merged but a later step failed): the train
-halts, leaves merged product PRs in place, and comments on the control PR. It
-re-fires automatically once the failing repo is green again — re-run
-`/conductor-land` to re-check status.
+halts, leaves merged product PRs in place, and comments on the control PR naming
+landed vs blocking repos. It does **not** re-fire itself — **someone or CI must
+re-trigger it** (the control PR's next review/check event, a `workflow_dispatch` /
+pipeline run, or a re-run of `/conductor-land`). The train **is idempotent on
+re-fire**: it skips already-merged product PRs and reconstructs the gitlink bumps,
+so re-triggering after the failing repo is green safely completes the landing.
 
 ---
 

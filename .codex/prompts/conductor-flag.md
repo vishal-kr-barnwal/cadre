@@ -74,7 +74,8 @@ For `skipped`, also ask the disposition:
      bd note <task_id> "SKIPPED: <reason>. Will complete later." --json
      ```
    - "Blocked": `bd update <task_id> --status blocked --json && bd note <task_id> "SKIPPED: <reason>" --json`
-   - Then advance: `bd update <next_task_id> --status in_progress --assignee conductor --json`
+   - Then advance: `bd update <next_task_id> --status in_progress --assignee <git-identity> --json`
+     (`<git-identity>` = `git config user.email` → `user.name` → omit `--assignee` if unset; never the literal `conductor`)
 
    - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
 

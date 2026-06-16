@@ -453,7 +453,11 @@ and `references/polyrepo-git.md`.**
 
 5. **Write `conductor/config.json`:** copy `<TEMPLATES_DIR>/config.json` to
    `conductor/config.json`, then set:
-   - `sync_mode`: `"shared"` (A) or `"local"` (B)
+   - `sync_mode`: `"shared"` (A) or `"local"` (B). This is the master gate for all
+     team/shared behaviors across commands; `"local"` keeps today's behavior.
+   - `auto_open`: leave `false` (template default). Opt-in hook that lets
+     `/conductor-ship` auto-open the monorepo PR after a clean push; teams flip it
+     to `true` manually. Keep it present so `ship` can read it without a fallback.
    - `control_remote`, `control_branch` from step 4
    - `pr_provider`: `"github"` or `"gitlab"`
    - `merge_train.enabled`: false only if C; `merge_train.auto_fire`: true for A,
@@ -475,12 +479,26 @@ and `references/polyrepo-git.md`.**
 7. **Extend `.gitattributes` for shared state (only if `sync_mode == "shared"`):**
    append (skip lines already present), then `git add .gitattributes`:
    ```
-   # Regenerable per-track state — union both sides rather than conflict
-   conductor/tracks/**/implement_state.json merge=union
-   conductor/tracks/**/parallel_state.json  merge=union
+   # Per-track resume state — these are SCALAR JSON objects, NOT newline-delimited
+   # records, so `merge=union` would interleave both sides into INVALID JSON and
+   # corrupt resume. Pin to main's copy (parallel_state.json is ephemeral and
+   # deleted at phase end); let implement_state.json conflict surface as a normal
+   # merge so a real divergence is never silently lost.
+   conductor/tracks/**/parallel_state.json  merge=ours
    ```
-   Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal merge so
-   structural conflicts surface intentionally.
+   Leave `implement_state.json` on **normal merge** (no attribute) so a genuine
+   resume-state divergence surfaces as a conflict instead of being clobbered.
+   Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal merge too,
+   so structural conflicts surface intentionally.
+
+   **Register the `ours` merge driver (CRITICAL):** the `merge=ours` attribute
+   silently falls back to a clobbering default unless the driver is registered.
+   Before relying on it, check and register:
+   ```bash
+   git config merge.ours.driver >/dev/null 2>&1 || git config merge.ours.driver true
+   ```
+   This also protects `.beads/** merge=ours` written in Section 2.7 / 3a — an
+   unregistered driver would silently mis-resolve `.beads/` on merge.
 
 8. **Commit State:**
    ```json
@@ -492,6 +510,29 @@ and `references/polyrepo-git.md`.**
 ---
 
 ## 2.8 FINAL ANNOUNCEMENT
+
+0. **Gitignore agent-local state:** create or extend `conductor/.gitignore` so
+   regenerable agent-local state never gets committed, while all durable track
+   artifacts stay versioned. Append only lines not already present.
+
+   - **ALWAYS ignore** (both monorepo and polyrepo, any sync mode):
+     ```gitignore
+     # Agent-local setup/refresh resume state — never share, always regenerable
+     setup_state.json
+     refresh_state.json
+     ```
+   - **ADDITIONALLY** ignore per-track resume state **only when NOT shared mode**
+     (i.e. monorepo, OR polyrepo with `sync_mode == "local"`). In shared mode this
+     state is intentionally synced (see Section 2.7b), so do NOT ignore it there:
+     ```gitignore
+     # Per-track resume state — local-only; in shared mode this is synced instead
+     tracks/**/implement_state.json
+     tracks/**/parallel_state.json
+     ```
+   - **Never ignore** (these stay committed — do NOT add them): `metadata.json`,
+     `spec.md`, `plan.md`, `learnings.md`, `revisions.md`, `blockers.md`,
+     `skipped.md`, `tracks.md`, `patterns.md`.
+   - `git add conductor/.gitignore`.
 
 1. **Announce Completion:** "Project setup completed! You can now initiate a track using the `newTrack` command."
 2. **Commit Files:** `git add conductor && git commit -m "conductor(setup): Add conductor setup files"`

@@ -103,18 +103,65 @@ jobs:
           META="conductor/tracks/${TRACK}/metadata.json"
           if [ ! -f "$META" ]; then echo "No metadata for $TRACK; abort."; exit 1; fi
 
-          mapfile -t REPO_NAMES < <(jq -r '.repos | keys[]' "$META")
+          # Ordered repo list: metadata.merge_order entries first (in their given
+          # order), then the alphabetical remainder. Never drop a repo, never
+          # duplicate one — a name listed in merge_order but absent from .repos is
+          # ignored; a repo absent from merge_order falls into the alpha tail.
+          mapfile -t REPO_NAMES < <(jq -r '
+            (.merge_order // []) as $order
+            | (.repos | keys) as $all
+            | ($order | map(select(. as $n | $all | index($n)))) as $head
+            | ($all | map(select(. as $n | $head | index($n) | not)) | sort) as $tail
+            | ($head + $tail)[]
+          ' "$META")
           CONTROL_PR="$(jq -r '.control_pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
 
           # --- Phase 1: verify EVERY sibling PR is approved + green -------------
+          # Also classify each product PR as landed (already MERGED) vs blocking
+          # (not ready), so a HALF-LANDED train can surface what is still holding
+          # it up on the control PR instead of failing silently.
           echo "::group::Pre-flight verification"
+          LANDED=""; BLOCKING=""; HALT=0
           for name in "${REPO_NAMES[@]}"; do
             repo="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
             pr="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
             [ -z "$pr" ] && continue
             echo "check $repo#$pr"
-            pr_ready "$repo" "$pr" || { echo "Product PR $repo#$pr not ready; halting."; exit 0; }
+            state="$(gh pr view "$pr" --repo "$repo" --json state --jq '.state')"
+            if [ "$state" = "MERGED" ]; then
+              LANDED="${LANDED:+$LANDED, }${name} (${repo}#${pr})"
+              continue
+            fi
+            if ! pr_ready "$repo" "$pr"; then
+              BLOCKING="${BLOCKING:+$BLOCKING, }${name} (${repo}#${pr})"
+              HALT=1
+            fi
           done
+          # If the train is half-landed (>=1 product PR merged) and something is
+          # still blocking, post/refresh a status comment on the control PR.
+          if [ "$HALT" = "1" ]; then
+            if [ -n "$LANDED" ] && [ -n "$CONTROL_PR" ]; then
+              MARKER="<!-- conductor-merge-train:status -->"
+              BODY="${MARKER}
+          🚧 **conductor merge-train — half landed.**
+          Already merged: ${LANDED:-(none)}
+          Still blocking: ${BLOCKING:-(none)}
+
+          The merged product PRs cannot be reverted automatically; the train will
+          re-fire and complete once the blocking repos are approved + green."
+              # Refresh the existing status comment if present, else create one.
+              existing="$(gh pr view "$CONTROL_PR" --repo "$CONTROL_REPO" --json comments \
+                          --jq "[.comments[] | select(.body | startswith(\"${MARKER}\"))][0].id // empty" || true)"
+              if [ -n "$existing" ]; then
+                gh api -X PATCH "repos/${CONTROL_REPO}/issues/comments/${existing}" -f body="$BODY" >/dev/null || true
+              else
+                gh pr comment "$CONTROL_PR" --repo "$CONTROL_REPO" --body "$BODY" || true
+              fi
+            fi
+            echo "Product PR(s) not ready (blocking: ${BLOCKING:-?}); halting."
+            echo "::endgroup::"
+            exit 0
+          fi
           if [ -n "$CONTROL_PR" ]; then
             pr_ready "$CONTROL_REPO" "$CONTROL_PR" || { echo "Control PR not ready; halting."; exit 0; }
           fi
@@ -132,13 +179,30 @@ jobs:
             sub="$(jq -r --arg n "$name" '.repos[$n].submodule_path // empty' "$META")"
             [ -z "$pr" ] && continue
             echo "::group::Merge product $repo#$pr"
-            pr_ready "$repo" "$pr" || { echo "REGRESSED before merge: $repo#$pr. Halting."; exit 1; }
-            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false
-            # New default-branch SHA after merge
+            # Idempotent re-fire: if this PR is ALREADY merged (e.g. an earlier
+            # train run merged it but then halted on a sibling), do NOT re-merge —
+            # but STILL reconstruct its gitlink bump below so a re-fire converges.
+            pr_state="$(gh pr view "$pr" --repo "$repo" --json state --jq '.state')"
+            if [ "$pr_state" = "MERGED" ]; then
+              echo "  $repo#$pr already MERGED; skipping merge, reconstructing gitlink bump."
+            else
+              pr_ready "$repo" "$pr" || { echo "REGRESSED before merge: $repo#$pr. Halting."; exit 1; }
+              gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false
+            fi
+            # Pin the gitlink to the MERGE COMMIT (not the branch head): the base
+            # branch may have advanced past our merge by the time we read it, so
+            # pinning the head would silently capture unrelated commits.
             base="$(gh pr view "$pr" --repo "$repo" --json baseRefName --jq '.baseRefName')"
-            new_sha="$(gh api "repos/${repo}/git/ref/heads/${base}" --jq '.object.sha')"
-            echo "  ${name} -> ${new_sha}"
-            # Bump the submodule gitlink on the control track branch
+            new_sha="$(gh pr view "$pr" --repo "$repo" --json mergeCommit --jq '.mergeCommit.oid')"
+            if [ -z "$new_sha" ] || [ "$new_sha" = "null" ]; then
+              # GitHub has not yet populated the merge commit (async squash). Do
+              # NOT bump to a wrong/empty SHA — halt and let the train re-fire.
+              echo "  ${name}: merge commit not yet available; halting to re-fire."
+              echo "::endgroup::"
+              exit 1
+            fi
+            echo "  ${name} -> ${new_sha} (merge commit)"
+            # Bump the submodule gitlink on the control track branch.
             # Fetch the base branch ref (fetch-by-bare-SHA is rejected by many hosts),
             # which now contains the just-merged commit, then pin the gitlink to it.
             git -C "$sub" fetch origin "$base" || git submodule update --init "$sub"

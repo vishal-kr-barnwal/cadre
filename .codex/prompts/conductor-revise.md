@@ -89,7 +89,7 @@ Revisions are valuable learnings - they indicate gaps in initial understanding.
 1. **Append to `learnings.md`:**
    ```markdown
    ## [YYYY-MM-DD HH:MM] - REVISION #N
-   Thread: $AMP_CURRENT_THREAD_ID
+   Thread: Session/thread ref if available
    - **Type:** Spec/Plan/Both
    - **Trigger:** <what triggered the revision during implementation>
    - **Learning:**

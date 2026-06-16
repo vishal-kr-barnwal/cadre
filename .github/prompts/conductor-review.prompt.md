@@ -68,6 +68,32 @@ Append a review entry to `conductor/tracks/<track_id>/learnings.md`:
 - **Follow-ups:** <linked tasks or revisions, if any>
 ```
 
+Then **record the structured verdict in `metadata.json`** so `/conductor-ship`
+and `/conductor-land` can enforce the review gate. Compute the reviewer identity
+`<git-identity>` = `git config user.email` (fallback `git config user.name`,
+else null). Count `blocking_count` = the number of blocking-severity findings
+(e.g. error/blocker/must-fix; a "Changes requested" verdict with any blocking
+finding implies `blocking_count > 0`). Write the `review` object with a
+**key-scoped** `jq` update (never a full-file rewrite, so concurrent sibling
+writes don't clobber):
+
+```bash
+META="conductor/tracks/<track_id>/metadata.json"
+REVIEWER="$(git config user.email || git config user.name || echo null)"
+jq --arg verdict "<approved|changes_requested>" \
+   --argjson blocking <blocking_count> \
+   --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+   --arg reviewer "$REVIEWER" \
+   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer}' \
+   "$META" > "$META.tmp" && mv "$META.tmp" "$META"
+```
+- `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
+  or `"changes_requested"` for **Changes requested**.
+- **Self-review warning (non-blocking):** if `metadata.json.owner` equals the
+  reviewer `<git-identity>`, warn the user that they are reviewing their own track
+  ("⚠️ You are the track owner — consider a second reviewer"), but still record the
+  verdict and proceed.
+
 ## 6. Route the Outcome
 
 - **Ready to ship:** announce the track is cleared and suggest `/conductor-ship`.
@@ -86,4 +112,18 @@ Append a review entry to `conductor/tracks/<track_id>/learnings.md`:
    ```bash
    bd note <epic_id> "REVIEW <date>: <verdict>. <n> findings (<n> blocking)." --json
    ```
+   - If a `bd` command fails: follow the Beads Error Handler Protocol.
+3. **Set the review label on the epic** so downstream tooling (and other agents)
+   can see the gate state. Remove the opposite label first so the two are mutually
+   exclusive:
+   - **Approved / clean** (`verdict == "approved"`, `blocking_count == 0`):
+     ```bash
+     bd label remove <epic_id> review:changes --json
+     bd label add <epic_id> review:ready --json
+     ```
+   - **Changes requested** (`verdict == "changes_requested"` or `blocking_count > 0`):
+     ```bash
+     bd label remove <epic_id> review:ready --json
+     bd label add <epic_id> review:changes --json
+     ```
    - If a `bd` command fails: follow the Beads Error Handler Protocol.

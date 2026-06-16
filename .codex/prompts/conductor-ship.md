@@ -23,9 +23,22 @@ local.
   archived and ask the user to choose.
 - Read `conductor/tracks/<track_id>/metadata.json` for `git_branch`
   (default `track/<track_id>`).
-- **Gate:** confirm the track has been reviewed (a `## Review` entry in `learnings.md`
-  with a "Ready to ship" verdict). If not, suggest `/conductor-review <track_id>` first
-  and ask whether to proceed anyway.
+- **Review gate.** Read the `review` object from
+  `conductor/tracks/<track_id>/metadata.json` (written by `/conductor-review`):
+  ```bash
+  jq -r '.review // "absent"' conductor/tracks/<track_id>/metadata.json
+  ```
+  - **Absent** (no `review` key, or `null`) → no structured gate recorded. Keep the
+    existing soft behavior: confirm the track has been reviewed (a `## Review` entry
+    in `learnings.md` with a "Ready to ship" verdict). If not, suggest
+    `/conductor-review <track_id>` first and ask whether to proceed anyway.
+  - **`verdict == "changes_requested"` OR `blocking_count > 0`** → **REFUSE**:
+    > "🚫 Track `<track_id>` has not cleared review (verdict:
+    > `<verdict>`, blocking findings: `<blocking_count>`). Resolve the findings
+    > and re-run `/conductor-review <track_id>` before shipping."
+    Then halt — do **not** rebase or push.
+  - **Clean** (`verdict == "approved"` and `blocking_count == 0`) → the gate is
+    satisfied; proceed without further confirmation.
 
 ## 2. Flush Dolt + Rebase + Prepare PR
 
@@ -60,12 +73,44 @@ For the selected track:
    git push origin track/<track_id> --force-with-lease
    ```
 
-5. **Announce PR guidance:**
-   > "Branch `track/<track_id>` is rebased on main and pushed.
-   > Create a PR from `track/<track_id>` into main via your team's PR process.
-   > After the PR is merged, delete the branch:
-   >   `git branch -d track/<track_id>`
-   >   `git push origin --delete track/<track_id>`"
+5. **Announce / open the PR:**
+
+   Read `conductor/config.json` (if present) for `pr_provider`
+   (`github`|`gitlab`, default `github`) and the opt-in flag `auto_open`
+   (default **false**). The flag is **off by default** so the default behavior is
+   unchanged.
+
+   - **`auto_open` is false or `config.json` is absent (default):** print PR
+     guidance only — do not create the PR:
+     > "Branch `track/<track_id>` is rebased on main and pushed.
+     > Create a PR from `track/<track_id>` into main via your team's PR process.
+     > After the PR is merged, delete the branch:
+     >   `git branch -d track/<track_id>`
+     >   `git push origin --delete track/<track_id>`"
+
+   - **`auto_open` is true:** attempt to open the PR with the host CLI (same
+     pattern as `/conductor-land`). First verify the CLI is authenticated
+     (GitHub: `gh auth status`; GitLab: `glab auth status`). If it is missing or
+     unauthenticated, fall back to printing the exact create command for the user
+     to run (the manual-fallback message), then continue.
+
+     **GitHub:**
+     ```bash
+     gh pr create \
+       --head track/<track_id> --base main \
+       --title "<track_id>: <description>" \
+       --body "Conductor track <track_id>. See conductor/tracks/<track_id>/spec.md."
+     ```
+     **GitLab:**
+     ```bash
+     glab mr create \
+       --source-branch track/<track_id> --target-branch main \
+       --title "<track_id>: <description>" \
+       --description "Conductor track <track_id>. See conductor/tracks/<track_id>/spec.md."
+     ```
+     On success, report the returned PR/MR URL and the branch-cleanup commands
+     above. On any CLI failure, do **not** error out — print the create command as
+     a manual fallback and tell the user to open the PR themselves.
 
 ## 3. Next Step
 

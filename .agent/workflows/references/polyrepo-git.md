@@ -46,6 +46,26 @@ how SHAs, branches, and worktrees are disambiguated for the life of the track.
 
 **Read rule:** `repos` present → per-repo lookup; else flat fields (monorepo).
 
+## Merge order (`metadata.json.merge_order`)
+
+`metadata.json` may carry an optional `"merge_order"` array — the left-to-right
+order in which the track's repos should land:
+
+```json
+"merge_order": ["api", "web"]
+```
+
+- **Semantics:** product-repos-first, **control-repo-last** is the intended
+  default — land the code repos in this order, then the control repo. Each entry
+  is a `repos[].name`.
+- **Source:** `/conductor-newtrack` parses a `<!-- repo-order: api > web -->`
+  hint from `plan.md` into this array (left-to-right, `>`-separated).
+- **Array only — no topo-sort, no cycle detection.** It is a plain ordered list,
+  not a dependency graph. Trust the author's order verbatim.
+- **Absent → alphabetical** by repo name. Consumers (merge train, `land`) must
+  read it as: `merge_order` entries first, in order, then the remaining repos
+  alphabetically, **never dropping a repo** not named in `merge_order`.
+
 ## Worktree layout (polyrepo)
 
 - Track worktree:   `.worktrees/<track_id>/<repo>/`
@@ -82,6 +102,37 @@ in your environment, operate directly on the submodule checkout with a per-repo
   `git -C <submodule_path> revert --no-edit <sha>` in reverse chronological
   order. **Halt and report on the first conflict in any repo — never auto-continue
   across repos.** Reopen Beads tasks only after every repo's revert succeeds.
+
+## Polyrepo preflight asserts
+
+A reusable set of per-repo sanity checks to run **before** opening cross-repo
+PRs or validating a polyrepo track. `/conductor-land` Step 1b and
+`/conductor-validate` both reference this section — run the same asserts so
+`land` never opens a PR on a state `validate` would have flagged. For each repo
+in the track (resolve via `metadata.json.repos`), assert:
+
+1. **Submodule initialized.** `git submodule status <submodule_path>` shows the
+   submodule checked out (no leading `-`, which marks uninitialized). If
+   uninitialized, halt and ask to run `git submodule update --init
+   <submodule_path>` — never auto-init during land.
+2. **`submodule_path` matches `.gitmodules`.** The `submodule_path` recorded in
+   `metadata.json` (and `repos.json`) must equal a `path` entry in `.gitmodules`
+   (`.gitmodules` is authoritative). A mismatch means stale metadata — halt and
+   report; do not guess.
+3. **PR base exists on the remote.** The repo's `base_branch` (e.g. `main`) must
+   exist on its remote: `git -C <submodule_path> ls-remote --exit-code --heads
+   <remote> <base_branch>`. If absent, the PR cannot be opened — halt and report
+   which repo/base is missing.
+4. **Track branch not behind base.** The per-repo `track/<id>` branch must not be
+   behind its `base_branch` on the remote (would make the PR un-mergeable or
+   require a rebase). Check
+   `git -C <submodule_path> rev-list --count <track_branch>..<remote>/<base_branch>`;
+   a non-zero count means behind — halt and prompt to rebase the track branch
+   onto the updated base before landing.
+
+`validate` runs these as **non-fatal warnings** (report all, continue); `land`
+runs them as **hard gates** (halt on the first failing repo). All four are
+**no-ops in monorepo mode** (no submodules, no per-repo `repos` map).
 
 ## Teardown
 

@@ -51,10 +51,20 @@ For each selected track:
      ```
    - **Do not delete** `track/<track_id>` (in any repo) — the branch must persist for the PR process. It will be deleted by the team after the PR is merged.
 3. **Check for stale parallel state**: If `parallel_state.json` exists, warn and clean up
-4. **Extract learnings before archiving** (see step 3a)
-5. Move track folder to archive
-6. Remove from `tracks.md`
-7. Add archive comment
+4. **Release the track lease (shared mode only):** if `conductor/config.json`
+   `sync_mode == "shared"` and `metadata.json` has a non-null `lease`, clear it so the
+   track is no longer claimed. Use a key-scoped jq write (never a full-file rewrite),
+   so concurrent sibling writes are not clobbered:
+   ```bash
+   tmp=$(mktemp)
+   jq '.lease = null' conductor/tracks/<track_id>/metadata.json > "$tmp" \
+     && mv "$tmp" conductor/tracks/<track_id>/metadata.json
+   ```
+   In monorepo/`local` mode there is no lease; this is a silent no-op.
+5. **Extract learnings before archiving** (see step 3a)
+6. Move track folder to archive
+7. Remove from `tracks.md`
+8. Add archive comment
 
 ### 3a. Extract Learnings Before Archiving
 
@@ -77,11 +87,21 @@ For each selected track:
    > 
    > "Select patterns to add to `conductor/patterns.md` (Enter numbers, 'all', or 'skip'):"
 
-4. **Update Project Patterns:**
-   - Append selected patterns to `conductor/patterns.md`:
+4. **Update Project Patterns (dedup before append):**
+   - **Read `conductor/patterns.md` first** and scan for an existing entry that is
+     equivalent to each pattern being elevated (same pattern text / intent, ignoring
+     the trailing `(from: ...)` source attribution).
+   - **If an equivalent entry already exists:** do NOT add a duplicate line. Instead,
+     append this track to that entry's source list, e.g.
+     `(from: auth_20250103)` → `(from: auth_20250103, <track_id> archived <date>)`.
+   - **If no equivalent entry exists:** append a new line under the right category:
      ```markdown
      - <pattern> (from: <track_id>, archived <date>)
      ```
+   - **Prefer surgical append/edit over a full-file rewrite.** Edit only the matched
+     line (to extend its source list) or append the single new line under its section
+     marker — never rewrite the whole `patterns.md`, so concurrent sibling writes (e.g.
+     another track archiving at the same time) are not clobbered.
 
 5. **Preserve Learnings in Archive:**
    - Keep `learnings.md` in the archived track folder

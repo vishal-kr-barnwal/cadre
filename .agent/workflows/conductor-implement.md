@@ -101,6 +101,10 @@ Implement track: the input provided with this command (the text typed after the 
 
     **Priority order — BEADS FIRST (if enabled):**
     - **Step 1:** `bd prime` — loads AI-optimized workflow context for the entire project
+    - **Step 1b — Handoff fast-path (resume hint):** If `conductor/HANDOFF.md` (the
+      rolling handoff) exists, read it as a **fast resume hint** — where the last
+      session left off and what's next. This is advisory only: **Beads remains the
+      source of truth**; if HANDOFF.md and Beads disagree, trust Beads.
     - **Step 2:** `bd show <beads_epic>` — read the `notes` field for prior session state
       (COMPLETED, IN PROGRESS, NEXT, KEY DECISIONS from previous sessions)
     - **Step 3:** `bd ready --parent <beads_epic>` — find all unblocked tasks now
@@ -174,10 +178,24 @@ Implement track: the input provided with this command (the text typed after the 
 
 4. **Check and Load Resume State:**
 
+   **Compute `<git-identity>`:** `git config user.email` (fallback
+   `git config user.name`, else null). This identifies the current operator and is
+   used by the owner-guard and advisory lease below.
+
    **Check for:** `conductor/tracks/<track_id>/implement_state.json`
 
    **If exists:**
    - Read state file
+   - **Owner-guard (both modes):** if the file's `owner` is present and differs
+     from the current `<git-identity>` **and** `status` is `in_progress` or
+     `handed_off`:
+     > "⚠️ This track is in progress by <owner>. Take over?"
+     > A) Take over - I'll set myself as owner and resume
+     > B) Stop - leave it to <owner>
+     - If A: proceed (the next state write sets `owner` to your `<git-identity>`).
+     - If B: HALT.
+     - If `owner` is absent (legacy state) or matches `<git-identity>`: resume
+       silently.
    - Announce: "Resuming implementation from [current_phase] (Phase [current_phase_index + 1]) - Task [current_task_index + 1]"
    - Skip to indicated phase and task within that phase
 
@@ -189,10 +207,38 @@ Implement track: the input provided with this command (the text typed after the 
        "current_phase_index": 0,
        "current_task_index": 0,
        "completed_phases": [],
-       "last_updated": "<current_timestamp>",
+       "owner": "<git-identity>",
+       "last_updated": "<current_timestamp ISO-8601>",
        "status": "starting"
      }
      ```
+
+   **Every state write** (here and at steps ii/iii below) MUST set `owner` to the
+   current `<git-identity>` and refresh `last_updated` to an ISO-8601 timestamp.
+
+4b. **Advisory lease (shared mode only — no-op in local/monorepo):**
+
+   Only when `config.json` `sync_mode == "shared"`. After reading
+   `metadata.json`, claim/refresh the track lease per the metadata `lease` schema:
+   `{ "owner": <git-identity>, "host": <hostname>, "acquired_at": <ISO-8601 UTC>,
+   "heartbeat_at": <ISO-8601 UTC> }`. Write it with key-scoped jq
+   (`jq '.lease = $obj'`), never a full-file rewrite.
+
+   - **No existing lease, or `lease.owner` == `<git-identity>`:** claim/refresh
+     silently (set/update `acquired_at` on first claim, always bump
+     `heartbeat_at`).
+   - **Foreign lease with a fresh `heartbeat_at`** (within the staleness window,
+     e.g. last ~15 min):
+     > "⚠️ <lease.owner> holds this track (heartbeat <heartbeat_at>)."
+     > A) Take over - steal the lease  B) Pick another track  C) Cancel
+     - If A: overwrite `lease` with your identity. If B: return to step 2. If C: HALT.
+   - **Foreign lease with a stale `heartbeat_at`** (older than the window):
+     > "ℹ️ <lease.owner> last touched this track at <heartbeat_at> (stale).
+     > Take over the lease? A) Yes  B) Pick another track  C) Cancel"
+     - If A: overwrite `lease`. If B: return to step 2. If C: HALT.
+   - **Refresh the lease heartbeat on every state write** (steps ii/iii) while this
+     track is active. In `local`/monorepo mode, skip all lease logic entirely
+     (`lease` stays null/absent).
 
 5. **Determine Execution Mode and Execute Phases/Tasks:**
 
@@ -214,76 +260,31 @@ Implement track: the input provided with this command (the text typed after the 
       - If not found or `<!-- execution: sequential -->`: Go to step 5d (Sequential Task Execution)
 
    c. **PARALLEL TASK EXECUTION FLOW:**
-   
-      **c1. Parse Parallel Task Metadata:**
-      - For each task in the phase, extract:
-        - `<!-- files: path1, path2 -->` - Files this task owns exclusively
-        - `<!-- depends: task1, task2 -->` - Dependencies on other tasks in phase
-        - `<!-- parallel-group: groupName -->` - Optional grouping
-      
-      **c2. Build Dependency Graph:**
-      - Identify tasks with no `depends:` annotation (can start immediately)
-      - Identify dependent tasks (must wait for dependencies to complete)
-      - Create execution order respecting dependencies
-      
-      **c3. Detect File Conflicts:**
-      - Check if any two tasks claim the same file in `files:` annotation.
-      - **POLYREPO:** compare `(repo, file)` tuples, not bare paths — the same
-        relative path in two different repos is **not** a conflict. Resolve each
-        task's repo from its `<!-- repo: -->` annotation first.
-      - If conflicts detected:
-        > "⚠️ File conflict detected: [files] claimed by multiple tasks"
-        > "A) Make conflicting tasks sequential (recommended)"
-        > "B) Continue anyway - I'll handle manually"
-        > "C) Stop and revise plan"
-        - If A: Remove parallel annotation from conflicting tasks
-        - If B: Proceed with warning
-        - If C: HALT
-      
-      **c4. Initialize Worker Worktrees (replaces file_locks):**
-      - **MONOREPO:** for each parallel task, create an isolated git worktree with Beads redirect:
-        ```bash
-        bd worktree create .worktrees/<track_id>_worker_<N>_<sanitized_name> \
-          --branch track_<track_id>_worker_<N>_<sanitized_name>
-        ```
-      - **POLYREPO:** resolve each task's repo, then create the worker worktree in
-        that repo's submodule context (see `references/polyrepo-git.md`):
-        ```bash
-        git -C <submodule_path> worktree add \
-          .worktrees/<track_id>/<repo>_worker_<N>_<sanitized_name> \
-          -b track_<track_id>_worker_<N>_<sanitized_name> origin/<base_branch>
-        ```
-        Two workers targeting different repos never collide even with identical
-        relative paths. The control plane's single `.beads/` DB still coordinates
-        all workers — copy/point a `.beads` redirect into each worker worktree.
-      - `bd worktree` auto-configures a `.beads` redirect file in each worktree pointing to the root `.beads/` database. All workers share one Dolt DB — no file_locks needed.
-      - **If `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-      - Create `conductor/tracks/<track_id>/parallel_state.json` as an **audit log only** (not used for coordination):
-        ```json
-        {
-          "phase": "<phase_name>",
-          "execution_mode": "parallel",
-          "started_at": "<timestamp>",
-          "workers": [],
-          "completed_workers": 0,
-          "total_workers": <count>
-        }
-        ```
 
-      **c5. Spawn Parallel Workers (Wave Model):**
-      - **If Beads enabled:** Pre-assign this wave's tasks before spawning:
-        ```bash
-        bd update <beads_task_id> --status in_progress \
-          --assignee worker_<N>_<name> \
-          --notes "PARALLEL WORKER: Starting in .worktrees/<track_id>_worker_<N>" \
-          --json
-        ```
-      - For each task in the current wave (no unmet dependencies), dispatch one
-        worker sub-agent.
-        Use the **Agent Manager** to spawn one dynamic subagent per task in the wave; see `references/parallel-execution.md`.
-        **If your tool has no parallel sub-agent primitive, execute the wave's
-        tasks sequentially yourself, one per worktree.** Each worker runs with
-        this prompt:
+      **If the phase is marked `<!-- execution: parallel -->`, STOP and follow
+      `references/parallel-execution.md` for coordinator mechanics** (wave parse,
+      file-conflict detection, worktree setup, worker monitoring, and merge-back).
+      Do **not** extract the polyrepo branch logic — that already defers to
+      `references/polyrepo-git.md`. The per-worker prompt below stays inline (it is
+      platform-invariant); hand it verbatim to each worker the coordinator spawns.
+
+      **Cross-person file-conflict pre-flight (shared mode only):** when
+      `config.json` `sync_mode == "shared"`, in addition to the same-`files:`
+      overlap check among this phase's tasks, query Beads for in-progress tasks
+      owned by **other** people and warn before starting if any of them claim a
+      file this wave's tasks also claim:
+      ```bash
+      bd list --status in_progress --json   # inspect assignee + any files note
+      ```
+      - For each candidate file overlap where the other task's `assignee` !=
+        current `<git-identity>`:
+        > "⚠️ <file> is also being edited by <owner> (task <id>, in progress).
+        > A) Proceed anyway  B) Pick a different task  C) Stop"
+      - In `local`/monorepo mode this cross-person check is a **no-op** (only the
+        local same-phase `files:` overlap check runs, as before).
+
+      **Per-worker prompt (inline — platform-invariant):** Each worker the
+      coordinator dispatches runs with this prompt:
         ```
         You are a Conductor sub-agent implementing a single task.
 
@@ -306,7 +307,8 @@ Implement track: the input provided with this command (the text typed after the 
             4. NEVER run `git push` — all commits stay local
 
             ## Completion Sequence (run in order)
-            5. bd note <beads_task_id> 'COMPLETED: <description>
+            5. bd note <beads_task_id> 'key: <track_id>:p<phase>:t<task>:<sha7>
+               COMPLETED: <description>
                COMMIT: <sha>
                FILES: <list changed>
                PATTERNS: <any reusable patterns found>' --json
@@ -321,69 +323,14 @@ Implement track: the input provided with this command (the text typed after the 
             - Beads task closed with structured note
             - parallel_state.json updated (audit log)
         ```
-      - Record each spawned worker in `parallel_state.json` workers array:
-        ```json
-        {
-          "worker_id": "worker_<N>_<sanitized_name>",
-          "task": "<task_description>",
-          "beads_task_id": "<beads_id>",
-          "repo": "<repo name (polyrepo) or omit in monorepo>",
-          "worktree": ".worktrees/<track_id>_worker_<N>_<sanitized_name>",
-          "branch": "track_<track_id>_worker_<N>_<sanitized_name>",
-          "depends_on": ["<task_id>"],
-          "status": "in_progress",
-          "started_at": "<timestamp>"
-        }
-        ```
 
-      **c6. Wave-Model Monitoring (replaces 30s polling):**
-      - Wait for all workers in the current wave to finish before starting the
-        next wave, using your platform's mechanism (see `references/parallel-execution.md`).
-      - After each wave completes, use Beads (not parallel_state.json) to find the next wave:
-        ```bash
-        bd ready --parent <epic_id> --json
-        ```
-        - Any newly ready tasks (whose `depends_on` workers just closed via `--continue`) form the next wave.
-        - Spawn next wave workers (repeat c5).
-      - Handle worker failures:
-        - If a worker reports an error, or its parallel_state entry is still `in_progress` after it finishes:
-          - Announce: "Worker <worker_id> failed: <error>"
-          - **If Beads enabled:** Reset for retry: `bd update <beads_task_id> --assignee "" --status open --json`
-          - Ask user: "Retry worker? A) Yes  B) Skip task  C) Stop"
-
-      **c7. Aggregate Results (merge worktrees, one dolt push):**
-      - **MONOREPO:** merge each worker's branch into the track branch in completion order:
-        ```bash
-        # For each worker in order:
-        git merge --no-ff track_<track_id>_worker_<N>_<name> \
-          -m "conductor(parallel): merge worker_<N>: <task_description>"
-        bd worktree remove .worktrees/<track_id>_worker_<N>_<name>
-        ```
-      - **POLYREPO:** merge each worker's branch into **its own repo's** `track/<id>`
-        branch, in that repo's git context (group workers by `repo` from
-        parallel_state):
-        ```bash
-        # For each worker in order, in its repo:
-        git -C <submodule_path> merge --no-ff track_<track_id>_worker_<N>_<name> \
-          -m "conductor(parallel): merge worker_<N> (<repo>): <task_description>"
-        git -C <submodule_path> worktree remove .worktrees/<track_id>/<repo>_worker_<N>_<name>
-        ```
-        Never merge a worker branch from one repo into another repo's branch.
-      - **If merge conflict:** HALT immediately. Show conflicting files (and the
-        repo) and ask the user to resolve before continuing.
-      - **If Beads enabled:** After all merges:
-        ```bash
-        bd dolt push  # One push for all workers combined
-        bd ready --parent <epic_id> --json  # Verify all tasks complete
-        bd note <epic_id> "PARALLEL PHASE COMPLETE: <phase>
-        WORKERS: <N> succeeded
-        COMMITS: <sha_list>" --json
-        ```
+      After the coordinator mechanics in `references/parallel-execution.md` finish
+      merging the wave and the phase is done:
       - Update `plan.md`: mark all parallel tasks `[x]`, append commit SHAs
       - Delete `parallel_state.json`
       - Check phase graph: are there other ready phases to process?
-      - If yes: Go back to step 5a2 to process next ready phase(s)
-      - If no more phases: Proceed to step 6 (Finalize Track)
+        - If yes: Go back to step 5a2 to process next ready phase(s)
+        - If no more phases: Proceed to step 6 (Finalize Track)
 
    d. **SEQUENTIAL EXECUTION FLOW:**
    
@@ -406,7 +353,9 @@ Implement track: the input provided with this command (the text typed after the 
              - **ONLY if `beads_enabled` is true:**
                - Generate task key from phase index and task index (e.g., `phase1_task1` for first task in first phase)
                - Look up `beads_task_id` from `beads_tasks` mapping in metadata.json using task key
-               - If found, run: `bd update <beads_task_id> --status in_progress`
+               - If found, run: `bd update <beads_task_id> --status in_progress --assignee <git-identity>`
+                 (the assignee is the current operator's git identity, **never** the
+                 literal "conductor")
                - **If `bd` command fails:**
                  > "⚠️ Beads command failed: <error message>"
                  > "A) Continue without Beads integration"
@@ -442,8 +391,11 @@ Implement track: the input provided with this command (the text typed after the 
         - Set `current_phase` to current phase name
         - Set `current_phase_index` to current phase number (zero-based)
         - Set `current_task_index` to current task number within the phase (zero-based)
-        - Set `last_updated` to current timestamp
+        - Set `owner` to the current `<git-identity>`
+        - Set `last_updated` to current timestamp (ISO-8601)
         - Set `status` to "in_progress"
+        - **Shared mode only:** refresh the `metadata.json` `lease.heartbeat_at`
+          (key-scoped jq, see step 4b). No-op in local/monorepo.
       - **iii. On Phase Completion:** When all tasks in a phase are complete:
         - Add phase name to `completed_phases` array
         - Reset `current_task_index` to 0
@@ -517,9 +469,15 @@ Implement track: the input provided with this command (the text typed after the 
 
 After marking each task `[x]` complete:
 
+**Dedup key (CONTRACT):** the first line of the bd note AND the first line of the
+learnings.md entry MUST be the same dedup key:
+`key: <track_id>:p<phase>:t<task>:<sha7>`. This lets the two stores be reconciled
+to each other.
+
 **Step 1 — BEADS FIRST (if enabled):**
 ```bash
-bd note <beads_task_id> "COMPLETED: <description>
+bd note <beads_task_id> "key: <track_id>:p<phase>:t<task>:<sha7>
+COMPLETED: <description>
 COMMIT: <sha_7chars>
 FILES: <list of files modified/created>
 PATTERNS: <reusable patterns discovered>
@@ -533,8 +491,9 @@ CONTEXT: <useful context for future tasks>" --json
 Append to `conductor/tracks/<track_id>/learnings.md`:
 
 ```markdown
+key: <track_id>:p<phase>:t<task>:<sha7>
 ## [YYYY-MM-DD HH:MM] - Phase N Task M: <task_name>
-Thread: $AMP_CURRENT_THREAD_ID (if available)
+Session/thread ref if available
 - **Implemented:** <brief description of what was done>
 - **Files changed:** <list of files modified/created>
 - **Commit:** <sha_7chars>
@@ -562,8 +521,14 @@ Thread: $AMP_CURRENT_THREAD_ID (if available)
    > 
    > "Select patterns to add to `conductor/patterns.md` (Enter numbers, or 'all', or 'skip'):"
 
-4. **Update Project Patterns:**
-   - If patterns selected, append to `conductor/patterns.md`:
+4. **Update Project Patterns (dedup before append):**
+   - **First read `conductor/patterns.md`** (if it exists). For each selected
+     pattern, check whether an **equivalent** entry already exists (same/similar
+     pattern description, ignoring the trailing `(from: …)` source list).
+   - **If an equivalent entry exists:** do NOT add a duplicate line — instead
+     append this track to that entry's source list, e.g.
+     `- Use Zod for validation (from: auth_20260615, login_20260520; 2026-06-16)`.
+   - **If no equivalent exists:** append a new line:
      ```markdown
      - <pattern description> (from: <track_id>, <date>)
      ```

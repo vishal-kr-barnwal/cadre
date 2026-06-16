@@ -81,9 +81,16 @@ git commit -m "conductor(refresh): Sync context with codebase"
    > 
    > "Would you like to update `conductor/patterns.md`? (yes/no)"
 
-4. **Update `conductor/patterns.md`:**
-   - Add new patterns with source attribution
-   - Merge duplicates
+4. **Update `conductor/patterns.md` (dedup before append):**
+   - **Read `conductor/patterns.md` first** and scan for an equivalent existing entry
+     for each pattern candidate (same pattern text / intent, ignoring the trailing
+     `(from: ...)` source attribution).
+   - **If an equivalent entry already exists:** do NOT add a duplicate line — append
+     the new track id(s) to that entry's source list instead.
+   - **If no equivalent entry exists:** add a new line with source attribution.
+   - **Prefer surgical append/edit over a full-file rewrite** (edit only the matched
+     line or append a single new line under its section marker) so concurrent sibling
+     writes are not clobbered.
    - Remove outdated patterns (if confirmed)
    - Format:
      ```markdown
@@ -168,7 +175,31 @@ choices made at setup. See `references/polyrepo-git.md` and `references/conducto
      from `tracks.md` (and vice-versa) and offer to sync.
    - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
 
-3. **Offer Sync Options:**
+3. **Reconcile Learnings Drift (file ↔ bd notes):**
+   - **Guarded:** runs only when `BEADS_AVAILABLE=true` (the check above). Skip
+     silently otherwise.
+   - **Scope:** limit to active + recently-touched epics (e.g. tracks in `tracks.md`
+     plus recently-archived ones), not the full history — keep it cheap.
+   - **Dedup key (CONTRACT):** every `learnings.md` entry and its mirrored bd note
+     carries a first line `key: <track_id>:p<i>:t<j>:<sha7>`. Use this exact key to
+     match entries across the two stores.
+   - **For each in-scope track with a `beads_epic`:**
+     - Read all keyed entries from `conductor/tracks/<track_id>/learnings.md`
+       (and the archived copy if archived).
+     - Read the epic's mirrored notes: `bd show <epic_id> --notes`.
+     - Build the set of `key:`s on each side and dedup on key.
+     - **File-only entries** (key present in `learnings.md`, absent from bd notes):
+       replay them into Beads as notes so the persistent memory is complete:
+       ```bash
+       bd note <epic_id> "key: <track_id>:p<i>:t<j>:<sha7>
+       <the learnings entry body>"
+       ```
+     - **Note-only entries** (key in bd notes, absent from `learnings.md`): surface
+       them in the drift report so the user can replay them back into the file.
+   - If any `bd` command fails: Follow Beads Error Handler Protocol (see
+     `references/beads-error-handler.md`).
+
+4. **Offer Sync Options:**
    > A) Sync Beads → Conductor (trust Beads)
    > B) Sync Conductor → Beads (trust plan.md)
    > C) Skip
