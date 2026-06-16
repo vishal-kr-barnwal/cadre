@@ -158,6 +158,24 @@ choices made at setup. See `references/polyrepo-git.md` and `references/conducto
 
 ---
 
+## 8c. REGENERATE THE TRACKS INDEX
+
+**`conductor/tracks.md` is a DERIVED CACHE, not a hand-edited file.** Its single
+source of truth is each track's `metadata.json.status`. A refresh may have changed
+track status (via the keyed reconciles above, completed-track detection, or simply
+to pick up edits made by other commands/teammates), so rebuild the index so it
+mirrors current metadata.
+
+- After applying updates, **regenerate the index per `/conductor-status --regen-index`**
+  (it scans every `conductor/tracks/*/metadata.json`, sorts by `track_id`, and
+  rebuilds only the content between the `<!-- conductor:index:start -->` /
+  `<!-- conductor:index:end -->` markers, preserving the human-authored preamble).
+  Do NOT hand-flip markers in `tracks.md` and do NOT duplicate the algorithm here.
+- This step is **bd-independent** and idempotent — run it regardless of Beads
+  availability, so the index stays correct even when `bd` is missing.
+
+---
+
 ## 9. BEADS DRIFT CHECK
 
 **PROTOCOL: Include Beads status in drift analysis.**

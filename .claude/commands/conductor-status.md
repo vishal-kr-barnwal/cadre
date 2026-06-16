@@ -1,6 +1,6 @@
 ---
 description: Display current Conductor project progress (add --export to write a summary)
-argument-hint: [--export | --team | --mine | --repos]
+argument-hint: [--export | --team | --mine | --repos | --regen-index]
 ---
 
 # Conductor Status
@@ -12,6 +12,10 @@ Show the current status of this Conductor project: $ARGUMENTS
 Pick the flow based on `$ARGUMENTS` (modes are additive; bare `/conductor-status`
 behavior is unchanged):
 
+- `--regen-index` → run the **Regenerate Index** flow in section 12 only (rebuild
+  `conductor/tracks.md` from per-track `metadata.json`). This is the canonical
+  regeneration entrypoint that every other command references after it mutates a
+  track's status; it does not print the live status.
 - `--export` → run the **Export** flow in section 9 only.
 - `--team` → run the **Team View** in section 10 (in addition to the live status).
 - `--mine` → run the live status (sections 1-8) but filter the multi-track scan to
@@ -30,15 +34,34 @@ the active owner, resolve `--mine`, and group team WIP.
 **only** under `--team`, `--mine`, or `--repos`. Bare `/conductor-status` reads only
 `tracks.md` + the active track, exactly as before.
 
+**Status source of truth:** each track's `metadata.json.status`
+(`new`|`in_progress`|`completed`|`blocked`|`skipped`) is authoritative. `tracks.md`
+is a **derived index** (a human-readable mirror) regenerated from metadata — see
+section 12. Never hand-flip a marker in `tracks.md`; update the track's
+`metadata.json.status` and regenerate the index instead.
+
 ## 1. Check Setup
 
 If `conductor/tracks.md` doesn't exist, tell user to run `/conductor-setup` first.
 
 ## 2. Read State
 
-- Read `conductor/tracks.md`
+- Read `conductor/tracks.md` (the human-readable derived index/mirror).
 - List all track directories: `conductor/tracks/*/`
 - Read each `conductor/tracks/<track_id>/plan.md`
+
+**Resolve the active track from metadata (source of truth), not the index.** Scan
+each `conductor/tracks/<id>/metadata.json` for `status == "in_progress"`:
+- In **shared mode** (`conductor/config.json` sync is `shared`), filter to the
+  track whose `owner` (fallback `assignee`) equals `<git-identity>` — that is *your*
+  active track; other in-progress tracks belong to teammates and surface in the Team
+  View (section 10).
+- In **monorepo/local mode** there is normally a single `in_progress` track; pick it.
+- `tracks.md` remains a correct mirror, so the legacy read of its `## [~] Track:`
+  marker still works as a fallback if no metadata reports `in_progress` (e.g.
+  pre-status tracks). If the metadata-derived active track and the `tracks.md` marker
+  disagree, prefer metadata and note that the index is stale — run
+  `/conductor-status --regen-index` to refresh it.
 
 ## 3. Calculate Progress
 
@@ -396,3 +419,117 @@ Everything here degrades silently if a remote/`gh` is unavailable.
 
    - If no repo has any `track/*` branch, print `No in-flight track branches across
      the fleet.`
+
+---
+
+## 12. REGENERATE INDEX (`--regen-index`)
+
+**Run only when `$ARGUMENTS` contains `--regen-index`.** Rebuild
+`conductor/tracks.md` as a **derived index** from each track's
+`metadata.json.status` (the single source of truth). This is the **canonical
+regeneration entrypoint**: every command that changes a track's status writes the
+new value to that track's `metadata.json` and then runs this procedure (rather than
+hand-editing a marker in `tracks.md`). It is **idempotent**, pure bash/jq, and
+**bd-independent** — running it twice in a row leaves the file byte-identical.
+
+**Marker map** (status → index marker):
+
+| status        | marker |
+|---------------|--------|
+| `new`         | `[ ]`  |
+| `in_progress` | `[~]`  |
+| `completed`   | `[x]`  |
+| `blocked`     | `[!]`  |
+| `skipped`     | `[-]`  |
+
+A missing/unknown `status` defaults to `new` → `[ ]` (back-compat for tracks created
+before the field existed).
+
+**The marked region.** The generated body lives between sentinel comments, and
+everything **outside** them (any human-authored header/preamble) is preserved
+verbatim:
+
+```
+<!-- conductor:index:start -->
+## [~] Track: User Authentication
+## [ ] Track: Payment Integration
+<!-- conductor:index:end -->
+```
+
+Each entry keeps the existing heading shape the repo already uses —
+`## [<marker>] Track: <name>` (one line per track) — so every existing reader that
+greps `## [..] Track:` keeps working unchanged. Use `metadata.json.name` for
+`<name>` (fallback to `track_id` if `name` is absent).
+
+**Procedure:**
+
+1. **Collect & sort.** Enumerate `conductor/tracks/*/metadata.json`, deterministically
+   sorted by `track_id` (ascending), and emit one heading line per track:
+
+   ```bash
+   gen_body() {
+     for md in $(ls conductor/tracks/*/metadata.json 2>/dev/null \
+                 | sort -t/ -k3); do
+       jq -r '
+         {new:"[ ]", in_progress:"[~]", completed:"[x]",
+          blocked:"[!]", skipped:"[-]"} as $m
+         | "## \($m[(.status // "new")] // "[ ]") Track: \(.name // .track_id)"
+       ' "$md"
+     done
+   }
+   ```
+
+   (Sorting by `track_id` via the directory path is deterministic because the dir is
+   named for the track id; if you prefer, read `.track_id` from each file and sort on
+   that — both yield the same order.)
+
+2. **Splice into the file, preserving the preamble.**
+   - If `conductor/tracks.md` already contains both
+     `<!-- conductor:index:start -->` and `<!-- conductor:index:end -->`, replace
+     **only** the lines strictly between them with the freshly generated body; keep
+     the preamble above `start` and any trailer below `end` untouched.
+   - If the markers are **absent** (first run, or a legacy hand-maintained file),
+     treat the **entire current file as preamble** and append a fresh marked region
+     after it. Do **not** parse or discard the legacy `## [..] Track:` lines — leave
+     them in the preamble; the new marked region below them becomes the live cache.
+     (Operators may delete the now-duplicated legacy lines by hand later; the command
+     never destroys human content on its own.)
+   - If `tracks.md` does not exist at all, create it containing just the marked region.
+
+   A self-contained, idempotent splice:
+
+   ```bash
+   f=conductor/tracks.md
+   START='<!-- conductor:index:start -->'
+   END='<!-- conductor:index:end -->'
+   bodyf="$(mktemp)"; gen_body > "$bodyf"   # body in a file (portable: no multi-line awk -v)
+   tmp="$(mktemp)"
+   if [ -f "$f" ] && grep -qF "$START" "$f" && grep -qF "$END" "$f"; then
+     # Preserve preamble (through START) + body + trailer (from END onward).
+     awk -v s="$START" -v e="$END" -v bf="$bodyf" '
+       index($0,s){print; while((getline line < bf) > 0) print line; close(bf); skip=1; next}
+       index($0,e){skip=0}
+       !skip{print}
+     ' "$f" > "$tmp"
+   else
+     # No markers: keep whole file (if any) as preamble, append a fresh region.
+     { [ -f "$f" ] && cat "$f"; printf '%s\n' "$START"; cat "$bodyf"; printf '%s\n' "$END"; } > "$tmp"
+   fi
+   mv "$tmp" "$f"; rm -f "$bodyf"
+   ```
+
+   `awk` prints the `START` line, streams the regenerated body in from `$bf`, then
+   skips the old body until it sees `END` (which it prints) and resumes copying the
+   trailer — so re-running yields a byte-identical file. (The body is passed via a
+   temp file, not `awk -v`, because BSD/macOS `awk` rejects multi-line `-v` values.)
+
+3. **Confirm.** Print a one-line summary, e.g.
+   `Regenerated conductor/tracks.md index from N tracks' metadata (preamble preserved).`
+
+**Shared-mode merge conflicts.** Because the index is **derived**, a Git merge
+conflict in `conductor/tracks.md` is resolved deterministically by **regenerating
+it** rather than hand-merging: take either side (or `git checkout --theirs/--ours
+conductor/tracks.md`), then run `/conductor-status --regen-index` to rebuild the
+marked region from each per-track `metadata.json`. Per-track metadata rarely
+collides (each track owns its own file), so the derived index never needs a manual
+merge — this is the whole point of the source-of-truth split.

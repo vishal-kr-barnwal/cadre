@@ -26,10 +26,32 @@ For each track in `tracks.md`:
 - List all directories in `conductor/tracks/`
 - Report any not referenced in `tracks.md`
 
-## 4. Status Consistency
+## 4. Index Drift
 
-- Compare status markers in `tracks.md` with `metadata.json` status field
-- Report mismatches
+`conductor/tracks.md` is a **derived index** (a cache); each track's
+`metadata.json` `status` field is the **single source of truth**. This check
+detects when the index has fallen out of sync with that truth — it never
+hand-flips a marker to "reconcile."
+
+- For each track, map its `metadata.json` `status` to the canonical marker
+  (`new`→`[ ]`, `in_progress`→`[~]`, `completed`→`[x]`, `blocked`→`[!]`,
+  `skipped`→`[-]`).
+- Compare against the `## [<marker>] Track:` line for that track inside
+  `tracks.md`'s generated region (between `<!-- conductor:index:start -->` and
+  `<!-- conductor:index:end -->`). A missing track entry, an extra/stale entry,
+  or a disagreeing marker is **index drift**.
+- Report each drift as a ⚠️ Warning naming the track, the metadata status, and
+  the (incorrect) marker currently in the index.
+- **Do not edit `tracks.md` markers by hand.** Offer in step 7 to fix all drift
+  at once by regenerating the index per `/conductor-status --regen-index` (which
+  rebuilds the marked region deterministically from per-track metadata,
+  preserving the human-authored preamble).
+
+> **Shared mode:** a `tracks.md` **merge conflict** is likewise resolved
+> deterministically by running `/conductor-status --regen-index` — per-track
+> `metadata.json` files rarely collide, and the derived index never needs a
+> manual merge. If you encounter conflict markers in `tracks.md`, regenerate
+> rather than hand-resolving.
 
 ## 5. Plan Integrity
 
@@ -116,8 +138,9 @@ For each track whose `metadata.json` carries a non-null `lease` object
 
 ### 5c.2 Team invariants
 
-(a) **No cross-owner file overlap.** Collect every in-progress (`[~]`) track
-   (status from `metadata.json` / `tracks.md`). For each, gather its in-progress
+(a) **No cross-owner file overlap.** Collect every in-progress track (status
+   `"in_progress"` read from each `metadata.json` — the source of truth, not the
+   derived `tracks.md` index). For each, gather its in-progress
    tasks' `<!-- files: ... -->` globs from `plan.md`. If two in-progress tracks
    with **different** `owner` (fall back to Beads `assignee`) claim an overlapping
    file/glob, report a ❌ Error naming both tracks, both owners, and the
@@ -187,7 +210,8 @@ health). In monorepo/local mode omit it — those checks are no-ops there.
 
 Offer to fix auto-fixable issues:
 - Missing metadata fields
-- Status mismatches
+- Index drift: regenerate `tracks.md` per `/conductor-status --regen-index`
+  (rebuild the marked region from per-track metadata) — never hand-edit a marker [4]
 - Orphan cleanup
 - Stale-lease clears (shared mode — set `lease` to null, key-scoped) [5c.1]
 - Stamp `<git-identity>` as `owner` on a genuinely unowned in-progress track [5c.2(b)]
