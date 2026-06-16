@@ -8,6 +8,10 @@ ADRs in `adr/` document key decisions. These are NOT loaded during skill invocat
 |-----|----------|
 | [ADR-0001](adr/0001-bd-prime-as-source-of-truth.md) | Use `bd prime` as CLI reference source of truth |
 
+## Key Principle: CLI-only (no MCP)
+
+This skill is **CLI-only** — it operates solely through `Read` and `Bash(bd:*)` against the local `bd` command. Do **NOT** reintroduce a `commands/` directory: those files implied a non-existent MCP server, and the skill has no MCP integration.
+
 ## Key Principle: DRY via bd prime
 
 **NEVER duplicate CLI documentation in SKILL.md or resources.**

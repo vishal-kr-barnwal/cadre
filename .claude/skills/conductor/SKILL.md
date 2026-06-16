@@ -122,32 +122,33 @@ fi
 
 ## Command Execution
 
-When a user invokes any `/conductor-*` command, **read the corresponding command reference** for the full step-by-step protocol:
+When a user invokes any `/conductor-*` command, **read the corresponding canonical command** for the full step-by-step protocol:
 
 | Command | Full Protocol |
 |---------|---------------|
-| `/conductor-setup` | [references/commands/setup.md](references/commands/setup.md) |
-| `/conductor-newtrack` | [references/commands/newtrack.md](references/commands/newtrack.md) |
-| `/conductor-implement` | [references/commands/implement.md](references/commands/implement.md) |
-| `/conductor-status` | [references/commands/status.md](references/commands/status.md) |
-| `/conductor-revert` | [references/commands/revert.md](references/commands/revert.md) |
-| `/conductor-validate` | [references/commands/validate.md](references/commands/validate.md) |
-| `/conductor-flag` | [references/commands/flag.md](references/commands/flag.md) |
-| `/conductor-revise` | [references/commands/revise.md](references/commands/revise.md) |
-| `/conductor-review` | [references/commands/review.md](references/commands/review.md) |
-| `/conductor-ship` | [references/commands/ship.md](references/commands/ship.md) |
-| `/conductor-archive` | [references/commands/archive.md](references/commands/archive.md) |
-| `/conductor-release` | [references/commands/release.md](references/commands/release.md) |
-| `/conductor-handoff` | [references/commands/handoff.md](references/commands/handoff.md) |
-| `/conductor-refresh` | [references/commands/refresh.md](references/commands/refresh.md) |
-| `/conductor-formula` | [references/commands/formula.md](references/commands/formula.md) |
+| `/conductor-setup` | [../../commands/conductor-setup.md](../../commands/conductor-setup.md) |
+| `/conductor-newtrack` | [../../commands/conductor-newtrack.md](../../commands/conductor-newtrack.md) |
+| `/conductor-implement` | [../../commands/conductor-implement.md](../../commands/conductor-implement.md) |
+| `/conductor-status` | [../../commands/conductor-status.md](../../commands/conductor-status.md) |
+| `/conductor-revert` | [../../commands/conductor-revert.md](../../commands/conductor-revert.md) |
+| `/conductor-validate` | [../../commands/conductor-validate.md](../../commands/conductor-validate.md) |
+| `/conductor-flag` | [../../commands/conductor-flag.md](../../commands/conductor-flag.md) |
+| `/conductor-revise` | [../../commands/conductor-revise.md](../../commands/conductor-revise.md) |
+| `/conductor-review` | [../../commands/conductor-review.md](../../commands/conductor-review.md) |
+| `/conductor-ship` | [../../commands/conductor-ship.md](../../commands/conductor-ship.md) |
+| `/conductor-land` | [../../commands/conductor-land.md](../../commands/conductor-land.md) |
+| `/conductor-archive` | [../../commands/conductor-archive.md](../../commands/conductor-archive.md) |
+| `/conductor-release` | [../../commands/conductor-release.md](../../commands/conductor-release.md) |
+| `/conductor-handoff` | [../../commands/conductor-handoff.md](../../commands/conductor-handoff.md) |
+| `/conductor-refresh` | [../../commands/conductor-refresh.md](../../commands/conductor-refresh.md) |
+| `/conductor-formula` | [../../commands/conductor-formula.md](../../commands/conductor-formula.md) |
 
-**Important:** Always read the full command reference before executing. Each file contains the complete protocol with error handling, Beads integration, and user interaction flows.
+**Important:** Always read the full canonical command before executing. Each file contains the complete protocol with error handling, Beads integration, and user interaction flows.
 
 ## References
 
 - **Workflow overview**: [references/workflows.md](references/workflows.md) - Commands table, Beads overview, state files, status markers, parallel execution
-- **Command protocols**: [references/commands/](references/commands/) - Full step-by-step execution details for all 15 commands
+- **Command protocols**: [../../commands/](../../commands/) - Full step-by-step execution details for all 16 commands
 - **Directory structure**: [references/structure.md](references/structure.md) - File layout and status markers
 - **Beads integration**: [references/beads-integration.md](references/beads-integration.md) - Session protocol, CLI commands, chemistry patterns
 - **Learnings system**: [references/learnings-system.md](references/learnings-system.md) - Ralph-style knowledge capture details

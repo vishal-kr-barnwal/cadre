@@ -276,7 +276,7 @@ main() {
   copy_reference
   copy_templates
 
-  local count stale d f
+  local count stale d f master
   count="$(ls "$SRC_DIR"/conductor-*.md | wc -l | tr -d ' ')"
 
   if [[ "$MODE" == "--check" ]]; then
@@ -284,7 +284,8 @@ main() {
     for d in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR" "$SKILL_DIR/templates"; do
       diff -rq "$GEN_ROOT/$d" "$REPO_ROOT/$d" >/dev/null 2>&1 || stale=true
     done
-    for f in parallel-execution.md template-locator.md; do
+    for master in "${SLICED_REFS[@]}"; do
+      f="$(basename "$master")"
       diff -q "$GEN_ROOT/$SKILL_DIR/references/$f" "$REPO_ROOT/$SKILL_DIR/references/$f" >/dev/null 2>&1 || stale=true
     done
     if ! $stale; then
