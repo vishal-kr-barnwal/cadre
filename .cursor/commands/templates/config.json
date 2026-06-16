@@ -1,0 +1,13 @@
+{
+  "sync_mode": "local",
+  "auto_open": false,
+  "control_remote": "origin",
+  "control_branch": "main",
+  "pull_on_command_start": true,
+  "pr_provider": "github",
+  "merge_train": {
+    "enabled": true,
+    "auto_fire": true,
+    "group_label_prefix": "cadre-track"
+  }
+}

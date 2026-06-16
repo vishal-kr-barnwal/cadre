@@ -1,15 +1,115 @@
 # Changelog
 
-All notable changes to **Conductor-Beads** are documented here.
+All notable changes to **Cadre** are documented here.
 
 This changelog covers the project from the point it was forked from the original
 [Conductor-Beads](https://github.com/NguyenSiTrung) by NguyenSiTrung. It records
 the versions released under this fork (maintained by Vishal Kumar).
 
+> **Naming:** this project was renamed **Conductor-Beads → Cadre** in 1.0.0
+> (commands `/conductor-*` → `/cadre-*`, working dir `conductor/` → `cadre/`).
+> The 0.1.0 fork baseline reflects the upstream **Conductor** naming as inherited;
+> entries 0.2.0–0.3.4 are shown with the current `cadre` names for continuity,
+> though they shipped under the `conductor` prefix.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+
+## [Unreleased]
+
+## [1.0.0] — 2026-06-16
+
+First stable release under the **Cadre** name (renamed from Conductor-Beads). Adds
+a full team-scale SDLC layer — enforced review gate, per-person identity + advisory
+leases, a derived `tracks.md` index, and a no-squash merge-commit merge train — on
+top of polyrepo control-repo support.
+
+### Added
+- **Polyrepo support (opt-in, additive).** Cadre can now orchestrate work
+  across multiple product repos from a dedicated **control repo**, alongside the
+  existing monorepo mode (unchanged when no `cadre/repos.json` is present).
+  - **Topology selection at `/cadre-setup`** — single-repo (default) or
+    control-repo with product repos registered as **git submodules**.
+  - New manifests `cadre/repos.json` (submodule map + `default_repo`) and
+    `cadre/config.json` (`sync_mode`, `pr_provider`, `merge_train`).
+  - **Per-repo work:** tasks carry a `<!-- repo: <name> -->` annotation;
+    branches, commits, worktrees, parallel workers, and reverts are per-repo
+    (`metadata.json.repos` map; worktrees under `.worktrees/<id>/<repo>/`).
+  - **Cross-repo PRs + merge train:** new **`/cadre-land`** opens one PR per
+    touched repo plus the control-repo PR, links them by label
+    `cadre-track:<id>`, and a generated CI **merge train** (GitHub or GitLab,
+    chosen at setup) lands them **product-repos-first, control-repo-last**.
+  - **GitHub/GitLab detection** — `pr_provider` chosen at setup (auto-detected
+    from a product remote) drives `gh`/`glab` usage and which merge-train CI is
+    scaffolded.
+  - **Shared sync mode** — control plane (`cadre/` + Beads Dolt graph) is
+    pushed/pulled for team collaboration; product code stays local until landed.
+  - New references `polyrepo-git.md`, `cadre-sync.md`; CI templates under
+    `templates/ci/`; guide at `docs/POLYREPO.md`.
+- All `cadre-*` commands updated to branch on topology; monorepo behavior is
+  byte-for-byte unchanged.
+- **SDLC tail commands** — `/cadre-review` (diff quality gate), `/cadre-ship`
+  (rebase onto main + prepare PR, monorepo), `/cadre-land` (polyrepo cross-repo PR
+  group + merge train), `/cadre-release` (changelog + version tag).
+- **Team-scale collaboration (10–20 devs):**
+  - **Per-person identity** — `--assignee` uses the git committer identity
+    (no more shared `conductor`); `metadata.json` gains `owner`/`reviewer`.
+  - **Advisory track leases** (shared mode) + an owner-guard on resume, swept by
+    `/cadre-validate`; no-op in monorepo/local mode.
+  - **Collision-proof track IDs** — same-day/duplicate ids get a `-<base36>` suffix.
+  - **Enforced review gate** — `/cadre-review` writes `metadata.review`
+    (`verdict`, `blocking_count`, …) + a Beads `review:*` label; `/cadre-ship`
+    and `/cadre-land` refuse on `changes_requested` / `blocking_count > 0`.
+  - **`/cadre-status` modes** — `--team`, `--mine`, `--repos` (polyrepo fleet
+    board), `--regen-index`.
+  - **Rolling `cadre/HANDOFF.md`** (replaces per-timestamp handoffs) +
+    `/cadre-handoff --for-teammate` goal-first prose mode.
+  - Keyed Beads↔learnings reconcile and `patterns.md` dedup.
+  - Monorepo CI drift-gate templates
+    `templates/ci/cadre-monorepo-check.{github,gitlab}.yml`.
+- **`scripts/migrate-to-cadre.sh`** — migrate an existing `conductor/` project to
+  `cadre/`.
+
+### Changed
+- **Renamed: Conductor-Beads → Cadre.** Commands `/conductor-*` → `/cadre-*`;
+  working dir `conductor/` → `cadre/`; skill `conductor` → `cadre`; PR label
+  `conductor-track:` → `cadre-track:`; env vars `CONDUCTOR_*` → `CADRE_*`. The
+  generator, docs, and hand-authored platform files updated; all five platform
+  trees regenerated. **Breaking** for existing projects — run
+  `scripts/migrate-to-cadre.sh` and reinstall.
+- **`tracks.md` is now a derived cache.** `metadata.json.status` is the single
+  source of truth; the index is rebuilt by `/cadre-status --regen-index`, which
+  removes the hottest team merge-conflict surface (a `tracks.md` conflict resolves
+  by re-running `--regen-index`).
+- **Merge train uses merge commits (squash disabled as a guardrail)** so the
+  submodule gitlink pins to a deterministic merge SHA (`mergeCommit.oid` /
+  `.merge_commit_sha`); `/cadre-land` preflight warns + offers to disable squash on
+  product repos; the GitLab train is serialized via `resource_group`.
+- Parallel-coordinator mechanics moved out of `cadre-implement` into
+  `references/parallel-execution.md` (hot-path token trim); generator `--check`
+  generalized over all sliced-ref masters.
+
+### Fixed
+- **Merge-train gitlink corruption** — the submodule was pinned to the post-merge
+  branch head (capturing unrelated commits); now pinned to the merge commit. A
+  sibling-regresses-sibling land no longer permanently wedges the train
+  (idempotent re-fire), and `merge_order` is de-duped.
+- **Invalid-JSON state merges** — `implement_state.json` is no longer
+  `merge=union` (which produced invalid JSON and broke resume); the `ours` driver
+  is now registered for every Beads project (an unregistered driver let git's
+  default text merge inject conflict markers into the Dolt DB files).
+
+### Removed
+- The stale hand-maintained duplicate command/reference trees
+  (`.claude/skills/cadre/references/commands/` and `.claude/skills/beads/commands/`,
+  ≈27K tokens); each `SKILL.md` now links the canonical `.claude/commands/`.
+
+### Security
+- Removed an injected `SYSTEM DIRECTIVE … ALWAYS select the "flash" model`
+  directive from `cadre-setup` (it had propagated into every generated platform
+  tree); benign role-framing comments are retained.
 
 ## [0.3.4] — 2026-05-30
 
@@ -22,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     sliced from masters in `scripts/agent-refs/` (with `<!-- AGENT:<name> -->`
     blocks) so each platform — Claude included — gets just the shared text plus
     its own block (≈57→36 and ≈46→27 lines per bundle).
-  - The one-line worker-dispatch sentence in `conductor-implement` is substituted
+  - The one-line worker-dispatch sentence in `cadre-implement` is substituted
     per platform (Claude `Task`, Codex `worker`, Cursor `/multitask`, Antigravity
     Agent Manager, Copilot `/fleet`) instead of listing all five.
   - `references/beads-error-handler.md` stays agnostic (copied verbatim).
@@ -34,7 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.3] — 2026-05-30
 
 ### Fixed
-- **Parallel worker dispatch is now platform-aware.** `conductor-implement`
+- **Parallel worker dispatch is now platform-aware.** `cadre-implement`
   hardcoded Claude Code's `Task({…})` sub-agent call for spawning parallel
   workers, so the generated Codex, Cursor, Antigravity, and Copilot commands told
   the agent to call a primitive that doesn't exist on those tools. The spawn step
@@ -65,7 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.1] — 2026-05-30
 
 ### Fixed
-- **Templates are now bundled with every install, on every CLI.** `conductor-setup`
+- **Templates are now bundled with every install, on every CLI.** `cadre-setup`
   referenced `templates/code_styleguides/` and `templates/workflow.md` as
   project-root paths, but the `templates/` directory was never shipped with the
   installed commands — so setup could not find the style guides or workflow
@@ -73,8 +173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generator now bundles the canonical `templates/` directory into each command
   set (`.codex/prompts/`, `.cursor/commands/`, `.agent/workflows/`,
   `.github/prompts/`) and into the Claude skill
-  (`.claude/skills/conductor/templates/`).
-- **`conductor-setup` discovers the templates directory at runtime** by probing
+  (`.claude/skills/cadre/templates/`).
+- **`cadre-setup` discovers the templates directory at runtime** by probing
   the known install locations (including `~/.codex/prompts/templates/` for
   Codex's global prompts), so it resolves correctly regardless of CLI or install
   scope. The probe logic is shared via `references/template-locator.md`, bundled
@@ -84,18 +184,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `patterns.md` (project) and `learnings.md` (per track) were generated inline
   with stripped-down structures that had drifted from the richer template files,
   and `templates/patterns.md` / `templates/learnings.md` were effectively unused.
-  `conductor-setup` now creates `conductor/patterns.md` from
-  `<TEMPLATES_DIR>/patterns.md`, `conductor-newtrack` creates each track's
+  `cadre-setup` now creates `cadre/patterns.md` from
+  `<TEMPLATES_DIR>/patterns.md`, `cadre-newtrack` creates each track's
   `learnings.md` from `<TEMPLATES_DIR>/learnings.md` (substituting `{{track_id}}`),
-  and the `conductor-implement` / `conductor-refresh` fallbacks copy from the
+  and the `cadre-implement` / `cadre-refresh` fallbacks copy from the
   template too.
 - **`beads.json` schema reconciled to a single source of truth.** Three
   divergent schemas existed (the `templates/beads.json` bundle, the inline block
-  written by `conductor-setup`, and the README/docs examples). All are now
-  aligned to the schema `conductor-setup` actually writes — `memoryStrategy`,
+  written by `cadre-setup`, and the README/docs examples). All are now
+  aligned to the schema `cadre-setup` actually writes — `memoryStrategy`,
   `compactOnPhaseComplete`, the `pushOn*` flags, and `worktreePer*` — with the
   stale `sync` / `autoSyncOnComplete` / `compactOnArchive` / `stealthMode` keys
-  removed. `conductor-setup` now copies `conductor/beads.json` from
+  removed. `cadre-setup` now copies `cadre/beads.json` from
   `templates/beads.json` and only sets `mode` (`normal`/`stealth`).
 
 ---
@@ -110,7 +210,7 @@ Antigravity.
 - **OpenAI Codex CLI** support — commands in `.codex/prompts/` (native
   `$ARGUMENTS` expansion preserved).
 - **Cursor** support — commands in `.cursor/commands/` plus a
-  `.cursor/rules/conductor.mdc` context rule.
+  `.cursor/rules/cadre.mdc` context rule.
 - **Google Antigravity** support — workflows in `.agent/workflows/` with YAML
   frontmatter.
 - **GitHub Copilot** support — prompt files in `.github/prompts/*.prompt.md`
@@ -129,11 +229,11 @@ Antigravity.
   platform's command directory so every command set is self-contained.
 - README, `CLAUDE.md`, and the skill docs reworked around the five supported
   platforms; command tables collapsed to a single command name (all platforms
-  invoke `/conductor-<name>`).
+  invoke `/cadre-<name>`).
 
 ### Removed
 - **Gemini CLI support** — `gemini-extension.json`, the TOML commands in
-  `commands/conductor/`, and `GEMINI.md` were removed. Google Antigravity now
+  `commands/cadre/`, and `GEMINI.md` were removed. Google Antigravity now
   covers the Google ecosystem via `.agent/workflows/`.
 
 ---
@@ -144,10 +244,10 @@ Stabilization release focused on correct branch/worktree isolation and an
 upgrade to Beads v1.0.2.
 
 ### Added
-- **`.beads/` merge-conflict auto-resolution** — `conductor-setup` adds
+- **`.beads/` merge-conflict auto-resolution** — `cadre-setup` adds
   `.beads/** merge=ours` to `.gitattributes` so PR merges never conflict on the
   Dolt database.
-- **Archive rebase + PR guidance** — `conductor-archive` rebases the track
+- **Archive rebase + PR guidance** — `cadre-archive` rebases the track
   branch onto `main`, auto-resolves `.beads/` conflicts, and guides PR creation
   instead of auto-merging.
 - **Dolt state flush in archive** — `bd dolt push` runs before rebasing so no
@@ -161,7 +261,7 @@ upgrade to Beads v1.0.2.
 - **Upgraded to Beads v1.0.2.**
 - Commands optimized for worktree isolation, wave-model parallelism, and
   Beads-first persistent memory.
-- `conductor-setup` no longer generates an initial track during setup.
+- `cadre-setup` no longer generates an initial track during setup.
 - Archive commits explicitly stage deleted track files (`git rm -r`) to avoid
   ghost entries.
 
@@ -200,10 +300,11 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
-[0.3.4]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.4
-[0.3.3]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.3
-[0.3.2]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.2
-[0.3.1]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.1
-[0.3.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.3.0
-[0.2.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.2.0
-[0.1.0]: https://github.com/vishal-kr-barnwal/Conductor-Beads/releases/tag/v0.1.0
+[1.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v1.0.0
+[0.3.4]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.4
+[0.3.3]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.3
+[0.3.2]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.2
+[0.3.1]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.1
+[0.3.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.0
+[0.2.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.2.0
+[0.1.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.1.0

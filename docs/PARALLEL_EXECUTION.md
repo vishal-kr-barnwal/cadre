@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the architecture for parallel task/phase execution in Conductor-Beads, inspired by [swarm-tools](https://github.com/joelhooks/swarm-tools).
+This document describes the architecture for parallel task/phase execution in Cadre, inspired by [swarm-tools](https://github.com/joelhooks/swarm-tools).
 
 ## Current State (Sequential)
 
@@ -104,7 +104,7 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    CONDUCTOR IMPLEMENT                       │
+│                    CADRE IMPLEMENT                       │
 │                    (Coordinator Agent)                       │
 │  - Parses plan.md for parallel annotations                  │
 │  - Detects file conflicts                                   │
@@ -133,7 +133,7 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 
 ### State Management
 
-#### `conductor/tracks/<track_id>/parallel_state.json`
+#### `cadre/tracks/<track_id>/parallel_state.json`
 
 ```json
 {
@@ -208,7 +208,7 @@ function detectConflicts(tasks: ParallelTask[]): Conflict[] {
 ## Worker Spawning
 
 The worker prompt below is platform-agnostic; only the **dispatch mechanism**
-differs per tool. See [`parallel-execution.md`](../.claude/skills/conductor/references/parallel-execution.md)
+differs per tool. See [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
 (bundled with every command set) for the full table:
 
 | Platform | Dispatch |
@@ -226,7 +226,7 @@ differs per tool. See [`parallel-execution.md`](../.claude/skills/conductor/refe
 Task({ 
   description: "Implement Task 1: Create auth module",
   prompt: `
-    You are a sub-agent implementing a single task for Conductor.
+    You are a sub-agent implementing a single task for Cadre.
     
     ## Context
     - Track: ${track_id}
@@ -260,16 +260,22 @@ Each worker updates state on completion:
 
 ```bash
 # Worker reads current state
-state=$(cat conductor/tracks/<track_id>/parallel_state.json)
+state=$(cat cadre/tracks/<track_id>/parallel_state.json)
 
 # Worker updates its own status
 jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" | .commit_sha = "abc1234" else . end)' \
-  conductor/tracks/<track_id>/parallel_state.json > tmp.json && mv tmp.json conductor/tracks/<track_id>/parallel_state.json
+  cadre/tracks/<track_id>/parallel_state.json > tmp.json && mv tmp.json cadre/tracks/<track_id>/parallel_state.json
 ```
 
 ---
 
-## Conductor-Implement Changes
+## Cadre-Implement Changes
+
+> The coordinator mechanics below now live in the sliced reference
+> [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
+> (bundled with every command set), not inline in `cadre-implement.md`. The
+> per-worker prompt stays inline in `cadre-implement.md`. This section
+> documents the design.
 
 ### Phase Processing (Updated)
 
@@ -474,7 +480,7 @@ bd update <beads_task_id> --status open \
 - Existing plans work unchanged (default: sequential)
 
 ### Phase 2: Coordinator Logic
-- Update `conductor-implement` to parse annotations
+- Update `cadre-implement` to parse annotations
 - Add parallel state management
 - Implement worker spawning
 
@@ -550,11 +556,23 @@ Phase 3 waits for both Phase 1 and Phase 2 to complete.
 
 ---
 
+## Polyrepo: repo-scoped parallelism
+
+In polyrepo mode (see [POLYREPO.md](POLYREPO.md)) parallel execution is
+**repo-scoped**: file-conflict detection compares `(repo, file)` tuples (identical
+relative paths in different repos do not conflict); worker worktrees live per repo
+at `.worktrees/<track_id>/<repo>_worker_<N>_<name>/` created in submodule context;
+each worker branch merges into **its own repo's** `track/<id>` branch; and
+`parallel_state.json` worker entries record a `repo` field. The single shared Beads
+Dolt graph still coordinates all workers regardless of repo.
+
+---
+
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `/conductor-implement` | Now supports parallel phases |
-| `/conductor-newtrack` | Asks about parallel execution |
-| `/conductor-status` | Shows parallel worker status |
-| `/conductor-validate` | Validates parallel annotations |
+| `/cadre-implement` | Now supports parallel phases (repo-scoped in polyrepo) |
+| `/cadre-newtrack` | Asks about parallel execution |
+| `/cadre-status` | Shows parallel worker status |
+| `/cadre-validate` | Validates parallel annotations |

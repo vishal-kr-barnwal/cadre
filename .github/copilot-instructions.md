@@ -1,29 +1,29 @@
-# Conductor-Beads — GitHub Copilot Instructions
+# Cadre — GitHub Copilot Instructions
 
-This repository uses **Conductor-Beads** for Context-Driven Development:
-spec-first planning (Conductor) plus a dependency-aware, persistent task graph
+This repository uses **Cadre** for Context-Driven Development:
+spec-first planning (Cadre) plus a dependency-aware, persistent task graph
 (Beads). This file is read automatically by GitHub Copilot (Chat, the coding
 agent, and the CLI) as repository custom instructions.
 
 ## Reusable prompts
 
-The Conductor commands are available as Copilot **prompt files** in
+The Cadre commands are available as Copilot **prompt files** in
 `.github/prompts/`. Invoke them in Copilot Chat by typing `/` followed by the
-command name, e.g. `/conductor-setup`, `/conductor-newtrack`,
-`/conductor-implement`, `/conductor-status`. Text typed after the command name
+command name, e.g. `/cadre-setup`, `/cadre-newtrack`,
+`/cadre-implement`, `/cadre-status`. Text typed after the command name
 is treated as the command's input.
 
-Full set: `conductor-setup`, `conductor-newtrack`, `conductor-implement`,
-`conductor-status`, `conductor-revert`, `conductor-validate`, `conductor-block`,
-`conductor-skip`, `conductor-revise`, `conductor-archive`, `conductor-export`,
-`conductor-handoff`, `conductor-refresh`, `conductor-formula`, `conductor-wisp`,
-`conductor-distill`.
+Full set: `cadre-setup`, `cadre-newtrack`, `cadre-implement`,
+`cadre-status` (`--export`), `cadre-revert`, `cadre-validate`,
+`cadre-flag`, `cadre-revise`, `cadre-review`, `cadre-ship`,
+`cadre-archive`, `cadre-release`, `cadre-handoff`,
+`cadre-refresh`, `cadre-formula` (`list`/`show`/`create`/`wisp`).
 
 ## Tracks
 
 A **track** is a unit of work (feature or bug) under
-`conductor/tracks/<track_id>/` with `spec.md`, `plan.md`, `metadata.json`, and
-`learnings.md`. The master list is `conductor/tracks.md`. Status markers:
+`cadre/tracks/<track_id>/` with `spec.md`, `plan.md`, `metadata.json`, and
+`learnings.md`. The master list is `cadre/tracks.md`. Status markers:
 `[ ]` new, `[~]` in progress, `[x]` done, `[!]` blocked, `[-]` skipped.
 
 ## TDD workflow

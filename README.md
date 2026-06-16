@@ -1,34 +1,46 @@
-# Conductor-Beads
+# Cadre
 
 **Measure twice, code once.**
 
 A unified toolkit for **Context-Driven Development** that combines structured planning with persistent memory. Turn your AI assistant into a proactive project manager that follows a strict protocol: **Context → Spec & Plan → Implement**.
 
-**Version:** 0.3.4
+**Version:** 1.0.0
 
-## What is Conductor-Beads?
+## What is Cadre?
 
-Conductor-Beads integrates two powerful systems:
+Cadre brings together two complementary halves:
 
-- **Conductor** provides the methodology — specs, plans, tracks, and TDD workflows
-- **Beads** provides the memory — persistent task tracking that survives conversation compaction
+- **Spec-first planning** — specs, plans, tracks, and TDD workflows (the Cadre methodology)
+- **Beads** — persistent task memory that survives conversation compaction
 
 Together, they enable AI agents to manage long-horizon development tasks without losing context across sessions.
 
 > 📋 Full version history is in the **[Changelog](CHANGELOG.md)**.
+
+## What's New in v1.0.0
+
+### Team-scale workflow
+
+- **An SDLC tail** — once a track is implemented, it flows through **review → ship/land → archive → release**. `/cadre-review` is an **enforced quality gate**: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `/cadre-ship` (monorepo) and `/cadre-land` (polyrepo) **refuse to proceed** on `changes_requested` or any blocking findings. A missing review prompts you to confirm; a clean approval proceeds.
+- **`tracks.md` is now a derived cache** — `metadata.json.status` is the **single source of truth** for a track's status. Never hand-edit the markers in `tracks.md`; rebuild it with `/cadre-status --regen-index`.
+- **New status modes** — `/cadre-status` gains `--mine` (your tracks), `--team` (per-person board), `--repos` (polyrepo fleet board), and `--regen-index` (rebuild the index), alongside the existing `--export`.
+- **Per-person identity + advisory leases** — assignees now use your git committer identity (`user.email` → `user.name`) rather than a literal `cadre`. `metadata.json` gained `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In **shared** sync mode a track can hold an **advisory lease** (a no-op in monorepo and local modes; stale leases are swept by `/cadre-validate`).
+- **Collision-proof track IDs** — same-day duplicate IDs get a short base36 suffix, and a push/Dolt conflict triggers a clean re-suffix (directory, `metadata.track_id`, branch, and Beads epic/label) followed by `--regen-index`.
+- **`/cadre-ship` can open the PR** — set `"auto_open": true` in `cadre/config.json` (default `false` = prepare only).
+- **Merge train uses merge commits** — squash is **disabled as a guardrail** (a squashed merge has no deterministic commit to pin the submodule gitlink to). Product PRs/MRs merge with a merge commit and the control repo pins the gitlink to it; `/cadre-land` preflight warns and offers to disable squash on product repos. See the [Polyrepo Guide](docs/POLYREPO.md).
 
 ## What's New in v0.3.0
 
 ### Multi-platform support
 - **Four new platforms** — the full 16-command suite now ships for **OpenAI Codex CLI**, **Cursor**, **Google Antigravity**, and **GitHub Copilot**, alongside Claude Code.
 - **Single source of truth** — the new [`scripts/generate-commands.sh`](scripts/generate-commands.sh) derives the Codex, Cursor, Antigravity, and Copilot command sets from the canonical Claude Code commands, so all platforms stay in sync. Run `--check` in CI to catch stale output.
-- **Per-platform context files** — `AGENTS.md` (Codex + Antigravity), `.github/copilot-instructions.md` (Copilot), and `.cursor/rules/conductor.mdc` (Cursor) join the existing `CLAUDE.md`.
+- **Per-platform context files** — `AGENTS.md` (Codex + Antigravity), `.github/copilot-instructions.md` (Copilot), and `.cursor/rules/cadre.mdc` (Cursor) join the existing `CLAUDE.md`.
 - **New [Install & Version Guide](docs/INSTALL.md)** — a compatibility matrix and per-platform install steps for all five tools, plus the versioning policy.
 
 ### Removed
-- **Gemini CLI support dropped** — the Gemini extension (`gemini-extension.json`), TOML commands (`commands/conductor/`), and `GEMINI.md` have been removed in favor of **Google Antigravity**, which now covers the Google ecosystem via `.agent/workflows/`.
+- **Gemini CLI support dropped** — the Gemini extension (`gemini-extension.json`), TOML commands (`commands/cadre/`), and `GEMINI.md` have been removed in favor of **Google Antigravity**, which now covers the Google ecosystem via `.agent/workflows/`.
 
-> All platforms operate on the same `conductor/` and `.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor, implement in Claude Code).
+> All platforms operate on the same `cadre/` and `.beads/` directories, so you can mix tools on one repo (e.g. plan in Cursor, implement in Claude Code).
 
 ## What's New in v0.2.0
 
@@ -39,8 +51,8 @@ Together, they enable AI agents to manage long-horizon development tasks without
 - **`bd ready --parent` flag** — corrected from `--epic` which does not exist in the Beads CLI.
 
 ### New Features
-- **`.beads/` merge conflict auto-resolution** — `conductor-setup` now adds `.beads/** merge=ours` to `.gitattributes` so PR merges never conflict on the Dolt database.
-- **Archive rebase + PR guidance** — `conductor-archive` now rebases the track branch onto main, resolves `.beads/` conflicts automatically, and guides PR creation instead of auto-merging.
+- **`.beads/` merge conflict auto-resolution** — `cadre-setup` now adds `.beads/** merge=ours` to `.gitattributes` so PR merges never conflict on the Dolt database.
+- **Archive rebase + PR guidance** — `cadre-archive` now rebases the track branch onto main, resolves `.beads/` conflicts automatically, and guides PR creation instead of auto-merging.
 - **Explicit archive commit staging** — archive commits now explicitly stage deleted track files (`git rm -r`) to avoid ghost entries.
 - **Dolt state flush in archive** — `bd dolt push` is called before rebasing to ensure no pending Dolt changes are lost.
 
@@ -50,10 +62,10 @@ If you have existing projects set up with v0.1.0, run the migration script from 
 
 ```bash
 # Dry-run first (shows what would change, no writes)
-bash /path/to/conductor-beads/scripts/migrate-v2.sh --dry-run
+bash /path/to/cadre-beads/scripts/migrate-v2.sh --dry-run
 
 # Apply migration
-bash /path/to/conductor-beads/scripts/migrate-v2.sh
+bash /path/to/cadre-beads/scripts/migrate-v2.sh
 ```
 
 **What the migration script fixes:**
@@ -72,11 +84,11 @@ See [`scripts/migrate-v2.sh`](scripts/migrate-v2.sh) for full details.
 
 | Platform | How | Invoke |
 |----------|-----|--------|
-| **Claude Code** | slash commands + skills | `/conductor-setup` |
-| **OpenAI Codex CLI** | custom prompts | `/conductor-setup` |
-| **Cursor** | commands + rule | `/conductor-setup` |
-| **Google Antigravity** | workflows | `/conductor-setup` |
-| **GitHub Copilot** | prompt files | `/conductor-setup` |
+| **Claude Code** | slash commands + skills | `/cadre-setup` |
+| **OpenAI Codex CLI** | custom prompts | `/cadre-setup` |
+| **Cursor** | commands + rule | `/cadre-setup` |
+| **Google Antigravity** | workflows | `/cadre-setup` |
+| **GitHub Copilot** | prompt files | `/cadre-setup` |
 | **Agent Skills compatible CLIs** | skills specification | — |
 
 See the **[Install & Version Guide](docs/INSTALL.md)** for the full compatibility matrix and per-platform setup. Installation summaries are below.
@@ -118,8 +130,8 @@ lets you pick which to set up, and installs them either **globally** (`~/`) or
 into a **project** directory:
 
 ```bash
-git clone https://github.com/vishal-kr-barnwal/Conductor-Beads.git
-cd Conductor-Beads
+git clone https://github.com/vishal-kr-barnwal/Cadre.git
+cd Cadre
 bash scripts/install.sh
 ```
 
@@ -138,21 +150,21 @@ the [Install & Version Guide](docs/INSTALL.md).
 Clone the repo once, then copy the commands and skills into your config:
 
 ```bash
-git clone https://github.com/vishal-kr-barnwal/Conductor-Beads.git
+git clone https://github.com/vishal-kr-barnwal/Cadre.git
 
 # Global install (available in every project)
-cp -r Conductor-Beads/.claude/commands/* ~/.claude/commands/
-cp -r Conductor-Beads/.claude/skills/*   ~/.claude/skills/
+cp -r Cadre/.claude/commands/* ~/.claude/commands/
+cp -r Cadre/.claude/skills/*   ~/.claude/skills/
 ```
 
 To scope the install to a single project instead, copy into that project's `.claude/`:
 
 ```bash
-cp -r Conductor-Beads/.claude/commands your-project/.claude/commands
-cp -r Conductor-Beads/.claude/skills   your-project/.claude/skills
+cp -r Cadre/.claude/commands your-project/.claude/commands
+cp -r Cadre/.claude/skills   your-project/.claude/skills
 ```
 
-> **Smaller context window?** Copy only the `conductor` skill (`.claude/skills/conductor`) — it already includes Beads integration. Add the `beads` and `skill-creator` skills only if you want standalone Beads usage or to build your own skills.
+> **Smaller context window?** Copy only the `cadre` skill (`.claude/skills/cadre`) — it already includes Beads integration. Add the `beads` and `skill-creator` skills only if you want standalone Beads usage or to build your own skills.
 
 ### OpenAI Codex CLI
 
@@ -164,17 +176,17 @@ cp -r .codex/prompts/* ~/.codex/prompts/
 cp AGENTS.md your-project/AGENTS.md   # project context
 ```
 
-Invoke `/conductor-setup` from the slash menu. Codex expands `$ARGUMENTS`, so `/conductor-newtrack Add OAuth login` works.
+Invoke `/cadre-setup` from the slash menu. Codex expands `$ARGUMENTS`, so `/cadre-newtrack Add OAuth login` works.
 
 ### Cursor
 
 ```bash
 mkdir -p your-project/.cursor/commands your-project/.cursor/rules
 cp -r .cursor/commands/* your-project/.cursor/commands/
-cp .cursor/rules/conductor.mdc your-project/.cursor/rules/
+cp .cursor/rules/cadre.mdc your-project/.cursor/rules/
 ```
 
-Type `/` in the Agent input and pick `conductor-setup`. The `.mdc` rule loads Conductor conventions automatically.
+Type `/` in the Agent input and pick `cadre-setup`. The `.mdc` rule loads Cadre conventions automatically.
 
 ### Google Antigravity
 
@@ -184,7 +196,7 @@ cp -r .agent/workflows/* your-project/.agent/workflows/
 cp AGENTS.md your-project/AGENTS.md
 ```
 
-Invoke `/conductor-setup`; Antigravity matches the workflow file name.
+Invoke `/cadre-setup`; Antigravity matches the workflow file name.
 
 ### GitHub Copilot
 
@@ -194,7 +206,7 @@ cp -r .github/prompts/* your-project/.github/prompts/
 cp .github/copilot-instructions.md your-project/.github/copilot-instructions.md
 ```
 
-In Copilot Chat, type `/` then `conductor-setup`. Enable prompt files in VS Code with `"chat.promptFiles": true` if needed.
+In Copilot Chat, type `/` then `cadre-setup`. Enable prompt files in VS Code with `"chat.promptFiles": true` if needed.
 
 > The Codex, Cursor, Antigravity, and Copilot command sets are generated from the Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
 
@@ -205,17 +217,17 @@ In Copilot Chat, type `/` then `conductor-setup`. Enable prompt files in VS Code
 Run the setup command once in your project directory — it does everything:
 
 ```bash
-/conductor-setup
+/cadre-setup
 ```
 
 Setup will:
 
-1. Scaffold the `conductor/` directory:
+1. Scaffold the `cadre/` directory:
    - `product.md` — product vision and goals
    - `tech-stack.md` — technology choices
    - `workflow.md` — development standards (TDD, commits)
-   - `tracks.md` — master track list
-2. **Prompt you to choose a Beads mode** and initialize it for you (runs `bd init`, creates `.beads/`, writes `conductor/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
+   - `tracks.md` — derived track index (a cache rebuilt from each track's `metadata.json` via `/cadre-status --regen-index`; `metadata.json.status` is the source of truth, so never hand-edit the markers)
+2. **Prompt you to choose a Beads mode** and initialize it for you (runs `bd init`, creates `.beads/`, writes `cadre/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
 
 You don't need to run `bd init` yourself — setup handles it.
 
@@ -228,7 +240,7 @@ When prompted, pick the mode that fits your repo:
 | **Normal** | `bd init` | The whole team uses Beads. `.beads/` is committed to the repo so everyone shares the task graph. |
 | **Stealth** | `bd init --stealth` | Personal use on a shared repo. `.beads/` is gitignored and stays local. |
 
-The choice is recorded in `conductor/beads.json` (copied from the bundled
+The choice is recorded in `cadre/beads.json` (copied from the bundled
 template; setup sets `mode`):
 
 ```json
@@ -236,7 +248,7 @@ template; setup sets `mode`):
   "enabled": true,
   "mode": "normal",
   "memoryStrategy": "beads-primary",
-  "epicPrefix": "conductor",
+  "epicPrefix": "cadre",
   "autoCreateTasks": true,
   "compactOnPhaseComplete": true,
   "pushOnTaskComplete": false,
@@ -254,19 +266,19 @@ template; setup sets `mode`):
 ### Creating a New Track
 
 ```bash
-/conductor-newtrack "Add user authentication"
+/cadre-newtrack "Add user authentication"
 ```
 
 This creates:
-- `conductor/tracks/<track_id>/spec.md` - Requirements
-- `conductor/tracks/<track_id>/plan.md` - Phased task list
-- `conductor/tracks/<track_id>/metadata.json` - Track metadata
+- `cadre/tracks/<track_id>/spec.md` - Requirements
+- `cadre/tracks/<track_id>/plan.md` - Phased task list
+- `cadre/tracks/<track_id>/metadata.json` - Track metadata
 - Beads epic (if enabled): `bd-xxxx`
 
 ### Implementing a Track
 
 ```bash
-/conductor-implement
+/cadre-implement
 ```
 
 The workflow:
@@ -278,7 +290,7 @@ The workflow:
 
 ### Parallel Task Execution (New!)
 
-For phases with independent tasks, Conductor can now execute them in parallel using sub-agents:
+For phases with independent tasks, Cadre can now execute them in parallel using sub-agents:
 
 ```markdown
 ## Phase 1: Core Setup
@@ -292,9 +304,9 @@ For phases with independent tasks, Conductor can now execute them in parallel us
 ```
 
 **How it works:**
-1. During `/conductor-newtrack`, you'll be asked if you want parallel execution
+1. During `/cadre-newtrack`, you'll be asked if you want parallel execution
 2. Tasks are analyzed for file conflicts and dependencies
-3. During `/conductor-implement`, parallel phases spawn sub-agents
+3. During `/cadre-implement`, parallel phases spawn sub-agents
 4. Each sub-agent works on exclusive files with TDD workflow
 5. Results are aggregated when all workers complete
 
@@ -308,13 +320,20 @@ See [Parallel Execution Design](docs/PARALLEL_EXECUTION.md) for details.
 ### Checking Status
 
 ```bash
-/conductor-status
+/cadre-status
 ```
 
 Shows:
 - Active tracks with progress
 - Ready tasks (from Beads)
 - Blocked items
+
+Status modes:
+- `--mine` — only tracks you own (matched against your git committer identity)
+- `--team` — a per-person board across all owners
+- `--repos` — a polyrepo fleet board (per-repo PR/merge state)
+- `--regen-index` — rebuild the derived `cadre/tracks.md` from each track's `metadata.json` (the source of truth)
+- `--export` — write a project summary to disk
 
 ---
 
@@ -324,22 +343,22 @@ The same command name works on every supported platform (Claude Code, Codex CLI,
 
 | Command | Description |
 |---------|-------------|
-| `/conductor-setup` | Initialize project context |
-| `/conductor-newtrack` | Create feature/bug track |
-| `/conductor-implement` | Execute tasks from plan |
-| `/conductor-status` | Show progress overview |
-| `/conductor-revert` | Git-aware revert |
-| `/conductor-validate` | Validate project integrity |
-| `/conductor-block` | Mark task as blocked |
-| `/conductor-skip` | Skip current task |
-| `/conductor-revise` | Update spec/plan |
-| `/conductor-archive` | Archive completed tracks |
-| `/conductor-export` | Generate project summary |
-| `/conductor-handoff` | Create context handoff |
-| `/conductor-refresh` | Sync context with codebase |
-| `/conductor-formula` | List/manage track templates |
-| `/conductor-wisp` | Ephemeral exploration track |
-| `/conductor-distill` | Extract template from track |
+| `/cadre-setup` | Initialize project context |
+| `/cadre-newtrack` | Create feature/bug track |
+| `/cadre-implement` | Execute tasks from plan |
+| `/cadre-status` | Show progress overview (`--mine`/`--team`/`--repos` boards, `--regen-index` rebuilds `tracks.md`, `--export` writes a summary) |
+| `/cadre-revert` | Git-aware revert |
+| `/cadre-validate` | Validate project integrity |
+| `/cadre-flag` | Flag a task as blocked or skipped |
+| `/cadre-revise` | Update spec/plan |
+| `/cadre-review` | Review a track's diff before shipping |
+| `/cadre-ship` | Rebase reviewed track, push, prepare PR (monorepo) |
+| `/cadre-land` | Polyrepo: open + link cross-repo PR group; merge train lands it |
+| `/cadre-archive` | Archive completed tracks |
+| `/cadre-release` | Cut a local release (changelog + tag) |
+| `/cadre-handoff` | Create context handoff |
+| `/cadre-refresh` | Sync context with codebase |
+| `/cadre-formula` | Track templates: list/show/create/wisp |
 
 ### Essential Beads Commands
 
@@ -377,14 +396,14 @@ Located in `.claude/skills/`:
 
 | Skill | Description |
 |-------|-------------|
-| **conductor** | Context-driven development methodology. Auto-activates when `conductor/` directory exists. Provides intent mapping for natural language commands. |
-| **beads** | Persistent task memory that survives conversation compaction. Auto-activates when `.beads/` directory exists. Integrates with Conductor for cross-session memory. |
+| **cadre** | Context-driven development methodology. Auto-activates when `cadre/` directory exists. Provides intent mapping for natural language commands. |
+| **beads** | Persistent task memory that survives conversation compaction. Auto-activates when `.beads/` directory exists. Integrates with Cadre for cross-session memory. |
 | **skill-creator** | Guide for creating and packaging new AI agent skills. |
 
 ### How Skills Work
 
 Skills auto-activate based on project structure:
-- `conductor/` directory → Conductor skill loads
+- `cadre/` directory → Cadre skill loads
 - `.beads/` directory → Beads skill loads
 - Both present → Integrated workflow enabled
 
@@ -400,16 +419,16 @@ Skills provide:
 ### Repository Structure
 
 ```
-Conductor-Beads/
+Cadre/
 ├── .claude/
 │   ├── commands/        # Claude Code slash commands (16) — canonical source
-│   └── skills/          # Skills (conductor, beads, skill-creator)
+│   └── skills/          # Skills (cadre, beads, skill-creator)
 ├── .codex/prompts/      # OpenAI Codex CLI commands (generated)
 ├── .cursor/             # Cursor commands + rule (generated)
 ├── .agent/workflows/    # Google Antigravity workflows (generated)
 ├── .github/prompts/     # GitHub Copilot prompt files (generated)
-├── scripts/             # generate-commands.sh, migrate-v2.sh
-├── templates/           # Workflow and styleguide templates
+├── scripts/             # install.sh, generate-commands.sh, migrate-to-cadre.sh
+├── templates/           # Workflow + styleguide templates, ci/ (merge-train + drift-check)
 ├── docs/                # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md            # Claude Code context
 └── AGENTS.md            # Codex + Antigravity context
@@ -417,25 +436,29 @@ Conductor-Beads/
 
 ### Generated Project Structure
 
-When you run Conductor on a project:
+When you run Cadre on a project:
 
 ```
 your-project/
-├── conductor/
+├── cadre/
 │   ├── product.md           # Product vision
 │   ├── tech-stack.md        # Technology choices
 │   ├── workflow.md          # Development standards
-│   ├── tracks.md            # Master track list
+│   ├── tracks.md            # Derived track index (cache; rebuilt from metadata.json via --regen-index)
 │   ├── patterns.md          # Consolidated learnings (Ralph-style)
 │   ├── beads.json           # Beads integration config
+│   ├── HANDOFF.md           # Single rolling handoff (trimmed; --for-teammate writes prose)
+│   ├── .gitignore           # Ignores agent-local state (setup/refresh/implement state)
+│   ├── repos.json           # Polyrepo only: control-repo topology + submodule map
+│   ├── config.json          # Polyrepo only: PR provider, sync mode, auto_open
 │   └── tracks/
 │       └── <track_id>/
 │           ├── spec.md      # Requirements
 │           ├── plan.md      # Task list
 │           ├── learnings.md # Patterns/gotchas discovered
-│           └── metadata.json
+│           └── metadata.json # Source of truth: status, owner, reviewer, review, lease, merge_order
 ├── .beads/                  # Beads Dolt DB (if initialized)
-├── .gitattributes           # .beads/** merge=ours (added by setup)
+├── .gitattributes           # .beads/** merge=ours + parallel_state.json merge=ours (added by setup)
 └── .worktrees/              # Git worktrees (flat — no nesting)
     ├── <track_id>/          # Track worktree (branch: track/<track_id>)
     └── <track_id>_worker_0_<name>/  # Parallel worker (branch: track_<id>_worker_0_<name>)
@@ -445,11 +468,14 @@ your-project/
 
 ## Status Markers
 
-Throughout conductor files:
+Throughout cadre files:
 - `[ ]` - Pending/New
 - `[~]` - In Progress
 - `[x]` - Completed
 - `[!]` - Blocked
+- `[-]` - Skipped
+
+These markers in `tracks.md` are derived from each track's `metadata.json.status` (the source of truth) — never hand-edit them; rebuild with `/cadre-status --regen-index`.
 
 ---
 
@@ -460,30 +486,30 @@ Throughout conductor files:
 ```mermaid
 flowchart TD
     subgraph SETUP[Project Setup]
-        A[New Project] --> B["conductor-setup"]
+        A[New Project] --> B["cadre-setup"]
         B --> C[Context files]
         C --> D["bd init"]
         D --> E[Ready]
     end
 
     subgraph PLANNING[Planning]
-        E --> F["conductor-newtrack"]
+        E --> F["cadre-newtrack"]
         F --> G[spec + plan]
         G --> H{Approved?}
-        H -->|No| I["conductor-revise"]
+        H -->|No| I["cadre-revise"]
         I --> G
         H -->|Yes| J[Ready to implement]
     end
 
     subgraph IMPL[Implementation]
-        J --> K["conductor-implement"]
+        J --> K["cadre-implement"]
         K --> L["bd ready"]
         L --> M[Execute Task - TDD]
         M --> N{Done?}
         N -->|Yes| O["bd done + update plan"]
         O --> P{More Tasks?}
         P -->|Yes| Q{5+ tasks?}
-        Q -->|Yes| R["conductor-handoff"]
+        Q -->|Yes| R["cadre-handoff"]
         R --> S[Save Context]
         S --> K
         Q -->|No| L
@@ -491,20 +517,23 @@ flowchart TD
     end
 
     subgraph ISSUES[Issue Handling]
-        N -->|Blocked| U["conductor-block"]
-        U --> V["conductor-skip"]
-        V --> L
-        M -->|Spec Wrong| W["conductor-revise"]
+        N -->|Blocked/Skip| U["cadre-flag"]
+        U --> L
+        M -->|Spec Wrong| W["cadre-revise"]
         W --> M
     end
 
     subgraph DONE[Completion]
-        T --> X["conductor-archive"]
-        T --> Y["conductor-export"]
+        T --> RV["cadre-review"]
+        RV --> SH["cadre-ship"]
+        SH --> X["cadre-archive"]
+        X --> RL["cadre-release"]
     end
 
-    K -.-> Z["conductor-status"]
-    K -.-> AA["conductor-validate"]
+    K -.-> EX["cadre-status --export"]
+
+    K -.-> Z["cadre-status"]
+    K -.-> AA["cadre-validate"]
 ```
 
 ### Session Resume Flow (with Beads)
@@ -520,7 +549,7 @@ flowchart LR
 
     subgraph RESUME[Resume Work]
         E --> F[Read spec.md + plan.md]
-        F --> G["conductor-implement"]
+        F --> G["cadre-implement"]
         G --> H[Continue from last task]
     end
 
@@ -541,11 +570,11 @@ flowchart LR
 | **Mid-Track Changes** | `implement` → `revise` → `implement` |
 | **Session Resume** | `bd ready` → `bd show --notes` → load spec → `implement` |
 | **Monitoring** | `status` / `validate` *(anytime)* |
-| **Context Drift** | `refresh` *(when codebase changed outside Conductor)* |
+| **Context Drift** | `refresh` *(when codebase changed outside Cadre)* |
 
 ### Knowledge Flywheel (Ralph-style Learnings)
 
-Conductor captures and consolidates learnings across tracks, inspired by [Ralph](https://github.com/snarktank/ralph):
+Cadre captures and consolidates learnings across tracks, inspired by [Ralph](https://github.com/snarktank/ralph):
 
 ```mermaid
 flowchart TB
@@ -580,8 +609,8 @@ flowchart TB
 ```
 
 **Key Files:**
-- `conductor/patterns.md` - Project-level patterns (read before starting new work)
-- `conductor/tracks/<id>/learnings.md` - Per-track discoveries (patterns, gotchas, context)
+- `cadre/patterns.md` - Project-level patterns (read before starting new work)
+- `cadre/tracks/<id>/learnings.md` - Per-track discoveries (patterns, gotchas, context)
 
 **How it works:**
 1. **Capture** - After each task, learnings are appended to track's `learnings.md`
@@ -592,7 +621,7 @@ flowchart TB
 **Learnings Entry Format:**
 ```markdown
 ## [2025-01-09 14:30] - Phase 1 Task 2: Add auth middleware
-Thread: https://ampcode.com/threads/T-xxx
+Session/thread ref if available
 - **Implemented:** JWT validation middleware
 - **Files changed:** src/auth/middleware.ts, src/auth/types.ts
 - **Commit:** abc1234

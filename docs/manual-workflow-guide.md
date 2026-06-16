@@ -1,6 +1,6 @@
 # Manual Workflow Guide
 
-This guide explains how to work with Conductor-Beads commands manually without relying on skills or auto-activation. Use this when you need precise control over the workflow or when skills don't behave as expected.
+This guide explains how to work with Cadre commands manually without relying on skills or auto-activation. Use this when you need precise control over the workflow or when skills don't behave as expected.
 
 ## Workflow Overview
 
@@ -84,8 +84,8 @@ Manual command invocation gives you **full control** over each step.
 Before using any command, ensure:
 1. Git is installed and initialized in your project
 2. You have write access to the project directory
-3. For implementation: `conductor/` directory exists with required files
-4. Beads CLI (`bd`) installed for persistent memory (Conductor will attempt Beads integration; if unavailable, you can choose to continue without it)
+3. For implementation: `cadre/` directory exists with required files
+4. Beads CLI (`bd`) installed for persistent memory (Cadre will attempt Beads integration; if unavailable, you can choose to continue without it)
 
 ### Installing Beads
 
@@ -107,17 +107,17 @@ bd --version
 
 ## Command Workflows
 
-### 1. `/conductor-setup`
+### 1. `/cadre-setup`
 
-**Purpose**: Initialize a new project with Conductor methodology.
+**Purpose**: Initialize a new project with Cadre methodology.
 
-**When to use**: First time setting up Conductor in any project.
+**When to use**: First time setting up Cadre in any project.
 
 **Manual workflow**:
 
 ```
 Step 1: Run the command
-   /conductor-setup
+   /cadre-setup
 
 Step 2: Answer project type questions
    - Brownfield (existing code) vs Greenfield (new project)
@@ -132,7 +132,7 @@ Step 3: Complete each section (max 5 questions each)
 
 Step 4: Beads Integration (if bd CLI detected)
    - Choose: Full integration, Stealth mode, or Skip
-   - Creates conductor/beads.json if enabled
+   - Creates cadre/beads.json if enabled
    - Runs bd init or bd init --stealth
 
 Step 5: Create initial track
@@ -140,7 +140,7 @@ Step 5: Create initial track
    - Review generated spec.md and plan.md
 
 Step 6: Verify artifacts
-   conductor/
+   cadre/
    ├── setup_state.json
    ├── product.md
    ├── product-guidelines.md
@@ -155,18 +155,18 @@ Step 6: Verify artifacts
    .beads/                  # If Beads enabled
 ```
 
-**State file**: `conductor/setup_state.json`
+**State file**: `cadre/setup_state.json`
 - Resume from any step if interrupted
 - Check `last_successful_step` to see progress
 
-**Beads config**: `conductor/beads.json` (copied from the bundled template;
+**Beads config**: `cadre/beads.json` (copied from the bundled template;
 setup sets `mode`)
 ```json
 {
   "enabled": true,
   "mode": "normal",
   "memoryStrategy": "beads-primary",
-  "epicPrefix": "conductor",
+  "epicPrefix": "cadre",
   "autoCreateTasks": true,
   "compactOnPhaseComplete": true,
   "pushOnTaskComplete": false,
@@ -179,7 +179,7 @@ setup sets `mode`)
 
 ---
 
-### 2. `/conductor-newtrack`
+### 2. `/cadre-newtrack`
 
 **Purpose**: Create a new feature or bug fix track.
 
@@ -189,9 +189,9 @@ setup sets `mode`)
 
 ```
 Step 1: Run the command (optionally with description)
-   /conductor-newtrack "Add user authentication"
+   /cadre-newtrack "Add user authentication"
    # or without description for interactive mode
-   /conductor-newtrack
+   /cadre-newtrack
 
 Step 2: Define track details
    - Type: feature, bug, or improvement
@@ -218,7 +218,7 @@ Step 6 (If Beads enabled):
 
 **Generated artifacts**:
 ```
-conductor/tracks/<shortname_YYYYMMDD>/
+cadre/tracks/<shortname_YYYYMMDD>/
 ├── metadata.json   # Track configuration + beads_epic ID
 ├── spec.md         # Requirements
 └── plan.md         # Implementation plan
@@ -228,7 +228,7 @@ conductor/tracks/<shortname_YYYYMMDD>/
 
 ---
 
-### 3. `/conductor-implement`
+### 3. `/cadre-implement`
 
 **Purpose**: Execute tasks from a track's plan.
 
@@ -238,9 +238,9 @@ conductor/tracks/<shortname_YYYYMMDD>/
 
 ```
 Step 1: Run the command
-   /conductor-implement
+   /cadre-implement
    # or specify track
-   /conductor-implement auth_20241219
+   /cadre-implement auth_20241219
 
 Step 2: Track selection (if not specified)
    - First non-completed track is auto-selected
@@ -282,7 +282,7 @@ Step 8: Track completion
    - Archive/delete/skip option
 ```
 
-**State file**: `conductor/tracks/<track_id>/implement_state.json`
+**State file**: `cadre/tracks/<track_id>/implement_state.json`
 ```json
 {
   "current_phase": "Phase 2",
@@ -305,7 +305,7 @@ Step 8: Track completion
 
 ---
 
-### 4. `/conductor-status`
+### 4. `/cadre-status`
 
 **Purpose**: Display project progress overview.
 
@@ -315,7 +315,7 @@ Step 8: Track completion
 
 ```
 Step 1: Run the command
-   /conductor-status
+   /cadre-status
 
 Step 2: Review output
    - Overall progress percentage
@@ -329,16 +329,31 @@ Step 3 (If Beads enabled):
    - Shows blocked tasks from Beads
 ```
 
-**No state file**: Read-only command.
+**Modes** (otherwise bare status is the default):
+
+| Flag | Effect |
+|------|--------|
+| *(none)* | Live overview. **Read-only and local** — reads `tracks.md` + `plan.md`, no per-track scan, no sync. |
+| `--export` | Write a project summary report (see §11). |
+| `--team` | Team View: WIP grouped by owner, with leases + review state (scans per-track `metadata.json`). |
+| `--mine` | Live status filtered to tracks whose `metadata.json.owner` is your git identity. |
+| `--repos` | Fleet Board (polyrepo only): per-repo branches, ahead/behind, PRs, merge order. |
+| `--regen-index` | Rebuild the derived `tracks.md` index from each track's `metadata.json.status` (the source of truth). |
+
+`--team`, `--mine`, and `--repos` are the only modes that read per-track
+`metadata.json` (for ownership, leases, review state).
+
+**No state file**: Read-only command (apart from `--regen-index`, which rewrites
+the `tracks.md` cache, and `--export`, which writes a summary).
 
 ---
 
-### 5. `/conductor-validate`
+### 5. `/cadre-validate`
 
 **Purpose**: Check project integrity and fix issues.
 
 **When to use**: 
-- After manual edits to conductor files
+- After manual edits to cadre files
 - When something seems broken
 - Periodic health check
 - Check for context staleness
@@ -347,7 +362,7 @@ Step 3 (If Beads enabled):
 
 ```
 Step 1: Run the command
-   /conductor-validate
+   /cadre-validate
 
 Step 2: Review findings
    - Missing files
@@ -362,66 +377,88 @@ Step 3: Choose fix option
    C) Skip (report only)
 
 Step 4: If staleness detected
-   - Suggests /conductor-refresh
+   - Suggests /cadre-refresh
 ```
 
 ---
 
-### 6. `/conductor-block`
+### 6. `/cadre-flag`
 
-**Purpose**: Mark a task as blocked.
+**Purpose**: Flag the current task as **blocked** or **skipped** (merges the former
+`/cadre-block` and `/cadre-skip`).
 
-**When to use**: Task cannot proceed due to external dependency.
+**When to use**: A task cannot proceed (blocked on an external dependency) or should
+be set aside (skipped — not applicable, or deferred).
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /conductor-block
+Step 1: Run the command with a mode
+   /cadre-flag blocked      # waiting on something external
+   /cadre-flag skipped      # set the task aside
 
-Step 2: Select blocked task
-   - Choose from in-progress or pending tasks
+Step 2: Select / confirm the task (defaults to the in-progress task)
 
-Step 3: Provide reason
-   - "Waiting for API credentials"
-   - "Blocked by team review"
+Step 3: Provide a reason
+   - blocked: "Waiting for API credentials", "Blocked by team review"
+   - skipped: will-complete-later | no-longer-needed | blocked-by-external
 
 Step 4: Updates applied
-   - Task marked [!] in plan.md
-   - If Beads: bd update <task_id> --status blocked
-   - Reason recorded in blockers.md
+   - blocked → task marked [!] in plan.md (+ bd update <id> --status blocked)
+   - skipped → [x] (SKIPPED) or reset to [ ], advance to next task,
+     update implement_state.json (+ bd close / bd update)
 ```
 
-**Blocker format in plan.md**:
+**Blocked format in plan.md**:
 ```markdown
 - [!] Task name [BLOCKED: Waiting for API credentials]
 ```
 
 ---
 
-### 7. `/conductor-skip`
+### 7. `/cadre-review`
 
-**Purpose**: Skip current task and move to next.
+**Purpose**: Review a track's diff before shipping — the quality gate between
+implement and ship.
 
-**When to use**: Task is not applicable or should be deferred.
+**When to use**: A track's tasks are complete and you want a code review before
+pushing/opening a PR.
 
 **Manual workflow**:
 
 ```
 Step 1: Run the command
-   /conductor-skip
+   /cadre-review [track_id]
 
-Step 2: Confirm task to skip
+Step 2: Cadre computes the diff
+   - git diff main...track/<track_id>
 
-Step 3: Provide justification
-   - Recorded in plan.md and skipped.md
+Step 3: Review is delegated to the /code-review skill
+   - plus track checks: acceptance criteria met? all tasks real? tests passing?
 
-Step 4: Implementation moves to next task
+Step 4: Findings recorded
+   - Appended to the track's learnings.md (verdict + findings)
+   - Structured verdict written to metadata.json:
+       review: { verdict, blocking_count, date, reviewer }
+       (verdict ∈ approved | changes_requested; reviewer = git identity)
+   - Beads label set: review:ready (clean) or review:changes (blocking)
+
+Step 5: Routed to next step
+   - Ready to ship → suggests /cadre-ship (or /cadre-land in polyrepo)
+   - Changes requested → suggests /cadre-revise or /cadre-flag
 ```
+
+**Review gate:** `metadata.review` is what `/cadre-ship` and `/cadre-land`
+enforce — `verdict: "approved"` with `blocking_count: 0` clears the gate;
+`changes_requested` or any blocking findings make them refuse.
+
+**Self-review warning:** if the reviewer's git identity equals the track owner,
+Cadre warns ("you are reviewing your own track — consider a second reviewer")
+but still records the verdict (the warning is non-blocking).
 
 ---
 
-### 8. `/conductor-revise`
+### 8. `/cadre-revise`
 
 **Purpose**: Update spec/plan when implementation reveals issues.
 
@@ -433,7 +470,7 @@ Step 4: Implementation moves to next task
 
 ```
 Step 1: Run the command
-   /conductor-revise
+   /cadre-revise
 
 Step 2: Select what to revise
    A) Spec only
@@ -450,11 +487,11 @@ Step 5: Approve changes
    - If Beads: tasks synced accordingly
 ```
 
-**Revision log**: `conductor/tracks/<track_id>/revisions.md`
+**Revision log**: `cadre/tracks/<track_id>/revisions.md`
 
 ---
 
-### 9. `/conductor-revert`
+### 9. `/cadre-revert`
 
 **Purpose**: Git-aware revert of work.
 
@@ -464,7 +501,7 @@ Step 5: Approve changes
 
 ```
 Step 1: Run the command
-   /conductor-revert
+   /cadre-revert
 
 Step 2: Select revert scope
    A) Entire track
@@ -482,7 +519,7 @@ Step 4: Confirm revert
 
 ---
 
-### 10. `/conductor-archive`
+### 10. `/cadre-archive`
 
 **Purpose**: Move completed tracks to archive.
 
@@ -492,52 +529,49 @@ Step 4: Confirm revert
 
 ```
 Step 1: Run the command
-   /conductor-archive
+   /cadre-archive
 
 Step 2: Select tracks to archive
    - Only completed [x] tracks shown
 
 Step 3: Confirm
 
-Step 4: Tracks moved to conductor/archive/
+Step 4: Tracks moved to cadre/archive/
    - If Beads: bd compact --auto for archived epic
 ```
 
 ---
 
-### 11. `/conductor-export`
+### 11. `/cadre-status --export`
 
-**Purpose**: Generate project summary report.
+**Purpose**: Generate a project summary report (formerly `/cadre-export`, now a
+mode of `/cadre-status`).
 
 **When to use**: Documentation, handoff, review.
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /conductor-export
+Step 1: Run the command with the flag
+   /cadre-status --export
 
-Step 2: Select export format
-   A) Markdown summary
-   B) JSON data
-   C) HTML report
+Step 2: Cadre gathers all cadre/ files + progress stats
+   - plus Beads statistics (bd stats) if available
 
-Step 3: Choose scope
-   A) Full project
-   B) Specific tracks
-
-Step 4: Report generated
-   - Output to conductor/exports/
+Step 3: Choose save option
+   A) cadre/export_YYYYMMDD.md
+   B) Overwrite README.md
+   C) Print only
 ```
 
 ---
 
-### 12. `/conductor-refresh`
+### 12. `/cadre-refresh`
 
 **Purpose**: Sync context docs with current codebase.
 
 **When to use**: 
-- Codebase changed outside Conductor
+- Codebase changed outside Cadre
 - Documentation drift detected
 - After major refactoring
 
@@ -545,7 +579,7 @@ Step 4: Report generated
 
 ```
 Step 1: Run the command
-   /conductor-refresh [scope]
+   /cadre-refresh [scope]
    
    Scopes: all, tech, product, workflow, track
 
@@ -566,7 +600,7 @@ Step 4: Approve changes
 
 ---
 
-### 13. `/conductor-handoff`
+### 13. `/cadre-handoff`
 
 **Purpose**: Create context handoff for transferring implementation to next section/session.
 
@@ -580,7 +614,9 @@ Step 4: Approve changes
 
 ```
 Step 1: Run the command
-   /conductor-handoff
+   /cadre-handoff
+   # goal-first prose for a human teammate:
+   /cadre-handoff --for-teammate
 
 Step 2: Context gathering
    - Current phase and task position
@@ -591,24 +627,30 @@ Step 3: Provide additional context
    - Key implementation decisions
    - Unresolved issues or blockers
 
-Step 4: Handoff document generated
-   - Progress summary
-   - Code changes summary
-   - Context for next section
-   - Resume instructions
+Step 4: Handoff document written
+   - Single rolling cadre/HANDOFF.md, overwritten/trimmed in place
+   - Default: machine summary (progress, code changes, resume instructions)
+   - --for-teammate: replaces the machine dump with goal-first prose
+     (what/why, current state, next step, gotchas)
 
 Step 5: State updated
    - section_count incremented
-   - handoff_history updated
+   - owner / last_updated set from git identity
    - implement_state.json saved
 ```
 
 **Generated artifacts**:
 ```
-conductor/tracks/<track_id>/
-├── handoff_YYYYMMDD_HHMMSS.md  # Section handoff document
-└── implement_state.json         # Updated with section tracking
+cadre/
+├── HANDOFF.md                   # Single rolling handoff (not per-timestamp)
+└── tracks/<track_id>/
+    └── implement_state.json     # Updated with section tracking
 ```
+
+The handoff is a **single rolling `cadre/HANDOFF.md`** that is overwritten and
+trimmed on each run — there are no per-timestamp `handoff_*.md` files. The
+`--for-teammate` mode writes goal-first prose into that same file instead of the
+machine dump.
 
 **Auto-detection**: The implement command will suggest handoff when:
 - 5+ tasks completed without handoff
@@ -617,7 +659,7 @@ conductor/tracks/<track_id>/
 
 ---
 
-### 14. `/conductor-formula`
+### 14. `/cadre-formula`
 
 **Purpose**: List and manage track workflow templates (Beads formulas).
 
@@ -632,9 +674,9 @@ conductor/tracks/<track_id>/
 
 ```
 Step 1: Run the command
-   /conductor-formula           # List all formulas
-   /conductor-formula list      # Same as above
-   /conductor-formula show auth # Show specific formula
+   /cadre-formula           # List all formulas
+   /cadre-formula list      # Same as above
+   /cadre-formula show auth # Show specific formula
 
 Step 2: For "list" subcommand
    - Runs: bd formula list --json
@@ -658,14 +700,17 @@ Step 3: For "show <name>" subcommand
 
 **Usage:**
 - bd mol pour <name> - Create persistent track
-- /conductor-wisp <name> - Create ephemeral exploration
+- /cadre-formula wisp <name> - Create ephemeral exploration
 ```
+
+The `create` and `wisp` subcommands are documented in sections 15 and 16.
 
 ---
 
-### 15. `/conductor-wisp`
+### 15. `/cadre-formula wisp`
 
-**Purpose**: Create ephemeral exploration track (no audit trail).
+**Purpose**: Create an ephemeral exploration track, no audit trail (formerly
+`/cadre-wisp`).
 
 **When to use**: 
 - Quick exploration before committing to a full track
@@ -679,9 +724,9 @@ Step 3: For "show <name>" subcommand
 
 ```
 Step 1: Run the command
-   /conductor-wisp                    # Interactive mode
-   /conductor-wisp auth-module        # Use specific formula
-   /conductor-wisp auth --var name=payments
+   /cadre-formula wisp                    # Interactive mode
+   /cadre-formula wisp auth-module        # Use specific formula
+   /cadre-formula wisp auth --var name=payments
 
 Step 2: Formula selection
    - If provided, use specified formula
@@ -689,7 +734,7 @@ Step 2: Formula selection
 
 Step 3: Wisp creation
    - Runs: bd mol wisp <formula> [--var key=value]
-   - Creates ephemeral instance in .beads-wisp/
+   - Creates ephemeral instance (Dolt wisps table, never synced to git)
 
 Step 4: Work in wisp
    - bd mol current (see current step)
@@ -704,16 +749,17 @@ bd mol burn <wisp>                  # Delete without trace
 ```
 
 **Transition to persistent track**:
-- A) Convert to track: `/conductor-newtrack` with findings
+- A) Convert to track: `/cadre-newtrack` with findings
 - B) Create follow-up issues: `bd create`
 - C) Squash with digest
 - D) Burn (discard)
 
 ---
 
-### 16. `/conductor-distill`
+### 16. `/cadre-formula create`
 
-**Purpose**: Extract reusable template from completed track.
+**Purpose**: Extract a reusable template from a completed track (formerly
+`/cadre-distill`).
 
 **When to use**: 
 - Track completed successfully
@@ -728,8 +774,8 @@ bd mol burn <wisp>                  # Delete without trace
 
 ```
 Step 1: Run the command
-   /conductor-distill auth_20241219
-   /conductor-distill auth_20241219 --as "auth-module"
+   /cadre-formula create auth_20241219
+   /cadre-formula create auth_20241219 --as "auth-module"
 
 Step 2: Track validation
    - Track must be completed [x]
@@ -744,8 +790,8 @@ Step 4: Template extraction
    - Runs: bd mol distill <epic_id> --as "<name>" --var ...
    - Creates reusable formula
 
-Step 5: Optional Conductor registration
-   - Creates conductor/templates/<name>/
+Step 5: Optional Cadre registration
+   - Creates cadre/templates/<name>/
    - Copies spec.template.md and plan.template.md
 
 Step 6: Cleanup options
@@ -757,21 +803,85 @@ Step 6: Cleanup options
 **Template usage after extraction**:
 ```bash
 # List templates
-/conductor-formula list
+/cadre-formula list
 
 # View template
-/conductor-formula show <template_name>
+/cadre-formula show <template_name>
 
 # Create from template
 bd mol pour <template> --var module_name=payments
-/conductor-wisp <template> --var module_name=cache
+/cadre-formula wisp <template> --var module_name=cache
+```
+
+---
+
+### 17. `/cadre-ship`
+
+**Purpose**: Rebase a reviewed track onto main, push it, and prepare the PR. The only
+Cadre step that pushes to a remote.
+
+**When to use**: After `/cadre-review` clears a track and before `/cadre-archive`.
+
+**Manual workflow**:
+
+```
+Step 1: Run the command
+   /cadre-ship [track_id]
+
+Step 2: Review gate (enforced — reads metadata.review)
+   - changes_requested OR blocking_count > 0 → REFUSE (halt; resolve and re-review)
+   - review absent → soft prompt (confirm a "Ready to ship" entry, ask to proceed)
+   - verdict approved AND blocking_count == 0 → proceed
+
+Step 3: Sync + push
+   - bd dolt push (flush Dolt), commit .beads/ if changed
+   - git rebase main track/<track_id>   (.beads/ conflicts → --ours)
+   - git push origin track/<track_id> --force-with-lease
+
+Step 4: PR guidance
+   - config.json "auto_open": false (default) → prepare only: print the
+     create-PR command for your team's process
+   - config.json "auto_open": true → open the PR with the host CLI
+     (gh / glab; falls back to printing the command if the CLI is unauthenticated)
+```
+
+**Review gate:** `/cadre-ship` refuses to rebase or push when the track's
+`metadata.review.verdict` is `changes_requested` or `blocking_count > 0`. An
+absent `review` block falls back to today's soft prompt; a clean approved review
+proceeds without further confirmation.
+
+---
+
+### 18. `/cadre-release`
+
+**Purpose**: Cut a local release — changelog entry + version tag across shipped/
+archived tracks. Local only; never pushes.
+
+**When to use**: Enough tracks have shipped to warrant a versioned release.
+
+**Manual workflow**:
+
+```
+Step 1: Run the command
+   /cadre-release            # suggest a bump
+   /cadre-release minor      # or major|patch|<version>
+
+Step 2: Determine range + version
+   - From last git tag to HEAD; semver bump from change types
+
+Step 3: Build + write CHANGELOG.md
+   - Grouped by Conventional-Commit type; confirm before writing
+
+Step 4: Commit + tag (local)
+   - git commit -m "chore(release): <version>" && git tag -a <version>
+   - Does NOT push — run `git push && git push origin <version>` when ready
 ```
 
 ---
 
 ## Beads Commands Reference
 
-When Beads integration is enabled, use these commands alongside Conductor:
+When Beads integration is enabled, use these commands alongside Cadre:
 
 | Command | Purpose |
 |---------|---------|
@@ -799,13 +909,14 @@ When Beads integration is enabled, use these commands alongside Conductor:
 | `bd mol squash <id>` | Compress completed molecule |
 | `bd mol distill <epic> --as "Name"` | Extract template from work |
 
-### New Conductor Commands
+### Template Commands (under `/cadre-formula`)
 
 | Command | Purpose |
 |---------|---------|
-| `/conductor-formula` | List and manage track templates |
-| `/conductor-wisp` | Create ephemeral exploration track |
-| `/conductor-distill` | Extract reusable template from track |
+| `/cadre-formula list` | List and manage track templates |
+| `/cadre-formula show <name>` | Show a template's structure and variables |
+| `/cadre-formula create <track_id>` | Extract reusable template from a completed track |
+| `/cadre-formula wisp [formula]` | Create ephemeral exploration track |
 
 ### Session Resume with Beads
 
@@ -818,11 +929,11 @@ bd ready
 # 2. Get context from notes
 bd show <task-id> --notes
 
-# 3. Load Conductor context
-# Read: conductor/tracks/<track_id>/spec.md, plan.md
+# 3. Load Cadre context
+# Read: cadre/tracks/<track_id>/spec.md, plan.md
 
 # 4. Resume implementation
-/conductor-implement <track_id>
+/cadre-implement <track_id>
 ```
 
 ---
@@ -831,15 +942,18 @@ bd show <task-id> --notes
 
 | File | Purpose | Location |
 |------|---------|----------|
-| `setup_state.json` | Setup progress | `conductor/` |
-| `beads.json` | Beads integration config | `conductor/` |
-| `refresh_state.json` | Refresh progress | `conductor/` |
-| `implement_state.json` | Phase-aware implementation resume | `conductor/tracks/<id>/` |
-| `metadata.json` | Track configuration + Beads epic ID | `conductor/tracks/<id>/` |
-| `blockers.md` | Block history log | `conductor/tracks/<id>/` |
-| `skipped.md` | Skipped tasks log | `conductor/tracks/<id>/` |
-| `revisions.md` | Revision history | `conductor/tracks/<id>/` |
-| `handoff_*.md` | Section handoff documents | `conductor/tracks/<id>/` |
+| `setup_state.json` | Setup progress | `cadre/` |
+| `beads.json` | Beads integration config | `cadre/` |
+| `config.json` | Sync mode, PR provider, `auto_open`, merge train (polyrepo/shared) | `cadre/` |
+| `repos.json` | Submodule manifest + `mode: "polyrepo"` (polyrepo only) | `cadre/` |
+| `refresh_state.json` | Refresh progress | `cadre/` |
+| `tracks.md` | **Derived** track index — rebuilt by `/cadre-status --regen-index`; never hand-edit | `cadre/` |
+| `HANDOFF.md` | Single rolling handoff (overwritten/trimmed each run) | `cadre/` |
+| `implement_state.json` | Phase-aware implementation resume | `cadre/tracks/<id>/` |
+| `metadata.json` | Track config + Beads epic ID; **source of truth for `status`**; also holds `owner`/`reviewer`/`review`/`lease`/`merge_order` | `cadre/tracks/<id>/` |
+| `blockers.md` | Block history log | `cadre/tracks/<id>/` |
+| `skipped.md` | Skipped tasks log | `cadre/tracks/<id>/` |
+| `revisions.md` | Revision history | `cadre/tracks/<id>/` |
 
 ---
 
@@ -847,15 +961,18 @@ bd show <task-id> --notes
 
 1. **Always check state files** before running commands to understand current progress
 
-2. **Use `/conductor-status`** frequently to see the big picture
+2. **Use `/cadre-status`** frequently to see the big picture
 
 3. **Use `bd ready`** to find tasks with no blockers (if Beads enabled)
 
-4. **Run `/conductor-validate`** after manual edits to catch issues
+4. **Run `/cadre-validate`** after manual edits to catch issues
 
 5. **Commit frequently** - each task should have its own commit
 
-6. **Keep plan.md updated** - status markers are the source of truth
+6. **Source of truth:** `metadata.json.status` is the single source of truth for a
+   track's status — `cadre/tracks.md` is a **derived cache** rebuilt by
+   `/cadre-status --regen-index`, so never hand-edit its markers. `plan.md`
+   checkboxes track per-task progress within a track.
 
 7. **Add notes to Beads** - they survive context compaction
 
@@ -863,7 +980,7 @@ bd show <task-id> --notes
    - `feat(scope): description`
    - `fix(scope): description`
    - `docs(scope): description`
-   - `conductor(plan): Mark task complete`
+   - `cadre(plan): Mark task complete`
 
 ---
 
@@ -874,8 +991,8 @@ bd show <task-id> --notes
 | Command stalls | Check state file, resume or restart |
 | Wrong track selected | Use explicit track ID parameter |
 | Task stuck in progress | Manually update `[~]` to `[ ]` in plan.md |
-| Dependency loop | Use `/conductor-validate` to detect |
-| Missing files | Run `/conductor-setup` or `/conductor-validate` |
-| Beads not syncing | Check `conductor/beads.json` has `enabled: true` |
+| Dependency loop | Use `/cadre-validate` to detect |
+| Missing files | Run `/cadre-setup` or `/cadre-validate` |
+| Beads not syncing | Check `cadre/beads.json` has `enabled: true` |
 | Lost context after compaction | Use `bd show <id> --notes` to recover |
-| bd command fails | Conductor continues without Beads (graceful degradation) |
+| bd command fails | Cadre continues without Beads (graceful degradation) |

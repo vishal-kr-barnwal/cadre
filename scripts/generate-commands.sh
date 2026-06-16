@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # generate-commands.sh — Derive every supported platform's command set from the
-# canonical Claude Code commands in `.claude/commands/conductor-*.md`.
+# canonical Claude Code commands in `.claude/commands/cadre-*.md`.
 #
 # One source of truth (the Claude `.md` commands) is transformed into:
-#   - Codex CLI         -> .codex/prompts/conductor-*.md
-#   - Cursor            -> .cursor/commands/conductor-*.md
-#   - Antigravity CLI   -> .agent/workflows/conductor-*.md
-#   - GitHub Copilot    -> .github/prompts/conductor-*.prompt.md
+#   - Codex CLI         -> .codex/prompts/cadre-*.md
+#   - Cursor            -> .cursor/commands/cadre-*.md
+#   - Antigravity CLI   -> .agent/workflows/cadre-*.md
+#   - GitHub Copilot    -> .github/prompts/cadre-*.prompt.md
 #
 # Each Claude command file has YAML frontmatter (`description:`, optional
 # `argument-hint:`) followed by a Markdown body. The body uses the `$ARGUMENTS`
@@ -16,7 +16,7 @@
 # conventions and copies the shared reference file alongside the commands so
 # every output directory is self-contained.
 #
-# Re-run after editing any `.claude/commands/conductor-*.md` to keep all
+# Re-run after editing any `.claude/commands/cadre-*.md` to keep all
 # platforms in sync. Generated files carry an "AUTO-GENERATED" marker; do not
 # hand-edit them — edit the canonical Claude command and regenerate.
 #
@@ -34,7 +34,7 @@ SRC_DIR=".claude/commands"
 # Agnostic reference: identical for every platform, copied as-is. Its master
 # lives in the Claude skill (which uses it directly); generated platforms get a
 # verbatim copy.
-AGNOSTIC_REF=".claude/skills/conductor/references/beads-error-handler.md"
+AGNOSTIC_REF=".claude/skills/cadre/references/beads-error-handler.md"
 
 # Sliced references: multi-platform masters with <!-- AGENT:<name> --> blocks.
 # Each platform receives a copy containing only the shared text plus its own
@@ -42,10 +42,12 @@ AGNOSTIC_REF=".claude/skills/conductor/references/beads-error-handler.md"
 SLICED_REFS=(
   "scripts/agent-refs/parallel-execution.md"
   "scripts/agent-refs/template-locator.md"
+  "scripts/agent-refs/polyrepo-git.md"
+  "scripts/agent-refs/cadre-sync.md"
 )
 
 TEMPLATES_SRC="templates"                  # canonical templates (single source)
-SKILL_DIR=".claude/skills/conductor"       # Claude skill; templates bundled here
+SKILL_DIR=".claude/skills/cadre"       # Claude skill; templates bundled here
 
 CODEX_DIR=".codex/prompts"
 CURSOR_DIR=".cursor/commands"
@@ -64,7 +66,7 @@ ref_dir_for() {
 }
 
 # Per-platform one-line worker-dispatch sentence, substituted into the
-# <!-- DISPATCH:start -->…<!-- DISPATCH:end --> region of conductor-implement.
+# <!-- DISPATCH:start -->…<!-- DISPATCH:end --> region of cadre-implement.
 dispatch_sentence() {
   case "$1" in
     claude)      echo 'Use the **`Task` tool**, one call per worker (calls are awaitable); see `references/parallel-execution.md`.' ;;
@@ -164,8 +166,8 @@ apply_dispatch() {
 
 generate_platform() {
   local platform="$1" src name desc body
-  for src in "$SRC_DIR"/conductor-*.md; do
-    name="$(basename "$src" .md)"            # e.g. conductor-setup
+  for src in "$SRC_DIR"/cadre-*.md; do
+    name="$(basename "$src" .md)"            # e.g. cadre-setup
     desc="$(extract_description "$src")"
     body="$(extract_body "$src" | apply_dispatch "$platform")"
 
@@ -242,9 +244,9 @@ copy_reference() {
 }
 
 # Bundle the canonical templates/ directory (workflow.md, code_styleguides/, …)
-# with every command set so `conductor-setup` can find them after install. It is
+# with every command set so `cadre-setup` can find them after install. It is
 # copied into each platform's command dir and into the Claude skill, matching the
-# install locations that `conductor-setup`'s template-discovery step probes.
+# install locations that `cadre-setup`'s template-discovery step probes.
 copy_templates() {
   local dir dest
   for dir in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR" "$SKILL_DIR"; do
@@ -274,15 +276,16 @@ main() {
   copy_reference
   copy_templates
 
-  local count stale d f
-  count="$(ls "$SRC_DIR"/conductor-*.md | wc -l | tr -d ' ')"
+  local count stale d f master
+  count="$(ls "$SRC_DIR"/cadre-*.md | wc -l | tr -d ' ')"
 
   if [[ "$MODE" == "--check" ]]; then
     stale=false
     for d in "$CODEX_DIR" "$CURSOR_DIR" "$ANTIGRAVITY_DIR" "$COPILOT_DIR" "$SKILL_DIR/templates"; do
       diff -rq "$GEN_ROOT/$d" "$REPO_ROOT/$d" >/dev/null 2>&1 || stale=true
     done
-    for f in parallel-execution.md template-locator.md; do
+    for master in "${SLICED_REFS[@]}"; do
+      f="$(basename "$master")"
       diff -q "$GEN_ROOT/$SKILL_DIR/references/$f" "$REPO_ROOT/$SKILL_DIR/references/$f" >/dev/null 2>&1 || stale=true
     done
     if ! $stale; then
@@ -294,7 +297,7 @@ main() {
   else
     echo "✓ Generated $count commands each for: Codex, Cursor, Antigravity, GitHub Copilot."
     echo "  Bundled references/ and templates/ into every command set + the Claude skill."
-    echo "  .codex/prompts/ .cursor/commands/ .agent/workflows/ .github/prompts/ .claude/skills/conductor/templates/"
+    echo "  .codex/prompts/ .cursor/commands/ .agent/workflows/ .github/prompts/ .claude/skills/cadre/templates/"
   fi
 }
 
