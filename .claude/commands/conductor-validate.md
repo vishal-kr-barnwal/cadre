@@ -56,6 +56,12 @@ For tracks with parallel execution annotations:
 **Run only when `conductor/repos.json` exists with `mode: "polyrepo"`** (skip
 silently in monorepo mode). See `references/polyrepo-git.md`.
 
+- **Preflight asserts:** run the shared **Preflight asserts** snippet in
+  `references/polyrepo-git.md` (the same definition `/conductor-land` runs before
+  opening PRs) so validate and land agree on what a "land-ready" polyrepo looks
+  like. Surface each failed assert as a ❌ Error here rather than halting, so the
+  full report still renders. Do not duplicate the assert logic inline — reference
+  the one snippet.
 - **Manifest ↔ `.gitmodules` parity:** every `repos[].submodule_path` has a
   matching `.gitmodules` entry (and vice-versa). Report drift (added/removed
   submodules not reflected in `repos.json`).
@@ -76,6 +82,95 @@ silently in monorepo mode). See `references/polyrepo-git.md`.
 
 Reuse the existing orphan/auto-fix scaffolding (step 7) for cleanup offers.
 
+## 5c. Team / Shared-Mode Invariants
+
+**Additive, degrade gracefully, and back-compat first.** Resolve sync mode once:
+read `conductor/config.json` `sync_mode`. The lease sweep and the merge-driver
+check below run **only when `sync_mode == "shared"`** (skip silently otherwise);
+the overlapping-`files:` and real-owner checks below also run in monorepo/local
+mode but are no-ops there because lease/owner metadata is absent (no two
+assignees, no lease objects), so they simply pass.
+
+Compute `<git-identity>` once for this command: value of `git config user.email`
+(fallback `git config user.name`, else null). Used only to label "your" tracks in
+messages — never to mutate ownership here.
+
+### 5c.1 Stale-lease sweep (shared mode only)
+
+For each track whose `metadata.json` carries a non-null `lease` object
+(`{ owner, host, acquired_at, heartbeat_at }`):
+
+- Compute lease age from `lease.heartbeat_at` (fall back to `acquired_at` if
+  `heartbeat_at` is absent) against the current UTC time.
+- **Stale threshold: heartbeat older than ~3 hours** (a lease whose holder has
+  clearly gone away — well beyond a normal active session's heartbeat cadence).
+  Treat an unparseable timestamp as stale.
+- Report each stale lease as a ⚠️ Warning naming the track, `lease.owner`,
+  `lease.host`, and the heartbeat age, e.g.
+  > "Track `<track_id>` holds a stale lease (owner `<owner>` on `<host>`, last
+  > heartbeat <N>h ago)."
+- Offer in step 7 to **clear** stale leases: set `lease` to `null` with a
+  key-scoped write — `jq '.lease = null' metadata.json` to a temp file then move
+  into place — so a concurrent sibling write isn't clobbered. Never clear a lease
+  whose heartbeat is fresh, and never clear a lease you cannot prove is stale.
+
+### 5c.2 Team invariants
+
+(a) **No cross-owner file overlap.** Collect every in-progress (`[~]`) track
+   (status from `metadata.json` / `tracks.md`). For each, gather its in-progress
+   tasks' `<!-- files: ... -->` globs from `plan.md`. If two in-progress tracks
+   with **different** `owner` (fall back to Beads `assignee`) claim an overlapping
+   file/glob, report a ❌ Error naming both tracks, both owners, and the
+   overlapping path(s). Same-owner overlap (one person, sequential work) is **not**
+   an error. If owners can't be resolved on both sides, downgrade to a ⚠️ Warning
+   (can't prove a cross-owner conflict). This is detection only — never reassign.
+
+(b) **Real owner on in-progress tracks.** Every in-progress (`[~]`) track must
+   have an `owner` (in `metadata.json`) and/or Beads `assignee` that is a real
+   identity — **not null/empty and not the literal string `"conductor"`** (the
+   legacy placeholder). Report a violation as a ⚠️ Warning, e.g.
+   > "In-progress track `<track_id>` has no real owner (owner: `<value>`). Set it
+   > with `bd update <id> --assignee <git-identity>` and record `owner` in
+   > metadata.json."
+   Offer in step 7 to stamp the current `<git-identity>` as `owner` (key-scoped
+   `jq '.owner = $id'`) — only when `<git-identity>` is non-null and the track is
+   genuinely unowned (never overwrite an existing real owner).
+
+(c) **Shared-mode merge drivers registered.** When `sync_mode == "shared"`,
+   the `merge=ours` driver the `.gitattributes` relies on must be registered, or
+   `.beads/**` and the pinned-state attributes silently mis-resolve on merge.
+   Check `git config merge.ours.driver`:
+   - Empty/unset → ❌ Error: "Shared mode is enabled but the `ours` merge driver
+     is not registered; `.beads/` and pinned state will be clobbered on merge."
+   - Also verify the expected `.gitattributes` lines exist (the `.beads/** merge=ours`
+     entry and the per-track state-file entries written at setup); report any
+     missing line as a ⚠️ Warning.
+   Offer in step 7 to register it: `git config merge.ours.driver true` (mirrors
+   setup's `git config merge.ours.driver >/dev/null 2>&1 || git config merge.ours.driver true`).
+
+### 5c.3 State-file repair
+
+For each track, validate `implement_state.json` and `parallel_state.json` (when
+present) as well-formed JSON — `jq empty <file>` must succeed. A common shared-mode
+corruption is **union-merge damage**: a `merge=union` driver applied to these scalar
+JSON objects interleaves both sides' lines into invalid JSON (this is exactly why
+the registered `merge=ours` driver in 5c.2(c) is required for the pinned
+`parallel_state.json`).
+
+- **Parse failure** → ❌ Error naming the file and track.
+- Offer in step 7 to repair:
+  - `parallel_state.json` is **ephemeral** (deleted at phase end) — offer to
+    **delete** the corrupted file so it regenerates cleanly on the next
+    `/conductor-implement`.
+  - `implement_state.json` is **resume state** — do **not** silently regenerate
+    (a real divergence must not be lost). Offer to **back it up**
+    (`implement_state.json.corrupt`) and reconstruct a minimal valid object from
+    `plan.md` progress + `<git-identity>` as `owner` and the current UTC time as
+    `last_updated`, surfacing to the user that resume position was reset. If the
+    user declines, leave the file and keep the ❌ Error.
+  - In shared mode, recommend confirming the merge driver fix from 5c.2(c) so the
+    corruption does not recur.
+
 ## 6. Report
 
 Present summary with:
@@ -84,12 +179,25 @@ Present summary with:
 - ❌ Errors
 - Recommendations for fixes
 
+In shared mode, include a **Team invariants** line summarizing the 5c results
+(leases swept, owner/file-overlap status, merge-driver registration, state-file
+health). In monorepo/local mode omit it — those checks are no-ops there.
+
 ## 7. Auto-Fix Option
 
 Offer to fix auto-fixable issues:
 - Missing metadata fields
 - Status mismatches
 - Orphan cleanup
+- Stale-lease clears (shared mode — set `lease` to null, key-scoped) [5c.1]
+- Stamp `<git-identity>` as `owner` on a genuinely unowned in-progress track [5c.2(b)]
+- Register the `ours` merge driver in shared mode (`git config merge.ours.driver true`) [5c.2(c)]
+- State-file repair: delete corrupted `parallel_state.json`; back up + reconstruct
+  corrupted `implement_state.json` (only with confirmation) [5c.3]
+
+All metadata fixes use **key-scoped `jq` writes to a temp file then move into
+place** (e.g. `jq '.lease = null'`, `jq '.owner = $id'`) — never a full-file
+rewrite — so concurrent sibling writes in shared mode aren't clobbered.
 
 ---
 

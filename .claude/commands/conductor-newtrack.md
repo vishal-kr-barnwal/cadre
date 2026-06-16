@@ -207,6 +207,14 @@ Create a new track for: $ARGUMENTS
      last resort.
    - Confirm the union of target repos with the user — these become the per-repo
      branches/worktrees created in step 10a.
+   - **Fleet advisory (advisory only — never blocks):** for each chosen repo, you
+     MAY list its in-flight track branches with
+     `git -C <submodule_path> ls-remote --heads origin 'track/*'`. If any other
+     `track/*` branches already exist on a repo you're about to touch, warn the
+     user that a teammate may have an in-flight track there (naming the repo and
+     branches), then continue — this is informational, not a halt. If the command
+     fails (e.g. offline, no remote), **degrade silently**: skip the advisory and
+     proceed without warning or error.
    - Example:
      ```markdown
      - [ ] Task 1: Add /login endpoint
@@ -216,6 +224,13 @@ Create a new track for: $ARGUMENTS
        <!-- repo: web -->
        <!-- files: src/pages/login.tsx -->
      ```
+   - **Merge-order directive (optional):** if some repos must land before others
+     (e.g. the API before the web client that consumes it), add a single
+     `<!-- repo-order: a > b > c -->` comment near the top of `plan.md`. Repos are
+     listed left-to-right in the order they should merge. This is parsed into
+     `metadata.json` `merge_order` in step 2.4.7 and consumed by `/conductor-land`
+     and the merge-train CI. If absent, repos merge in alphabetical order. Only the
+     repos you name need appear; any omitted repos merge after, alphabetically.
 
 4. **User Confirmation:**
    > "I've drafted the implementation plan. Please review:"
@@ -230,6 +245,12 @@ Create a new track for: $ARGUMENTS
 
 ### 2.4 Create Track Artifacts and Update Main Plan
 
+0. **Compute git identity (`<git-identity>`):** Run
+   `git config user.email` (fallback `git config user.name`, else treat as null).
+   Hold this value for the rest of the command — it populates `metadata.owner`,
+   the Beads epic `--assignee`, and (shared mode only) `metadata.lease.owner`.
+   If null, silently proceed with `owner: null` and omit the Beads `--assignee`.
+
 1. **Check for Duplicate Track Name:**
    - List existing directories in `conductor/tracks/`
    - Extract short names from track IDs (`shortname_YYYYMMDD` → `shortname`)
@@ -238,7 +259,21 @@ Create a new track for: $ARGUMENTS
      - Explain track with that name exists
      - Suggest different name or resuming existing track
 
-2. **Generate Track ID:** Create unique ID: `shortname_YYYYMMDD`
+2. **Generate Track ID:** Create base ID: `shortname_YYYYMMDD`.
+   - **Collision-proof suffix:** if a directory `conductor/tracks/<shortname_YYYYMMDD>`
+     already exists (e.g. a same-day re-creation that slipped past the name check),
+     append `-<2-char base36>` as the **last path segment** — e.g.
+     `auth_20260615` → `auth_20260615-b`. The suffix comes *after* the date and is
+     `-`-separated, so the `shortname_YYYYMMDD` parse still works. Pick the random
+     2-char base36 value, retry if that directory also exists. **Never** derive the
+     ID from the Beads epic ID.
+   - **Shared mode (`config.json` `sync_mode: "shared"`):** if the publish step in
+     §3.0 is later rejected because another machine already pushed this exact
+     `track_id` (a push / `bd dolt push` conflict), re-suffix the track — rename the
+     directory, the `track/<track_id>` branch, the `tracks.md` row, the
+     `metadata.json` `track_id`, and the Beads epic title — then re-publish. The
+     detailed rejection-recovery branch lives in `references/conductor-sync.md`
+     (owned by the sync master); this command only needs to honor the re-suffix.
 
 3. **Ask for Priority:**
    > "What priority should this track have?"
@@ -273,11 +308,35 @@ Create a new track for: $ARGUMENTS
      "created_at": "YYYY-MM-DDTHH:MM:SSZ",
      "updated_at": "YYYY-MM-DDTHH:MM:SSZ",
      "description": "<Initial user description>",
+     "owner": "<git-identity>",
+     "reviewer": null,
      "git_branch": "track/<track_id>",
      "worktree_path": ".worktrees/<track_id>"
    }
    ```
-   Populate with actual values from steps 3-5.
+   Populate with actual values from steps 0, 3-5.
+   - `owner` is `<git-identity>` from step 0 (set it to `null` if git identity is
+     unset — never write an empty string). `reviewer` is always `null` at creation.
+
+   **SHARED MODE ONLY (`conductor/config.json` `sync_mode: "shared"`):** also add a
+   `lease` object claiming the track for the creating user. In monorepo + local
+   mode, **omit `lease` entirely (no-op)** — do not add a `null` key, do not change
+   any behavior. Shared-mode `lease` schema:
+   ```json
+   "lease": {
+     "owner": "<git-identity>",
+     "host": "<hostname>",
+     "acquired_at": "<ISO-8601 UTC>",
+     "heartbeat_at": "<ISO-8601 UTC>"
+   }
+   ```
+   `<hostname>` is the output of `hostname`; `acquired_at` and `heartbeat_at` are
+   both the current UTC time at creation.
+
+   **Concurrency-safe writes:** when adding Beads fields, `review`, or `lease` later
+   (here or in sibling commands), use key-scoped `jq` (e.g.
+   `jq '.review = $obj'`), never a full-file rewrite, so concurrent writes from
+   sibling commands don't clobber each other.
 
    **POLYREPO ONLY:** also add a `repos` map — one entry per target repo from the
    union computed in step 3.5. Keep the flat `git_branch`/`worktree_path` fields
@@ -291,6 +350,17 @@ Create a new track for: $ARGUMENTS
      "web": { "submodule_path": "repos/web", "git_branch": "track/<track_id>", "worktree_path": ".worktrees/<track_id>/web", "base_branch": "main" }
    }
    ```
+
+   **POLYREPO ONLY — `merge_order`:** scan the confirmed `plan.md` for a
+   `<!-- repo-order: a > b > c -->` directive (see step 3.5). If present, split on
+   `>`, trim each repo name, and store the result as an **array, left-to-right**:
+   ```json
+   "merge_order": ["api", "web"]
+   ```
+   Store the array verbatim — do **not** topo-sort, de-dupe against the repo graph,
+   or run cycle detection; it is a plain ordering hint. If the directive is absent,
+   **omit `merge_order` entirely** (downstream treats an absent field as
+   alphabetical order).
 
 8. **Write Files:**
    - `conductor/tracks/<track_id>/spec.md`
@@ -402,9 +472,13 @@ Create a new track for: $ARGUMENTS
        -t epic -p <priority_number> \
        --design "<technical approach from spec>" \
        --acceptance "<completion criteria from spec>" \
-       --assignee conductor \
+       --assignee "<git-identity>" \
        --json
      ```
+   - `<git-identity>` is the value of `git config user.email` (fallback
+     `git config user.name`, else null). Compute it once at the start of step 2.4
+     (see step 2.4.0) and reuse it for the epic assignee and `metadata.owner`. If
+     null, omit `--assignee` rather than passing an empty string.
    - Store returned epic ID (e.g., `bd-a3f8`)
 
 3. **Create Tasks for Each Phase with Context:**
@@ -458,6 +532,9 @@ Create a new track for: $ARGUMENTS
      - Phase keys: `phase{N}` (1-indexed, e.g., `phase1`, `phase2`)
      - Task keys: `phase{N}_task{M}` (both 1-indexed, e.g., `phase1_task1`, `phase2_task3`)
    - Store ALL phase and task IDs returned from `bd create --json` commands
+   - **Write with key-scoped `jq`** (e.g. `jq '.beads_epic = $e | .beads_tasks = $t'`),
+     never a full-file rewrite — this preserves the `owner`/`reviewer`/`lease`
+     fields written in step 2.4.7 and avoids clobbering concurrent sibling writes.
 
 7. **Seed Epic with Init Note:**
    - After creating the epic, run:
