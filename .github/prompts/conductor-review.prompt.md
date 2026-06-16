@@ -79,11 +79,15 @@ writes don't clobber):
 
 ```bash
 META="conductor/tracks/<track_id>/metadata.json"
-REVIEWER="$(git config user.email || git config user.name || echo null)"
+# Emit JSON null (not the literal string "null") when git identity is unset.
+# REVIEWER holds either a quoted JSON string ("a@b.com") or the bareword null.
+REVIEWER="$(git config user.email >/dev/null 2>&1 && printf '"%s"' "$(git config user.email)" \
+  || { git config user.name >/dev/null 2>&1 && printf '"%s"' "$(git config user.name)"; } \
+  || echo null)"
 jq --arg verdict "<approved|changes_requested>" \
    --argjson blocking <blocking_count> \
    --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-   --arg reviewer "$REVIEWER" \
+   --argjson reviewer "$REVIEWER" \
    '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer}' \
    "$META" > "$META.tmp" && mv "$META.tmp" "$META"
 ```

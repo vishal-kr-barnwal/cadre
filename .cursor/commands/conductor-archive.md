@@ -71,16 +71,16 @@ For each selected track:
    ```
    In monorepo/`local` mode there is no lease; this is a silent no-op.
 5. **Extract learnings before archiving** (see step 3a)
-6. **Set the terminal status (source of truth):** before moving the folder, write
-   the archived state to THAT track's `metadata.json` via a key-scoped jq write
-   (never a full-file rewrite), so concurrent sibling writes are not clobbered:
-   ```bash
-   tmp=$(mktemp)
-   jq '.status = "archived"' conductor/tracks/<track_id>/metadata.json > "$tmp" \
-     && mv "$tmp" conductor/tracks/<track_id>/metadata.json
-   ```
-7. Move track folder to `conductor/archive/<track_id>/` (this carries the updated
-   `metadata.json` with it, so the live `conductor/tracks/*` scan no longer sees it)
+6. **Do NOT change the status.** The status enum is fixed —
+   `{new, in_progress, completed, blocked, skipped}` — and there is no `"archived"`
+   value. Leave `metadata.json.status == "completed"` (set earlier by implement
+   finalize) untouched; archival is represented by the **folder move alone**
+   (step 7), not by a status mutation. The live `conductor/tracks/*` scan
+   (step 1, `status == "completed"`) stops seeing the track once its folder leaves
+   `conductor/tracks/`, so no status write is needed.
+7. Move track folder to `conductor/archive/<track_id>/` (this carries the
+   `metadata.json` with it — still `status == "completed"` — so the live
+   `conductor/tracks/*` scan no longer sees it)
 8. **Regenerate the derived index** — do NOT hand-edit `tracks.md` markers. Rebuild
    the index from per-track metadata by running the procedure for
    `/conductor-status --regen-index` (see `conductor-status.md`). Because the

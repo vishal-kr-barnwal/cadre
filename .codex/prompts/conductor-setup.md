@@ -423,6 +423,14 @@ only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the mod
        .beads/** merge=ours
        ```
      - `git add .gitattributes`
+     - **Register the `ours` merge driver (CRITICAL) — runs for ALL full-Beads
+       projects (monorepo + polyrepo, local + shared), wherever
+       `.beads/** merge=ours` is written:** an unregistered `ours` driver makes git
+       fall back to its default text merge, which injects conflict markers into the
+       Dolt DB files. Check and register right here:
+       ```bash
+       git config merge.ours.driver >/dev/null 2>&1 || git config merge.ours.driver true
+       ```
      - Announce: "Configured `.gitattributes`: `.beads/` conflicts auto-resolve on PR merge"
    - **If mode B (stealth):** Skip — `.beads/` is not tracked in git.
 
@@ -508,14 +516,16 @@ and `references/polyrepo-git.md`.**
    Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal merge too,
    so structural conflicts surface intentionally.
 
-   **Register the `ours` merge driver (CRITICAL):** the `merge=ours` attribute
-   silently falls back to a clobbering default unless the driver is registered.
-   Before relying on it, check and register:
+   **Register the `ours` merge driver (CRITICAL):** an unregistered `ours` driver
+   makes git fall back to its default text merge, which injects conflict markers
+   into the pinned state files. Before relying on it, check and register:
    ```bash
    git config merge.ours.driver >/dev/null 2>&1 || git config merge.ours.driver true
    ```
-   This also protects `.beads/** merge=ours` written in Section 2.7 / 3a — an
-   unregistered driver would silently mis-resolve `.beads/` on merge.
+   This is idempotent with the registration already performed in Section 2.7 / 3a
+   (which covers `.beads/** merge=ours` for every full-Beads project); running it
+   again here harmlessly re-asserts the driver for the per-track `merge=ours`
+   attributes written above.
 
 8. **Commit State:**
    ```json

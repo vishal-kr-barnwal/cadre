@@ -107,10 +107,14 @@ jobs:
           # order), then the alphabetical remainder. Never drop a repo, never
           # duplicate one — a name listed in merge_order but absent from .repos is
           # ignored; a repo absent from merge_order falls into the alpha tail.
+          # De-dupe $head preserving first-seen order — a user typo such as
+          # "repo-order: api > api > web" would otherwise process api twice.
           mapfile -t REPO_NAMES < <(jq -r '
             (.merge_order // []) as $order
             | (.repos | keys) as $all
-            | ($order | map(select(. as $n | $all | index($n)))) as $head
+            | ($order
+               | map(select(. as $n | $all | index($n)))
+               | reduce .[] as $n ([]; if (index($n)) then . else . + [$n] end)) as $head
             | ($all | map(select(. as $n | $head | index($n) | not)) | sort) as $tail
             | ($head + $tail)[]
           ' "$META")
@@ -187,7 +191,9 @@ jobs:
               echo "  $repo#$pr already MERGED; skipping merge, reconstructing gitlink bump."
             else
               pr_ready "$repo" "$pr" || { echo "REGRESSED before merge: $repo#$pr. Halting."; exit 1; }
-              gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false
+              # Merge with a MERGE COMMIT (squash disabled by guardrail) so the
+              # gitlink can pin to a single deterministic merge SHA.
+              gh pr merge "$pr" --repo "$repo" --merge --delete-branch=false
             fi
             # Pin the gitlink to the MERGE COMMIT (not the branch head): the base
             # branch may have advanced past our merge by the time we read it, so
@@ -195,7 +201,7 @@ jobs:
             base="$(gh pr view "$pr" --repo "$repo" --json baseRefName --jq '.baseRefName')"
             new_sha="$(gh pr view "$pr" --repo "$repo" --json mergeCommit --jq '.mergeCommit.oid')"
             if [ -z "$new_sha" ] || [ "$new_sha" = "null" ]; then
-              # GitHub has not yet populated the merge commit (async squash). Do
+              # Merge commit (squash disabled by guardrail) not yet readable; do
               # NOT bump to a wrong/empty SHA — halt and let the train re-fire.
               echo "  ${name}: merge commit not yet available; halting to re-fire."
               echo "::endgroup::"
@@ -220,9 +226,10 @@ jobs:
           # --- Phase 4: re-await control PR check on bumped commit, merge LAST -
           if [ -n "$CONTROL_PR" ]; then
             echo "Waiting for control PR #$CONTROL_PR checks on bumped commit..."
-            for i in $(seq 1 30); do
+            for _ in $(seq 1 30); do
               if pr_ready "$CONTROL_REPO" "$CONTROL_PR"; then
-                gh pr merge "$CONTROL_PR" --repo "$CONTROL_REPO" --squash --delete-branch
+                # Merge commit (squash disabled by guardrail) for the control seal PR too.
+                gh pr merge "$CONTROL_PR" --repo "$CONTROL_REPO" --merge --delete-branch
                 echo "Merge train complete for ${TRACK}."
                 exit 0
               fi

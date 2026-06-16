@@ -24,7 +24,10 @@ Any remaining text after the mode is the reason.
 
 ## 2. Identify Task
 - If a task is named in the arguments, find that task in the active track's `plan.md`.
-- Otherwise find the in-progress track in `tracks.md`, then the in-progress (`[~]`) task in its `plan.md`.
+- Otherwise resolve the active track via its `metadata.json` — the track whose
+  `metadata.json.status == "in_progress"` (the source of truth; fall back to the
+  `[~]` track in `tracks.md` only if no metadata says so). Then find the in-progress
+  (`[~]`) task in that track's `plan.md`.
 
 ## 3. Get Reason
 If no reason was supplied in the arguments, ask for it.
@@ -79,6 +82,29 @@ For `skipped`, also ask the disposition:
 
    - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
 
-## 6. Confirm
+## 6. Update Track Status
+
+Flagging a task can change the *track's* status. Set the track's
+`metadata.json.status` with a key-scoped jq write so the source of truth drives the
+`tracks.md` markers (`[!]` / `[-]`) — these were previously unreachable because the
+status was only ever set on the task. Use a portable jq update (BSD + GNU):
+
+```bash
+META="conductor/tracks/<track_id>/metadata.json"
+tmp="$(mktemp)"
+jq --arg s "<new_status>" '.status = $s' "$META" > "$tmp" && mv "$tmp" "$META"
+```
+
+Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skipped`):
+- **`blocked`** — the flag leaves the track blocked with no ready task to advance to
+  (e.g. `blocked` mode and no other pending task is workable).
+- **`skipped`** — the user is abandoning the remaining track (no intent to finish it).
+- Otherwise leave **`in_progress`** — the track advanced to a next task (the common
+  `skipped` "will complete later" / "no longer needed" path that moved `[~]` forward).
+
+Then regenerate the index per `/conductor-status --regen-index` so `tracks.md`
+reflects the new track marker.
+
+## 7. Confirm
 - `blocked`: announce the task is blocked and on what.
 - `skipped`: confirm the skip and show the next task.

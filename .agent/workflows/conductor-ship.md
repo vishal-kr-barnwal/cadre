@@ -27,21 +27,25 @@ local.
 - Read `conductor/tracks/<track_id>/metadata.json` for `git_branch`
   (default `track/<track_id>`).
 - **Review gate.** Read the `review` object from
-  `conductor/tracks/<track_id>/metadata.json` (written by `/conductor-review`):
+  `conductor/tracks/<track_id>/metadata.json` (written by `/conductor-review`).
+  Extract two fields:
   ```bash
-  jq -r '.review // "absent"' conductor/tracks/<track_id>/metadata.json
+  META="conductor/tracks/<track_id>/metadata.json"
+  verdict=$(jq -r '.review.verdict // "absent"' "$META")
+  blocking=$(jq -r '.review.blocking_count // 0' "$META")
   ```
-  - **Absent** (no `review` key, or `null`) → no structured gate recorded. Keep the
-    existing soft behavior: confirm the track has been reviewed (a `## Review` entry
-    in `learnings.md` with a "Ready to ship" verdict). If not, suggest
-    `/conductor-review <track_id>` first and ask whether to proceed anyway.
-  - **`verdict == "changes_requested"` OR `blocking_count > 0`** → **REFUSE**:
+  - **Absent** (`$verdict == "absent"` — no `review` key, or `null`) → no structured
+    gate recorded. Keep the existing soft behavior: confirm the track has been
+    reviewed (a `## Review` entry in `learnings.md` with a "Ready to ship" verdict).
+    If not, suggest `/conductor-review <track_id>` first and ask whether to proceed
+    anyway.
+  - **`$verdict == "changes_requested"` OR `$blocking > 0`** → **REFUSE**:
     > "🚫 Track `<track_id>` has not cleared review (verdict:
-    > `<verdict>`, blocking findings: `<blocking_count>`). Resolve the findings
+    > `$verdict`, blocking findings: `$blocking`). Resolve the findings
     > and re-run `/conductor-review <track_id>` before shipping."
     Then halt — do **not** rebase or push.
-  - **Clean** (`verdict == "approved"` and `blocking_count == 0`) → the gate is
-    satisfied; proceed without further confirmation.
+  - **Clean** (otherwise — `$verdict` is approved/non-blocking and `$blocking == 0`)
+    → the gate is satisfied; proceed without further confirmation.
 
 ## 2. Flush Dolt + Rebase + Prepare PR
 

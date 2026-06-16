@@ -74,10 +74,14 @@ conductor-merge-train:
       # order), then the alphabetical remainder. Never drop or duplicate a repo;
       # a name in merge_order but absent from .repos is ignored, a repo absent
       # from merge_order falls into the alpha tail.
+      # De-dupe $head preserving first-seen order — a user typo such as
+      # "repo-order: api > api > web" would otherwise process api twice.
       mapfile -t REPO_NAMES < <(jq -r '
         (.merge_order // []) as $order
         | (.repos | keys) as $all
-        | ($order | map(select(. as $n | $all | index($n)))) as $head
+        | ($order
+           | map(select(. as $n | $all | index($n)))
+           | reduce .[] as $n ([]; if (index($n)) then . else . + [$n] end)) as $head
         | ($all | map(select(. as $n | $head | index($n) | not)) | sort) as $tail
         | ($head + $tail)[]
       ' "$META")
@@ -148,18 +152,19 @@ conductor-merge-train:
         mr_state="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.state')"
         if [ "$mr_state" = "merged" ]; then
           echo "  $proj!$iid already merged; skipping merge, reconstructing gitlink bump."
-          new_sha="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.merge_commit_sha // .squash_commit_sha // empty')"
+          new_sha="$(glab api "projects/${enc}/merge_requests/${iid}" --jq '.merge_commit_sha // .sha // empty')"
         else
           mr_ready "$proj" "$iid" || { echo "REGRESSED: $proj!$iid. Halting."; exit 1; }
-          # Capture the MERGE COMMIT from the merge PUT response (.sha for the
-          # merge endpoint, .merge_commit_sha as a fallback) — not the branch head,
-          # which may have advanced past our merge and would silently capture
-          # unrelated commits.
-          merge_resp="$(glab api --method PUT "projects/${enc}/merge_requests/${iid}/merge" -f squash=true)"
-          new_sha="$(printf '%s' "$merge_resp" | jq -r '.sha // .merge_commit_sha // empty')"
+          # Merge with a MERGE COMMIT (squash disabled by guardrail — do NOT set
+          # squash=true) so the gitlink can pin to a single deterministic merge
+          # SHA. Read it from the merge PUT response (.merge_commit_sha, falling
+          # back to .sha) — not the branch head, which may have advanced past our
+          # merge and would silently capture unrelated commits.
+          merge_resp="$(glab api --method PUT "projects/${enc}/merge_requests/${iid}/merge")"
+          new_sha="$(printf '%s' "$merge_resp" | jq -r '.merge_commit_sha // .sha // empty')"
         fi
         if [ -z "$new_sha" ] || [ "$new_sha" = "null" ]; then
-          # GitLab has not yet populated the merge commit (async squash). Do NOT
+          # Merge commit (squash disabled by guardrail) not yet readable; do NOT
           # bump to a wrong/empty SHA — halt and let the train re-fire.
           echo "  ${name}: merge commit not yet available; halting to re-fire."; exit 1
         fi
@@ -180,9 +185,11 @@ conductor-merge-train:
       # Phase 4: merge control MR LAST
       if [ -n "$CONTROL_MR" ]; then
         enc="$(printf '%s' "$CONTROL_PROJ" | sed 's#/#%2F#g')"
-        for i in $(seq 1 30); do
+        for _ in $(seq 1 30); do
           if mr_ready "$CONTROL_PROJ" "$CONTROL_MR"; then
-            glab api --method PUT "projects/${enc}/merge_requests/${CONTROL_MR}/merge" -f squash=true >/dev/null
+            # Merge commit (squash disabled by guardrail — do NOT set squash=true)
+            # for the control seal MR too.
+            glab api --method PUT "projects/${enc}/merge_requests/${CONTROL_MR}/merge" >/dev/null
             echo "Merge train complete for ${TRACK}."; exit 0
           fi
           sleep 20

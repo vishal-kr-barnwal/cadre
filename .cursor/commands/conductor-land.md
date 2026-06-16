@@ -37,17 +37,27 @@ last** — once every sibling PR is approved and CI-green.
 4. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
    tracks not yet archived and ask. Read
    `conductor/tracks/<track_id>/metadata.json` for the `repos` map.
-5. **Gate — reviewed?** Confirm the track has a `## Review` entry in `learnings.md`
-   with a "Ready to ship" verdict. If not, suggest `/conductor-review <track_id>`
-   and ask whether to proceed anyway.
+5. **Gate — reviewed?** The machine-readable review gate in **§1.5** is
+   authoritative — do **not** prompt here unconditionally. Extract the review
+   fields once (D6 shape) and defer:
+   ```bash
+   META="conductor/tracks/<track_id>/metadata.json"
+   verdict=$(jq -r '.review.verdict // "absent"' "$META")
+   blocking=$(jq -r '.review.blocking_count // 0' "$META")
+   ```
+   Only when `verdict == "absent"` may you fall back to the soft prompt (suggest
+   `/conductor-review <track_id>` and ask whether to proceed anyway). If a review
+   exists, take **no** action here — §1.5 either refuses or proceeds. Never ask
+   "proceed anyway?" against an approved track.
 
 ### 1.5 Review-Gate Enforcement (machine-readable)
 
 Read `metadata.json` `review` (written by `/conductor-review`) and enforce it
 **before** any push/PR work:
 
-- **`review` absent** → keep today's behavior: the soft confirmation prompt from
-  the section-1 "reviewed?" gate (ask whether to proceed anyway). Do not block.
+- **`review` absent** (`verdict == "absent"`) → keep today's behavior: the soft
+  confirmation prompt from the section-1 step-5 "reviewed?" gate (ask whether to
+  proceed anyway). Do not block. This is the **only** branch that prompts.
 - **`review.verdict == "changes_requested"` OR `review.blocking_count > 0`** →
   **REFUSE.** Print a clear message naming the verdict and blocking count, e.g.
   > "Track `<track_id>` has an unresolved review (verdict: changes_requested,
@@ -55,6 +65,8 @@ Read `metadata.json` `review` (written by `/conductor-review`) and enforce it
   > landing." — then halt without opening any PR.
 - **`review.verdict == "approved"` and `review.blocking_count == 0`** → proceed.
 
+Reuse the `verdict` / `blocking` values extracted in section-1 step 5 (re-read
+only if metadata changed since):
 ```bash
 META="conductor/tracks/<track_id>/metadata.json"
 verdict=$(jq -r '.review.verdict // "absent"' "$META")
@@ -99,6 +111,36 @@ For each entry in `metadata.json.repos`:
    (`git -C <submodule_path> rev-list --count track/<track_id>..origin/<default_branch>` > 0),
    **OFFER a rebase** (`git -C <submodule_path> rebase origin/<default_branch> track/<track_id>`).
    **Never force-rebase and never force-push** — ask first; if declined, halt.
+
+5. **Squash guardrail (merge commits must be allowed).** The merge train pins each
+   submodule gitlink to a product PR's **merge commit** (squash is disabled by
+   guardrail — see §7), so deterministic pinning requires that each product repo
+   *allow merge commits* and is *not* squash-only. Probe the host via API; this is
+   read-only here:
+
+   **GitHub** (per product `repo_slug`, e.g. `org/api`):
+   ```bash
+   gh api "repos/<slug>" --jq '{merge: .allow_merge_commit, squash: .allow_squash_merge}'
+   ```
+   If `allow_merge_commit` is `false` (merge commits disallowed) or the repo is
+   effectively squash-only, **WARN** — name the repo and explain that cross-repo
+   tracks require merge commits for deterministic submodule gitlink pinning — and
+   **OFFER** (do not auto-apply) the fix:
+   ```bash
+   gh api -X PATCH "repos/<slug>" -F allow_merge_commit=true -F allow_squash_merge=false
+   ```
+
+   **GitLab:** read the project's `merge_method` (`glab api "projects/<url-encoded-slug>" --jq '.merge_method'`).
+   If it is not `merge` (i.e. `ff` or `rebase_merge` which force a single squashed
+   commit), **WARN** the same way and **OFFER** to set it back to merge commits:
+   ```bash
+   glab api -X PUT "projects/<url-encoded-slug>" -f merge_method=merge
+   ```
+
+   **Never auto-apply** the fix — print the command and let the user run it.
+   **Warn-and-proceed if offline / no API access** (the probe failing on
+   connectivity or missing auth is not a real misconfiguration); note the check was
+   skipped and continue.
 
 **Also check the control repo** the same way (base = `config.json`
 `control_branch`).
@@ -237,9 +279,15 @@ can record them in `metadata.json` (step 5.2) on the next run.
 - CI status (green / running / failed)
 - Merge-train state: not-ready / ready (all approved + green) / merged
 
-When the train fires, it merges product PRs first, bumps the submodule gitlinks on
-the control branch, then merges the control PR last (see
-`templates/ci/conductor-merge-train.*`).
+When the train fires, it merges each product PR with a **merge commit** (squash is
+disabled by guardrail, so the gitlink can be pinned deterministically — GitHub
+`gh pr merge "$pr" --repo "$repo" --merge --delete-branch=false`; GitLab the
+merge-commit method, never `squash=true`), reads that merge commit's SHA
+deterministically (GitHub `gh pr view "$pr" --repo "$repo" --json mergeCommit
+--jq '.mergeCommit.oid'`; GitLab `.merge_commit_sha // .sha`), bumps the submodule
+gitlinks on the control branch to those merge commits, then merges the control PR
+last (see `templates/ci/conductor-merge-train.*`). If a merge-commit SHA comes back
+empty/null, the train echoes a message and `exit 1`s to re-fire.
 
 **Merge order.** The CI honors `metadata.json` `merge_order` when present: the
 listed repos merge first in that left-to-right order, then the alphabetical

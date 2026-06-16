@@ -19,15 +19,21 @@ Verify these files exist in `conductor/`:
 
 ## 2. Tracks Consistency
 
-For each track in `tracks.md`:
-- Verify directory exists: `conductor/tracks/<track_id>/`
+Enumerate tracks from the **source of truth** — each `conductor/tracks/*/metadata.json`
+— never from the derived `tracks.md` index. For each track directory:
 - Verify files: `metadata.json`, `spec.md`, `plan.md`
 - Validate metadata.json has: track_id, type, status, created_at
 
 ## 3. Orphan Detection
 
-- List all directories in `conductor/tracks/`
-- Report any not referenced in `tracks.md`
+- List all directories in `conductor/tracks/`.
+- A directory **missing its `metadata.json`** (no valid track manifest) is a true
+  ❌ orphan — report it (offer cleanup in step 7).
+- A directory **with a valid `metadata.json` but absent from the `tracks.md`
+  generated region** is **not** an orphan — it is **index drift** (the derived
+  index simply hasn't been regenerated). Report it via the Index Drift check
+  (Section 4), fixable by `/conductor-status --regen-index`. Do not flag such a
+  track as an orphan.
 
 ## 4. Index Drift
 
@@ -110,11 +116,13 @@ Reuse the existing orphan/auto-fix scaffolding (step 7) for cleanup offers.
 ## 5c. Team / Shared-Mode Invariants
 
 **Additive, degrade gracefully, and back-compat first.** Resolve sync mode once:
-read `conductor/config.json` `sync_mode`. The lease sweep and the merge-driver
-check below run **only when `sync_mode == "shared"`** (skip silently otherwise);
-the overlapping-`files:` and real-owner checks below also run in monorepo/local
-mode but are no-ops there because lease/owner metadata is absent (no two
-assignees, no lease objects), so they simply pass.
+read `conductor/config.json` `sync_mode`. The lease sweep below runs **only when
+`sync_mode == "shared"`** (skip silently otherwise). The merge-driver check
+(5c.2(c)) runs **whenever `.beads/** merge=ours` is present in `.gitattributes`**
+— i.e. for every full-Beads project (monorepo + polyrepo, local + shared), not
+only shared mode. The overlapping-`files:` and real-owner checks below also run in
+monorepo/local mode but are no-ops there because lease/owner metadata is absent (no
+two assignees, no lease objects), so they simply pass.
 
 Compute `<git-identity>` once for this command: value of `git config user.email`
 (fallback `git config user.name`, else null). Used only to label "your" tracks in
@@ -162,15 +170,19 @@ For each track whose `metadata.json` carries a non-null `lease` object
    `jq '.owner = $id'`) — only when `<git-identity>` is non-null and the track is
    genuinely unowned (never overwrite an existing real owner).
 
-(c) **Shared-mode merge drivers registered.** When `sync_mode == "shared"`,
-   the `merge=ours` driver the `.gitattributes` relies on must be registered, or
-   `.beads/**` and the pinned-state attributes silently mis-resolve on merge.
+(c) **`ours` merge driver registered.** Runs whenever `.beads/** merge=ours` is
+   present in `.gitattributes` (every full-Beads project — monorepo + polyrepo,
+   local + shared), not only shared mode. The `merge=ours` driver the
+   `.gitattributes` relies on must be registered, or git falls back to its default
+   text merge, which injects conflict markers into the Dolt DB files (and, in
+   shared mode, into the pinned per-track state files).
    Check `git config merge.ours.driver`:
-   - Empty/unset → ❌ Error: "Shared mode is enabled but the `ours` merge driver
-     is not registered; `.beads/` and pinned state will be clobbered on merge."
+   - Empty/unset → ❌ Error: "`.beads/** merge=ours` is configured but the `ours`
+     merge driver is not registered; git's default text merge will inject conflict
+     markers into the Dolt DB files (and pinned state in shared mode) on merge."
    - Also verify the expected `.gitattributes` lines exist (the `.beads/** merge=ours`
-     entry and the per-track state-file entries written at setup); report any
-     missing line as a ⚠️ Warning.
+     entry, plus — in shared mode — the per-track state-file entries written at
+     setup); report any missing line as a ⚠️ Warning.
    Offer in step 7 to register it: `git config merge.ours.driver true` (mirrors
    setup's `git config merge.ours.driver >/dev/null 2>&1 || git config merge.ours.driver true`).
 
@@ -218,7 +230,7 @@ Offer to fix auto-fixable issues:
 - Orphan cleanup
 - Stale-lease clears (shared mode — set `lease` to null, key-scoped) [5c.1]
 - Stamp `<git-identity>` as `owner` on a genuinely unowned in-progress track [5c.2(b)]
-- Register the `ours` merge driver in shared mode (`git config merge.ours.driver true`) [5c.2(c)]
+- Register the `ours` merge driver when `.beads/** merge=ours` is present (`git config merge.ours.driver true`) [5c.2(c)]
 - State-file repair: delete corrupted `parallel_state.json`; back up + reconstruct
   corrupted `implement_state.json` (only with confirmation) [5c.3]
 

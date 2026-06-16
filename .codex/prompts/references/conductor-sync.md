@@ -29,10 +29,10 @@ Run before reading/modifying `conductor/` or Beads:
    `parallel_state.json` is **ephemeral** and resolves via the `merge=ours`
    driver (keep our side; it is rebuilt at the next parallel dispatch).
    `implement_state.json` is a **scalar JSON object**, so a line-`union` merge
-   would interleave keys and produce **invalid JSON** — it therefore uses a
-   normal merge (or `merge=ours` when configured); on the rare real conflict,
-   discard the stale side and let the next `/conductor-implement` rebuild it from
-   `plan.md` + Beads. **Never apply `merge=union` to any single-object JSON file.**
+   would interleave keys and produce **invalid JSON** — it stays on a **normal
+   merge** (no `.gitattributes` entry); on the rare real conflict, discard the
+   stale side and let the next `/conductor-implement` rebuild it from `plan.md` +
+   Beads. **Never apply `merge=union` to any single-object JSON file.**
 5. **Spec/plan/manifest conflicts** (`spec.md`, `plan.md`, `repos.json`,
    `config.json`) are surfaced to the user — **never auto-clobber them.** Stop and
    ask how to resolve.
@@ -69,11 +69,12 @@ postamble push after mutation.
    - the track directory `conductor/tracks/<old_id>/` → `conductor/tracks/<new_id>/`;
    - the track branch(es) `track/<old_id>` → `track/<new_id>` (every repo in
      polyrepo mode);
-   - the `tracks.md` row (ID column);
    - `metadata.json` `track_id` (key-scoped jq);
    - the Beads epic title / track-scope label `conductor-track:<old_id>` →
      `conductor-track:<new_id>`.
-   Then re-run the preamble and push again. Never derive the new ID from the
+   Then regenerate the index per `/conductor-status --regen-index` (the derived
+   index is a mirror of `metadata.json`, not an authority — it has no ID column to
+   edit), re-run the preamble, and push again. Never derive the new ID from the
    Beads epic ID.
 
 ## `.gitattributes` (added in shared mode)
@@ -83,17 +84,15 @@ postamble push after mutation.
 .beads/** merge=ours
 # Ephemeral per-track state — rebuilt next dispatch; keep our side, don't conflict
 conductor/tracks/**/parallel_state.json  merge=ours
-# Resume state is a single JSON object — NEVER union (would corrupt JSON);
-# keep our side and let the next /conductor-implement rebuild it on conflict
-conductor/tracks/**/implement_state.json merge=ours
 ```
 
 > **Why not `merge=union`?** `union` concatenates both sides' lines, which is
-> only safe for append-only line logs. `implement_state.json` and
-> `parallel_state.json` are single JSON objects — unioning them interleaves
-> keys/braces into invalid JSON. Use `merge=ours` (or a normal merge) so a
-> conflict is resolved by discarding the stale copy and regenerating, never by
-> blindly splicing.
+> only safe for append-only line logs. `parallel_state.json` and
+> `implement_state.json` are single JSON objects — unioning them interleaves
+> keys/braces into invalid JSON. `parallel_state.json` uses `merge=ours`;
+> `implement_state.json` stays on the **normal merge** (no attribute) — either
+> way a conflict is resolved by discarding the stale copy and regenerating, never
+> by blindly splicing.
 
 These drivers only take effect once registered (see "Driver registration"
 below). Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal

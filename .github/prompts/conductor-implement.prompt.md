@@ -108,7 +108,10 @@ Implement track: the input provided with this command (the text typed after the 
      inline the algorithm here — defer to that mode.
 
 3. **Load Track Context:**
-   - Identify track folder from tracks file link → get `<track_id>`
+   - Resolve `<track_id>` from `the input provided with this command (the text typed after the command name)` (when a track was named) or from the
+     active track selected in step 2 — i.e. the one whose
+     `conductor/tracks/<track_id>/metadata.json` has `status == "in_progress"`.
+     Its `conductor/tracks/<track_id>/` folder is the track folder.
    - Read (using absolute paths):
      - `conductor/tracks/<track_id>/plan.md`
      - `conductor/tracks/<track_id>/spec.md`
@@ -204,16 +207,17 @@ Implement track: the input provided with this command (the text typed after the 
 
    **If exists:**
    - Read state file
-   - **Owner-guard (both modes):** if the file's `owner` is present and differs
-     from the current `<git-identity>` **and** `status` is `in_progress` or
-     `handed_off`:
+   - **Owner-guard (both modes):** only show the take-over prompt when the file's
+     `owner` is **non-null** AND the current `<git-identity>` is **non-null** AND
+     they differ, **and** `status` is `in_progress` or `handed_off`:
      > "⚠️ This track is in progress by <owner>. Take over?"
      > A) Take over - I'll set myself as owner and resume
      > B) Stop - leave it to <owner>
      - If A: proceed (the next state write sets `owner` to your `<git-identity>`).
      - If B: HALT.
-     - If `owner` is absent (legacy state) or matches `<git-identity>`: resume
-       silently.
+     - If `owner` is `null`/absent (legacy or unattributed state), or the current
+       `<git-identity>` is `null`, or `owner` matches `<git-identity>`: resume
+       **silently** (no prompt).
    - Announce: "Resuming implementation from [current_phase] (Phase [current_phase_index + 1]) - Task [current_task_index + 1]"
    - Skip to indicated phase and task within that phase
 

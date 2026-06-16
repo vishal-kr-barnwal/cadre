@@ -9,9 +9,12 @@ Pass arguments through `the input provided with this command (the text typed aft
 ## 0. Mode
 
 If `the input provided with this command (the text typed after the command name)` contains `--for-teammate`, run the **Teammate Handoff** flow in
-section 10 instead of (or in addition to) the rolling `HANDOFF.md` — a goal-first
-prose handoff for another human/agent. Otherwise produce the default rolling
-handoff (sections 1-9). The default (no-arg) output stays byte-identical to today.
+section 10 — a goal-first prose handoff for another human/agent. It writes that
+prose INTO the single rolling `conductor/HANDOFF.md`, REPLACING the machine dump
+(it skips the §4 / §9 machine-dump sections for that write). There is no second
+file. Otherwise produce the default rolling handoff (sections 1-9), which writes
+the single rolling `conductor/HANDOFF.md` with a trimmed `git log -3` and the
+`owner` / `last_updated` fields.
 
 ## 1. Identify Active Track
 - Find track marked `[~]` in `conductor/tracks.md`
@@ -229,8 +232,11 @@ Display:
 
 **Run only when `the input provided with this command (the text typed after the command name)` contains `--for-teammate`.** Produces a goal-first,
 prose handoff aimed at another human or agent picking up the track — derived from
-`spec.md`, not from raw machine dumps. This is in ADDITION to the rolling
-`conductor/HANDOFF.md`; the default (no-arg) output stays byte-identical to today.
+`spec.md`, not from raw machine dumps. It writes this prose INTO the single rolling
+`conductor/HANDOFF.md`, REPLACING the machine dump for that write — skip the §4 /
+§9 machine-dump sections. There is no second file; this is the same
+`conductor/HANDOFF.md` the default flow maintains, just with goal-first prose
+instead of the machine content.
 
 1. **Read the spec:** Load `conductor/tracks/<track_id>/spec.md`. The handoff is
    written from the track's GOAL outward, not from the git history.
@@ -238,8 +244,10 @@ prose handoff aimed at another human or agent picking up the track — derived f
 2. **Compute identity & timestamp:** `<git-identity>` = `git config user.email`
    (fallback `git config user.name`, else null); current `<ISO-8601>` timestamp.
 
-3. **Write prose handoff** to `conductor/HANDOFF.md` (overwrite in place) with
-   these sections, all in plain prose — short paragraphs / tight bullets:
+3. **Write prose handoff** to `conductor/HANDOFF.md` (overwrite in place,
+   REPLACING the machine dump — do NOT run the §4 / §9 machine-dump sections for
+   this write; there is no second file) with these sections, all in plain prose —
+   short paragraphs / tight bullets:
    - **Header:** track id, owner (`<git-identity>`), `last_updated` (`<ISO-8601>`).
    - **Goal:** one-paragraph restatement of what the track is trying to achieve
      (from `spec.md`).
@@ -253,8 +261,9 @@ prose handoff aimed at another human or agent picking up the track — derived f
      at `conductor/workflow.md` rather than inlining commands).
 
 4. **SUPPRESS machine dumps:** in `--for-teammate` mode do NOT include raw
-   `bd show` output, `git log`, or parallel-worker JSON. The teammate handoff is
-   goal-first prose only. (The Beads sync in section 9 still runs as usual.)
+   `bd show` output, `git log`, or parallel-worker JSON, and skip the §4 / §9
+   machine-dump sections entirely. The teammate handoff is goal-first prose only,
+   written into the single rolling `conductor/HANDOFF.md`.
 
 5. **Present:** show the `conductor/HANDOFF.md` location and note that it is a
    teammate-oriented handoff.

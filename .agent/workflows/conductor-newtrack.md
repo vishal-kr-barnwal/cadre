@@ -271,10 +271,12 @@ Create a new track for: the input provided with this command (the text typed aft
    - **Shared mode (`config.json` `sync_mode: "shared"`):** if the publish step in
      §3.0 is later rejected because another machine already pushed this exact
      `track_id` (a push / `bd dolt push` conflict), re-suffix the track — rename the
-     directory, the `track/<track_id>` branch, the `tracks.md` row, the
-     `metadata.json` `track_id`, and the Beads epic title — then re-publish. The
-     detailed rejection-recovery branch lives in `references/conductor-sync.md`
-     (owned by the sync master); this command only needs to honor the re-suffix.
+     track DIRECTORY, the `metadata.json` `track_id` (key-scoped `jq`), the
+     `track/<track_id>` branch(es), and the Beads epic title + `conductor-track:<id>`
+     label — then "regenerate the index per `/conductor-status --regen-index`" and
+     re-publish. The detailed rejection-recovery branch lives in
+     `references/conductor-sync.md` (owned by the sync master); this command only
+     needs to honor the re-suffix.
 
 3. **Ask for Priority:**
    > "What priority should this track have?"

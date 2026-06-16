@@ -511,7 +511,15 @@ greps `## [..] Track:` keeps working unchanged. Use `metadata.json.name` for
      ' "$f" > "$tmp"
    else
      # No markers: keep whole file (if any) as preamble, append a fresh region.
-     { [ -f "$f" ] && cat "$f"; printf '%s\n' "$START"; cat "$bodyf"; printf '%s\n' "$END"; } > "$tmp"
+     # Guard the boundary: if the legacy preamble lacks a trailing newline, emit
+     # one so START is not concatenated onto the last content line.
+     {
+       if [ -f "$f" ]; then
+         cat "$f"
+         [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ] && printf '\n'
+       fi
+       printf '%s\n' "$START"; cat "$bodyf"; printf '%s\n' "$END"
+     } > "$tmp"
    fi
    mv "$tmp" "$f"; rm -f "$bodyf"
    ```
@@ -520,6 +528,11 @@ greps `## [..] Track:` keeps working unchanged. Use `metadata.json.name` for
    skips the old body until it sees `END` (which it prints) and resumes copying the
    trailer — so re-running yields a byte-identical file. (The body is passed via a
    temp file, not `awk -v`, because BSD/macOS `awk` rejects multi-line `-v` values.)
+   In the no-markers branch, `tail -c 1` reads the preamble's final byte: a
+   command-substitution `$(...)` strips a trailing newline, so a non-empty result
+   means the last byte was *not* a newline — emit one separating `\n` before `START`
+   (works on BSD + GNU). Once the markers exist, subsequent runs take the splice
+   branch and stay byte-identical.
 
 3. **Confirm.** Print a one-line summary, e.g.
    `Regenerated conductor/tracks.md index from N tracks' metadata (preamble preserved).`
