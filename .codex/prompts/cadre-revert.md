@@ -115,6 +115,31 @@ over), stop here.
 
 **GOAL: Find ALL actual commits in Git history that correspond to user's confirmed intent.**
 
+0. **Idempotency check — detect an already-reverted target (don't double-apply):**
+   Re-running a revert (e.g. after a crash between the git reverts and the metadata
+   reset, or a user repeating the command) must not stack a second revert on top.
+   Before building the revert list, check whether this target is **already
+   reverted**:
+   - Read `cadre/tracks/<track_id>/metadata.json`. If the target's task SHAs already
+     have a matching `Revert "<message>"` commit later in the relevant repo's history
+     (`git log --grep` for the revert of each SHA), the revert is **already applied —
+     regardless of `metadata.status`.** The Revert commits are the durable git
+     evidence; a prior run may have crashed *after* creating them but *before*
+     resetting `metadata.status` (leaving it `completed`), so gating this check on the
+     status value would miss exactly that crash window and stack a **second** revert
+     (reverting the revert re-applies the original change). Treat `metadata.status` as
+     corroborating, not gating — Phases 3–4 below heal it to the correct final value
+     either way.
+   - If already reverted: announce *"Target '[Description]' appears already reverted
+     (metadata.status=`<status>`, revert commits present); nothing to do."* and ask
+     the user to confirm a **re-revert** (B) Yes / (A) No, default **No**). On **No**,
+     HALT. Only proceed to build a new revert list on explicit confirmation.
+   - If a **partial** prior revert is detected (some SHAs reverted, some not — e.g. a
+     conflict halt left the chain incomplete), do **not** re-revert the already-
+     reverted SHAs: narrow the revert list to only the SHAs lacking a `Revert "..."`
+     commit, then continue. Phases 3–4 still reset metadata/plan/index to the correct
+     final state (so a partial prior run is healed, not duplicated).
+
 1. **Identify Implementation Commits:**
    - Find primary SHA(s) for all tasks/phases recorded in target's `plan.md`
    - **POLYREPO:** for each task, read its `<!-- repo: -->` annotation (absent →
@@ -139,9 +164,18 @@ over), stop here.
    - **IF** reverting entire track:
      - Use `git log -- cadre/tracks.md`
      - Find commit that first introduced `## [ ] Track: <Track Description>` line
-     - Add this "track creation" commit SHA to revert list
-     - **POLYREPO:** the track-creation / tracks.md commit lives in the **control
-       repo** — revert it there, separately from the per-repo product chains.
+     - Add this "track creation" commit SHA to the revert list **to recover any
+       non-derived files it introduced** (e.g. `spec.md`, the initial `plan.md`,
+       `metadata.json`). **Do NOT use this commit to undo the `tracks.md` marker** —
+       `tracks.md` is a **derived cache**, so its marker is fixed by resetting
+       `metadata.status` + `--regen-index` in Phase 4 (Section 5.0 steps 3 & 5), not
+       by git-reverting it. If git-reverting this commit would touch `cadre/tracks.md`,
+       **exclude `cadre/tracks.md` from that revert's pathspec** (or restore it via
+       `--regen-index` afterward) so the derived index is never hand-/git-rewound out
+       of step with the source of truth.
+     - **POLYREPO:** the track-creation commit lives in the **control repo** — revert
+       it there (same `tracks.md` exclusion), separately from the per-repo product
+       chains.
 
 4. **Compile and Analyze Final List:**
    - Create comprehensive list of ALL SHAs to revert
@@ -210,16 +244,67 @@ over), stop here.
      - **Do not reopen Beads tasks** until every repo's chain has completed
        successfully (see Section 7.0).
 
-3. **Verify Plan State:**
-   - After all reverts succeed, read relevant `plan.md` file(s)
+3. **Reset the source of truth (`metadata.json.status`) FIRST:**
+   `metadata.json.status` is the single source of truth; `cadre/tracks.md` is a
+   **derived cache** (step 5). If you only reset `plan.md` markers and leave
+   `metadata.status` at `completed`, the next `/cadre-status --regen-index` will
+   **resurrect the stale `[x]`** and silently erase this revert. So fix metadata
+   here, **before** touching any derived marker.
+   - Read `cadre/tracks/<track_id>/metadata.json`. Compute the correct post-revert
+     status from the set of tasks just reverted vs. those left intact — i.e. after
+     the plan reset in step 4, will any task remain `[x]` (real, un-reverted work
+     survives)?
+     - **Some implementation work survives** the revert (a partial revert — e.g. a
+       single task/phase out of a larger track) → `in_progress`.
+     - **No implementation work survives** (the track is back to a clean slate —
+       e.g. a full-track revert, or the only completed work was reverted) → `new`.
+     - **Never leave it `completed`** after a revert.
+   - Write it with a **key-scoped** jq update (portable BSD + GNU), the same pattern
+     every status-mutating command uses, so only `.status` changes:
+     ```bash
+     META="cadre/tracks/<track_id>/metadata.json"
+     tmp="$(mktemp)"
+     jq --arg s "<new_status>" '.status = $s' "$META" > "$tmp" && mv "$tmp" "$META"
+     ```
+     (`<new_status>` ∈ `in_progress` | `new`, per the rule above.)
+
+4. **Reset `plan.md` markers (consistent with the new `metadata.status`):**
+   - Read the relevant `plan.md` file(s)
    - Ensure reverted item correctly reset:
      - Change `[x]` back to `[ ]` for reverted tasks
      - Change `[~]` back to `[ ]` if reverting in-progress items
      - Remove commit SHAs from reverted task lines
+   - The per-task resets above must agree with the `metadata.status` chosen in step
+     3: if **no** task remains `[x]` after this pass, `metadata.status` must be
+     `new`; if at least one survives, it must be `in_progress`. If they disagree,
+     re-derive step 3 from this post-reset `plan.md` (the plan is authoritative for
+     *which* tasks reverted; metadata is authoritative for the *track* status).
    - If not correct, perform file edit to fix and commit correction
 
-4. **Announce Completion:**
-   > "Revert complete. [Target] has been reverted. Plan is synchronized."
+5. **Rebuild the derived index (`tracks.md`) — never git-revert it directly:**
+   `cadre/tracks.md` is **derived** from `metadata.json.status`. Do **not**
+   git-revert `tracks.md` to undo its marker (Phase 2 already excludes it from the
+   product/code revert chains for this reason). Instead, regenerate it so the cache
+   follows the source of truth you just fixed:
+   - Run the **Regenerate Index** flow: `/cadre-status --regen-index`. It rewrites
+     the `## [<marker>] Track:` line for `<track_id>` from the new
+     `metadata.status` (`in_progress` → `[~]`, `new` → `[ ]`) and is idempotent.
+   - Commit the regenerated `tracks.md` (with the metadata + plan resets) as the
+     plan-sync correction. Because the marker now flows from `metadata.status`, a
+     **later `--regen-index` can no longer resurrect a stale `[x]`.**
+   - **Shared sync mode (`cadre/config.json` `sync_mode == "shared"`):** publish the
+     correction **at this commit site** — run the sync postamble
+     (`references/cadre-sync.md`): `bd dolt push` then
+     `git push <control_remote> <control_branch>` — so the corrected source of truth
+     (`metadata.status`) and regenerated index reach teammates. Do **not** couple this
+     publish to Beads availability: Section 7.0's postamble only covers the Beads task
+     reopen, so if `BEADS_AVAILABLE=false` the metadata/index correction would
+     otherwise sit unpublished. This metadata/index publish must run whenever
+     `sync_mode == "shared"`. Product code stays local.
+
+6. **Announce Completion:**
+   > "Revert complete. [Target] has been reverted. Source of truth
+   > (`metadata.status` → `<new_status>`) and derived index synchronized."
    > "Status markers reset to pending. [X] commits reverted."
 
 ---
