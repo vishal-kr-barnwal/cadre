@@ -7,11 +7,11 @@ description: |
   - Files like `cadre/tracks.md`, `cadre/product.md`, `cadre/workflow.md` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
-  - User invokes `/cadre-*` commands (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula)
+  - User asks for a `cadre-*` workflow (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula)
   - User mentions documentation is outdated or wants to sync context with codebase changes
   - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
   
-  Interoperable across Claude Code and OpenAI Codex CLI.
+  Interoperable across Claude Code and OpenAI Codex.
   Integrates with Beads for persistent task memory across sessions.
 ---
 
@@ -32,7 +32,7 @@ For parallel execution details (annotations, state schema, when to use), see [re
 
 ## Context Loading
 
-Load **lazily**: pull each file only when a command actually needs it, and only
+Load **lazily**: pull each file only when a workflow actually needs it, and only
 once per session. Do **not** eagerly read everything on activation — that scales the
 fixed per-session cost with project age (`patterns.md` in particular grows with team
 history, and a long `tracks.md` is rarely needed in full).
@@ -42,14 +42,14 @@ history, and a long `tracks.md` is rarely needed in full).
 2. `cadre/tech-stack.md` - Technology constraints
 3. `cadre/workflow.md` - Development methodology (TDD, commits)
 
-**Load on demand** (only from the commands that use them):
+**Load on demand** (only from the workflows that use them):
 - `cadre/tracks.md` — current work status; read the **marked index region only**,
-  not the whole file. Status-aware commands (`/cadre-status`, `/cadre-implement`)
+  not the whole file. Status-aware workflows (`cadre-status`, `cadre-implement`)
   resolve status from each track's `metadata.json.status` (the source of truth)
   rather than this derived cache.
 - `cadre/patterns.md` — **codebase patterns; read before starting work**
-  (`/cadre-implement`, `/cadre-newtrack`). Commands that never use it (e.g.
-  `/cadre-release`, `/cadre-flag`, `/cadre-status`) should not load it.
+  (`cadre-implement`, `cadre-newtrack`). Workflows that never use it (e.g.
+  `cadre-release`, `cadre-flag`, `cadre-status`) should not load it.
 
 **Important**: Cadre commits locally but never pushes. Users decide when to push to remote.
 
@@ -78,7 +78,7 @@ Cadre captures and consolidates learnings across tracks. For full details, see [
 
 ## Beads Integration
 
-Beads integration is **always attempted** for persistent task memory. If `bd` CLI is unavailable or fails, the user can choose to continue without it. All cadre commands work normally without Beads.
+Beads integration is **always attempted** for persistent task memory. If `bd` CLI is unavailable or fails, the user can choose to continue without it. All Cadre workflows work normally without Beads.
 
 For full Beads details (availability check, CLI commands, session protocol, chemistry patterns), see [references/beads-integration.md](references/beads-integration.md).
 
@@ -100,8 +100,8 @@ fi
 1. **On new session**: Check for in-progress tracks, offer to resume
 2. **On task completion**: Suggest next task or phase verification
 3. **On blocked detection**: Alert user and suggest alternatives
-4. **On all tasks complete**: Congratulate and walk the ship pipeline — suggest `/cadre-review`, then `/cadre-ship`, then `/cadre-archive` (and `/cadre-release` once enough tracks have shipped)
-5. **On stale context detected**: If setup >2 days old or significant codebase changes detected, suggest `/cadre-refresh`
+4. **On all tasks complete**: Congratulate and walk the ship pipeline — suggest `cadre-review`, then `cadre-ship`, then `cadre-archive` (and `cadre-release` once enough tracks have shipped)
+5. **On stale context detected**: If setup >2 days old or significant codebase changes detected, suggest `cadre-refresh`
 6. **On Beads available**: If `bd` CLI detected during setup, offer integration
 7. **On implement start**: Read `patterns.md` and announce pattern count
 8. **On task complete**: Prompt for learnings capture
@@ -111,56 +111,57 @@ fi
 
 ## Intent Mapping
 
-| User Intent | Command |
+| User Intent | Workflow |
 |-------------|---------|
-| "Set up this project" | `/cadre-setup` |
-| "Create a new feature" | `/cadre-newtrack [desc]` |
-| "Start working" / "Implement" | `/cadre-implement [id]` |
-| "What's the status?" | `/cadre-status` |
-| "Undo that" / "Revert" | `/cadre-revert` |
-| "Check for issues" | `/cadre-validate` |
-| "This is blocked" / "Skip this task" | `/cadre-flag <blocked\|skipped>` |
-| "This needs revision" / "Spec is wrong" | `/cadre-revise` |
-| "Review this" / "Check the diff before merge" | `/cadre-review [track_id]` |
-| "Ship it" / "Open the PR" / "Push the branch" | `/cadre-ship [track_id]` |
-| "Save context" / "Handoff" / "Transfer to next section" | `/cadre-handoff` |
-| "Archive completed" | `/cadre-archive` |
-| "Cut a release" / "Update the changelog" / "Tag a version" | `/cadre-release [bump]` |
-| "Export summary" | `/cadre-status --export` |
-| "Docs are outdated" / "Sync with codebase" | `/cadre-refresh` |
-| "List templates" / "Show formulas" | `/cadre-formula` |
-| "Quick exploration" / "Ephemeral track" | `/cadre-formula wisp [formula]` |
-| "Extract template" / "Create reusable pattern" | `/cadre-formula create [track_id]` |
+| "Set up this project" | `cadre-setup` |
+| "Create a new feature" | `cadre-newtrack [desc]` |
+| "Start working" / "Implement" | `cadre-implement [id]` |
+| "What's the status?" | `cadre-status` |
+| "Undo that" / "Revert" | `cadre-revert` |
+| "Check for issues" | `cadre-validate` |
+| "This is blocked" / "Skip this task" | `cadre-flag <blocked\|skipped>` |
+| "This needs revision" / "Spec is wrong" | `cadre-revise` |
+| "Review this" / "Check the diff before merge" | `cadre-review [track_id]` |
+| "Ship it" / "Open the PR" / "Push the branch" | `cadre-ship [track_id]` |
+| "Save context" / "Handoff" / "Transfer to next section" | `cadre-handoff` |
+| "Archive completed" | `cadre-archive` |
+| "Cut a release" / "Update the changelog" / "Tag a version" | `cadre-release [bump]` |
+| "Export summary" | `cadre-status --export` |
+| "Docs are outdated" / "Sync with codebase" | `cadre-refresh` |
+| "List templates" / "Show formulas" | `cadre-formula` |
+| "Quick exploration" / "Ephemeral track" | `cadre-formula wisp [formula]` |
+| "Extract template" / "Create reusable pattern" | `cadre-formula create [track_id]` |
 
-## Command Execution
+## Workflow Execution
 
-When a user invokes any `/cadre-*` command, **read the corresponding canonical command** for the full step-by-step protocol:
+When a user asks for any `cadre-*` workflow, **read the corresponding workflow protocol** for the full step-by-step protocol:
+Treat text after the workflow name as workflow arguments.
 
-| Command | Full Protocol |
+| Workflow | Full Protocol |
 |---------|---------------|
-| `/cadre-setup` | [../../commands/cadre-setup.md](../../commands/cadre-setup.md) |
-| `/cadre-newtrack` | [../../commands/cadre-newtrack.md](../../commands/cadre-newtrack.md) |
-| `/cadre-implement` | [../../commands/cadre-implement.md](../../commands/cadre-implement.md) |
-| `/cadre-status` | [../../commands/cadre-status.md](../../commands/cadre-status.md) |
-| `/cadre-revert` | [../../commands/cadre-revert.md](../../commands/cadre-revert.md) |
-| `/cadre-validate` | [../../commands/cadre-validate.md](../../commands/cadre-validate.md) |
-| `/cadre-flag` | [../../commands/cadre-flag.md](../../commands/cadre-flag.md) |
-| `/cadre-revise` | [../../commands/cadre-revise.md](../../commands/cadre-revise.md) |
-| `/cadre-review` | [../../commands/cadre-review.md](../../commands/cadre-review.md) |
-| `/cadre-ship` | [../../commands/cadre-ship.md](../../commands/cadre-ship.md) |
-| `/cadre-land` | [../../commands/cadre-land.md](../../commands/cadre-land.md) |
-| `/cadre-archive` | [../../commands/cadre-archive.md](../../commands/cadre-archive.md) |
-| `/cadre-release` | [../../commands/cadre-release.md](../../commands/cadre-release.md) |
-| `/cadre-handoff` | [../../commands/cadre-handoff.md](../../commands/cadre-handoff.md) |
-| `/cadre-refresh` | [../../commands/cadre-refresh.md](../../commands/cadre-refresh.md) |
-| `/cadre-formula` | [../../commands/cadre-formula.md](../../commands/cadre-formula.md) |
+| `cadre-setup` | [protocols/cadre-setup.md](protocols/cadre-setup.md) |
+| `cadre-newtrack` | [protocols/cadre-newtrack.md](protocols/cadre-newtrack.md) |
+| `cadre-implement` | [protocols/cadre-implement.md](protocols/cadre-implement.md) |
+| `cadre-status` | [protocols/cadre-status.md](protocols/cadre-status.md) |
+| `cadre-revert` | [protocols/cadre-revert.md](protocols/cadre-revert.md) |
+| `cadre-validate` | [protocols/cadre-validate.md](protocols/cadre-validate.md) |
+| `cadre-flag` | [protocols/cadre-flag.md](protocols/cadre-flag.md) |
+| `cadre-revise` | [protocols/cadre-revise.md](protocols/cadre-revise.md) |
+| `cadre-review` | [protocols/cadre-review.md](protocols/cadre-review.md) |
+| `cadre-ship` | [protocols/cadre-ship.md](protocols/cadre-ship.md) |
+| `cadre-land` | [protocols/cadre-land.md](protocols/cadre-land.md) |
+| `cadre-archive` | [protocols/cadre-archive.md](protocols/cadre-archive.md) |
+| `cadre-release` | [protocols/cadre-release.md](protocols/cadre-release.md) |
+| `cadre-handoff` | [protocols/cadre-handoff.md](protocols/cadre-handoff.md) |
+| `cadre-refresh` | [protocols/cadre-refresh.md](protocols/cadre-refresh.md) |
+| `cadre-formula` | [protocols/cadre-formula.md](protocols/cadre-formula.md) |
 
-**Important:** Always read the full canonical command before executing. Each file contains the complete protocol with error handling, Beads integration, and user interaction flows.
+**Important:** Always read the full workflow protocol before executing. Each file contains the complete protocol with error handling, Beads integration, and user interaction flows. When a protocol references `references/...`, resolve it against this skill's `references/` directory.
 
 ## References
 
-- **Workflow overview**: [references/workflows.md](references/workflows.md) - Commands table, Beads overview, state files, status markers, parallel execution
-- **Command protocols**: [../../commands/](../../commands/) - Full step-by-step execution details for all 16 commands
+- **Workflow overview**: [references/workflows.md](references/workflows.md) - Workflow table, Beads overview, state files, status markers, parallel execution
+- **Workflow protocols**: [protocols/](protocols/) - Full step-by-step execution details for all 16 workflows
 - **Directory structure**: [references/structure.md](references/structure.md) - File layout and status markers
 - **Beads integration**: [references/beads-integration.md](references/beads-integration.md) - Session protocol, CLI commands, chemistry patterns
 - **Learnings system**: [references/learnings-system.md](references/learnings-system.md) - Ralph-style knowledge capture details

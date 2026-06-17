@@ -1,15 +1,15 @@
 # Install & Version Guide
 
-Cadre ships the same 16 commands to two AI coding tools. This guide
-covers installation for each platform and explains how versioning and command
-generation work.
+Cadre ships the same 16 workflow protocols to Claude Code and OpenAI Codex.
+This guide covers installation for each platform and explains how versioning
+and skill-bundle generation work.
 
 - [Version & compatibility matrix](#version--compatibility-matrix)
 - [Prerequisite: Beads](#prerequisite-beads)
 - [Per-platform installation](#per-platform-installation)
   - [Claude Code](#claude-code)
-  - [OpenAI Codex CLI](#openai-codex-cli)
-- [How commands are generated](#how-commands-are-generated)
+  - [OpenAI Codex](#openai-codex)
+- [How skills are generated](#how-skills-are-generated)
 - [MCP and LSP helpers](#mcp-and-lsp-helpers)
 - [Versioning policy](#versioning-policy)
 
@@ -18,17 +18,17 @@ generation work.
 ## Version & compatibility matrix
 
 Current release: **v2.0.0** — team-scale hardening for 10–20 person teams,
-Claude/Codex-only command surfaces, ownership guards, review sequencing,
+Claude/Codex skill surfaces, ownership guards, review sequencing,
 machine-recorded coverage, and a derived `tracks.md` index.
 
-| Platform | Min. version | Commands directory | Command format | Invoke | Context file | Source of truth |
-|----------|--------------|--------------------|----------------|--------|--------------|-----------------|
-| **Claude Code** | 1.0+ | `.claude/commands/` | Markdown + frontmatter, `$ARGUMENTS` | `/cadre-setup` | `CLAUDE.md` | ✅ canonical |
-| **OpenAI Codex CLI** | custom prompts | `~/.codex/prompts/` | Markdown, `$ARGUMENTS`/`$1`…`$9` | `/cadre-setup` | `AGENTS.md` | generated |
+| Platform | Min. version | Workflow directory | Format | Invoke | Context file | Source of truth |
+|----------|--------------|--------------------|--------|--------|--------------|-----------------|
+| **Claude Code** | 1.0+ | `.claude/skills/` | Agent Skill `SKILL.md` + references | `$cadre`, then `cadre-setup` | `CLAUDE.md` | generated bundle |
+| **OpenAI Codex** | current skills | `.agents/skills/` | Agent Skill `SKILL.md` + references | `$cadre`, then `cadre-setup` | `AGENTS.md` | generated bundle |
 
-> The **Claude Code** `.claude/commands/*.md` files are the single source of
-> truth. The Codex command set is generated from them by
-> [`scripts/generate-commands.sh`](../scripts/generate-commands.sh).
+> The master workflow protocols in `skills/cadre/protocols/cadre-*.md` are the single source of
+> truth. Claude Code and Codex skill bundles are generated from them by
+> [`scripts/generate-skills.sh`](../scripts/generate-skills.sh).
 
 Both platforms operate on the **same** `cadre/` and `.beads/`
 directories, so you can mix tools on one repository (e.g. plan in Codex,
@@ -91,29 +91,32 @@ The manual per-platform steps below do the same copies by hand.
 
 ### Claude Code
 
-Copy the commands and skills into your Claude config.
+Copy the skills into your Claude config.
 
 ```bash
 # Global (every project)
-cp -r .claude/commands/* ~/.claude/commands/
 cp -r .claude/skills/*   ~/.claude/skills/
 
 # Or scope to a single project
-cp -r .claude/commands your-project/.claude/commands
 cp -r .claude/skills   your-project/.claude/skills
 ```
 
-Context lives in `CLAUDE.md`. Invoke with `/cadre-setup`,
-`/cadre-newtrack`, etc.
+Context lives in `CLAUDE.md`. Invoke explicitly with `$cadre`, or ask for
+`cadre-setup`, `cadre-newtrack`, etc.
 
-### OpenAI Codex CLI
+### OpenAI Codex
 
-Codex loads custom prompts from your Codex home directory (they are **global**,
-not per-repo). Copy the generated prompt files there:
+Codex reads repo-scoped skills from `.agents/skills` and user-scoped skills from
+`~/.agents/skills`.
 
 ```bash
-mkdir -p ~/.codex/prompts
-cp -r .codex/prompts/* ~/.codex/prompts/
+# Project install
+mkdir -p your-project/.agents/skills
+cp -r .agents/skills/. your-project/.agents/skills/
+
+# Or global install for your user
+mkdir -p ~/.agents/skills
+cp -r .agents/skills/. ~/.agents/skills/
 ```
 
 Add Cadre context to your project so Codex knows the conventions. Copy the
@@ -124,37 +127,32 @@ relevant sections):
 cp AGENTS.md your-project/AGENTS.md
 ```
 
-Invoke from the Codex slash menu: type `/` then `cadre-setup` (or
-`/prompts:cadre-setup`). Codex expands `$ARGUMENTS` and `$1`…`$9`, so
-`/cadre-newtrack Add OAuth login` passes the description through.
-
-> **Note:** OpenAI marks custom prompts as deprecated in favor of Skills, but
-> they remain fully supported. If you prefer Skills, the same Markdown bodies
-> can be dropped into a Codex skill.
+Invoke explicitly with `$cadre`, or ask naturally for `cadre-setup`,
+`cadre-newtrack Add OAuth login`, and so on. The Cadre skill routes the request
+to the master protocol in `skills/cadre/protocols/`.
 
 ---
 
-## How commands are generated
+## How skills are generated
 
-The Codex command set is **generated** from the canonical Claude Code commands
-in `.claude/commands/cadre-*.md` by:
+Claude Code and Codex skill bundles are **generated** from the
+master workflow protocols in `skills/cadre/protocols/cadre-*.md` by:
 
 ```bash
-bash scripts/generate-commands.sh
+bash scripts/generate-skills.sh
 ```
 
-This reads each Claude command's frontmatter and body and emits the
-Codex-specific variant:
+This reads each master protocol's frontmatter and body, then emits
+platform-specific skill bundles:
 
-| Transform | Codex |
-|-----------|-------|
-| Frontmatter | none |
-| `$ARGUMENTS` | kept (native) |
-| Worker-dispatch sentence | `worker` agent type |
-| `references/beads-error-handler.md` (agnostic) | copied verbatim |
-| `references/parallel-execution.md`, `template-locator.md` (sliced) | only Codex's section |
-| `templates/` bundle | copied into `templates/` |
-| File extension | `.md` |
+| Transform | Claude Code | Codex |
+|-----------|-------------|-------|
+| Protocol bodies | generated into `.claude/skills/cadre/protocols/` | generated into `.agents/skills/cadre/protocols/` |
+| Frontmatter | preserved | skill metadata lives in `SKILL.md` |
+| Worker-dispatch reference | `Task` tool | `worker` agent type |
+| `references/beads-error-handler.md` (agnostic) | skill reference | copied into `.agents/skills/cadre/references/` |
+| `references/parallel-execution.md`, `template-locator.md` (sliced) | only Claude's section | only Codex's section |
+| `templates/` bundle | copied into `.claude/skills/cadre/templates/` | copied into `.agents/skills/cadre/templates/` |
 
 ### Per-agent slicing (token optimization)
 
@@ -170,30 +168,30 @@ substituted per platform. Edit the masters in `scripts/agent-refs/`
 
 `cadre-setup` copies starter files (`workflow.md`, `code_styleguides/`, …)
 into your project. Those live in the canonical `templates/` directory, and the
-generator bundles a copy into the Codex command set at
-`.codex/prompts/templates/` — plus the Claude skill at
+generator bundles a copy into the Codex skill at
+`.agents/skills/cadre/templates/` — plus the Claude skill at
 `.claude/skills/cadre/templates/`. Because each platform's install command
-copies its whole directory, the templates ship with the commands.
+copies its whole directory, the templates ship with the workflow.
 
 `cadre-setup` then **discovers** the templates directory at runtime by
-probing those install locations (and `~/.codex/prompts/templates/` for Codex's
-global prompts), so it works regardless of which tool or install scope you use.
+probing those install locations (including `~/.agents/skills/cadre/templates/`
+for global Codex skills), so it works regardless of which tool or install scope you use.
 Edit templates only in the canonical `templates/` directory and regenerate.
 
 Generated files carry an `AUTO-GENERATED` marker. **Do not hand-edit them** —
-edit the Claude command and regenerate. To verify the committed output is in
+edit the master protocol in `skills/cadre/protocols/` and regenerate. To verify the committed output is in
 sync (e.g. in CI):
 
 ```bash
-bash scripts/generate-commands.sh --check
+bash scripts/generate-skills.sh --check
 ```
 
 This exits non-zero if any generated file is stale.
 
 A ready-made drift gate ships at
 `templates/ci/cadre-monorepo-check.{github,gitlab}.yml` — drop the one for
-your CI into place and it runs `generate-commands.sh --check` (plus `bash -n` on
-the command scripts) on every PR. The `templates/` directory now includes a
+your CI into place and it runs `generate-skills.sh --check` (plus `bash -n` on
+the generator and installer scripts) on every PR. The `templates/` directory now includes a
 `ci/` subdirectory carrying both this monorepo-check and the polyrepo
 merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
 
@@ -209,7 +207,7 @@ deterministic agent integrations:
   index regeneration.
 - `<TEMPLATES_DIR>/scripts/cadre-lsp-setup.js` scans a project, recommends
   language servers, detects missing server commands, and appends `cadre/lsp.json`
-  entries during `/cadre-setup` or `/cadre-refresh --lsp`.
+  entries during `cadre-setup` or `cadre-refresh --lsp`.
 - `<TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<id>
   --json` runs a best-effort LSP reference scan when `cadre/lsp.json` configures
   language servers.
@@ -226,14 +224,14 @@ recorded in the [Changelog](../CHANGELOG.md).
 
 | Bump | When |
 |------|------|
-| **Major** (`x.0.0`) | Breaking changes to the `cadre/` directory layout, command behavior, or Beads schema that require migration. |
-| **Minor** (`0.x.0`) | New commands, new platform support, or new opt-in features. Backward compatible. |
+| **Major** (`x.0.0`) | Breaking changes to the `cadre/` directory layout, workflow behavior, or Beads schema that require migration. |
+| **Minor** (`0.x.0`) | New workflows, new platform support, or new opt-in features. Backward compatible. |
 | **Patch** (`0.0.x`) | Bug fixes and documentation. |
 
-When adding or changing a command:
+When adding or changing a workflow protocol:
 
-1. Edit the canonical Claude command in `.claude/commands/`.
-2. Run `bash scripts/generate-commands.sh` to regenerate the Codex command set.
+1. Edit the master protocol in `skills/cadre/protocols/`.
+2. Run `bash scripts/generate-skills.sh` to regenerate skill bundles.
 3. Bump the version in `README.md`.
 4. Note the change in the README "What's New" section.
 

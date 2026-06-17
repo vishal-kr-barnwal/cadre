@@ -11,7 +11,7 @@ cadre/
 ├── tracks.md               # Master track list with status markers
 ├── patterns.md             # Consolidated learnings from all tracks (Ralph-style)
 ├── setup_state.json        # Setup progress tracking
-├── refresh_state.json      # Context refresh tracking (created by /cadre-refresh)
+├── refresh_state.json      # Context refresh tracking (created by cadre-refresh)
 ├── beads.json              # Beads integration config (created by setup)
 ├── code_styleguides/       # Language-specific style guides
 ├── archive/                # Archived completed tracks
@@ -31,12 +31,12 @@ cadre/
 
 ## Topology: Monorepo vs Polyrepo
 
-Cadre runs in one of two topologies, decided at `/cadre-setup`:
+Cadre runs in one of two topologies, decided at `cadre-setup`:
 
 - **Monorepo (default).** No `cadre/repos.json`. The repo root is the single
   working tree; every track is one `track/<id>` branch; the structure above
   applies as-is. This is fully backward compatible — absent `repos.json`, every
-  command behaves exactly as before.
+  workflow behaves exactly as before.
 - **Polyrepo.** A `cadre/repos.json` with `"mode": "polyrepo"` exists. The
   current repo is a **control repo** that holds `cadre/`, `.beads/`,
   `.gitmodules`, and the merge-train CI. Product code lives in **git submodules**
@@ -51,7 +51,7 @@ control-repo/                 # polyrepo control plane
 │   └── ... (tracks.md, tracks/<id>/*, etc. as above)
 ├── .beads/                   # single shared Dolt task graph for ALL repos
 ├── .gitmodules               # authoritative path+URL for each product repo
-├── .github/workflows/cadre-merge-train.yml   # (github) cross-repo merge train
+├── .github/workflowscadre-merge-train.yml   # (github) cross-repo merge train
 │   └── (or .gitlab-ci.yml for gitlab)
 ├── repos/<name>/             # product repo as a submodule
 └── .worktrees/<track_id>/<repo>/   # per-repo track worktree
@@ -126,7 +126,7 @@ Plan.md can include annotations for parallel task execution:
 ## Cross-platform compatibility
 
 The same `cadre/` structure is used by every supported tool — Claude Code and
-OpenAI Codex CLI — and both of them invoke the same command name (e.g.
-`/cadre-setup`, `/cadre-newtrack`, `/cadre-implement`). Files, workflows, and
+OpenAI Codex — and both of them use the same workflow names (e.g.
+`cadre-setup`, `cadre-newtrack`, `cadre-implement`). Files, workflows, and
 state management are fully compatible across tools, so you can mix them on one
 repo.

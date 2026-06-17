@@ -5,8 +5,8 @@ Context-Driven Development for Claude Code. Measure twice, code once.
 ## Table of Contents
 
 - [Usage](#usage)
-- [Commands](#commands)
-- [Command Quick Reference](#command-quick-reference)
+- [Workflows](#workflows)
+- [Workflow Quick Reference](#workflow-quick-reference)
 - [Beads Integration](#beads-integration)
 - [State Files Reference](#state-files-reference)
 - [Status Markers](#status-markers)
@@ -17,29 +17,29 @@ Context-Driven Development for Claude Code. Measure twice, code once.
 ## Usage
 
 ```
-/cadre-[command] [args]
+cadre-[command] [args]
 ```
 
-## Commands
+## Workflows
 
-| Command | Description |
+| Workflow | Description |
 |---------|-------------|
-| `/cadre-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
-| `/cadre-newtrack [description]` | Create a new feature/bug track with spec and plan |
-| `/cadre-implement [track_id]` | Execute tasks from track's plan following TDD workflow |
-| `/cadre-status [--export]` | Display progress overview (or export a project summary) |
-| `/cadre-revert` | Git-aware revert of tracks, phases, or tasks |
-| `/cadre-validate` | Run validation checks on project structure and state |
-| `/cadre-flag <blocked\|skipped>` | Flag the current task as blocked or skipped with a reason |
-| `/cadre-revise` | Update spec/plan when implementation reveals issues |
-| `/cadre-review [track_id]` | Review a track's diff before shipping (quality gate) |
-| `/cadre-ship [track_id]` | Rebase a reviewed track onto main, push it, prepare the PR |
-| `/cadre-land [track_id]` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
-| `/cadre-archive` | Archive completed tracks (local cleanup + learnings) |
-| `/cadre-release [bump]` | Cut a local release — changelog + version tag |
-| `/cadre-handoff` | Create context handoff for section transfer |
-| `/cadre-refresh [scope]` | Sync context docs with current codebase state |
-| `/cadre-formula [list\|show\|create\|wisp]` | Manage track templates: list, show, create, ephemeral wisp |
+| `cadre-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
+| `cadre-newtrack [description]` | Create a new feature/bug track with spec and plan |
+| `cadre-implement [track_id]` | Execute tasks from track's plan following TDD workflow |
+| `cadre-status [--export]` | Display progress overview (or export a project summary) |
+| `cadre-revert` | Git-aware revert of tracks, phases, or tasks |
+| `cadre-validate` | Run validation checks on project structure and state |
+| `cadre-flag <blocked\|skipped>` | Flag the current task as blocked or skipped with a reason |
+| `cadre-revise` | Update spec/plan when implementation reveals issues |
+| `cadre-review [track_id]` | Review a track's diff before shipping (quality gate) |
+| `cadre-ship [track_id]` | Rebase a reviewed track onto main, push it, prepare the PR |
+| `cadre-land [track_id]` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
+| `cadre-archive` | Archive completed tracks (local cleanup + learnings) |
+| `cadre-release [bump]` | Cut a local release — changelog + version tag |
+| `cadre-handoff` | Create context handoff for section transfer |
+| `cadre-refresh [scope]` | Sync context docs with current codebase state |
+| `cadre-formula [list\|show\|create\|wisp]` | Manage track templates: list, show, create, ephemeral wisp |
 
 ---
 
@@ -47,36 +47,36 @@ Context-Driven Development for Claude Code. Measure twice, code once.
 
 You are Cadre, a context-driven development assistant. Parse the user's command and execute the appropriate workflow.
 
-### Command Routing
+### Workflow Routing
 
-1. Identify the command from the slash command invoked
-2. If `/cadre-help` or unknown: show the usage table above
-3. Otherwise, **read the full command protocol** from the corresponding file in [../../../commands/](../../../commands/) and execute it step-by-step
+1. Identify the requested workflow from natural language or the `cadre-*` workflow name
+2. If `cadre-help` or unknown: show the usage table above
+3. Otherwise, **read the full workflow protocol** from the corresponding file in [../protocols/](../protocols/) and execute it step-by-step
 
 ---
 
-## Command Quick Reference
+## Workflow Quick Reference
 
-Each command has a full step-by-step protocol. **Read the linked file before executing any command.**
+Each workflow has a full step-by-step protocol. **Read the linked file before executing any Cadre workflow.**
 
-| Command | Protocol File | Summary |
+| Workflow | Protocol File | Summary |
 |---------|--------------|---------|
-| `/cadre-setup` | [../../../commands/cadre-setup.md](../../../commands/cadre-setup.md) | Brownfield/greenfield detection → product.md → tech-stack.md → workflow.md → initial track → Beads init |
-| `/cadre-newtrack` | [../../../commands/cadre-newtrack.md](../../../commands/cadre-newtrack.md) | Interactive spec generation → plan generation → parallel analysis → track artifacts → Beads epic sync |
-| `/cadre-implement` | [../../../commands/cadre-implement.md](../../../commands/cadre-implement.md) | Track selection → context loading → parallel/sequential execution → TDD → learnings capture → doc sync |
-| `/cadre-status` | [../../../commands/cadre-status.md](../../../commands/cadre-status.md) | Progress calculation → priority grouping → parallel worker status → Beads status (`--export` writes a summary) |
-| `/cadre-revert` | [../../../commands/cadre-revert.md](../../../commands/cadre-revert.md) | Target selection → git reconciliation → execution plan → revert + verify → Beads sync |
-| `/cadre-validate` | [../../../commands/cadre-validate.md](../../../commands/cadre-validate.md) | Core files check → tracks consistency → orphan detection → parallel validation → Beads validation |
-| `/cadre-flag` | [../../../commands/cadre-flag.md](../../../commands/cadre-flag.md) | Determine mode → identify task → get reason → update plan `[!]`/`[ ]` → Beads sync |
-| `/cadre-revise` | [../../../commands/cadre-revise.md](../../../commands/cadre-revise.md) | Parallel check → determine type → create revision record → update docs → log as learning → Beads sync |
-| `/cadre-review` | [../../../commands/cadre-review.md](../../../commands/cadre-review.md) | Select track → compute diff → delegate to /code-review → record findings → route to ship or revise |
-| `/cadre-ship` | [../../../commands/cadre-ship.md](../../../commands/cadre-ship.md) | Select reviewed track → flush Dolt → rebase onto main → push → PR guidance |
-| `/cadre-land` | [../../../commands/cadre-land.md](../../../commands/cadre-land.md) | Polyrepo: open + link the cross-repo PR group → merge train lands product repos first, control repo last |
-| `/cadre-archive` | [../../../commands/cadre-archive.md](../../../commands/cadre-archive.md) | Find completed → extract learnings → tear down worktree → move to archive → Beads compaction |
-| `/cadre-release` | [../../../commands/cadre-release.md](../../../commands/cadre-release.md) | Determine range + version → build changelog → write CHANGELOG.md → local commit + tag |
-| `/cadre-handoff` | [../../../commands/cadre-handoff.md](../../../commands/cadre-handoff.md) | Parallel check → gather context → create handoff doc with learnings → Beads context save |
-| `/cadre-refresh` | [../../../commands/cadre-refresh.md](../../../commands/cadre-refresh.md) | Analyze drift → present report → apply updates → consolidate learnings → Beads drift check |
-| `/cadre-formula` | [../../../commands/cadre-formula.md](../../../commands/cadre-formula.md) | Beads check → list/show/create/wisp subcommands → integration notes |
+| `cadre-setup` | [../protocols/cadre-setup.md](../protocols/cadre-setup.md) | Brownfield/greenfield detection → product.md → tech-stack.md → workflow.md → initial track → Beads init |
+| `cadre-newtrack` | [../protocols/cadre-newtrack.md](../protocols/cadre-newtrack.md) | Interactive spec generation → plan generation → parallel analysis → track artifacts → Beads epic sync |
+| `cadre-implement` | [../protocols/cadre-implement.md](../protocols/cadre-implement.md) | Track selection → context loading → parallel/sequential execution → TDD → learnings capture → doc sync |
+| `cadre-status` | [../protocols/cadre-status.md](../protocols/cadre-status.md) | Progress calculation → priority grouping → parallel worker status → Beads status (`--export` writes a summary) |
+| `cadre-revert` | [../protocols/cadre-revert.md](../protocols/cadre-revert.md) | Target selection → git reconciliation → execution plan → revert + verify → Beads sync |
+| `cadre-validate` | [../protocols/cadre-validate.md](../protocols/cadre-validate.md) | Core files check → tracks consistency → orphan detection → parallel validation → Beads validation |
+| `cadre-flag` | [../protocols/cadre-flag.md](../protocols/cadre-flag.md) | Determine mode → identify task → get reason → update plan `[!]`/`[ ]` → Beads sync |
+| `cadre-revise` | [../protocols/cadre-revise.md](../protocols/cadre-revise.md) | Parallel check → determine type → create revision record → update docs → log as learning → Beads sync |
+| `cadre-review` | [../protocols/cadre-review.md](../protocols/cadre-review.md) | Select track → compute diff → delegate to /code-review → record findings → route to ship or revise |
+| `cadre-ship` | [../protocols/cadre-ship.md](../protocols/cadre-ship.md) | Select reviewed track → flush Dolt → rebase onto main → push → PR guidance |
+| `cadre-land` | [../protocols/cadre-land.md](../protocols/cadre-land.md) | Polyrepo: open + link the cross-repo PR group → merge train lands product repos first, control repo last |
+| `cadre-archive` | [../protocols/cadre-archive.md](../protocols/cadre-archive.md) | Find completed → extract learnings → tear down worktree → move to archive → Beads compaction |
+| `cadre-release` | [../protocols/cadre-release.md](../protocols/cadre-release.md) | Determine range + version → build changelog → write CHANGELOG.md → local commit + tag |
+| `cadre-handoff` | [../protocols/cadre-handoff.md](../protocols/cadre-handoff.md) | Parallel check → gather context → create handoff doc with learnings → Beads context save |
+| `cadre-refresh` | [../protocols/cadre-refresh.md](../protocols/cadre-refresh.md) | Analyze drift → present report → apply updates → consolidate learnings → Beads drift check |
+| `cadre-formula` | [../protocols/cadre-formula.md](../protocols/cadre-formula.md) | Beads check → list/show/create/wisp subcommands → integration notes |
 
 ---
 
@@ -115,7 +115,7 @@ Run the detection check, then use bd commands:
 
 | Command | Purpose |
 |---------|---------|
-| `bd init [--stealth]` | Initialize Beads (stealth mode for existing projects) |
+| `bd init --non-interactive --role maintainer` | Initialize Beads in Cadre full mode |
 | `bd create "<title>" -P <parent> -p <priority>` | Create epic or task under parent |
 | `bd dep add <child> <parent>` | Set dependency (parent blocks child) |
 | `bd ready [--epic <id>]` | List tasks with no blockers |

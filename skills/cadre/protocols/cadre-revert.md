@@ -1,0 +1,365 @@
+---
+description: Git-aware revert of tracks, phases, or tasks
+---
+
+<!-- 
+SYSTEM DIRECTIVE: You are an AI agent for the Cadre framework serving as a Git-aware assistant for reverting work.
+CRITICAL: Validate every tool call. If any fails, halt and announce the failure.
+CRITICAL: User's explicit confirmation is required at multiple checkpoints.
+-->
+
+# Cadre Revert
+
+Revert Cadre work using the workflow arguments.
+
+**Scope:** Revert logical units of work tracked by Cadre (Tracks, Phases, Tasks) by investigating Git history and finding all associated commits.
+
+---
+
+## 1.0 SETUP CHECK
+
+**PROTOCOL: Verify project is properly set up before proceeding.**
+
+1. **Verify Tracks File:** Check if `cadre/tracks.md` exists
+   - If NOT exists: HALT and instruct: "The project has not been set up or `cadre/tracks.md` is corrupted. Please run `cadre-setup` or restore the file."
+
+2. **Verify Track Content:** Check if `cadre/tracks.md` is not empty
+   - If empty: HALT with same message as above
+
+3. **Topology check:** Read `cadre/repos.json`. If absent or `mode` ≠
+   `"polyrepo"` → monorepo mode; every step behaves as today. If
+   `mode == "polyrepo"` → reverts are **per-repo chains** (see
+   `references/polyrepo-git.md`): each recorded SHA belongs to the repo named by
+   its task's `<!-- repo: -->` annotation, and reverts run inside that repo. This
+   is the highest-risk polyrepo operation — group by repo, revert reverse-order
+   within each repo, and **halt on the first conflict in any repo.** If
+   `config.json` `sync_mode == "shared"`, run the sync preamble first.
+
+---
+
+## 2.0 PHASE 1: INTERACTIVE TARGET SELECTION & CONFIRMATION
+
+**GOAL: Guide user to clearly identify and confirm the logical unit to revert before analysis begins.**
+
+1. **Initiate Revert Process:** Determine user's target.
+
+2. **Check for User-Provided Target:**
+   - **IF target provided** (e.g., `cadre-revert track <track_id>`): → **PATH A: Direct Confirmation**
+   - **IF NO target provided**: → **PATH B: Guided Selection Menu** (default)
+
+3. **Interaction Paths:**
+
+   ### PATH A: Direct Confirmation
+
+   1. Find the specific track, phase, or task in `tracks.md` or relevant `plan.md`
+   2. Ask for confirmation:
+      > "You asked to revert the [Track/Phase/Task]: '[Description]'. Is this correct?"
+      > A) Yes
+      > B) No
+   3. If "Yes": Establish as `target_intent` → Proceed to Phase 2
+   4. If "No": Ask clarifying questions to find correct item
+
+   ### PATH B: Guided Selection Menu
+
+   1. **Identify Revert Candidates:**
+      - **Scan All Plans:** Read `cadre/tracks.md` AND every `cadre/tracks/*/plan.md`
+      - **Prioritize In-Progress:** Find ALL Tracks, Phases, Tasks marked `[~]`
+      - **Fallback to Completed:** If NO in-progress items found, find 5 most recently completed (`[x]`)
+
+   2. **Present Unified Hierarchical Menu:**
+
+      **Example when in-progress items found:**
+      > "I found multiple in-progress items. Please choose which to revert:"
+      >
+      > Track: track_20251208_user_profile
+      >   1) [Phase] Implement Backend API
+      >   2) [Task] Update user model
+      >
+      > 3) A different Track, Task, or Phase.
+
+      **Example when showing recently completed:**
+      > "No items are in progress. Please choose a recently completed item to revert:"
+      >
+      > Track: track_20251208_user_profile
+      >   1) [Phase] Foundational Setup
+      >   2) [Task] Initialize React application
+      >
+      > Track: track_20251208_auth_ui
+      >   3) [Task] Create login form
+      >
+      > 4) A different Track, Task, or Phase.
+
+   3. **Process User's Choice:**
+      - If numbered selection (1, 2, 3...): Set as `target_intent` → Proceed to Phase 2
+      - If "different" option or unclear: Engage in dialogue:
+        - "What is the name or ID of the track you're looking for?"
+        - "Can you describe the task you want to revert?"
+        - Once identified, loop back to PATH A for final confirmation
+
+4. **Halt on Failure:** If no items found to present, announce and halt.
+
+---
+
+## 2.5 OWNERSHIP GUARD
+
+Once the target track is known (and **before** any git reconciliation or revert),
+run the **Ownership Guard** (`references/ownership-guard.md`) for that track.
+Reverting rewinds commits another agent may be building on and resets plan markers,
+so this is the highest-impact place to avoid clobbering a teammate's in-flight work
+— including in the default monorepo topology, where the advisory `lease` is a no-op.
+If the guard halts (the track is held by someone else and the user chose not to take
+over), stop here.
+
+---
+
+## 3.0 PHASE 2: GIT RECONCILIATION & VERIFICATION
+
+**GOAL: Find ALL actual commits in Git history that correspond to user's confirmed intent.**
+
+0. **Idempotency check — detect an already-reverted target (don't double-apply):**
+   Re-running a revert (e.g. after a crash between the git reverts and the metadata
+   reset, or a user repeating the command) must not stack a second revert on top.
+   Before building the revert list, check whether this target is **already
+   reverted**:
+   - Read `cadre/tracks/<track_id>/metadata.json`. If the target's task SHAs already
+     have a matching `Revert "<message>"` commit later in the relevant repo's history
+     (`git log --grep` for the revert of each SHA), the revert is **already applied —
+     regardless of `metadata.status`.** The Revert commits are the durable git
+     evidence; a prior run may have crashed *after* creating them but *before*
+     resetting `metadata.status` (leaving it `completed`), so gating this check on the
+     status value would miss exactly that crash window and stack a **second** revert
+     (reverting the revert re-applies the original change). Treat `metadata.status` as
+     corroborating, not gating — Phases 3–4 below heal it to the correct final value
+     either way.
+   - If already reverted: announce *"Target '[Description]' appears already reverted
+     (metadata.status=`<status>`, revert commits present); nothing to do."* and ask
+     the user to confirm a **re-revert** (B) Yes / (A) No, default **No**). On **No**,
+     HALT. Only proceed to build a new revert list on explicit confirmation.
+   - If a **partial** prior revert is detected (some SHAs reverted, some not — e.g. a
+     conflict halt left the chain incomplete), do **not** re-revert the already-
+     reverted SHAs: narrow the revert list to only the SHAs lacking a `Revert "..."`
+     commit, then continue. Phases 3–4 still reset metadata/plan/index to the correct
+     final state (so a partial prior run is healed, not duplicated).
+
+1. **Identify Implementation Commits:**
+   - Find primary SHA(s) for all tasks/phases recorded in target's `plan.md`
+   - **POLYREPO:** for each task, read its `<!-- repo: -->` annotation (absent →
+     `default_repo`) and tag the SHA with that repo. A multi-repo task records
+     `repo:sha` pairs (`api:abc1234 web:def5678`) — split them per repo. Search
+     for each SHA in **that repo's** history (`git -C <submodule_path> cat-file -t <sha>`),
+     not the control repo. Build a **per-repo SHA list**.
+
+   **Handle "Ghost" Commits (Rewritten History):**
+   - If SHA from plan is NOT found in Git (in its repo for polyrepo):
+     - Announce this to user
+     - Search Git log (the relevant repo) for commit with highly similar message
+     - Ask user to confirm it as the replacement
+     - If not confirmed, HALT
+
+2. **Identify Associated Plan-Update Commits:**
+   - For each validated implementation commit:
+     - Use `git log` to find corresponding plan-update commit that happened *after* it
+     - Look for commits that modified the relevant `plan.md` file
+
+3. **Identify Track Creation Commit (Track Revert Only):**
+   - **IF** reverting entire track:
+     - Use `git log -- cadre/tracks.md`
+     - Find commit that first introduced `## [ ] Track: <Track Description>` line
+     - Add this "track creation" commit SHA to the revert list **to recover any
+       non-derived files it introduced** (e.g. `spec.md`, the initial `plan.md`,
+       `metadata.json`). **Do NOT use this commit to undo the `tracks.md` marker** —
+       `tracks.md` is a **derived cache**, so its marker is fixed by resetting
+       `metadata.status` + `--regen-index` in Phase 4 (Section 5.0 steps 3 & 5), not
+       by git-reverting it. If git-reverting this commit would touch `cadre/tracks.md`,
+       **exclude `cadre/tracks.md` from that revert's pathspec** (or restore it via
+       `--regen-index` afterward) so the derived index is never hand-/git-rewound out
+       of step with the source of truth.
+     - **POLYREPO:** the track-creation commit lives in the **control repo** — revert
+       it there (same `tracks.md` exclusion), separately from the per-repo product
+       chains.
+
+4. **Compile and Analyze Final List:**
+   - Create comprehensive list of ALL SHAs to revert
+   - For each commit, check for:
+     - Merge commits (warn user)
+     - Cherry-pick duplicates (warn user)
+
+---
+
+## 4.0 PHASE 3: FINAL EXECUTION PLAN CONFIRMATION
+
+**GOAL: Present clear, final plan before modifying anything.**
+
+1. **Summarize Findings:**
+   > "I have analyzed your request. Here is the plan:"
+   > * **Target:** Revert [Task/Phase/Track] '[Description]'
+   > * **Commits to Revert:** [count]
+   >   - `<sha_code_commit>` ('feat: Add user profile')
+   >   - `<sha_plan_commit>` ('cadre(plan): Mark task complete')
+   > * **Action:** I will run `git revert` on these commits in reverse order.
+   - **POLYREPO:** present the commits **grouped by repo**, plus the control-repo
+     commits separately, so the user sees exactly what reverts where. Make clear
+     each repo reverts independently and a conflict in one repo halts the whole
+     operation (already-reverted repos stay reverted):
+     > * **repo `api`:** `<sha>` ('feat: login endpoint')
+     > * **repo `web`:** `<sha>` ('feat: login form')
+     > * **control repo:** `<sha>` ('cadre(plan): mark complete'), `<sha>` (track creation)
+
+2. **Final Go/No-Go:**
+   > "**Do you want to proceed?**"
+   > A) Yes
+   > B) No
+
+3. **Handle Response:**
+   - If "Yes": Proceed to Phase 4
+   - If "No": Ask clarifying questions to get correct revert plan
+
+---
+
+## 5.0 PHASE 4: EXECUTION & VERIFICATION
+
+**GOAL: Execute revert, verify plan state, handle errors gracefully.**
+
+1. **Execute Reverts:**
+   - **MONOREPO:** revert on the **track's own branch**, not whatever happens to be
+     checked out. Resolve `git_branch` from `metadata.json` (default
+     `track/<track_id>`) and check it out (or operate in its worktree) first, so the
+     revert commits land on the track branch:
+     ```bash
+     BRANCH="$(jq -r '.git_branch // "track/<track_id>"' cadre/tracks/<track_id>/metadata.json)"
+     git rev-parse --verify "$BRANCH" >/dev/null 2>&1 && git checkout "$BRANCH"
+     ```
+     Then run `git revert --no-edit <sha>` for each commit, most recent first,
+     working backward. (If the branch no longer exists — e.g. a shipped+deleted
+     track — confirm the intended target with the user before reverting on HEAD.)
+   - **POLYREPO — per-repo chains (see `references/polyrepo-git.md`):** process one
+     repo at a time. Within each repo, revert its SHAs reverse-chronologically:
+     ```bash
+     git -C <submodule_path> revert --no-edit <sha>   # newest first, per repo
+     ```
+     After all product repos succeed, revert the **control-repo** commits
+     (plan-update + track-creation) in the control repo. **Never interleave repos**
+     — finish one repo's chain before starting the next.
+
+2. **Handle Conflicts:**
+   - If revert fails due to merge conflict:
+     - **HALT immediately — do NOT continue to any other repo.** Already-reverted
+       repos stay reverted; report exactly which repo halted and what remains.
+     - Show conflicting files (and the repo, in polyrepo mode)
+     - Provide clear instructions:
+       > "Merge conflict detected in repo `<repo>`: [files]"
+       > "Options:"
+       > 1. Resolve manually and run `git -C <submodule_path> revert --continue`
+       > 2. Abort with `git -C <submodule_path> revert --abort`
+     - **Do not reopen Beads tasks** until every repo's chain has completed
+       successfully (see Section 7.0).
+
+3. **Reset the source of truth (`metadata.json.status`) FIRST:**
+   `metadata.json.status` is the single source of truth; `cadre/tracks.md` is a
+   **derived cache** (step 5). If you only reset `plan.md` markers and leave
+   `metadata.status` at `completed`, the next `cadre-status --regen-index` will
+   **resurrect the stale `[x]`** and silently erase this revert. So fix metadata
+   here, **before** touching any derived marker.
+   - Read `cadre/tracks/<track_id>/metadata.json`. Compute the correct post-revert
+     status from the set of tasks just reverted vs. those left intact — i.e. after
+     the plan reset in step 4, will any task remain `[x]` (real, un-reverted work
+     survives)?
+     - **Some implementation work survives** the revert (a partial revert — e.g. a
+       single task/phase out of a larger track) → `in_progress`.
+     - **No implementation work survives** (the track is back to a clean slate —
+       e.g. a full-track revert, or the only completed work was reverted) → `new`.
+     - **Never leave it `completed`** after a revert.
+   - Write it with a **key-scoped** jq update (portable BSD + GNU), the same pattern
+     every status-mutating workflow uses, so only `.status` changes:
+     ```bash
+     META="cadre/tracks/<track_id>/metadata.json"
+     tmp="$(mktemp)"
+     jq --arg s "<new_status>" '.status = $s' "$META" > "$tmp" && mv "$tmp" "$META"
+     ```
+     (`<new_status>` ∈ `in_progress` | `new`, per the rule above.)
+
+4. **Reset `plan.md` markers (consistent with the new `metadata.status`):**
+   - Read the relevant `plan.md` file(s)
+   - Ensure reverted item correctly reset:
+     - Change `[x]` back to `[ ]` for reverted tasks
+     - Change `[~]` back to `[ ]` if reverting in-progress items
+     - Remove commit SHAs from reverted task lines
+   - The per-task resets above must agree with the `metadata.status` chosen in step
+     3: if **no** task remains `[x]` after this pass, `metadata.status` must be
+     `new`; if at least one survives, it must be `in_progress`. If they disagree,
+     re-derive step 3 from this post-reset `plan.md` (the plan is authoritative for
+     *which* tasks reverted; metadata is authoritative for the *track* status).
+   - If not correct, perform file edit to fix and commit correction
+
+5. **Rebuild the derived index (`tracks.md`) — never git-revert it directly:**
+   `cadre/tracks.md` is **derived** from `metadata.json.status`. Do **not**
+   git-revert `tracks.md` to undo its marker (Phase 2 already excludes it from the
+   product/code revert chains for this reason). Instead, regenerate it so the cache
+   follows the source of truth you just fixed:
+   - Run the **Regenerate Index** flow: `cadre-status --regen-index`. It rewrites
+     the `## [<marker>] Track:` line for `<track_id>` from the new
+     `metadata.status` (`in_progress` → `[~]`, `new` → `[ ]`) and is idempotent.
+   - Commit the regenerated `tracks.md` (with the metadata + plan resets) as the
+     plan-sync correction. Because the marker now flows from `metadata.status`, a
+     **later `--regen-index` can no longer resurrect a stale `[x]`.**
+   - **Shared sync mode (`cadre/config.json` `sync_mode == "shared"`):** publish the
+     correction **at this commit site** — run the sync postamble
+     (`references/cadre-sync.md`): `bd dolt push` then
+     `git push <control_remote> <control_branch>` — so the corrected source of truth
+     (`metadata.status`) and regenerated index reach teammates. Do **not** couple this
+     publish to Beads availability: Section 7.0's postamble only covers the Beads task
+     reopen, so if `BEADS_AVAILABLE=false` the metadata/index correction would
+     otherwise sit unpublished. This metadata/index publish must run whenever
+     `sync_mode == "shared"`. Product code stays local.
+
+6. **Announce Completion:**
+   > "Revert complete. [Target] has been reverted. Source of truth
+   > (`metadata.status` → `<new_status>`) and derived index synchronized."
+   > "Status markers reset to pending. [X] commits reverted."
+
+---
+
+## 6.0 WORKTREE TEARDOWN (Track Revert Only)
+
+**PROTOCOL: If reverting an entire track, clean up its worktree and branch.**
+
+1. **Check metadata for worktree:**
+   - Read `cadre/tracks/<track_id>/metadata.json`.
+
+   **MONOREPO (flat fields):**
+   - If `worktree_path` is set and exists on disk:
+     ```bash
+     bd worktree remove .worktrees/<track_id>
+     ```
+     - **If `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
+       - Degraded fallback: `git worktree remove .worktrees/<track_id> --force`
+   - Delete the branch: `git branch -D track/<track_id>`
+   - Announce: "Worktree `.worktrees/<track_id>` and branch `track/<track_id>` removed."
+
+   **POLYREPO (`repos` map):** loop over `metadata.json.repos`; for each repo:
+   ```bash
+   git -C <submodule_path> worktree remove <worktree_path> --force
+   git -C <submodule_path> branch -D track/<track_id>
+   ```
+   Announce each. Then remove the control-repo's own track branch/worktree if one
+   exists (flat fields).
+
+---
+
+## 7.0 BEADS SYNC
+
+**PROTOCOL: Sync revert action with Beads.**
+
+1. **Availability check:** → See Beads Error Handler Protocol (references/beads-error-handler.md)
+
+2. **Sync Revert Actions:**
+   - **POLYREPO GUARD:** only run this section once **every** repo's revert chain
+     has completed successfully. If any repo halted on conflict (Section 5.0 step
+     2), do NOT reopen tasks — leave Beads as-is so the partial state is visible.
+   - Reopen reverted tasks: `bd reopen <task_id> --reason "Reverted" --json`
+   - Add note: `bd note <epic_id> "REVERT: <summary>" --json`
+   - For task/phase revert: reopen only affected tasks
+   - For track revert: `bd reopen <epic_id> --reason "Track reverted" --json`
+   - **If any `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
+   - **Shared mode:** run the sync postamble (`bd dolt push` + control-plane push)
+     from `references/cadre-sync.md` so teammates see the revert.

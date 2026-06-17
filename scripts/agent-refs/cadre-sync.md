@@ -16,15 +16,15 @@ Sync behavior is governed **solely** by `cadre/config.json` — it is
 > **The single gating predicate is `sync_mode == "shared"`** — the preamble and
 > postamble apply in **both monorepo and polyrepo**. Never gate the control-plane
 > pull/commit/push on topology (e.g. "polyrepo + shared"): a shared **monorepo**
-> publishes its control plane exactly the same way. Command owners cite this file
+> publishes its control plane exactly the same way. Workflow owners cite this file
 > as the single source for that predicate rather than restating it. (Only product-
 > repo **CODE** push stays gated/manual — see the note below.)
 
 > **Product-repo CODE is never auto-pushed regardless of sync mode.** Shared mode
-> shares orchestration state only. Code branches go up only at `/cadre-land`
+> shares orchestration state only. Code branches go up only at `cadre-land`
 > (or archive's safety-net push).
 
-## Sync preamble (top of every command that mutates control-plane state)
+## Sync preamble (top of every workflow that mutates control-plane state)
 
 Run before reading/modifying `cadre/` or Beads:
 
@@ -35,8 +35,8 @@ Run before reading/modifying `cadre/` or Beads:
    git config --get merge.ours.driver >/dev/null || git config merge.ours.driver true
    ```
 
-   This makes every shared command self-register on a fresh clone, so a teammate
-   who cloned the control repo without running `/cadre-setup` (which HALTs on an
+   This makes every shared workflow self-register on a fresh clone, so a teammate
+   who cloned the control repo without running `cadre-setup` (which HALTs on an
    already-initialized project, leaving the other 9–19 teammates without the
    driver) still resolves `.beads/**` and `parallel_state.json` conflicts
    correctly on their very first shared pull. It is local config (not committed)
@@ -51,24 +51,24 @@ Run before reading/modifying `cadre/` or Beads:
    `implement_state.json` is a **scalar JSON object**, so a line-`union` merge
    would interleave keys and produce **invalid JSON** — it stays on a **normal
    merge** (no `.gitattributes` entry); on the rare real conflict, discard the
-   stale side and let the next `/cadre-implement` rebuild it from `plan.md` +
+   stale side and let the next `cadre-implement` rebuild it from `plan.md` +
    Beads. **Never apply `merge=union` to any single-object JSON file.**
 5. **Spec/plan/manifest conflicts** (`spec.md`, `plan.md`, `repos.json`,
    `config.json`) are surfaced to the user — **never auto-clobber them.** Stop and
    ask how to resolve.
 6. Submodule pointer refresh is **optional and gated** (default off):
-   `git submodule update --init --remote` is offered in `/cadre-refresh`, not
+   `git submodule update --init --remote` is offered in `cadre-refresh`, not
    run automatically here.
 
 If `pull_on_command_start` is `false` in config, skip the pull but still run the
 postamble push after mutation.
 
-## Sync postamble (after a command mutates control-plane state)
+## Sync postamble (after a workflow mutates control-plane state)
 
 1. Commit the `cadre/` changes in the control repo as usual.
    - **Per-repo / per-track `metadata.json` writes use key-scoped jq (CAS),
      never a full-file rewrite** — e.g. `jq '.review = $obj'` / `jq '.lease = …'`,
-     not `jq '{…whole object…}'`. Sibling commands (review, implement, ship) may
+     not `jq '{…whole object…}'`. Sibling workflows (review, implement, ship) may
      write different keys of the same file concurrently; a full rewrite clobbers
      a teammate's just-written key, a scoped assignment preserves it.
 2. Make the Beads Dolt push **mandatory** (not optional) in shared mode — Dolt is
@@ -98,7 +98,7 @@ postamble push after mutation.
    - `metadata.json` `track_id` (key-scoped jq);
    - the Beads epic title / track-scope label `cadre-track:<old_id>` →
      `cadre-track:<new_id>`.
-   Then regenerate the index per `/cadre-status --regen-index` (the derived
+   Then regenerate the index per `cadre-status --regen-index` (the derived
    index is a mirror of `metadata.json`, not an authority — it has no ID column to
    edit), re-run the preamble, and push again. Never derive the new ID from the
    Beads epic ID.
@@ -139,7 +139,7 @@ merged.
 
 `merge=ours` is a named driver, not a built-in — the `.gitattributes` lines
 above are inert until the driver is defined in git config. Shared-mode setup
-(`/cadre-setup` when `sync_mode == "shared"`) registers it on the **first**
+(`cadre-setup` when `sync_mode == "shared"`) registers it on the **first**
 clone:
 
 ```
@@ -150,7 +150,7 @@ git config merge.ours.driver true
 missing, git falls back to a normal text merge for those files and the
 ephemeral/scalar-JSON files can conflict.
 
-Because `/cadre-setup` HALTs on an already-initialized project, it never runs for
+Because `cadre-setup` HALTs on an already-initialized project, it never runs for
 the teammates who clone *after* the project is set up. So the sync **preamble**
 (step 0 above) **self-registers the driver on every shared command** — each fresh
 clone heals itself before its first shared pull, without depending on setup. Both

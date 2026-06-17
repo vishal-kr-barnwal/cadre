@@ -18,7 +18,7 @@ Beads uses a chemistry metaphor for work templates. This guide covers when and h
           ▼               │               ▼
 ┌─────────────────┐       │       ┌─────────────────┐
 │   MOL (Liquid)  │       │       │  WISP (Vapor)   │
-│   bd pour       │       │       │  bd wisp create │
+│  bd mol pour    │       │       │  bd mol wisp    │
 │                 │       │       │                 │
 │  Persistent     │       │       │  Ephemeral      │
 │  .beads/        │       │       │  Dolt wisps tbl │
@@ -49,7 +49,7 @@ Will this work be referenced later?
 │
 ├─ YES → Does it need audit trail / git history?
 │        │
-│        ├─ YES → MOL (bd pour)
+│        ├─ YES → MOL (bd mol pour)
 │        │        Examples: Features, bugs, specs
 │        │
 │        └─ NO  → Could go either way
@@ -58,7 +58,7 @@ Will this work be referenced later?
 │                 ├─ YES → MOL
 │                 └─ NO  → WISP (then squash if valuable)
 │
-└─ NO  → WISP (bd wisp create)
+└─ NO  → WISP (bd mol wisp)
          Examples: Grooming, health checks, scratch work
          End state: burn (no value) or squash (capture learnings)
 ```
@@ -67,13 +67,13 @@ Will this work be referenced later?
 
 | Scenario | Use | Command | End State |
 |----------|-----|---------|-----------|
-| New feature work | Mol | `bd pour spec` | Close normally |
-| Bug fix | Mol | `bd pour bug` | Close normally |
-| Grooming session | Wisp | `bd wisp create grooming` | Squash → digest |
-| Code review | Wisp | `bd wisp create review` | Squash findings |
-| Research spike | Wisp | `bd wisp create spike` | Squash or burn |
-| Session health check | Wisp | `bd wisp create health` | Burn |
-| Agent coordination | Wisp | `bd wisp create coordinator` | Burn |
+| New feature work | Mol | `bd mol pour spec` | Close normally |
+| Bug fix | Mol | `bd mol pour bug` | Close normally |
+| Grooming session | Wisp | `bd mol wisp grooming` | Squash → digest |
+| Code review | Wisp | `bd mol wisp pr-review` | Squash findings |
+| Research spike | Wisp | `bd mol wisp spike` | Squash or burn |
+| Session health check | Wisp | `bd mol wisp health` | Burn |
+| Agent coordination | Wisp | `bd mol wisp coordinator` | Burn |
 
 ## Common Patterns
 
@@ -83,7 +83,7 @@ Use for periodic backlog maintenance.
 
 ```bash
 # Start grooming
-bd wisp create grooming --var date="2025-01-02"
+bd mol wisp grooming --var date="2025-01-02"
 
 # Work through checklist (stale, duplicates, verification)
 # Track findings in wisp notes
@@ -100,7 +100,7 @@ Use for PR review checklists.
 
 ```bash
 # Start review
-bd wisp create pr-review --var pr="123" --var repo="myproject"
+bd mol wisp pr-review --var pr="123" --var repo="myproject"
 
 # Track review findings (security, performance, style)
 # Each finding is a child issue in the wisp
@@ -117,7 +117,7 @@ Use for time-boxed exploration.
 
 ```bash
 # Start spike (2 hour timebox)
-bd wisp create spike --var topic="GraphQL pagination"
+bd mol wisp spike --var topic="GraphQL pagination"
 
 # Explore, take notes in wisp issues
 # Track sources, findings, dead ends
@@ -136,12 +136,12 @@ bd mol burn <wisp-id>    # If dead end → no trace
 
 ```bash
 # Persistent mol (solid → liquid)
-bd pour <proto>                    # Synced to git
-bd pour <proto> --var key=value
+bd mol pour <proto>                # Synced to git
+bd mol pour <proto> --var key=value
 
 # Ephemeral wisp (solid → vapor)
-bd wisp create <proto>             # Not synced
-bd wisp create <proto> --var key=value
+bd mol wisp <proto>                # Not synced
+bd mol wisp <proto> --var key=value
 ```
 
 ### Ending Work
@@ -161,17 +161,17 @@ bd mol burn <wisp-id>              # Deletes with no record
 
 ```bash
 # List wisps
-bd wisp list
+bd mol wisp list
 
 # Garbage collect orphaned wisps
-bd wisp gc
-bd wisp gc --closed --force          # Purge all closed wisps
+bd mol wisp gc
+bd mol wisp gc --closed --force      # Purge all closed wisps
 
 # View proto/mol structure
 bd mol show <id>
 
-# List available protos
-bd mol catalog
+# List available formulas/protos
+bd formula list
 ```
 
 ## Storage Locations

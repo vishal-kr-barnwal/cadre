@@ -71,7 +71,7 @@ Essential commands: `bd ready`, `bd create`, `bd show`, `bd update`, `bd note`, 
 | Feature | CLI | Resource |
 |---------|-----|----------|
 | Molecules (templates) | `bd mol --help` | [MOLECULES.md](resources/MOLECULES.md) |
-| Chemistry (pour/wisp) | `bd pour`, `bd wisp` | [CHEMISTRY_PATTERNS.md](resources/CHEMISTRY_PATTERNS.md) |
+| Chemistry (pour/wisp) | `bd mol pour`, `bd mol wisp` | [CHEMISTRY_PATTERNS.md](resources/CHEMISTRY_PATTERNS.md) |
 | Agent beads | `bd agent --help` | [AGENTS.md](resources/AGENTS.md) |
 | Async gates | `bd gate --help` | [ASYNC_GATES.md](resources/ASYNC_GATES.md) |
 | Worktrees | `bd worktree --help` | [WORKTREES.md](resources/WORKTREES.md) |

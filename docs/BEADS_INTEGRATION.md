@@ -63,23 +63,21 @@ This spec defines how Cadre's context-driven development methodology integrates 
 
 ## Workflow Integration
 
-### Phase 1: Setup (`/cadre-setup` + `bd init`)
+### Phase 1: Setup (`cadre-setup` + `bd init`)
 
-When user runs `/cadre-setup`:
+When user runs `cadre-setup`:
 
 1. **Cadre creates** standard context files
-2. **If Beads available**, also run:
+2. **If Beads available**, also run full-mode initialization:
    ```bash
-   bd init              # Initialize .beads/ directory
-   # OR for shared repos:
-   bd init --stealth    # Keep Beads local-only
+   bd init --non-interactive --role maintainer
    ```
 3. **Create linking config** in `cadre/beads.json` (copied from the bundled
-   template; `cadre-setup` sets `mode` to `normal` or `stealth`):
+   template; `mode` stays `normal`):
    ```json
    {
      "enabled": true,
-     "mode": "stealth",
+     "mode": "normal",
      "memoryStrategy": "beads-primary",
      "epicPrefix": "cadre",
      "autoCreateTasks": true,
@@ -92,12 +90,12 @@ When user runs `/cadre-setup`:
    }
    ```
 
-### Phase 2: Track Creation (`/cadre-newtrack` + `bd create`)
+### Phase 2: Track Creation (`cadre-newtrack` + `bd create`)
 
 When creating a new track:
 
 ```
-User: /cadre-newtrack Add user authentication
+User: cadre-newtrack Add user authentication
 
 Cadre Actions:
 1. Create cadre/tracks/auth_20241226/
@@ -131,12 +129,12 @@ Beads Actions:
 }
 ```
 
-### Phase 3: Implementation (`/cadre-implement` + `bd ready`)
+### Phase 3: Implementation (`cadre-implement` + `bd ready`)
 
 When implementing:
 
 ```
-User: /cadre-implement auth_20241226
+User: cadre-implement auth_20241226
 
 Combined Workflow:
 1. Cadre loads spec.md and plan.md for context
@@ -170,10 +168,10 @@ Combined Workflow:
 8. Cadre updates plan.md with commit SHA
 ```
 
-### Phase 4: Status & Progress (`/cadre-status` + `bd show`)
+### Phase 4: Status & Progress (`cadre-status` + `bd show`)
 
 ```
-User: /cadre-status
+User: cadre-status
 
 Output combines both sources:
 
@@ -196,10 +194,10 @@ bd show bd-a3f8.3 --deps
   Blocked by: bd-a3f8.2 (in progress)
 ```
 
-### Phase 5: Blocking & Dependencies (`/cadre-flag blocked` + `bd dep`)
+### Phase 5: Blocking & Dependencies (`cadre-flag blocked` + `bd dep`)
 
 ```
-User: /cadre-flag blocked - External API not ready
+User: cadre-flag blocked - External API not ready
 
 Actions:
 1. Cadre marks task [B] in plan.md
@@ -260,21 +258,21 @@ bd dolt push                      # Push changes to remote
 > `shared` mode (teammates pull/push the canonical Dolt graph), local-only
 > otherwise. See [POLYREPO.md](POLYREPO.md).
 
-## Command Mapping
+## Workflow Mapping
 
-| Cadre Command | Beads Equivalent | Integration |
+| Cadre Workflow | Beads Equivalent | Integration |
 |-------------------|------------------|-------------|
-| `/cadre-setup` | `bd init` | Run both |
-| `/cadre-newtrack` | `bd create` (epic + tasks) | Create track + epic with `--design`, `--acceptance` |
-| `/cadre-implement` | `bd ready`, `bd update`, `bd close` | Query ready, track progress, complete |
-| `/cadre-status` | `bd ready`, `bd show` | Combine outputs, read notes for context |
-| `/cadre-flag blocked` | `bd update --status blocked` | Sync both with structured notes |
-| `/cadre-flag skipped` | `bd close` or `bd update` | Mark in both based on skip reason |
-| `/cadre-handoff` | `bd note`, `bd dolt push` | Save context + push to remote |
-| `/cadre-ship` | `bd dolt push` | Flush Dolt before rebase/push (monorepo) |
-| `/cadre-land` | `bd dolt push` | Flush Dolt before opening the cross-repo PR group (polyrepo) |
-| `/cadre-revert` | `bd reopen` | Sync status |
-| `/cadre-archive` | `bd compact --auto` | Archive track + compact |
+| `cadre-setup` | `bd init` | Run both |
+| `cadre-newtrack` | `bd create` (epic + tasks) | Create track + epic with `--design`, `--acceptance` |
+| `cadre-implement` | `bd ready`, `bd update`, `bd close` | Query ready, track progress, complete |
+| `cadre-status` | `bd ready`, `bd show` | Combine outputs, read notes for context |
+| `cadre-flag blocked` | `bd update --status blocked` | Sync both with structured notes |
+| `cadre-flag skipped` | `bd close` or `bd update` | Mark in both based on skip reason |
+| `cadre-handoff` | `bd note`, `bd dolt push` | Save context + push to remote |
+| `cadre-ship` | `bd dolt push` | Flush Dolt before rebase/push (monorepo) |
+| `cadre-land` | `bd dolt push` | Flush Dolt before opening the cross-repo PR group (polyrepo) |
+| `cadre-revert` | `bd reopen` | Sync status |
+| `cadre-archive` | `bd compact --auto` | Archive track + compact |
 
 ## Data Synchronization
 
@@ -292,7 +290,7 @@ When `bd close` or `bd update` runs:
 2. Add commit SHA if available
 3. Update the track's `metadata.json` `status` (the single source of truth for
    track status) if the epic is complete — never hand-flip the `tracks.md` marker;
-   regenerate the cache via `/cadre-status --regen-index`
+   regenerate the cache via `cadre-status --regen-index`
 
 ### Conflict Resolution
 
@@ -305,7 +303,7 @@ it to reconcile teammates.
 ```
 Conflict: plan.md says [x], metadata.json/Beads says the task is active
 Resolution: Reconcile plan.md against metadata.json (agent likely still working),
-            then run /cadre-status --regen-index — do not silently rewrite plan.md
+            then run cadre-status --regen-index — do not silently rewrite plan.md
 
 Conflict: Beads has task not in plan.md
 Resolution: Add to plan.md under "Unplanned Tasks" section
@@ -316,8 +314,8 @@ Resolution: Add to plan.md under "Unplanned Tasks" section
 ### cadre/beads.json
 
 This is the canonical schema, written by `cadre-setup` from the bundled
-`templates/beads.json`. `mode` is the only field setup changes (`normal` vs
-`stealth`).
+`templates/beads.json`. Cadre setup uses full Beads integration, so `mode`
+remains `normal`.
 
 ```json
 {
@@ -338,7 +336,7 @@ This is the canonical schema, written by `cadre-setup` from the bundled
 | Key | Meaning |
 |-----|---------|
 | `enabled` | Beads integration active |
-| `mode` | `normal` commits `.beads/`; `stealth` keeps it local-only |
+| `mode` | `normal` commits `.beads/` as part of the shared control plane |
 | `memoryStrategy` | `beads-primary` — Beads is the source of truth for task status |
 | `epicPrefix` | Prefix for Beads epic IDs created per track |
 | `autoCreateTasks` | Create Beads tasks automatically from plan.md |
@@ -358,19 +356,19 @@ Skill activation checks:
 > All phases below are shipped (this spec is **Status: Implemented**). Two
 > team-scale refinements layer on top: task **assignees use the git committer
 > identity** (`user.email` → `user.name`, never a literal `cadre`), and
-> `/cadre-review` stamps the Beads epic with a `review:ready` or
-> `review:changes` label that `/cadre-ship` and `/cadre-land` gate on.
+> `cadre-review` stamps the Beads epic with a `review:ready` or
+> `review:changes` label that `cadre-ship` and `cadre-land` gate on.
 
 ### Phase 1: Basic Integration (MVP)
-- [x] Add `bd init` to `/cadre-setup`
-- [x] Create epic on `/cadre-newtrack`
-- [x] Query `bd ready` in `/cadre-implement`
+- [x] Add `bd init` to `cadre-setup`
+- [x] Create epic on `cadre-newtrack`
+- [x] Query `bd ready` in `cadre-implement`
 - [x] Sync completion status
 
 ### Phase 2: Full Sync
 - [x] Bidirectional plan.md ↔ Beads sync
 - [x] Dependency graph from phase order
-- [x] Status aggregation in `/cadre-status`
+- [x] Status aggregation in `cadre-status`
 
 ### Phase 3: Advanced Features
 - [x] Beads compaction on archive
@@ -521,7 +519,7 @@ bd update <task_id> --status blocked \
 | Cross-session memory | Git notes | Persistent graph |
 | Dependency tracking | Phase order | Full DAG |
 | Ready task detection | Manual | `bd ready` |
-| Context after compaction | Re-read files | `bd show --notes` |
+| Context after compaction | Re-read files | `bd show --long` |
 | Multi-agent coordination | File locks | Hash-based IDs |
 | Workflow templates | Manual spec copying | `bd mol pour/wisp` |
 | Ephemeral exploration | Full track overhead | Wisps (no audit trail) |
@@ -532,17 +530,17 @@ bd update <task_id> --status blocked \
 
 Cadre tracks can be extracted as reusable templates:
 
-| Beads Concept | Cadre Mapping | Command |
+| Beads Concept | Cadre Mapping | Beads Command |
 |---------------|-------------------|---------|
 | **Formula** | Track template source | `bd formula list` |
 | **Proto** | Frozen template | `bd cook <formula>` |
 | **Mol** | Persistent track | `bd mol pour <proto>` |
 | **Wisp** | Ephemeral exploration | `bd mol wisp <proto>` |
 
-**Cadre Commands (all under `/cadre-formula`):**
-- `/cadre-formula list` - List available templates
-- `/cadre-formula wisp` - Quick ephemeral exploration
-- `/cadre-formula create` - Extract template from completed track
+**Cadre workflows (all under `cadre-formula`):**
+- `cadre-formula list` - List available templates
+- `cadre-formula wisp` - Quick ephemeral exploration
+- `cadre-formula create` - Extract template from completed track
 
 ### Gates (v0.40+)
 
@@ -571,11 +569,9 @@ bd dep add <issue> external:project-a:auth-api
 
 ## Open Questions
 
-1. **Stealth by default?** - Should integration use `bd init --stealth` to avoid polluting shared repos?
+1. **Sync frequency** - Real-time vs. on-command sync?
 
-2. **Sync frequency** - Real-time vs. on-command sync?
-
-3. **Skill loading** - Load the `cadre` and `beads` skills separately or merge them into a single combined skill?
+2. **Skill loading** - Load the `cadre` and `beads` skills separately or merge them into a single combined skill?
 
 4. **Fallback behavior** - ~~If `bd` not installed, silent skip or prompt to install?~~ **Resolved**: Always attempt Beads; prompt user to choose if unavailable.
 

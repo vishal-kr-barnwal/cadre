@@ -6,8 +6,8 @@ monorepo or polyrepo delivery safely.
 
 Use this guide when you want the end-to-end operating model. Use
 [Install & Version Guide](INSTALL.md) for installation details, and use
-[Manual Workflow Guide](manual-workflow-guide.md) when you need command-by-command
-protocol detail.
+[Manual Workflow Guide](manual-workflow-guide.md) when you need step-by-step
+workflow protocol detail.
 
 ## What Cadre Is
 
@@ -20,7 +20,7 @@ into a structured work system with:
   learnings.
 - Beads integration for persistent task memory, dependency tracking, notes, and
   resume context.
-- Review, ship, land, archive, and release commands for a complete SDLC.
+- Review, ship, land, archive, and release workflows for a complete SDLC.
 - Team safety features for ownership, review gates, collision checks, and shared
   control-plane sync.
 
@@ -34,7 +34,7 @@ setup -> newtrack -> implement -> review -> ship/land -> archive -> release
 
 ### Project Context
 
-After `/cadre-setup`, a project has a `cadre/` directory that records how work
+After `cadre-setup`, a project has a `cadre/` directory that records how work
 should happen:
 
 | File | Purpose |
@@ -53,7 +53,7 @@ should happen:
 `metadata.json.status` is authoritative. Regenerate the index with:
 
 ```bash
-/cadre-status --regen-index
+cadre-status --regen-index
 ```
 
 ### Tracks
@@ -148,8 +148,8 @@ Supported primary surfaces:
 
 | Surface | Cadre form |
 |---------|------------|
-| Claude Code | Slash commands plus skills. |
-| OpenAI Codex CLI | Generated custom prompts plus `AGENTS.md`. |
+| Claude Code | Skill plus bundled workflow protocols. |
+| OpenAI Codex | Repo/user skills plus `AGENTS.md`. |
 
 Install Beads too:
 
@@ -160,10 +160,10 @@ bd --version
 
 ## Initialize a Project
 
-Run setup inside your target project:
+Ask the Cadre skill to run setup inside your target project:
 
 ```bash
-/cadre-setup
+cadre-setup
 ```
 
 Setup asks about:
@@ -189,7 +189,7 @@ reasonably make cross-cutting changes in one branch.
 Monorepo is the default. If there is no `cadre/repos.json`, Cadre treats the
 project as a monorepo.
 
-Use `/cadre-ship` to prepare the PR.
+Use `cadre-ship` to prepare the PR.
 
 ### Polyrepo
 
@@ -208,7 +208,7 @@ control-repo/
 └── .worktrees/<track_id>/<repo>/
 ```
 
-Use `/cadre-land` to open the cross-repo PR group. The merge train lands product
+Use `cadre-land` to open the cross-repo PR group. The merge train lands product
 repos first and the control repo last. Product repos must allow merge commits,
 because the control repo pins submodule gitlinks to deterministic merge SHAs.
 
@@ -234,7 +234,7 @@ Shared mode requires:
 git config merge.ours.driver true
 ```
 
-Cadre self-heals this in shared command preambles, but registering it explicitly
+Cadre self-heals this in shared workflow preambles, but registering it explicitly
 on every clone is still a good team setup step.
 
 ## Create Work
@@ -242,7 +242,7 @@ on every clone is still a good team setup step.
 Create a track:
 
 ```bash
-/cadre-newtrack "Add OAuth login"
+cadre-newtrack "Add OAuth login"
 ```
 
 Cadre will:
@@ -268,7 +268,7 @@ Before approving the plan, check:
 Start or resume implementation:
 
 ```bash
-/cadre-implement <track_id>
+cadre-implement <track_id>
 ```
 
 The implementation loop is:
@@ -339,21 +339,21 @@ Avoid parallelism when:
 
 ## Check Status
 
-Common status commands:
+Common status workflow requests:
 
 ```bash
-/cadre-status
-/cadre-status --mine
-/cadre-status --team
-/cadre-status --available
-/cadre-status --collisions
-/cadre-status --repos
-/cadre-status --export
+cadre-status
+cadre-status --mine
+cadre-status --team
+cadre-status --available
+cadre-status --collisions
+cadre-status --repos
+cadre-status --export
 ```
 
 Use these boards this way:
 
-| Command | Use when |
+| Flag | Use when |
 |---------|----------|
 | `--mine` | You want your active work. |
 | `--team` | You want owner, lease, review, and WIP distribution. |
@@ -365,7 +365,7 @@ Use these boards this way:
 Run validation periodically:
 
 ```bash
-/cadre-validate
+cadre-validate
 ```
 
 Validation checks index drift, metadata, plans, Beads consistency, stale leases,
@@ -376,7 +376,7 @@ merge-driver setup, state-file health, and polyrepo manifest/submodule parity.
 ### Block a Task
 
 ```bash
-/cadre-flag blocked
+cadre-flag blocked
 ```
 
 Use this when an external dependency, missing API, access issue, or product
@@ -385,7 +385,7 @@ decision prevents progress.
 ### Skip a Task
 
 ```bash
-/cadre-flag skipped
+cadre-flag skipped
 ```
 
 Use this when a task is no longer needed or intentionally deferred.
@@ -393,7 +393,7 @@ Use this when a task is no longer needed or intentionally deferred.
 ### Revise Spec or Plan
 
 ```bash
-/cadre-revise <track_id>
+cadre-revise <track_id>
 ```
 
 Use this when implementation reveals that the spec is wrong, the plan is missing
@@ -403,8 +403,8 @@ work, or dependencies need to change. Cadre records revisions in
 ### Handoff Work
 
 ```bash
-/cadre-handoff
-/cadre-handoff --for-teammate @alice
+cadre-handoff
+cadre-handoff --for-teammate @alice
 ```
 
 Use handoff before context gets large, before pausing for the day, or before
@@ -416,7 +416,7 @@ transferring ownership. Cadre writes a rolling
 Run review after implementation is complete:
 
 ```bash
-/cadre-review <track_id>
+cadre-review <track_id>
 ```
 
 Review checks:
@@ -446,7 +446,7 @@ The result is recorded in `metadata.review`:
 Request a reviewer without reviewing:
 
 ```bash
-/cadre-review --request @alice
+cadre-review --request @alice
 ```
 
 For teams, consider setting `require_second_reviewer: true` in
@@ -458,7 +458,7 @@ different reviewer approves it.
 ### Monorepo Ship
 
 ```bash
-/cadre-ship <track_id>
+cadre-ship <track_id>
 ```
 
 Ship:
@@ -473,7 +473,7 @@ Ship:
 ### Polyrepo Land
 
 ```bash
-/cadre-land <track_id>
+cadre-land <track_id>
 ```
 
 Land:
@@ -494,7 +494,7 @@ snapshot seal.
 After a shipped or landed track:
 
 ```bash
-/cadre-archive <track_id>
+cadre-archive <track_id>
 ```
 
 Archive extracts remaining learnings, cleans up worktrees, and moves completed
@@ -503,9 +503,9 @@ work out of active track lists.
 Cut a release when enough shipped work has accumulated:
 
 ```bash
-/cadre-release patch
-/cadre-release minor
-/cadre-release major
+cadre-release patch
+cadre-release minor
+cadre-release major
 ```
 
 Cadre creates a changelog entry and local tag. Users decide when to push tags.
@@ -536,16 +536,16 @@ Useful MCP tools:
 | `cadre_regen_index` | Regenerate `tracks.md`. |
 
 MCP is best for lower-token, deterministic agent integrations. A client can call
-tools instead of asking an agent to reread and reinterpret long Markdown command
-protocols.
+tools instead of asking an agent to reread and reinterpret long Markdown
+workflow protocols.
 
 ## Use LSP Review
 
 Configure optional language servers during setup or later:
 
 ```bash
-/cadre-setup
-/cadre-refresh --lsp
+cadre-setup
+cadre-refresh --lsp
 ```
 
 Cadre scans the codebase, recommends language servers, checks whether each server
@@ -574,7 +574,7 @@ Run the helper:
 node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<track_id> --json
 ```
 
-If no config exists, it exits successfully with `available: false`. `/cadre-review`
+If no config exists, it exits successfully with `available: false`. `cadre-review`
 can then record that code intelligence was skipped instead of pretending it ran.
 
 Use LSP review for:
@@ -593,8 +593,8 @@ For 10-20 people, use these defaults:
 |------|----------------|
 | Topology | Monorepo unless repo boundaries are essential. |
 | Sync mode | `shared`. |
-| Beads | Enabled and committed, not stealth. |
-| Review | Require structured `/cadre-review`; consider `require_second_reviewer`. |
+| Beads | Enabled and committed as the shared control plane. |
+| Review | Require structured `cadre-review`; consider `require_second_reviewer`. |
 | Status | Use `--team`, `--available`, and `--collisions` daily. |
 | Parallelism | Use for independent tasks with clear file ownership. |
 | CI | Install monorepo drift gate or polyrepo merge train templates. |
@@ -604,10 +604,10 @@ For 10-20 people, use these defaults:
 Daily team loop:
 
 ```text
-1. /cadre-status --team
-2. /cadre-status --available
-3. Pick/claim a track with /cadre-implement
-4. Use /cadre-status --collisions before deep edits
+1. cadre-status --team
+2. cadre-status --available
+3. Pick/claim a track with cadre-implement
+4. Use cadre-status --collisions before deep edits
 5. Handoff before pausing or transferring work
 6. Review before ship/land
 7. Archive after merge
@@ -626,7 +626,7 @@ templates/ci/cadre-merge-train.gitlab.yml
 
 Use the monorepo check to catch:
 
-- Generated command drift.
+- Generated skill protocol drift.
 - Shell syntax errors.
 - `tracks.md` index drift.
 - Missing shared-mode `.gitattributes` lines.
@@ -642,7 +642,7 @@ Use the merge-train templates for polyrepo landing.
 Do not hand-merge status markers. Resolve either side, then run:
 
 ```bash
-/cadre-status --regen-index
+cadre-status --regen-index
 ```
 
 ### Beads DB Gets Conflict Markers
@@ -660,7 +660,7 @@ Then rerun the shared sync or validation command.
 Run:
 
 ```bash
-/cadre-validate
+cadre-validate
 ```
 
 Shared mode stale leases older than the canonical 30-minute window can be swept.
@@ -678,7 +678,7 @@ Check:
 If code changed after review, rerun:
 
 ```bash
-/cadre-review <track_id>
+cadre-review <track_id>
 ```
 
 ### Polyrepo Land Opens No PRs
@@ -696,30 +696,30 @@ Check:
 Run:
 
 ```bash
-/cadre-validate
-/cadre-status --repos
+cadre-validate
+cadre-status --repos
 ```
 
-## Command Reference
+## Workflow Reference
 
-| Command | Purpose |
+| Workflow | Purpose |
 |---------|---------|
-| `/cadre-setup` | Initialize Cadre in a project. |
-| `/cadre-newtrack` | Create a track with spec, plan, metadata, and Beads tasks. |
-| `/cadre-implement` | Execute track tasks with TDD and local commits. |
-| `/cadre-status` | Show status, team boards, available work, collisions, repos, export. |
-| `/cadre-review` | Review diff and record structured verdict. |
-| `/cadre-ship` | Monorepo ship flow. |
-| `/cadre-land` | Polyrepo PR group and merge-train flow. |
-| `/cadre-archive` | Archive completed work and extract learnings. |
-| `/cadre-release` | Create changelog and local version tag. |
-| `/cadre-handoff` | Save rolling per-track handoff. |
-| `/cadre-revise` | Update spec/plan when reality changes. |
-| `/cadre-flag` | Mark task blocked or skipped. |
-| `/cadre-revert` | Revert track, phase, or task work. |
-| `/cadre-validate` | Check and optionally repair Cadre integrity. |
-| `/cadre-refresh` | Sync context docs with the current codebase. |
-| `/cadre-formula` | Manage reusable templates and wisps. |
+| `cadre-setup` | Initialize Cadre in a project. |
+| `cadre-newtrack` | Create a track with spec, plan, metadata, and Beads tasks. |
+| `cadre-implement` | Execute track tasks with TDD and local commits. |
+| `cadre-status` | Show status, team boards, available work, collisions, repos, export. |
+| `cadre-review` | Review diff and record structured verdict. |
+| `cadre-ship` | Monorepo ship flow. |
+| `cadre-land` | Polyrepo PR group and merge-train flow. |
+| `cadre-archive` | Archive completed work and extract learnings. |
+| `cadre-release` | Create changelog and local version tag. |
+| `cadre-handoff` | Save rolling per-track handoff. |
+| `cadre-revise` | Update spec/plan when reality changes. |
+| `cadre-flag` | Mark task blocked or skipped. |
+| `cadre-revert` | Revert track, phase, or task work. |
+| `cadre-validate` | Check and optionally repair Cadre integrity. |
+| `cadre-refresh` | Sync context docs with the current codebase. |
+| `cadre-formula` | Manage reusable templates and wisps. |
 
 ## Recommended Reading
 

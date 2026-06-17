@@ -1,7 +1,7 @@
 # CLI Command Reference
 
 **For:** AI agents and developers using bd command-line interface
-**Version:** 1.0.2
+**Version:** 1.0.5
 
 ## Quick Navigation
 
@@ -113,14 +113,14 @@ bd stale --limit 20 --json                   # Limit results
 ```bash
 # Basic creation
 # IMPORTANT: Always quote titles and descriptions with double quotes
-bd create "Issue title" -t story|spike|bug|task -p 0-4 -d "Description" --json
+bd create "Issue title" -t bug|feature|task|epic|chore|decision -p 0-4 -d "Description" --json
 
 # Create with explicit ID (for parallel workers)
 bd create "Issue title" --id worker1-100 -p 1 --json
 
-# Create with labels (--labels or --label work)
-bd create "Issue title" -t story -p 1 -l bug,critical --json
-bd create "Issue title" -t story -p 1 --label bug,critical --json
+# Create with labels (-l or --labels)
+bd create "Issue title" -t task -p 1 -l bug,critical --json
+bd create "Issue title" -t task -p 1 --labels bug,critical --json
 
 # Examples with special characters (all require quoting):
 bd create "Fix: auth doesn't validate tokens" -t bug -p 1 --json
@@ -131,8 +131,8 @@ bd create -f feature-plan.md --json
 
 # Create epic with hierarchical child tasks
 bd create "Auth System" -t epic -p 1 --json         # Returns: bd-a3f8e9
-bd create "Phase 1" -t milestone --parent bd-a3f8e9 --json # Returns: bd-a3f8e9.1
-bd create "Login UI" -t story --parent bd-a3f8e9.1 --json  # Auto-assigned: bd-a3f8e9.1.1
+bd create "Phase 1" -t task --parent bd-a3f8e9 --labels cadre:phase --json # Returns child ID
+bd create "Login UI" -t task --parent <phase-id> --labels cadre:task --json # Returns child ID
 
 # Create and link discovered work (one command)
 bd create "Found bug" -t bug -p 1 --deps discovered-from:<parent-id> --json
@@ -183,7 +183,7 @@ bd edit <id> --acceptance       # Edit acceptance criteria
 ```bash
 # Add a note to an issue (replaces bd update --notes)
 bd note <id> "This is a progress note"
-bd note <id> -f notes.txt                      # From file
+bd note <id> --file notes.txt                  # From file
 bd note <id> "Multi-line
 note content" --json
 ```

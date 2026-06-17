@@ -4,7 +4,7 @@ This reference covers bd's molecular chemistry system for reusable work template
 
 ## The Chemistry Metaphor
 
-bd v0.34.0+ introduces a chemistry-inspired workflow system:
+bd introduces a chemistry-inspired workflow system:
 
 | Phase | Name | Storage | Synced? | Use Case |
 |-------|------|---------|---------|----------|
@@ -15,8 +15,8 @@ bd v0.34.0+ introduces a chemistry-inspired workflow system:
 > **Migration note (v0.56+):** Wisps previously used a separate SQLite database in `.beads-wisp/`. They now live in a Dolt-backed `wisps` table with `dolt_ignore`. Run `bd migrate wisps` to migrate existing data.
 
 **Phase transitions:**
-- `spawn` / `pour`: Solid (proto) → Liquid (mol)
-- `wisp create`: Solid (proto) → Vapor (wisp)
+- `bd mol pour`: Solid (proto/formula) → Liquid (mol)
+- `bd mol wisp`: Solid (proto/formula) → Vapor (wisp)
 - `squash`: Vapor (wisp) → Digest (permanent summary)
 - `burn`: Vapor (wisp) → Nothing (deleted, no trace)
 - `distill`: Liquid (ad-hoc epic) → Solid (proto)
@@ -47,12 +47,12 @@ Protos are epics with the `template` label. Create manually or distill from exis
 
 ```bash
 # Manual creation
-bd create "Release Workflow" --type epic --label template
+bd create "Release Workflow" --type epic --labels template
 bd create "Run tests for {{component}}" --type task
 bd dep add task-id epic-id --type parent-child
 
 # Distill from ad-hoc work (extracts template from existing epic)
-bd mol distill bd-abc123 --as "Release Workflow" --var version=1.0.0
+bd mol distill bd-abc123 "Release Workflow" --var version=1.0.0
 ```
 
 **Proto naming convention:** Use `mol-` prefix for clarity (e.g., `mol-release`, `mol-patrol`).
@@ -73,42 +73,23 @@ bd mol show mol-release --json  # Machine-readable
 
 ---
 
-## Spawning Molecules
+## Creating Molecules
 
-### Basic Spawn (Creates Wisp by Default)
+### Persistent vs Ephemeral
 
 ```bash
-bd mol spawn mol-patrol                    # Creates wisp (ephemeral)
-bd mol spawn mol-feature --pour            # Creates mol (persistent)
-bd mol spawn mol-release --var version=2.0 # With variable substitution
+bd mol pour mol-feature                    # Creates mol (persistent)
+bd mol wisp mol-patrol                     # Creates wisp (ephemeral)
+bd mol pour mol-release --var version=2.0  # With variable substitution
 ```
 
-**Chemistry shortcuts:**
-```bash
-bd mol pour mol-feature                    # Shortcut for spawn --pour
-bd mol wisp mol-patrol                     # Explicit wisp creation
-```
+### Compose with Bonds
 
-### Spawn with Immediate Execution
+Create the main molecule, then attach additional protos/molecules with `bd mol bond`:
 
 ```bash
-bd mol run mol-release --var version=2.0
-```
-
-`bd mol run` does three things:
-1. Spawns the molecule (persistent)
-2. Assigns root issue to caller
-3. Pins root issue for session recovery
-
-**Use `mol run` when:** Starting durable work that should survive crashes. The pin ensures `bd ready` shows the work after restart.
-
-### Spawn with Attachments
-
-Attach additional protos in a single command:
-
-```bash
-bd mol spawn mol-feature --attach mol-testing --var name=auth
-# Spawns mol-feature, then spawns mol-testing and bonds them
+bd mol pour mol-feature --var name=auth
+bd mol bond bd-feature-root mol-testing
 ```
 
 **Attach types:**
@@ -116,9 +97,7 @@ bd mol spawn mol-feature --attach mol-testing --var name=auth
 - `parallel` - Attached runs alongside primary
 - `conditional` - Attached runs only if primary fails
 
-```bash
-bd mol spawn mol-deploy --attach mol-rollback --attach-type conditional
-```
+Use `bd mol bond bd-deploy-root mol-rollback --type conditional` for rollback-style flows.
 
 ---
 
@@ -150,7 +129,7 @@ By default, spawned protos inherit target's phase. Override with flags:
 bd mol bond mol-critical-bug wisp-patrol --pour
 
 # Need ephemeral diagnostic on persistent feature?
-bd mol bond mol-temp-check bd-feature --wisp
+bd mol bond mol-temp-check bd-feature --ephemeral
 ```
 
 ### Custom Compound Names
@@ -167,8 +146,7 @@ bd mol bond mol-feature mol-deploy --as "Feature with Deploy"
 
 ```bash
 bd mol wisp mol-patrol                       # From proto
-bd mol spawn mol-patrol                      # Same (spawn defaults to wisp)
-bd mol spawn mol-check --var target=db       # With variables
+bd mol wisp mol-check --var target=db        # With variables
 ```
 
 ### Listing Wisps
@@ -212,7 +190,7 @@ bd mol wisp gc --closed --force      # Purge all closed wisps
 Extract a reusable template from ad-hoc work:
 
 ```bash
-bd mol distill bd-o5xe --as "Release Workflow"
+bd mol distill bd-o5xe "Release Workflow"
 bd mol distill bd-abc --var feature_name=auth-refactor --var version=1.0.0
 ```
 
@@ -279,14 +257,14 @@ The dependency is satisfied when the external project has a closed issue with `p
 
 ```bash
 # Create proto
-bd create "Weekly Review" --type epic --label template
+bd create "Weekly Review" --type epic --labels template
 bd create "Review open issues" --type task
 bd create "Update priorities" --type task
 bd create "Archive stale work" --type task
 # Link as children...
 
 # Use each week
-bd mol spawn mol-weekly-review --pour
+bd mol pour mol-weekly-review
 ```
 
 ### Pattern: Ephemeral Patrol Cycle
@@ -304,7 +282,8 @@ bd mol squash wisp-abc123 --summary "Patrol complete: 3 issues found, 2 resolved
 ### Pattern: Feature with Rollback
 
 ```bash
-bd mol spawn mol-deploy --attach mol-rollback --attach-type conditional
+bd mol pour mol-deploy
+bd mol bond bd-deploy-root mol-rollback --type conditional
 # If deploy fails, rollback automatically becomes unblocked
 ```
 
@@ -312,8 +291,8 @@ bd mol spawn mol-deploy --attach mol-rollback --attach-type conditional
 
 ```bash
 # After completing a good workflow organically
-bd mol distill bd-release-epic --as "Release Process" --var version=X.Y.Z
-# Now team can: bd mol spawn mol-release-process --var version=2.0.0
+bd mol distill bd-release-epic "Release Process" --var version=X.Y.Z
+# Now team can: bd mol pour mol-release-process --var version=2.0.0
 ```
 
 ---
@@ -324,14 +303,11 @@ bd mol distill bd-release-epic --as "Release Process" --var version=X.Y.Z
 |---------|---------|
 | `bd formula list` | List available formulas/protos |
 | `bd mol show <id>` | Show proto/mol structure |
-| `bd mol spawn <proto>` | Create wisp from proto (default) |
-| `bd mol spawn <proto> --pour` | Create persistent mol from proto |
-| `bd mol run <proto>` | Spawn + assign + pin (durable execution) |
 | `bd mol bond <A> <B>` | Combine protos or molecules |
 | `bd mol distill <epic>` | Extract proto from ad-hoc work |
 | `bd mol squash <mol>` | Compress wisp children to digest |
 | `bd mol burn <wisp>` | Delete wisp without trace |
-| `bd mol pour <proto>` | Shortcut for `spawn --pour` |
+| `bd mol pour <proto>` | Create persistent mol from proto/formula |
 | `bd mol wisp <proto>` | Create ephemeral wisp |
 | `bd mol wisp list` | List all wisps |
 | `bd mol wisp gc` | Garbage collect orphaned wisps |

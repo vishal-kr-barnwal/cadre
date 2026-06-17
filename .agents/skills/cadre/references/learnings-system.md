@@ -75,14 +75,14 @@ Session/thread ref if available
 
 ## Workflow Integration
 
-### On `/cadre-newtrack`
+### On `cadre-newtrack`
 
 1. Read `cadre/patterns.md` if exists
 2. Display: "📚 **Codebase Patterns:** Found X patterns from previous tracks"
 3. Check `cadre/archive/` for similar tracks
 4. Create `learnings.md` with inherited patterns header
 
-### On `/cadre-implement`
+### On `cadre-implement`
 
 1. **At Start:**
    - Read `cadre/patterns.md`
@@ -98,26 +98,26 @@ Session/thread ref if available
    - Prompt: "Elevate patterns to project level?"
    - If yes: Append to `cadre/patterns.md`
 
-### On `/cadre-revise`
+### On `cadre-revise`
 
 1. Append revision entry to `learnings.md`
 2. Prompt: "This revision reveals a reusable lesson. Add to patterns?"
 3. If yes: Append to `cadre/patterns.md`
 
-### On `/cadre-handoff`
+### On `cadre-handoff`
 
 1. Read `learnings.md` entries since last handoff
 2. Include summarized learnings in handoff document
 3. Add thread URL for context retrieval
 
-### On `/cadre-archive`
+### On `cadre-archive`
 
 1. Read `learnings.md` for unextracted patterns
 2. Prompt: "Extract patterns before archiving?"
 3. Append selected patterns to `cadre/patterns.md`
 4. Keep `learnings.md` in archived track folder
 
-### On `/cadre-refresh`
+### On `cadre-refresh`
 
 1. Scan all `learnings.md` files in `cadre/tracks/*/` and `cadre/archive/*/`
 2. Find patterns mentioned 2+ times across tracks

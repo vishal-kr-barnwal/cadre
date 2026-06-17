@@ -77,7 +77,7 @@ Beads state is stored in the Dolt database (not as files). Access via `bd show <
 
 ### Atomic claim via `bd sql` (compare-and-set)
 
-The ownership guard, `/cadre-implement`, and `/cadre-validate` claim a track
+The ownership guard, `cadre-implement`, and `cadre-validate` claim a track
 **atomically** by a single conditional update against the Dolt task graph — the real
 serialization point in default monorepo mode (where the advisory `lease` is a no-op).
 `bd sql` (Dolt-backed, `bd` v0.50.0+) runs SQL against the `issues` table; the epic's
@@ -98,7 +98,7 @@ no-`bd` fallback. **Verify the live schema at runtime** — `bd sql "SELECT * FR
 issues LIMIT 1" --format json` confirms the column names (the last-updated timestamp
 column is `updated_at`; if a `bd` build differs, adjust the `WHERE` accordingly).
 This is the canonical grounding for the Beads-CAS referenced by
-`references/ownership-guard.md §4`, `/cadre-implement`, and `/cadre-validate`.
+`references/ownership-guard.md §4`, `cadre-implement`, and `cadre-validate`.
 
 ### Task ID Mapping
 
@@ -165,8 +165,8 @@ bd ready --parent <epic_id>
 | **Task start** | `bd update --status in_progress` | Status change |
 | **Task complete** | `bd close --reason` | Completion + commit SHA |
 | **Task blocked** | `bd update --status blocked` | Block reason |
-| **Phase complete** | `bd update --notes` | COMPLETED/IN PROGRESS/NEXT summary |
-| **Handoff** | `bd update --notes` | Full session context for recovery |
+| **Phase complete** | `bd note` | COMPLETED/IN PROGRESS/NEXT summary |
+| **Handoff** | `bd note` | Full session context for recovery |
 
 ## Chemistry Patterns (Molecules)
 
@@ -258,9 +258,9 @@ bd mail reply msg-123 -m "Task completed, commit abc1234"
 bd mail inbox
 ```
 
-> **Note:** Messaging requires a mail delegate (e.g., `gt mail`). If not configured, use `bd update --notes` for coordination instead.
+> **Note:** Messaging requires a mail delegate (e.g., `gt mail`). If not configured, use `bd note` for coordination instead.
 
-> **Tip:** Use the `decision` issue type (`bd create -t decision`) for architectural decisions made during `/cadre-revise`.
+> **Tip:** Use the `decision` issue type (`bd create -t decision`) for architectural decisions made during `cadre-revise`.
 
 ## Configuration
 
@@ -280,25 +280,25 @@ Enable integration via `cadre/beads.json`:
 | `enabled` | boolean | Enable/disable Beads integration |
 | `auto_sync` | boolean | Sync on every task completion |
 | `epic_prefix` | string | Prefix for Beads epic IDs |
-| `sync_on_implement` | boolean | Sync before `/cadre-implement` |
+| `sync_on_implement` | boolean | Sync before `cadre-implement` |
 
-## Command Mapping
+## Workflow Mapping
 
-| Cadre Command | Beads Operations | Description |
+| Cadre Workflow | Beads Operations | Description |
 |-------------------|------------------|-------------|
-| `/cadre-setup` | `bd init` | Initialize Beads in project |
-| `/cadre-newtrack` | `bd create` (epic + tasks) | Create epic with linked tasks |
-| `/cadre-implement` | `bd ready` → `bd update` → `bd done` | Get next task, track progress, complete |
-| `/cadre-status` | `bd ready`, `bd show` | Show available tasks, epic status |
-| `/cadre-flag blocked` | `bd update --status blocked` | Mark task blocked with reason |
-| `/cadre-flag skipped` | `bd update --status skipped` / `bd close` | Skip task with justification |
-| `/cadre-ship` | `bd dolt push` | Flush Dolt state before rebase/push |
-| `/cadre-archive` | `bd admin compact --auto` | Archive completed epics |
+| `cadre-setup` | `bd init` | Initialize Beads in project |
+| `cadre-newtrack` | `bd create` (epic + tasks) | Create epic with linked tasks |
+| `cadre-implement` | `bd ready` → `bd update` → `bd close` | Get next task, track progress, complete |
+| `cadre-status` | `bd ready`, `bd show` | Show available tasks, epic status |
+| `cadre-flag blocked` | `bd update --status blocked` | Mark task blocked with reason |
+| `cadre-flag skipped` | `bd update --status skipped` / `bd close` | Skip task with justification |
+| `cadre-ship` | `bd dolt push` | Flush Dolt state before rebase/push |
+| `cadre-archive` | `bd admin compact --auto` | Archive completed epics |
 
 ### Example Flow
 
 ```bash
-# User runs /cadre-implement
+# User runs cadre-implement
 
 # 1. Cadre checks Beads for ready tasks
 bd ready --parent auth_20250115
@@ -325,7 +325,7 @@ bd close TASK-001 --reason "Implemented JWT validation"
 When updating task status, use structured notes for recovery after compaction:
 
 ```bash
-bd update TASK-001 --notes "COMPLETED: JWT validation with RS256
+bd note TASK-001 "COMPLETED: JWT validation with RS256
 KEY DECISION: RS256 over HS256 for key rotation
 IN PROGRESS: Password reset flow
 NEXT: Implement rate limiting
@@ -510,7 +510,7 @@ Beads handles concurrent updates safely:
 Workers should include worker context in notes:
 
 ```bash
-bd update <task_id> --notes "WORKER: worker_1_auth
+bd note <task_id> "WORKER: worker_1_auth
 TASK: Create auth module
 FILES: src/auth/index.ts, src/auth/index.test.ts
 STATUS: Completed

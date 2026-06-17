@@ -3,13 +3,13 @@
 # Scaffolded into the repo as `.gitlab-ci.yml` (or `include:`-d from an existing
 # pipeline). This is the OPTIONAL drift-gate half of the PR-open / CI hook: it
 # guards the "edit canonical -> regenerate -> commit" contract for the generated
-# command sets.
+# skill bundles.
 #
 # What it does: on every merge-request pipeline it checks out the repo and runs
-#   1. `bash scripts/generate-commands.sh --check` — regenerates the Codex
-#      command set (.codex/prompts) into a scratch dir and
+#   1. `bash scripts/generate-skills.sh --check` — regenerates Claude/Codex
+#      skill bundles into a scratch dir and
 #      fails if the committed output is STALE. The fix is always: edit the
-#      canonical .claude/commands/ source, re-run `bash scripts/generate-commands.sh`,
+#      master workflow protocols/ source, re-run `bash scripts/generate-skills.sh`,
 #      and commit the regenerated trees.
 #   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
 #      every script under scripts/, so a broken generator/installer can't merge.
@@ -41,9 +41,9 @@ cadre-monorepo-check:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - apk add --no-cache bash jq git >/dev/null 2>&1 || true
-    # Fails if .claude/commands/ was edited without regenerating the per-platform
-    # command sets. Fix: re-run generate-commands.sh and commit the output.
-    - bash scripts/generate-commands.sh --check
+    # Fails if skill protocol sources changed without regenerating the
+    # per-platform skill bundles. Fix: re-run generate-skills.sh and commit.
+    - bash scripts/generate-skills.sh --check
     # Parse-only (-n) — validates every script without executing it.
     - bash -n scripts/*.sh
     # Semantic smoke test for safety-critical context shared across agent files.

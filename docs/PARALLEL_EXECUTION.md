@@ -209,12 +209,12 @@ function detectConflicts(tasks: ParallelTask[]): Conflict[] {
 
 The worker prompt below is platform-agnostic; only the **dispatch mechanism**
 differs per tool. See [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
-(bundled with every command set) for the full table:
+(bundled with every skill bundle) for the full table:
 
 | Platform | Dispatch |
 |----------|----------|
 | **Claude Code** | `Task` tool, one call per worker (awaitable) |
-| **OpenAI Codex CLI** | spawn parallel agents with the `worker` agent type; manage via `/agent` |
+| **OpenAI Codex** | spawn parallel agents with the `worker` agent type; manage via `/agent` |
 | **No parallel primitive** | sequential fallback — one agent runs each task in its worktree |
 
 ### Example: Claude Code's Task() Tool
@@ -270,7 +270,7 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
 
 > The coordinator mechanics below now live in the sliced reference
 > [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
-> (bundled with every command set), not inline in `cadre-implement.md`. The
+> (bundled with every skill bundle), not inline in `cadre-implement.md`. The
 > per-worker prompt stays inline in `cadre-implement.md`. This section
 > documents the design.
 
@@ -565,11 +565,11 @@ Dolt graph still coordinates all workers regardless of repo.
 
 ---
 
-## Commands Reference
+## Workflow Reference
 
-| Command | Description |
+| Workflow | Description |
 |---------|-------------|
-| `/cadre-implement` | Now supports parallel phases (repo-scoped in polyrepo) |
-| `/cadre-newtrack` | Asks about parallel execution |
-| `/cadre-status` | Shows parallel worker status |
-| `/cadre-validate` | Validates parallel annotations |
+| `cadre-implement` | Now supports parallel phases (repo-scoped in polyrepo) |
+| `cadre-newtrack` | Asks about parallel execution |
+| `cadre-status` | Shows parallel worker status |
+| `cadre-validate` | Validates parallel annotations |

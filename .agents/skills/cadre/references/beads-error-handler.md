@@ -1,6 +1,6 @@
 # Beads Error Handler Protocol
 
-Shared error handling for all Cadre commands that use `bd` CLI commands.
+Shared error handling for all Cadre workflows that use `bd` CLI commands.
 
 ## Standard Error Response
 
@@ -40,9 +40,9 @@ When `beads_enabled = false` (set by option A or initial unavailability):
 | `bd dolt push` | Skip (no remote sync) |
 | `bd compact` | Skip (no compaction) |
 
-## Usage in Commands
+## Usage in Workflows
 
-Every Cadre command that calls `bd` should reference this protocol instead of inlining the A/B/C options. Example:
+Every Cadre workflow that calls `bd` should reference this protocol instead of inlining the A/B/C options. Example:
 
 ```markdown
 Run: bd update <task_id> --status in_progress --json

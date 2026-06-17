@@ -120,8 +120,8 @@ Issue Lifecycle:
 ```
 Epic Planning with Ready Fronts:
 - [ ] Create epic issue for high-level goal
-- [ ] Create milestone issues for phases
-- [ ] Create story issues named by WHAT, not WHEN
+- [ ] Create task issues for phases (label them `cadre:phase`)
+- [ ] Create task issues named by WHAT, not WHEN (label them `cadre:task`)
 - [ ] Add deps using requirement language: "X needs Y" → bd dep add X Y
 - [ ] Verify with bd blocked
 - [ ] Use bd ready to work through in dependency order
@@ -133,13 +133,13 @@ Epic Planning with Ready Fronts:
 # Create epic (the goal)
 bd create "OAuth integration" -t epic
 
-# Create milestones
-bd create "Phase 1: Credentials" -t milestone --parent bd-1
-bd create "Phase 2: Flow" -t milestone --parent bd-1
+# Create phase tasks
+bd create "Phase 1: Credentials" -t task --parent bd-1 --labels cadre:phase
+bd create "Phase 2: Flow" -t task --parent bd-1 --labels cadre:phase
 
-# Create stories
-bd create "Generate client secrets" -t story --parent bd-2
-bd create "Implement Auth Code Flow" -t story --parent bd-3
+# Create implementation tasks
+bd create "Generate client secrets" -t task --parent bd-2 --labels cadre:task
+bd create "Implement Auth Code Flow" -t task --parent bd-3 --labels cadre:task
 
 # Add deps
 bd dep add bd-3 bd-2  # Flow needs credentials
@@ -156,7 +156,7 @@ Resume Workflow:
 - [ ] Run bd ready to see available work
 - [ ] Run bd stats for project overview
 - [ ] Show details on issue to work on: bd show <id>
-- [ ] Review notes (bd show <id> --notes)
+- [ ] Review notes (`bd show <id> --long`)
 - [ ] Begin work with full context
 ```
 

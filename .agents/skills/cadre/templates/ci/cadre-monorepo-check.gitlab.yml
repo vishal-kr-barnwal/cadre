@@ -3,23 +3,25 @@
 # Scaffolded into the repo as `.gitlab-ci.yml` (or `include:`-d from an existing
 # pipeline). This is the OPTIONAL drift-gate half of the PR-open / CI hook: it
 # guards the "edit canonical -> regenerate -> commit" contract for the generated
-# command sets.
+# skill bundles.
 #
 # What it does: on every merge-request pipeline it checks out the repo and runs
-#   1. `bash scripts/generate-commands.sh --check` — regenerates the Codex
-#      command set (.codex/prompts) into a scratch dir and
+#   1. `bash scripts/generate-skills.sh --check` — regenerates Claude/Codex
+#      skill bundles into a scratch dir and
 #      fails if the committed output is STALE. The fix is always: edit the
-#      canonical .claude/commands/ source, re-run `bash scripts/generate-commands.sh`,
+#      master workflow protocols/ source, re-run `bash scripts/generate-skills.sh`,
 #      and commit the regenerated trees.
 #   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
 #      every script under scripts/, so a broken generator/installer can't merge.
-#   3. tracks.md freshness — regenerates cadre/tracks.md from each track's
+#   3. agent context parity — when `scripts/check-agent-context.sh` exists, asserts
+#      AGENTS.md and CLAUDE.md both carry the team-scale safety rules.
+#   4. tracks.md freshness — regenerates cadre/tracks.md from each track's
 #      metadata.json.status (the source of truth) into a scratch file and fails if
 #      the committed index is STALE or hand-edited. The fix is always:
 #      `/cadre-status --regen-index` (never hand-merge tracks.md markers).
-#   4. .gitattributes guard (shared mode only) — asserts the required `merge=ours`
+#   5. .gitattributes guard (shared mode only) — asserts the required `merge=ours`
 #      lines exist so the control-plane merge contract isn't silently dropped.
-#   5. review gate (track MRs only) — asserts the track's metadata.review cleared:
+#   6. review gate (track MRs only) — asserts the track's metadata.review cleared:
 #      verdict approved, no blocking findings, no disallowed self-review, and
 #      reviewed_sha is present. (SHA-equality against the MR head is only a
 #      non-blocking WARNING — ship/land rebase rewrites the tip, so CI cannot match
@@ -39,11 +41,13 @@ cadre-monorepo-check:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - apk add --no-cache bash jq git >/dev/null 2>&1 || true
-    # Fails if .claude/commands/ was edited without regenerating the per-platform
-    # command sets. Fix: re-run generate-commands.sh and commit the output.
-    - bash scripts/generate-commands.sh --check
+    # Fails if skill protocol sources changed without regenerating the
+    # per-platform skill bundles. Fix: re-run generate-skills.sh and commit.
+    - bash scripts/generate-skills.sh --check
     # Parse-only (-n) — validates every script without executing it.
     - bash -n scripts/*.sh
+    # Semantic smoke test for safety-critical context shared across agent files.
+    - '[ ! -f scripts/check-agent-context.sh ] || bash scripts/check-agent-context.sh'
     # tracks.md is a DERIVED cache, not an authority: it must equal the output of
     # the regen-index script (which rebuilds it from each track's
     # metadata.json.status, the single source of truth). Catches a stale index or a

@@ -19,17 +19,17 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 ## Key Capabilities
 
-**Spec-first SDLC.** Every track flows through plan → implement (TDD) → **review → ship (monorepo) / land (polyrepo) → archive → release**. `/cadre-review` is an enforced quality gate: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `/cadre-ship` / `/cadre-land` refuse to proceed on `changes_requested` or blocking findings.
+**Spec-first SDLC.** Every track flows through plan → implement (TDD) → **review → ship (monorepo) / land (polyrepo) → archive → release**. `cadre-review` is an enforced quality gate: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `cadre-ship` / `cadre-land` refuse to proceed on `changes_requested` or blocking findings.
 
-**Two AI coding tools, one source of truth.** The 16-command suite runs on Claude Code and OpenAI Codex CLI. The Codex set is generated from the canonical Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh) (run `--check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
+**Two AI coding tools, one source of truth.** The 16 Cadre workflow protocols run through skills on Claude Code and OpenAI Codex. Both skill bundles are generated from [`skills/cadre/protocols/`](skills/cadre/protocols/) (run `scripts/generate-skills.sh --check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
 
 **Built for teams.**
-- **Per-person identity + advisory leases** — assignees use your git committer identity (`user.email` → `user.name`); `metadata.json` carries `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In shared sync mode a track can hold an advisory lease (a no-op in monorepo/local modes; stale leases swept by `/cadre-validate`).
-- **`tracks.md` is a derived cache** — `metadata.json.status` is the single source of truth; rebuild the index with `/cadre-status --regen-index` (a `tracks.md` merge conflict resolves by re-running it). Never hand-edit the markers.
-- **Status boards** — `/cadre-status --mine` / `--team` / `--repos` (polyrepo fleet board) / `--export`.
+- **Per-person identity + advisory leases** — assignees use your git committer identity (`user.email` → `user.name`); `metadata.json` carries `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In shared sync mode a track can hold an advisory lease (a no-op in monorepo/local modes; stale leases swept by `cadre-validate`).
+- **`tracks.md` is a derived cache** — `metadata.json.status` is the single source of truth; rebuild the index with `cadre-status --regen-index` (a `tracks.md` merge conflict resolves by re-running it). Never hand-edit the markers.
+- **Status boards** — `cadre-status --mine` / `--team` / `--repos` (polyrepo fleet board) / `--export`.
 - **Collision-proof track IDs** — same-day duplicates get a short base36 suffix; a push/Dolt conflict triggers a clean re-suffix.
 
-**Monorepo and polyrepo.** A polyrepo control repo orchestrates work across product-repo submodules; `/cadre-land` opens the cross-repo PR group and a merge train lands it product-repos-first, control-repo-last. The train uses **merge commits (squash disabled as a guardrail)** so each submodule gitlink pins to a deterministic merge commit. See the [Polyrepo Guide](docs/POLYREPO.md).
+**Monorepo and polyrepo.** A polyrepo control repo orchestrates work across product-repo submodules; `cadre-land` opens the cross-repo PR group and a merge train lands it product-repos-first, control-repo-last. The train uses **merge commits (squash disabled as a guardrail)** so each submodule gitlink pins to a deterministic merge commit. See the [Polyrepo Guide](docs/POLYREPO.md).
 
 ---
 
@@ -37,9 +37,8 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 | Platform | How | Invoke |
 |----------|-----|--------|
-| **Claude Code** | slash commands + skills | `/cadre-setup` |
-| **OpenAI Codex CLI** | custom prompts | `/cadre-setup` |
-| **Agent Skills compatible CLIs** | skills specification | — |
+| **Claude Code** | skills | `$cadre`, then `cadre-setup` |
+| **OpenAI Codex** | repo/user skills + `AGENTS.md` | `$cadre`, then `cadre-setup` |
 
 See the **[Install & Version Guide](docs/INSTALL.md)** for the full compatibility matrix and per-platform setup. Installation summaries are below.
 
@@ -97,47 +96,48 @@ the [Install & Version Guide](docs/INSTALL.md).
 
 ### Claude Code
 
-Clone the repo once, then copy the commands and skills into your config:
+Clone the repo once, then copy the skills into your config:
 
 ```bash
 git clone https://github.com/vishal-kr-barnwal/Cadre.git
 
 # Global install (available in every project)
-cp -r Cadre/.claude/commands/* ~/.claude/commands/
 cp -r Cadre/.claude/skills/*   ~/.claude/skills/
 ```
 
 To scope the install to a single project instead, copy into that project's `.claude/`:
 
 ```bash
-cp -r Cadre/.claude/commands your-project/.claude/commands
 cp -r Cadre/.claude/skills   your-project/.claude/skills
 ```
 
 > **Smaller context window?** Copy only the `cadre` skill (`.claude/skills/cadre`) — it already includes Beads integration. Add the `beads` and `skill-creator` skills only if you want standalone Beads usage or to build your own skills.
 
-### OpenAI Codex CLI
+### OpenAI Codex
 
-Codex loads custom prompts globally from `~/.codex/prompts/`:
+Codex reads skills from `.agents/skills` in a project, or from `~/.agents/skills`
+globally:
 
 ```bash
-mkdir -p ~/.codex/prompts
-cp -r .codex/prompts/* ~/.codex/prompts/
+mkdir -p your-project/.agents/skills
+cp -r Cadre/.agents/skills/. your-project/.agents/skills/
 cp AGENTS.md your-project/AGENTS.md   # project context
 ```
 
-Invoke `/cadre-setup` from the slash menu. Codex expands `$ARGUMENTS`, so `/cadre-newtrack Add OAuth login` works.
+Invoke the Cadre skill explicitly with `$cadre`, or ask naturally for
+`cadre-setup`, `cadre-newtrack Add OAuth login`, and so on.
 
-> The Codex command set is generated from the Claude commands by [`scripts/generate-commands.sh`](scripts/generate-commands.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
+> Claude and Codex skill bundles are generated from the master protocols in [`skills/cadre/protocols/`](skills/cadre/protocols/) by [`scripts/generate-skills.sh`](scripts/generate-skills.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
 
 ---
 
 ## Setup Guide
 
-Run the setup command once in your project directory — it does everything:
+Run the setup workflow once in your project directory — it does everything:
 
 ```bash
-/cadre-setup
+$cadre
+cadre-setup
 ```
 
 Setup will:
@@ -146,22 +146,17 @@ Setup will:
    - `product.md` — product vision and goals
    - `tech-stack.md` — technology choices
    - `workflow.md` — development standards (TDD, commits)
-   - `tracks.md` — derived track index (a cache rebuilt from each track's `metadata.json` via `/cadre-status --regen-index`; `metadata.json.status` is the source of truth, so never hand-edit the markers)
-2. **Prompt you to choose a Beads mode** and initialize it for you (runs `bd init`, creates `.beads/`, writes `cadre/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
+   - `tracks.md` — derived track index (a cache rebuilt from each track's `metadata.json` via `cadre-status --regen-index`; `metadata.json.status` is the source of truth, so never hand-edit the markers)
+2. **Initialize Beads in full mode** for you (runs `bd init --non-interactive --role maintainer`, creates `.beads/`, writes `cadre/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
 
 You don't need to run `bd init` yourself — setup handles it.
 
-### Beads mode
+### Beads Mode
 
-When prompted, pick the mode that fits your repo:
+Cadre setup always uses full Beads integration. `.beads/` is committed as part
+of the control plane so the team shares one task graph.
 
-| Mode | What setup runs | When to use |
-|------|-----------------|-------------|
-| **Normal** | `bd init` | The whole team uses Beads. `.beads/` is committed to the repo so everyone shares the task graph. |
-| **Stealth** | `bd init --stealth` | Personal use on a shared repo. `.beads/` is gitignored and stays local. |
-
-The choice is recorded in `cadre/beads.json` (copied from the bundled
-template; setup sets `mode`):
+The mode is recorded in `cadre/beads.json` (copied from the bundled template):
 
 ```json
 {
@@ -185,9 +180,7 @@ template; setup sets `mode`):
 
 ### Creating a New Track
 
-```bash
-/cadre-newtrack "Add user authentication"
-```
+Ask `$cadre` for `cadre-newtrack "Add user authentication"`.
 
 This creates:
 - `cadre/tracks/<track_id>/spec.md` - Requirements
@@ -197,9 +190,7 @@ This creates:
 
 ### Implementing a Track
 
-```bash
-/cadre-implement
-```
+Ask `$cadre` for `cadre-implement`.
 
 The workflow:
 1. **Load context** - Reads spec.md and plan.md
@@ -224,9 +215,9 @@ For phases with independent tasks, Cadre can execute them in parallel using sub-
 ```
 
 **How it works:**
-1. During `/cadre-newtrack`, you'll be asked if you want parallel execution
+1. During `cadre-newtrack`, you'll be asked if you want parallel execution
 2. Tasks are analyzed for file conflicts and dependencies
-3. During `/cadre-implement`, parallel phases spawn sub-agents
+3. During `cadre-implement`, parallel phases spawn sub-agents
 4. Each sub-agent works on exclusive files with TDD workflow
 5. Results are aggregated when all workers complete
 
@@ -240,7 +231,7 @@ See [Parallel Execution Design](docs/PARALLEL_EXECUTION.md) for details.
 ### Checking Status
 
 ```bash
-/cadre-status
+cadre-status
 ```
 
 Shows:
@@ -257,28 +248,29 @@ Status modes:
 
 ---
 
-## Commands Reference
+## Workflow Reference
 
-The same command name works on every supported platform (Claude Code, Codex CLI).
+The same workflow name works through the Cadre skill on every supported
+platform (Claude Code, Codex).
 
-| Command | Description |
+| Workflow | Description |
 |---------|-------------|
-| `/cadre-setup` | Initialize project context |
-| `/cadre-newtrack` | Create feature/bug track |
-| `/cadre-implement` | Execute tasks from plan |
-| `/cadre-status` | Show progress overview (`--mine`/`--team`/`--repos` boards, `--regen-index` rebuilds `tracks.md`, `--export` writes a summary) |
-| `/cadre-revert` | Git-aware revert |
-| `/cadre-validate` | Validate project integrity |
-| `/cadre-flag` | Flag a task as blocked or skipped |
-| `/cadre-revise` | Update spec/plan |
-| `/cadre-review` | Review a track's diff before shipping |
-| `/cadre-ship` | Rebase reviewed track, push, prepare PR (monorepo) |
-| `/cadre-land` | Polyrepo: open + link cross-repo PR group; merge train lands it |
-| `/cadre-archive` | Archive completed tracks |
-| `/cadre-release` | Cut a local release (changelog + tag) |
-| `/cadre-handoff` | Create context handoff |
-| `/cadre-refresh` | Sync context with codebase |
-| `/cadre-formula` | Track templates: list/show/create/wisp |
+| `cadre-setup` | Initialize project context |
+| `cadre-newtrack` | Create feature/bug track |
+| `cadre-implement` | Execute tasks from plan |
+| `cadre-status` | Show progress overview (`--mine`/`--team`/`--repos` boards, `--regen-index` rebuilds `tracks.md`, `--export` writes a summary) |
+| `cadre-revert` | Git-aware revert |
+| `cadre-validate` | Validate project integrity |
+| `cadre-flag` | Flag a task as blocked or skipped |
+| `cadre-revise` | Update spec/plan |
+| `cadre-review` | Review a track's diff before shipping |
+| `cadre-ship` | Rebase reviewed track, push, prepare PR (monorepo) |
+| `cadre-land` | Polyrepo: open + link cross-repo PR group; merge train lands it |
+| `cadre-archive` | Archive completed tracks |
+| `cadre-release` | Cut a local release (changelog + tag) |
+| `cadre-handoff` | Create context handoff |
+| `cadre-refresh` | Sync context with codebase |
+| `cadre-formula` | Track templates: list/show/create/wisp |
 
 ### Essential Beads Commands
 
@@ -288,7 +280,7 @@ The same command name works on every supported platform (Claude Code, Codex CLI)
 |---------|-------------|
 | `bd prime` | Load AI-optimized workflow context (run first!) |
 | `bd ready` | List tasks with no blockers |
-| `bd create "Title" -t story -p 0` | Create a P0 story (highest priority) |
+| `bd create "Title" -t task -p 0` | Create a P0 task (highest priority) |
 | `bd create "Bug" --deps discovered-from:<id>` | Create and link discovered work |
 | `bd show <id>` | View task details, notes, and context |
 | `bd close <id> --continue` | Complete task and auto-advance to next |
@@ -306,7 +298,7 @@ The same command name works on every supported platform (Claude Code, Codex CLI)
 | `bd mol wisp <template>` | Create ephemeral exploration (no audit) |
 | `bd mol current` | Show current step in molecule |
 | `bd mol squash <id>` | Compress completed molecule to digest |
-| `bd mol distill <epic> --as "Name"` | Extract template from completed work |
+| `bd mol distill <epic> "Name"` | Extract template from completed work |
 
 ---
 
@@ -316,7 +308,7 @@ Located in `.claude/skills/`:
 
 | Skill | Description |
 |-------|-------------|
-| **cadre** | Context-driven development methodology. Auto-activates when `cadre/` directory exists. Provides intent mapping for natural language commands. |
+| **cadre** | Context-driven development methodology. Auto-activates when `cadre/` directory exists. Routes natural language to bundled workflow protocols. |
 | **beads** | Persistent task memory that survives conversation compaction. Auto-activates when `.beads/` directory exists. Integrates with Cadre for cross-session memory. |
 | **skill-creator** | Guide for creating and packaging new AI agent skills. |
 
@@ -329,7 +321,7 @@ Skills auto-activate based on project structure:
 
 Skills provide:
 - **Context Loading**: Automatically reads relevant project files
-- **Intent Mapping**: Converts natural language to commands
+- **Intent Mapping**: Routes natural language to workflow protocols
 - **Proactive Behaviors**: Suggests next steps and detects issues
 
 ---
@@ -340,10 +332,10 @@ Skills provide:
 
 ```
 Cadre/
+├── skills/cadre/protocols/  # Master workflow protocols (edit these)
 ├── .claude/
-│   ├── commands/        # Claude Code slash commands (16) — canonical source
-│   └── skills/          # Skills (cadre, beads, skill-creator)
-├── .codex/prompts/      # OpenAI Codex CLI commands (generated)
+│   └── skills/          # Claude Code skills
+├── .agents/skills/      # OpenAI Codex repo skills
 ├── scripts/             # install/generate scripts, Cadre MCP server, LSP review helper
 ├── templates/           # Workflow + styleguide templates, ci/ (merge-train + drift-check)
 ├── docs/                # Documentation (see docs/INSTALL.md)
@@ -392,7 +384,7 @@ Throughout cadre files:
 - `[!]` - Blocked
 - `[-]` - Skipped
 
-These markers in `tracks.md` are derived from each track's `metadata.json.status` (the source of truth) — never hand-edit them; rebuild with `/cadre-status --regen-index`.
+These markers in `tracks.md` are derived from each track's `metadata.json.status` (the source of truth) — never hand-edit them; rebuild with `cadre-status --regen-index`.
 
 ---
 
@@ -424,7 +416,7 @@ flowchart TD
         K --> L["bd ready"]
         L --> M[Execute Task - TDD]
         M --> N{Done?}
-        N -->|Yes| O["bd done + update plan"]
+        N -->|Yes| O["bd close + update plan"]
         O --> P{More Tasks?}
         P -->|Yes| Q{5+ tasks?}
         Q -->|Yes| R["cadre-handoff"]
@@ -489,7 +481,7 @@ flowchart LR
 | **Multi-Section** | `implement` → *(5+ tasks)* → `handoff` → *(new session)* → `implement` |
 | **Handle Blockers** | `implement` → `flag` (blocked) → `flag` (skipped) or wait → `implement` |
 | **Mid-Track Changes** | `implement` → `revise` → `implement` |
-| **Session Resume** | `bd ready` → `bd show --notes` → load spec → `implement` |
+| **Session Resume** | `bd ready` → `bd show --long` → load spec → `implement` |
 | **Monitoring** | `status` / `validate` *(anytime)* |
 | **Context Drift** | `refresh` *(when codebase changed outside Cadre)* |
 

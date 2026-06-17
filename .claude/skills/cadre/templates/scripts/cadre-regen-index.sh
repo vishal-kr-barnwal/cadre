@@ -3,7 +3,7 @@
 # cadre-regen-index.sh — Rebuild cadre/tracks.md as a DERIVED index from each
 # track's metadata.json.status (the single source of truth).
 #
-# This is the implementation behind `/cadre-status --regen-index`. Every command
+# This is the implementation behind `cadre-status --regen-index`. Every workflow
 # that changes a track's status writes the new value to that track's metadata.json
 # and then calls this script, rather than hand-editing a marker in tracks.md.
 #

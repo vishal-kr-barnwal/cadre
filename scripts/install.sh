@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# install.sh — Install the Cadre commands for your AI coding CLIs.
+# install.sh — Install the Cadre skills for your AI coding CLIs.
 #
 # Detects the supported tools on this machine, lets you pick which ones to set
 # up, and installs either globally (into your home config, e.g. ~/.claude/) or
 # into a project directory (e.g. <project>/.claude/).
 #
 # Supported tools and what gets installed:
-#   Claude Code        .claude/commands/ + .claude/skills/
-#   OpenAI Codex CLI   .codex/prompts/
+#   Claude Code        .claude/skills/
+#   OpenAI Codex       .agents/skills/ (+ AGENTS.md for project installs)
 #
 # Usage:
 #   bash scripts/install.sh                 # interactive
@@ -52,7 +52,7 @@ show_help() { sed -n '3,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 agent_label() {
   case "$1" in
     claude)      echo "Claude Code" ;;
-    codex)       echo "OpenAI Codex CLI" ;;
+    codex)       echo "OpenAI Codex" ;;
   esac
 }
 
@@ -60,7 +60,7 @@ agent_label() {
 agent_native() {
   case "$1" in
     claude)      echo "global or project" ;;
-    codex)       echo "global" ;;
+    codex)       echo "global or project" ;;
   esac
 }
 
@@ -75,8 +75,8 @@ agent_detect() {
 # Source directories each agent needs present in the repo before installing.
 agent_sources() {
   case "$1" in
-    claude)      echo ".claude/commands .claude/skills" ;;
-    codex)       echo ".codex/prompts" ;;
+    claude)      echo ".claude/skills" ;;
+    codex)       echo ".agents/skills" ;;
   esac
 }
 
@@ -100,22 +100,21 @@ copy_file_safe() {  # copy_file_safe <src> <dest> : never overwrite an existing 
 install_agent() {
   local agent="$1" base="$2" scope="$3" src
   for src in $(agent_sources "$agent"); do
-    [ -d "$REPO_ROOT/$src" ] || die "missing $src in repo. Run: bash scripts/generate-commands.sh"
+    [ -d "$REPO_ROOT/$src" ] || die "missing $src in repo. Run: bash scripts/generate-skills.sh"
   done
 
   case "$agent" in
     claude)
-      copy_dir "$REPO_ROOT/.claude/commands" "$base/.claude/commands"
       copy_dir "$REPO_ROOT/.claude/skills"   "$base/.claude/skills"
-      ok "Claude Code → $base/.claude/{commands,skills}"
+      ok "Claude Code → $base/.claude/skills"
       ;;
     codex)
-      copy_dir "$REPO_ROOT/.codex/prompts" "$base/.codex/prompts"
-      ok "Codex CLI → $base/.codex/prompts"
+      copy_dir "$REPO_ROOT/.agents/skills" "$base/.agents/skills"
+      ok "Codex → $base/.agents/skills"
       if [ "$scope" = project ]; then
         copy_file_safe "$REPO_ROOT/AGENTS.md" "$base/AGENTS.md"
       else
-        note "Codex reads custom prompts from ~/.codex/prompts globally; add AGENTS.md per project for context."
+        note "Codex reads user skills from ~/.agents/skills; add AGENTS.md per project for context."
       fi
       ;;
   esac
@@ -249,5 +248,5 @@ for a in $SELECTED; do
 done
 
 say ""
-ok "Done. Run ${BOLD}/cadre-setup${RESET}${GREEN}${RESET} in your project to get started."
+ok "Done. Ask the Cadre skill for ${BOLD}cadre-setup${RESET}${GREEN}${RESET} in your project to get started."
 $DRY_RUN && warn "dry-run: nothing was actually written."

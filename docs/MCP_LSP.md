@@ -48,8 +48,8 @@ Set `CADRE_ROOT=/path/to/project` when launching from outside the project root.
 Cadre can configure LSP during setup, or later with refresh:
 
 ```bash
-/cadre-setup          # includes an optional LSP recommendation step
-/cadre-refresh --lsp  # rerun LSP recommendations later
+cadre-setup          # includes an optional LSP recommendation step
+cadre-refresh --lsp  # rerun LSP recommendations later
 ```
 
 Both flows use the bundled setup helper:
@@ -111,7 +111,7 @@ For a 10-20 person team:
 2. Add LSP per language, starting with the repos that have frequent shared API
    changes.
 3. Keep both integrations graceful: absence of MCP/LSP should degrade to the
-   existing file-based command protocol, not block ordinary Cadre work.
+   existing file-based workflow protocol, not block ordinary Cadre work.
 
 References:
 - MCP specification: https://modelcontextprotocol.io/specification/2025-11-25

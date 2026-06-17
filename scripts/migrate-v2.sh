@@ -153,7 +153,7 @@ if $BEADS_TRACKED; then
     fi
   fi
 else
-  ok ".beads/ not git-tracked (stealth mode) — .gitattributes not needed."
+  ok ".beads/ not git-tracked — .gitattributes not needed."
 fi
 
 # =============================================================================
