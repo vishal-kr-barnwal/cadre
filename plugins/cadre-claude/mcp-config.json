@@ -4,10 +4,7 @@
       "command": "node",
       "args": [
         "${CLAUDE_PLUGIN_ROOT}/scripts/mcp/cadre-server.js"
-      ],
-      "env": {
-        "CADRE_ROOT": "${CLAUDE_PROJECT_DIR}"
-      }
+      ]
     }
   }
 }

@@ -30,15 +30,29 @@ behavior is unchanged):
 - otherwise → show the live status (sections 1-8) and, in polyrepo mode, the PR
   group / merge-train surface in section 5c.
 
+**MCP routing for this workflow (required):**
+- First resolve the project root with `cadre_current_root` using the per-call
+  `root` argument.
+- Use `cadre_team_status` for all multi-track status, ownership, reviewer, and
+  status-count data (`--team`, `--mine`, `--repos`, and the multi-track parts of
+  bare status). Read files only for details the MCP payload does not expose yet
+  (for example active-task snippets from `plan.md`).
+- Use `cadre_regen_index` for `--regen-index`; do not run the helper script or
+  reimplement the splice directly from the workflow.
+- Use `cadre_available_work` for `--available` / `--unowned`.
+- Use `cadre_collision_scan` for `--collisions`.
+- For resource reads, use `cadre://team-status?root=<absolute-or-encoded-root>` or
+  `cadre://collisions?root=<absolute-or-encoded-root>` with the same per-call root
+  contract.
+
 **Identity:** compute `<git-identity>` once at runtime as
 `git config user.email` (fallback `git config user.name`, else null). Used to label
 the active owner, resolve `--mine`, and group team WIP.
 
-**Cheap by default:** the full multi-track filesystem scan of every
-`cadre/tracks/<id>/metadata.json` (for ownership, leases, review state, and plan
-`<!-- files: -->` claims) runs **only** under the multi-track modes — `--team`,
-`--mine`, `--repos`, `--available`/`--unowned`, or `--collisions`. Bare
-`cadre-status` reads only `tracks.md` + the active track, exactly as before.
+**Cheap by default:** full multi-track MCP scans run **only** under the
+multi-track modes — `--team`, `--mine`, `--repos`, `--available`/`--unowned`, or
+`--collisions`. Bare `cadre-status` reads only `tracks.md` + the active track
+details that are not yet exposed by MCP, exactly as before.
 
 **Status source of truth:** each track's `metadata.json.status`
 (`new`|`in_progress`|`completed`|`blocked`|`skipped`) is authoritative. `tracks.md`
@@ -52,9 +66,12 @@ If `cadre/tracks.md` doesn't exist, tell user to run `cadre-setup` first.
 
 ## 2. Read State
 
-- Read `cadre/tracks.md` (the human-readable derived index/mirror).
-- List all track directories: `cadre/tracks/*/`
-- Read each `cadre/tracks/<track_id>/plan.md`
+- Read `cadre/tracks.md` only as the human-readable derived index/mirror.
+- Call `cadre_team_status` with `root` to load the track inventory and status
+  source-of-truth view. Use its `tracks[]` records for multi-track status,
+  ownership, reviewer, and review-verdict summaries.
+- Read `cadre/tracks/<track_id>/plan.md` only for tracks whose task-level details
+  are needed for the requested view.
 
 **Resolve the active track from metadata (source of truth), not the index.** Scan
 each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"`:
@@ -67,7 +84,7 @@ each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"`:
   marker still works as a fallback if no metadata reports `in_progress` (e.g.
   pre-status tracks). If the metadata-derived active track and the `tracks.md` marker
   disagree, prefer metadata and note that the index is stale — run
-  `cadre-status --regen-index` to refresh it.
+  MCP `cadre_regen_index` to refresh it.
 
 ## 3. Calculate Progress
 
@@ -504,38 +521,26 @@ Each entry keeps the existing heading shape the repo already uses —
 greps `## [..] Track:` keeps working unchanged. Use `metadata.json.name` for
 `<name>` (fallback to `track_id` if `name` is absent).
 
-**Procedure:** the splice is a deterministic, pure bash/jq program — it carries no
-decisions, so it ships as a **bundled helper script** rather than inline shell.
+**Procedure:** call the required MCP tool:
 
-1. **Resolve the bundled script.** Locate `<TEMPLATES_DIR>` per
-   `references/template-locator.md`; the helper is at
-   `<TEMPLATES_DIR>/scripts/cadre-regen-index.sh`. Run it from the project root:
+```json
+{ "root": "/absolute/path/to/project" }
+```
 
-   ```bash
-   bash "<TEMPLATES_DIR>/scripts/cadre-regen-index.sh"
-   ```
+Use `cadre_regen_index` and require `ok: true` in the returned JSON. It enumerates
+`cadre/tracks/*/metadata.json` (deterministically sorted), emits one
+`## [<marker>] Track: <name>` line per track (using the marker map above;
+`name` → fallback `track_id`), and splices that body between the sentinels while
+preserving any human preamble above `start` and trailer below `end`. It is
+idempotent and bd-independent.
 
-   It enumerates `cadre/tracks/*/metadata.json` (deterministically sorted),
-   emits one `## [<marker>] Track: <name>` line per track (using the marker map
-   above; `name` → fallback `track_id`), and **splices** that body between the
-   sentinels — preserving any human preamble above `start` and trailer below `end`.
-   It is idempotent (re-running yields a byte-identical file), creates the marked
-   region on first run (treating any existing content as preamble, never discarding
-   legacy `## [..] Track:` lines), and prints a one-line summary. **bd-independent.**
-
-2. **Fallback (only if the bundled script can't be found** — e.g. a partial
-   install): regenerate the marked region by hand from the same contract — for each
-   `cadre/tracks/*/metadata.json` (sorted by `track_id`) emit
-   `## <marker(.status)> Track: <.name // .track_id>` using the marker map above,
-   then replace **only** the lines between `<!-- cadre:index:start -->` and
-   `<!-- cadre:index:end -->` (appending a fresh marked region after the existing
-   file as preamble if the sentinels are absent). Never hand-edit a marker outside
-   the marked region, and never discard human content.
+If `cadre_regen_index` fails, halt and surface the MCP error. Do not fall back to
+hand-editing markers or reimplementing the splice in the workflow.
 
 **Shared-mode merge conflicts.** Because the index is **derived**, a Git merge
 conflict in `cadre/tracks.md` is resolved deterministically by **regenerating
 it** rather than hand-merging: take either side (or `git checkout --theirs/--ours
-cadre/tracks.md`), then run `cadre-status --regen-index` to rebuild the
+cadre/tracks.md`), then call MCP `cadre_regen_index` to rebuild the
 marked region from each per-track `metadata.json`. Per-track metadata rarely
 collides (each track owns its own file), so the derived index never needs a manual
 merge — this is the whole point of the source-of-truth split.
@@ -551,7 +556,8 @@ Like `--team`, this performs the full multi-track scan and degrades gracefully.
 
 1. **Identity:** compute `<git-identity>` (see Identity above).
 
-2. **Select candidates.** A track is **available** when ALL hold:
+2. **Select candidates via MCP.** Call `cadre_available_work` with `root`. A track
+   is **available** when ALL hold:
    - `metadata.json.status` is `new` (marker `[ ]`) — not in progress, completed,
      blocked, or skipped; AND
    - it is **unowned** — `metadata.json.owner` is null/absent (or, shared mode, any
@@ -562,7 +568,7 @@ Like `--team`, this performs the full multi-track scan and degrades gracefully.
    - **Beads (preferred):** `bd ready --json` already returns unblocked, unassigned
      work; intersect it with the new/unowned tracks above when `bd` is available.
 
-3. **Present** (sorted by priority, then `track_id`):
+3. **Present** the MCP result (sorted by priority, then `track_id`):
 
    ```
    ## Cadre — Available Work   (you: @<git-identity>)
@@ -591,12 +597,13 @@ annotation is a first-class plan artifact emitted for **every** task in `plan.md
 (not only parallel phases), so this scan sees the whole fleet's file footprint.
 Like `--team`, this performs the full multi-track scan and degrades gracefully.
 
-1. **Select active tracks.** A track is **active** when its
+1. **Scan via MCP.** Call `cadre_collision_scan` with `root`. A track is
+   **active** when its
    `metadata.json.status` is `in_progress` or `blocked` (markers `[~]` / `[!]`) —
    i.e. someone is mid-flight on it. Skip `new`, `completed`, and `skipped` tracks
    (a `new` track owns no files yet; finished/abandoned ones no longer contend).
 
-2. **Mine the file claims.** For each active track, parse its
+2. **Use MCP-mined file claims.** The tool parses each active track's
    `cadre/tracks/<track_id>/plan.md` and collect every task's
    `<!-- files: ... -->` annotation, splitting on commas and trimming whitespace.
    Build a claim list of `(track_id, repo, file)` tuples:
@@ -607,7 +614,7 @@ Like `--team`, this performs the full multi-track scan and degrades gracefully.
    - Compare on the **`(repo, file)` tuple**, never the bare path — the same path in
      two different submodule repos is **not** a collision in polyrepo mode.
 
-3. **Find cross-track overlaps.** Group the claims by `(repo, file)`. A
+3. **Use MCP-computed overlaps.** A
    **collision** is any `(repo, file)` tuple claimed by tasks in **two or more
    different active tracks** (same file claimed twice *within one track* is normal
    sequencing, not a collision — ignore it). For each colliding tuple, record the

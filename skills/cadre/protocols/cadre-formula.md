@@ -23,6 +23,10 @@ Subcommands:
 
 **PROTOCOL: Verify Beads is available for formula management.**
 
+0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+   `root` argument (the current project root or any path inside it). Use the
+   returned root for Cadre track lookup and plan parsing in this workflow.
+
 1. **Check Beads CLI:** Run `which bd`
    - If NOT found:
      > "⚠️ Beads CLI (`bd`) is required for formula management."
@@ -179,16 +183,19 @@ After listing or showing formulas, include:
 **If track_id provided:**
 - Validate track exists in `cadre/tracks/<track_id>/`
 - Load `cadre/tracks/<track_id>/metadata.json`
+- Call `cadre_parse_plan` with `root` and the track's relative `planPath` before
+  extracting structure.
 
 **If no track_id:**
-1. Read `cadre/tracks.md`, find tracks marked `[x]` (completed).
+1. Call `cadre_team_status` with `root`, find tracks whose status is `completed`.
 2. If completed tracks found, present a numbered list and ask the user to choose.
 3. If none:
    > "⚠️ No completed tracks found. Complete a track with `cadre-implement` first."
    - HALT
 
 ### 6.2 Validate Track
-1. If the track is NOT `[x]` in `tracks.md`: warn and offer to extract anyway or complete first (HALT if they choose to complete first).
+1. If the track's MCP/source status is not `completed`: warn and offer to extract
+   anyway or complete first (HALT if they choose to complete first).
 2. Read `metadata.json` for `beads_epic`. If none:
    > "⚠️ This track has no Beads integration. Templates are extracted from Beads epics."
    - HALT
@@ -198,8 +205,9 @@ After listing or showing formulas, include:
 - Otherwise derive a kebab-case name from the track description and confirm.
 
 ### 6.4 Analyze Track for Variables
-Read `spec.md` and `plan.md`; identify specific names, versions, paths that should
-become `{{variables}}`. Propose them in a table and let the user adjust.
+Read `spec.md` and use the `cadre_parse_plan` result for `plan.md`; identify
+specific names, versions, paths that should become `{{variables}}`. Propose them in
+a table and let the user adjust.
 
 ### 6.5 Extract Template
 ```bash

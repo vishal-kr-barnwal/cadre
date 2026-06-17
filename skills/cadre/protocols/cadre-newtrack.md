@@ -17,6 +17,10 @@ Create a new track from the workflow arguments.
 
 **PROTOCOL: Verify Cadre environment is properly set up.**
 
+0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+   `root` argument (the current project root or any path inside it). Use the
+   returned root for all project-scoped MCP calls in this workflow.
+
 1. **Check Required Files:** Verify existence of:
    - `cadre/product.md`
    - `cadre/tech-stack.md`
@@ -33,6 +37,10 @@ Create a new track from the workflow arguments.
    `references/polyrepo-git.md` for the per-repo branch/worktree model and the
    repo annotation. If `cadre/config.json` has `sync_mode: "shared"`, run the
    sync preamble from `references/cadre-sync.md` before mutating any state.
+
+4. **Load existing track inventory via MCP:** Call `cadre_team_status` with
+   `root`. Use the returned `tracks[]` for duplicate-name, dependency-prompt, and
+   existing-owner context instead of scanning `tracks.md` for authoritative state.
 
 ---
 
@@ -257,6 +265,11 @@ Create a new track from the workflow arguments.
    Now that every task carries a `<!-- files: -->` annotation (and, in polyrepo, a
    `<!-- repo: -->` annotation), warn if this new track's claimed files overlap
    another **active** track's claimed files.
+   - **Use MCP for the existing-fleet side:** call `cadre_collision_scan` with
+     `root` and use its returned active-track claims/collisions as the canonical
+     view of current cross-track overlap. For the new, not-yet-written draft plan,
+     parse the draft in memory using the same `<!-- repo: -->` / `<!-- files: -->`
+     contract before comparing it against the MCP result.
    - **Collect this track's claims:** the set of `(repo, file)` tuples across all
      tasks in the drafted `plan.md`. In **monorepo** mode there is one logical
      repo, so the tuple's repo component is the control repo (effectively compare
@@ -319,7 +332,7 @@ Create a new track from the workflow arguments.
      `track_id` (a push / `bd dolt push` conflict), re-suffix the track — rename the
      track DIRECTORY, the `metadata.json` `track_id` (key-scoped `jq`), the
      `track/<track_id>` branch(es), and the Beads epic title + `cadre-track:<id>`
-     label — then "regenerate the index per `cadre-status --regen-index`" and
+     label — then call MCP `cadre_regen_index` and
      re-publish. The detailed rejection-recovery branch lives in
      `references/cadre-sync.md` (owned by the sync master); this workflow only
      needs to honor the re-suffix.
@@ -335,7 +348,7 @@ Create a new track from the workflow arguments.
 
 4. **Ask for Dependencies (Optional):**
    > "Does this track depend on any other tracks being completed first?"
-   - If yes: List incomplete tracks from `cadre/tracks.md`, let user select
+   - If yes: List incomplete tracks from the `cadre_team_status` result, let user select
    - Store selected track_ids in `depends_on` array
    - Default to empty array if skipped or no incomplete tracks
 
@@ -456,12 +469,9 @@ Create a new track from the workflow arguments.
    - `cadre/tracks.md` is a DERIVED INDEX, never hand-edited. The new track's
      `metadata.json` already carries `"status": "new"` (step 2.4.7), which is the
      single source of truth. Do NOT append a `## [ ] Track:` block in place.
-   - Instead, regenerate the index per `cadre-status --regen-index`: it scans
-     every `cadre/tracks/*/metadata.json` and rebuilds the marked region
-     (`<!-- cadre:index:start -->` … `<!-- cadre:index:end -->`) from each
-     track's status + name, preserving any human-authored preamble. The new track
-     (marker `[ ]` from status `new`) appears in the regenerated region
-     automatically. Do not inline the algorithm here — defer to that mode.
+   - Instead, call `cadre_regen_index` with `root`. Require `ok: true`; on failure,
+     halt and surface the MCP error. The new track (marker `[ ]` from status `new`)
+     appears in the regenerated region automatically. Do not inline the algorithm.
 
 10a. **Scaffold Commit + Create Worktree:**
    - Stage and commit all cadre files to the **control repo** (main):
@@ -549,7 +559,12 @@ Create a new track from the workflow arguments.
      `metadata.beads_epic` in step 5).
 
 3. **Create Tasks for Each Phase with Context:**
-   - Parse `plan.md` for phases and tasks
+   - Parse `plan.md` for phases and tasks with `cadre_parse_plan`:
+     ```json
+     { "root": "/absolute/path/to/project", "planPath": "cadre/tracks/<track_id>/plan.md" }
+     ```
+     Use the returned phases/tasks/annotations as the authoritative structure for
+     Beads task creation.
    - For each phase:
      ```bash
      bd create "<phase_name>" -t task --parent <epic_id> --labels cadre:phase --json

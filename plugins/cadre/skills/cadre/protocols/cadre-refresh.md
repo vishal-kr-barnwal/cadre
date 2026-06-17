@@ -5,6 +5,8 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+
 # Cadre Refresh
 
 Sync cadre context documentation with the current codebase state.
@@ -12,6 +14,11 @@ Sync cadre context documentation with the current codebase state.
 ## 1. Verify Setup
 
 Check cadre/ exists with core files. If not, suggest `cadre-setup`.
+
+Resolve the project root with `cadre_current_root` using the per-call `root`
+argument. Use the returned root for all MCP calls in this workflow. Call
+`cadre_team_status` to load the active track inventory before analyzing track or
+learnings scope.
 
 **Control-plane sync preamble (`sync_mode == "shared"` — both topologies):** if
 `cadre/config.json` has `sync_mode == "shared"`, run the **sync preamble** from
@@ -176,6 +183,8 @@ auto-pushed.
 choices made at setup. See `references/polyrepo-git.md` and `references/cadre-sync.md`.
 
 1. **Reconcile manifest vs `.gitmodules`:**
+   - First call `cadre_polyrepo_preflight` with `root` and include its returned
+     errors/warnings in the reconcile report.
    - Submodules in `.gitmodules` not in `repos.json` → offer to **add** entries
      (prompt for `default_branch`/`enabled`).
    - Entries in `repos.json` whose submodule was removed → offer to **remove** or
@@ -212,11 +221,11 @@ track status (via the keyed reconciles above, completed-track detection, or simp
 to pick up edits made by other workflows/teammates), so rebuild the index so it
 mirrors current metadata.
 
-- After applying updates, **regenerate the index per `cadre-status --regen-index`**
-  (it scans every `cadre/tracks/*/metadata.json`, sorts by `track_id`, and
-  rebuilds only the content between the `<!-- cadre:index:start -->` /
-  `<!-- cadre:index:end -->` markers, preserving the human-authored preamble).
-  Do NOT hand-flip markers in `tracks.md` and do NOT duplicate the algorithm here.
+- After applying updates, call MCP `cadre_regen_index` with `root` (it scans every
+  `cadre/tracks/*/metadata.json`, sorts by `track_id`, and rebuilds only the
+  content between the `<!-- cadre:index:start -->` / `<!-- cadre:index:end -->`
+  markers, preserving the human-authored preamble). Require `ok: true`; do NOT
+  hand-flip markers in `tracks.md` and do NOT duplicate the algorithm here.
 - This step is **bd-independent** and idempotent — run it regardless of Beads
   availability, so the index stays correct even when `bd` is missing.
 

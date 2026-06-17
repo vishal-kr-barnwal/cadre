@@ -33,6 +33,9 @@ the track to ship or routes issues back into the plan.
 
 ## 1. Verify Setup
 
+Resolve the project root with `cadre_current_root` using the per-call `root`
+argument. Use the returned root for all MCP calls in this workflow.
+
 If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
 
 **Sync preamble (shared mode).** If `cadre/config.json` has `sync_mode == "shared"`
@@ -48,8 +51,13 @@ clone (the postamble in §8 publishes it).
 - If a `track_id` is provided, use it.
 - Otherwise pick the active (`[~]`) track, or — if none is in progress — list
   completed (`[x]`) tracks not yet archived and ask the user to choose.
+- Use `cadre_team_status` with `root` for active/completed track selection. Use
+  `tracks.md` markers only as human-readable fallback labels.
 - Read `cadre/tracks/<track_id>/metadata.json` for `git_branch`
   (default `track/<track_id>`) and `spec.md` for acceptance criteria.
+- Call `cadre_parse_plan` with `root` and the selected track's relative `planPath`;
+  use the parsed structure when checking task completion and when falling back to
+  task SHAs.
 
 ## 3. Compute the Diff
 
@@ -59,7 +67,8 @@ git diff main...<git_branch>          # changes the track introduces vs main
 git diff main...<git_branch> --stat   # summary for the report
 ```
 If the branch is absent (work was done directly on the current branch), fall back to
-the track's commit range from `plan.md` task SHAs, or `git diff main...HEAD`.
+the track's commit range from the `cadre_parse_plan` task SHA data, or
+`git diff main...HEAD`.
 
 **POLYREPO (`metadata.json` has a `repos` map):** the track spans several repos.
 Compute the diff **per repo** in submodule context and review them together:
@@ -190,6 +199,12 @@ jq --arg verdict "$NEW_VERDICT" \
    '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer, coverage: $coverage, self_reviewed: $self, reviewed_sha: $reviewed_sha, review_seq: $seq}' \
    "$META" > "$tmp" && mv "$tmp" "$META"
 ```
+
+After writing the review object, call `cadre_review_gate` with `root` and
+`trackId`. Use the returned `ok`, `reasons`, and `warnings` to verify that
+`cadre-ship` / `cadre-land` will interpret the verdict as intended. If the MCP
+gate result contradicts the just-written verdict, halt and fix `metadata.review`
+before publishing.
 - `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
   or `"changes_requested"` for **Changes requested**.
 - `reviewed_sha` is the track branch's HEAD commit SHA captured here, at review time.

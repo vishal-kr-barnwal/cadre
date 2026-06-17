@@ -27,16 +27,18 @@ last** — once every sibling PR is approved and CI-green.
 
 ## 1. Verify Setup & Topology
 
-1. If `cadre/tracks.md` doesn't exist → tell the user to run `cadre-setup`
+1. Resolve the project root with `cadre_current_root` using the per-call `root`
+   argument. Use the returned root for all MCP calls in this workflow.
+2. If `cadre/tracks.md` doesn't exist → tell the user to run `cadre-setup`
    first and halt.
-2. Read `cadre/repos.json`. If absent or `mode` ≠ `"polyrepo"` →
+3. Read `cadre/repos.json`. If absent or `mode` ≠ `"polyrepo"` →
    > "This is a monorepo project. Use `cadre-ship <track_id>` to push the
    > branch and open a single PR."
    and halt.
-3. Read `cadre/config.json` for `pr_provider` (`github`|`gitlab`) and
+4. Read `cadre/config.json` for `pr_provider` (`github`|`gitlab`) and
    `merge_train`. If `sync_mode: "shared"`, run the sync preamble
    (`references/cadre-sync.md`) first.
-4. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
+5. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
    tracks not yet archived and ask. Resolve the active track from
    `metadata.json.status` (source of truth), never the derived `tracks.md` cache.
    Read `cadre/tracks/<track_id>/metadata.json` for the `repos` map.
@@ -47,51 +49,28 @@ last** — once every sibling PR is approved and CI-green.
    you are the holder / your identity is `null`) your next `metadata.json` write
    sets `owner = <git-identity>` via key-scoped `jq`. This applies in **both**
    monorepo and polyrepo and even where the advisory `lease` is a no-op.
-5. **Gate — reviewed?** The machine-readable review gate in **§1.5** is
-   authoritative — do **not** prompt here unconditionally. Extract the review
-   fields once (D6 shape) and defer:
-   ```bash
-   META="cadre/tracks/<track_id>/metadata.json"
-   verdict=$(jq -r '.review.verdict // "absent"' "$META")
-   blocking=$(jq -r '.review.blocking_count // 0' "$META")
-   ```
-   Only when `verdict == "absent"` may you fall back to the soft prompt (suggest
+6. **Gate — reviewed?** Call `cadre_review_gate` with `root` and `trackId`. The
+   machine-readable MCP review gate in **§1.5** is authoritative — do **not**
+   prompt here unconditionally. Only when the MCP result contains reason
+   `No recorded review verdict` may you fall back to the soft prompt (suggest
    `cadre-review <track_id>` and ask whether to proceed anyway). If a review
    exists, take **no** action here — §1.5 either refuses or proceeds. Never ask
    "proceed anyway?" against an approved track.
 
 ### 1.5 Review-Gate Enforcement (machine-readable)
 
-Read `metadata.json` `review` (written by `cadre-review`) and enforce it
-**before** any push/PR work:
+Use the `cadre_review_gate` result and enforce it **before** any push/PR work:
 
 - **`review` absent** (`verdict == "absent"`) → keep today's behavior: the soft
   confirmation prompt from the section-1 step-5 "reviewed?" gate (ask whether to
   proceed anyway). Do not block. This is the **only** branch that prompts.
-- **`review.verdict == "changes_requested"` OR `review.blocking_count > 0`** →
+- **Any blocking MCP reason other than absent review** →
   **REFUSE.** Print a clear message naming the verdict and blocking count, e.g.
   > "Track `<track_id>` has an unresolved review (verdict: changes_requested,
   > <n> blocking findings). Resolve them and re-run `cadre-review` before
   > landing." — then halt without opening any PR.
-- **Self-approved while `require_second_reviewer` is set**
-  (`config.json` `require_second_reviewer == true` AND
-  `review.self_reviewed == true`) → **REFUSE**: tell the user the track was approved
-  by its own owner and a different reviewer must run `cadre-review` first; halt
-  without opening any PR.
-- **`review.verdict == "approved"` and `review.blocking_count == 0`**
-  (and not blocked by the self-review rule above) → proceed.
-
-Reuse the `verdict` / `blocking` values extracted in section-1 step 5 (re-read
-only if metadata changed since):
-```bash
-META="cadre/tracks/<track_id>/metadata.json"
-verdict=$(jq -r '.review.verdict // "absent"' "$META")
-blocking=$(jq -r '.review.blocking_count // 0' "$META")
-self_reviewed=$(jq -r '.review.self_reviewed // false' "$META")
-require_second=$(jq -r '.require_second_reviewer // false' cadre/config.json 2>/dev/null)
-# absent -> soft prompt; changes_requested or blocking>0 -> refuse;
-# require_second && self_reviewed -> refuse; else proceed
-```
+- **`ok: true`** → proceed. Surface any MCP warnings (for example older reviews
+  without `reviewed_sha`) as non-blocking notes.
 
 ---
 
@@ -108,9 +87,11 @@ require_second=$(jq -r '.require_second_reviewer // false' cadre/config.json 2>/
 
 Validate **EVERY** touched repo first. This is a gate: if **any** check fails,
 **halt before opening (or pushing for) ANY PR** — never open a partial group.
-Follow the **preflight asserts in `references/polyrepo-git.md`** (the shared
-preflight-assert snippet) for the per-repo checks; this workflow just drives the
-loop over `metadata.json.repos` (plus the control repo) and aggregates results.
+First call `cadre_polyrepo_preflight` with `root`. If it returns `ok: false`,
+surface the returned errors and halt before any push/PR work. Then follow the
+remaining **preflight asserts in `references/polyrepo-git.md`** for checks not yet
+covered by MCP; this workflow just drives the loop over `metadata.json.repos`
+(plus the control repo) and aggregates results.
 
 > **Fan out per-repo (parallel).** Every per-repo check below is **read-only and
 > independent** — the submodule `git submodule status`, the `git config -f
@@ -202,19 +183,11 @@ continue to step 3.
 
 ## 3. Push Per-Repo Branches
 
-**Re-read the review gate first (TOCTOU close).** The verdict checked in §1.5 is a
+**Re-read the review gate first (TOCTOU close).** The MCP verdict checked in §1.5 is a
 point-in-time snapshot; the preflight + sync above can take a while, during which a
-reviewer may flip it. Re-read from disk immediately before the first push and abort
-if it now blocks — do **not** open a partial group against a freshly-blocked track:
-```bash
-META="cadre/tracks/<track_id>/metadata.json"
-verdict=$(jq -r '.review.verdict // "absent"' "$META")
-blocking=$(jq -r '.review.blocking_count // 0' "$META")
-if [ "$verdict" = "changes_requested" ] || [ "$blocking" -gt 0 ]; then
-  echo "🚫 Review flipped to a blocking state (verdict: $verdict, blocking: $blocking) during land. Aborting before any push — re-run cadre-review."
-  exit 1
-fi
-```
+reviewer may flip it. Call `cadre_review_gate` again immediately before the first
+push and abort if it now blocks — do **not** open a partial group against a
+freshly-blocked track.
 
 **Then enforce `reviewed_sha` (the control branch must not have advanced past the
 reviewed commit).** `cadre-review` records `metadata.review.reviewed_sha` = the

@@ -29,9 +29,11 @@ writes the track's rolling `cadre/tracks/<track_id>/HANDOFF.md` with a trimmed
 
 ## 1. Identify Active Track
 - **Resolve the active track from the source of truth, not the derived cache.**
-  Scan each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"` (in
-  shared mode, filter to the one whose `owner`/`assignee` equals `<git-identity>`),
-  as `cadre-status` does. Use the `[~]` marker in `cadre/tracks.md` only as a
+  First call `cadre_current_root` with the workflow `root`, then call
+  `cadre_team_status` with that resolved root. Use the returned `tracks[]` to find
+  `status == "in_progress"` (in shared mode, filter to the one whose
+  `owner`/`assignee` equals `<git-identity>`), as `cadre-status` does. Use the
+  `[~]` marker in `cadre/tracks.md` only as a
   fallback when no metadata reports `in_progress`, and warn if the two disagree
   (the index can lag the per-track status). Picking the wrong track here would
   write a handoff against a track a teammate is actively working.
@@ -39,6 +41,9 @@ writes the track's rolling `cadre/tracks/<track_id>/HANDOFF.md` with a trimmed
 - **Ownership guard:** run the Ownership Guard (`references/ownership-guard.md`)
   for the resolved track before writing/committing the handoff; if it halts, stop.
 - Load `spec.md`, `plan.md`, and `implement_state.json`
+- Call `cadre_parse_plan` with `root` and the active track's relative `planPath`.
+  Use the returned phases/tasks/annotations to compute progress, current task, and
+  blocked markers for the handoff.
 - Read `metadata.json` — check for `worktree_path` field (indicates parallel execution may be in progress)
 
 ## 1a. Parallel Execution Check
@@ -62,7 +67,8 @@ If `metadata.json` has a `worktree_path` field (or a `repos` map in polyrepo mod
 ## 2. Gather Handoff Context
 
 **Progress Analysis:**
-- Count completed `[x]`, in-progress `[~]`, pending `[ ]` tasks
+- Count completed `[x]`, in-progress `[~]`, pending `[ ]` tasks from the
+  `cadre_parse_plan` result
 - Calculate overall percentage
 - Identify current phase and task position
 

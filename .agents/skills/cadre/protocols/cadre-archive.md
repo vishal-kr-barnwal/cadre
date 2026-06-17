@@ -5,11 +5,16 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+
 # Cadre Archive
 
 Archive completed tracks to clean up the project.
 
 ## 0. Topology Check
+Resolve the project root with `cadre_current_root` using the per-call `root`
+argument. Use the returned root for all MCP calls in this workflow.
+
 Read `cadre/repos.json` and `cadre/config.json`. If `repos.json` is
 absent or `mode` ≠ `"polyrepo"` → monorepo mode; every step behaves as today. If
 `mode == "polyrepo"`, worktree teardown and the safety-net branch push are
@@ -17,16 +22,11 @@ absent or `mode` ≠ `"polyrepo"` → monorepo mode; every step behaves as today
 the sync preamble and, at the end, the postamble (push the control plane).
 
 ## 1. Find Completed Tracks
-Select completed tracks by reading the **source of truth**: scan every
-`cadre/tracks/<id>/metadata.json` and keep those whose `status == "completed"`.
+Select completed tracks by reading the **source of truth** through MCP: call
+`cadre_team_status` with `root` and keep tracks whose `status == "completed"`.
 `tracks.md` remains a correct human-readable mirror (its `## [x] Track:` lines), so
-a quick glance there still works — but the authoritative selection is the per-track
-`metadata.json` status, e.g.:
-```bash
-for m in cadre/tracks/*/metadata.json; do
-  [ "$(jq -r '.status // "new"' "$m")" = "completed" ] && dirname "$m"
-done
-```
+a quick glance there still works — but the authoritative selection is the MCP view
+over per-track `metadata.json` status.
 
 ## 2. Select Tracks
 - Archive all completed
@@ -87,12 +87,11 @@ For each selected track:
    `metadata.json` with it — still `status == "completed"` — so the live
    `cadre/tracks/*` scan no longer sees it)
 8. **Regenerate the derived index** — do NOT hand-edit `tracks.md` markers. Rebuild
-   the index from per-track metadata by running the procedure for
-   `cadre-status --regen-index` (see `cadre-status.md`). Because the
-   archived track's folder has moved out of `cadre/tracks/`, the regenerated
-   body no longer lists it — its `## [x] Track:` line drops out automatically. This
-   is idempotent and bd-independent. (Run once after all selected tracks have been
-   moved, or after each — either way the final index is the same.)
+   the index from per-track metadata by calling MCP `cadre_regen_index` with
+   `root`. Because the archived track's folder has moved out of `cadre/tracks/`,
+   the regenerated body no longer lists it — its `## [x] Track:` line drops out
+   automatically. This is idempotent and bd-independent. Require `ok: true`; run
+   once after all selected tracks have been moved.
 9. Add archive comment
 
 ### 3a. Extract Learnings Before Archiving

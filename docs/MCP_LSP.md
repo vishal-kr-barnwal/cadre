@@ -4,7 +4,7 @@ Cadre uses two different integration layers for different jobs:
 
 - **MCP** exposes Cadre state and deterministic operations as structured tools
   and resources. Use it when an agent needs to inspect or mutate the work graph
-  without rereading long command prompts.
+  without rereading long command prompts. MCP is required for Cadre workflows.
 - **LSP** exposes code intelligence. Use it during review to find references,
   callers, diagnostics, and symbol-level breakage that a diff-only review may
   miss.
@@ -25,6 +25,8 @@ offers these tools:
 
 | Tool | Purpose |
 |------|---------|
+| `cadre_ping` | Verify that the required Cadre MCP runtime is available. |
+| `cadre_current_root` | Resolve a caller-provided path to the Cadre project root. |
 | `cadre_regen_index` | Rebuild `cadre/tracks.md` from `metadata.json.status`. |
 | `cadre_parse_plan` | Parse phases, tasks, and annotations from `plan.md`. |
 | `cadre_team_status` | Group tracks by owner and status. |
@@ -37,11 +39,44 @@ It also exposes resources:
 
 | Resource | Purpose |
 |----------|---------|
-| `cadre://tracks` | Raw per-track metadata. |
-| `cadre://team-status` | Team board data. |
-| `cadre://collisions` | Cross-track collision data. |
+| `cadre://tracks?root=/path/to/project` | Raw per-track metadata. |
+| `cadre://team-status?root=/path/to/project` | Team board data. |
+| `cadre://collisions?root=/path/to/project` | Cross-track collision data. |
 
-Set `CADRE_ROOT=/path/to/project` when launching from outside the project root.
+Cadre workflows require MCP. At the start of a Cadre workflow, callers should
+verify MCP availability with `cadre_ping`. If Cadre MCP
+tools are unavailable, halt and ask the user to install, enable, or restart the
+Cadre plugin.
+
+Every project-scoped MCP tool requires a per-call `root` argument. This keeps a
+single long-running MCP process safe for two sessions in two different projects:
+each call carries its own routing context, and the server stores no mutable
+project root. The server normalizes the supplied path by walking upward to the
+nearest directory containing `cadre/`, so callers may pass either the project
+root or a path inside it. During `cadre-setup`, project-scoped MCP calls begin
+after setup has created `cadre/`.
+
+Example tool arguments:
+
+```json
+{ "root": "/path/to/project" }
+```
+
+Use `cadre_current_root` with a `root` argument to inspect the resolved project
+root that subsequent per-call arguments should use.
+
+Workflow routing:
+
+| Workflow checkpoint | MCP tool |
+|--------------------|----------|
+| Project root resolution | `cadre_current_root` |
+| Track inventory, active/completed selection, owner/reviewer summaries | `cadre_team_status` |
+| Next unblocked work | `cadre_available_work` |
+| Cross-track file overlaps | `cadre_collision_scan` |
+| Phase/task/annotation parsing | `cadre_parse_plan` |
+| Derived `tracks.md` rebuilds | `cadre_regen_index` |
+| Ship/land review enforcement | `cadre_review_gate` |
+| Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |
 
 ### Plugin packaging
 
@@ -54,7 +89,9 @@ The generated Claude Code and Codex plugins both bundle this MCP server:
 
 The server code and `cadre-core.js` are copied into each plugin's `scripts/`
 directory so installed plugin cache paths do not depend on the development
-checkout.
+checkout. `cadre_regen_index` also resolves the bundled
+`cadre-regen-index.sh` helper from the plugin templates, so the user project
+does not need its own copy of the helper script.
 
 ## LSP Review Helper
 
@@ -127,12 +164,12 @@ LSP opt-in per repo and avoids starting irrelevant language servers globally.
 
 For a 10-20 person team:
 
-1. Add MCP first. It reduces token use and makes status/collision/review checks
-   deterministic for every agent.
+1. Install the Cadre plugin with MCP enabled; Cadre workflows require it for
+   deterministic status/collision/review checks.
 2. Add LSP per language, starting with the repos that have frequent shared API
    changes.
-3. Keep both integrations graceful: absence of MCP/LSP should degrade to the
-   existing file-based workflow protocol, not block ordinary Cadre work.
+3. Keep LSP graceful: absence of configured language servers should not block
+   ordinary Cadre work unless the review policy explicitly requires it.
 
 References:
 - MCP specification: https://modelcontextprotocol.io/specification/2025-11-25

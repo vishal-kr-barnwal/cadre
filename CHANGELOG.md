@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Installation is now plugin-only for both Claude Code and OpenAI Codex. The
   generated plugin packages bundle the Cadre skill, workflow protocols,
   templates, MCP config, and helper scripts.
+- The Cadre MCP server now requires project-scoped tools to receive a per-call
+  `root` argument, avoiding shared mutable project state when one long-running
+  MCP process serves multiple project sessions.
+- Cadre skills and generated workflow protocols now treat MCP as required:
+  workflows must verify `cadre_ping` and halt if Cadre MCP tools are unavailable.
+- Wired every Cadre workflow protocol through its deterministic MCP checkpoints:
+  root resolution, team status, available work, collision scans, plan parsing,
+  review gates, polyrepo preflight, and index regeneration.
 - Moved the shared Beads error-handler reference to `scripts/agent-refs/` so it
   is copied into generated plugin skill bundles from a real source file instead
   of from another generated artifact.

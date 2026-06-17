@@ -12,6 +12,9 @@ the resulting status marker and Beads sync differ.
 
 ## 0. Sync Preamble (shared mode)
 
+Resolve the project root with `cadre_current_root` using the per-call `root`
+argument. Use the returned root for all MCP calls in this workflow.
+
 Before reading or resolving any track state, reconcile the control plane so the
 flag lands on top of teammates' latest work (and so the ownership guard sees the
 current owner/lease, not a stale local view):
@@ -42,6 +45,9 @@ Any remaining text after the mode is the reason.
   `metadata.json.status == "in_progress"` (the source of truth; fall back to the
   `[~]` track in `tracks.md` only if no metadata says so). Then find the in-progress
   (`[~]`) task in that track's `plan.md`.
+- Use `cadre_team_status` with `root` to resolve the active track inventory, then
+  call `cadre_parse_plan` with `root` and the active track's relative `planPath` to
+  locate the task and task indexes. Edit `plan.md` only after the task is resolved.
 - **Ownership guard:** before changing the plan or metadata, run the Ownership Guard
   (`references/ownership-guard.md`) for the resolved track; if it halts, stop. Don't
   flag a track a teammate is actively implementing without taking it over.
@@ -128,8 +134,8 @@ Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skip
 - Otherwise leave **`in_progress`** — the track advanced to a next task (the common
   `skipped` "will complete later" / "no longer needed" path that moved `[~]` forward).
 
-Then regenerate the index per `cadre-status --regen-index` so `tracks.md`
-reflects the new track marker.
+Then call MCP `cadre_regen_index` with `root` so `tracks.md` reflects the new track
+marker. Require `ok: true`; halt and surface the MCP error if it fails.
 
 ## 6.5 Commit & Propagate (so teammates see the flag)
 

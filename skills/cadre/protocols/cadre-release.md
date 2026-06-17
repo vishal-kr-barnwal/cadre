@@ -12,6 +12,9 @@ never pushes a tag or branch. The user decides when to push (`git push --tags`).
 
 ## 1. Verify Setup
 
+Resolve the project root with `cadre_current_root` using the per-call `root`
+argument. Use the returned root for all MCP calls in this workflow.
+
 If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
 
 ## 2. Determine the Range
@@ -25,8 +28,12 @@ If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
    git describe --tags --abbrev=0 2>/dev/null      # most recent tag, if any
    ```
 2. The release covers tracks completed since that tag — primarily **archived** tracks
-   (`cadre/archive/*/`) plus any `[x]` tracks not yet archived. Read each track's
-   `metadata.json` (type, description) and `plan.md` task commit SHAs.
+   (`cadre/archive/*/`) plus any completed live tracks. Call `cadre_team_status`
+   with `root` for the live completed-track inventory instead of relying on `[x]`
+   markers. Read each selected track's `metadata.json` (type, description), and use
+   `cadre_parse_plan` for live track `plan.md` files when collecting task commit
+   SHAs. Archived tracks may be read directly from `cadre/archive/*/` because MCP
+   project tools are scoped to live `cadre/tracks/*`.
 3. If there is no prior tag, cover all history up to `HEAD`.
 
 ## 3. Determine the Version

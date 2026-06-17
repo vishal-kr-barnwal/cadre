@@ -515,22 +515,26 @@ Cadre creates a changelog entry and local tag. Users decide when to push tags.
 
 ## Use MCP
 
-Cadre includes an optional MCP server:
+Cadre requires its bundled MCP server:
 
 ```bash
 node scripts/mcp/cadre-server.js
 ```
 
-Set `CADRE_ROOT` when launching from outside the project:
-
-```bash
-CADRE_ROOT=/path/to/project node scripts/mcp/cadre-server.js
-```
+Every project-scoped MCP tool requires a per-call `root` argument. The server
+normalizes that path by walking upward to the nearest directory containing
+`cadre/`, so callers may pass either the project root or a path inside it. This
+keeps one long-running MCP process safe across two sessions in different
+projects because no project root is stored globally. Verify MCP availability
+with `cadre_ping`; if Cadre MCP tools are unavailable,
+halt and ask the user to install, enable, or restart the Cadre plugin.
 
 Useful MCP tools:
 
 | Tool | Purpose |
 |------|---------|
+| `cadre_ping` | Verify that the required Cadre MCP runtime is available. |
+| `cadre_current_root` | Resolve a supplied `root` to the Cadre project root. |
 | `cadre_team_status` | Structured team board. |
 | `cadre_available_work` | Unblocked work to pick up. |
 | `cadre_collision_scan` | Cross-track file overlap. |
@@ -538,9 +542,22 @@ Useful MCP tools:
 | `cadre_polyrepo_preflight` | Local polyrepo sanity checks. |
 | `cadre_regen_index` | Regenerate `tracks.md`. |
 
-MCP is best for lower-token, deterministic agent integrations. A client can call
-tools instead of asking an agent to reread and reinterpret long Markdown
-workflow protocols.
+Workflow routing:
+
+| Workflow checkpoint | MCP tool |
+|--------------------|----------|
+| Project root resolution | `cadre_current_root` |
+| Track inventory, active/completed selection, owner/reviewer summaries | `cadre_team_status` |
+| Next unblocked work | `cadre_available_work` |
+| Cross-track file overlaps | `cadre_collision_scan` |
+| Phase/task/annotation parsing | `cadre_parse_plan` |
+| Derived `tracks.md` rebuilds | `cadre_regen_index` |
+| Ship/land review enforcement | `cadre_review_gate` |
+| Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |
+
+MCP is the required deterministic integration layer for status, collision,
+review-gate, and index-regeneration checks. A client can call tools instead of
+asking an agent to reread and reinterpret long Markdown workflow protocols.
 
 ## Use LSP Review
 
@@ -601,7 +618,7 @@ For 10-20 people, use these defaults:
 | Status | Use `--team`, `--available`, and `--collisions` daily. |
 | Parallelism | Use for independent tasks with clear file ownership. |
 | CI | Install monorepo drift gate or polyrepo merge train templates. |
-| MCP | Enable for agent dashboards and deterministic status checks. |
+| MCP | Required through the Cadre plugin for deterministic status checks. |
 | LSP | Enable for repos with shared APIs or heavy refactors. |
 
 Daily team loop:

@@ -58,6 +58,47 @@ For active tracks, load when working that track:
 - `cadre/tracks/<track_id>/plan.md`
 - `cadre/tracks/<track_id>/learnings.md` - **Patterns/gotchas from this track**
 
+## MCP Tool Contract
+
+Cadre MCP is a required runtime for deterministic status, collision,
+review-gate, and index-regeneration checks. At the start of every Cadre
+workflow, verify the MCP server is available with `cadre_ping`.
+If the Cadre MCP tools are unavailable, **HALT** and tell the user to install,
+enable, or restart the Cadre plugin; do not silently continue with a file-only
+fallback for MCP-backed checks.
+
+Every project-scoped Cadre MCP call **MUST** include a per-call `root` argument
+pointing at the current project root, or any path inside that project. The MCP
+server normalizes the path upward to the nearest directory containing `cadre/`.
+For `cadre-setup`, verify MCP availability first; project-scoped MCP calls begin
+after setup has created `cadre/`.
+
+Do not rely on MCP server cwd, `CADRE_ROOT`, or remembered server state for
+project routing. This keeps one long-running MCP process safe across multiple
+projects.
+
+Examples:
+
+```json
+{ "root": "/absolute/path/to/project" }
+```
+
+For resource reads, include `root` in the URI query, e.g.
+`cadre://team-status?root=/absolute/path/to/project`.
+
+Workflow tool routing:
+
+| MCP tool | Required use |
+|---------|--------------|
+| `cadre_current_root` | Resolve the per-call project root at the start of every project-scoped workflow. |
+| `cadre_team_status` | Track inventory, active/completed track selection, owner/reviewer/status summaries. |
+| `cadre_available_work` | `cadre-status --available` and default `cadre-implement` candidate selection. |
+| `cadre_collision_scan` | Cross-track file overlap checks in status, newtrack, implement, validate, and revise. |
+| `cadre_parse_plan` | Phase/task/annotation parsing for implement, validate, review, revert, handoff, formula, release. |
+| `cadre_regen_index` | Every rebuild of `cadre/tracks.md`; never hand-edit or reimplement index splicing. |
+| `cadre_review_gate` | Review verification after review writes and before ship/land pushes. |
+| `cadre_polyrepo_preflight` | Polyrepo setup, validate, refresh, and land preflight checks. |
+
 ## Learnings System (Ralph-style)
 
 Cadre captures and consolidates learnings across tracks. For full details, see [references/learnings-system.md](references/learnings-system.md).

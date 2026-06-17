@@ -281,6 +281,7 @@ function reviewGate(root, trackId) {
   const config = loadTopology(root).config || {};
   const review = track.metadata.review || null;
   const reasons = [];
+  const warnings = [];
   if (!review) {
     reasons.push("No recorded review verdict");
   } else {
@@ -294,7 +295,7 @@ function reviewGate(root, trackId) {
       reasons.push("Self-review is not sufficient when require_second_reviewer is true");
     }
     if (!review.reviewed_sha) {
-      reasons.push("Review does not record reviewed_sha");
+      warnings.push("Review does not record reviewed_sha; branch-advance guard is skipped for older reviews");
     }
   }
   return {
@@ -302,6 +303,7 @@ function reviewGate(root, trackId) {
     track_id: track.track_id,
     review,
     reasons,
+    warnings,
   };
 }
 
@@ -339,14 +341,24 @@ function polyrepoPreflight(root) {
 }
 
 function regenIndex(root) {
-  const script = path.join(root, "templates", "scripts", "cadre-regen-index.sh");
+  const candidates = [
+    path.join(root, "templates", "scripts", "cadre-regen-index.sh"),
+    path.join(__dirname, "..", "templates", "scripts", "cadre-regen-index.sh"),
+    path.join(__dirname, "..", "skills", "cadre", "templates", "scripts", "cadre-regen-index.sh"),
+  ];
+  const script = candidates.find(fileExists);
   if (!fileExists(script)) {
-    return { ok: false, error: `Missing helper script: ${script}` };
+    return {
+      ok: false,
+      error: "Missing helper script: cadre-regen-index.sh",
+      checked: candidates,
+    };
   }
   const result = spawnSync("bash", [script, root], { cwd: root, encoding: "utf8" });
   return {
     ok: result.status === 0,
     status: result.status,
+    script,
     stdout: result.stdout,
     stderr: result.stderr,
   };

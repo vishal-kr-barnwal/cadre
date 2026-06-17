@@ -5,6 +5,8 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+
 # Cadre Ship
 
 Ship the reviewed track named in the workflow arguments.
@@ -22,6 +24,8 @@ local.
 
 ## 1. Verify Setup & Select Track
 
+- Resolve the project root with `cadre_current_root` using the per-call `root`
+  argument. Use the returned root for all MCP calls in this workflow.
 - If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
 - **Sync preamble (shared mode).** If `cadre/config.json` has `sync_mode == "shared"`
   (in **both** monorepo and polyrepo — never gate on topology), run the **sync
@@ -40,17 +44,9 @@ local.
   from concurrently shipping the same track in **any** topology (in default monorepo
   mode the advisory `lease` is a no-op, so this guard is the only serialization).
   If it halts, stop.
-- **Review gate.** Read the `review` object from
-  `cadre/tracks/<track_id>/metadata.json` (written by `cadre-review`).
-  Extract two fields:
-  ```bash
-  META="cadre/tracks/<track_id>/metadata.json"
-  verdict=$(jq -r '.review.verdict // "absent"' "$META")
-  blocking=$(jq -r '.review.blocking_count // 0' "$META")
-  self_reviewed=$(jq -r '.review.self_reviewed // false' "$META")
-  require_second=$(jq -r '.require_second_reviewer // false' cadre/config.json 2>/dev/null)
-  ```
-  - **Absent** (`$verdict == "absent"` — no `review` key, or `null`) → no structured
+- **Review gate.** Call `cadre_review_gate` with `root` and `trackId`. This MCP
+  result is authoritative for verdict, blocking findings, and self-review policy.
+  - **Absent** (the result contains reason `No recorded review verdict`) → no structured
     gate recorded. Keep the existing soft behavior: confirm the track has been
     reviewed (a `## Review` entry in `learnings.md` with a "Ready to ship" verdict).
     If not, suggest `cadre-review <track_id>` first and ask whether to proceed
@@ -59,19 +55,14 @@ local.
     `learnings.md` (`OVERRIDE: shipped without a recorded review — operator
     <git-identity>, <YYYY-MM-DDThh:mm:ssZ>`) and, if Beads is available, mirror it to
     the epic (`bd note <epic_id> "OVERRIDE: shipped without recorded review (<git-identity>)" --json`).
-  - **`$verdict == "changes_requested"` OR `$blocking > 0`** → **REFUSE**:
+  - **Any blocking MCP reason other than absent review** → **REFUSE**:
     > "🚫 Track `<track_id>` has not cleared review (verdict:
-    > `$verdict`, blocking findings: `$blocking`). Resolve the findings
+    > `<verdict>`, blocking findings: `<blocking_count>`). Resolve the findings
     > and re-run `cadre-review <track_id>` before shipping."
     Then halt — do **not** rebase or push.
-  - **Self-approved while a second reviewer is required** (`$require_second == true`
-    AND `$self_reviewed == true`) → **REFUSE**:
-    > "🚫 Track `<track_id>` was approved by its own owner and
-    > `require_second_reviewer` is set. Have a different reviewer run
-    > `cadre-review <track_id>` before shipping."
-    Then halt.
-  - **Clean** (otherwise — `$verdict` is approved/non-blocking and `$blocking == 0`)
-    → the gate is satisfied; proceed without further confirmation.
+  - **Clean** (`ok: true`) → the gate is satisfied; proceed without further
+    confirmation. Surface any MCP warnings (for example older reviews without
+    `reviewed_sha`) as non-blocking notes.
 
 ## 2. Flush Dolt + Rebase + Prepare PR
 
@@ -104,10 +95,11 @@ For the selected track:
      ```
    - This syncs the track branch with main's latest Beads state before the PR.
 
-4. **Re-read the review gate, then push (TOCTOU close):** the verdict read in
+4. **Re-read the review gate, then push (TOCTOU close):** the MCP verdict read in
    §1 is a point-in-time snapshot; a reviewer may have flipped it to
-   `changes_requested` during the (slow) Dolt-flush + rebase above. **Re-read it
-   from disk immediately before pushing** and abort if it now blocks. The same
+   `changes_requested` during the (slow) Dolt-flush + rebase above. **Call
+   `cadre_review_gate` again immediately before pushing** and abort if it now
+   blocks. The same
    re-read also enforces **`reviewed_sha`** — the track-branch HEAD captured at
    review time (`metadata.review.reviewed_sha`, written by `cadre-review`). If the
    branch advanced past the reviewed commit (new work landed after the review), the
@@ -116,15 +108,11 @@ For the selected track:
    rebase-onto-main in step 3 rewrites the tip, so comparing the post-rebase HEAD
    would false-positive on a clean track:
    ```bash
-   META="cadre/tracks/<track_id>/metadata.json"
-   verdict=$(jq -r '.review.verdict // "absent"' "$META")
-   blocking=$(jq -r '.review.blocking_count // 0' "$META")
-   if [ "$verdict" = "changes_requested" ] || [ "$blocking" -gt 0 ]; then
-     echo "🚫 Review flipped to a blocking state (verdict: $verdict, blocking: $blocking) during ship. Aborting push — re-run cadre-review."
-     exit 1
-   fi
+   # Call MCP: cadre_review_gate { "root": "<root>", "trackId": "<track_id>" }.
+   # If ok=false for any reason other than an explicitly approved absent-review
+   # override from §1, abort before push.
    # reviewed_sha guard: did the branch advance past the reviewed commit?
-   reviewed_sha=$(jq -r '.review.reviewed_sha // ""' "$META")
+   reviewed_sha=$(jq -r '.review.reviewed_sha // ""' "cadre/tracks/<track_id>/metadata.json")
    if [ -n "$reviewed_sha" ] && [ "$reviewed_sha" != "$prerebase_head" ]; then
      echo "🚫 Branch advanced past reviewed commit $reviewed_sha (pre-rebase tip $prerebase_head). Re-review needed — re-run cadre-review <track_id> before shipping."
      exit 1

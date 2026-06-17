@@ -14,3 +14,10 @@ The LSP setup and review helpers are bundled under `scripts/` so Cadre
 workflows can copy or invoke them. They are not auto-registered as plugin LSP
 servers because Cadre configures per-project language servers in
 `cadre/lsp.json`.
+
+Cadre MCP is a required runtime. Use `cadre_ping` to verify the server is
+available. All project-scoped MCP tools require a per-call `root` argument.
+The server normalizes that path by walking upward to the nearest directory
+containing `cadre/`, so callers may pass either the project root or a path
+inside it. Use `cadre_current_root` with `root` to inspect the resolved
+project root.

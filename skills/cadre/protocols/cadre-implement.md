@@ -17,6 +17,10 @@ Implement the requested track from the workflow arguments.
 
 **PROTOCOL: Verify Cadre environment is properly set up.**
 
+0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+   `root` argument (the current project root or any path inside it). Use the
+   returned root for every project-scoped MCP call in this workflow.
+
 1. **Check Required Files:** Verify existence of:
    - `cadre/product.md`
    - `cadre/tech-stack.md`
@@ -37,6 +41,10 @@ Implement the requested track from the workflow arguments.
      `references/cadre-sync.md` now (pull control plane + `bd dolt pull`)
      before reading or mutating any state.
 
+4. **Load structured track inventory via MCP:** Call `cadre_team_status` with
+   `root`. Use the returned `tracks[]` for status, owner, reviewer, and review
+   context instead of treating `tracks.md` as authoritative.
+
 ---
 
 ## 2.0 TRACK SELECTION
@@ -49,6 +57,8 @@ Implement the requested track from the workflow arguments.
    - Split by `---` separator to identify track sections
    - Extract: status (`[ ]`, `[~]`, `[x]`), description, folder link
    - **CRITICAL:** If no track sections found: "The tracks file is empty or malformed." → HALT
+   - This read is for human-readable descriptions only. Authoritative status and
+     ownership come from `cadre_team_status`.
 
 3. **Select Track:**
 
@@ -58,7 +68,10 @@ Implement the requested track from the workflow arguments.
    - If no match or ambiguous: Inform user, suggest next available track
 
    **If no track name provided:**
-   - Resolve each track's status from its `metadata.json.status` (source of truth).
+   - Call `cadre_available_work` with `root` and prefer the first returned track.
+     This MCP result is the authoritative "next unblocked, unowned" candidate set.
+   - If MCP returns no available candidates, resolve each remaining incomplete
+     track's status from the `cadre_team_status` result.
      **Prefer a `new`, unowned track**; **skip** tracks that are `in_progress` with a
      *different* non-null `owner` (a teammate is already on it). Select the first
      available track.
@@ -112,11 +125,9 @@ Implement the requested track from the workflow arguments.
      `cadre-newtrack` for **every** task (not only parallel phases), so the selected
      track's full file footprint is known up front. Before starting work, warn if it
      overlaps another **active** track's footprint.
-   - **Reuse the validate overlap algorithm (`cadre-validate` §5c.2(a)) — do not
-     invent a new one.** Collect every **other** track whose `metadata.json.status`
-     is `"in_progress"` (source of truth, not the derived `tracks.md`). For each,
-     gather its tasks' `<!-- files: -->` globs from `plan.md`. Compare against this
-     track's claimed files:
+   - **Use MCP — do not invent a new scanner.** Call `cadre_collision_scan` with
+     `root`. Compare the selected track's file claims against the returned active
+     collisions and claims:
      - **POLYREPO:** compare `(repo, file)` tuples (resolve each task's
        `<!-- repo: -->`, absent → `default_repo`) — the same relative path in two
        different repos is **not** a collision.
@@ -169,12 +180,12 @@ Implement the requested track from the workflow arguments.
      META="cadre/tracks/<track_id>/metadata.json"; tmp="$(mktemp)"
      jq '.status = "in_progress"' "$META" > "$tmp" && mv "$tmp" "$META"
      ```
-   - **Step b — regenerate the index:** then regenerate the index per
-     `cadre-status --regen-index` (it rebuilds only the region between
+   - **Step b — regenerate the index:** then call MCP `cadre_regen_index` with
+     `root` (it rebuilds only the region between
      `<!-- cadre:index:start -->` and `<!-- cadre:index:end -->` from each
-     track's metadata status + name, preserving the preamble). The selected track's
-     `## [~] Track:` line appears in the regenerated region automatically. Do not
-     inline the algorithm here — defer to that mode.
+     track's metadata status + name, preserving the preamble). Require `ok: true`
+     or halt. The selected track's `## [~] Track:` line appears in the regenerated
+     region automatically. Do not inline the algorithm here.
 
 3. **Load Track Context:**
    - Resolve `<track_id>` from workflow arguments (when a track was named) or from the
@@ -186,6 +197,10 @@ Implement the requested track from the workflow arguments.
      - `cadre/tracks/<track_id>/spec.md`
      - `cadre/workflow.md`
    - **Error Handling:** If any read fails, STOP and inform user
+   - Also call `cadre_parse_plan` with `root` and
+     `planPath: "cadre/tracks/<track_id>/plan.md"`. Use its parsed phases, tasks,
+     and annotations for dependency graph construction and task iteration; keep
+     the file read only for human-readable task text and edits.
 
 3a. **Load Context (Beads-first, files as fallback):**
 
@@ -350,7 +365,8 @@ Implement the requested track from the workflow arguments.
 5. **Determine Execution Mode and Execute Phases/Tasks:**
 
    a. **Parse Phase Dependencies and Build Phase Graph:**
-      - For each phase in plan.md, check for `<!-- depends: -->` annotation
+      - Use the `cadre_parse_plan` result. For each phase, check for
+        `<!-- depends: -->` annotation
       - **If NO annotation:** Phase depends on previous phase (sequential, default)
       - **If `<!-- depends: -->` (empty):** Phase has no dependencies (can start immediately)
       - **If `<!-- depends: phase1, phase2 -->`:** Phase waits for listed phases only
@@ -466,7 +482,9 @@ Implement the requested track from the workflow arguments.
    
       **d1. Announce:** "Executing tasks from plan.md following workflow.md procedures."
 
-      **d2. Iterate Through Tasks:** Loop through each task in `plan.md` one by one.
+      **d2. Iterate Through Tasks:** Loop through each task from the
+      `cadre_parse_plan` result one by one, applying progress edits back to
+      `plan.md`.
 
       **d3. For Each Task:**
           - **i-0. Resolve Task Repo & Working Root (POLYREPO ONLY):** Read the
@@ -609,10 +627,10 @@ Implement the requested track from the workflow arguments.
        META="cadre/tracks/<track_id>/metadata.json"; tmp="$(mktemp)"
        jq '.status = "completed"' "$META" > "$tmp" && mv "$tmp" "$META"
        ```
-     - **Step b — regenerate the index:** then regenerate the index per
-       `cadre-status --regen-index`. The track's line is rebuilt as
-       `## [x] Track:` in the marked region from its metadata; the preamble is
-       preserved. Do not inline the algorithm — defer to that mode.
+     - **Step b — regenerate the index:** then call MCP `cadre_regen_index` with
+       `root`. The track's line is rebuilt as `## [x] Track:` in the marked region
+       from its metadata; the preamble is preserved. Require `ok: true`; do not
+       inline the algorithm.
    - **Clean Up State:** Delete `cadre/tracks/<track_id>/implement_state.json`
    - **Elevate Patterns:** Prompt for pattern consolidation (see step 5e)
    - Announce track fully complete

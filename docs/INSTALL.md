@@ -10,7 +10,7 @@ versioning and generated bundles work.
   - [Claude Code](#claude-code)
   - [OpenAI Codex](#openai-codex)
 - [How bundles are generated](#how-bundles-are-generated)
-- [MCP and LSP helpers](#mcp-and-lsp-helpers)
+- [MCP runtime and LSP helpers](#mcp-runtime-and-lsp-helpers)
 - [Versioning policy](#versioning-policy)
 
 ---
@@ -170,14 +170,14 @@ merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
 
 ---
 
-## MCP and LSP helpers
+## MCP runtime and LSP helpers
 
-Cadre also ships optional runtime helpers for teams that want lower-token, more
-deterministic agent integrations:
+Cadre plugins bundle a required MCP runtime plus optional LSP helpers:
 
-- `node scripts/mcp/cadre-server.js` starts a dependency-free MCP server exposing
-  Cadre tools/resources for track status, collision scans, review gates, and
-  index regeneration.
+- `node scripts/mcp/cadre-server.js` starts the dependency-free MCP server
+  required by Cadre workflows for track status, collision scans, review gates,
+  and index regeneration. Project-scoped MCP calls must include a per-call
+  `root` argument.
 - `<TEMPLATES_DIR>/scripts/cadre-lsp-setup.js` scans a project, recommends
   language servers, detects missing server commands, and appends `cadre/lsp.json`
   entries during `cadre-setup` or `cadre-refresh --lsp`.

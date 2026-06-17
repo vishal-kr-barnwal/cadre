@@ -6,6 +6,18 @@ description: Validate Cadre project integrity
 
 Validate the integrity of this Cadre project.
 
+## 0. MCP Baseline
+
+1. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+   `root` argument (the current project root or any path inside it). Use the
+   returned root for every project-scoped MCP call in this workflow.
+2. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
+   Use its `tracks[]` and status/owner/reviewer data as the authoritative
+   multi-track inventory for validation.
+3. **Parse plans through MCP:** For each `cadre/tracks/<track_id>/plan.md`, call
+   `cadre_parse_plan` with `root` and the relative `planPath`. Use the returned
+   phases/tasks/annotations for plan-integrity and annotation checks.
+
 ## 0. Sync Preamble (shared mode only)
 
 Validate **mutates shared control-plane state** — it clears stale leases, stamps
@@ -32,7 +44,8 @@ Verify these files exist in `cadre/`:
 ## 2. Tracks Consistency
 
 Enumerate tracks from the **source of truth** — each `cadre/tracks/*/metadata.json`
-— never from the derived `tracks.md` index. For each track directory:
+— preferably through the `cadre_team_status` result, never from the derived
+`tracks.md` index. For each track directory:
 - Verify files: `metadata.json`, `spec.md`, `plan.md`
 - Validate metadata.json has: track_id, type, status, created_at
 
@@ -51,7 +64,7 @@ Enumerate tracks from the **source of truth** — each `cadre/tracks/*/metadata.
 - A directory **with a valid `metadata.json` but absent from the `tracks.md`
   generated region** is **not** an orphan — it is **index drift** (the derived
   index simply hasn't been regenerated). Report it via the Index Drift check
-  (Section 4), fixable by `cadre-status --regen-index`. Do not flag such a
+  (Section 4), fixable by MCP `cadre_regen_index`. Do not flag such a
   track as an orphan.
 
 ## 4. Index Drift
@@ -71,19 +84,19 @@ hand-flips a marker to "reconcile."
 - Report each drift as a ⚠️ Warning naming the track, the metadata status, and
   the (incorrect) marker currently in the index.
 - **Do not edit `tracks.md` markers by hand.** Offer in step 7 to fix all drift
-  at once by regenerating the index per `cadre-status --regen-index` (which
+  at once by calling MCP `cadre_regen_index` (which
   rebuilds the marked region deterministically from per-track metadata,
   preserving the human-authored preamble).
 
 > **Shared mode:** a `tracks.md` **merge conflict** is likewise resolved
-> deterministically by running `cadre-status --regen-index` — per-track
+> deterministically by calling MCP `cadre_regen_index` — per-track
 > `metadata.json` files rarely collide, and the derived index never needs a
 > manual merge. If you encounter conflict markers in `tracks.md`, regenerate
 > rather than hand-resolving.
 
 ## 5. Plan Integrity
 
-For each `plan.md`:
+For each `plan.md`, use the `cadre_parse_plan` result:
 - Must have at least one phase and task
 - Valid markers only: `[ ]`, `[~]`, `[x]`, `[!]`
 - Completed tracks should have all tasks completed
@@ -107,11 +120,11 @@ For tracks with parallel execution annotations:
 silently in monorepo mode). See `references/polyrepo-git.md`.
 
 - **Preflight asserts:** run the shared **Preflight asserts** snippet in
-  `references/polyrepo-git.md` (the same definition `cadre-land` runs before
-  opening PRs) so validate and land agree on what a "land-ready" polyrepo looks
-  like. Surface each failed assert as a ❌ Error here rather than halting, so the
-  full report still renders. Do not duplicate the assert logic inline — reference
-  the one snippet.
+  `references/polyrepo-git.md` through MCP by calling `cadre_polyrepo_preflight`
+  with `root` first. Surface each returned error as a ❌ Error here rather than
+  halting, so the full report still renders. Use the reference snippet only for
+  checks not yet represented in the MCP result; do not duplicate shared logic
+  inline.
 - **Manifest ↔ `.gitmodules` parity:** every `repos[].submodule_path` has a
   matching `.gitmodules` entry (and vice-versa). Report drift (added/removed
   submodules not reflected in `repos.json`).
@@ -196,14 +209,14 @@ For each track whose `metadata.json` carries a non-null `lease` object
 ### 5c.2 Team invariants
 
 (a) **No cross-owner file overlap.** Collect every in-progress track (status
-   `"in_progress"` read from each `metadata.json` — the source of truth, not the
-   derived `tracks.md` index). For each, gather its in-progress
-   tasks' `<!-- files: ... -->` globs from `plan.md`. If two in-progress tracks
-   with **different** `owner` (fall back to Beads `assignee`) claim an overlapping
-   file/glob, report a ❌ Error naming both tracks, both owners, and the
-   overlapping path(s). Same-owner overlap (one person, sequential work) is **not**
-   an error. If owners can't be resolved on both sides, downgrade to a ⚠️ Warning
-   (can't prove a cross-owner conflict). This is detection only — never reassign.
+   `"in_progress"` from MCP/source metadata). Call `cadre_collision_scan` with
+   `root` and use its returned `(repo, file)` overlaps as the canonical overlap
+   detector. If two in-progress tracks with **different** `owner` (fall back to
+   Beads `assignee`) claim an overlapping file/glob, report a ❌ Error naming both
+   tracks, both owners, and the overlapping path(s). Same-owner overlap (one
+   person, sequential work) is **not** an error. If owners can't be resolved on
+   both sides, downgrade to a ⚠️ Warning (can't prove a cross-owner conflict). This
+   is detection only — never reassign.
 
 (b) **Real owner on in-progress tracks.** Every in-progress (`[~]`) track must
    have an `owner` (in `metadata.json`) and/or Beads `assignee` that is a real
@@ -285,7 +298,7 @@ health). In monorepo/local mode omit it — those checks are no-ops there.
 
 Offer to fix auto-fixable issues:
 - Missing metadata fields
-- Index drift: regenerate `tracks.md` per `cadre-status --regen-index`
+- Index drift: regenerate `tracks.md` with MCP `cadre_regen_index`
   (rebuild the marked region from per-track metadata) — never hand-edit a marker [4]
 - Orphan cleanup
 - Stale-lease clears (shared mode — set `lease` to null, key-scoped) [5c.1]

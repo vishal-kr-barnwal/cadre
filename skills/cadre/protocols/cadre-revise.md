@@ -8,9 +8,11 @@ Update specifications and plans when implementation reveals issues, requirements
 
 ## 1. Identify Track
 - **Resolve the active track from the source of truth, not the derived cache.**
-  Scan each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"` (in
-  shared mode, filter to the one whose `owner`/`assignee` equals `<git-identity>`),
-  exactly as `cadre-status` does. The `[~]` marker in `cadre/tracks.md` is a
+  First call `cadre_current_root` with the workflow `root`, then call
+  `cadre_team_status` with that resolved root. Use the returned `tracks[]` to find
+  `status == "in_progress"` (in shared mode, filter to the one whose
+  `owner`/`assignee` equals `<git-identity>`), exactly as `cadre-status` does. The
+  `[~]` marker in `cadre/tracks.md` is a
   human-readable mirror that can lag (between a status write and the next
   regen-index, or after a merge); use it **only** as a fallback when no metadata
   reports `in_progress`, and warn that the index looks stale if the two disagree.
@@ -22,6 +24,8 @@ Update specifications and plans when implementation reveals issues, requirements
   revising a track a teammate is mid-implementation on, in monorepo mode too. If it
   halts, stop here.
 - Read `metadata.json` — check `worktree_path` field for active parallel execution
+- Call `cadre_parse_plan` with `root` and the selected track's relative `planPath`
+  before editing. Use the parsed phases/tasks/annotations to validate plan changes.
 
 ## 1a. Parallel Execution Check
 
@@ -60,6 +64,10 @@ Append to `cadre/tracks/<track_id>/revisions.md`:
 - Update `spec.md` and/or `plan.md` as needed
 - Add "Last Revised" marker at top of updated files
 - New tasks: `[ ]`, Removed tasks: `[-] [REMOVED: reason]`
+- After modifying `plan.md`, call `cadre_parse_plan` again. If parsing returns no
+  phases/tasks or loses required annotations, fix the plan before committing.
+- Call `cadre_collision_scan` with `root` after plan changes that alter
+  `<!-- files: -->` or `<!-- repo: -->` annotations; warn about any new overlaps.
 - **Phase-level parallel changes:**
   - Add/modify `<!-- depends: -->` annotations for phase dependencies
   - Add/modify `<!-- depends: phase1, phase2 -->` for specific phase dependencies
@@ -178,4 +186,3 @@ Revisions are valuable learnings - they indicate gaps in initial understanding.
    - If parallel phase changed to sequential (or vice versa):
      - Clear assignees if reverting to sequential: `bd update <id> --assignee "" --json`
    - Note: File isolation is enforced by worktrees (physical), not tracked in Beads notes
-

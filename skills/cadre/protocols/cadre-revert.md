@@ -20,6 +20,10 @@ Revert Cadre work using the workflow arguments.
 
 **PROTOCOL: Verify project is properly set up before proceeding.**
 
+0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+   `root` argument (the current project root or any path inside it). Use the
+   returned root for every project-scoped MCP call in this workflow.
+
 1. **Verify Tracks File:** Check if `cadre/tracks.md` exists
    - If NOT exists: HALT and instruct: "The project has not been set up or `cadre/tracks.md` is corrupted. Please run `cadre-setup` or restore the file."
 
@@ -34,6 +38,10 @@ Revert Cadre work using the workflow arguments.
    is the highest-risk polyrepo operation — group by repo, revert reverse-order
    within each repo, and **halt on the first conflict in any repo.** If
    `config.json` `sync_mode == "shared"`, run the sync preamble first.
+
+4. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
+   Use the returned `tracks[]` as the authoritative track/status/owner inventory
+   during target selection.
 
 ---
 
@@ -51,7 +59,8 @@ Revert Cadre work using the workflow arguments.
 
    ### PATH A: Direct Confirmation
 
-   1. Find the specific track, phase, or task in `tracks.md` or relevant `plan.md`
+   1. Find the specific track, phase, or task using `cadre_team_status` plus
+      `cadre_parse_plan` for the relevant `plan.md`
    2. Ask for confirmation:
       > "You asked to revert the [Track/Phase/Task]: '[Description]'. Is this correct?"
       > A) Yes
@@ -62,7 +71,8 @@ Revert Cadre work using the workflow arguments.
    ### PATH B: Guided Selection Menu
 
    1. **Identify Revert Candidates:**
-      - **Scan All Plans:** Read `cadre/tracks.md` AND every `cadre/tracks/*/plan.md`
+      - **Scan All Plans through MCP:** use `cadre_team_status` for track
+        inventory and `cadre_parse_plan` for every `cadre/tracks/*/plan.md`
       - **Prioritize In-Progress:** Find ALL Tracks, Phases, Tasks marked `[~]`
       - **Fallback to Completed:** If NO in-progress items found, find 5 most recently completed (`[x]`)
 
@@ -142,7 +152,8 @@ over), stop here.
      final state (so a partial prior run is healed, not duplicated).
 
 1. **Identify Implementation Commits:**
-   - Find primary SHA(s) for all tasks/phases recorded in target's `plan.md`
+   - Call `cadre_parse_plan` for the target track and find primary SHA(s) for all
+     tasks/phases recorded in target's `plan.md`
    - **POLYREPO:** for each task, read its `<!-- repo: -->` annotation (absent →
      `default_repo`) and tag the SHA with that repo. A multi-repo task records
      `repo:sha` pairs (`api:abc1234 web:def5678`) — split them per repo. Search
@@ -257,7 +268,7 @@ over), stop here.
 3. **Reset the source of truth (`metadata.json.status`) FIRST:**
    `metadata.json.status` is the single source of truth; `cadre/tracks.md` is a
    **derived cache** (step 5). If you only reset `plan.md` markers and leave
-   `metadata.status` at `completed`, the next `cadre-status --regen-index` will
+   `metadata.status` at `completed`, the next MCP `cadre_regen_index` will
    **resurrect the stale `[x]`** and silently erase this revert. So fix metadata
    here, **before** touching any derived marker.
    - Read `cadre/tracks/<track_id>/metadata.json`. Compute the correct post-revert
@@ -279,7 +290,8 @@ over), stop here.
      (`<new_status>` ∈ `in_progress` | `new`, per the rule above.)
 
 4. **Reset `plan.md` markers (consistent with the new `metadata.status`):**
-   - Read the relevant `plan.md` file(s)
+   - Parse the relevant `plan.md` file(s) with `cadre_parse_plan`, then edit the
+     files to reset markers
    - Ensure reverted item correctly reset:
      - Change `[x]` back to `[ ]` for reverted tasks
      - Change `[~]` back to `[ ]` if reverting in-progress items
@@ -296,9 +308,9 @@ over), stop here.
    git-revert `tracks.md` to undo its marker (Phase 2 already excludes it from the
    product/code revert chains for this reason). Instead, regenerate it so the cache
    follows the source of truth you just fixed:
-   - Run the **Regenerate Index** flow: `cadre-status --regen-index`. It rewrites
-     the `## [<marker>] Track:` line for `<track_id>` from the new
-     `metadata.status` (`in_progress` → `[~]`, `new` → `[ ]`) and is idempotent.
+  - Call MCP `cadre_regen_index` with `root`. It rewrites the
+    `## [<marker>] Track:` line for `<track_id>` from the new `metadata.status`
+    (`in_progress` → `[~]`, `new` → `[ ]`) and is idempotent. Require `ok: true`.
    - Commit the regenerated `tracks.md` (with the metadata + plan resets) as the
      plan-sync correction. Because the marker now flows from `metadata.status`, a
      **later `--regen-index` can no longer resurrect a stale `[x]`.**
