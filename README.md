@@ -556,6 +556,7 @@ Session/thread ref if available
 
 ## Documentation
 
+- [Platform Usage Guide](docs/PLATFORM_USAGE.md)
 - [Manual Workflow Guide](docs/manual-workflow-guide.md)
 - [Beads Integration](docs/BEADS_INTEGRATION.md)
 - [Parallel Execution](docs/PARALLEL_EXECUTION.md)

@@ -247,6 +247,7 @@ At phase completion:
 
 - [Polyrepo Guide](docs/POLYREPO.md) - Control-repo model, submodules, cross-repo PRs + merge train, sync modes
 - [Install & Version Guide](docs/INSTALL.md) - Per-platform install + compatibility matrix + versioning policy
+- [Platform Usage Guide](docs/PLATFORM_USAGE.md) - End-to-end operating model for using Cadre
 - [Manual Workflow Guide](docs/manual-workflow-guide.md) - Step-by-step command reference
 - [Beads Integration](docs/BEADS_INTEGRATION.md) - How Cadre and Beads work together
 - [Parallel Execution](docs/PARALLEL_EXECUTION.md) - Parallel task execution design

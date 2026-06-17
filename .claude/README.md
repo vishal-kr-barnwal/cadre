@@ -204,6 +204,7 @@ matrix and per-platform setup.
 
 - [GitHub Repository](https://github.com/vishal-kr-barnwal/Cadre)
 - [Install & Version Guide](../docs/INSTALL.md)
+- [Platform Usage Guide](../docs/PLATFORM_USAGE.md)
 - [MCP and LSP Integration](../docs/MCP_LSP.md)
 - [Agent Skills Specification](https://agentskills.io)
 

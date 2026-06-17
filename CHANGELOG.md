@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Detailed platform usage guide (`docs/PLATFORM_USAGE.md`) covering installation,
+  setup, topology choice, daily workflows, review/ship/land, team operation,
+  MCP/LSP usage, CI, and troubleshooting.
 - Initial dependency-free Cadre MCP server (`scripts/mcp/cadre-server.js`) with
   tools/resources for index regeneration, plan parsing, team status, available
   work, collision scans, review-gate checks, and polyrepo local preflight.
