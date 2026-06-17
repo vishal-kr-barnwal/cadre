@@ -38,8 +38,16 @@ last** — once every sibling PR is approved and CI-green.
    `merge_train`. If `sync_mode: "shared"`, run the sync preamble
    (`references/cadre-sync.md`) first.
 4. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
-   tracks not yet archived and ask. Read
-   `cadre/tracks/<track_id>/metadata.json` for the `repos` map.
+   tracks not yet archived and ask. Resolve the active track from
+   `metadata.json.status` (source of truth), never the derived `tracks.md` cache.
+   Read `cadre/tracks/<track_id>/metadata.json` for the `repos` map.
+   **Ownership guard (at selection).** Before mutating the track (pushing
+   branches, recording PR URLs into `metadata.json`), run the topology-independent
+   ownership guard (`references/ownership-guard.md`) for `<track_id>`. If the
+   track is foreign-held, take over or halt per that guard; on take-over (or when
+   you are the holder / your identity is `null`) your next `metadata.json` write
+   sets `owner = <git-identity>` via key-scoped `jq`. This applies in **both**
+   monorepo and polyrepo and even where the advisory `lease` is a no-op.
 5. **Gate — reviewed?** The machine-readable review gate in **§1.5** is
    authoritative — do **not** prompt here unconditionally. Extract the review
    fields once (D6 shape) and defer:
@@ -105,6 +113,15 @@ Follow the **preflight asserts in `references/polyrepo-git.md`** (the shared
 preflight-assert snippet) for the per-repo checks; this command just drives the
 loop over `metadata.json.repos` (plus the control repo) and aggregates results.
 
+> **Fan out per-repo (parallel).** Every per-repo check below is **read-only and
+> independent** — the submodule `git submodule status`, the `git config -f
+> .gitmodules` lookup, the `ls-remote` base-existence probe, the `rev-list`
+> behind-base count, and the host `gh api`/`glab api` merge-method probe touch
+> only one repo and never each other's state. **Run them per-repo in parallel
+> (one sub-agent / one job per repo) rather than as a serial loop**, then
+> aggregate: the gate still fails fast if **any** repo fails. Serializing them
+> only makes a many-repo track slower; correctness is unchanged.
+
 For each entry in `metadata.json.repos`:
 
 1. **Submodule initialized.** `git submodule status <submodule_path>` is checked
@@ -119,6 +136,18 @@ For each entry in `metadata.json.repos`:
    (`git -C <submodule_path> ls-remote --exit-code --heads origin <default_branch>`).
    If missing, **halt**.
 4. **Track branch not behind base.** Compare `track/<track_id>` against the base.
+   **First capture the PRE-REBASE tip** of the track branch for the §3
+   reviewed-SHA check (so a rebase-onto-base below cannot move the head past the
+   reviewed commit and false-positive the §3 gate):
+   ```bash
+   prerebase_tip=$(git -C <submodule_path> rev-parse track/<track_id>)
+   # stash it per repo (prerebase_tip_<repo>) for the behind-base rebase guard below
+   # — NOT for §3 (§3 uses only the control tip below; reviewed_sha is
+   # control-repo-scoped, product-repo advancement is the merge train's concern).
+   # ALSO capture THIS control repo's track-branch tip (no -C) — this is what §3
+   # enforces reviewed_sha against:
+   #   prerebase_tip_control=$(git rev-parse track/<track_id>)
+   ```
    If the track branch is **behind** base
    (`git -C <submodule_path> rev-list --count track/<track_id>..origin/<default_branch>` > 0),
    **OFFER a rebase** (`git -C <submodule_path> rebase origin/<default_branch> track/<track_id>`).
@@ -188,9 +217,37 @@ if [ "$verdict" = "changes_requested" ] || [ "$blocking" -gt 0 ]; then
 fi
 ```
 
+**Then enforce `reviewed_sha` (the control branch must not have advanced past the
+reviewed commit).** `/cadre-review` records `metadata.review.reviewed_sha` = the
+**control-repo** track-branch HEAD it actually reviewed — a single scalar. It is
+**control-repo-scoped; do NOT fan it across product repos.** Each product repo has a
+different HEAD, so comparing the one control SHA against every repo's tip would
+false-abort essentially every polyrepo landing. Per-product-repo advancement is
+observed downstream by the merge train, not here. Compare `reviewed_sha` against the
+**control repo's PRE-REBASE tip** captured in §2b step 4 (`prerebase_tip_control`) —
+**not** the post-rebase HEAD, so a rebase-onto-base does not false-positive. If the
+control pre-rebase tip differs from `reviewed_sha` (the control branch genuinely
+advanced past the reviewed commit), **abort** (or soft-prompt re-review):
+```bash
+# reviewed_sha is absent on tracks reviewed before this field existed -> skip (no regression)
+reviewed_sha=$(jq -r '.review.reviewed_sha // empty' "$META")
+tip="$prerebase_tip_control"   # control repo's tip captured in §2b step 4, BEFORE any rebase
+if [ -n "$reviewed_sha" ] && [ -n "$tip" ] && [ "$tip" != "$reviewed_sha" ]; then
+  echo "🚫 control: branch advanced past reviewed commit ${reviewed_sha} (pre-rebase tip ${tip}); re-review needed."
+  echo "   Re-run /cadre-review <track_id>, or confirm to proceed anyway."
+  exit 1   # abort; on a soft-prompt build, ask instead of exiting
+fi
+```
+A missing `reviewed_sha` (older review, or `bd`/review predating this field) **skips
+this check** — never block a previously-valid review. Use the pre-rebase tip so the
+§2b rebase-onto-base offer cannot make a clean branch look advanced.
+
 For each entry in `metadata.json.repos` (and the control repo), make sure the
 `track/<track_id>` branch is on its remote so a PR can be opened from it. This is
-idempotent if `/cadre-implement` or `/cadre-archive` already pushed:
+idempotent if `/cadre-implement` or `/cadre-archive` already pushed. The
+per-repo pushes (and any read-only `ls-remote` / `fetch` probes around them) are
+**independent across repos — fan them out per-repo in parallel** rather than as a
+serial loop (each writes only its own repo's remote ref):
 
 ```bash
 # product repos
@@ -210,31 +267,66 @@ were kept local through implement). Flush Dolt first if shared:
 Let `LABEL = <merge_train.group_label_prefix>:<track_id>` (default
 `cadre-track:<track_id>`).
 
-1. **One PR per touched product repo** (`track/<id>` → that repo's `default_branch`):
+1. **One PR per touched product repo** (`track/<id>` → that repo's `default_branch`).
+   **Open these in parallel — fan out per-repo (see §4a),** since each repo's
+   create is independent. **Idempotent create (reuse, never duplicate).** Before
+   creating, look for an already-open PR/MR on that head→base; if one exists, reuse
+   its URL and treat it as success (so a retry or a concurrent sibling run does not
+   open a duplicate):
 
    **GitHub:**
    ```bash
-   gh pr create --repo <org/repo> \
-     --head track/<track_id> --base <default_branch> \
-     --title "<track_id>: <description> (<repo>)" \
-     --body "<see cross-link block below>" \
-     --label "<LABEL>"
+   existing=$(gh pr list --repo <org/repo> \
+     --head track/<track_id> --base <default_branch> --state open \
+     --json url --jq '.[0].url // empty')
+   if [ -n "$existing" ]; then
+     pr_url="$existing"   # reuse — already open, treat as success
+   else
+     pr_url=$(gh pr create --repo <org/repo> \
+       --head track/<track_id> --base <default_branch> \
+       --title "<track_id>: <description> (<repo>)" \
+       --body "<see cross-link block below>" \
+       --label "<LABEL>")
+   fi
    ```
    **GitLab:**
    ```bash
-   glab mr create --repo <org/repo> \
-     --source-branch track/<track_id> --target-branch <default_branch> \
-     --title "<track_id>: <description> (<repo>)" \
-     --description "<cross-link block>" --label "<LABEL>"
+   existing=$(glab mr list --repo <org/repo> \
+     --source-branch track/<track_id> --state opened \
+     --output json | jq -r '.[0].web_url // empty')
+   if [ -n "$existing" ]; then
+     pr_url="$existing"   # reuse — already open, treat as success
+   else
+     pr_url=$(glab mr create --repo <org/repo> \
+       --source-branch track/<track_id> --target-branch <default_branch> \
+       --title "<track_id>: <description> (<repo>)" \
+       --description "<cross-link block>" --label "<LABEL>")
+   fi
    ```
+   (Reusing an existing PR/MR still falls through to the label + cross-link +
+   record steps below, so a half-finished prior run is completed, not duplicated.)
 
 2. **The control-repo PR** for the cadre `track/<track_id>` branch (carries the
    `cadre/` state changes). The submodule gitlink bumps are **NOT** applied
    now — the merge train applies them after the product PRs merge. Open it with the
-   same `<LABEL>`.
+   same `<LABEL>`, using the **same idempotent reuse-then-create guard** as the
+   product PRs above (`gh pr list --head track/<track_id> --base <control_branch>
+   --state open` / `glab mr list --source-branch track/<track_id> --state opened`)
+   so a re-run reuses the existing control PR instead of opening a second one.
 
 3. **Apply the group label** to every PR (product + control) so the merge-train CI
    recognizes the group.
+
+### 4a. Fan out the per-repo PR-open work (parallel)
+
+The product-repo opens are mutually independent — each `gh pr list`/`gh pr create`
+(or `glab` equivalent) and its label application touch a single repo's host API and
+nothing shared. **Open them per-repo in parallel (one sub-agent / job per repo)
+rather than as a serial loop.** Only the metadata-record step (§5.2) writes shared
+state (`metadata.json`), so keep that on key-scoped `jq` writes and, in shared mode,
+re-read `$META` from disk before each patch (a parallel sibling may have recorded
+its `repos[<repo>].pr_url` since you loaded it). Open the **control-repo PR after**
+the product fan-out so its cross-link block can list every sibling URL.
 
 ---
 
@@ -347,6 +439,17 @@ PR's own** review/check events, and on a schedule/dispatch. A review or green on
 - Wire product repos to `repository_dispatch`/webhook the control repo on approval
   (documented in the CI template header).
 If `merge_train.auto_fire` is false, only manual/dispatch runs land the group.
+
+**Don't serialize the whole org behind one train lane.** The merge-train workflow
+should scope its concurrency group **per track** (e.g. `cadre-merge-train-<track_id>`
+— GitHub `concurrency.group`, GitLab `resource_group`) rather than a single global
+`cadre-merge-train` lane, so one stalled or conflicted track does not block every
+other track's landing. Pair that with an **auto-fire trigger** — `repository_dispatch`
+(GitHub) / pipeline `trigger` or webhook (GitLab), keyed on the track id — so a
+sibling product-repo approval fires that track's train without waiting on a global
+schedule. The concurrency-group value and trigger wiring live in the CI templates
+(`templates/ci/cadre-merge-train.{github,gitlab}.yml`); reference and tune them
+there, not in this command.
 
 **On partial failure** (a product PR merged but a later step failed): the train
 halts, leaves merged product PRs in place, and comments on the control PR naming

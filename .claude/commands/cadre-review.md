@@ -17,14 +17,32 @@ the track to ship or routes issues back into the plan.
   should review this track and surface it in the team's review queue, then stop (no
   diff, no verdict). Set `metadata.json.reviewer` to the requested person
   (key-scoped jq), and if Beads is available add the label `review:requested` to the
-  epic (`bd label add <epic_id> review:requested --json`). `/cadre-status --team`
-  lists tracks `awaiting review` with their assigned reviewer, so review load can be
-  distributed deliberately instead of landing on whoever volunteers.
-- **No flag** (default) → run the full review (sections 1-7) and record the verdict.
+  epic, **adding it BEFORE clearing any stale verdict labels** so a crash never
+  strips the track to no review label:
+  ```bash
+  bd label add <epic_id> review:requested --json
+  bd label remove <epic_id> review:ready --json
+  bd label remove <epic_id> review:changes --json
+  ```
+  `/cadre-status --team` lists tracks `awaiting review` with their assigned reviewer,
+  so review load can be distributed deliberately instead of landing on whoever
+  volunteers. In shared mode (`sync_mode == "shared"`), bracket this with the sync
+  preamble/postamble from `references/cadre-sync.md` (pull first; then commit
+  `cadre/`, **mandatory** `bd dolt push`, push the control branch) so the assignment
+  reaches the reviewer's clone.
+- **No flag** (default) → run the full review (sections 1-8) and record the verdict.
 
 ## 1. Verify Setup
 
 If `cadre/tracks.md` doesn't exist, tell the user to run `/cadre-setup` first.
+
+**Sync preamble (shared mode).** If `cadre/config.json` has `sync_mode == "shared"`
+(in **both** monorepo and polyrepo), run the **sync preamble** from
+`references/cadre-sync.md` now — `git pull --rebase` the control plane + `bd dolt
+pull` — so you review against the latest spec/plan and so the verdict and label you
+write below land on top of teammates' state. In `local` mode (or when `config.json`
+is absent) skip the preamble. This makes the recorded verdict reach the shipper's
+clone (the postamble in §8 publishes it).
 
 ## 2. Select Track
 
@@ -65,6 +83,29 @@ track diff from step 3. Also check the track-specific concerns:
 - Are all plan tasks marked `[x]` actually implemented (no stubs/TODOs)?
 - Tests present and passing for new behavior (per `workflow.md`'s coverage bar)?
 
+**Machine gate (complements `/code-review`, which by design refuses to compile or
+look outside the diff).** Run two automated passes and fold their results into the
+verdict — they catch regressions a diff-scoped reviewer cannot:
+
+1. **Typecheck / compile / build.** Run the project's declared typecheck/compile/build
+   command from `cadre/tech-stack.md` (or `cadre/workflow.md` if that's where the
+   build command lives) — e.g. `tsc --noEmit`, `cargo check`, `go build ./...`,
+   `mypy`, `mvn -q compile`. In **polyrepo**, run it per touched repo in its
+   submodule context. Each unresolved type/compile error is a **blocking** finding;
+   add the count to `blocking_count` (computed in §5) and list the errors in the
+   findings. **Degrade gracefully:** if no typecheck/compile/build command is
+   declared, skip this pass and note in the report that no machine typecheck was
+   available (do not fabricate a green result).
+
+2. **Cross-track regression via code intelligence.** Where a code-intelligence
+   backend is available (LSP `find-references` / `incoming-calls`, or an equivalent),
+   for each symbol the diff **changed signature of or removed**, look up its callers
+   and surface any that live **outside** the track diff — those are call sites this
+   track may have broken in code it didn't touch (a cross-track regression).
+   Report them as findings (blocking when a removed/renamed symbol still has live
+   callers). **Degrade gracefully:** if no LSP / code-intelligence backend is
+   available, skip this pass and note it in the report.
+
 ## 5. Record Findings
 
 Append a review entry to `cadre/tracks/<track_id>/learnings.md`:
@@ -99,6 +140,11 @@ COVERAGE="$(jq -r '.last_coverage // "null"' "$META")"
 ME="$(git config user.email 2>/dev/null || git config user.name 2>/dev/null || echo)"
 OWNER="$(jq -r '.owner // ""' "$META")"
 SELF=false; [ -n "$ME" ] && [ "$ME" = "$OWNER" ] && SELF=true
+# reviewed_sha: the track branch HEAD at the moment of review. /cadre-ship and
+# /cadre-land compare the branch's PRE-REBASE tip against this; if the branch
+# advanced past it, they demand a re-review (see those commands' verdict re-read).
+BRANCH="$(jq -r '.git_branch // "track/<track_id>"' "$META")"
+REVIEWED_SHA="$(git rev-parse "$BRANCH" 2>/dev/null || git rev-parse HEAD)"
 tmp="$(mktemp)"
 jq --arg verdict "<approved|changes_requested>" \
    --argjson blocking <blocking_count> \
@@ -106,11 +152,18 @@ jq --arg verdict "<approved|changes_requested>" \
    --argjson reviewer "$REVIEWER" \
    --argjson coverage "$COVERAGE" \
    --argjson self "$SELF" \
-   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer, coverage: $coverage, self_reviewed: $self}' \
+   --arg reviewed_sha "$REVIEWED_SHA" \
+   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer, coverage: $coverage, self_reviewed: $self, reviewed_sha: $reviewed_sha}' \
    "$META" > "$tmp" && mv "$tmp" "$META"
 ```
 - `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
   or `"changes_requested"` for **Changes requested**.
+- `reviewed_sha` is the track branch's HEAD commit SHA captured here, at review time.
+  It pins the verdict to a specific commit: in `/cadre-ship` / `/cadre-land` the
+  pre-push re-read compares the branch's **pre-rebase** tip against it, and if the
+  branch advanced past `reviewed_sha` the gate demands a re-review (the approval no
+  longer describes the code being shipped). In **polyrepo** the control-repo branch
+  HEAD is captured; per-repo advancement is observed by the merge train.
 - `coverage` carries the measured number from `/cadre-implement`'s coverage gate so
   the recorded verdict reflects a real measurement, not a self-asserted "tests pass".
   If a track was reviewed with `coverage: null`, note that coverage was never
@@ -145,16 +198,42 @@ jq --arg verdict "<approved|changes_requested>" \
    ```
    - If a `bd` command fails: follow the Beads Error Handler Protocol.
 3. **Set the review label on the epic** so downstream tooling (and other agents)
-   can see the gate state. Remove the opposite label first so the two are mutually
-   exclusive:
+   can see the gate state. The two states are mutually exclusive, but **add the
+   winning label BEFORE removing the losing one(s)** — that ordering means a crash
+   between the two `bd` calls leaves the track with the correct label set rather
+   than with *neither* (which would read as "review never happened"). Worst case is
+   a transient overlap of both labels, which the next flip cleans up.
    - **Approved / clean** (`verdict == "approved"`, `blocking_count == 0`):
      ```bash
-     bd label remove <epic_id> review:changes --json
      bd label add <epic_id> review:ready --json
+     bd label remove <epic_id> review:changes --json
+     bd label remove <epic_id> review:requested --json
      ```
    - **Changes requested** (`verdict == "changes_requested"` or `blocking_count > 0`):
      ```bash
-     bd label remove <epic_id> review:ready --json
      bd label add <epic_id> review:changes --json
+     bd label remove <epic_id> review:ready --json
+     bd label remove <epic_id> review:requested --json
      ```
    - If a `bd` command fails: follow the Beads Error Handler Protocol.
+
+## 8. Publish the Verdict (shared mode)
+
+The verdict in `metadata.json` and the Beads label only help the shipper if they
+reach the shipper's clone. If `cadre/config.json` has `sync_mode == "shared"` (in
+**both** monorepo and polyrepo — never gate this on topology), run the **sync
+postamble** from `references/cadre-sync.md`:
+
+1. Commit the `cadre/` changes (the `metadata.json` `.review` write from §5, plus the
+   `learnings.md` review entry from §5). The `metadata.json` write is already
+   key-scoped jq (`.review = {…}`), so it won't clobber a sibling's concurrent write.
+2. **`bd dolt push` is MANDATORY** here — it publishes the review label flip from §7
+   to the shared task graph.
+3. `git push <control_remote> <control_branch>` to publish the control plane.
+4. On push rejection, re-run the sync preamble (pull --rebase + `bd dolt pull`),
+   re-apply per the postamble's conflict rules, then push again.
+
+This is the same orchestration-state publish every mutating command performs; it
+pushes **only the control plane** — product code is never auto-pushed (it goes up at
+`/cadre-ship` / `/cadre-land`). In `local` mode (or when `config.json` is absent),
+skip this section — the verdict stays local, matching today's behavior.

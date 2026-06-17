@@ -23,6 +23,11 @@ local.
   archived and ask the user to choose.
 - Read `cadre/tracks/<track_id>/metadata.json` for `git_branch`
   (default `track/<track_id>`).
+- **Ownership guard.** Before touching the track, run the Ownership Guard
+  (`references/ownership-guard.md`) for the resolved track — it stops two operators
+  from concurrently shipping the same track in **any** topology (in default monorepo
+  mode the advisory `lease` is a no-op, so this guard is the only serialization).
+  If it halts, stop.
 - **Review gate.** Read the `review` object from
   `cadre/tracks/<track_id>/metadata.json` (written by `/cadre-review`).
   Extract two fields:
@@ -70,6 +75,9 @@ For the selected track:
 
 3. **Rebase track branch onto main:**
    ```bash
+   # Capture the PRE-REBASE track-branch tip for the reviewed_sha check in step 4.
+   # Must be read BEFORE the rebase so rebasing onto main does not false-positive.
+   prerebase_head=$(git rev-parse track/<track_id>)
    git rebase main track/<track_id>
    ```
    - If conflict arises in `.beads/` during rebase:
@@ -83,7 +91,14 @@ For the selected track:
 4. **Re-read the review gate, then push (TOCTOU close):** the verdict read in
    §1 is a point-in-time snapshot; a reviewer may have flipped it to
    `changes_requested` during the (slow) Dolt-flush + rebase above. **Re-read it
-   from disk immediately before pushing** and abort if it now blocks:
+   from disk immediately before pushing** and abort if it now blocks. The same
+   re-read also enforces **`reviewed_sha`** — the track-branch HEAD captured at
+   review time (`metadata.review.reviewed_sha`, written by `/cadre-review`). If the
+   branch advanced past the reviewed commit (new work landed after the review), the
+   approval no longer covers what you are about to ship, so re-review is needed.
+   Compare against the **pre-rebase** tip (`$prerebase_head` from step 3) — the
+   rebase-onto-main in step 3 rewrites the tip, so comparing the post-rebase HEAD
+   would false-positive on a clean track:
    ```bash
    META="cadre/tracks/<track_id>/metadata.json"
    verdict=$(jq -r '.review.verdict // "absent"' "$META")
@@ -92,8 +107,16 @@ For the selected track:
      echo "🚫 Review flipped to a blocking state (verdict: $verdict, blocking: $blocking) during ship. Aborting push — re-run /cadre-review."
      exit 1
    fi
+   # reviewed_sha guard: did the branch advance past the reviewed commit?
+   reviewed_sha=$(jq -r '.review.reviewed_sha // ""' "$META")
+   if [ -n "$reviewed_sha" ] && [ "$reviewed_sha" != "$prerebase_head" ]; then
+     echo "🚫 Branch advanced past reviewed commit $reviewed_sha (pre-rebase tip $prerebase_head). Re-review needed — re-run /cadre-review <track_id> before shipping."
+     exit 1
+   fi
    git push origin track/<track_id> --force-with-lease
    ```
+   When `reviewed_sha` is absent (older tracks reviewed before the field existed),
+   skip the guard — only the verdict/blocking check applies.
 
 5. **Announce / open the PR:**
 
@@ -116,23 +139,40 @@ For the selected track:
      unauthenticated, fall back to printing the exact create command for the user
      to run (the manual-fallback message), then continue.
 
+     **Idempotent creation (avoid duplicate PRs).** Before creating, check whether
+     an open PR/MR already exists for this branch; if so, reuse its URL and treat
+     this as success (a re-run after a partial ship must not open a second PR):
+
      **GitHub:**
      ```bash
-     gh pr create \
-       --head track/<track_id> --base main \
-       --title "<track_id>: <description>" \
-       --body "Cadre track <track_id>. See cadre/tracks/<track_id>/spec.md."
+     existing=$(gh pr list --head track/<track_id> --base main --state open \
+       --json url --jq '.[0].url // ""')
+     if [ -n "$existing" ]; then
+       echo "PR already open for track/<track_id>: $existing"
+     else
+       gh pr create \
+         --head track/<track_id> --base main \
+         --title "<track_id>: <description>" \
+         --body "Cadre track <track_id>. See cadre/tracks/<track_id>/spec.md."
+     fi
      ```
      **GitLab:**
      ```bash
-     glab mr create \
-       --source-branch track/<track_id> --target-branch main \
-       --title "<track_id>: <description>" \
-       --description "Cadre track <track_id>. See cadre/tracks/<track_id>/spec.md."
+     existing=$(glab mr list --source-branch track/<track_id> \
+       --output json --jq '.[0].web_url // ""' 2>/dev/null)
+     if [ -n "$existing" ]; then
+       echo "MR already open for track/<track_id>: $existing"
+     else
+       glab mr create \
+         --source-branch track/<track_id> --target-branch main \
+         --title "<track_id>: <description>" \
+         --description "Cadre track <track_id>. See cadre/tracks/<track_id>/spec.md."
+     fi
      ```
-     On success, report the returned PR/MR URL and the branch-cleanup commands
-     above. On any CLI failure, do **not** error out — print the create command as
-     a manual fallback and tell the user to open the PR themselves.
+     On success (whether reused or newly created), report the PR/MR URL and the
+     branch-cleanup commands above. On any CLI failure, do **not** error out — print
+     the create command as a manual fallback and tell the user to open the PR
+     themselves.
 
 ## 3. Next Step
 
