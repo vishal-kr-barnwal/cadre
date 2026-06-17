@@ -95,10 +95,13 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    declared, skip this pass and note in the report that no machine typecheck was
    available (do not fabricate a green result).
 
-2. **Cross-track regression via code intelligence.** Prefer the bundled LSP review
-   helper when present:
+2. **Cross-track regression via code intelligence.** Prefer Cadre's LSP review
+   helper when present. Resolve `<TEMPLATES_DIR>` per
+   `references/template-locator.md` and use
+   `<TEMPLATES_DIR>/scripts/cadre-lsp-review.js`; if absent, fall back to a
+   project-local `scripts/cadre-lsp-review.js`. Run:
    ```bash
-   node scripts/cadre-lsp-review.js --base main --head <git_branch> --json
+   node <lsp-review-helper> --base main --head <git_branch> --json
    ```
    It reads optional `cadre/lsp.json`, talks to the configured language server(s),
    and reports references outside the track diff for changed/removed symbols. If it

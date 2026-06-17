@@ -31,7 +31,8 @@ Initialize this project with context-driven development. Follow this workflow pr
    - If `STEP` is `"2.2_product_guidelines"`: Announce "Resuming: Guidelines complete. Next: Tech Stack." → Proceed to **Section 2.3**
    - If `STEP` is `"2.3_tech_stack"`: Announce "Resuming: Tech Stack complete. Next: Code Styleguides." → Proceed to **Section 2.4**
    - If `STEP` is `"2.4_code_styleguides"`: Announce "Resuming: Styleguides complete. Next: Workflow." → Proceed to **Section 2.5**
-   - If `STEP` is `"2.5_workflow"`: Announce "Resuming: Scaffolding complete. Next: Beads Integration." → Proceed to **Section 2.7**
+   - If `STEP` is `"2.5_workflow"`: Announce "Resuming: Workflow complete. Next: LSP Setup." → Proceed to **Section 2.6**
+   - If `STEP` is `"2.6_lsp"`: Announce "Resuming: LSP setup complete or skipped. Next: Beads Integration." → Proceed to **Section 2.7**
    - If `STEP` is `"2.7_beads_monorepo"`: Announce "Resuming: Beads complete. Next: Sync Mode." → Proceed to **Section 2.7a**
    - If `STEP` is `"2.7a_sync_mode_mono"`: Announce "Resuming: Sync mode configured. Next: Finalize." → Proceed to **Section 2.8**
    - If `STEP` is `"2.7_beads_polyrepo"`: Announce "Resuming: Beads complete. Next: Sync Mode & PR Provider." → Proceed to **Section 2.7b**
@@ -50,7 +51,8 @@ Present to user:
 > 1. **Project Discovery:** Analyze if this is new or existing project
 > 2. **Product Definition:** Define vision, guidelines, and tech stack
 > 3. **Configuration:** Select code style guides and workflow
-> 4. **Beads Integration:** Set up persistent task memory
+> 4. **LSP Setup:** Configure optional language-server code intelligence
+> 5. **Beads Integration:** Set up persistent task memory
 >
 > Let's get started!"
 
@@ -354,7 +356,63 @@ only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the mod
 
 ---
 
-### 2.6 Finalization
+### 2.6 LSP Setup (Optional)
+
+**PROTOCOL: Recommend and optionally configure language servers for code
+intelligence. This powers `/cadre-review`'s LSP/code-intelligence pass. It can be
+configured later with `/cadre-refresh --lsp` if the user skips now.**
+
+1. **Resolve helper:** Resolve `<TEMPLATES_DIR>` as described in
+   `references/template-locator.md`. Prefer the bundled helper
+   `<TEMPLATES_DIR>/scripts/cadre-lsp-setup.js`. If it is absent but a project-local
+   `scripts/cadre-lsp-setup.js` exists, use that. If neither exists, degrade
+   gracefully: explain that LSP auto-detection is unavailable and proceed to step 6.
+
+2. **Run read-only scan:**
+   ```bash
+   node <helper> --json
+   ```
+   The helper scans source file extensions, recommends LSP server entries, checks
+   whether server commands are available on PATH, and reports install commands for
+   missing servers. It does not write unless rerun with `--write`.
+
+3. **Present recommendations:** Show a compact table:
+   | Language | Server command | Files | Installed? | Install command |
+   Include only languages with detected source files. If no recommendations are
+   found, say so and skip to step 6.
+
+4. **Ask:**
+   - If all recommended server commands are available:
+     > "Configure `cadre/lsp.json` for these language servers?"
+     > A) Yes — write/append the config
+     > B) No — skip for now; I can run `/cadre-refresh --lsp` later
+   - If one or more server commands are missing:
+     > "Some recommended language servers are not installed. What would you like to do?"
+     > A) Write/append `cadre/lsp.json` now, and I'll install the missing servers after setup
+     > B) Stop here so I can install them first
+     > C) Skip LSP for now; I can run `/cadre-refresh --lsp` later
+   If B in the missing-server branch: HALT without marking step complete.
+
+5. **Write config when approved:** Run:
+   ```bash
+   node <helper> --write --json
+   ```
+   This creates or appends to `cadre/lsp.json` without duplicating existing
+   `servers[]` entries. If the helper reports missing commands, print their install
+   commands and remind the user that `/cadre-review` will degrade gracefully until
+   they are installed.
+   - `git add cadre/lsp.json` if it was written.
+
+6. **Commit State:**
+   ```json
+   {"last_successful_step": "2.6_lsp"}
+   ```
+
+7. **Continue:** Proceed to Section 2.6a.
+
+---
+
+### 2.6a Finalization
 
 1. **Summarize:** List all files created/copied.
 2. **Transition:** Announce proceeding to Beads Integration.

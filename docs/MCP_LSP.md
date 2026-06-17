@@ -45,10 +45,30 @@ Set `CADRE_ROOT=/path/to/project` when launching from outside the project root.
 
 ## LSP Review Helper
 
+Cadre can configure LSP during setup, or later with refresh:
+
+```bash
+/cadre-setup          # includes an optional LSP recommendation step
+/cadre-refresh --lsp  # rerun LSP recommendations later
+```
+
+Both flows use the bundled setup helper:
+
+```bash
+node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json
+node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --write --json
+```
+
+The helper scans source file extensions, recommends language servers, checks
+whether each server command is available on PATH, and appends missing entries to
+`cadre/lsp.json` without duplicating existing `servers[]` entries. If commands
+are missing, Cadre prints install commands and asks whether to write the config
+now or stop so the user can install the servers first.
+
 Cadre also ships a best-effort LSP review hook:
 
 ```bash
-node scripts/cadre-lsp-review.js --base main --head track/<track_id> --json
+node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<track_id> --json
 ```
 
 If `cadre/lsp.json` is absent, the helper exits successfully with

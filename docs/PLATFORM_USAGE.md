@@ -170,6 +170,7 @@ Setup asks about:
 
 - Brownfield or greenfield project.
 - Product and technical context.
+- Optional LSP/code-intelligence setup based on a codebase scan.
 - Beads mode.
 - Monorepo or polyrepo topology.
 - Shared or local sync mode.
@@ -540,7 +541,19 @@ protocols.
 
 ## Use LSP Review
 
-Configure optional language servers in `cadre/lsp.json`:
+Configure optional language servers during setup or later:
+
+```bash
+/cadre-setup
+/cadre-refresh --lsp
+```
+
+Cadre scans the codebase, recommends language servers, checks whether each server
+command is installed, and asks whether to append the recommendations to
+`cadre/lsp.json`. If a recommended server is missing, Cadre shows the install
+command and lets you write the config now or stop and install first.
+
+The resulting `cadre/lsp.json` looks like this:
 
 ```json
 {
@@ -558,7 +571,7 @@ Configure optional language servers in `cadre/lsp.json`:
 Run the helper:
 
 ```bash
-node scripts/cadre-lsp-review.js --base main --head track/<track_id> --json
+node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<track_id> --json
 ```
 
 If no config exists, it exits successfully with `available: false`. `/cadre-review`

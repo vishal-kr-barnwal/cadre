@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Optional LSP setup flow for `/cadre-setup` plus `/cadre-refresh --lsp`, backed
+  by a bundled scanner that recommends language servers, writes/appends
+  `cadre/lsp.json`, and reports missing install commands.
 - Detailed platform usage guide (`docs/PLATFORM_USAGE.md`) covering installation,
   setup, topology choice, daily workflows, review/ship/land, team operation,
   MCP/LSP usage, CI, and troubleshooting.

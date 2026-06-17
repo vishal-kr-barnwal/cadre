@@ -207,9 +207,12 @@ deterministic agent integrations:
 - `node scripts/mcp/cadre-server.js` starts a dependency-free MCP server exposing
   Cadre tools/resources for track status, collision scans, review gates, and
   index regeneration.
-- `node scripts/cadre-lsp-review.js --base main --head track/<id> --json` runs a
-  best-effort LSP reference scan when `cadre/lsp.json` configures language
-  servers.
+- `<TEMPLATES_DIR>/scripts/cadre-lsp-setup.js` scans a project, recommends
+  language servers, detects missing server commands, and appends `cadre/lsp.json`
+  entries during `/cadre-setup` or `/cadre-refresh --lsp`.
+- `<TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<id>
+  --json` runs a best-effort LSP reference scan when `cadre/lsp.json` configures
+  language servers.
 
 See [MCP and LSP Integration](MCP_LSP.md) for setup and rollout guidance.
 

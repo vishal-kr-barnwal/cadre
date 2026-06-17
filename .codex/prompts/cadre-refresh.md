@@ -27,8 +27,11 @@ If no argument, ask:
 - `track [id]` - Specific track
 - `repos` - **Polyrepo only:** reconcile `repos.json` ↔ `.gitmodules`, toggle
   `sync_mode` / per-repo `enabled` (see section 8b)
+- `lsp` - Scan the codebase and configure or update `cadre/lsp.json`
 
 **Flags:**
+- `--lsp` - Run only the LSP setup/update flow (section 8d). Use this when setup
+  skipped LSP or when the codebase gained a new language.
 - `--all` - For the learnings consolidation pass (section 8a), read **every**
   active **and** archived track's `learnings.md` (full-history consolidation).
   Without it, learnings consolidation defaults to **active + recently-touched**
@@ -212,6 +215,66 @@ mirrors current metadata.
   Do NOT hand-flip markers in `tracks.md` and do NOT duplicate the algorithm here.
 - This step is **bd-independent** and idempotent — run it regardless of Beads
   availability, so the index stays correct even when `bd` is missing.
+
+---
+
+## 8d. LSP SETUP / REFRESH
+
+**Run when the scope is `lsp`, `$ARGUMENTS` contains `--lsp`, or the user chose
+the LSP-only refresh path.** This is the later configuration path for projects
+that skipped LSP during `/cadre-setup`, or for codebases that gained a language.
+
+1. **Resolve helper:** Resolve `<TEMPLATES_DIR>` as described in
+   `references/template-locator.md`. Prefer
+   `<TEMPLATES_DIR>/scripts/cadre-lsp-setup.js`; fall back to project-local
+   `scripts/cadre-lsp-setup.js`. If neither exists, report that the helper is
+   unavailable and skip without changing files.
+
+2. **Scan and recommend:**
+   ```bash
+   node <helper> --json
+   ```
+   The helper detects source-language extensions, recommends language server
+   commands, checks whether those commands are installed, and compares the result
+   with the existing `cadre/lsp.json`.
+
+3. **Present report:**
+   - Recommended languages and server commands.
+   - Which entries are already configured.
+   - Which entries would be appended.
+   - Which language-server commands are missing, including install commands.
+
+4. **Ask:**
+   - If new config entries are recommended:
+     > "Append these LSP servers to `cadre/lsp.json`?"
+     > A) Yes — append/update config
+     > B) No — leave config unchanged
+   - If server commands are missing:
+     > "Some configured/recommended language servers are not installed."
+     > A) Continue after writing config; I'll install the missing servers
+     > B) Stop so I can install them first
+     > C) Skip LSP refresh
+   If B in the missing-server branch: HALT without changing `cadre/lsp.json`.
+
+5. **Write config when approved:**
+   ```bash
+   node <helper> --write --json
+   ```
+   This creates `cadre/lsp.json` if missing and appends only missing `servers[]`
+   entries. It must not duplicate existing entries keyed by `id` or `command`.
+   `git add cadre/lsp.json` when changed.
+
+6. **Install guidance:** If any server command is missing, print the helper's
+   install command(s). Tell the user `/cadre-review` will degrade gracefully and
+   record code intelligence as skipped until those commands are installed.
+
+7. **Commit + publish:** Include `cadre/lsp.json` in the refresh commit from
+   section 8. If this is a pure `--lsp` refresh, commit with:
+   ```bash
+   git add cadre/lsp.json
+   git commit -m "cadre(refresh): Configure LSP servers"
+   ```
+   In shared mode, run the sync postamble from `references/cadre-sync.md`.
 
 ---
 
