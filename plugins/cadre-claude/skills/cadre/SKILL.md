@@ -91,15 +91,18 @@ Workflow tool routing:
 
 | MCP tool | Required use |
 |---------|--------------|
+| `cadre_doctor` | Diagnose Cadre runtime wiring, project markers, Beads, LSP, provider CLIs, and generated-bundle check availability. Use when setup/tool availability is unclear. |
 | `cadre_current_root` | Resolve the per-call project root at the start of every project-scoped workflow. |
 | `cadre_live_status` | Cheap bare `cadre-status` summary. |
 | `cadre_team_status` | Track inventory, active/completed track selection, owner/reviewer/status summaries. |
 | `cadre_available_work` | `cadre-status --available` and default `cadre-implement` candidate selection, including stale reclaimable work. |
+| `cadre_prepare_implementation` | Preferred `cadre-implement` start packet: selected track, optional ownership claim, context, collisions, available work, and plan integrity in one bounded call. |
 | `cadre_collision_scan` | Cross-track file overlap checks, including exact, prefix, and glob overlaps. |
 | `cadre_parse_plan` | Phase/task/annotation/commit parsing for implement, validate, review, revert, handoff, formula, release. |
 | `cadre_track_context` | Bounded per-track context: metadata, parsed plan, task counts, worktree routing, hold state, review state, and Beads IDs. |
 | `cadre_plan_integrity` | Plan annotation, dependency, repo-routing, task-key, and parallel file-claim validation. |
 | `cadre_claim_track` | Track ownership claim, Beads assignment check, metadata owner/lease mirror, and `implement_state.json` creation. |
+| `cadre_create_beads_tree` | Preferred Beads initialization for `cadre-newtrack`: create/plan epic, phases, tasks, dependencies, notes, and metadata Beads IDs. |
 | `cadre_record_task_result` | Task marker/SHA/coverage result recording in `plan.md` and `metadata.json`. |
 | `cadre_set_track_status` | Track status mutations plus `cadre/tracks.md` regeneration. |
 | `cadre_record_review` | Structured review verdict write with reviewer race guard, `review_seq`, self-review flag, coverage, and gate check. |
@@ -109,11 +112,26 @@ Workflow tool routing:
 | `cadre_lsp_review` | Code-intelligence review wrapper around the configured LSP helper with structured findings. |
 | `cadre_lsp_warm_review` | Preferred code-intelligence review path when available; reuses the persistent LSP daemon and warm language servers. |
 | `cadre_lsp_daemon_status` | Inspect warm LSP server sessions before/after repeated review work. |
+| `cadre_lsp_impact` | Low-token semantic impact for planning/revision: symbol references, file symbols, and optional LSP diff review. |
 | `cadre_test_coverage` | Run the configured test/coverage command, parse measured coverage, and record it on the track/task. |
 | `cadre_pr_ci_status` | Read GitHub/GitLab PR/MR and CI status for a track branch or explicit PR/MR. |
 | `cadre_repo_map` | Compact semantic repo map and symbol reference lookup for low-token orientation. |
 | `cadre_beads_write` | Structured Beads operations (`ready`, `show`, `update`, `note`, `close`, labels, deps, create) instead of raw `bd` shell snippets. |
+| `cadre_review_assist` | Review evidence packet: diff, incomplete plan tasks, TODO/stub scan, coverage, and LSP findings; required before `/code-review` and sufficient fallback when `/code-review` is unavailable. |
 | `cadre_polyrepo_preflight` | Polyrepo setup, validate, refresh, and land preflight checks. |
+
+Packet-first rule: when a protocol names a composite MCP packet, call that
+packet before doing the equivalent manual scan. Use smaller MCP tools only when
+the packet reports that a prompt, repair, or narrower follow-up is needed.
+
+Preferred packet checkpoints:
+- Setup/health checks: `cadre_doctor`.
+- New track planning: `cadre_lsp_impact` before plan confirmation, then
+  `cadre_create_beads_tree` after track files are written.
+- Implementation start: `cadre_prepare_implementation`.
+- Review: `cadre_review_assist` to frame the evidence, plus
+  `cadre_lsp_warm_review` / `cadre_lsp_review` for semantic regressions.
+- Revision: `cadre_lsp_impact` before rewriting plans that touch existing code.
 
 ## Beads Integration
 

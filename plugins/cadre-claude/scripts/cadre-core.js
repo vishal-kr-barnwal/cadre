@@ -41,6 +41,21 @@ function fileExists(file) {
   }
 }
 
+function isCadreProjectRoot(root) {
+  const cadreDir = path.join(root, "cadre");
+  if (!fileExists(cadreDir)) return false;
+  return [
+    "tracks.md",
+    "setup_state.json",
+    "product.md",
+    "tech-stack.md",
+    "workflow.md",
+    "beads.json",
+    "config.json",
+    "repos.json",
+  ].some((name) => fileExists(path.join(cadreDir, name))) || fileExists(path.join(cadreDir, "tracks"));
+}
+
 function gitIdentity(root) {
   for (const key of ["user.email", "user.name"]) {
     const result = spawnSync("git", ["config", key], {
@@ -575,6 +590,15 @@ function findTrack(root, trackId) {
   return listTracks(root).find((item) => item.track_id === trackId) || null;
 }
 
+function priorityRank(priority) {
+  return {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+  }[String(priority || "medium").toLowerCase()] ?? 2;
+}
+
 function trackContext(root, trackId) {
   const track = findTrack(root, trackId);
   if (!track) return { ok: false, error: `Track not found: ${trackId}` };
@@ -636,6 +660,75 @@ function trackContext(root, trackId) {
   };
 }
 
+function implementationPrep(root, args = {}) {
+  const identity = args.identity || gitIdentity(root);
+  const team = teamStatus(root);
+  const available = availableWork(root);
+  let trackId = args.trackId || args.track_id || null;
+  const warnings = [];
+
+  if (!trackId && available.available.length > 0) {
+    trackId = available.available[0].track_id;
+  }
+  if (!trackId) {
+    const mine = team.tracks.find((track) => track.status === "in_progress" && (!track.owner || track.owner === identity));
+    const anyOpen = team.tracks.find((track) => ["new", "in_progress", "blocked"].includes(track.status));
+    trackId = (mine || anyOpen || {}).track_id || null;
+  }
+  if (!trackId) {
+    return {
+      ok: false,
+      root,
+      identity,
+      reason: "No available or incomplete track found",
+      team,
+      available,
+    };
+  }
+
+  let claim = null;
+  if (args.claim === true) {
+    claim = claimTrack(root, trackId, { identity, takeover: args.takeover === true });
+    if (!claim.ok) {
+      return { ok: false, root, identity, selected_track: trackId, claim, team, available };
+    }
+  }
+
+  const context = trackContext(root, trackId);
+  const collisions = collisionScan(root);
+  const selectedCollisions = (collisions.collisions || []).filter((collision) =>
+    (collision.track_ids || []).includes(trackId)
+  );
+  const integrity = planIntegrity(root, trackId);
+  const foreignCollisions = selectedCollisions.filter((collision) =>
+    (collision.owners || []).some((owner) => owner && owner !== identity)
+  );
+  if (foreignCollisions.length > 0) {
+    warnings.push(`${foreignCollisions.length} cross-owner file collision(s) involve the selected track`);
+  }
+  if (context.ok && context.hold && context.hold.owner && identity && context.hold.owner !== identity) {
+    warnings.push(`Selected track is held by ${context.hold.owner}`);
+  }
+
+  return {
+    ok: context.ok && integrity.ok,
+    root,
+    identity,
+    selected_track: trackId,
+    claim,
+    context,
+    team_summary: {
+      total_tracks: team.total_tracks,
+      by_status: team.by_status,
+      by_owner: team.by_owner,
+    },
+    available,
+    collisions: selectedCollisions,
+    integrity,
+    warnings,
+  };
+}
+
 function planIntegrity(root, trackId = null) {
   const topology = loadTopology(root);
   const tracks = trackId ? [findTrack(root, trackId)].filter(Boolean) : listTracks(root);
@@ -677,6 +770,202 @@ function planIntegrity(root, trackId = null) {
     }
   }
   return { ok: errors.length === 0, root, checked_tracks: tracks.length, errors, warnings };
+}
+
+function extractBeadsId(json, fallback = null) {
+  if (!json || typeof json !== "object") return fallback;
+  return json.id || json.issue_id || json.issueId || (json.issue && json.issue.id) || fallback;
+}
+
+function parseCommandJson(result) {
+  try {
+    return JSON.parse(result.stdout || "null");
+  } catch (_) {
+    return null;
+  }
+}
+
+function beadsCommandPlanEntry(args) {
+  return { command: ["bd", ...args].join(" "), args };
+}
+
+function createBeadsTree(root, args = {}) {
+  const trackId = args.trackId || args.track_id;
+  if (!trackId) return { ok: false, error: "trackId is required" };
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+
+  const dryRun = args.dryRun === true;
+  if (!dryRun && !commandExists("bd", root)) {
+    return { ok: false, available: false, reason: "Beads CLI (bd) is not installed or not on PATH" };
+  }
+
+  const identity = args.identity || gitIdentity(root);
+  const plan = parsePlanFile(track.plan_path);
+  const epicId = args.epicId || track.metadata.beads_epic || `cadre-${track.track_id}`;
+  const commands = [];
+  const results = [];
+  const beadsTasks = {};
+
+  const runBd = (bdArgs) => {
+    commands.push(beadsCommandPlanEntry(bdArgs));
+    if (dryRun) {
+      const id = bdArgs[0] === "create" && bdArgs.includes("--id") ? epicId : `dry-${commands.length}`;
+      return { ok: true, status: 0, stdout: JSON.stringify({ id }), stderr: "", command: ["bd", ...bdArgs].join(" ") };
+    }
+    const result = runCommand("bd", bdArgs, { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+    results.push(result);
+    return result;
+  };
+
+  const showEpic = dryRun ? { ok: false } : runCommand("bd", ["show", epicId, "--json"], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  if (showEpic.ok) {
+    if (track.metadata.beads_epic === epicId && track.metadata.beads_tasks && Object.keys(track.metadata.beads_tasks).length > 0) {
+      return {
+        ok: true,
+        available: true,
+        existing: true,
+        dry_run: false,
+        track_id: track.track_id,
+        beads_epic: epicId,
+        beads_tasks: track.metadata.beads_tasks,
+        commands,
+        results,
+        metadata_patch: {
+          beads_epic: epicId,
+          beads_tasks: track.metadata.beads_tasks,
+        },
+      };
+    }
+    return {
+      ok: false,
+      available: true,
+      existing: true,
+      reason: `Beads epic ${epicId} already exists but metadata.beads_tasks is missing; reconcile existing children before creating new ones`,
+      commands,
+      results,
+    };
+  } else {
+    const epicArgs = [
+      "create",
+      `${track.track_id}: ${track.metadata.description || track.metadata.name || track.track_id}`,
+      "--id",
+      epicId,
+      "-t",
+      "epic",
+      "-p",
+      String(priorityRank(track.metadata.priority)),
+      "--json",
+    ];
+    if (identity) epicArgs.splice(epicArgs.length - 1, 0, "--assignee", identity);
+    const epicResult = runBd(epicArgs);
+    if (!epicResult.ok) return { ok: false, available: true, stage: "create_epic", commands, results };
+  }
+
+  const phaseIds = {};
+  for (const phase of plan.phases || []) {
+    const phaseKey = `phase${phase.phase_index}`;
+    const phaseResult = runBd(["create", phase.title, "-t", "task", "--parent", epicId, "--labels", "cadre:phase", "--json"]);
+    if (!phaseResult.ok) return { ok: false, available: true, stage: "create_phase", phase: phaseKey, commands, results };
+    const phaseId = extractBeadsId(parseCommandJson(phaseResult), dryRun ? `dry-${phaseKey}` : null);
+    phaseIds[phaseKey] = phaseId;
+    beadsTasks[phaseKey] = phaseId;
+
+    for (const task of phase.tasks || []) {
+      const taskKey = `phase${phase.phase_index}_task${task.task_index}`;
+      const taskResult = runBd([
+        "create",
+        task.title,
+        "-t",
+        "task",
+        "--parent",
+        phaseId,
+        "--labels",
+        "cadre:task",
+        "--json",
+      ]);
+      if (!taskResult.ok) return { ok: false, available: true, stage: "create_task", task: taskKey, commands, results };
+      beadsTasks[taskKey] = extractBeadsId(parseCommandJson(taskResult), dryRun ? `dry-${taskKey}` : null);
+    }
+  }
+
+  for (const phase of plan.phases || []) {
+    const phaseKey = `phase${phase.phase_index}`;
+    if (!phase.annotations.depends && phase.phase_index > 1) {
+      runBd(["dep", "add", phaseIds[phaseKey], phaseIds[`phase${phase.phase_index - 1}`], "--json"]);
+    } else if (phase.annotations.depends) {
+      for (const dep of phase.annotations.depends.split(",").map((item) => item.trim()).filter(Boolean)) {
+        if (phaseIds[dep]) runBd(["dep", "add", phaseIds[phaseKey], phaseIds[dep], "--json"]);
+      }
+    }
+
+    const execution = phase.annotations.execution || "sequential";
+    for (const task of phase.tasks || []) {
+      const taskKey = `phase${phase.phase_index}_task${task.task_index}`;
+      if (execution !== "parallel" && task.task_index > 1) {
+        runBd(["dep", "add", beadsTasks[taskKey], beadsTasks[`phase${phase.phase_index}_task${task.task_index - 1}`], "--json"]);
+      }
+      if (execution === "parallel") {
+        for (const dep of task.depends || []) {
+          const taskDep = dep.match(/^task(\d+)$/);
+          const depKey = taskDep ? `phase${phase.phase_index}_task${taskDep[1]}` : dep;
+          if (beadsTasks[depKey]) runBd(["dep", "add", beadsTasks[taskKey], beadsTasks[depKey], "--json"]);
+        }
+      }
+    }
+  }
+
+  runBd([
+    "note",
+    epicId,
+    [
+      `TRACK INITIALIZED: ${track.track_id}`,
+      `PHASES: ${(plan.phases || []).length}`,
+      `BRANCH: ${track.metadata.git_branch || `track/${track.track_id}`}`,
+    ].join("\n"),
+    "--json",
+  ]);
+
+  for (const phase of plan.phases || []) {
+    if ((phase.annotations.execution || "sequential") !== "parallel") continue;
+    for (const task of phase.tasks || []) {
+      const taskKey = `phase${phase.phase_index}_task${task.task_index}`;
+      runBd([
+        "note",
+        beadsTasks[taskKey],
+        [
+          "PARALLEL_ENABLED: true",
+          `FILES_OWNED: ${(task.files || []).join(", ")}`,
+          `DEPENDS_ON: ${(task.depends || []).join(", ") || "none"}`,
+          task.repo ? `REPO: ${task.repo}` : null,
+        ].filter(Boolean).join("\n"),
+        "--json",
+      ]);
+    }
+  }
+
+  if (!dryRun) {
+    writeJson(track.metadata_path, {
+      ...track.metadata,
+      beads_epic: epicId,
+      beads_tasks: beadsTasks,
+    });
+  }
+
+  return {
+    ok: true,
+    available: true,
+    dry_run: dryRun,
+    track_id: track.track_id,
+    beads_epic: epicId,
+    beads_tasks: beadsTasks,
+    commands,
+    results,
+    metadata_patch: {
+      beads_epic: epicId,
+      beads_tasks: beadsTasks,
+    },
+  };
 }
 
 function reviewGate(root, trackId, options = {}) {
@@ -1069,6 +1358,113 @@ function prCiStatus(root, args = {}) {
   return { ok: false, available: false, provider, reason: `Unsupported provider: ${provider}` };
 }
 
+function diffSurface(root, base, head) {
+  const range = `${base}...${head}`;
+  const stat = runCommand("git", ["diff", "--stat", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  const names = runCommand("git", ["diff", "--name-only", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  return {
+    ok: stat.ok || names.ok,
+    base,
+    head,
+    stat: stat.stdout.trim(),
+    files: names.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+    errors: [stat.stderr, names.stderr].filter(Boolean).join("\n").trim(),
+  };
+}
+
+function scanReviewTodos(root, files, limit = 100) {
+  const findings = [];
+  const patterns = [
+    /\bTODO\b/i,
+    /\bFIXME\b/i,
+    /\bstub\b/i,
+    /throw new Error\(["']not implemented/i,
+  ];
+  for (const file of files || []) {
+    if (isIgnoredRepoMapFile(file)) continue;
+    const abs = path.join(root, file);
+    if (!fileExists(abs)) continue;
+    let stat;
+    try {
+      stat = fs.statSync(abs);
+    } catch (_) {
+      continue;
+    }
+    if (stat.size > 1024 * 1024) continue;
+    const lines = fs.readFileSync(abs, "utf8").split(/\r?\n/);
+    for (let index = 0; index < lines.length && findings.length < limit; index += 1) {
+      const line = lines[index];
+      if (patterns.some((pattern) => pattern.test(line))) {
+        findings.push({ file, line: index + 1, snippet: line.trim().slice(0, 180) });
+      }
+    }
+  }
+  return findings;
+}
+
+function reviewAssist(root, args = {}) {
+  const trackId = args.trackId || args.track_id;
+  if (!trackId) return { ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  if (!context.ok) return context;
+  const base = args.base || "main";
+  const head = args.head || context.track.git_branch || "HEAD";
+  const diff = diffSurface(root, base, head);
+  const incompleteTasks = [];
+  for (const phase of context.plan.phases || []) {
+    for (const task of phase.tasks || []) {
+      if (task.marker !== "x" && task.marker !== "-") {
+        incompleteTasks.push({
+          phase: phase.phase_index,
+          task: task.task_index,
+          task_key: task.task_key,
+          title: task.title,
+          marker: task.marker,
+        });
+      }
+    }
+  }
+  const todos = scanReviewTodos(root, diff.files, Number(args.todoLimit || 100));
+  const lsp = args.includeLsp === false ? null : lspReview(root, { base, head, config: args.config });
+  const blocking = [];
+  if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
+  if (todos.length > 0) blocking.push(`${todos.length} TODO/FIXME/stub marker(s) found in changed files`);
+  if (context.track.last_coverage == null) blocking.push("No measured coverage recorded on the track");
+  if (lsp && lsp.available !== false && Array.isArray(lsp.findings)) {
+    const lspBlocking = lsp.findings.filter((finding) => finding.severity === "blocking" || finding.blocking === true);
+    if (lspBlocking.length > 0) blocking.push(`${lspBlocking.length} blocking LSP/code-intelligence finding(s)`);
+  }
+
+  return {
+    ok: true,
+    root,
+    track_id: trackId,
+    base,
+    head,
+    diff,
+    task_counts: context.task_counts,
+    incomplete_tasks: incompleteTasks,
+    coverage: context.track.last_coverage,
+    todos,
+    lsp,
+    suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
+    blocking_reasons: blocking,
+  };
+}
+
+function isIgnoredRepoMapFile(file) {
+  const normalized = String(file || "").replace(/\\/g, "/");
+  if (!normalized) return true;
+  if (normalized.startsWith(".agents/")) return true;
+  if (normalized.startsWith(".claude/")) return true;
+  if (normalized.startsWith(".claude-plugin/")) return true;
+  if (normalized.startsWith("plugins/cadre/")) return true;
+  if (normalized.startsWith("plugins/cadre-claude/")) return true;
+  return normalized
+    .split("/")
+    .some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part));
+}
+
 function gitTrackedFiles(root) {
   const result = runCommand("git", ["ls-files"], { cwd: root });
   if (!result.ok) return [];
@@ -1076,8 +1472,7 @@ function gitTrackedFiles(root) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((file) => !file.split("/").some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part)))
-    .filter((file) => !file.startsWith("plugins/cadre/") && !file.startsWith("plugins/cadre-claude/"));
+    .filter((file) => !isIgnoredRepoMapFile(file));
 }
 
 function languageForFile(file) {
@@ -1113,7 +1508,7 @@ function extractRepoSymbols(root, file, limitPerFile = 40) {
   const patterns = [
     /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
     /\b(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][\w$]*)\b/g,
-    /\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g,
+    /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g,
     /^\s*def\s+([A-Za-z_][\w]*)\b/gm,
     /^\s*class\s+([A-Za-z_][\w]*)\b/gm,
     /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm,
@@ -1138,6 +1533,7 @@ function repoMap(root, args = {}) {
     const matches = result.stdout
       .split(/\r?\n/)
       .filter(Boolean)
+      .filter((line) => !isIgnoredRepoMapFile(line.split(":")[0]))
       .slice(0, limit)
       .map((line) => {
         const [file, lineNo, ...rest] = line.split(":");
@@ -1161,6 +1557,121 @@ function repoMap(root, args = {}) {
     by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
     symbols,
     truncated: symbols.length >= limit,
+  };
+}
+
+function lspImpact(root, args = {}) {
+  const limit = Number(args.limit || 50);
+  const symbols = Array.isArray(args.symbols)
+    ? args.symbols
+    : (args.symbol ? [args.symbol] : []);
+  const files = Array.isArray(args.files) ? args.files : [];
+  const symbolResults = {};
+  for (const symbol of symbols.filter(Boolean)) {
+    symbolResults[symbol] = repoMap(root, { symbol, limit });
+  }
+  const fileSymbols = {};
+  for (const file of files) {
+    if (isIgnoredRepoMapFile(file)) continue;
+    fileSymbols[file] = extractRepoSymbols(root, file, limit);
+  }
+  const review = args.base || args.head
+    ? lspReview(root, { base: args.base || "main", head: args.head || "HEAD", config: args.config })
+    : null;
+  return {
+    ok: true,
+    root,
+    symbols: symbolResults,
+    files: fileSymbols,
+    review,
+  };
+}
+
+function lspConfigStatus(root) {
+  const configPath = path.join(root, "cadre", "lsp.json");
+  const config = readJson(configPath, null);
+  if (!config) {
+    return {
+      configured: false,
+      path: path.relative(root, configPath),
+      servers: [],
+      missing: [],
+    };
+  }
+  const servers = Array.isArray(config.servers) ? config.servers : [];
+  return {
+    configured: true,
+    path: path.relative(root, configPath),
+    servers: servers.map((server) => ({
+      id: server.id || server.command || "unknown",
+      command: server.command || null,
+      available: server.command ? commandExists(server.command, root) : false,
+    })),
+    missing: servers
+      .filter((server) => !server.command || !commandExists(server.command, root))
+      .map((server) => server.id || server.command || "unknown"),
+  };
+}
+
+function mergeDriverStatus(root) {
+  const result = runCommand("git", ["config", "merge.ours.driver"], { cwd: root });
+  return {
+    configured: result.ok && result.stdout.trim() !== "",
+    value: result.stdout.trim() || null,
+  };
+}
+
+function doctor(root, options = {}) {
+  const candidateRoot = path.resolve(root || process.cwd());
+  const generatedCheck = path.join(candidateRoot, "scripts", "generate-skills.sh");
+  const checks = {
+    mcp_runtime: { ok: true, server: "cadre" },
+    cadre_project: {
+      ok: Boolean(options.hasCadreProject || isCadreProjectRoot(candidateRoot)),
+      root: candidateRoot,
+      markers: [
+        "cadre/tracks.md",
+        "cadre/setup_state.json",
+        "cadre/product.md",
+        "cadre/config.json",
+        "cadre/beads.json",
+        "cadre/lsp.json",
+      ].filter((name) => fileExists(path.join(candidateRoot, name))),
+    },
+    git: {
+      available: commandExists("git", candidateRoot),
+      identity: gitIdentity(candidateRoot),
+      merge_ours: mergeDriverStatus(candidateRoot),
+    },
+    beads: {
+      available: commandExists("bd", candidateRoot),
+      config_present: fileExists(path.join(candidateRoot, "cadre", "beads.json")),
+    },
+    lsp: lspConfigStatus(candidateRoot),
+    providers: {
+      gh: commandExists("gh", candidateRoot),
+      glab: commandExists("glab", candidateRoot),
+    },
+    generated_bundles: {
+      check_available: fileExists(generatedCheck),
+      command: fileExists(generatedCheck) ? "bash scripts/generate-skills.sh --check" : null,
+    },
+  };
+  const warnings = [];
+  if (!checks.cadre_project.ok) {
+    warnings.push("No Cadre project markers found. This is fine for the Cadre harness/source repo, but project-scoped Cadre workflows need setup first.");
+  }
+  if (checks.cadre_project.ok && !checks.beads.available) {
+    warnings.push("Beads CLI (bd) is not available; Cadre project workflows require it.");
+  }
+  if (checks.lsp.configured && checks.lsp.missing.length > 0) {
+    warnings.push(`LSP config exists but missing server commands: ${checks.lsp.missing.join(", ")}`);
+  }
+  return {
+    ok: warnings.length === 0,
+    root: candidateRoot,
+    checks,
+    warnings,
   };
 }
 
@@ -1329,10 +1840,16 @@ module.exports = {
   beadsTaskWrite,
   claimTrack,
   collisionScan,
+  createBeadsTree,
+  doctor,
   gitIdentity,
+  implementationPrep,
+  isCadreProjectRoot,
+  isIgnoredRepoMapFile,
   listTracks,
   liveStatus,
   loadTopology,
+  lspImpact,
   lspReview,
   parsePlanFile,
   parsePlanText,
@@ -1344,6 +1861,7 @@ module.exports = {
   recordTaskResult,
   regenIndex,
   repoMap,
+  reviewAssist,
   reviewGate,
   setTrackStatus,
   syncControlPlane,

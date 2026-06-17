@@ -26,6 +26,10 @@ Update specifications and plans when implementation reveals issues, requirements
 - Read `metadata.json` — check `worktree_path` field for active parallel execution
 - Call `cadre_parse_plan` with `root` and the selected track's relative `planPath`
   before editing. Use the parsed phases/tasks/annotations to validate plan changes.
+- When the revision touches existing files, public symbols, APIs, routes, or module
+  boundaries, call MCP `cadre_lsp_impact` with the relevant `files[]` and/or
+  `symbols[]`. Use its references/file-symbol output to identify affected tasks,
+  tests, and follow-up work before rewriting the plan.
 
 ## 1a. Parallel Execution Check
 
@@ -64,6 +68,10 @@ Append to `cadre/tracks/<track_id>/revisions.md`:
 - Update `spec.md` and/or `plan.md` as needed
 - Add "Last Revised" marker at top of updated files
 - New tasks: `[ ]`, Removed tasks: `[-] [REMOVED: reason]`
+- Re-run MCP `cadre_plan_integrity` for the revised track. If existing files,
+  public symbols, APIs, routes, or module boundaries changed, re-run
+  `cadre_lsp_impact` with the final `files[]`/`symbols[]` set and carry any
+  affected callers/tests into the revised plan before committing.
 - After modifying `plan.md`, call `cadre_parse_plan` again. If parsing returns no
   phases/tasks or loses required annotations, fix the plan before committing.
 - Call `cadre_collision_scan` with `root` after plan changes that alter

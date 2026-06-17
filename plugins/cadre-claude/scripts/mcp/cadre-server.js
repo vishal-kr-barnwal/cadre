@@ -30,6 +30,15 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_doctor",
+    description: "Diagnose Cadre runtime wiring, project markers, Beads, LSP, provider CLIs, and generated-bundle checks.",
+    inputSchema: {
+      type: "object",
+      properties: { root: { type: "string" } },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_regen_index",
     description: "Regenerate cadre/tracks.md from per-track metadata.json status.",
     inputSchema: {
@@ -78,6 +87,22 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { root: { type: "string" } },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_prepare_implementation",
+    description: "Return one bounded implementation-start packet: selected track, optional claim, context, collisions, available work, and plan integrity.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        identity: { type: "string" },
+        claim: { type: "boolean" },
+        takeover: { type: "boolean" },
+      },
       required: ["root"],
       additionalProperties: false,
     },
@@ -169,6 +194,22 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_create_beads_tree",
+    description: "Create or plan the Beads epic/phase/task/dependency tree for one Cadre track, then patch metadata with returned Beads IDs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        identity: { type: "string" },
+        epicId: { type: "string" },
+        dryRun: { type: "boolean" },
+      },
+      required: ["root", "trackId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_record_review",
     description: "Write metadata.review with review_seq, self-review detection, override guard, and immediate review-gate evaluation.",
     inputSchema: {
@@ -184,6 +225,24 @@ const TOOLS = [
         allowOverride: { type: "boolean" },
       },
       required: ["root", "trackId", "verdict"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_review_assist",
+    description: "Assemble a review fallback packet: diff surface, unfinished plan tasks, TODO/stub scan, coverage, and LSP findings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        base: { type: "string" },
+        head: { type: "string" },
+        includeLsp: { type: "boolean" },
+        config: { type: "string" },
+        todoLimit: { type: "number" },
+      },
+      required: ["root", "trackId"],
       additionalProperties: false,
     },
   },
@@ -301,6 +360,25 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_lsp_impact",
+    description: "Return semantic impact data for symbols/files using repo-map references plus optional LSP diff review.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        symbol: { type: "string" },
+        symbols: { type: "array", items: { type: "string" } },
+        files: { type: "array", items: { type: "string" } },
+        base: { type: "string" },
+        head: { type: "string" },
+        config: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_beads_write",
     description: "Run structured Beads task operations such as update, note, close, label changes, dependency add, create, ready, or show.",
     inputSchema: {
@@ -369,6 +447,23 @@ function hasCadreDirectory(dir) {
   return isDirectory(path.join(dir, "cadre"));
 }
 
+function isCadreStateDirectory(dir) {
+  return [
+    "tracks.md",
+    "setup_state.json",
+    "product.md",
+    "tech-stack.md",
+    "workflow.md",
+    "beads.json",
+    "config.json",
+    "repos.json",
+  ].some((name) => fs.existsSync(path.join(dir, name))) || isDirectory(path.join(dir, "tracks"));
+}
+
+function hasCadreProjectState(dir) {
+  return hasCadreDirectory(dir) && isCadreStateDirectory(path.join(dir, "cadre"));
+}
+
 function normalizePathCandidate(value) {
   if (typeof value !== "string" || value.trim() === "") return null;
   let candidate = value.trim();
@@ -395,8 +490,8 @@ function findCadreRoot(start) {
   if (!dir) return null;
 
   while (true) {
-    if (hasCadreDirectory(dir)) return dir;
-    if (path.basename(dir) === "cadre" && isDirectory(path.join(dir, "tracks"))) {
+    if (hasCadreProjectState(dir)) return dir;
+    if (path.basename(dir) === "cadre" && isCadreStateDirectory(dir)) {
       return path.dirname(dir);
     }
     const parent = path.dirname(dir);
@@ -523,6 +618,10 @@ async function toolCall(name, args) {
       rootContract: "project-scoped tools require a per-call root argument",
     });
   }
+  if (name === "cadre_doctor") {
+    const info = rootFromCandidate(args && args.root ? args.root : process.cwd());
+    return asTextJson(core.doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
+  }
   if (name === "cadre_current_root") {
     const root = requireCadreRoot(args || {});
     return asTextJson({
@@ -551,6 +650,8 @@ async function toolCall(name, args) {
       return asTextJson(core.liveStatus(root));
     case "cadre_available_work":
       return asTextJson(core.availableWork(root));
+    case "cadre_prepare_implementation":
+      return asTextJson(core.implementationPrep(root, args));
     case "cadre_set_track_status":
       return asTextJson(core.setTrackStatus(root, args.trackId, args.status));
     case "cadre_collision_scan":
@@ -563,8 +664,12 @@ async function toolCall(name, args) {
       return asTextJson(core.claimTrack(root, args.trackId, args));
     case "cadre_record_task_result":
       return asTextJson(core.recordTaskResult(root, args));
+    case "cadre_create_beads_tree":
+      return asTextJson(core.createBeadsTree(root, args));
     case "cadre_record_review":
       return asTextJson(core.recordReview(root, args));
+    case "cadre_review_assist":
+      return asTextJson(core.reviewAssist(root, args));
     case "cadre_sync_control_plane":
       return asTextJson(core.syncControlPlane(root, args));
     case "cadre_lsp_review":
@@ -577,6 +682,8 @@ async function toolCall(name, args) {
       return asTextJson(core.prCiStatus(root, args));
     case "cadre_repo_map":
       return asTextJson(core.repoMap(root, args));
+    case "cadre_lsp_impact":
+      return asTextJson(core.lspImpact(root, args));
     case "cadre_beads_write":
       return asTextJson(core.beadsTaskWrite(root, args));
     case "cadre_review_gate":

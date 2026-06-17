@@ -17,9 +17,11 @@ calls are awaitable — await all workers in the wave before computing the next
 wave.
 <!-- /AGENT:claude -->
 <!-- AGENT:codex -->
-Spawn parallel agents — one per task in the wave — using the built-in `worker`
-agent type. Tell Codex explicitly: "spawn N agents, one per task; wait for all
-before continuing." Manage running agents with `/agent`.
+Use Codex's multi-agent tools when they are available: spawn one
+`agent_type: "worker"` sub-agent per task in the wave, give each worker its
+exclusive worktree/files, and wait for the wave before computing the next one.
+If those tools are not currently exposed, search for the multi-agent tool first;
+only fall back to sequential execution when no sub-agent primitive is available.
 <!-- /AGENT:codex -->
 
 If this tool has no parallel sub-agent primitive, fall back to **sequential**

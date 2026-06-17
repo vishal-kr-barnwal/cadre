@@ -27,12 +27,17 @@ behavior is unchanged):
 - `--collisions` → run the **File Collisions** board in section 14: cross-track
   `(repo, file)` overlaps mined from every planned/active track's plan
   `<!-- files: -->` annotations. Like `--team`, it performs the full multi-track scan.
+- `--doctor` → run the **Doctor** flow in section 15 only: Cadre runtime,
+  project-marker, Beads, LSP, provider CLI, merge-driver, and generated-bundle
+  diagnostics.
 - otherwise → show the live status (sections 1-8) and, in polyrepo mode, the PR
   group / merge-train surface in section 5c.
 
 **MCP routing for this workflow (required):**
 - First resolve the project root with `cadre_current_root` using the per-call
   `root` argument.
+- Use `cadre_doctor` for `--doctor`, and whenever setup/tool availability is the
+  actual question. Do not simulate the doctor by hand with scattered shell probes.
 - Use `cadre_live_status` for bare status. It returns the compact active-track
   summary and task counts without making the agent manually scan every plan.
 - Use `cadre_team_status` for full multi-track status, ownership, reviewer, and
@@ -66,7 +71,10 @@ section 12. Never hand-flip a marker in `tracks.md`; update the track's
 
 ## 1. Check Setup
 
-If `cadre/tracks.md` doesn't exist, tell user to run `cadre-setup` first.
+If `cadre/tracks.md` doesn't exist, call `cadre_doctor` with `root` before
+answering. If doctor reports no valid Cadre project markers, tell user to run
+`cadre-setup` first. If markers exist but a file is missing, report the specific
+doctor finding and suggest `cadre-validate` or the named repair.
 
 ## 2. Read State
 
@@ -642,7 +650,29 @@ Like `--team`, this performs the full multi-track scan and requires Beads.
      to a single-column `File` table since there is only one repo.
    - If no `(repo, file)` tuple is claimed by more than one planned/active track, print
      `No cross-track file collisions among planned/active tracks.`
-   - If planned/active tracks exist but **none** carry `<!-- files: -->` annotations (e.g.
+  - If planned/active tracks exist but **none** carry `<!-- files: -->` annotations (e.g.
      legacy plans created before the annotation was first-class), print
      `No <!-- files: --> annotations found on planned/active tracks — cannot compute
      collisions.` so the empty result isn't mistaken for "all clear".
+
+---
+
+## 15. DOCTOR (`--doctor`)
+
+**Run only when workflow arguments contain `--doctor`.** This is the low-token
+health view for "is Cadre wired correctly here?"
+
+1. **Call MCP `cadre_doctor`.** Pass `root` as the current project path or any
+   path inside it. The tool may be used before a valid Cadre project exists; it
+   reports project-marker status separately from runtime availability.
+2. **Present grouped findings:**
+   - Runtime/MCP availability.
+   - Project markers and resolved root.
+   - Beads CLI and Beads graph health.
+   - LSP helper/daemon status.
+   - Git provider CLIs and PR/CI helper availability.
+   - Merge-driver registration in shared mode.
+   - Generated-bundle check availability.
+3. **Recommend exactly one next action:** setup, validate, install/restore Beads,
+   configure LSP, register the merge driver, regenerate bundles, or no action when
+   the result is clean.

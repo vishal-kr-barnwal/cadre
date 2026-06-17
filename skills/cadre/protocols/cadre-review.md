@@ -78,12 +78,24 @@ If there are no changes, report that and stop.
 
 ## 4. Run the Review
 
-**Delegate the actual review to the `/code-review` skill** so findings match the
-project's review conventions. Invoke `/code-review` (default effort) scoped to the
-track diff from step 3. Also check the track-specific concerns:
+**Start with the structured review evidence packet.** Call MCP
+`cadre_review_assist` with `root`, `trackId`, `base`, and `head`. It returns the
+diff surface, unfinished plan tasks, TODO/FIXME/stub scan, recorded coverage, and
+LSP findings when configured. Treat its `blocking_reasons[]` as the initial
+blocking-finding set, and use the packet to scope any subsequent diff reads.
+
+**Delegate the actual review to the `/code-review` skill** when it is available
+so findings match the project's review conventions. Invoke `/code-review`
+(default effort) scoped to the track diff from step 3 plus the
+`cadre_review_assist` evidence. Also check the track-specific concerns:
 - Does the diff satisfy the acceptance criteria in `spec.md`?
 - Are all plan tasks marked `[x]` actually implemented (no stubs/TODOs)?
 - Tests present and passing for new behavior (per `workflow.md`'s coverage bar)?
+
+If `/code-review` is not available in the current client, continue with
+`cadre_review_assist` plus focused human inspection of the changed files. Do not
+fall back to an unstructured full-diff read unless the packet identifies a file
+that needs manual review.
 
 **Machine gate (complements `/code-review`, which by design refuses to compile or
 look outside the diff).** Run two automated passes and fold their results into the

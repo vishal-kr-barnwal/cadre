@@ -251,6 +251,15 @@ Create a new track from the workflow arguments.
         STAY — they are first-class and required regardless of execution mode.
       - Announce: "All phases and tasks will execute sequentially."
 
+3.1. **Semantic impact check (when existing code is touched):**
+   - If the drafted plan names existing files, public symbols, APIs, routes, or
+     modules, call MCP `cadre_lsp_impact` with `root`, the relevant `files[]` and/or
+     `symbols[]`, and a small `limit`. Use its references/file-symbol output to
+     refine `<!-- files: -->` ownership, identify likely tests/callers, and warn
+     about hidden integration work before the user confirms the plan. If LSP is not
+     configured, the tool still returns low-token repo-map references; do not block
+     track creation solely because code intelligence is unavailable.
+
 3.5. **Annotate Target Repos (POLYREPO ONLY — skip in monorepo mode):**
    - For each task, decide which product repo it touches and append a
      `<!-- repo: <name> -->` annotation (parallel to `<!-- files: -->`). The name
@@ -554,6 +563,16 @@ Create a new track from the workflow arguments.
 ### 2.5 BEADS INTEGRATION
 
 **PROTOCOL: Sync track with Beads for persistent task memory.**
+
+**Preferred MCP path:** after the track files and plan are written, call
+`cadre_create_beads_tree` first with `dryRun: true`, then again without `dryRun`
+after the planned epic/tasks/dependencies and metadata patch look correct. It
+creates the deterministic epic, phases, tasks, dependencies, initialization notes,
+parallel file-ownership notes, and the `metadata.json` `beads_epic` /
+`beads_tasks` patch in one structured operation. If the live call returns
+`ok: true`, skip the raw `bd create` / `bd dep add` sequence below and continue to
+publish. If it returns an actionable error, repair that error; do not silently
+create a file-only track.
 
 1. **Check Beads Availability:**
    - Check if `bd` command exists: `which bd`

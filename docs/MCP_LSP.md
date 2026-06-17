@@ -26,24 +26,29 @@ offers these tools:
 | Tool | Purpose |
 |------|---------|
 | `cadre_ping` | Verify that the required Cadre MCP runtime is available. |
+| `cadre_doctor` | Diagnose runtime wiring, project markers, Beads, LSP, provider CLIs, merge-driver state, and generated-bundle check availability. |
 | `cadre_current_root` | Resolve a caller-provided path to the Cadre project root. |
 | `cadre_regen_index` | Rebuild `cadre/tracks.md` from `metadata.json.status`. |
 | `cadre_parse_plan` | Parse phases, tasks, annotations, task keys, and recorded commit SHAs from `plan.md`. |
 | `cadre_team_status` | Group tracks by owner and status. |
 | `cadre_live_status` | Return the compact default status summary without agent-side plan scans. |
 | `cadre_available_work` | List ready unowned tracks and stale held tracks that can be reclaimed. |
+| `cadre_prepare_implementation` | Return a bounded implementation-start packet with selected track, optional claim, context, collisions, available work, and plan integrity. |
 | `cadre_set_track_status` | Set `metadata.json.status` and regenerate `cadre/tracks.md`. |
 | `cadre_collision_scan` | Report cross-track exact, prefix, and glob file overlaps from `<!-- files: -->`. |
 | `cadre_track_context` | Return a bounded per-track context payload: metadata, parsed plan, counts, hold state, worktree routing, review state, and Beads IDs. |
 | `cadre_plan_integrity` | Validate plan annotations, task keys, dependency references, repo routing, and parallel file-claim shape. |
 | `cadre_claim_track` | Claim ownership, mirror owner/lease metadata, and create `implement_state.json`. |
+| `cadre_create_beads_tree` | Create or dry-run the Beads epic/phase/task/dependency tree for one track and patch metadata with Beads IDs. |
 | `cadre_record_task_result` | Record task marker/SHA/coverage results in `plan.md` and `metadata.json`. |
 | `cadre_record_review` | Write the structured review verdict with reviewer-race guard and immediate gate evaluation. |
+| `cadre_review_assist` | Assemble review evidence: diff surface, unfinished plan tasks, TODO/stub scan, coverage, and LSP findings. |
 | `cadre_sync_control_plane` | Run the shared-mode sync preamble or postamble as a structured operation. |
 | `cadre_lsp_review` | Run the Cadre LSP/code-intelligence review helper and return structured findings. |
 | `cadre_lsp_warm_review` | Run code-intelligence review through a persistent daemon that reuses initialized language servers. |
 | `cadre_lsp_daemon_status` | Inspect warm daemon sessions and open-document counts. |
 | `cadre_lsp_daemon_shutdown` | Stop the daemon and all warm language servers. |
+| `cadre_lsp_impact` | Return symbol references, file symbols, and optional LSP diff findings for planning/revision impact checks. |
 | `cadre_test_coverage` | Run configured tests/coverage, parse measured coverage, and optionally record it on a track/task. |
 | `cadre_pr_ci_status` | Read GitHub/GitLab PR/MR metadata and CI status for a track branch or explicit PR/MR. |
 | `cadre_repo_map` | Return a compact semantic repository map or references for one symbol. |
@@ -88,10 +93,12 @@ Workflow routing:
 
 | Workflow checkpoint | MCP tool |
 |--------------------|----------|
+| Runtime/project diagnostics | `cadre_doctor` |
 | Project root resolution | `cadre_current_root` |
 | Track inventory, active/completed selection, owner/reviewer summaries | `cadre_team_status` |
 | Cheap default status | `cadre_live_status` |
 | Next unblocked work | `cadre_available_work` |
+| Implementation start packet | `cadre_prepare_implementation` |
 | Cross-track file overlaps | `cadre_collision_scan` |
 | Phase/task/annotation parsing | `cadre_parse_plan` |
 | Track-specific context packet | `cadre_track_context` |
@@ -108,7 +115,19 @@ Workflow routing:
 | PR/MR and CI status | `cadre_pr_ci_status` |
 | Low-token repo/symbol orientation | `cadre_repo_map` or `cadre://repo-map` |
 | Beads task writes | `cadre_beads_write` |
+| Beads tree initialization | `cadre_create_beads_tree` |
+| Review evidence packet | `cadre_review_assist` |
+| Planning/revision semantic impact | `cadre_lsp_impact` |
 | Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |
+
+Composite packets should be called at the protocol checkpoint they are designed
+for rather than recreated with scattered shell probes:
+
+- `cadre_doctor`: setup, status `--doctor`, and validate diagnostics.
+- `cadre_prepare_implementation`: first implementation-start call after root/sync.
+- `cadre_create_beads_tree`: new-track Beads tree dry-run and live creation.
+- `cadre_review_assist`: first review evidence packet before `/code-review`.
+- `cadre_lsp_impact`: new-track planning and revise impact checks.
 
 ### Plugin packaging
 

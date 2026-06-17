@@ -47,6 +47,17 @@ Implement the requested track from the workflow arguments.
    `root`. Use the returned `tracks[]` for status, owner, reviewer, and review
    context instead of treating `tracks.md` as authoritative.
 
+5. **Preferred bounded start packet:** before manually walking sections 2.0-3.0,
+   call MCP `cadre_prepare_implementation` with `root`, optional `trackId` from
+   workflow arguments, `identity`, and `claim: true` when you are ready to claim.
+   This single call returns the selected track, ownership claim result, bounded
+   `cadre_track_context`, available-work data, selected-track collisions, and
+   `cadre_plan_integrity`. Use that packet as the source for the selection,
+   ownership, collision, plan-integrity, and resume displays below. Do not repeat
+   the same fleet scan with `cadre_team_status`, `cadre_available_work`,
+   `cadre_collision_scan`, or `cadre_claim_track` unless the packet reports that a
+   narrower repair/follow-up is needed.
+
 ---
 
 ## 2.0 TRACK SELECTION
@@ -83,10 +94,12 @@ Implement the requested track from the workflow arguments.
 
 3b. **Ownership guard & claim at selection (both topologies):**
    - Compute `<git-identity>` (`git config user.email` → `user.name` → null).
-   - Call MCP `cadre_claim_track` with `root`, `trackId`, and `identity`. This is
-     the structured ownership guard: it claims Beads when present, mirrors owner
-     and shared-mode lease metadata, and creates `implement_state.json` before any
-     work begins.
+   - Prefer the claim result from `cadre_prepare_implementation` when that call was
+     used with `claim: true`; otherwise call MCP `cadre_claim_track` directly.
+   - When no prior packet claim exists, call MCP `cadre_claim_track` with `root`,
+     `trackId`, and `identity`. This is the structured ownership guard: it claims
+     Beads when present, mirrors owner and shared-mode lease metadata, and creates
+     `implement_state.json` before any work begins.
    - If the tool returns `foreign-held`, list the holder and ask whether to stop,
      pick another track, or retry with `takeover: true` after explicit user
      confirmation. If it reports missing Beads, HALT and restore the Beads

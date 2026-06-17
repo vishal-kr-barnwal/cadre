@@ -16,10 +16,15 @@ Validate the integrity of this Cadre project.
 1. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for every project-scoped MCP call in this workflow.
-2. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
+2. **Run diagnostics through MCP:** Call `cadre_doctor` with `root` and include its
+   findings in the validation report. Use it for runtime/project-marker, Beads,
+   LSP, provider CLI, merge-driver, and generated-bundle checks instead of
+   repeating ad hoc shell probes throughout the workflow. Missing required runtime
+   pieces are validation errors.
+3. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
    Use its `tracks[]` and status/owner/reviewer data as the authoritative
    multi-track inventory for validation.
-3. **Validate plans through MCP:** Call `cadre_plan_integrity` with `root` for
+4. **Validate plans through MCP:** Call `cadre_plan_integrity` with `root` for
    the fleet-wide plan annotation/task-key/dependency check. For any track that
    needs detailed reporting, call `cadre_track_context` or `cadre_parse_plan` with
    the relative `planPath`.

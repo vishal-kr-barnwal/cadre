@@ -27,7 +27,14 @@ Initialize this project with context-driven development. Follow this workflow pr
 > Project-scoped MCP calls begin as soon as this workflow creates or confirms
 > `cadre/`.
 
-0. **Prerequisite check (Beads is required):** Cadre setup requires the `bd` CLI.
+0. **MCP runtime + diagnostic check:** Call `cadre_ping` before any project
+   mutation. Then call `cadre_doctor` with the current working directory as
+   `root`. `cadre_doctor` is valid even before `cadre/` exists; use it to detect
+   whether this is a fresh project, a partially initialized project, or a broken
+   install. Missing project markers are expected for a fresh setup and do not
+   block. Missing Cadre MCP runtime blocks immediately.
+
+0a. **Prerequisite check (Beads is required):** Cadre setup requires the `bd` CLI.
    Run `which bd` and `bd --version` before any project mutation.
    - If either command fails, **HALT** and tell the user to install Beads first
      (`npm install -g @beads/bd`, `brew install beads`, or the project-documented
@@ -719,9 +726,11 @@ and `references/polyrepo-git.md`.**
      `skipped.md`, `tracks.md`, `patterns.md`.
    - `git add cadre/.gitignore`.
 
-1. **Final MCP verification:** Call `cadre_current_root` with `root` once more and,
-   if any tracks were created during a resumed/custom setup path, call
-   `cadre_team_status` to verify the structured track view loads.
+1. **Final MCP verification:** Call `cadre_current_root` with `root` once more,
+   then call `cadre_doctor` with that resolved root. If any tracks were created
+   during a resumed/custom setup path, also call `cadre_team_status` to verify the
+   structured track view loads. Surface non-blocking doctor warnings in the setup
+   summary; halt only on missing required runtime/project invariants.
 2. **Announce Completion:** "Project setup completed! You can now initiate a track using the `newTrack` command."
 3. **Commit Files:** `git add cadre && git commit -m "cadre(setup): Add cadre setup files"`
    - In monorepo mode this also stages `config.json` (and `.gitattributes` if

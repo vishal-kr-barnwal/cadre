@@ -214,7 +214,7 @@ differs per tool. See [`parallel-execution.md`](../plugins/cadre-claude/skills/c
 | Platform | Dispatch |
 |----------|----------|
 | **Claude Code** | `Task` tool, one call per worker (awaitable) |
-| **OpenAI Codex** | spawn parallel agents with the `worker` agent type; manage via `/agent` |
+| **OpenAI Codex** | use multi-agent tools to spawn one `worker` sub-agent per task and wait for the wave |
 | **No parallel primitive** | sequential fallback — one agent runs each task in its worktree |
 
 ### Example: Claude Code's Task() Tool
