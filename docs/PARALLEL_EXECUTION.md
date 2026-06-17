@@ -126,8 +126,8 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
             └─────────────────┼─────────────────┘
                               ▼
                     ┌─────────────────┐
-                    │  State Store    │
-                    │  (JSON files)   │
+                    │ Coordinator MCP │
+                    │ + Beads Graph   │
                     └─────────────────┘
 ```
 
@@ -145,7 +145,7 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
       "worker_id": "worker_1_auth",
       "task": "Task 1: Create auth module",
       "files": ["src/auth.ts", "src/auth.test.ts"],
-      "status": "completed",
+      "status": "merged",
       "started_at": "2024-12-30T10:00:00Z",
       "completed_at": "2024-12-30T10:05:00Z",
       "commit_sha": "abc1234"
@@ -158,10 +158,6 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
       "started_at": "2024-12-30T10:00:00Z"
     }
   ],
-  "file_locks": {
-    "src/auth.ts": "worker_1_auth",
-    "src/config.ts": "worker_2_config"
-  },
   "completed_workers": 1,
   "total_workers": 3
 }
@@ -177,18 +173,14 @@ Prevent multiple workers from modifying the same file simultaneously.
 ### Implementation
 
 1. **Pre-spawn validation**: Before spawning workers, validate no file conflicts
-2. **Lock acquisition**: Record file locks in `parallel_state.json`
-3. **Lock release**: Remove lock when worker completes
-4. **Conflict detection**: If conflicts found, fall back to sequential execution
+2. **Coordinator audit**: Record worker/file ownership through
+   `cadre_record_parallel_worker`; `parallel_state.json` is audit-only
+3. **Dependency coordination**: Beads dependencies and assignees determine which
+   workers can start and which dependents are unblocked
+4. **Conflict detection**: If plan-level conflicts are found, fall back to
+   sequential execution or revise the plan before spawning workers
 
 ```typescript
-interface FileLock {
-  path: string;
-  worker_id: string;
-  acquired_at: string;
-  ttl_seconds: number;  // Auto-release after timeout (default: 3600)
-}
-
 function detectConflicts(tasks: ParallelTask[]): Conflict[] {
   const fileMap = new Map<string, string[]>();
   for (const task of tasks) {
@@ -323,9 +315,9 @@ so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
       - Proceed to phase checkpoint
 
 3. **Beads Integration (if enabled):**
-   - Parallel tasks can update Beads concurrently
-   - Use `bd update <id> --status in_progress` at worker start
-   - Use `bd close <id>` at worker completion
+   - The coordinator updates Beads task status through Cadre MCP/`bd`
+   - Workers return commit/test/coverage evidence, not direct completion writes
+   - Dependents unblock only after clean merge-back and `cadre_complete_task`
 ```
 
 ---
@@ -400,27 +392,25 @@ COMMITS: <sha_list>" --json
 
 ### Worker Protocol
 
-```bash
-# At worker start (claimed by coordinator already)
-bd note <beads_task_id> "WORKER: <worker_id>
-TASK: <task_description>
-FILES: <exclusive_files>
-STARTED: <timestamp>" --json
+Workers return evidence to the coordinator instead of directly mutating Cadre or
+Beads completion state:
 
-# During execution - discovered issues
-bd create "Found race condition" \
-  -t bug -p 2 \
-  --deps discovered-from:<beads_task_id> \
-  --assignee <worker_id> \
-  --json
-
-# At worker completion
-bd note <beads_task_id> "COMPLETED: commit <sha>
-DURATION: <time>
-FILES_MODIFIED: <list>" --json
-# Coordinator only, after clean merge-back:
-cadre_record_parallel_worker { status: "merged", completeTask: true, ... }
+```json
+{
+  "worker_id": "worker_1_auth",
+  "task_key": "task-1",
+  "commit_sha": "abc1234",
+  "tests": ["npm test -- auth"],
+  "coverage": 84.2,
+  "files_changed": ["src/auth.ts", "src/auth.test.ts"],
+  "notes": ["Found and fixed token expiry edge case"]
+}
 ```
+
+The coordinator records start/progress/failure through
+`cadre_record_parallel_worker`. After a clean merge-back, it calls the same MCP
+tool with `status: "merged"` and `completeTask: true`; discovered issues become
+coordinator-owned Beads notes or follow-up tasks.
 
 ### Concurrent Safety Guarantees
 
