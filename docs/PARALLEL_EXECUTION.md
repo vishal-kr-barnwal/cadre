@@ -87,6 +87,9 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 - If NO `<!-- depends: -->` annotation: Phase depends on ALL previous phases (sequential, default behavior)
 - If `<!-- depends: -->` is empty: Phase has NO dependencies (can run parallel with any phase)
 - If `<!-- depends: phase1, phase2 -->`: Phase waits for listed phases only
+- Runtime scheduling is not inferred ad hoc by the agent. `cadre-implement` calls
+  MCP `cadre_phase_schedule`, then dispatches only the returned
+  conflict-free `ready_groups[]`.
 
 #### Task-Level Annotations
 

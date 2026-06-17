@@ -181,9 +181,11 @@ Create a new track from the workflow arguments.
    b. **Identify Parallelizable Phases:**
       - Analyze phases for:
         - Cross-phase dependencies (does Phase B need Phase A's output?)
+        - File ownership conflicts between phases (do ready phases claim the same repo+file?)
         - Independent scopes (can Phase 1 and Phase 2 run without coordination?)
-        - Example: "Core Backend" and "UI Components" often have no dependencies
-   
+      - Phase-level parallelism is executed only through the concrete scheduler:
+        `cadre_phase_schedule` computes ready groups and splits conflicting phases.
+
    c. **Present Parallel Execution Options:**
       > "I've analyzed the plan for parallel execution potential:"
       > 
@@ -195,8 +197,8 @@ Create a new track from the workflow arguments.
       >   - All tasks share files → sequential execution only
       > 
       > **Phase-Level Parallelism:**
-      > - Phase 1 and Phase 2 are independent → can run in parallel
-      > - Phase 3 requires Phase 1 and Phase 2 → must wait for both
+      > - Phase 1 and Phase 2 have no cross-phase dependency and no file overlap → same ready group
+      > - Phase 3 depends on Phase 1 and Phase 2 → waits for both
       >
       > "Would you like to enable parallel execution? (yes/no)"
    
@@ -207,11 +209,16 @@ Create a new track from the workflow arguments.
           annotation (already emitted in step 2 for every task — verify it is
           present and accurate for the parallel tasks; do not duplicate it)
         - Add `<!-- depends: taskN -->` annotation where task dependencies exist within phase
-      
+
       - **For phase-level parallelism:**
-        - Add `<!-- depends: -->` (empty) for phases with no dependencies (can run immediately)
-        - Add `<!-- depends: phase1, phase2 -->` for phases that depend on specific phases
-        - Phases WITHOUT any `<!-- depends: -->` annotation default to sequential (depends on previous phase)
+        - Add `<!-- depends: -->` (empty) to phases that can start immediately.
+        - Add `<!-- depends: phase1, phase2 -->` to phases that depend on specific
+          phases.
+        - Leave the annotation absent for the default sequential rule (a phase
+          depends on the previous phase).
+        - Do not rely on prose alone: `cadre-implement` will call
+          `cadre_phase_schedule` to compute the actual ready groups and file-conflict
+          splits.
       
       **Example Output:**
       ```markdown
@@ -407,9 +414,9 @@ Create a new track from the workflow arguments.
      > "Estimated hours to complete? (Enter number or skip)"
    - Store in `estimated_hours` or null if skipped
 
-6. **Create Directory:** `cadre/tracks/<track_id>/`
-
-7. **Create `metadata.json`:**
+6. **Build metadata draft (do not write yet):** prepare the object that will become
+   `cadre/tracks/<track_id>/metadata.json`, but keep it in memory until the Beads
+   dry-run below succeeds.
    ```json
    {
      "track_id": "<track_id>",
@@ -475,9 +482,31 @@ Create a new track from the workflow arguments.
    **omit `merge_order` entirely** (downstream treats an absent field as
    alphabetical order).
 
-8. **Write Files:**
+7. **Beads dry-run before any track files are written:**
+   - Call MCP `cadre_create_beads_tree` with `dryRun: true`, `trackId`,
+     `planText`, `specText`, and the metadata draft from step 6.
+   - Require `ok: true`. If it fails, HALT before creating
+     `cadre/tracks/<track_id>/`, before regenerating `tracks.md`, before committing,
+     and before creating any worktree.
+   - Review the returned epic/task/dependency plan and `metadata_patch` shape. Repair
+     the plan/spec draft and retry the dry-run until the Beads tree is correct.
+
+8. **Write scaffold files:**
+   - Create directory: `cadre/tracks/<track_id>/`
+   - Write `cadre/tracks/<track_id>/metadata.json` from the step 6 draft.
    - `cadre/tracks/<track_id>/spec.md`
    - `cadre/tracks/<track_id>/plan.md`
+
+8a. **Create live Beads metadata before index/commit/worktree:**
+   - Immediately after the scaffold files exist, call MCP
+     `cadre_create_beads_tree` again without `dryRun`.
+   - Require `ok: true`; this creates/repairs the deterministic Beads epic/tree and
+     patches `metadata.json` with `beads_epic` and `beads_tasks` using the
+     key-scoped CAS helper.
+   - If it fails, do not regenerate `tracks.md`, commit, or create worktrees. Repair
+     the cause and retry the live call; if abandoning the track, remove the
+     uncommitted `cadre/tracks/<track_id>/` scaffold so no file-only partial track is
+     stranded.
 
 9. **Initialize Learnings File (Ralph-style progress tracking):**
    
@@ -518,7 +547,7 @@ Create a new track from the workflow arguments.
 10. **Regenerate Tracks Index:**
    - Announce: "Updating the tracks file."
    - `cadre/tracks.md` is a DERIVED INDEX, never hand-edited. The new track's
-     `metadata.json` already carries `"status": "new"` (step 2.4.7), which is the
+     `metadata.json` already carries `"status": "new"` (step 8), which is the
      single source of truth. Do NOT append a `## [ ] Track:` block in place.
    - Instead, call `cadre_regen_index` with `root`. Require `ok: true`; on failure,
      halt and surface the MCP error. The new track (marker `[ ]` from status `new`)
@@ -564,17 +593,18 @@ Create a new track from the workflow arguments.
 
 **PROTOCOL: Sync track with Beads for persistent task memory.**
 
-**Preferred MCP path:** after the track files and plan are written, call
-`cadre_create_beads_tree` first with `dryRun: true`, then again without `dryRun`
-after the planned epic/tasks/dependencies and metadata patch look correct. It
+**Preferred MCP path:** the dry-run belongs before project mutation in step 7
+(`cadre_create_beads_tree` with `dryRun: true`, draft `planText`, `specText`,
+and metadata). The live call belongs immediately after scaffold files exist in
+step 8a, before index regeneration, commit, or worktree creation. The live call
 creates the deterministic epic, phases, tasks, dependencies, design/acceptance
 context, initialization notes, parallel file-ownership notes, and the
-`metadata.json` `beads_epic` / `beads_tasks` patch in one structured operation.
-Workers rely on this Beads context during parallel execution, so repair MCP
-errors instead of recreating a partial context-less tree by hand. If the live call returns
-`ok: true`, skip the raw `bd create` / `bd dep add` sequence below and continue to
-publish. If it returns an actionable error, repair that error; do not silently
-create a file-only track.
+`metadata.json` `beads_epic` / `beads_tasks` CAS patch in one recoverable unit.
+Workers rely on this Beads context during parallel and phase-level execution, so
+repair MCP errors instead of recreating a partial context-less tree by hand. If
+the live call returns `ok: true`, skip the raw `bd create` / `bd dep add`
+sequence below and continue to publish. If it returns an actionable error, repair
+that error; do not silently create a file-only track.
 
 1. **Check Beads Availability:**
    - Check if `bd` command exists: `which bd`

@@ -62,6 +62,19 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_phase_schedule",
+    description: "Compute the concrete phase-level scheduler packet: dependencies, ready phases, conflict-aware ready groups, and errors.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+      },
+      required: ["root", "trackId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_team_status",
     description: "Return team status grouped by owner and track status.",
     inputSchema: {
@@ -138,6 +151,20 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_metadata_patch",
+    description: "Apply a top-level metadata.json patch with CAS retry semantics and report conflict/error details.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        patch: { type: "object" },
+      },
+      required: ["root", "trackId", "patch"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_collision_scan",
     description: "Return cross-track file collisions from plan <!-- files: --> claims, including prefix/glob overlaps.",
     inputSchema: {
@@ -189,6 +216,21 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_heartbeat_track",
+    description: "Refresh a track owner's shared lease/implement-state heartbeat and mirror Beads assignment when available.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        identity: { type: "string" },
+        now: { type: "string" },
+      },
+      required: ["root", "trackId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_record_task_result",
     description: "Record a task result in plan.md plus metadata last_task_result/last_coverage.",
     inputSchema: {
@@ -225,6 +267,8 @@ const TOOLS = [
         summary: { type: "string" },
         reason: { type: "string" },
         beadsTaskId: { type: "string" },
+        repo: { type: "string" },
+        workingRoot: { type: "string" },
       },
       required: ["root", "trackId", "phaseIndex", "taskIndex"],
       additionalProperties: false,
@@ -257,6 +301,7 @@ const TOOLS = [
         allowLowCoverage: { type: "boolean" },
         summary: { type: "string" },
         reason: { type: "string" },
+        workingRoot: { type: "string" },
       },
       required: ["root", "trackId", "workerId", "status"],
       additionalProperties: false,
@@ -273,6 +318,9 @@ const TOOLS = [
         identity: { type: "string" },
         epicId: { type: "string" },
         dryRun: { type: "boolean" },
+        planText: { type: "string" },
+        specText: { type: "string" },
+        metadata: { type: "object" },
       },
       required: ["root", "trackId"],
       additionalProperties: false,
@@ -291,6 +339,8 @@ const TOOLS = [
         reviewer: { type: "string" },
         coverage: { type: "number" },
         reviewedSha: { type: "string" },
+        reviewedShas: { type: "object" },
+        date: { type: "string" },
         allowOverride: { type: "boolean" },
       },
       required: ["root", "trackId", "verdict"],
@@ -308,10 +358,31 @@ const TOOLS = [
         base: { type: "string" },
         head: { type: "string" },
         includeLsp: { type: "boolean" },
+        includeMachine: { type: "boolean" },
+        machineCommand: { type: "string" },
         config: { type: "string" },
         todoLimit: { type: "number" },
+        repo: { type: "string" },
       },
       required: ["root", "trackId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_review_machine_gate",
+    description: "Run the configured review machine gate (typecheck/build/check/lint) inside MCP, per repo for polyrepo tracks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        repo: { type: "string" },
+        workingRoot: { type: "string" },
+        machineCommand: { type: "string" },
+        command: { type: "string" },
+        timeoutMs: { type: "number" },
+      },
+      required: ["root"],
       additionalProperties: false,
     },
   },
@@ -391,6 +462,8 @@ const TOOLS = [
         taskIndex: { type: "number" },
         status: { type: "string", enum: ["pending", "new", "in_progress", "completed", "blocked", "skipped"] },
         commitSha: { type: "string" },
+        repo: { type: "string" },
+        workingRoot: { type: "string" },
       },
       required: ["root"],
       additionalProperties: false,
@@ -487,6 +560,7 @@ const TOOLS = [
         trackId: { type: "string" },
         root: { type: "string" },
         headSha: { type: "string" },
+        headShas: { type: "object" },
       },
       required: ["trackId", "root"],
       additionalProperties: false,
@@ -713,6 +787,8 @@ async function toolCall(name, args) {
       const planPath = path.resolve(root, args.planPath);
       return asTextJson(core.parsePlanFile(planPath));
     }
+    case "cadre_phase_schedule":
+      return asTextJson(core.phaseSchedule(root, args));
     case "cadre_team_status":
       return asTextJson(core.teamStatus(root));
     case "cadre_team_board":
@@ -725,6 +801,8 @@ async function toolCall(name, args) {
       return asTextJson(core.implementationPrep(root, args));
     case "cadre_set_track_status":
       return asTextJson(core.setTrackStatus(root, args.trackId, args.status));
+    case "cadre_metadata_patch":
+      return asTextJson(core.metadataPatch(root, args));
     case "cadre_collision_scan":
       return asTextJson(core.collisionScan(root));
     case "cadre_track_context":
@@ -733,6 +811,8 @@ async function toolCall(name, args) {
       return asTextJson(core.planIntegrity(root, args.trackId || null));
     case "cadre_claim_track":
       return asTextJson(core.claimTrack(root, args.trackId, args));
+    case "cadre_heartbeat_track":
+      return asTextJson(core.heartbeatTrack(root, args));
     case "cadre_record_task_result":
       return asTextJson(core.recordTaskResult(root, args));
     case "cadre_complete_task":
@@ -745,6 +825,8 @@ async function toolCall(name, args) {
       return asTextJson(core.recordReview(root, args));
     case "cadre_review_assist":
       return asTextJson(core.reviewAssist(root, args));
+    case "cadre_review_machine_gate":
+      return asTextJson(core.reviewMachineGate(root, args));
     case "cadre_sync_control_plane":
       return asTextJson(core.syncControlPlane(root, args));
     case "cadre_lsp_review":

@@ -97,6 +97,17 @@ Present to user:
 
 2. **Execute Based on Maturity:**
 
+   **Hard prerequisite preflight (before project mutation):**
+   - Call `cadre_ping`. If Cadre MCP is unavailable, HALT and ask the user to
+     install/enable/restart the Cadre plugin before setup mutates the project.
+   - Run `which bd` and `bd --version`. If either fails, HALT. Beads is a Cadre
+     setup prerequisite, and setup must not create `cadre/`, initialize git, write
+     product/workflow/LSP files, register submodules, or otherwise mutate the
+     project until Beads is available.
+   - Keep this result as the prerequisite check for Section 2.7; Section 2.7 may
+     re-run it defensively before `bd init`, but failure there is a changed
+     environment and must still halt.
+
    **IF BROWNFIELD:**
    - Announce: "Existing project detected."
    - If uncommitted changes detected: "WARNING: You have uncommitted changes. Please commit or stash before proceeding."
@@ -456,10 +467,11 @@ configured later with `cadre-refresh --lsp` if the user skips now.**
 
 **PROTOCOL: Set up Beads integration for persistent task memory.**
 
-1. **Check for Beads CLI:**
-   - Run `which bd` and `bd --version`.
-   - **If either fails:** HALT. Beads is a setup prerequisite; do not continue in
-     file-only mode.
+1. **Re-check Beads CLI:**
+   - The required preflight already ran before any project mutation. Re-run
+     `which bd` and `bd --version` here only to catch a changed shell/PATH before
+     `bd init`.
+   - **If either fails:** HALT. Do not continue in file-only mode.
 
 2. **If Beads Available, Enable Full Integration:**
    - Do not ask for a Beads mode. Cadre uses full Beads integration by default so
@@ -546,7 +558,7 @@ here exactly as it does in polyrepo. See `references/cadre-sync.md`.**
      (`review.self_reviewed`), forcing a second reviewer.
    - `allow_unreviewed_ship` and `allow_unpinned_review_ship`: leave `false`
      (template defaults). These keep `cadre-ship` hard-gated on a structured
-     review and `reviewed_sha`; teams may flip them only for legacy compatibility.
+     review and reviewed commit pins; teams may flip them only for legacy compatibility.
    - `control_remote`, `control_branch` from step 2 (write these whenever
      `sync_mode == "shared"` so the sync pre/postamble can publish the control
      plane; harmless defaults in `local` mode).
@@ -638,7 +650,7 @@ and `references/polyrepo-git.md`.**
      owner (`review.self_reviewed`), forcing a second reviewer.
    - `allow_unreviewed_ship` and `allow_unpinned_review_ship`: leave `false`
      (template defaults). These keep `cadre-ship` / `cadre-land` hard-gated on a
-     structured review and `reviewed_sha`; teams may flip them only for legacy
+     structured review and reviewed commit pins; teams may flip them only for legacy
      compatibility.
    - `control_remote`, `control_branch` from step 4
    - `pr_provider`: `"github"` or `"gitlab"`

@@ -154,6 +154,131 @@ test("createBeadsTree dryRun plans epic, tasks, deps, notes, and metadata patch"
   }
 });
 
+test("createBeadsTree dryRun can preflight a track before files exist", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-draft-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+
+    const result = core.createBeadsTree(root, {
+      trackId: "draft_20260617",
+      identity: "dev@example.com",
+      dryRun: true,
+      planText: samplePlan("draft_20260617"),
+      specText: "# Spec\n\n## Acceptance\nWorks before files exist.\n",
+      metadata: { description: "Draft track", priority: "high" },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.dry_run, true);
+    assert.equal(result.beads_epic, "cadre-draft_20260617");
+    assert.ok(result.beads_tasks.phase1_task1);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "draft_20260617")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("metadataPatch preserves unrelated metadata while patching selected keys", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-metadata-patch-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "patch_20260617", samplePlan("patch_20260617"), {
+      owner: "old@example.com",
+      review: { verdict: "changes_requested", blocking_count: 1 },
+    });
+
+    const patched = core.metadataPatch(root, {
+      trackId: "patch_20260617",
+      patch: { owner: "new@example.com" },
+    });
+
+    assert.equal(patched.ok, true);
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "patch_20260617", "metadata.json"), "utf8"));
+    assert.equal(metadata.owner, "new@example.com");
+    assert.equal(metadata.review.verdict, "changes_requested");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("phaseSchedule returns conflict-free ready phase groups", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-phase-schedule-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "phase_20260617", `# Plan: phase_20260617
+
+## Phase 1: Foundation
+
+- [x] Task 1: Done
+  <!-- files: src/foundation.js -->
+
+## Phase 2: API
+<!-- depends: -->
+
+- [ ] Task 1: Build API
+  <!-- files: src/api.js -->
+
+## Phase 3: UI
+<!-- depends: -->
+
+- [ ] Task 1: Build UI
+  <!-- files: src/ui.js -->
+
+## Phase 4: Wire
+<!-- depends: phase2, phase3 -->
+
+- [ ] Task 1: Integrate
+  <!-- files: src/app.js -->
+`);
+
+    const schedule = core.phaseSchedule(root, { trackId: "phase_20260617" });
+
+    assert.equal(schedule.ok, true);
+    assert.deepEqual(schedule.ready_phases, ["phase2", "phase3"]);
+    assert.deepEqual(schedule.ready_groups, [["phase2", "phase3"]]);
+    assert.deepEqual(schedule.conflict_splits, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("phaseSchedule splits ready phases with file ownership conflicts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-phase-conflict-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "phase_conflict_20260617", `# Plan: phase_conflict_20260617
+
+## Phase 1: Foundation
+
+- [x] Task 1: Done
+  <!-- files: src/foundation.js -->
+
+## Phase 2: API
+<!-- depends: -->
+
+- [ ] Task 1: Update shared model
+  <!-- files: src/shared.js -->
+
+## Phase 3: UI
+<!-- depends: -->
+
+- [ ] Task 1: Update shared model
+  <!-- files: src/shared.js -->
+`);
+
+    const schedule = core.phaseSchedule(root, { trackId: "phase_conflict_20260617" });
+
+    assert.equal(schedule.ok, true);
+    assert.deepEqual(schedule.ready_phases, ["phase2", "phase3"]);
+    assert.deepEqual(schedule.ready_groups, [["phase2"], ["phase3"]]);
+    assert.equal(schedule.conflict_splits.length, 1);
+    assert.equal(schedule.conflict_splits[0].file, "src/shared.js");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("completeTask gates plan mutation on measured coverage", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-task-test-"));
   try {
@@ -186,6 +311,39 @@ test("completeTask gates plan mutation on measured coverage", () => {
     assert.equal(metadata.last_coverage, 86);
     assert.equal(metadata.last_task_result.task_key, "phase1_task1");
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask refuses mapped Beads tasks when bd is unavailable without mutating plan", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-beads-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "beads_required_20260617", samplePlan("beads_required_20260617"), {
+      beads_epic: "cadre-beads_required_20260617",
+      beads_tasks: { phase1_task1: "bd-task-1" },
+    });
+    process.env.PATH = "/nonexistent";
+
+    const result = core.completeTask(root, {
+      trackId: "beads_required_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+      commitSha: "abcdef123456",
+      command: "printf 'Statements : 86%%\\n'",
+      coverageThreshold: 80,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.stage, "beads_unavailable");
+    const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "beads_required_20260617", "plan.md"), "utf8");
+    assert.match(plan, /- \[ \] Task 1: Implement core/);
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "beads_required_20260617", "metadata.json"), "utf8"));
+    assert.equal(metadata.last_task_result, undefined);
+    assert.equal(metadata.last_test_run, undefined);
+  } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -243,6 +401,91 @@ test("reviewAssist and lspImpact provide fallback review context", () => {
     assert.equal(impact.ok, true);
     assert.ok(impact.symbols.exportedCore.matches.length >= 1);
     assert.ok(impact.files["src/core.js"].some((symbol) => symbol.name === "exportedCore"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("polyrepo reviewAssist, machine gate, and review records are repo-aware", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-review-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "owner@example.com"]);
+    git(root, ["config", "user.name", "Owner"]);
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({ mode: "polyrepo", default_repo: "app" }, null, 2));
+
+    const appRoot = path.join(root, "repos", "app");
+    fs.mkdirSync(appRoot, { recursive: true });
+    git(appRoot, ["init"]);
+    git(appRoot, ["config", "user.email", "app@example.com"]);
+    git(appRoot, ["config", "user.name", "App"]);
+    write(path.join(appRoot, "src", "app.js"), "export function app() {\n  return true;\n}\n");
+    git(appRoot, ["add", "."]);
+    git(appRoot, ["commit", "-m", "initial app"]);
+    write(path.join(appRoot, "src", "app.js"), "export function app() {\n  // TODO verify edge case\n  return true;\n}\n");
+    git(appRoot, ["add", "."]);
+    git(appRoot, ["commit", "-m", "feature app"]);
+    const appHead = git(appRoot, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const plan = `# Plan: poly_20260617
+
+## Phase 1: App
+
+- [x] Task 1: Update app
+  <!-- repo: app -->
+  <!-- files: src/app.js -->
+`;
+    writeTrack(root, "poly_20260617", plan, {
+      owner: "owner@example.com",
+      last_coverage: 91,
+      repos: {
+        app: {
+          submodule_path: "repos/app",
+          git_branch: "HEAD",
+          base_branch: "HEAD~1",
+        },
+      },
+    });
+
+    const assist = core.reviewAssist(root, {
+      trackId: "poly_20260617",
+      includeLsp: false,
+      includeMachine: false,
+      todoLimit: 10,
+    });
+    assert.equal(assist.ok, true);
+    const appDiff = assist.repo_diffs.find((entry) => entry.repo === "app");
+    assert.ok(appDiff);
+    assert.ok(appDiff.files.includes("src/app.js"));
+    assert.ok(assist.todos.some((todo) => todo.repo === "app" && todo.file === "src/app.js"));
+
+    const machine = core.reviewMachineGate(root, {
+      trackId: "poly_20260617",
+      machineCommand: "node -e \"process.exit(0)\"",
+    });
+    assert.equal(machine.ok, true);
+    assert.equal(machine.available, true);
+    assert.equal(machine.results[0].repo, "app");
+
+    const review = core.recordReview(root, {
+      trackId: "poly_20260617",
+      verdict: "approved",
+      reviewer: "reviewer@example.com",
+    });
+    assert.equal(review.ok, true);
+    assert.equal(review.review.reviewed_shas.app, appHead);
+
+    const matchingGate = core.reviewGate(root, "poly_20260617", {
+      headSha: "control-without-review-pin",
+      headShas: { app: appHead },
+    });
+    assert.equal(matchingGate.ok, true);
+
+    const staleGate = core.reviewGate(root, "poly_20260617", {
+      headShas: { app: "0000000" },
+    });
+    assert.equal(staleGate.ok, false);
+    assert.ok(staleGate.reasons.some((reason) => reason.includes("reviewed_shas.app")));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

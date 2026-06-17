@@ -98,9 +98,12 @@ Workflow tool routing:
 | `cadre_prepare_implementation` | Preferred `cadre-implement` start packet: selected track, optional ownership claim, context, collisions, available work, and plan integrity in one bounded call. |
 | `cadre_collision_scan` | Cross-track file overlap checks, including exact, prefix, and glob overlaps. |
 | `cadre_parse_plan` | Phase/task/annotation/commit parsing for implement, validate, review, revert, handoff, formula, release. |
+| `cadre_phase_schedule` | Concrete phase-level scheduler: dependencies, ready phases, conflict-free ready groups, and scheduler errors. |
 | `cadre_track_context` | Bounded per-track context: metadata, parsed plan, task counts, worktree routing, hold state, review state, and Beads IDs. |
 | `cadre_plan_integrity` | Plan annotation, dependency, repo-routing, task-key, and parallel file-claim validation. |
 | `cadre_claim_track` | Track ownership claim, Beads assignment check, metadata owner/lease mirror, and `implement_state.json` creation. |
+| `cadre_heartbeat_track` | Long-running build/test heartbeat for owner/lease metadata and Beads assignment freshness. |
+| `cadre_metadata_patch` | Key-scoped metadata mutation with CAS retry semantics. |
 | `cadre_create_beads_tree` | Preferred Beads initialization for `cadre-newtrack`: create/plan epic, phases, tasks, dependencies, notes, and metadata Beads IDs. |
 | `cadre_record_task_result` | Task marker/SHA/coverage result recording in `plan.md` and `metadata.json`. |
 | `cadre_complete_task` | Preferred task-completion transaction: run coverage/tests, enforce threshold, then record plan/metadata/Beads together. |
@@ -108,7 +111,7 @@ Workflow tool routing:
 | `cadre_set_track_status` | Track status mutations plus `cadre/tracks.md` regeneration. |
 | `cadre_record_review` | Structured review verdict write with reviewer race guard, `review_seq`, self-review flag, coverage, and gate check. |
 | `cadre_regen_index` | Manual rebuilds of `cadre/tracks.md`; never hand-edit or reimplement index splicing. |
-| `cadre_review_gate` | Review verification after review writes and before ship/land pushes; pass `headSha` to enforce the reviewed commit pin. |
+| `cadre_review_gate` | Review verification after review writes and before ship/land pushes; pass `headSha`/`headShas` to enforce reviewed commit pins. |
 | `cadre_sync_control_plane` | Shared-mode control-plane sync pre/postamble (`git`, Beads Dolt, merge driver) as one structured operation. |
 | `cadre_lsp_review` | Code-intelligence review wrapper around the configured LSP helper with structured findings. |
 | `cadre_lsp_warm_review` | Preferred code-intelligence review path when available; reuses the persistent LSP daemon and warm language servers. |
@@ -118,7 +121,8 @@ Workflow tool routing:
 | `cadre_pr_ci_status` | Read GitHub/GitLab PR/MR and CI status for a track branch or explicit PR/MR. |
 | `cadre_repo_map` | Compact semantic repo map and symbol reference lookup for low-token orientation. |
 | `cadre_beads_write` | Structured Beads operations (`ready`, `show`, `update`, `note`, `close`, labels, deps, create) instead of raw `bd` shell snippets. |
-| `cadre_review_assist` | Review evidence packet: diff, incomplete plan tasks, TODO/stub scan, coverage, and LSP findings; required before `/code-review` and sufficient fallback when `/code-review` is unavailable. |
+| `cadre_review_assist` | Review evidence packet: repo-aware diff, incomplete plan tasks, TODO/stub scan, coverage, machine gate, and LSP findings; required before `/code-review` and sufficient fallback when `/code-review` is unavailable. |
+| `cadre_review_machine_gate` | Run typecheck/build/check/lint inside MCP, per repo for polyrepo review evidence. |
 | `cadre_polyrepo_preflight` | Polyrepo setup, validate, refresh, and land preflight checks. |
 
 Packet-first rule: when a protocol names a composite MCP packet, call that
@@ -128,8 +132,10 @@ the packet reports that a prompt, repair, or narrower follow-up is needed.
 Preferred packet checkpoints:
 - Setup/health checks: `cadre_doctor`.
 - New track planning: `cadre_lsp_impact` before plan confirmation, then
-  `cadre_create_beads_tree` after track files are written.
+  `cadre_create_beads_tree` dry-run before writing track files and live
+  immediately after scaffold files exist.
 - Implementation start: `cadre_prepare_implementation`.
+- Phase-level execution: `cadre_phase_schedule` before dispatching ready phases.
 - Task completion: `cadre_complete_task` after the code commit, before any plan
   row is marked complete.
 - Team status: `cadre_team_board` for `--team` / `--mine` rich boards.

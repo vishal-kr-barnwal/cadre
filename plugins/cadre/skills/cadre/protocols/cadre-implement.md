@@ -317,8 +317,9 @@ Implement the requested track from the workflow arguments.
    Only when `config.json` `sync_mode == "shared"`. After reading
    `metadata.json`, claim/refresh the track lease per the metadata `lease` schema:
    `{ "owner": <git-identity>, "host": <hostname>, "acquired_at": <ISO-8601 UTC>,
-   "heartbeat_at": <ISO-8601 UTC> }`. Write it with key-scoped jq
-   (`jq '.lease = $obj'`), never a full-file rewrite.
+   "heartbeat_at": <ISO-8601 UTC> }`. Prefer MCP `cadre_heartbeat_track` for the
+   refresh write; raw `jq '.lease = $obj'` is only a fallback, and must remain
+   key-scoped.
 
    - **No existing lease, or `lease.owner` == `<git-identity>`:** claim/refresh
      silently (set/update `acquired_at` on first claim, always bump
@@ -332,32 +333,47 @@ Implement the requested track from the workflow arguments.
      > "ℹ️ <lease.owner> last touched this track at <heartbeat_at> (stale).
      > Take over the lease? A) Yes  B) Pick another track  C) Cancel"
      - If A: overwrite `lease`. If B: return to step 2. If C: HALT.
-   - **Heartbeat is a periodic write, decoupled from state writes.** Refresh the
-     lease `heartbeat_at` on every state write (steps ii/iii) **and** independently on
-     a timer well inside the canonical staleness window (`references/ownership-guard.md
-     §5`) — e.g. roughly every third of the window — so a long quiet build or a
-     slow-running test suite (no state write for many minutes) does **not** let the
-     heartbeat age past the window and get the worker swept by `cadre-validate` or
-     stolen by a teammate. The heartbeat write is a standalone key-scoped jq bump of
-     `lease.heartbeat_at` (and the Beads-CAS claim's `assignee`/`updated_at`, when
-     `beads_enabled`); it does not require any `implement_state.json` change. In
-     `local`/monorepo mode, skip all lease logic entirely (`lease` stays
-     null/absent).
+   - **Heartbeat is periodic, decoupled from state writes.** Call MCP
+     `cadre_heartbeat_track` on every state write (steps ii/iii) **and**
+     independently on a timer well inside the canonical staleness window
+     (`references/ownership-guard.md §5`) — e.g. roughly every third of the window —
+     so a long quiet build or a slow-running test suite (no state write for many
+     minutes) does **not** let the heartbeat age past the window and get the worker
+     swept by `cadre-validate` or stolen by a teammate. The MCP call performs the
+     key-scoped metadata heartbeat and mirrors Beads assignment freshness when
+     available; it does not require any `implement_state.json` change.
 
 5. **Determine Execution Mode and Execute Phases/Tasks:**
 
-   a. **Parse Phase Dependencies and Build Phase Graph:**
-      - Use the `cadre_parse_plan` result. For each phase, check for
-        `<!-- depends: -->` annotation
-      - **If NO annotation:** Phase depends on previous phase (sequential, default)
-      - **If `<!-- depends: -->` (empty):** Phase has no dependencies (can start immediately)
-      - **If `<!-- depends: phase1, phase2 -->`:** Phase waits for listed phases only
-      - Build a phase dependency graph to determine which phases can run in parallel
+   a. **Call the phase scheduler packet:**
+      - Call MCP `cadre_phase_schedule` with `root` and `trackId`.
+      - If it returns `ok: false`, HALT and fix `errors[]` (unknown phase deps,
+        cycles, or invalid annotations) before executing tasks.
+      - Use `ready_groups[]` as the only source of truth for phase dispatch:
+        each inner array is a conflict-free set of phases that may run
+        concurrently. Multiple inner arrays mean the scheduler found ready phases
+        that must be serialized because of repo/file ownership conflicts; run group
+        1 to completion, then call `cadre_phase_schedule` again before considering
+        group 2.
+      - If `ready_groups[]` is empty and unfinished phases remain, the track is
+        blocked on incomplete dependencies or blocked tasks; report the blocking
+        phase statuses from `phases[]` and HALT.
 
-   a2. **Identify Ready Phases:**
-      - Find phases with no unmet dependencies (all dependent phases completed)
-      - If multiple phases are ready simultaneously, they can run in parallel
-      - Process ready phases (may be single or multiple)
+   a2. **Dispatch a ready phase group:**
+      - For a ready group with one phase, process that phase directly with step 5b.
+      - For a ready group with multiple phases:
+        - If this client exposes parallel sub-agent tools, spawn one phase
+          coordinator per phase. Each phase coordinator receives the phase id,
+          track id, assigned repo/file claims from `phases[].claims`, and the
+          worker prompt below.
+        - If no phase-level sub-agent primitive is available, run the phases in the
+          group one at a time but preserve the scheduler result in the handoff/status
+          report. Correctness beats simulated parallelism.
+        - A phase coordinator may itself use task-level parallel workers when the
+          phase has `<!-- execution: parallel -->`; nested task waves still follow
+          `references/parallel-execution.md`.
+      - After every phase in the group reaches completed/skipped tasks, call
+        `cadre_phase_schedule` again. Continue until no ready group remains.
 
    b. **Parse Task Execution Mode (for current phase):**
       - For the current phase, check for `<!-- execution: parallel -->` annotation
@@ -460,9 +476,11 @@ Implement the requested track from the workflow arguments.
           recorded together. A `conflict` task stays unmarked until its worktree is
           resolved + merged.
         - Delete `parallel_state.json`
-        - Check phase graph: are there other ready phases to process?
-          - If yes: Go back to step 5a2 to process next ready phase(s)
-          - If no more phases: Proceed to step 6 (Finalize Track)
+        - Call MCP `cadre_phase_schedule` again:
+          - If it returns non-empty `ready_groups[]`: Go back to step 5a2.
+          - If no unfinished phases remain: Proceed to step 6 (Finalize Track).
+          - If unfinished phases remain with no ready group: report the blocking
+            phase statuses and halt.
       - If any `conflict` workers remain, hand control back to the user to resolve
         them (their worktrees + branches are intact); resume merge-back once resolved.
 
@@ -525,8 +543,8 @@ Implement the requested track from the workflow arguments.
         - Set `owner` to the current `<git-identity>`
         - Set `last_updated` to current timestamp (ISO-8601)
         - Set `status` to "in_progress"
-        - **Shared mode only:** refresh the `metadata.json` `lease.heartbeat_at`
-          (key-scoped jq, see step 4b). No-op in local/monorepo.
+        - Refresh the heartbeat through MCP `cadre_heartbeat_track` (the lease
+          portion is only active in shared mode).
       - **iii. On Phase Completion:** When all tasks in a phase are complete:
         - Add phase name to `completed_phases` array
         - Reset `current_task_index` to 0
@@ -543,9 +561,11 @@ Implement the requested track from the workflow arguments.
           local mode and publishes shared orchestration state when configured.
           **Product code is never pushed** at phase completion. In `local` mode,
           commits stay local as today.
-        - **Check phase graph for next ready phases:**
-          - If other phases now have all dependencies met → Go back to step 5a2
-          - If next sequential phase is ready → Process it
+        - **Check scheduler for next ready phases:**
+          - Call MCP `cadre_phase_schedule` again.
+          - If it returns non-empty `ready_groups[]` → Go back to step 5a2.
+          - If no ready groups and unfinished phases remain → report the blocking
+            statuses and halt.
           - If all phases complete → Proceed to step 6 (Finalize Track)
 
       **d4. Handle Blocked Tasks:**

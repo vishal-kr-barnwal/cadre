@@ -5,6 +5,11 @@ own git worktree, coordinated through Beads (the shared Dolt DB) using a **wave
 model**: dispatch every task whose dependencies are met, wait for the wave to
 finish, then dispatch the next wave.
 
+Phase-level parallelism is scheduled before this file is entered. The
+coordinator calls MCP `cadre_phase_schedule`, receives conflict-free
+`ready_groups[]`, and then invokes this task-wave protocol independently for
+each ready phase that is marked `<!-- execution: parallel -->`.
+
 The *worker prompt* (identity, task, TDD steps, completion sequence) is supplied
 by `cadre-implement`. This file covers **how to dispatch a worker on this
 tool**.
@@ -50,7 +55,8 @@ optimization.
 
 ## Coordinator mechanics (run these in order)
 
-`cadre-implement` hands you a phase marked `<!-- execution: parallel -->`.
+`cadre-implement` hands you a scheduler-approved phase marked
+`<!-- execution: parallel -->`.
 Drive the whole wave loop here; the *worker prompt* stays inline in
 `cadre-implement`. The steps below are platform-agnostic — the only
 platform-specific part is **how you dispatch** (see "Dispatching each worker"

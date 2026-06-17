@@ -443,6 +443,10 @@ The result is recorded in `metadata.review`:
   "coverage": 87.5,
   "self_reviewed": false,
   "reviewed_sha": "abc123...",
+  "reviewed_shas": {
+    ".": "abc123...",
+    "api": "def456..."
+  },
   "review_seq": 1
 }
 ```
@@ -469,7 +473,7 @@ Ship:
 
 1. Re-reads the review gate.
 2. Refuses unresolved review findings.
-3. Checks `reviewed_sha`.
+3. Checks `reviewed_sha` / `reviewed_shas`.
 4. Rebases the track branch.
 5. Pushes the track branch.
 6. Prepares or opens the PR, depending on config.
@@ -697,6 +701,7 @@ Check:
 - `metadata.review.verdict`
 - `metadata.review.blocking_count`
 - `metadata.review.reviewed_sha`
+- `metadata.review.reviewed_shas`
 - `metadata.review.self_reviewed`
 - `cadre/config.json` `require_second_reviewer`
 

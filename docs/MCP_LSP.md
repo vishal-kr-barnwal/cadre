@@ -30,6 +30,7 @@ offers these tools:
 | `cadre_current_root` | Resolve a caller-provided path to the Cadre project root. |
 | `cadre_regen_index` | Rebuild `cadre/tracks.md` from `metadata.json.status`. |
 | `cadre_parse_plan` | Parse phases, tasks, annotations, task keys, and recorded commit SHAs from `plan.md`. |
+| `cadre_phase_schedule` | Compute phase dependencies, current ready phases, and conflict-free phase dispatch groups. |
 | `cadre_team_status` | Group tracks by owner and status. |
 | `cadre_team_board` | Rich team board: WIP, handoffs, review queue, blockers, and optional Beads label evidence. |
 | `cadre_live_status` | Return the compact default status summary without agent-side plan scans. |
@@ -40,12 +41,15 @@ offers these tools:
 | `cadre_track_context` | Return a bounded per-track context payload: metadata, parsed plan, counts, hold state, worktree routing, review state, and Beads IDs. |
 | `cadre_plan_integrity` | Validate plan annotations, task keys, dependency references, repo routing, and parallel file-claim shape. |
 | `cadre_claim_track` | Claim ownership, mirror owner/lease metadata, and create `implement_state.json`. |
+| `cadre_heartbeat_track` | Refresh owner/lease heartbeat during long quiet builds or tests. |
+| `cadre_metadata_patch` | Apply top-level `metadata.json` patches with CAS retry semantics. |
 | `cadre_create_beads_tree` | Create or dry-run the Beads epic/phase/task/dependency tree for one track and patch metadata with Beads IDs. |
 | `cadre_record_task_result` | Record task marker/SHA/coverage results in `plan.md` and `metadata.json`. |
 | `cadre_complete_task` | Run coverage/tests, enforce the threshold, then record plan/metadata/Beads completion as one transaction. |
 | `cadre_record_parallel_worker` | Coordinator-owned parallel worker status/evidence update; can complete a task after clean merge. |
 | `cadre_record_review` | Write the structured review verdict with reviewer-race guard and immediate gate evaluation. |
-| `cadre_review_assist` | Assemble review evidence: diff surface, unfinished plan tasks, TODO/stub scan, coverage, and LSP findings. |
+| `cadre_review_assist` | Assemble review evidence: repo-aware diff surface, unfinished plan tasks, TODO/stub scan, coverage, machine gate, and LSP findings. |
+| `cadre_review_machine_gate` | Run configured typecheck/build/check/lint evidence inside MCP, per repo for polyrepo tracks. |
 | `cadre_sync_control_plane` | Run the shared-mode sync preamble or postamble as a structured operation. |
 | `cadre_lsp_review` | Run the Cadre LSP/code-intelligence review helper and return structured findings. |
 | `cadre_lsp_warm_review` | Run code-intelligence review through a persistent daemon that reuses initialized language servers. |
@@ -56,7 +60,7 @@ offers these tools:
 | `cadre_pr_ci_status` | Read GitHub/GitLab PR/MR metadata and CI status for a track branch or explicit PR/MR. |
 | `cadre_repo_map` | Return a compact semantic repository map or references for one symbol. |
 | `cadre_beads_write` | Perform structured Beads writes (`update`, `note`, `close`, labels, deps, create) without ad hoc shell snippets. |
-| `cadre_review_gate` | Evaluate whether `metadata.review` clears ship/land; optional `headSha` enforces `reviewed_sha` pinning. |
+| `cadre_review_gate` | Evaluate whether `metadata.review` clears ship/land; optional `headSha`/`headShas` enforce reviewed commit pins. |
 | `cadre_polyrepo_preflight` | Run local polyrepo manifest/submodule checks. |
 
 It also exposes resources:
@@ -106,9 +110,12 @@ Workflow routing:
 | Implementation start packet | `cadre_prepare_implementation` |
 | Cross-track file overlaps | `cadre_collision_scan` |
 | Phase/task/annotation parsing | `cadre_parse_plan` |
+| Phase-level ready-group scheduling | `cadre_phase_schedule` |
 | Track-specific context packet | `cadre_track_context` |
 | Plan annotation validation | `cadre_plan_integrity` |
 | Ownership claim | `cadre_claim_track` |
+| Long-running owner/lease heartbeat | `cadre_heartbeat_track` |
+| Key-scoped metadata updates | `cadre_metadata_patch` |
 | Per-task result write | `cadre_record_task_result` |
 | Safe task completion | `cadre_complete_task` |
 | Parallel worker audit/status | `cadre_record_parallel_worker` |
@@ -118,6 +125,7 @@ Workflow routing:
 | Ship/land review enforcement | `cadre_review_gate` |
 | Shared-mode pre/post sync | `cadre_sync_control_plane` |
 | Code-intelligence review | `cadre_lsp_warm_review` preferred; `cadre_lsp_review` fallback |
+| Review machine gate | `cadre_review_machine_gate` |
 | Coverage measurement and recording | `cadre_test_coverage` |
 | PR/MR and CI status | `cadre_pr_ci_status` |
 | Low-token repo/symbol orientation | `cadre_repo_map` or `cadre://repo-map` |
@@ -132,6 +140,7 @@ for rather than recreated with scattered shell probes:
 
 - `cadre_doctor`: setup, status `--doctor`, and validate diagnostics.
 - `cadre_prepare_implementation`: first implementation-start call after root/sync.
+- `cadre_phase_schedule`: phase-level coordinator loop before dispatching phases.
 - `cadre_create_beads_tree`: new-track Beads tree dry-run and live creation.
 - `cadre_review_assist`: first review evidence packet before `/code-review`.
 - `cadre_lsp_impact`: new-track planning and revise impact checks.
@@ -258,15 +267,18 @@ when changing language-server binaries on disk.
 3. Common package scripts such as `coverage`, `test:coverage`, or `test`.
 4. A small language fallback (`pytest --cov --cov-report=term`, `go test ./...`).
 
-It parses common terminal coverage summaries and `coverage/lcov.info`, then
-writes `metadata.last_test_run` and `metadata.last_coverage` when `trackId` is
-provided. If `phaseIndex` and `taskIndex` are also provided, it records the task
-result through the same path as `cadre_record_task_result`.
+It parses common terminal coverage summaries and `coverage/lcov.info` from the
+task's resolved repo/worktree, then writes `metadata.last_test_run` and
+`metadata.last_coverage` when `trackId` is provided. If `phaseIndex` and
+`taskIndex` are also provided, it records the task result through the same path
+as `cadre_record_task_result`.
 
 For normal implementation completion, prefer `cadre_complete_task`: it runs the
-coverage command first, enforces the threshold, and only then marks the plan row
-complete and closes the Beads task. `cadre_test_coverage` remains useful for
-diagnostic and preflight checks where no plan mutation should happen.
+coverage command first in the task's resolved repo/worktree, enforces the
+threshold, requires mapped Beads tasks to be writable, writes the Beads
+completion note/close, and only then records the plan row and metadata result.
+`cadre_test_coverage` remains useful for diagnostic and preflight checks where no
+plan mutation should happen.
 
 `cadre_pr_ci_status` uses local provider CLIs rather than embedding provider
 tokens in Cadre: GitHub uses `gh pr view ... --json`; GitLab uses

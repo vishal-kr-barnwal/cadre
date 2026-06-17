@@ -77,11 +77,15 @@ test("MCP root resolution rejects harness skill directories without project stat
     const names = tools.tools.map((tool) => tool.name);
     for (const name of [
       "cadre_prepare_implementation",
+      "cadre_phase_schedule",
+      "cadre_metadata_patch",
+      "cadre_heartbeat_track",
       "cadre_create_beads_tree",
       "cadre_complete_task",
       "cadre_record_parallel_worker",
       "cadre_team_board",
       "cadre_review_assist",
+      "cadre_review_machine_gate",
       "cadre_lsp_impact",
     ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);

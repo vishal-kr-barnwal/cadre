@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const STATUS_MARKERS = {
@@ -27,6 +28,60 @@ function writeJson(file, value) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
   fs.renameSync(tmp, file);
+}
+
+function textHash(text) {
+  return crypto.createHash("sha256").update(String(text || "")).digest("hex");
+}
+
+function patchJsonFile(file, patcher, options = {}) {
+  const retries = Number(options.retries || 5);
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    let beforeText;
+    try {
+      beforeText = fs.readFileSync(file, "utf8");
+    } catch (error) {
+      return { ok: false, file, error: `Unable to read JSON file: ${error.message}` };
+    }
+    let before;
+    try {
+      before = JSON.parse(beforeText || "{}");
+    } catch (error) {
+      return { ok: false, file, error: `Invalid JSON: ${error.message}` };
+    }
+    const beforeHash = textHash(beforeText);
+    let next;
+    try {
+      next = patcher({ ...before }, before);
+    } catch (error) {
+      return { ok: false, file, error: `JSON patcher failed: ${error.message}` };
+    }
+    if (!next || typeof next !== "object") {
+      return { ok: false, file, error: "JSON patcher must return an object" };
+    }
+    let latestText;
+    try {
+      latestText = fs.readFileSync(file, "utf8");
+    } catch (error) {
+      return { ok: false, file, error: `Unable to re-read JSON file: ${error.message}` };
+    }
+    if (textHash(latestText) !== beforeHash) continue;
+    writeJson(file, next);
+    return {
+      ok: true,
+      file,
+      attempts: attempt,
+      before_hash: beforeHash,
+      after_hash: textHash(`${JSON.stringify(next, null, 2)}\n`),
+      value: next,
+    };
+  }
+  return {
+    ok: false,
+    file,
+    error: `JSON file changed during patch after ${retries} retries`,
+    conflict: true,
+  };
 }
 
 function utcNow() {
@@ -191,27 +246,27 @@ function loadPackageJson(root) {
   return readJson(path.join(root, "package.json"), null);
 }
 
-function configuredCoverageCommand(root, args = {}) {
+function configuredCoverageCommand(root, args = {}, workingRoot = root) {
   if (args.command) return String(args.command);
   const topology = loadTopology(root);
   const config = topology.config || {};
   for (const key of ["coverage_command", "test_coverage_command", "test_command"]) {
     if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
   }
-  const pkg = loadPackageJson(root);
+  const pkg = loadPackageJson(workingRoot);
   if (pkg && pkg.scripts) {
     for (const name of ["coverage", "test:coverage", "test:cov", "test"]) {
       if (pkg.scripts[name]) {
-        if (fileExists(path.join(root, "pnpm-lock.yaml"))) return `pnpm ${name}`;
-        if (fileExists(path.join(root, "yarn.lock"))) return `yarn ${name}`;
+        if (fileExists(path.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(path.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
         return `npm run ${name}`;
       }
     }
   }
-  if (fileExists(path.join(root, "pyproject.toml")) || fileExists(path.join(root, "pytest.ini"))) {
+  if (fileExists(path.join(workingRoot, "pyproject.toml")) || fileExists(path.join(workingRoot, "pytest.ini"))) {
     return "pytest --cov --cov-report=term";
   }
-  if (fileExists(path.join(root, "go.mod"))) return "go test ./...";
+  if (fileExists(path.join(workingRoot, "go.mod"))) return "go test ./...";
   return null;
 }
 
@@ -266,8 +321,8 @@ function coverageThreshold(root) {
   return 80;
 }
 
-function runCoverage(root, args = {}) {
-  const command = configuredCoverageCommand(root, args);
+function runCoverage(root, args = {}, workingRoot = root) {
+  const command = configuredCoverageCommand(root, args, workingRoot);
   if (!command) {
     return {
       ok: false,
@@ -284,19 +339,20 @@ function runCoverage(root, args = {}) {
   }
   const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1000);
   const result = runCommand(command, [], {
-    cwd: root,
+    cwd: workingRoot,
     shell: true,
     timeoutMs,
     maxBuffer: 30 * 1024 * 1024,
   });
   const combined = `${result.stdout}\n${result.stderr}`;
   const parsed = parseCoveragePercent(combined);
-  const lcov = parsed == null ? parseLcovCoverage(root) : null;
+  const lcov = parsed == null ? parseLcovCoverage(workingRoot) : null;
   const coverage = parsed == null ? lcov : parsed;
   return {
     ok: result.ok,
     available: true,
     command,
+    cwd: workingRoot,
     status: result.status,
     signal: result.signal,
     coverage,
@@ -528,6 +584,221 @@ function planClaims(root, track, topology = loadTopology(root)) {
     }
   }
   return claims;
+}
+
+function phaseAliases(phase) {
+  const title = String(phase.title || "").trim().toLowerCase();
+  const simpleTitle = title.replace(/^phase\s+\d+\s*:\s*/, "").trim();
+  return Array.from(new Set([
+    `phase${phase.phase_index}`,
+    `phase ${phase.phase_index}`,
+    String(phase.phase_index),
+    title,
+    simpleTitle,
+  ].filter(Boolean)));
+}
+
+function resolvePhaseDependency(value, aliasMap) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return null;
+  if (aliasMap.has(key)) return aliasMap.get(key);
+  const compact = key.replace(/\s+/g, "");
+  if (aliasMap.has(compact)) return aliasMap.get(compact);
+  const phaseNumber = key.match(/^phase\s*(\d+)$/i) || key.match(/^(\d+)$/);
+  if (phaseNumber && aliasMap.has(`phase${phaseNumber[1]}`)) return aliasMap.get(`phase${phaseNumber[1]}`);
+  return null;
+}
+
+function phaseDependencyIds(phase, previousPhase, aliasMap) {
+  if (!Object.prototype.hasOwnProperty.call(phase.annotations || {}, "depends")) {
+    return previousPhase ? [`phase${previousPhase.phase_index}`] : [];
+  }
+  const raw = String((phase.annotations || {}).depends || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((item) => resolvePhaseDependency(item, aliasMap))
+    .filter(Boolean)
+    .map((item) => `phase${item.phase_index}`);
+}
+
+function phaseStatus(phase) {
+  const tasks = phase.tasks || [];
+  if (tasks.length === 0) return "completed";
+  if (tasks.every((task) => task.marker === "x" || task.marker === "-")) return "completed";
+  if (tasks.some((task) => task.marker === "!")) return "blocked";
+  if (tasks.some((task) => task.marker === "~" || task.marker === "x" || task.marker === "-")) return "in_progress";
+  return "pending";
+}
+
+function claimsForPhase(root, phase, topology = loadTopology(root)) {
+  const claims = [];
+  for (const task of phase.tasks || []) {
+    const repo = topology.polyrepo ? task.repo || topology.defaultRepo : ".";
+    for (const file of task.files || []) {
+      claims.push({
+        phase_id: `phase${phase.phase_index}`,
+        phase_index: phase.phase_index,
+        phase_title: phase.title,
+        task_key: task.task_key,
+        task_title: task.title,
+        repo,
+        file: normalizeClaimPath(file),
+      });
+    }
+  }
+  return claims;
+}
+
+function phaseConflict(left, right) {
+  const conflicts = [];
+  for (const leftClaim of left.claims || []) {
+    for (const rightClaim of right.claims || []) {
+      if (leftClaim.repo !== rightClaim.repo) continue;
+      if (!claimsOverlap(leftClaim.file, rightClaim.file)) continue;
+      conflicts.push({ left: leftClaim, right: rightClaim });
+    }
+  }
+  return conflicts;
+}
+
+function groupReadyPhases(readyPhases) {
+  const groups = [];
+  const conflicts = [];
+  for (const phase of readyPhases) {
+    let placed = false;
+    for (const group of groups) {
+      const groupConflicts = group.flatMap((existing) => phaseConflict(existing, phase));
+      if (groupConflicts.length === 0) {
+        group.push(phase);
+        placed = true;
+        break;
+      }
+      conflicts.push(...groupConflicts);
+    }
+    if (!placed) groups.push([phase]);
+  }
+  return { groups, conflicts };
+}
+
+function detectPhaseCycles(phaseNodes) {
+  const byId = new Map(phaseNodes.map((phase) => [phase.phase_id, phase]));
+  const visiting = new Set();
+  const visited = new Set();
+  const cycles = [];
+  const stack = [];
+  function visit(id) {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) {
+      const start = stack.indexOf(id);
+      cycles.push(stack.slice(start).concat(id));
+      return;
+    }
+    visiting.add(id);
+    stack.push(id);
+    const node = byId.get(id);
+    for (const dep of (node && node.depends_on) || []) visit(dep);
+    stack.pop();
+    visiting.delete(id);
+    visited.add(id);
+  }
+  for (const phase of phaseNodes) visit(phase.phase_id);
+  return cycles;
+}
+
+function topologicalPhaseWaves(phaseNodes) {
+  const remaining = new Map(phaseNodes.map((phase) => [phase.phase_id, { ...phase }]));
+  const completed = new Set();
+  const waves = [];
+  while (remaining.size > 0) {
+    const wave = Array.from(remaining.values())
+      .filter((phase) => phase.depends_on.every((dep) => completed.has(dep)))
+      .sort((a, b) => a.phase_index - b.phase_index);
+    if (wave.length === 0) break;
+    waves.push(wave.map((phase) => phase.phase_id));
+    for (const phase of wave) {
+      completed.add(phase.phase_id);
+      remaining.delete(phase.phase_id);
+    }
+  }
+  return waves;
+}
+
+function phaseSchedule(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const plan = parsePlanFile(track.plan_path);
+  const topology = loadTopology(root);
+  const aliasMap = new Map();
+  for (const phase of plan.phases || []) {
+    for (const alias of phaseAliases(phase)) aliasMap.set(alias, phase);
+  }
+
+  const errors = [];
+  const phases = (plan.phases || []).map((phase, index, all) => {
+    const rawDepends = Object.prototype.hasOwnProperty.call(phase.annotations || {}, "depends")
+      ? String((phase.annotations || {}).depends || "").trim()
+      : null;
+    const unknownDepends = rawDepends == null || rawDepends === ""
+      ? []
+      : rawDepends
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .filter((item) => !resolvePhaseDependency(item, aliasMap));
+    for (const dep of unknownDepends) {
+      errors.push({ phase_id: `phase${phase.phase_index}`, message: `Unknown phase dependency: ${dep}` });
+    }
+    const dependsOn = phaseDependencyIds(phase, all[index - 1], aliasMap);
+    const claims = claimsForPhase(root, phase, topology);
+    return {
+      phase_id: `phase${phase.phase_index}`,
+      phase_index: phase.phase_index,
+      title: phase.title,
+      execution: phase.annotations.execution || "sequential",
+      depends_on: dependsOn,
+      status: phaseStatus(phase),
+      task_counts: taskCounts({ phases: [phase] }),
+      claims,
+      tasks: (phase.tasks || []).map((task) => ({
+        task_key: task.task_key,
+        task_index: task.task_index,
+        title: task.title,
+        marker: task.marker,
+        repo: task.repo || (topology.polyrepo ? topology.defaultRepo : "."),
+        files: task.files || [],
+        depends: task.depends || [],
+      })),
+    };
+  });
+  const cycles = detectPhaseCycles(phases);
+  for (const cycle of cycles) {
+    errors.push({ phase_id: cycle[0] || null, message: `Phase dependency cycle: ${cycle.join(" -> ")}` });
+  }
+  const completed = new Set(phases.filter((phase) => phase.status === "completed").map((phase) => phase.phase_id));
+  const ready = errors.length === 0
+    ? phases
+      .filter((phase) => !["completed", "blocked"].includes(phase.status))
+      .filter((phase) => phase.depends_on.every((dep) => completed.has(dep)))
+    : [];
+  const { groups, conflicts } = groupReadyPhases(ready);
+  return {
+    ok: errors.length === 0,
+    track_id: track.track_id,
+    phases,
+    topological_waves: topologicalPhaseWaves(phases),
+    ready_phases: ready.map((phase) => phase.phase_id),
+    ready_groups: groups.map((group) => group.map((phase) => phase.phase_id)),
+    conflict_splits: conflicts.map((conflict) => ({
+      repo: conflict.left.repo,
+      file: conflict.left.file === conflict.right.file ? conflict.left.file : `${conflict.left.file} <-> ${conflict.right.file}`,
+      left_phase: conflict.left.phase_id,
+      right_phase: conflict.right.phase_id,
+      left_task: conflict.left.task_key,
+      right_task: conflict.right.task_key,
+    })),
+    errors,
+  };
 }
 
 function normalizeClaimPath(file) {
@@ -960,6 +1231,90 @@ function trackContext(root, trackId) {
   };
 }
 
+function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
+  if (args.workingRoot) {
+    const candidate = path.isAbsolute(args.workingRoot)
+      ? args.workingRoot
+      : path.resolve(root, args.workingRoot);
+    return { repo: args.repo || (task && task.repo) || ".", path: candidate, source: "argument.workingRoot" };
+  }
+  const topology = loadTopology(root);
+  if (topology.polyrepo && track.metadata.repos && typeof track.metadata.repos === "object") {
+    const repo = args.repo || (task && task.repo) || topology.defaultRepo;
+    const info = track.metadata.repos[repo];
+    if (info) {
+      const rel = info.worktree_path || info.submodule_path || "";
+      return {
+        repo,
+        path: rel ? path.resolve(root, rel) : root,
+        source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path",
+      };
+    }
+    return { repo, path: root, source: "polyrepo-missing-repo-fallback" };
+  }
+  if (track.metadata.worktree_path) {
+    const candidate = path.resolve(root, track.metadata.worktree_path);
+    if (fileExists(candidate)) {
+      return { repo: ".", path: candidate, source: "metadata.worktree_path" };
+    }
+  }
+  return { repo: ".", path: root, source: "project-root" };
+}
+
+function repoEntriesForTrack(root, track, args = {}) {
+  const topology = loadTopology(root);
+  if (topology.polyrepo && track.metadata.repos && typeof track.metadata.repos === "object") {
+    return Object.entries(track.metadata.repos)
+      .filter(([repo]) => !args.repo || args.repo === repo)
+      .map(([repo, info]) => {
+        const rel = info.worktree_path || info.submodule_path || "";
+        return {
+          repo,
+          root: rel ? path.resolve(root, rel) : root,
+          path: rel,
+          base: args.base || info.base_branch || "main",
+          head: args.head || info.git_branch || track.metadata.git_branch || `track/${track.track_id}`,
+          source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path",
+        };
+      });
+  }
+  return [{
+    repo: args.repo || ".",
+    root: args.workingRoot ? path.resolve(root, args.workingRoot) : root,
+    path: args.workingRoot || ".",
+    base: args.base || "main",
+    head: args.head || track.metadata.git_branch || `track/${track.track_id}`,
+    source: args.workingRoot ? "argument.workingRoot" : "project-root",
+  }];
+}
+
+function gitRevParse(root, ref) {
+  if (!ref) return null;
+  const result = runCommand("git", ["rev-parse", ref], { cwd: root });
+  return result.ok ? result.stdout.trim() || null : null;
+}
+
+function reviewedShasForTrack(root, track, args = {}) {
+  const supplied = args.reviewedShas || args.reviewed_shas || null;
+  const entries = repoEntriesForTrack(root, track, args);
+  const reviewedShas = {};
+  const controlHead = (supplied && supplied["."])
+    || args.reviewedSha
+    || args.reviewed_sha
+    || gitRevParse(root, track.metadata.git_branch || `track/${track.track_id}`)
+    || gitRevParse(root, "HEAD");
+  if (controlHead) reviewedShas["."] = controlHead;
+  for (const entry of entries) {
+    reviewedShas[entry.repo] = (supplied && supplied[entry.repo])
+      || gitRevParse(entry.root, entry.head)
+      || gitRevParse(entry.root, "HEAD");
+  }
+  return {
+    reviewed_sha: controlHead || null,
+    reviewed_shas: reviewedShas,
+  };
+}
+
 function implementationPrep(root, args = {}) {
   const identity = args.identity || gitIdentity(root);
   const team = teamStatus(root);
@@ -1128,11 +1483,17 @@ function sectionText(markdown, headingPattern) {
   return compactLines(out.join("\n"));
 }
 
-function trackSpecContext(track) {
-  const text = fileExists(track.spec_path) ? fs.readFileSync(track.spec_path, "utf8") : "";
+function specContextFromText(text) {
   const overview = sectionText(text, /^#{1,4}\s+(overview|summary|technical approach|approach|requirements?)\b/i) || compactLines(text, 1400);
   const acceptance = sectionText(text, /^#{1,4}\s+(acceptance|success criteria|done|definition of done)\b/i) || compactLines(text, 1000);
   return { overview, acceptance };
+}
+
+function trackSpecContext(track, fallbackText = "") {
+  const text = track.spec_path && fileExists(track.spec_path)
+    ? fs.readFileSync(track.spec_path, "utf8")
+    : fallbackText;
+  return specContextFromText(text);
 }
 
 function taskDesignText(track, phase, task, specContext) {
@@ -1164,17 +1525,36 @@ function addCreateContext(args, design, acceptance) {
 function createBeadsTree(root, args = {}) {
   const trackId = args.trackId || args.track_id;
   if (!trackId) return { ok: false, error: "trackId is required" };
-  const track = findTrack(root, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-
   const dryRun = args.dryRun === true;
+  const diskTrack = findTrack(root, trackId);
+  if (!diskTrack && !dryRun) return { ok: false, error: `Track not found: ${trackId}` };
+  if (!diskTrack && dryRun && !args.planText) {
+    return { ok: false, error: `Track not found: ${trackId}; dryRun without track files requires planText` };
+  }
+  const draftMetadata = {
+    track_id: trackId,
+    type: "feature",
+    status: "new",
+    priority: "medium",
+    description: trackId,
+    git_branch: `track/${trackId}`,
+    ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
+  };
+  const track = diskTrack || {
+    track_id: trackId,
+    dir: null,
+    metadata_path: null,
+    plan_path: null,
+    spec_path: null,
+    metadata: draftMetadata,
+  };
   if (!dryRun && !commandExists("bd", root)) {
     return { ok: false, available: false, reason: "Beads CLI (bd) is not installed or not on PATH" };
   }
 
   const identity = args.identity || gitIdentity(root);
-  const plan = parsePlanFile(track.plan_path);
-  const specContext = trackSpecContext(track);
+  const plan = args.planText ? parsePlanText(args.planText) : parsePlanFile(track.plan_path);
+  const specContext = trackSpecContext(track, args.specText || "");
   const epicId = args.epicId || track.metadata.beads_epic || `cadre-${track.track_id}`;
   const commands = [];
   const results = [];
@@ -1320,12 +1700,16 @@ function createBeadsTree(root, args = {}) {
     }
   }
 
+  let metadataPatch = null;
   if (!dryRun) {
-    writeJson(track.metadata_path, {
-      ...track.metadata,
+    metadataPatch = patchJsonFile(track.metadata_path, (metadata) => ({
+      ...metadata,
       beads_epic: epicId,
       beads_tasks: beadsTasks,
-    });
+    }));
+    if (!metadataPatch.ok) {
+      return { ok: false, available: true, stage: "metadata_patch", commands, results, metadata_patch: metadataPatch };
+    }
   }
 
   return {
@@ -1341,6 +1725,7 @@ function createBeadsTree(root, args = {}) {
       beads_epic: epicId,
       beads_tasks: beadsTasks,
     },
+    metadata_write: metadataPatch,
   };
 }
 
@@ -1369,14 +1754,24 @@ function reviewGate(root, trackId, options = {}) {
     if (config.require_second_reviewer === true && review.self_reviewed === true) {
       reasons.push("Self-review is not sufficient when require_second_reviewer is true");
     }
-    if (!review.reviewed_sha) {
+    const hasPinnedReview = Boolean(review.reviewed_sha)
+      || Boolean(review.reviewed_shas && Object.values(review.reviewed_shas).some(Boolean));
+    if (!hasPinnedReview) {
       if (config.allow_unpinned_review_ship === true) {
-        warnings.push("Review does not record reviewed_sha; allowed by config.allow_unpinned_review_ship");
+        warnings.push("Review does not record reviewed_sha/reviewed_shas; allowed by config.allow_unpinned_review_ship");
       } else {
-        reasons.push("Review does not record reviewed_sha");
+        reasons.push("Review does not record reviewed_sha/reviewed_shas");
       }
-    } else if (options.headSha && options.headSha !== review.reviewed_sha) {
+    } else if (review.reviewed_sha && options.headSha && options.headSha !== review.reviewed_sha) {
       reasons.push(`Head ${options.headSha} differs from reviewed_sha ${review.reviewed_sha}; re-review required`);
+    }
+    if (review.reviewed_shas && options.headShas && typeof options.headShas === "object") {
+      for (const [repo, reviewedSha] of Object.entries(review.reviewed_shas)) {
+        const headSha = options.headShas[repo];
+        if (reviewedSha && headSha && headSha !== reviewedSha) {
+          reasons.push(`Repo ${repo} head ${headSha} differs from reviewed_shas.${repo} ${reviewedSha}; re-review required`);
+        }
+      }
     }
   }
   return {
@@ -1385,6 +1780,65 @@ function reviewGate(root, trackId, options = {}) {
     review,
     reasons,
     warnings,
+  };
+}
+
+function metadataPatch(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const patch = args.patch && typeof args.patch === "object" ? args.patch : null;
+  if (!patch) return { ok: false, error: "patch object is required" };
+  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }));
+  return {
+    ok: result.ok,
+    track_id: track.track_id,
+    metadata_path: path.relative(root, track.metadata_path),
+    patch_keys: Object.keys(patch).sort(),
+    result,
+  };
+}
+
+function heartbeatTrack(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const identity = args.identity || gitIdentity(root) || track.metadata.owner || null;
+  const now = args.now || utcNow();
+  const topology = loadTopology(root);
+  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
+    if (topology.config.sync_mode === "shared") {
+      metadata.lease = {
+        ...(metadata.lease || {}),
+        owner: identity,
+        acquired_at: metadata.lease && metadata.lease.acquired_at ? metadata.lease.acquired_at : now,
+        heartbeat_at: now,
+      };
+    }
+    metadata.owner = metadata.owner || identity;
+    metadata.updated_at = now;
+    return metadata;
+  });
+  const statePath = path.join(track.dir, "implement_state.json");
+  let stateResult = null;
+  if (fileExists(statePath)) {
+    stateResult = patchJsonFile(statePath, (state) => ({
+      ...state,
+      owner: state.owner || identity,
+      last_updated: now,
+    }));
+  }
+  let beads = null;
+  const epic = track.metadata.beads_epic;
+  if (epic && commandExists("bd", root)) {
+    beads = beadsTaskWrite(root, { operation: "update", id: epic, assignee: identity || "" });
+  }
+  return {
+    ok: metadataResult.ok && (!stateResult || stateResult.ok) && (!beads || beads.ok),
+    track_id: track.track_id,
+    owner: identity,
+    heartbeat_at: now,
+    metadata: metadataResult,
+    state: stateResult,
+    beads,
   };
 }
 
@@ -1441,17 +1895,21 @@ function claimTrack(root, trackId, options = {}) {
     }
   }
 
-  const metadata = { ...track.metadata, owner: identity };
   const topology = loadTopology(root);
-  if (topology.config.sync_mode === "shared") {
-    metadata.lease = {
-      ...(metadata.lease || {}),
-      owner: identity,
-      acquired_at: metadata.lease && metadata.lease.owner === identity ? metadata.lease.acquired_at || now : now,
-      heartbeat_at: now,
-    };
-  }
-  writeJson(track.metadata_path, metadata);
+  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
+    metadata.owner = identity;
+    metadata.updated_at = now;
+    if (topology.config.sync_mode === "shared") {
+      metadata.lease = {
+        ...(metadata.lease || {}),
+        owner: identity,
+        acquired_at: metadata.lease && metadata.lease.owner === identity ? metadata.lease.acquired_at || now : now,
+        heartbeat_at: now,
+      };
+    }
+    return metadata;
+  });
+  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult, commands };
   const statePath = path.join(track.dir, "implement_state.json");
   writeJson(statePath, {
     status: "starting",
@@ -1465,6 +1923,7 @@ function claimTrack(root, trackId, options = {}) {
     track_id: track.track_id,
     owner: identity,
     previous_hold: hold,
+    metadata: metadataResult,
     commands,
   };
 }
@@ -1481,13 +1940,19 @@ function setTrackStatus(root, trackId, status) {
   if (!track) {
     return { ok: false, error: `Track not found: ${trackId}` };
   }
-  const metadata = { ...track.metadata, status };
-  writeJson(track.metadata_path, metadata);
+  const metadata = patchJsonFile(track.metadata_path, (current) => ({
+    ...current,
+    status,
+  }));
+  if (!metadata.ok) {
+    return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
+  }
   const regen = regenIndex(root);
   return {
     ok: Boolean(regen.ok),
     track_id: trackId,
     status,
+    metadata,
     regen,
   };
 }
@@ -1523,20 +1988,32 @@ function recordTaskResult(root, args = {}) {
   if (commitSha && !nextLine.includes(commitSha)) {
     nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
   }
-  lines[idx] = nextLine;
-  fs.writeFileSync(track.plan_path, `${lines.join("\n").replace(/\n+$/, "")}\n`);
-
-  const metadata = { ...track.metadata };
-  if (typeof args.coverage === "number") metadata.last_coverage = args.coverage;
-  metadata.last_task_result = {
+  const recordedAt = utcNow();
+  const lastTaskResult = {
     phase_index: phaseIndex,
     task_index: taskIndex,
     task_key: task.task_key,
     status: args.status || "completed",
     commit_sha: commitSha || null,
-    recorded_at: utcNow(),
+    repo: args.repo || task.repo || null,
+    working_root: args.workingRoot || null,
+    recorded_at: recordedAt,
   };
-  writeJson(track.metadata_path, metadata);
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    if (typeof args.coverage === "number") current.last_coverage = args.coverage;
+    if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
+    current.last_task_result = lastTaskResult;
+    return current;
+  });
+  if (!metadata.ok) {
+    return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  }
+  lines[idx] = nextLine;
+  try {
+    fs.writeFileSync(track.plan_path, `${lines.join("\n").replace(/\n+$/, "")}\n`);
+  } catch (error) {
+    return { ok: false, track_id: track.track_id, stage: "plan_write", error: error.message, metadata };
+  }
   return {
     ok: true,
     track_id: track.track_id,
@@ -1544,7 +2021,8 @@ function recordTaskResult(root, args = {}) {
     line: task.line,
     status: args.status || "completed",
     commit_sha: commitSha || null,
-    beads_task_id: metadata.beads_tasks ? metadata.beads_tasks[task.task_key] || null : null,
+    beads_task_id: metadata.value && metadata.value.beads_tasks ? metadata.value.beads_tasks[task.task_key] || null : null,
+    metadata,
   };
 }
 
@@ -1558,7 +2036,8 @@ function completeTask(root, args = {}) {
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
 
-  const coverage = runCoverage(root, args);
+  const workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+  const coverage = runCoverage(root, args, workingRoot.path);
   const threshold = Number(args.coverageThreshold ?? coverageThreshold(root));
   const allowMissingCoverage = args.allowMissingCoverage === true;
   const allowLowCoverage = args.allowLowCoverage === true;
@@ -1594,44 +2073,49 @@ function completeTask(root, args = {}) {
   }
 
   const metadataBefore = readJson(track.metadata_path, track.metadata) || track.metadata;
-  writeJson(track.metadata_path, {
-    ...metadataBefore,
-    last_test_run: {
-      command: coverage.command,
-      ok: coverage.available ? coverage.ok : null,
-      status: coverage.available ? coverage.status : null,
-      signal: coverage.available ? coverage.signal : null,
-      coverage: coverage.coverage,
-      threshold,
-      measured_at: utcNow(),
-      allow_missing_coverage: allowMissingCoverage,
-      allow_low_coverage: allowLowCoverage,
-    },
-    ...(typeof coverage.coverage === "number" ? { last_coverage: coverage.coverage } : {}),
-  });
-
-  const taskResult = recordTaskResult(root, {
-    trackId: args.trackId,
-    phaseIndex,
-    taskIndex,
-    status: args.status || "completed",
-    commitSha: args.commitSha,
-    coverage: coverage.coverage,
-  });
-  if (!taskResult.ok) return { ok: false, stage: "record_task_result", coverage, task_result: taskResult };
-
+  const mappedBeadsTaskId = metadataBefore.beads_tasks ? metadataBefore.beads_tasks[task.task_key] || null : null;
+  const explicitBeadsTaskId = args.beadsTaskId || args.taskId || null;
+  const beadsTaskId = explicitBeadsTaskId || mappedBeadsTaskId;
+  const beadsConfigured = Boolean(
+    explicitBeadsTaskId ||
+    metadataBefore.beads_epic ||
+    (metadataBefore.beads_tasks && Object.keys(metadataBefore.beads_tasks).length > 0)
+  );
+  const beadsAvailable = commandExists("bd", root);
   const beads = {
     attempted: false,
-    available: commandExists("bd", root),
+    required: beadsConfigured,
+    available: beadsAvailable,
     note: null,
     close: null,
     skipped_reason: null,
   };
-  const beadsTaskId = taskResult.beads_task_id || args.beadsTaskId || args.taskId || null;
-  if (!beadsTaskId) {
-    beads.skipped_reason = "No Beads task id mapped for this plan task";
-  } else if (!beads.available) {
-    beads.skipped_reason = "Beads CLI (bd) is not installed or not on PATH";
+  if (beadsConfigured && !beadsTaskId) {
+    return {
+      ok: false,
+      stage: "beads_mapping",
+      blocked: true,
+      threshold,
+      working_root: workingRoot,
+      coverage,
+      beads,
+      reason: "Track has Beads metadata but this plan task has no mapped Beads task id; task was not marked complete",
+    };
+  }
+  if (beadsTaskId && !beadsAvailable) {
+    return {
+      ok: false,
+      stage: "beads_unavailable",
+      blocked: true,
+      threshold,
+      working_root: workingRoot,
+      coverage,
+      beads,
+      reason: "Beads CLI (bd) is required for this mapped task but is not installed or not on PATH; task was not marked complete",
+    };
+  }
+  if (!beadsConfigured) {
+    beads.skipped_reason = "Track has no Beads task mapping";
   } else {
     beads.attempted = true;
     const sha = args.commitSha ? String(args.commitSha).slice(0, 12) : "unknown";
@@ -1652,17 +2136,43 @@ function completeTask(root, args = {}) {
       });
     }
     if (beads.note && !beads.note.ok) {
-      return { ok: false, stage: "beads_note", coverage, task_result: taskResult, beads };
+      return { ok: false, stage: "beads_note", threshold, working_root: workingRoot, coverage, beads };
     }
     if (beads.close && !beads.close.ok) {
-      return { ok: false, stage: "beads_close", coverage, task_result: taskResult, beads };
+      return { ok: false, stage: "beads_close", threshold, working_root: workingRoot, coverage, beads };
     }
   }
+
+  const lastTestRun = {
+    command: coverage.command,
+    cwd: coverage.cwd || workingRoot.path,
+    ok: coverage.available ? coverage.ok : null,
+    status: coverage.available ? coverage.status : null,
+    signal: coverage.available ? coverage.signal : null,
+    coverage: coverage.coverage,
+    threshold,
+    measured_at: utcNow(),
+    allow_missing_coverage: allowMissingCoverage,
+    allow_low_coverage: allowLowCoverage,
+  };
+  const taskResult = recordTaskResult(root, {
+    trackId: args.trackId,
+    phaseIndex,
+    taskIndex,
+    status: args.status || "completed",
+    commitSha: args.commitSha,
+    coverage: coverage.coverage,
+    repo: workingRoot.repo,
+    workingRoot: path.relative(root, workingRoot.path) || ".",
+    lastTestRun,
+  });
+  if (!taskResult.ok) return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, beads };
 
   return {
     ok: true,
     track_id: track.track_id,
     task_key: taskResult.task_key,
+    working_root: workingRoot,
     threshold,
     coverage,
     task_result: taskResult,
@@ -1731,6 +2241,8 @@ function recordParallelWorker(root, args = {}) {
       summary: args.summary || `parallel worker ${workerId}`,
       reason: args.reason || `merged ${workerId}`,
       beadsTaskId: nextWorker.beads_task_id,
+      repo: nextWorker.repo || args.repo,
+      workingRoot: args.workingRoot || nextWorker.worktree || args.worktree,
     });
     if (!completion.ok) return { ok: false, stage: "complete_task", state_path: statePath, worker: nextWorker, completion };
   }
@@ -1759,36 +2271,43 @@ function recordReview(root, args = {}) {
     return { ok: false, error: `Invalid review verdict: ${verdict}` };
   }
   const reviewer = args.reviewer || gitIdentity(root);
-  const existing = track.metadata.review || {};
-  if (
-    verdict === "approved" &&
-    args.allowOverride !== true &&
-    existing.reviewer &&
-    existing.reviewer !== reviewer &&
-    (existing.verdict === "changes_requested" || Number(existing.blocking_count || 0) > 0)
-  ) {
+  const pins = reviewedShasForTrack(root, track, args);
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    const existing = current.review || {};
+    if (
+      verdict === "approved" &&
+      args.allowOverride !== true &&
+      existing.reviewer &&
+      existing.reviewer !== reviewer &&
+      (existing.verdict === "changes_requested" || Number(existing.blocking_count || 0) > 0)
+    ) {
+      throw new Error("Approval would override another reviewer's open changes_requested verdict");
+    }
+    current.review = {
+      verdict,
+      blocking_count: Number(args.blockingCount || 0),
+      date: args.date || utcNow(),
+      reviewer: reviewer || null,
+      coverage: args.coverage ?? current.last_coverage ?? null,
+      self_reviewed: Boolean(reviewer && current.owner && reviewer === current.owner),
+      reviewed_sha: pins.reviewed_sha || null,
+      reviewed_shas: pins.reviewed_shas || {},
+      review_seq: Number(existing.review_seq || 0) + 1,
+    };
+    return current;
+  });
+  if (!metadata.ok) {
     return {
       ok: false,
-      error: "Approval would override another reviewer's open changes_requested verdict",
-      existing_review: existing,
-      requires_override: true,
+      track_id: track.track_id,
+      stage: "metadata_patch",
+      error: metadata.error,
+      requires_override: /override another reviewer/.test(metadata.error || ""),
+      metadata,
     };
   }
-  const metadata = { ...track.metadata };
-  const reviewedSha = args.reviewedSha || runCommand("git", ["rev-parse", metadata.git_branch || `track/${track.track_id}`], { cwd: root }).stdout.trim() || runCommand("git", ["rev-parse", "HEAD"], { cwd: root }).stdout.trim();
-  metadata.review = {
-    verdict,
-    blocking_count: Number(args.blockingCount || 0),
-    date: args.date || utcNow(),
-    reviewer: reviewer || null,
-    coverage: args.coverage ?? metadata.last_coverage ?? null,
-    self_reviewed: Boolean(reviewer && metadata.owner && reviewer === metadata.owner),
-    reviewed_sha: reviewedSha || null,
-    review_seq: Number(existing.review_seq || 0) + 1,
-  };
-  writeJson(track.metadata_path, metadata);
-  const gate = reviewGate(root, track.track_id);
-  return { ok: true, track_id: track.track_id, review: metadata.review, gate };
+  const gate = reviewGate(root, track.track_id, args);
+  return { ok: true, track_id: track.track_id, review: metadata.value.review, metadata, gate };
 }
 
 function syncControlPlane(root, args = {}) {
@@ -1818,49 +2337,160 @@ function syncControlPlane(root, args = {}) {
 }
 
 function testCoverage(root, args = {}) {
-  const coverageRun = runCoverage(root, args);
-  if (!coverageRun.available) return coverageRun;
-  const { command, result, coverage } = coverageRun;
-  let task_result = null;
+  let track = null;
+  let task = null;
+  let workingRoot = { repo: args.repo || ".", path: args.workingRoot ? path.resolve(root, args.workingRoot) : root, source: args.workingRoot ? "argument.workingRoot" : "project-root" };
   if (args.trackId) {
-    const track = findTrack(root, args.trackId);
+    track = findTrack(root, args.trackId);
     if (!track) {
-      return { ok: false, available: true, command, result, coverage, error: `Track not found: ${args.trackId}` };
+      return { ok: false, available: false, error: `Track not found: ${args.trackId}` };
     }
-    const metadata = { ...track.metadata };
-    metadata.last_test_run = {
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      const plan = parsePlanFile(track.plan_path);
+      const phase = (plan.phases || []).find((item) => item.phase_index === Number(args.phaseIndex));
+      task = phase && (phase.tasks || []).find((item) => item.task_index === Number(args.taskIndex));
+    }
+    workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+  }
+  const coverageRun = runCoverage(root, args, workingRoot.path);
+  if (!coverageRun.available) return coverageRun;
+  const { command, coverage } = coverageRun;
+  let task_result = null;
+  let metadata = null;
+  if (track) {
+    metadata = patchJsonFile(track.metadata_path, (current) => {
+      current.last_test_run = {
       command,
-      ok: result.ok,
-      status: result.status,
-      signal: result.signal,
+      cwd: coverageRun.cwd || workingRoot.path,
+      ok: coverageRun.ok,
+      status: coverageRun.status,
+      signal: coverageRun.signal,
       coverage,
       measured_at: utcNow(),
-    };
-    if (typeof coverage === "number") metadata.last_coverage = coverage;
-    writeJson(track.metadata_path, metadata);
-    if (args.phaseIndex && args.taskIndex) {
+      };
+      if (typeof coverage === "number") current.last_coverage = coverage;
+      return current;
+    });
+    if (!metadata.ok) {
+      return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
       task_result = recordTaskResult(root, {
         trackId: args.trackId,
         phaseIndex: args.phaseIndex,
         taskIndex: args.taskIndex,
-        status: args.status || (result.ok ? "completed" : "blocked"),
+        status: args.status || (coverageRun.ok ? "completed" : "blocked"),
         commitSha: args.commitSha,
         coverage,
+        repo: workingRoot.repo,
+        workingRoot: path.relative(root, workingRoot.path) || ".",
       });
     }
   }
   return {
+    ok: coverageRun.ok,
+    available: true,
+    command,
+    cwd: coverageRun.cwd,
+    status: coverageRun.status,
+    signal: coverageRun.signal,
+    coverage,
+    coverage_source: coverageRun.coverage_source,
+    timed_out: coverageRun.signal === "SIGTERM" || coverageRun.signal === "SIGKILL",
+    stdout_tail: coverageRun.stdout_tail,
+    stderr_tail: coverageRun.stderr_tail,
+    working_root: workingRoot,
+    metadata,
+    task_result,
+  };
+}
+
+function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
+  const explicit = args.machineCommand || args.machine_command || args.command;
+  if (explicit) return String(explicit);
+  const config = loadTopology(root).config || {};
+  for (const key of [
+    "review_machine_gate_command",
+    "machine_gate_command",
+    "review_check_command",
+    "typecheck_command",
+    "build_command",
+    "check_command",
+  ]) {
+    if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
+  }
+  const pkg = loadPackageJson(workingRoot);
+  if (pkg && pkg.scripts) {
+    for (const name of ["typecheck", "check", "build", "lint"]) {
+      if (pkg.scripts[name]) {
+        if (fileExists(path.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(path.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
+        return `npm run ${name}`;
+      }
+    }
+  }
+  return null;
+}
+
+function runMachineGate(root, args = {}, workingRoot = root) {
+  const command = configuredMachineGateCommand(root, args, workingRoot);
+  if (!command) {
+    return {
+      ok: true,
+      available: false,
+      reason: "No review machine-gate command configured or discovered",
+      hints: [
+        "Pass { machineCommand } explicitly",
+        "Set cadre/config.json review_machine_gate_command",
+        "Add a package script named typecheck, check, build, or lint",
+      ],
+    };
+  }
+  const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1000);
+  const result = runCommand(command, [], {
+    cwd: workingRoot,
+    shell: true,
+    timeoutMs,
+    maxBuffer: 30 * 1024 * 1024,
+  });
+  return {
     ok: result.ok,
     available: true,
     command,
+    cwd: workingRoot,
     status: result.status,
     signal: result.signal,
-    coverage,
-    coverage_source: coverageRun.coverage_source,
     timed_out: result.signal === "SIGTERM" || result.signal === "SIGKILL",
     stdout_tail: result.stdout.slice(-4000),
     stderr_tail: result.stderr.slice(-4000),
-    task_result,
+  };
+}
+
+function reviewMachineGate(root, args = {}) {
+  const trackId = args.trackId || args.track_id || null;
+  const track = trackId ? findTrack(root, trackId) : null;
+  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
+  const entries = track
+    ? repoEntriesForTrack(root, track, args)
+    : [{
+      repo: args.repo || ".",
+      root: args.workingRoot ? path.resolve(root, args.workingRoot) : root,
+      path: args.workingRoot || ".",
+      source: args.workingRoot ? "argument.workingRoot" : "project-root",
+    }];
+  const results = entries.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    source: entry.source,
+    ...runMachineGate(root, args, entry.root),
+  }));
+  const blocking = results.filter((result) => result.available && !result.ok);
+  return {
+    ok: blocking.length === 0,
+    available: results.some((result) => result.available),
+    track_id: trackId,
+    results,
+    blocking_count: blocking.length,
   };
 }
 
@@ -1992,9 +2622,18 @@ function reviewAssist(root, args = {}) {
   if (!trackId) return { ok: false, error: "trackId is required" };
   const context = trackContext(root, trackId);
   if (!context.ok) return context;
+  const track = findTrack(root, trackId);
   const base = args.base || "main";
   const head = args.head || context.track.git_branch || "HEAD";
-  const diff = diffSurface(root, base, head);
+  const repoEntries = track ? repoEntriesForTrack(root, track, args) : [];
+  const repoDiffs = repoEntries.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    cwd: entry.root,
+    source: entry.source,
+    ...diffSurface(entry.root, entry.base || base, entry.head || head),
+  }));
+  const diff = repoDiffs.find((entry) => entry.repo === ".") || diffSurface(root, base, head);
   const incompleteTasks = [];
   for (const phase of context.plan.phases || []) {
     for (const task of phase.tasks || []) {
@@ -2005,12 +2644,21 @@ function reviewAssist(root, args = {}) {
           task_key: task.task_key,
           title: task.title,
           marker: task.marker,
+          repo: task.repo || null,
         });
       }
     }
   }
-  const todos = scanReviewTodos(root, diff.files, Number(args.todoLimit || 100));
+  const todoLimit = Number(args.todoLimit || 100);
+  const repoTodos = repoDiffs.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    cwd: entry.cwd,
+    todos: scanReviewTodos(entry.cwd || root, entry.files, todoLimit),
+  }));
+  const todos = repoTodos.flatMap((entry) => entry.todos.map((todo) => ({ ...todo, repo: entry.repo }))).slice(0, todoLimit);
   const lsp = args.includeLsp === false ? null : lspReview(root, { base, head, config: args.config });
+  const machineGate = args.includeMachine === false ? null : reviewMachineGate(root, args);
   const blocking = [];
   if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
   if (todos.length > 0) blocking.push(`${todos.length} TODO/FIXME/stub marker(s) found in changed files`);
@@ -2018,6 +2666,9 @@ function reviewAssist(root, args = {}) {
   if (lsp && lsp.available !== false && Array.isArray(lsp.findings)) {
     const lspBlocking = lsp.findings.filter((finding) => finding.severity === "blocking" || finding.blocking === true);
     if (lspBlocking.length > 0) blocking.push(`${lspBlocking.length} blocking LSP/code-intelligence finding(s)`);
+  }
+  if (machineGate && machineGate.blocking_count > 0) {
+    blocking.push(`${machineGate.blocking_count} machine gate check(s) failed`);
   }
 
   return {
@@ -2027,11 +2678,14 @@ function reviewAssist(root, args = {}) {
     base,
     head,
     diff,
+    repo_diffs: repoDiffs,
     task_counts: context.task_counts,
     incomplete_tasks: incompleteTasks,
     coverage: context.track.last_coverage,
     todos,
+    repo_todos: repoTodos,
     lsp,
+    machine_gate: machineGate,
     suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
     blocking_reasons: blocking,
   };
@@ -2437,8 +3091,10 @@ module.exports = {
   loadTopology,
   lspImpact,
   lspReview,
+  metadataPatch,
   parsePlanFile,
   parsePlanText,
+  phaseSchedule,
   planClaims,
   planIntegrity,
   polyrepoPreflight,
@@ -2450,10 +3106,12 @@ module.exports = {
   repoMap,
   reviewAssist,
   reviewGate,
+  reviewMachineGate,
   setTrackStatus,
   syncControlPlane,
   teamBoard,
   teamStatus,
   testCoverage,
+  heartbeatTrack,
   trackContext,
 };

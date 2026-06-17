@@ -85,9 +85,10 @@ If there are no changes, report that and stop.
 
 **Start with the structured review evidence packet.** Call MCP
 `cadre_review_assist` with `root`, `trackId`, `base`, and `head`. It returns the
-diff surface, unfinished plan tasks, TODO/FIXME/stub scan, recorded coverage, and
-LSP findings when configured. Treat its `blocking_reasons[]` as the initial
-blocking-finding set, and use the packet to scope any subsequent diff reads.
+repo-aware diff surface (`repo_diffs[]` in polyrepo), unfinished plan tasks,
+TODO/FIXME/stub scan, recorded coverage, machine-gate evidence, and LSP findings
+when configured. Treat its `blocking_reasons[]` as the initial blocking-finding
+set, and use the packet to scope any subsequent diff reads.
 
 **Delegate the actual review to the `/code-review` skill** when it is available
 so findings match the project's review conventions. Invoke `/code-review`
@@ -106,15 +107,15 @@ that needs manual review.
 look outside the diff).** Run two automated passes and fold their results into the
 verdict — they catch regressions a diff-scoped reviewer cannot:
 
-1. **Typecheck / compile / build.** Run the project's declared typecheck/compile/build
-   command from `cadre/tech-stack.md` (or `cadre/workflow.md` if that's where the
-   build command lives) — e.g. `tsc --noEmit`, `cargo check`, `go build ./...`,
-   `mypy`, `mvn -q compile`. In **polyrepo**, run it per touched repo in its
-   submodule context. Each unresolved type/compile error is a **blocking** finding;
-   add the count to `blocking_count` (computed in §5) and list the errors in the
-   findings. **Degrade gracefully:** if no typecheck/compile/build command is
-   declared, skip this pass and note in the report that no machine typecheck was
-   available (do not fabricate a green result).
+1. **Typecheck / compile / build.** Use the `machine_gate` returned by
+   `cadre_review_assist`; if it was skipped or needs a different command, call MCP
+   `cadre_review_machine_gate` with `root`, `trackId`, and optional
+   `machineCommand`. In **polyrepo**, the tool runs per touched repo/worktree. Each
+   unresolved type/compile/build error is a **blocking** finding; add the count to
+   `blocking_count` (computed in §5) and list the relevant stderr/stdout tail in the
+   findings. **Degrade gracefully:** if no machine-gate command is declared or
+   discovered, note that no machine gate was available (do not fabricate a green
+   result).
 
 2. **Cross-track regression via code intelligence.** Call MCP
    `cadre_lsp_warm_review` with `root`, `base`, and `head` (`<git_branch>`). It
@@ -156,7 +157,8 @@ Call `cadre_record_review` with `root`, `trackId`, `verdict`, `blockingCount`,
 `reviewer`, and `coverage` (from `cadre_track_context.track.last_coverage` or
 the latest measured value). The tool writes `metadata.review`, increments
 `review_seq`, detects self-review, refuses to silently override another
-reviewer's open `changes_requested`, captures `reviewed_sha`, and immediately
+reviewer's open `changes_requested`, captures `reviewed_sha` plus
+`reviewed_shas` per repo in polyrepo, and immediately
 returns the `cadre_review_gate` result.
 
 If `cadre_record_review` returns `requires_override`, ask the user to confirm the
@@ -167,11 +169,12 @@ route changes before publishing.
 - `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
   or `"changes_requested"` for **Changes requested**.
 - `reviewed_sha` is the track branch's HEAD commit SHA captured here, at review time.
-  It pins the verdict to a specific commit: in `cadre-ship` / `cadre-land` the
+  In polyrepo, `reviewed_shas` pins each reviewed product repo. These pins tie the
+  verdict to specific commits: in `cadre-ship` / `cadre-land` the
   pre-push re-read compares the branch's **pre-rebase** tip against it, and if the
-  branch advanced past `reviewed_sha` the gate demands a re-review (the approval no
-  longer describes the code being shipped). In **polyrepo** the control-repo branch
-  HEAD is captured; per-repo advancement is observed by the merge train.
+  branch advanced past the reviewed pin the gate demands a re-review (the approval
+  no longer describes the code being shipped). In **polyrepo**, `headShas` are
+  compared against `reviewed_shas` per product repo.
 - `coverage` carries the measured number from `cadre-implement`'s coverage gate so
   the recorded verdict reflects a real measurement, not a self-asserted "tests pass".
   If a track was reviewed with `coverage: null`, note that coverage was never

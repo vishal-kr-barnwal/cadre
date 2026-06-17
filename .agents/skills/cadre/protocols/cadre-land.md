@@ -59,7 +59,7 @@ last** — once every sibling PR is approved and CI-green.
    monorepo and polyrepo and even where the advisory `lease` is a no-op.
 7. **Gate — reviewed?** Call `cadre_review_gate` with `root` and `trackId`. The
    machine-readable MCP review gate in **§1.5** is authoritative — do **not**
-   prompt here unconditionally. Missing review data and missing `reviewed_sha`
+   prompt here unconditionally. Missing review data and missing reviewed commit pins
    block by default. Only explicit override flags (`--allow-unreviewed` or
    `--allow-unpinned-review`) may bypass the matching reason, and the override
    must be logged to `learnings.md` and the Beads epic.
@@ -68,8 +68,7 @@ last** — once every sibling PR is approved and CI-green.
 
 Use the `cadre_review_gate` result and enforce it **before** any push/PR work:
 
-- **Any blocking MCP reason** (including absent review or missing
-  `reviewed_sha`) →
+- **Any blocking MCP reason** (including absent review or missing reviewed pins) →
   **REFUSE.** Print a clear message naming the verdict and blocking count, e.g.
   > "Track `<track_id>` has an unresolved review (verdict: changes_requested,
   > <n> blocking findings). Resolve them and re-run `cadre-review` before
@@ -77,7 +76,7 @@ Use the `cadre_review_gate` result and enforce it **before** any push/PR work:
 - **Explicit override flags** (`--allow-unreviewed`, `--allow-unpinned-review`) →
   only bypass the matching reason after an `OVERRIDE:` audit line and Beads note.
 - **`ok: true`** → proceed. Surface any MCP warnings (for example older reviews
-  without `reviewed_sha`) as non-blocking notes.
+  without reviewed commit pins) as non-blocking notes.
 
 ---
 
@@ -129,10 +128,9 @@ For each entry in `metadata.json.repos`:
    ```bash
    prerebase_tip=$(git -C <submodule_path> rev-parse track/<track_id>)
    # stash it per repo (prerebase_tip_<repo>) for the behind-base rebase guard below
-   # — NOT for §3 (§3 uses only the control tip below; reviewed_sha is
-   # control-repo-scoped, product-repo advancement is the merge train's concern).
-   # ALSO capture THIS control repo's track-branch tip (no -C) — this is what §3
-   # enforces reviewed_sha against:
+   # and for §3 headShas review-gate enforcement.
+   # ALSO capture THIS control repo's track-branch tip (no -C) for the scalar
+   # reviewed_sha compatibility check:
    #   prerebase_tip_control=$(git rev-parse track/<track_id>)
    ```
    If the track branch is **behind** base
@@ -192,20 +190,26 @@ continue to step 3.
 
 **Re-read the review gate first (TOCTOU close).** The MCP verdict checked in §1.5 is a
 point-in-time snapshot; the preflight + sync above can take a while, during which a
-reviewer may flip it. Call `cadre_review_gate` again immediately before the first
-push with `headSha: "$prerebase_tip_control"` and abort if it now blocks — do
-**not** open a partial group against a freshly-blocked track. The `headSha` check
-compares the control-repo pre-rebase tip to `metadata.review.reviewed_sha`; do not
-fan that scalar across product repos. Per-product-repo advancement is observed
-downstream by the merge train.
+reviewer may flip it. Capture the current pre-push tip of every product repo in
+`metadata.json.repos` (`headShas: { "<repo>": "<sha>" }`) plus the control repo
+scalar `headSha` when present, then call `cadre_review_gate` immediately before the
+first push. Abort if it now blocks — do **not** open a partial group against a
+freshly-blocked track. The gate compares `headShas` against
+`metadata.review.reviewed_shas`, so product-repo work that advanced after review
+requires re-review.
 ```bash
-# Call MCP: cadre_review_gate { "root": "<root>", "trackId": "<track_id>", "headSha": "$prerebase_tip_control" }
+# Call MCP: cadre_review_gate {
+#   "root": "<root>",
+#   "trackId": "<track_id>",
+#   "headSha": "$prerebase_tip_control",
+#   "headShas": { "api": "$api_tip", "web": "$web_tip" }
+# }
 # If ok=false, abort before push unless an explicit logged override applies.
 ```
-A missing `reviewed_sha` blocks by default through `cadre_review_gate`. Proceed
-only with the explicit `--allow-unpinned-review` override described above. Use
-the pre-rebase tip so the §2b rebase-onto-base offer cannot make a clean branch
-look advanced.
+A missing reviewed pin blocks by default through `cadre_review_gate`. Proceed only
+with the explicit `--allow-unpinned-review` override described above. Use
+pre-rebase/pre-push tips so the §2b rebase-onto-base offer cannot make a clean
+branch look advanced.
 
 For each entry in `metadata.json.repos` (and the control repo), make sure the
 `track/<track_id>` branch is on its remote so a PR can be opened from it. This is
