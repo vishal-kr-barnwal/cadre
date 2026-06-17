@@ -11,6 +11,19 @@ Marks the current (or specified) task as **blocked** (waiting on something exter
 or **skipped** (intentionally not done now). Both modes share the same flow — only
 the resulting status marker and Beads sync differ.
 
+## 0. Sync Preamble (shared mode)
+
+Before reading or resolving any track state, reconcile the control plane so the
+flag lands on top of teammates' latest work (and so the ownership guard sees the
+current owner/lease, not a stale local view):
+
+- **Shared sync mode** (`cadre/config.json` `sync_mode == "shared"`): run the sync
+  preamble (`references/cadre-sync.md`) — `git pull --rebase <control_remote>
+  <control_branch>` then `bd dolt pull` — before resolving the active track or
+  touching `plan.md`/`metadata.json`. This mirrors the postamble in step 6.5, so
+  flag reconciles before it mutates rather than after. In `local`/monorepo mode
+  there is nothing to pull; skip this step.
+
 ## 1. Determine Mode
 
 Parse `$ARGUMENTS` for the mode:

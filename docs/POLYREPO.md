@@ -229,7 +229,9 @@ task graph. **Product-repo code always stays local** until you land it.
 > an advisory `lease` object (`{ owner, host, acquired_at, heartbeat_at }`) so
 > teammates can see who is actively driving a track. It is **advisory only** —
 > nothing blocks on it — and is **swept** by `/cadre-validate` (a heartbeat
-> older than ~3h is cleared to `null`). Leases are **absent in monorepo and
+> older than the canonical staleness window — **30 minutes**, the single source
+> of truth in `ownership-guard.md` §5, shared with `/cadre-implement`'s take-over
+> reclaim — is cleared to `null`). Leases are **absent in monorepo and
 > `local` mode** (no-op there). `owner` and `reviewer` on `metadata.json` are
 > populated from the running git identity (`git config user.email`, falling back
 > to `user.name`), never a literal `"cadre"`.

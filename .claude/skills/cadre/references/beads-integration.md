@@ -75,6 +75,31 @@ cadre/tracks/auth_20250115/
 
 Beads state is stored in the Dolt database (not as files). Access via `bd show <epic_id>`.
 
+### Atomic claim via `bd sql` (compare-and-set)
+
+The ownership guard, `/cadre-implement`, and `/cadre-validate` claim a track
+**atomically** by a single conditional update against the Dolt task graph — the real
+serialization point in default monorepo mode (where the advisory `lease` is a no-op).
+`bd sql` (Dolt-backed, `bd` v0.50.0+) runs SQL against the `issues` table; the epic's
+`assignee` column is the claim/ownership key:
+
+```bash
+# Compare-and-set: claim the epic only if free, stale, or already yours.
+bd sql "UPDATE issues SET assignee='<git-identity>'
+        WHERE id='<beads_epic>'
+          AND (assignee IS NULL OR assignee=''
+               OR assignee='<git-identity>'          -- idempotent for the holder / handoff recipient
+               OR updated_at < datetime('now','-30 minutes'))"   -- staleness window: ownership-guard.md §5
+```
+
+Read **rows-affected**: `1` won the claim, `0` lost it (foreign-held). Mirror the
+winner into `metadata.json.owner` (key-scoped jq) as the human-readable copy and the
+no-`bd` fallback. **Verify the live schema at runtime** — `bd sql "SELECT * FROM
+issues LIMIT 1" --format json` confirms the column names (the last-updated timestamp
+column is `updated_at`; if a `bd` build differs, adjust the `WHERE` accordingly).
+This is the canonical grounding for the Beads-CAS referenced by
+`references/ownership-guard.md §4`, `/cadre-implement`, and `/cadre-validate`.
+
 ### Task ID Mapping
 
 The `metadata.json` contains a `beads_tasks` mapping that links plan tasks to Beads IDs:

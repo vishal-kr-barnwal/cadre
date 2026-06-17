@@ -6,6 +6,21 @@ description: Validate Cadre project integrity
 
 Validate the integrity of this Cadre project.
 
+## 0. Sync Preamble (shared mode only)
+
+Validate **mutates shared control-plane state** — it clears stale leases, stamps
+owners, registers the merge driver, and regenerates the index. Run against a stale
+local snapshot, those fixes both reconcile the wrong picture and stay local, so
+read `cadre/config.json` `sync_mode` first.
+
+- `sync_mode == "shared"` → run the **sync preamble** from `references/cadre-sync.md`
+  now (pull control plane with `git pull --rebase` + `bd dolt pull`) **before**
+  diagnosing anything in the sections below, so the lease sweep, owner checks, and
+  index-drift detection reconcile the *current* shared truth — not a stale local
+  copy. The matching **sync postamble** runs in step 7 after fixes are applied.
+- Absent or `sync_mode == "local"` → skip the preamble/postamble entirely (today's
+  behavior; nothing is pulled or pushed).
+
 ## 1. Core Files Check
 
 Verify these files exist in `cadre/`:
@@ -20,6 +35,13 @@ Enumerate tracks from the **source of truth** — each `cadre/tracks/*/metadata.
 — never from the derived `tracks.md` index. For each track directory:
 - Verify files: `metadata.json`, `spec.md`, `plan.md`
 - Validate metadata.json has: track_id, type, status, created_at
+
+> **Fan out the per-track detection.** Everything in sections 2–5c is **read-only,
+> per-track, and independent** (it inspects each track's own files and reports —
+> it never mutates state until step 7). With many tracks this loop SHOULD be fanned
+> out across tracks in parallel — inspect each track concurrently and collect the
+> findings — rather than walked strictly serially. Auto-fixes (step 7) and the sync
+> postamble stay sequential and single-writer; only the *detection* is parallel.
 
 ## 3. Orphan Detection
 
@@ -144,6 +166,32 @@ For each track whose `metadata.json` carries a non-null `lease` object
   key-scoped write — `jq '.lease = null' metadata.json` to a temp file then move
   into place — so a concurrent sibling write isn't clobbered. Never clear a lease
   whose heartbeat is fresh, and never clear a lease you cannot prove is stale.
+- **Re-read immediately before clearing (close the TOCTOU).** Detection above may
+  have run against a snapshot that the preamble's `git pull --rebase` (step 0) then
+  advanced — or a live owner may have heartbeated since. Just before you write
+  `lease = null`, **re-read `lease` from `metadata.json` on disk** and **re-check
+  the heartbeat age** against the **canonical 30-minute window** (see
+  `references/ownership-guard.md` §5 — the single source for this threshold). If the
+  re-read lease is now absent, or its `heartbeat_at` is now within the window (a
+  live worker refreshed it), **abort the clear** for that track and leave the lease
+  intact — never evict a freshly-heartbeated worker.
+- **Beads-CAS-aware clear.** When `BEADS_AVAILABLE` (see step 8 / `references/beads-integration.md`),
+  the lease's real serialization point is the shared Dolt DB, not the local file.
+  Release ownership atomically with a single conditional update keyed on the lease
+  still being stale, then read rows-affected:
+  ```bash
+  # Clear the epic's assignee/owner only if it is still the stale holder.
+  bd sql "UPDATE issues SET assignee = NULL
+          WHERE id = '<beads_epic>' AND assignee = '<lease.owner>'"
+  # rows-affected: 1 → you won the release; mirror lease=null into metadata.json.
+  #                0 → someone re-acquired it (re-assigned / heartbeated) → ABORT
+  #                    the clear, leave the lease, report it as still-held.
+  ```
+  On `1`, **then** mirror the cleared state to `metadata.json` with the key-scoped
+  `jq '.lease = null'` write above (Dolt is canonical; the file is its mirror). On
+  `0`, treat the track as foreign-held again and skip it. If `bd` is unavailable,
+  fall back to the local re-read-and-recheck path above (the file becomes the only
+  guard, exactly as in monorepo mode).
 
 ### 5c.2 Team invariants
 
@@ -166,7 +214,21 @@ For each track whose `metadata.json` carries a non-null `lease` object
    > metadata.json."
    Offer in step 7 to stamp the current `<git-identity>` as `owner` (key-scoped
    `jq '.owner = $id'`) — only when `<git-identity>` is non-null and the track is
-   genuinely unowned (never overwrite an existing real owner).
+   genuinely unowned (never overwrite an existing real owner). **Make the stamp
+   Beads-CAS-aware** when `BEADS_AVAILABLE`: claim the epic atomically with a single
+   conditional update against the Dolt DB, keyed on it still being unowned, then read
+   rows-affected:
+   ```bash
+   bd sql "UPDATE issues SET assignee = '<git-identity>'
+           WHERE id = '<beads_epic>' AND (assignee IS NULL OR assignee = '' OR assignee = 'cadre')"
+   # rows-affected: 1 → you won the claim; mirror owner into metadata.json (jq '.owner = $id').
+   #                0 → a real owner already holds it → do NOT overwrite; leave the
+   #                    metadata.json stamp unwritten and report it as owned.
+   ```
+   On `1`, mirror `owner` to `metadata.json` with the key-scoped `jq` write above; on
+   `0`, skip the stamp (a teammate claimed it first). If `bd` is unavailable, fall
+   back to the local key-scoped `jq` stamp (file is the only guard, as in monorepo
+   mode).
 
 (c) **`ours` merge driver registered.** Runs whenever `.beads/** merge=ours` is
    present in `.gitattributes` (every full-Beads project — monorepo + polyrepo,
@@ -235,6 +297,17 @@ Offer to fix auto-fixable issues:
 All metadata fixes use **key-scoped `jq` writes to a temp file then move into
 place** (e.g. `jq '.lease = null'`, `jq '.owner = $id'`) — never a full-file
 rewrite — so concurrent sibling writes in shared mode aren't clobbered.
+
+**Sync postamble (shared mode only).** Once the chosen fixes are applied, publish
+the reconciled control plane rather than leaving the repairs local. When
+`sync_mode == "shared"` (resolved in step 0), run the **sync postamble** from
+`references/cadre-sync.md`: commit the `cadre/` changes (lease clears, owner
+stamps, regenerated index, repaired state files), make the `bd dolt push`
+**mandatory** (Dolt is the canonical shared task graph — the lease/owner CAS
+writes above live there), then `git push` the control plane; on push rejection,
+re-run the preamble (pull --rebase + dolt pull) and push again. In absent/`local`
+mode, skip the postamble — fixes stay local as today. Product-repo CODE is never
+pushed here; only the control plane is published.
 
 ---
 

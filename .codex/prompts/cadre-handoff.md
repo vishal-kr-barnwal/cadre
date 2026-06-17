@@ -12,8 +12,10 @@ Pass arguments through `$ARGUMENTS`.
 If `$ARGUMENTS` contains `--for-teammate`, run the **Teammate Handoff** flow in
 section 10 — a goal-first prose handoff for another human/agent. It writes that
 prose INTO the track's rolling `cadre/tracks/<track_id>/HANDOFF.md`, REPLACING the
-machine dump (it skips the §4 / §9 machine-dump sections for that write). There is
-no second file. Otherwise produce the default rolling handoff (sections 1-9), which
+machine dump (it skips the §4 / §9 machine-dump sections for that write), AND
+routes the work to the named recipient (Beads assignee + `handoff:pending` label +
+`bd mail` notification — see §10). There is no second file. Otherwise produce the
+default rolling handoff (sections 1-9), which
 writes the track's rolling `cadre/tracks/<track_id>/HANDOFF.md` with a trimmed
 `git log -3` and the `owner` / `last_updated` fields.
 
@@ -236,9 +238,11 @@ Display:
    ```bash
    bd dolt push  # Ensures changes reach remote immediately
    ```
-   - **Polyrepo + `sync_mode: "shared"`:** also push the control plane
-     (`git push <control_remote> <control_branch>`) so a teammate can pick up the
-     handoff — see `references/cadre-sync.md`. Product code stays local.
+   - **`sync_mode: "shared"` (monorepo OR polyrepo):** also run the sync
+     postamble (see `references/cadre-sync.md`) — commit the `cadre/` changes,
+     make the `bd dolt push` mandatory, and `git push <control_remote>
+     <control_branch>` — so a teammate can pick up the handoff. This is gated on
+     `sync_mode == "shared"` alone, not on topology. Product code stays local.
 
 **Benefit:** Beads notes survive context compaction, enabling seamless session resume.
 
@@ -248,7 +252,8 @@ Display:
 
 **Run only when `$ARGUMENTS` contains `--for-teammate`.** Produces a goal-first,
 prose handoff aimed at another human or agent picking up the track — derived from
-`spec.md`, not from raw machine dumps. It writes this prose INTO the single rolling
+`spec.md`, not from raw machine dumps — AND routes the track to that recipient so
+it actually lands in their queue. It writes this prose INTO the single rolling
 `cadre/tracks/<track_id>/HANDOFF.md`, REPLACING the machine dump for that write — skip the §4 /
 §9 machine-dump sections. There is no second file; this is the same
 `cadre/tracks/<track_id>/HANDOFF.md` the default flow maintains, just with goal-first prose
@@ -257,8 +262,13 @@ instead of the machine content.
 1. **Read the spec:** Load `cadre/tracks/<track_id>/spec.md`. The handoff is
    written from the track's GOAL outward, not from the git history.
 
-2. **Compute identity & timestamp:** `<git-identity>` = `git config user.email`
-   (fallback `git config user.name`, else null); current `<ISO-8601>` timestamp.
+2. **Compute identities & timestamp:** `<git-identity>` (the handoff author) =
+   `git config user.email` (fallback `git config user.name`, else null); current
+   `<ISO-8601>` timestamp. Also resolve the **recipient** from the value after
+   `--for-teammate` in `$ARGUMENTS` (e.g. `--for-teammate alice@example.com` or
+   `--for-teammate "Alice"`) — `<recipient-identity>` is that git email/name. If no
+   recipient is given, write the prose handoff but SKIP the routing in step 3a
+   (warn that no recipient was named, so nothing was assigned/notified).
 
 3. **Write prose handoff** to `cadre/tracks/<track_id>/HANDOFF.md` (overwrite in place,
    REPLACING the machine dump — do NOT run the §4 / §9 machine-dump sections for
@@ -276,10 +286,52 @@ instead of the machine content.
    - **Run/test:** the literal line `Run/test: see workflow.md` (point the teammate
      at `cadre/workflow.md` rather than inlining commands).
 
+3a. **Route the work to the recipient (Beads):** the prose in step 3 only
+   *describes* the handoff — this step makes the track actually land in the
+   recipient's queue. Run the standard Beads availability check (see
+   `references/beads-integration.md`); if `BEADS_AVAILABLE=false`, skip this step
+   silently and tell the user the prose handoff was written but the track could not
+   be auto-routed (no Beads). When Beads is available, for the resolved epic
+   (`cadre-<track_id>` / the `beads_epic` in `metadata.json`):
+   - **Set the ASSIGNEE + `handoff:pending` label — never the owner.** Ownership
+     intentionally stays with the author until the recipient picks the track up, so
+     `/cadre-status` Team View groups the pending handoff by `assignee` (the `owner` is
+     deliberately unchanged). The recipient is **not** locked out: the Ownership Guard
+     recognizes "epic `assignee` == you (with `handoff:pending`)" as a pending handoff
+     addressed to you and lets you claim cleanly — ownership transfers to you at
+     pickup, and `/cadre-implement` clears the `handoff:pending` label then (see
+     `references/ownership-guard.md §3` "handoff addressed to you" and the Beads-CAS
+     self-claim clause `OR assignee='<git-identity>'` in §4, which avoids the
+     30-minute lockout):
+     ```bash
+     bd update <epic_id> --assignee "<recipient-identity>" \
+       --label handoff:pending --json
+     ```
+     (If `--label` is not combinable with `--assignee` in one call, run
+     `bd label add <epic_id> handoff:pending --json` separately.) Do **not** touch
+     `metadata.json` `owner` here — it transfers on pickup, not at handoff.
+   - **Notify the recipient** via the existing Beads mail (see the Messaging
+     Integration section of `references/beads-integration.md`):
+     ```bash
+     bd mail send "<recipient-identity>" \
+       -s "Handoff: <track_id>" \
+       -m "Track <track_id> handed off to you by <git-identity>.
+     Read cadre/tracks/<track_id>/HANDOFF.md (goal-first prose) to start.
+     Assigned to you with label handoff:pending." --json
+     ```
+   - If any `bd` command fails, follow the Beads Error Handler Protocol (see
+     `references/beads-error-handler.md`) — the prose handoff stands either way.
+   - In `sync_mode: "shared"`, run the sync postamble (see
+     `references/cadre-sync.md`) so the assignee/label/mail reach the recipient's
+     control plane; `bd dolt push` is mandatory there. Product code stays local.
+
 4. **SUPPRESS machine dumps:** in `--for-teammate` mode do NOT include raw
    `bd show` output, `git log`, or parallel-worker JSON, and skip the §4 / §9
    machine-dump sections entirely. The teammate handoff is goal-first prose only,
    written into the single rolling `cadre/tracks/<track_id>/HANDOFF.md`.
 
-5. **Present:** show the `cadre/tracks/<track_id>/HANDOFF.md` location and note that it is a
-   teammate-oriented handoff.
+5. **Present:** show the `cadre/tracks/<track_id>/HANDOFF.md` location, note that it is a
+   teammate-oriented handoff, and report the routing outcome — that the epic was
+   assigned to `<recipient-identity>` with the `handoff:pending` label and that the
+   recipient was notified by `bd mail` (or that routing was skipped because no
+   recipient was named / Beads was unavailable).
