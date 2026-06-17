@@ -1,6 +1,6 @@
 ---
 description: Display current Cadre project progress (add --export to write a summary)
-argument-hint: [--export | --team | --mine | --repos | --regen-index]
+argument-hint: [--export | --team | --mine | --repos | --collisions | --regen-index]
 ---
 
 # Cadre Status
@@ -25,6 +25,9 @@ behavior is unchanged):
 - `--available` (alias `--unowned`) → run the **Available Work** board in section 13:
   the unblocked, unowned work a teammate can pick up. Like `--team`, it performs the
   full multi-track scan.
+- `--collisions` → run the **File Collisions** board in section 14: cross-track
+  `(repo, file)` overlaps mined from every active track's plan `<!-- files: -->`
+  annotations. Like `--team`, it performs the full multi-track scan.
 - otherwise → show the live status (sections 1-8) and, in polyrepo mode, the PR
   group / merge-train surface in section 5c.
 
@@ -33,9 +36,10 @@ behavior is unchanged):
 the active owner, resolve `--mine`, and group team WIP.
 
 **Cheap by default:** the full multi-track filesystem scan of every
-`cadre/tracks/<id>/metadata.json` (for ownership, leases, and review state) runs
-**only** under `--team`, `--mine`, or `--repos`. Bare `/cadre-status` reads only
-`tracks.md` + the active track, exactly as before.
+`cadre/tracks/<id>/metadata.json` (for ownership, leases, review state, and plan
+`<!-- files: -->` claims) runs **only** under the multi-track modes — `--team`,
+`--mine`, `--repos`, `--available`/`--unowned`, or `--collisions`. Bare
+`/cadre-status` reads only `tracks.md` + the active track, exactly as before.
 
 **Status source of truth:** each track's `metadata.json.status`
 (`new`|`in_progress`|`completed`|`blocked`|`skipped`) is authoritative. `tracks.md`
@@ -339,6 +343,20 @@ source is missing, omit that sub-section silently.
      non-null `lease`. Group by `metadata.json.owner` (fallback `assignee`).
    - For `--mine`, filter both sources to `<git-identity>` (owner/assignee match).
 
+1a. **Gather incoming handoffs.** A track that was routed by
+   `/cadre-handoff --for-teammate` lands in its *recipient's* queue via the epic's
+   `assignee` + the Beads label `handoff:pending` (the `owner` is intentionally left
+   on the author, so this is invisible to an owner-only scan). Surface it so the
+   recipient actually sees the work waiting for them:
+   - **Beads (preferred):** when `bd` is available,
+     `bd list --label handoff:pending --json`; group entries by `assignee` (the
+     recipient). Each entry's epic id maps back to its track (`cadre-<track_id>` /
+     the `beads_epic` in `metadata.json`).
+   - For `--mine`, filter to epics whose `assignee` equals `<git-identity>` — these
+     are handoffs waiting for **you** to pick up.
+   - If `bd` is unavailable, omit this sub-section silently (the `handoff:pending`
+     routing is Beads-only).
+
 2. **Gather the Review Queue.** A track is in the review queue when **any** of:
    - `metadata.json.review.verdict == "changes_requested"` **or**
      `metadata.json.review.blocking_count > 0`  → **Changes requested**; or
@@ -369,6 +387,10 @@ source is missing, omit that sub-section silently.
    **@bob**
    - [~] billing_20260616 — Billing (1/8, 12%)
 
+   ### Incoming Handoffs (by recipient)
+   **@carol**
+   - ⇢ search_20260614 — Search (handoff:pending) — from @alice → /cadre-implement search_20260614
+
    ### Review Queue
    - 🔴 auth_20260615 — changes requested (2 blocking) — rev:@bob
    - 🟢 search_20260614 — ready to ship (review:ready) — rev:@carol
@@ -382,6 +404,11 @@ source is missing, omit that sub-section silently.
    - For shared-mode leases, show the `lease.owner` / `lease.host` and a relative
      age from `lease.heartbeat_at`; in monorepo/local mode there are no leases, so
      omit that annotation.
+   - Under **Incoming Handoffs**, show the recipient (the epic `assignee`) and the
+     handoff author when known (from the epic notes / `bd mail`), plus a ready-to-run
+     `/cadre-implement <track_id>` to claim it. In `--mine` this section lists the
+     handoffs assigned to **you** — so the recipient of a handoff finally sees the
+     waiting work without grepping `tracks.md`.
    - If a sub-section has no entries, print `— none —` under its heading.
 
 ---
@@ -396,12 +423,23 @@ Everything here degrades silently if a remote/`gh` is unavailable.
 1. **Enumerate submodules.** Read `repos.json`; for each enabled repo resolve its
    `<submodule_path>`.
 
-2. **List in-flight track branches per repo.**
+   > **Fan out per repo (parallel).** Steps 2 and 4 below are **read-only and
+   > independent per repo** — each only fetches and inspects its own
+   > `<submodule_path>` and never mutates shared state — so they SHOULD be fanned
+   > out **one worker per repo in parallel** (rather than a serial loop) and the
+   > per-repo results joined before presenting. The `git fetch` round-trips dominate
+   > the runtime, so parallel fan-out cuts the fleet scan from O(repos) network waits
+   > to roughly one. If this environment has no parallel sub-agent primitive, fall
+   > back to the serial loop — the per-repo output is identical either way.
+
+2. **List in-flight track branches per repo** (run per repo, in parallel — see the
+   fan-out note above).
    - `git -C <submodule_path> fetch --quiet origin` (skip silently on failure).
    - `git -C <submodule_path> for-each-ref --format='%(refname:short) %(committerdate:relative)' refs/remotes/origin/track/*`
      to list every in-flight `track/<id>` branch on that repo's remote.
 
-3. **Flag repo-level overlap.** Build a map of `<track_id> → [repos]`. If two or
+3. **Flag repo-level overlap.** After the per-repo workers join, build a map of
+   `<track_id> → [repos]` from their combined results. If two or
    more **different** track IDs have live `track/*` branches in the **same** repo,
    flag that repo as contended (multiple tracks touching it concurrently).
 
@@ -541,3 +579,60 @@ Like `--team`, this performs the full multi-track scan and degrades gracefully.
 
    - If nothing is available, print `No unblocked, unowned work right now — every
      incomplete track is owned or dependency-blocked. See /cadre-status --team.`
+
+---
+
+## 14. FILE COLLISIONS (`--collisions`)
+
+**Run only when `$ARGUMENTS` contains `--collisions`.** The "is anyone else about
+to touch the same file as me?" board — it mines every **active** track's plan
+`<!-- files: ... -->` annotations and reports cross-track `(repo, file)` overlaps
+**before** they collide at merge time. The `<!-- files: path1, path2 -->`
+annotation is a first-class plan artifact emitted for **every** task in `plan.md`
+(not only parallel phases), so this scan sees the whole fleet's file footprint.
+Like `--team`, this performs the full multi-track scan and degrades gracefully.
+
+1. **Select active tracks.** A track is **active** when its
+   `metadata.json.status` is `in_progress` or `blocked` (markers `[~]` / `[!]`) —
+   i.e. someone is mid-flight on it. Skip `new`, `completed`, and `skipped` tracks
+   (a `new` track owns no files yet; finished/abandoned ones no longer contend).
+
+2. **Mine the file claims.** For each active track, parse its
+   `cadre/tracks/<track_id>/plan.md` and collect every task's
+   `<!-- files: ... -->` annotation, splitting on commas and trimming whitespace.
+   Build a claim list of `(track_id, repo, file)` tuples:
+   - **Resolve the repo per task.** In **polyrepo** mode a task is annotated with
+     `<!-- repo: <name> -->` (default repo from `repos.json` when absent); use that
+     as `<repo>`. In **monorepo** mode there is one repo — use a constant sentinel
+     `<repo> = "."` so the tuple shape is uniform.
+   - Compare on the **`(repo, file)` tuple**, never the bare path — the same path in
+     two different submodule repos is **not** a collision in polyrepo mode.
+
+3. **Find cross-track overlaps.** Group the claims by `(repo, file)`. A
+   **collision** is any `(repo, file)` tuple claimed by tasks in **two or more
+   different active tracks** (same file claimed twice *within one track* is normal
+   sequencing, not a collision — ignore it). For each colliding tuple, record the
+   set of contending track IDs (and, when known, each track's `owner` for a
+   "coordinate with @whom" hint).
+
+4. **Present** (one row per colliding `(repo, file)`, sorted by repo then file):
+
+   ```
+   ## Cadre — File Collisions (active tracks)
+
+   | Repo | File | Contending tracks |
+   |------|------|-------------------|
+   | api  | src/auth/session.ts | auth_20260615 (@alice), billing_20260616 (@bob) |
+   | .    | README.md           | docs_20260617 (@carol), search_20260614 (@alice) |
+
+   ⚠️ 2 file collisions across 4 active tracks — coordinate before both land.
+   ```
+
+   - In monorepo mode the `Repo` column shows the `.` sentinel; you MAY collapse it
+     to a single-column `File` table since there is only one repo.
+   - If no `(repo, file)` tuple is claimed by more than one active track, print
+     `No cross-track file collisions among active tracks.`
+   - If active tracks exist but **none** carry `<!-- files: -->` annotations (e.g.
+     legacy plans created before the annotation was first-class), print
+     `No <!-- files: --> annotations found on active tracks — cannot compute
+     collisions.` so the empty result isn't mistaken for "all clear".

@@ -75,11 +75,60 @@ Implement track: $ARGUMENTS
      track. This is what prevents the **default monorepo** collision where two
      people both pick the same next track — the advisory `lease` is a no-op there,
      so the guard relies on `metadata.json.owner` + `implement_state.json` instead.
-   - **Claim immediately** so a second picker hits the guard: stamp
-     `owner = <git-identity>` on `metadata.json` (key-scoped jq) and create
-     `implement_state.json` now (status `starting`, `owner`, `last_updated`) — before
-     doing any work. If the guard reported the track foreign-held and the user chose
-     **Stop**, return to track selection.
+   - **Atomic claim (Beads-CAS — preferred when `beads_enabled`):** the real
+     serialization point in the **default monorepo** mode (where the advisory `lease`
+     is a no-op) is a single conditional write against the shared Dolt task graph, so
+     two pickers can't both win. Read the track's `beads_epic` from `metadata.json`,
+     then attempt one compare-and-set that claims the epic only if it is unheld or
+     stale (staleness window per `references/ownership-guard.md §5`):
+     ```bash
+     bd sql "UPDATE issues SET assignee='<git-identity>'
+             WHERE id='<beads_epic>'
+               AND (assignee IS NULL OR assignee=''
+                    OR assignee='<git-identity>'
+                    OR updated_at < datetime('now','-30 minutes'))"
+     ```
+     Read **rows-affected**: `1` → **you won** the claim; `0` → someone else already
+     holds it → treat as **foreign-held** (offer take-over / pick-another per the
+     guard). On a win, **mirror** the owner into `metadata.json` via key-scoped jq
+     (`jq --arg o "<git-identity>" '.owner = $o'`) so the file mirrors Beads. The
+     `OR assignee='<git-identity>'` clause keeps the claim idempotent for the rightful
+     holder — re-running on your own track, or picking up a track **handed off to you**
+     (assignee == you; see `references/ownership-guard.md §3`), wins cleanly instead of
+     locking you out for the staleness window. On a handoff pickup, also clear the
+     label (`bd label rm <beads_epic> handoff:pending --json`). Ground the exact `bd`
+     interface in `references/beads-integration.md`.
+   - **Fallback (no `bd`, or `bd` unavailable):** use today's read-decide-write —
+     stamp `owner = <git-identity>` on `metadata.json` (key-scoped jq), then rely on
+     the control-plane `git push --rebase` round-trip (shared mode) / the Ownership
+     Guard (monorepo) to detect a racing claim. A push rejection means a sibling won;
+     re-read ownership and treat as foreign-held.
+   - **Claim immediately** so a second picker hits the guard: after the claim above,
+     create `implement_state.json` now (status `starting`, `owner`, `last_updated`) —
+     before doing any work. If the guard (or a lost CAS) reported the track
+     foreign-held and the user chose **Stop**, return to track selection.
+
+3b-1. **Cross-track file-collision check at selection (both topologies):**
+   - `<!-- files: path1, path2 -->` is now a first-class plan artifact emitted by
+     `/cadre-newtrack` for **every** task (not only parallel phases), so the selected
+     track's full file footprint is known up front. Before starting work, warn if it
+     overlaps another **active** track's footprint.
+   - **Reuse the validate overlap algorithm (`/cadre-validate` §5c.2(a)) — do not
+     invent a new one.** Collect every **other** track whose `metadata.json.status`
+     is `"in_progress"` (source of truth, not the derived `tracks.md`). For each,
+     gather its tasks' `<!-- files: -->` globs from `plan.md`. Compare against this
+     track's claimed files:
+     - **POLYREPO:** compare `(repo, file)` tuples (resolve each task's
+       `<!-- repo: -->`, absent → `default_repo`) — the same relative path in two
+       different repos is **not** a collision.
+     - **MONOREPO:** compare bare `file` paths.
+   - If any `(repo,file)` is claimed by both the selected track and a different active
+     track with a **different** `owner` (fall back to Beads `assignee`):
+     > "⚠️ Track `<other_track>` (owner `<owner>`) is also editing <file(s)>.
+     > A) Proceed anyway  B) Pick a different track  C) Stop"
+     - A: proceed. B: return to step 2. C: HALT.
+   - Same-owner overlap (your own sequential work) is **not** flagged. In
+     `local`/monorepo mode with no other active tracks, this is a silent no-op.
 
 4. **Check Dependencies:**
    - Read `cadre/tracks/<track_id>/metadata.json`
@@ -269,9 +318,17 @@ Implement track: $ARGUMENTS
      > "ℹ️ <lease.owner> last touched this track at <heartbeat_at> (stale).
      > Take over the lease? A) Yes  B) Pick another track  C) Cancel"
      - If A: overwrite `lease`. If B: return to step 2. If C: HALT.
-   - **Refresh the lease heartbeat on every state write** (steps ii/iii) while this
-     track is active. In `local`/monorepo mode, skip all lease logic entirely
-     (`lease` stays null/absent).
+   - **Heartbeat is a periodic write, decoupled from state writes.** Refresh the
+     lease `heartbeat_at` on every state write (steps ii/iii) **and** independently on
+     a timer well inside the canonical staleness window (`references/ownership-guard.md
+     §5`) — e.g. roughly every third of the window — so a long quiet build or a
+     slow-running test suite (no state write for many minutes) does **not** let the
+     heartbeat age past the window and get the worker swept by `/cadre-validate` or
+     stolen by a teammate. The heartbeat write is a standalone key-scoped jq bump of
+     `lease.heartbeat_at` (and the Beads-CAS claim's `assignee`/`updated_at`, when
+     `beads_enabled`); it does not require any `implement_state.json` change. In
+     `local`/monorepo mode, skip all lease logic entirely (`lease` stays
+     null/absent).
 
 5. **Determine Execution Mode and Execute Phases/Tasks:**
 
@@ -345,25 +402,48 @@ Implement track: $ARGUMENTS
                COMMIT: <sha>
                FILES: <list changed>
                PATTERNS: <any reusable patterns found>' --json
-            6. bd close <beads_task_id> --continue --reason 'Task completed' --json
-               (--continue auto-advances dependent tasks in the Beads graph)
-            7. Update parallel_state.json: set your worker entry status='completed', commit_sha=<sha>
-               (audit log only — do NOT run bd dolt push)
+            6. Do NOT close your own Beads task. Leave it OPEN — the coordinator
+               closes it (`bd close --continue`) ONLY after your branch merges cleanly
+               back into the track branch (references/parallel-execution.md §6).
+               Closing here would auto-advance your dependents BEFORE merge-back, so a
+               merge-back conflict could not hold them — defeating the dependency gate.
+            7. Update parallel_state.json: set your worker entry status='awaiting_merge',
+               commit_sha=<sha> (audit log only — do NOT run bd dolt push). The
+               coordinator transitions it to 'merged' (clean) or 'conflict' at
+               merge-back.
 
             ## Success Criteria
             - All tests pass, coverage >80%
             - Commit created with proper message
-            - Beads task closed with structured note
-            - parallel_state.json updated (audit log)
+            - Structured completion note added (`bd note`); task left OPEN for the
+              coordinator to close at clean merge-back
+            - parallel_state.json updated to status='awaiting_merge' (audit log)
         ```
 
       After the coordinator mechanics in `references/parallel-execution.md` finish
       merging the wave and the phase is done:
-      - Update `plan.md`: mark all parallel tasks `[x]`, append commit SHAs
-      - Delete `parallel_state.json`
-      - Check phase graph: are there other ready phases to process?
-        - If yes: Go back to step 5a2 to process next ready phase(s)
-        - If no more phases: Proceed to step 6 (Finalize Track)
+      - The merge-back in `references/parallel-execution.md` is **fault-isolating**:
+        a worker whose branch hits a merge conflict is set aside (its
+        `parallel_state.json` `status` becomes `conflict`, its worktree + branch are
+        **retained**, and its Beads task is **not** closed) instead of HALTing the
+        whole wave. Do **not** restate that mechanism here — it is owned by
+        `references/parallel-execution.md`.
+      - **Dependency-gated dispatch (interplay):** when computing the next wave, a
+        task whose dependency's worker is in `conflict` status **MUST NOT** be
+        dispatched — its dependency's Beads task is still open, so `bd ready` will not
+        surface it (and you must not force it). It only becomes dispatchable after a
+        human resolves that worker's retained worktree and the coordinator merges +
+        closes it. Surface any retained `conflict` workers to the user before
+        continuing.
+      - Only when **no** worker is left in `conflict`:
+        - Update `plan.md`: mark all merged parallel tasks `[x]`, append commit SHAs
+          (a `conflict` task stays unmarked until its worktree is resolved + merged)
+        - Delete `parallel_state.json`
+        - Check phase graph: are there other ready phases to process?
+          - If yes: Go back to step 5a2 to process next ready phase(s)
+          - If no more phases: Proceed to step 6 (Finalize Track)
+      - If any `conflict` workers remain, hand control back to the user to resolve
+        them (their worktrees + branches are intact); resume merge-back once resolved.
 
    d. **SEQUENTIAL EXECUTION FLOW:**
    
@@ -442,11 +522,13 @@ Implement track: $ARGUMENTS
           bd dolt push
           ```
           - **If any command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-        - **Control-plane sync (polyrepo + `sync_mode: "shared"` only):** after the
-          phase checkpoint commit to `cadre/`, run the sync postamble in
+        - **Control-plane sync (`sync_mode: "shared"` — both topologies):** after
+          the phase checkpoint commit to `cadre/`, run the sync postamble in
           `references/cadre-sync.md` — `bd dolt push` is **mandatory** here (not
-          optional), then `git push <control_remote> <control_branch>`. **Product
-          code is never pushed** at phase completion. In `local`/monorepo mode,
+          optional), then `git push <control_remote> <control_branch>`. This gates on
+          `config.json` `sync_mode == "shared"` **regardless of topology** (monorepo
+          or polyrepo): the control plane is shared orchestration state, never code.
+          **Product code is never pushed** at phase completion. In `local` mode,
           commits stay local as today.
         - **Check phase graph for next ready phases:**
           - If other phases now have all dependencies met → Go back to step 5a2

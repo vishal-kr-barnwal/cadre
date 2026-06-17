@@ -32,9 +32,12 @@ optimization.
 - **One worktree per worker.** Workers only read/write inside their assigned
   `.worktrees/<track_id>_worker_<N>_<name>/`. Never let two workers share files.
 - **Beads is the coordinator, not `parallel_state.json`.** Pre-assign each wave's
-  tasks (`bd update … --status in_progress --assignee …`) before dispatch; each
-  worker closes its task with `bd close … --continue` so dependent tasks become
-  ready for the next wave. `parallel_state.json` is an audit log only.
+  tasks (`bd update … --status in_progress --assignee …`) before dispatch. A task's
+  dependents are released only on **clean integration**: the coordinator runs
+  `bd close … --continue` when that worker's branch **merges cleanly** in §6, which
+  marks dependent tasks ready for a later wave. A worker whose merge conflicts is
+  left un-closed (its status is `conflict`), so its dependents stay blocked until a
+  human resolves it. `parallel_state.json` is an audit log only.
 - **Wait for the whole wave** before computing the next wave with
   `bd ready --parent <epic_id> --json`.
 - **Workers never `git push`.** All commits stay local; the coordinator merges
@@ -115,6 +118,17 @@ phase.)
 
 ### 4. Dispatch the wave's workers
 
+**Dependency gate (clean-integration only).** A downstream task may be dispatched
+in a wave **only when every task it `depends:` on has reached `merged` state** —
+i.e. that dependency's branch merged cleanly into the track branch and its Beads
+task was closed via `bd close --continue`. A dependency left in `conflict` (its
+merge-back hit a conflict and was set aside per §6) does **not** count as
+satisfied: because its Beads task is never closed, `bd ready --parent` will not
+surface its dependents, so they stay blocked until a human resolves that worker's
+worktree conflict and the coordinator merges it. Unrelated tasks (those that do
+not transitively depend on a set-aside worker) are never blocked by it and
+dispatch normally.
+
 - **If Beads enabled:** pre-assign this wave's tasks before dispatch. The assignee
   is the **worker label** for this wave (`worker_<N>_<name>`) — never the literal
   "cadre":
@@ -141,6 +155,18 @@ phase.)
     "started_at": "<timestamp>"
   }
   ```
+  The per-worker `status` is one of **`in_progress` | `awaiting_merge` | `merged` | `conflict`**:
+  - `in_progress` — dispatched, still running (not yet finished).
+  - `awaiting_merge` — the worker finished its task cleanly (committed + `bd note`d)
+    and is waiting for the coordinator to merge its branch back. The worker does
+    **not** close its own Beads task (closing there would release dependents before
+    merge-back — see §6); it leaves the task open and records `commit_sha`.
+  - `merged` — the coordinator merged its branch cleanly into the track branch and
+    closed its Beads task via `bd close --continue` (clean integration; dependents may
+    now proceed).
+  - `conflict` — its merge-back hit a conflict; its worktree + branch are
+    **retained** (never `worktree remove`d) and its Beads task is **not** closed
+    until a human resolves it (so it does not release dependents — see §6).
 
 ### 5. Monitor the wave (wave model, not polling)
 
@@ -151,44 +177,98 @@ phase.)
   ```bash
   bd ready --parent <epic_id> --json
   ```
-  Any newly ready tasks (whose `depends_on` workers just closed via `--continue`)
-  form the next wave — repeat from step 4.
-- **Worker failure:** if a worker reports an error, or its `parallel_state` entry
-  is still `in_progress` after it finishes:
+  Any newly ready tasks (whose `depends_on` workers just reached `merged` and
+  closed via `--continue`) form the next wave — repeat from step 4.
+- **Conflict-set-aside workers gate their dependents.** A worker left in `conflict`
+  (its merge-back hit a conflict, §6) keeps its Beads task open, so `bd ready
+  --parent` will **not** surface any task that transitively depends on it — those
+  dependents stay blocked across waves until a human resolves the retained worktree
+  and the coordinator merges it + `bd close --continue`s it (flipping its status to
+  `merged`). At that point its dependents become ready and dispatch in a
+  **subsequent** wave. Tasks that do not depend on the conflicting worker are
+  unaffected and keep flowing through waves normally.
+- **Worker failure** (runtime error during the worker's own run — distinct from a
+  merge-back conflict, which §6 handles by setting the worker aside as `conflict`):
+  if a worker reports an error, or its `parallel_state` entry is still
+  `in_progress` after it finishes (a worker that completed cleanly leaves
+  `awaiting_merge`, so a still-`in_progress` entry after the wait means it died
+  before finishing):
   - Announce: "Worker <worker_id> failed: <error>"
   - **If Beads enabled:** reset for retry —
     `bd update <beads_task_id> --assignee "" --status open --json`
   - Ask the user: "Retry worker? A) Yes  B) Skip task  C) Stop".
 
-### 6. Merge back (aggregate results, one dolt push)
+### 6. Merge back (fault-isolating: clean workers integrate, conflicts set aside)
+
+Merge back is **fault-isolating** — a conflict in one worker does **not** halt the
+others. Walk the workers that finished cleanly (status `awaiting_merge`) in
+completion order; for each, attempt the merge and branch on the result. Keep a
+running **`conflict_workers`** "needs manual resolution" list.
 
 - **MONOREPO:** merge each worker's branch into the track branch in completion
   order:
   ```bash
-  # For each worker in order:
-  git merge --no-ff track_<track_id>_worker_<N>_<name> \
-    -m "cadre(parallel): merge worker_<N>: <task_description>"
-  bd worktree remove .worktrees/<track_id>_worker_<N>_<name>
+  # For each worker in completion order:
+  if git merge --no-ff track_<track_id>_worker_<N>_<name> \
+       -m "cadre(parallel): merge worker_<N>: <task_description>"; then
+    # CLEAN MERGE: close the Beads task and tear down the worktree.
+    bd close <beads_task_id> --continue --reason "merged worker_<N>" --json
+    bd worktree remove .worktrees/<track_id>_worker_<N>_<name>
+    # parallel_state: set this worker's status -> "merged"
+  else
+    # CONFLICT: set aside — do NOT remove the worktree, do NOT close the task.
+    git merge --abort
+    # parallel_state: set this worker's status -> "conflict"
+    # add worker_<N> to conflict_workers; continue with the next worker.
+  fi
   ```
 - **POLYREPO:** merge each worker's branch into **its own repo's** `track/<id>`
   branch, in that repo's git context (group workers by `repo` from
   `parallel_state`):
   ```bash
-  # For each worker in order, in its repo:
-  git -C <submodule_path> merge --no-ff track_<track_id>_worker_<N>_<name> \
-    -m "cadre(parallel): merge worker_<N> (<repo>): <task_description>"
-  git -C <submodule_path> worktree remove .worktrees/<track_id>/<repo>_worker_<N>_<name>
+  # For each worker in completion order, in its repo:
+  if git -C <submodule_path> merge --no-ff track_<track_id>_worker_<N>_<name> \
+       -m "cadre(parallel): merge worker_<N> (<repo>): <task_description>"; then
+    bd close <beads_task_id> --continue --reason "merged worker_<N> (<repo>)" --json
+    git -C <submodule_path> worktree remove .worktrees/<track_id>/<repo>_worker_<N>_<name>
+    # parallel_state: set this worker's status -> "merged"
+  else
+    git -C <submodule_path> merge --abort
+    # parallel_state: set this worker's status -> "conflict"; add to conflict_workers; continue.
+  fi
   ```
   Never merge a worker branch from one repo into another repo's branch.
-- **If a merge conflict occurs:** HALT immediately. Show the conflicting files (and
-  the repo) and ask the user to resolve before continuing.
-- **If Beads enabled:** after all merges —
+- **Clean workers (`merged`):** the worker's task is closed with `bd close
+  --continue` (so its dependents become ready for a later wave — see §4/§5) and its
+  worktree + branch are torn down.
+- **Conflicting workers (`conflict`):** **set the worker aside and keep going.**
+  Abort the in-progress merge, then **retain** its worktree + branch (do **not**
+  `worktree remove`), mark its `parallel_state` worker `status` `conflict`, do
+  **not** `bd close --continue` it (its Beads task stays not-done, so it does not
+  release dependents — `bd ready --parent` keeps any transitive dependents
+  blocked), and add it to `conflict_workers`. Independent workers and unrelated
+  tasks proceed unaffected.
+- **After the merge loop**, if `conflict_workers` is non-empty, report it and ask
+  the user to resolve each retained worktree manually. Once a human resolves a
+  retained worker's conflict, the coordinator merges it, flips its status to
+  `merged`, and runs `bd close <beads_task_id> --continue` — at which point its
+  dependents become ready and dispatch in a **subsequent** wave (§5). Show the
+  conflicting files (and, in polyrepo, the repo) for each.
+- **If Beads enabled:** after the merge loop, publish the clean merges —
   ```bash
-  bd dolt push  # One push for all workers combined
-  bd ready --parent <epic_id> --json  # Verify all tasks complete
-  bd note <epic_id> "PARALLEL PHASE COMPLETE: <phase>
-  WORKERS: <N> succeeded
+  bd dolt push  # One push for all cleanly-merged workers combined
+  bd ready --parent <epic_id> --json  # Tasks still ready/blocked behind any conflict workers
+  bd note <epic_id> "PARALLEL PHASE: <phase>
+  WORKERS: <merged_count> merged, <conflict_count> set aside (conflict)
+  CONFLICTS: <conflict_workers or 'none'>
   COMMITS: <sha_list>" --json
   ```
-- Hand control back to `cadre-implement` to mark the plan tasks `[x]`, append
-  commit SHAs, delete `parallel_state.json`, and process the next ready phase.
+- **Phase completion vs. partial:** the phase is complete only when
+  `conflict_workers` is empty. If any worker is set aside, hand back a **partial**
+  result — `cadre-implement` marks the cleanly-`merged` tasks `[x]` with their SHAs,
+  leaves the conflicting tasks unmarked (and any tasks gated behind them per §4/§5),
+  and **keeps** `parallel_state.json` (with the `conflict` worker entries) so the
+  phase can resume after a human resolves the retained worktrees.
+- Otherwise (no conflicts) hand control back to `cadre-implement` to mark the plan
+  tasks `[x]`, append commit SHAs, delete `parallel_state.json`, and process the
+  next ready phase.

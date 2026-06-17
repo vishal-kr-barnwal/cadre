@@ -112,6 +112,21 @@ Create a new track for: $ARGUMENTS
    - **CRITICAL:** Plan structure MUST adhere to workflow methodology (e.g., TDD tasks)
    - Include `[ ]` status markers for each task/sub-task
 
+   **CRITICAL: Emit a `<!-- files: ... -->` annotation for EVERY task.**
+   The files annotation is a **first-class plan artifact**, not a parallel-only
+   one — emit it for each task in **every** phase regardless of execution mode.
+   For each task, list the files it is expected to create or modify:
+   ```markdown
+   - [ ] Task 1: Implement JWT validation
+     <!-- files: src/auth/jwt.ts, src/auth/jwt.test.ts -->
+   ```
+   This drives downstream cross-track collision and cross-owner overlap checks
+   (`/cadre-implement`, `/cadre-validate`). If a task's files are genuinely
+   unknowable up front, emit a best-effort list and refine it during
+   implementation rather than omitting the annotation. The parallel-execution
+   step below (step 3.d) reuses these same annotations — it adds `execution:` /
+   `depends:` metadata but does NOT re-introduce `files:` (they already exist).
+
    **CRITICAL: Inject Phase Completion Tasks**
    - Check if `cadre/workflow.md` defines "Phase Completion Verification and Checkpointing Protocol"
    - If YES, for EACH Phase, append final meta-task:
@@ -153,7 +168,9 @@ Create a new track for: $ARGUMENTS
    d. **If User Confirms Parallel:**
       - **For task-level parallelism:**
         - Add `<!-- execution: parallel -->` annotation after eligible phase headings
-        - Add `<!-- files: path1, path2 -->` annotation to each task with its file ownership
+        - Ensure each task carries its `<!-- files: path1, path2 -->` ownership
+          annotation (already emitted in step 2 for every task — verify it is
+          present and accurate for the parallel tasks; do not duplicate it)
         - Add `<!-- depends: taskN -->` annotation where task dependencies exist within phase
       
       - **For phase-level parallelism:**
@@ -188,10 +205,15 @@ Create a new track for: $ARGUMENTS
       <!-- depends: phase1, phase2 -->
       
       - [ ] Task 1: Wire up auth with UI
+        <!-- files: src/app.tsx -->
       ```
+      (Every task carries a `<!-- files: -->` annotation — including
+      sequential-phase tasks — per the first-class rule in step 2.)
    
    e. **If User Declines Parallel:**
-      - Keep all phases as default sequential (no annotations needed)
+      - Keep all phases as default sequential (no `execution:`/`depends:`
+        annotations needed). The per-task `<!-- files: -->` annotations from step 2
+        STAY — they are first-class and required regardless of execution mode.
       - Announce: "All phases and tasks will execute sequentially."
 
 3.5. **Annotate Target Repos (POLYREPO ONLY — skip in monorepo mode):**
@@ -229,6 +251,32 @@ Create a new track for: $ARGUMENTS
      `metadata.json` `merge_order` in step 2.4.7 and consumed by `/cadre-land`
      and the merge-train CI. If absent, repos merge in alphabetical order. Only the
      repos you name need appear; any omitted repos merge after, alphabetically.
+
+3.6. **Cross-Track File-Collision Advisory (advisory only — never blocks):**
+   Now that every task carries a `<!-- files: -->` annotation (and, in polyrepo, a
+   `<!-- repo: -->` annotation), warn if this new track's claimed files overlap
+   another **active** track's claimed files.
+   - **Collect this track's claims:** the set of `(repo, file)` tuples across all
+     tasks in the drafted `plan.md`. In **monorepo** mode there is one logical
+     repo, so the tuple's repo component is the control repo (effectively compare
+     bare `file` paths). In **polyrepo** mode resolve each task's repo from its
+     `<!-- repo: -->` annotation (defaulting to `default_repo`) and compare the
+     **`(repo, file)` tuple**, not the bare path — the same relative path in two
+     different repos is **not** a collision.
+   - **Collect every other active track's claims:** an *active* track is any
+     `cadre/tracks/*/metadata.json` whose `status` is not `completed`, `archived`,
+     or `skipped` (i.e. `new`, `in_progress`, or `blocked`). Parse the `files:`
+     (and polyrepo `repo:`) annotations from each such track's `plan.md`.
+   - **Report overlaps:** if any `(repo, file)` tuple is claimed by both this track
+     and another active track, warn (do NOT halt):
+     > "⚠️ File overlap: `<repo>/<file>` is also claimed by active track
+     > `<other_track_id>` (owner: `<owner>`). Two tracks editing the same file may
+     > conflict at ship/land. Consider narrowing scope or coordinating."
+     List one line per overlapping tuple (naming the other track and its `owner`,
+     falling back to its Beads `assignee`). This mirrors `/cadre-validate`'s
+     cross-owner file-overlap check, surfaced early at creation time.
+   - **Degrade silently:** if another track's `plan.md` is missing or unparseable,
+     skip it without error. This advisory never blocks track creation.
 
 4. **User Confirmation:**
    > "I've drafted the implementation plan. Please review:"
@@ -463,24 +511,41 @@ Create a new track for: $ARGUMENTS
      - If user chooses A: Skip remaining Beads steps, continue to completion
      - If user chooses B: HALT and wait for user to install
 
-2. **Create Epic for Track with Full Context:**
+2. **Create Epic for Track with Full Context (idempotent):**
    - Map priority: critical=0, high=1, medium=2, low=3
    - Extract technical approach from `spec.md` for design field
    - Extract acceptance criteria from `spec.md`
-   - Run:
+   - **Use a deterministic epic id** `cadre-<track_id>` so a retry after a
+     half-completed create + metadata write never strands or duplicates the epic:
      ```bash
      bd create "<track_id>: <description>" \
+       --id cadre-<track_id> \
        -t epic -p <priority_number> \
        --design "<technical approach from spec>" \
        --acceptance "<completion criteria from spec>" \
        --assignee "<git-identity>" \
        --json
      ```
+   - **"Already exists" is success, not failure.** If `bd create --id` reports the
+     id already exists (a prior run created the epic but crashed before writing
+     `metadata.beads_epic`, or this is an outright retry), treat it as a no-op
+     success: do NOT route it through the ERROR HANDLING block below, do NOT
+     re-create under a new id. Continue with epic id `cadre-<track_id>`.
+   - **Only the EPIC is idempotent — the children are NOT.** The phase/task
+     `bd create` calls in step 3 carry **no** `--id` (they get Beads hash ids), so
+     blindly re-running step 3 on an already-existing epic creates **duplicate**
+     phase/task issues under it. On an "already exists" epic, first check whether
+     children already exist
+     (`bd ready --parent cadre-<track_id> --json` / `bd list --parent cadre-<track_id> --json`):
+     if they do, **SKIP step 3** and only (re)write `metadata` (step 5) from the
+     existing tree. Re-running `bd note` (step 7) merely appends a duplicate note and
+     is harmless.
    - `<git-identity>` is the value of `git config user.email` (fallback
      `git config user.name`, else null). Compute it once at the start of step 2.4
      (see step 2.4.0) and reuse it for the epic assignee and `metadata.owner`. If
      null, omit `--assignee` rather than passing an empty string.
-   - Store returned epic ID (e.g., `bd-a3f8`)
+   - Store the epic ID `cadre-<track_id>` for the steps below (and write it to
+     `metadata.beads_epic` in step 5).
 
 3. **Create Tasks for Each Phase with Context:**
    - Parse `plan.md` for phases and tasks
@@ -515,10 +580,12 @@ Create a new track for: $ARGUMENTS
        - Example: Task 3 has `<!-- depends: task1 -->` → `bd dep add <task3_id> <task1_id>`
 
 5. **Update Metadata:**
-   - Add to `cadre/tracks/<track_id>/metadata.json`:
+   - Add to `cadre/tracks/<track_id>/metadata.json` (`beads_epic` is the
+     deterministic id `cadre-<track_id>` from step 2; task/phase ids are whatever
+     `bd create --json` returned):
      ```json
      {
-       "beads_epic": "bd-a3f8",
+       "beads_epic": "cadre-<track_id>",
        "beads_tasks": {
          "phase1": "bd-a3f8.1",
          "phase1_task1": "bd-a3f8.1.1",
@@ -576,9 +643,12 @@ Create a new track for: $ARGUMENTS
 
 ---
 
-## 3.0 SYNC POSTAMBLE (polyrepo + shared mode only)
+## 3.0 SYNC POSTAMBLE (shared mode only)
 
 If `cadre/config.json` has `sync_mode: "shared"`, publish the control plane
 per `references/cadre-sync.md`: `bd dolt push` then
-`git push <control_remote> <control_branch>`. In `local` mode (or monorepo),
-commits stay local — do not push.
+`git push <control_remote> <control_branch>`. This applies in **both monorepo and
+polyrepo** topologies — the control-plane publish is gated on `sync_mode`, never
+on topology. In `local` mode (or when `sync_mode` is absent), commits stay
+local — do not push. Product-repo CODE is still never auto-pushed regardless of
+sync mode; only the control plane is published here.
