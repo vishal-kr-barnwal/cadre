@@ -216,12 +216,11 @@ monorepo mode). Surface the cross-repo PR group and the merge-train order for th
    `repos.json.merge_train.group_label_prefix` (default `cadre-track`); the
    label is `<prefix>:<track_id>`.
 
-2. **List the PR group.** Prefer GitHub:
-   `gh pr list --label "<prefix>:<track_id>" --state all --json number,title,state,headRepository,reviewDecision,mergeable,url`
-   across the relevant repos (each submodule repo + the control repo). If `gh` is
-   unavailable, **degrade silently** to the recorded URLs in
-   `metadata.json.repos[*].pr_url` and `metadata.json.control_pr_url` (skip the
-   live state columns).
+2. **List the PR group.** Prefer MCP `cadre_pr_ci_status` for every recorded
+   product/control PR URL or branch so provider status and CI arrive as
+   structured data. If the provider CLI is unavailable, **degrade silently** to
+   the recorded URLs in `metadata.json.repos[*].pr_url` and
+   `metadata.json.control_pr_url` (skip the live state columns).
 
 3. **Compute the merge-train order.** Read `metadata.json.merge_order` (array of
    repo names, left-to-right). If absent, default to **product repos first** (the

@@ -100,13 +100,14 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    available (do not fabricate a green result).
 
 2. **Cross-track regression via code intelligence.** Call MCP
-   `cadre_lsp_review` with `root`, `base`, and `head` (`<git_branch>`). It wraps
-   the configured LSP helper, includes timeout/availability information, and
-   returns structured findings for changed, renamed, and removed symbols where
-   possible. If it returns `available: false`, note that code intelligence was
-   unavailable and continue. Treat live external callers of removed/renamed
-   symbols as blocking findings; other external references are warnings unless the
-   semantic change clearly breaks callers.
+   `cadre_lsp_warm_review` with `root`, `base`, and `head` (`<git_branch>`). It
+   routes through the persistent LSP daemon so repeated reviews reuse warm
+   language servers. If the daemon path is unavailable, fall back to
+   `cadre_lsp_review`. Both return structured findings for changed, renamed, and
+   removed symbols where possible. If the result has `available: false`, note that
+   code intelligence was unavailable and continue. Treat live external callers of
+   removed/renamed symbols as blocking findings; other external references are
+   warnings unless the semantic change clearly breaks callers.
 
 ## 5. Record Findings
 

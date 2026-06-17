@@ -107,6 +107,12 @@ Workflow tool routing:
 | `cadre_review_gate` | Review verification after review writes and before ship/land pushes; pass `headSha` to enforce the reviewed commit pin. |
 | `cadre_sync_control_plane` | Shared-mode control-plane sync pre/postamble (`git`, Beads Dolt, merge driver) as one structured operation. |
 | `cadre_lsp_review` | Code-intelligence review wrapper around the configured LSP helper with structured findings. |
+| `cadre_lsp_warm_review` | Preferred code-intelligence review path when available; reuses the persistent LSP daemon and warm language servers. |
+| `cadre_lsp_daemon_status` | Inspect warm LSP server sessions before/after repeated review work. |
+| `cadre_test_coverage` | Run the configured test/coverage command, parse measured coverage, and record it on the track/task. |
+| `cadre_pr_ci_status` | Read GitHub/GitLab PR/MR and CI status for a track branch or explicit PR/MR. |
+| `cadre_repo_map` | Compact semantic repo map and symbol reference lookup for low-token orientation. |
+| `cadre_beads_write` | Structured Beads operations (`ready`, `show`, `update`, `note`, `close`, labels, deps, create) instead of raw `bd` shell snippets. |
 | `cadre_polyrepo_preflight` | Polyrepo setup, validate, refresh, and land preflight checks. |
 
 ## Beads Integration

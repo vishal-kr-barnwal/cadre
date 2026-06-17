@@ -273,6 +273,7 @@ class LspClient {
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = Buffer.alloc(0);
+    this.opened = new Map();
   }
 
   start() {
@@ -385,14 +386,26 @@ class LspClient {
 
   open(file) {
     const abs = path.join(this.root, file);
-    this.notify("textDocument/didOpen", {
-      textDocument: {
-        uri: pathToFileURL(abs).href,
-        languageId: languageId(file),
-        version: 1,
-        text: fs.readFileSync(abs, "utf8"),
-      },
-    });
+    const uri = pathToFileURL(abs).href;
+    const text = fs.readFileSync(abs, "utf8");
+    const version = (this.opened.get(file) || 0) + 1;
+    const alreadyOpen = this.opened.has(file);
+    this.opened.set(file, version);
+    if (alreadyOpen) {
+      this.notify("textDocument/didChange", {
+        textDocument: { uri, version },
+        contentChanges: [{ text }],
+      });
+    } else {
+      this.notify("textDocument/didOpen", {
+        textDocument: {
+          uri,
+          languageId: languageId(file),
+          version,
+          text,
+        },
+      });
+    }
   }
 
   async documentSymbols(file) {
@@ -557,9 +570,14 @@ function lspRefToLocation(root, ref) {
   }
 }
 
-async function run() {
-  const args = parseArgs(process.argv);
-  const root = process.cwd();
+async function runReview(options = {}) {
+  const args = {
+    base: options.base || "main",
+    head: options.head || "HEAD",
+    config: options.config || "cadre/lsp.json",
+  };
+  const root = options.root || process.cwd();
+  const clientPool = options.clientPool || null;
   const configPath = path.resolve(root, args.config);
   if (!fs.existsSync(configPath)) {
     return {
@@ -638,19 +656,25 @@ async function run() {
       }
       continue;
     }
-    const client = new LspClient(root, server);
+    let pooled = null;
+    let client = null;
     try {
-      const startupTimeoutMs = positiveInt(server.startupTimeoutMs, DEFAULT_STARTUP_TIMEOUT_MS);
-      await withTimeout(
-        client.start(),
-        startupTimeoutMs,
-        `${server.command} did not spawn within ${startupTimeoutMs}ms`
-      );
-      await withTimeout(
-        client.initialize(),
-        startupTimeoutMs,
-        `${server.command} did not initialize within ${startupTimeoutMs}ms`
-      );
+      pooled = clientPool ? await clientPool.get(root, server) : null;
+      client = pooled ? pooled.client : new LspClient(root, server);
+      if (!pooled) {
+        const startupTimeoutMs = positiveInt(server.startupTimeoutMs, DEFAULT_STARTUP_TIMEOUT_MS);
+        await withTimeout(
+          client.start(),
+          startupTimeoutMs,
+          `${server.command} did not spawn within ${startupTimeoutMs}ms`
+        );
+        await withTimeout(
+          client.initialize(),
+          startupTimeoutMs,
+          `${server.command} did not initialize within ${startupTimeoutMs}ms`
+        );
+      }
+      serverReport.warm = Boolean(pooled);
       const openFiles = Array.from(new Set(
         serverEntries
           .filter((entry) => entry.exists)
@@ -695,6 +719,7 @@ async function run() {
     } catch (error) {
       serverReport.skipped = true;
       findings.push(skipFinding(server, "server_unavailable", `LSP scan skipped: ${error.message}`));
+      if (clientPool && pooled) await clientPool.drop(root, server);
       for (const candidate of allCandidates.values()) {
         if (candidate.changeType !== "removed") continue;
         const refs = scanTextReferences(root, candidate.name, changedSet, server.extensions);
@@ -703,7 +728,7 @@ async function run() {
         }
       }
     } finally {
-      await client.shutdown();
+      if (!clientPool && client) await client.shutdown();
     }
   }
 
@@ -719,21 +744,31 @@ async function run() {
   };
 }
 
-run()
-  .then((result) => {
-    if (process.argv.includes("--json")) {
-      console.log(JSON.stringify(result, null, 2));
-    } else if (!result.available) {
-      console.log(`LSP review helper unavailable: ${result.reason}`);
-    } else if (result.findings.length === 0) {
-      console.log("LSP review helper found no external reference risks.");
-    } else {
-      for (const finding of result.findings) {
-        console.log(JSON.stringify(finding));
-      }
+async function runCli() {
+  const args = parseArgs(process.argv);
+  const result = await runReview({ ...args, root: process.cwd() });
+  if (args.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else if (!result.available) {
+    console.log(`LSP review helper unavailable: ${result.reason}`);
+  } else if (result.findings.length === 0) {
+    console.log("LSP review helper found no external reference risks.");
+  } else {
+    for (const finding of result.findings) {
+      console.log(JSON.stringify(finding));
     }
-  })
-  .catch((error) => {
+  }
+}
+
+if (require.main === module) {
+  runCli().catch((error) => {
     console.error(error.message);
     process.exit(1);
   });
+}
+
+module.exports = {
+  LspClient,
+  commandAvailability,
+  runReview,
+};

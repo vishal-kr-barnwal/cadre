@@ -466,7 +466,9 @@ Implement the requested track from the workflow arguments.
              - **ONLY if `beads_enabled` is true:**
                - Generate task key from phase index and task index (e.g., `phase1_task1` for first task in first phase)
                - Look up `beads_task_id` from `beads_tasks` mapping in metadata.json using task key
-               - If found, run: `bd update <beads_task_id> --status in_progress --assignee <git-identity>`
+              - If found, call MCP `cadre_beads_write` with `operation:
+                "update"`, `id: <beads_task_id>`, `status: "in_progress"`,
+                and `assignee: <git-identity>`
                  (the assignee is the current operator's git identity, **never** the
                  literal "cadre")
                - **If `bd` command fails:**
@@ -482,17 +484,17 @@ Implement the requested track from the workflow arguments.
                - Use the `beads_task_id` returned by `cadre_record_task_result`
                  (fallback to the `beads_tasks` map from `cadre_track_context`).
                - If found:
-                 - Add structured completion notes:
-                   ```bash
-                   bd note <beads_task_id> "COMPLETED: <description>
-                   COMMIT: <sha_7chars>
-                   FILES CHANGED: <list>
-                   KEY DECISION: <if any>" --json
-                   ```
-                 - Close with auto-advance: `bd close <beads_task_id> --continue --reason "Task completed"`
+                 - Add structured completion notes with MCP
+                   `cadre_beads_write` (`operation: "note"`, `id:
+                   <beads_task_id>`, `note: "COMPLETED: ..."`).
+                 - Close with auto-advance using MCP `cadre_beads_write`
+                   (`operation: "close"`, `id: <beads_task_id>`, `continue:
+                   true`, `reason: "Task completed"`).
                    (The `--continue` flag auto-advances to next step if available)
                  - If discovered work during implementation:
-                   `bd create "<issue>" -t bug -p 2 --deps discovered-from:<current_task_id> --json`
+                   call MCP `cadre_beads_write` with `operation: "create"`,
+                   `type: "bug"`, `priority: "2"`, and `deps:
+                   "discovered-from:<current_task_id>"`.
                - **If `bd` command fails:**
                  Follow `references/beads-error-handler.md`: retry once or halt.
       - **ii. Update Implementation State:** After marking task in progress:
@@ -538,16 +540,16 @@ Implement the requested track from the workflow arguments.
       - After implementation, run tests, linting, type checks.
       - **Machine-verified coverage gate (do not self-assert):** the TDD bar in
         `workflow.md` (default >80%) must be **measured**, not claimed. Run the
-        project's coverage tool (from `workflow.md` / `tech-stack.md`), **parse the
-        reported percentage**, and:
+        project's coverage tool through MCP `cadre_test_coverage` (pass `root`,
+        `trackId`, `phaseIndex`, and `taskIndex`; pass an explicit `command`
+        only when `cadre/config.json` / package scripts do not declare one), and:
         - If it is **below** the `workflow.md` threshold → treat as an issue: do not
           mark the task `[x]`; either add the missing tests (preferred) or, if the
           gap is intentional, require an explicit user override and note it.
-        - Record the **measured number** so the review gate can read it: stamp
-          `metadata.json` `last_coverage` (key-scoped jq:
-          `jq --argjson c <pct> '.last_coverage=$c'`) — `cadre-review` copies it
-          into `review.coverage`. "Tests pass, coverage >80%" must be a recorded
-          measurement, never free prose.
+        - Record the **measured number** through `cadre_test_coverage`; it writes
+          `metadata.last_test_run` and `metadata.last_coverage` so `cadre-review`
+          can copy it into `review.coverage`. "Tests pass, coverage >80%" must be
+          a recorded measurement, never free prose.
         - If no coverage tool is configured in `workflow.md`, say so explicitly
           (don't silently treat the bar as met) and proceed only with user awareness.
       - If issues found, analyze the root cause:

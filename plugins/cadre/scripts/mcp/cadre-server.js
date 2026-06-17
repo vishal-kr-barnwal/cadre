@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 const { fileURLToPath } = require("url");
 const core = require("../cadre-core");
 
@@ -209,8 +210,124 @@ const TOOLS = [
         base: { type: "string" },
         head: { type: "string" },
         config: { type: "string" },
+        timeoutMs: { type: "number" },
       },
       required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_lsp_warm_review",
+    description: "Run the LSP/code-intelligence review through the persistent daemon so language servers stay warm across calls.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        base: { type: "string" },
+        head: { type: "string" },
+        config: { type: "string" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_lsp_daemon_status",
+    description: "Return persistent LSP daemon status and warm language-server sessions.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_lsp_daemon_shutdown",
+    description: "Stop the persistent LSP daemon and all warm language-server sessions.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_test_coverage",
+    description: "Run the project's configured test/coverage command, parse measured coverage, and optionally record it on a track/task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        command: { type: "string" },
+        timeoutMs: { type: "number" },
+        trackId: { type: "string" },
+        phaseIndex: { type: "number" },
+        taskIndex: { type: "number" },
+        status: { type: "string", enum: ["pending", "new", "in_progress", "completed", "blocked", "skipped"] },
+        commitSha: { type: "string" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_pr_ci_status",
+    description: "Read GitHub/GitLab PR/MR and CI status for a track branch or explicit PR/MR.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        provider: { type: "string", enum: ["github", "gitlab"] },
+        trackId: { type: "string" },
+        branch: { type: "string" },
+        pr: { type: "string" },
+        mr: { type: "string" },
+        prNumber: { type: "number" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_repo_map",
+    description: "Return a compact semantic repository map, or low-token references for a requested symbol.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        symbol: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_beads_write",
+    description: "Run structured Beads task operations such as update, note, close, label changes, dependency add, create, ready, or show.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        operation: {
+          type: "string",
+          enum: ["ready", "show", "update", "note", "close", "label_add", "label_remove", "dep_add", "create"],
+        },
+        id: { type: "string" },
+        taskId: { type: "string" },
+        issueId: { type: "string" },
+        parent: { type: "string" },
+        status: { type: "string" },
+        assignee: { type: "string" },
+        priority: { type: "string" },
+        note: { type: "string" },
+        reason: { type: "string" },
+        continue: { type: "boolean" },
+        label: { type: "string" },
+        dependsOn: { type: "string" },
+        title: { type: "string" },
+        type: { type: "string" },
+        deps: { type: "string" },
+      },
+      required: ["root", "operation"],
       additionalProperties: false,
     },
   },
@@ -326,7 +443,78 @@ function asTextJson(value) {
   };
 }
 
-function toolCall(name, args) {
+class LspDaemonClient {
+  constructor() {
+    this.proc = null;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.buffer = "";
+  }
+
+  ensure() {
+    if (this.proc && !this.proc.killed) return;
+    const daemon = path.resolve(__dirname, "..", "cadre-lsp-daemon.js");
+    this.proc = spawn(process.execPath, [daemon], {
+      cwd: path.resolve(__dirname, "..", ".."),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.proc.stdout.on("data", (chunk) => this.read(chunk));
+    this.proc.stderr.on("data", () => {});
+    this.proc.on("exit", () => {
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("LSP daemon exited"));
+      }
+      this.pending.clear();
+      this.proc = null;
+    });
+  }
+
+  read(chunk) {
+    this.buffer += chunk.toString("utf8");
+    let idx;
+    while ((idx = this.buffer.indexOf("\n")) >= 0) {
+      const line = this.buffer.slice(0, idx).trim();
+      this.buffer = this.buffer.slice(idx + 1);
+      if (!line) continue;
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch (_) {
+        continue;
+      }
+      if (!message.id || !this.pending.has(message.id)) continue;
+      const pending = this.pending.get(message.id);
+      this.pending.delete(message.id);
+      clearTimeout(pending.timer);
+      if (message.error) pending.reject(new Error(message.error.message || "LSP daemon error"));
+      else pending.resolve(message.result);
+    }
+  }
+
+  request(method, params = {}, timeoutMs = 60000) {
+    this.ensure();
+    const id = this.nextId++;
+    const payload = JSON.stringify({ id, method, params });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`LSP daemon ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      this.proc.stdin.write(`${payload}\n`);
+    });
+  }
+
+  async shutdown() {
+    if (!this.proc) return { ok: true, stopped: 0, skipped: true };
+    return this.request("shutdown", {}, 5000);
+  }
+}
+
+const lspDaemon = new LspDaemonClient();
+
+async function toolCall(name, args) {
   if (name === "cadre_ping") {
     return asTextJson({
       ok: true,
@@ -341,6 +529,12 @@ function toolCall(name, args) {
       root,
       source: "argument.root",
     });
+  }
+  if (name === "cadre_lsp_daemon_status") {
+    return asTextJson(await lspDaemon.request("status", {}, 5000));
+  }
+  if (name === "cadre_lsp_daemon_shutdown") {
+    return asTextJson(await lspDaemon.shutdown());
   }
 
   const root = requireCadreRoot(args || {});
@@ -375,6 +569,16 @@ function toolCall(name, args) {
       return asTextJson(core.syncControlPlane(root, args));
     case "cadre_lsp_review":
       return asTextJson(core.lspReview(root, args));
+    case "cadre_lsp_warm_review":
+      return asTextJson(await lspDaemon.request("review", { ...args, root }, Number(args.timeoutMs || 120000)));
+    case "cadre_test_coverage":
+      return asTextJson(core.testCoverage(root, args));
+    case "cadre_pr_ci_status":
+      return asTextJson(core.prCiStatus(root, args));
+    case "cadre_repo_map":
+      return asTextJson(core.repoMap(root, args));
+    case "cadre_beads_write":
+      return asTextJson(core.beadsTaskWrite(root, args));
     case "cadre_review_gate":
       return asTextJson(core.reviewGate(root, args.trackId, args));
     case "cadre_polyrepo_preflight":
@@ -417,6 +621,12 @@ function resourceList() {
         description: "Bounded per-track context. Read with ?root=/path/to/project&trackId=<id>.",
         mimeType: "application/json",
       },
+      {
+        uri: "cadre://repo-map",
+        name: "Cadre semantic repo map",
+        description: "Compact repository symbol map. Read with ?root=/path/to/project and optional &symbol=<name>.",
+        mimeType: "application/json",
+      },
     ],
   };
 }
@@ -424,7 +634,7 @@ function resourceList() {
 function parseResourceUri(uri) {
   const [base, query = ""] = uri.split("?");
   const params = new URLSearchParams(query);
-  return { base, root: params.get("root"), trackId: params.get("trackId") };
+  return { base, root: params.get("root"), trackId: params.get("trackId"), symbol: params.get("symbol") };
 }
 
 function resourceRead(uri) {
@@ -436,6 +646,7 @@ function resourceRead(uri) {
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://plan-integrity") value = core.planIntegrity(root, resource.trackId || null);
   else if (resource.base === "cadre://track-context") value = core.trackContext(root, resource.trackId);
+  else if (resource.base === "cadre://repo-map") value = core.repoMap(root, { symbol: resource.symbol || null });
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   return {
     contents: [
@@ -448,7 +659,7 @@ function resourceRead(uri) {
   };
 }
 
-function handle(message) {
+async function handle(message) {
   const method = message.method;
   const params = message.params || {};
   if (method === "initialize") {
@@ -517,8 +728,13 @@ process.stdin.on("data", (chunk) => {
     let message;
     try {
       message = JSON.parse(raw);
-      const result = handle(message);
-      if (result !== undefined) respond(message, result);
+      Promise.resolve(handle(message))
+        .then((result) => {
+          if (result !== undefined) respond(message, result);
+        })
+        .catch((error) => {
+          respondError(message || { id: null }, error);
+        });
     } catch (error) {
       respondError(message || { id: null }, error);
     }

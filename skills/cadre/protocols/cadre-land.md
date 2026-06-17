@@ -358,6 +358,11 @@ can record them in `metadata.json` (step 5.2) on the next run.
 - CI status (green / running / failed)
 - Merge-train state: not-ready / ready (all approved + green) / merged
 
+Prefer MCP `cadre_pr_ci_status` for each recorded product/control PR URL or
+branch so provider status, review decision, and check rollups arrive as
+structured data. If the provider CLI is unavailable, degrade to the recorded
+URLs in `metadata.json` and omit live state columns.
+
 When the train fires, it merges each product PR with a **merge commit** (squash is
 disabled by guardrail, so the gitlink can be pinned deterministically — GitHub
 `gh pr merge "$pr" --repo "$repo" --merge --delete-branch=false`; GitLab the

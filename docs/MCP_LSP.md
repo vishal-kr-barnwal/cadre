@@ -41,6 +41,13 @@ offers these tools:
 | `cadre_record_review` | Write the structured review verdict with reviewer-race guard and immediate gate evaluation. |
 | `cadre_sync_control_plane` | Run the shared-mode sync preamble or postamble as a structured operation. |
 | `cadre_lsp_review` | Run the Cadre LSP/code-intelligence review helper and return structured findings. |
+| `cadre_lsp_warm_review` | Run code-intelligence review through a persistent daemon that reuses initialized language servers. |
+| `cadre_lsp_daemon_status` | Inspect warm daemon sessions and open-document counts. |
+| `cadre_lsp_daemon_shutdown` | Stop the daemon and all warm language servers. |
+| `cadre_test_coverage` | Run configured tests/coverage, parse measured coverage, and optionally record it on a track/task. |
+| `cadre_pr_ci_status` | Read GitHub/GitLab PR/MR metadata and CI status for a track branch or explicit PR/MR. |
+| `cadre_repo_map` | Return a compact semantic repository map or references for one symbol. |
+| `cadre_beads_write` | Perform structured Beads writes (`update`, `note`, `close`, labels, deps, create) without ad hoc shell snippets. |
 | `cadre_review_gate` | Evaluate whether `metadata.review` clears ship/land; optional `headSha` enforces `reviewed_sha` pinning. |
 | `cadre_polyrepo_preflight` | Run local polyrepo manifest/submodule checks. |
 
@@ -53,6 +60,7 @@ It also exposes resources:
 | `cadre://collisions?root=/path/to/project` | Cross-track collision data. |
 | `cadre://plan-integrity?root=/path/to/project` | Plan validation across tracks, or one track with `&trackId=<id>`. |
 | `cadre://track-context?root=/path/to/project&trackId=<id>` | Bounded context for one track. |
+| `cadre://repo-map?root=/path/to/project` | Compact semantic map; add `&symbol=<name>` for references. |
 
 Cadre workflows require MCP. At the start of a Cadre workflow, callers should
 verify MCP availability with `cadre_ping`. If Cadre MCP
@@ -95,7 +103,11 @@ Workflow routing:
 | Structured review write | `cadre_record_review` |
 | Ship/land review enforcement | `cadre_review_gate` |
 | Shared-mode pre/post sync | `cadre_sync_control_plane` |
-| Code-intelligence review | `cadre_lsp_review` |
+| Code-intelligence review | `cadre_lsp_warm_review` preferred; `cadre_lsp_review` fallback |
+| Coverage measurement and recording | `cadre_test_coverage` |
+| PR/MR and CI status | `cadre_pr_ci_status` |
+| Low-token repo/symbol orientation | `cadre_repo_map` or `cadre://repo-map` |
+| Beads task writes | `cadre_beads_write` |
 | Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |
 
 ### Plugin packaging
@@ -170,6 +182,50 @@ The helper:
 
 The output is advisory unless the reviewer treats a live external caller of a
 removed or renamed symbol as blocking.
+
+### Persistent LSP daemon
+
+The MCP server also owns a persistent LSP daemon:
+
+```text
+cadre_lsp_warm_review
+cadre_lsp_daemon_status
+cadre_lsp_daemon_shutdown
+```
+
+`cadre_lsp_warm_review` uses the same review engine as
+`cadre-lsp-review.js`, but the daemon keeps initialized language servers alive
+between calls. Repeated reviews against the same root/server reuse warm
+processes and update already-open documents with `textDocument/didChange`.
+
+Use `cadre_lsp_review` as the compatibility fallback when a client cannot use
+the daemon path. Use `cadre_lsp_daemon_shutdown` before plugin shutdown tests or
+when changing language-server binaries on disk.
+
+## Coverage, PR/CI, and Beads MCP
+
+`cadre_test_coverage` chooses a command in this order:
+
+1. Explicit tool argument `command`.
+2. `cadre/config.json` `coverage_command`, `test_coverage_command`, or
+   `test_command`.
+3. Common package scripts such as `coverage`, `test:coverage`, or `test`.
+4. A small language fallback (`pytest --cov --cov-report=term`, `go test ./...`).
+
+It parses common terminal coverage summaries and `coverage/lcov.info`, then
+writes `metadata.last_test_run` and `metadata.last_coverage` when `trackId` is
+provided. If `phaseIndex` and `taskIndex` are also provided, it records the task
+result through the same path as `cadre_record_task_result`.
+
+`cadre_pr_ci_status` uses local provider CLIs rather than embedding provider
+tokens in Cadre: GitHub uses `gh pr view ... --json`; GitLab uses
+`glab mr view ... --output json`. The tool resolves a track branch from
+metadata when `trackId` is supplied.
+
+`cadre_beads_write` is the preferred write surface for routine task operations:
+`ready`, `show`, `update`, `note`, `close`, `label_add`, `label_remove`,
+`dep_add`, and `create`. It keeps Beads mutations structured while still
+letting Beads own its Dolt database.
 
 ### Plugin packaging
 

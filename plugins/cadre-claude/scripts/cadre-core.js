@@ -59,13 +59,16 @@ function runCommand(command, args, options = {}) {
     cwd: options.cwd,
     encoding: "utf8",
     shell: options.shell === true,
+    timeout: options.timeoutMs,
+    maxBuffer: options.maxBuffer || 10 * 1024 * 1024,
   });
   return {
     ok: result.status === 0,
     status: result.status,
+    signal: result.signal || null,
     stdout: result.stdout || "",
     stderr: result.stderr || "",
-    command: [command, ...args].join(" "),
+    command: options.shell === true ? command : [command, ...args].join(" "),
   };
 }
 
@@ -89,6 +92,69 @@ function loadTopology(root) {
     config,
     defaultRepo: polyrepo ? repos.default_repo : ".",
   };
+}
+
+function loadPackageJson(root) {
+  return readJson(path.join(root, "package.json"), null);
+}
+
+function configuredCoverageCommand(root, args = {}) {
+  if (args.command) return String(args.command);
+  const topology = loadTopology(root);
+  const config = topology.config || {};
+  for (const key of ["coverage_command", "test_coverage_command", "test_command"]) {
+    if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
+  }
+  const pkg = loadPackageJson(root);
+  if (pkg && pkg.scripts) {
+    for (const name of ["coverage", "test:coverage", "test:cov", "test"]) {
+      if (pkg.scripts[name]) {
+        if (fileExists(path.join(root, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(path.join(root, "yarn.lock"))) return `yarn ${name}`;
+        return `npm run ${name}`;
+      }
+    }
+  }
+  if (fileExists(path.join(root, "pyproject.toml")) || fileExists(path.join(root, "pytest.ini"))) {
+    return "pytest --cov --cov-report=term";
+  }
+  if (fileExists(path.join(root, "go.mod"))) return "go test ./...";
+  return null;
+}
+
+function parseCoveragePercent(text) {
+  const source = String(text || "");
+  const patterns = [
+    /All files[^|\n]*(?:\|[^|\n]*){3,}\|\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\||$)/i,
+    /\bStatements\s*:\s*([0-9]+(?:\.[0-9]+)?)%/i,
+    /\bLines\s*:\s*([0-9]+(?:\.[0-9]+)?)%/i,
+    /\bTOTAL\b[^\n%]*\s([0-9]+(?:\.[0-9]+)?)%/i,
+    /\bcoverage[^0-9%]{0,40}([0-9]+(?:\.[0-9]+)?)%/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+function parseLcovCoverage(root) {
+  const candidates = [
+    path.join(root, "coverage", "lcov.info"),
+    path.join(root, "lcov.info"),
+  ];
+  for (const file of candidates) {
+    if (!fileExists(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    let found = 0;
+    let hit = 0;
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith("LF:")) found += Number(line.slice(3)) || 0;
+      if (line.startsWith("LH:")) hit += Number(line.slice(3)) || 0;
+    }
+    if (found > 0) return Math.round((hit / found) * 10000) / 100;
+  }
+  return null;
 }
 
 function parseIsoTime(value) {
@@ -856,6 +922,315 @@ function syncControlPlane(root, args = {}) {
   return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, commands };
 }
 
+function testCoverage(root, args = {}) {
+  const command = configuredCoverageCommand(root, args);
+  if (!command) {
+    return {
+      ok: false,
+      available: false,
+      reason: "No coverage/test command configured or detected",
+      hints: [
+        "Set cadre/config.json coverage_command",
+        "Add package.json scripts.coverage or scripts.test:coverage",
+        "Pass { command } explicitly to cadre_test_coverage",
+      ],
+    };
+  }
+  const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1000);
+  const result = runCommand(command, [], {
+    cwd: root,
+    shell: true,
+    timeoutMs,
+    maxBuffer: 30 * 1024 * 1024,
+  });
+  const combined = `${result.stdout}\n${result.stderr}`;
+  const parsed = parseCoveragePercent(combined);
+  const lcov = parsed == null ? parseLcovCoverage(root) : null;
+  const coverage = parsed == null ? lcov : parsed;
+  let task_result = null;
+  if (args.trackId) {
+    const track = findTrack(root, args.trackId);
+    if (!track) {
+      return { ok: false, available: true, command, result, coverage, error: `Track not found: ${args.trackId}` };
+    }
+    const metadata = { ...track.metadata };
+    metadata.last_test_run = {
+      command,
+      ok: result.ok,
+      status: result.status,
+      signal: result.signal,
+      coverage,
+      measured_at: utcNow(),
+    };
+    if (typeof coverage === "number") metadata.last_coverage = coverage;
+    writeJson(track.metadata_path, metadata);
+    if (args.phaseIndex && args.taskIndex) {
+      task_result = recordTaskResult(root, {
+        trackId: args.trackId,
+        phaseIndex: args.phaseIndex,
+        taskIndex: args.taskIndex,
+        status: args.status || (result.ok ? "completed" : "blocked"),
+        commitSha: args.commitSha,
+        coverage,
+      });
+    }
+  }
+  return {
+    ok: result.ok,
+    available: true,
+    command,
+    status: result.status,
+    signal: result.signal,
+    coverage,
+    coverage_source: parsed == null && lcov != null ? "lcov" : (parsed != null ? "output" : null),
+    timed_out: result.signal === "SIGTERM" || result.signal === "SIGKILL",
+    stdout_tail: result.stdout.slice(-4000),
+    stderr_tail: result.stderr.slice(-4000),
+    task_result,
+  };
+}
+
+function providerFromConfig(root, args = {}) {
+  if (args.provider) return args.provider;
+  const config = loadTopology(root).config || {};
+  if (config.pr_provider) return config.pr_provider;
+  const remote = runCommand("git", ["remote", "get-url", "origin"], { cwd: root });
+  const url = `${remote.stdout}\n${remote.stderr}`.toLowerCase();
+  if (url.includes("gitlab")) return "gitlab";
+  return "github";
+}
+
+function prCiStatus(root, args = {}) {
+  const provider = providerFromConfig(root, args);
+  const track = args.trackId ? findTrack(root, args.trackId) : null;
+  const branch = args.branch || (track && (track.metadata.git_branch || `track/${track.track_id}`)) || null;
+  if (provider === "github") {
+    if (!commandExists("gh", root)) {
+      return { ok: false, available: false, provider, reason: "GitHub CLI (gh) is not installed or not on PATH" };
+    }
+    const target = args.pr || args.prNumber || branch;
+    if (!target) return { ok: false, available: true, provider, reason: "No PR number or branch supplied" };
+    const fields = [
+      "number",
+      "url",
+      "state",
+      "title",
+      "headRefName",
+      "headRefOid",
+      "baseRefName",
+      "reviewDecision",
+      "mergeStateStatus",
+      "statusCheckRollup",
+    ].join(",");
+    const result = runCommand("gh", ["pr", "view", String(target), "--json", fields], { cwd: root });
+    let data = null;
+    try {
+      data = JSON.parse(result.stdout || "{}");
+    } catch (_) {
+      // Keep raw output below.
+    }
+    return {
+      ok: result.ok,
+      available: true,
+      provider,
+      target,
+      branch,
+      status: result.status,
+      pr: data,
+      stdout_tail: result.stdout.slice(-2000),
+      stderr_tail: result.stderr.slice(-2000),
+    };
+  }
+  if (provider === "gitlab") {
+    if (!commandExists("glab", root)) {
+      return { ok: false, available: false, provider, reason: "GitLab CLI (glab) is not installed or not on PATH" };
+    }
+    const target = args.pr || args.mr || args.prNumber || branch;
+    if (!target) return { ok: false, available: true, provider, reason: "No MR number or branch supplied" };
+    const result = runCommand("glab", ["mr", "view", String(target), "--output", "json"], { cwd: root });
+    let data = null;
+    try {
+      data = JSON.parse(result.stdout || "{}");
+    } catch (_) {
+      // Keep raw output below.
+    }
+    return {
+      ok: result.ok,
+      available: true,
+      provider,
+      target,
+      branch,
+      status: result.status,
+      mr: data,
+      stdout_tail: result.stdout.slice(-2000),
+      stderr_tail: result.stderr.slice(-2000),
+    };
+  }
+  return { ok: false, available: false, provider, reason: `Unsupported provider: ${provider}` };
+}
+
+function gitTrackedFiles(root) {
+  const result = runCommand("git", ["ls-files"], { cwd: root });
+  if (!result.ok) return [];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((file) => !file.split("/").some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part)))
+    .filter((file) => !file.startsWith("plugins/cadre/") && !file.startsWith("plugins/cadre-claude/"));
+}
+
+function languageForFile(file) {
+  return {
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".py": "python",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".swift": "swift",
+    ".rb": "ruby",
+    ".php": "php",
+  }[path.extname(file)] || null;
+}
+
+function extractRepoSymbols(root, file, limitPerFile = 40) {
+  const abs = path.join(root, file);
+  if (!fileExists(abs)) return [];
+  let stat;
+  try {
+    stat = fs.statSync(abs);
+  } catch (_) {
+    return [];
+  }
+  if (stat.size > 1024 * 1024) return [];
+  const language = languageForFile(file);
+  if (!language) return [];
+  const text = fs.readFileSync(abs, "utf8");
+  const patterns = [
+    /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
+    /\b(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][\w$]*)\b/g,
+    /\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g,
+    /^\s*def\s+([A-Za-z_][\w]*)\b/gm,
+    /^\s*class\s+([A-Za-z_][\w]*)\b/gm,
+    /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm,
+  ];
+  const symbols = [];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) && symbols.length < limitPerFile) {
+      const prefix = text.slice(0, match.index);
+      const line = prefix.split(/\r?\n/).length;
+      symbols.push({ name: match[1], file, line, language });
+    }
+  }
+  return symbols;
+}
+
+function repoMap(root, args = {}) {
+  const limit = Number(args.limit || 200);
+  const symbol = args.symbol ? String(args.symbol) : null;
+  if (symbol) {
+    const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+    const matches = result.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .slice(0, limit)
+      .map((line) => {
+        const [file, lineNo, ...rest] = line.split(":");
+        return { file, line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
+      });
+    return { ok: result.ok || matches.length > 0, root, symbol, matches, truncated: matches.length >= limit };
+  }
+  const files = gitTrackedFiles(root);
+  const byLanguage = {};
+  const symbols = [];
+  for (const file of files) {
+    const language = languageForFile(file);
+    if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
+    if (symbols.length < limit) symbols.push(...extractRepoSymbols(root, file, 12));
+    if (symbols.length > limit) symbols.length = limit;
+  }
+  return {
+    ok: true,
+    root,
+    files: files.length,
+    by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
+    symbols,
+    truncated: symbols.length >= limit,
+  };
+}
+
+function beadsTaskWrite(root, args = {}) {
+  if (!commandExists("bd", root)) {
+    return { ok: false, available: false, reason: "Beads CLI (bd) is not installed or not on PATH" };
+  }
+  const op = args.operation;
+  const id = args.id || args.taskId || args.issueId;
+  const commands = [];
+  const runBd = (bdArgs) => {
+    const result = runCommand("bd", bdArgs, { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+    commands.push(result);
+    return result;
+  };
+  if (op === "ready") {
+    const bdArgs = ["ready", "--json"];
+    if (args.parent) bdArgs.push("--parent", String(args.parent));
+    runBd(bdArgs);
+  } else if (op === "show") {
+    if (!id) return { ok: false, available: true, error: "id is required for show" };
+    runBd(["show", String(id), "--json"]);
+  } else if (op === "update") {
+    if (!id) return { ok: false, available: true, error: "id is required for update" };
+    const bdArgs = ["update", String(id), "--json"];
+    if (args.status) bdArgs.push("--status", String(args.status));
+    if (Object.prototype.hasOwnProperty.call(args, "assignee")) bdArgs.push("--assignee", String(args.assignee || ""));
+    if (args.priority) bdArgs.push("--priority", String(args.priority));
+    runBd(bdArgs);
+  } else if (op === "note") {
+    if (!id || !args.note) return { ok: false, available: true, error: "id and note are required for note" };
+    runBd(["note", String(id), String(args.note), "--json"]);
+  } else if (op === "close") {
+    if (!id) return { ok: false, available: true, error: "id is required for close" };
+    const bdArgs = ["close", String(id), "--reason", String(args.reason || "Task completed"), "--json"];
+    if (args.continue === true) bdArgs.splice(2, 0, "--continue");
+    runBd(bdArgs);
+  } else if (op === "label_add" || op === "label_remove") {
+    if (!id || !args.label) return { ok: false, available: true, error: "id and label are required for label operations" };
+    runBd(["label", op === "label_add" ? "add" : "remove", String(id), String(args.label), "--json"]);
+  } else if (op === "dep_add") {
+    if (!id || !args.dependsOn) return { ok: false, available: true, error: "id and dependsOn are required for dep_add" };
+    runBd(["dep", "add", String(id), String(args.dependsOn), "--json"]);
+  } else if (op === "create") {
+    if (!args.title) return { ok: false, available: true, error: "title is required for create" };
+    const bdArgs = ["create", String(args.title), "--json"];
+    if (args.type) bdArgs.push("-t", String(args.type));
+    if (args.parent) bdArgs.push("--parent", String(args.parent));
+    if (args.priority) bdArgs.push("-p", String(args.priority));
+    if (args.deps) bdArgs.push("--deps", String(args.deps));
+    runBd(bdArgs);
+  } else {
+    return {
+      ok: false,
+      available: true,
+      error: `Unsupported Beads operation: ${op}`,
+      operations: ["ready", "show", "update", "note", "close", "label_add", "label_remove", "dep_add", "create"],
+    };
+  }
+  const ok = commands.every((cmd) => cmd.ok);
+  let json = null;
+  const last = commands[commands.length - 1];
+  try {
+    json = JSON.parse(last && last.stdout ? last.stdout : "null");
+  } catch (_) {
+    // Keep raw output.
+  }
+  return { ok, available: true, operation: op, commands, json };
+}
+
 function lspReview(root, args = {}) {
   const candidates = [
     path.join(root, "templates", "scripts", "cadre-lsp-review.js"),
@@ -951,6 +1326,7 @@ function regenIndex(root) {
 module.exports = {
   STATUS_MARKERS,
   availableWork,
+  beadsTaskWrite,
   claimTrack,
   collisionScan,
   gitIdentity,
@@ -963,12 +1339,15 @@ module.exports = {
   planClaims,
   planIntegrity,
   polyrepoPreflight,
+  prCiStatus,
   recordReview,
   recordTaskResult,
   regenIndex,
+  repoMap,
   reviewGate,
   setTrackStatus,
   syncControlPlane,
   teamStatus,
+  testCoverage,
   trackContext,
 };

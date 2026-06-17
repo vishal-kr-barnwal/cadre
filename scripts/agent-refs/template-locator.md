@@ -37,4 +37,5 @@ sensible built-in defaults instead of copying files.
 | `code_styleguides/<lang>.md` | `cadre/code_styleguides/` | only the selected guides |
 | `beads.json` | `cadre/beads.json` | setup copies full-mode Beads config (`mode: "normal"`) |
 | `scripts/cadre-lsp-setup.js` | *(run in place)* | `node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json` — recommend/write `cadre/lsp.json` |
-| `scripts/cadre-lsp-review.js` | *(run in place through MCP when possible)* | `cadre_lsp_review` / `node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --json` — code-intelligence review |
+| `scripts/cadre-lsp-review.js` | *(run in place through MCP when possible)* | `cadre_lsp_warm_review` preferred, `cadre_lsp_review` fallback / `node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --json` — code-intelligence review |
+| `scripts/cadre-lsp-daemon.js` | *(managed by MCP)* | persistent LSP daemon used by `cadre_lsp_warm_review` |

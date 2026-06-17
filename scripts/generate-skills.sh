@@ -247,6 +247,7 @@ copy_plugin_scripts() {
   cp "$REPO_ROOT/scripts/cadre-core.js" "$dest/cadre-core.js"
   cp "$REPO_ROOT/scripts/cadre-lsp-setup.js" "$dest/cadre-lsp-setup.js"
   cp "$REPO_ROOT/scripts/cadre-lsp-review.js" "$dest/cadre-lsp-review.js"
+  cp "$REPO_ROOT/scripts/cadre-lsp-daemon.js" "$dest/cadre-lsp-daemon.js"
   cp "$REPO_ROOT/scripts/mcp/cadre-server.js" "$dest/mcp/cadre-server.js"
 }
 

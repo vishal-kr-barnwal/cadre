@@ -158,6 +158,12 @@ For the selected track:
      the create command as a manual fallback and tell the user to open the PR
      themselves.
 
+   - **After a PR/MR exists or the branch was pushed for manual PR creation:**
+     call MCP `cadre_pr_ci_status` with `root`, `trackId`, `provider`, and
+     `branch: "track/<track_id>"`. Surface the structured URL/state/review/check
+     summary when available; if the provider CLI is unavailable, keep the manual
+     PR guidance and do not fail the ship.
+
 ## 3. Publish the Control Plane (shared mode)
 
 The §1 ownership guard mirrored `owner` into `metadata.json` and §2 committed the
