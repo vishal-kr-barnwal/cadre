@@ -26,7 +26,7 @@ platform-control/                 # the control repo (you run cadre here)
 │   └── tracks/<id>/metadata.json # carries a per-repo `repos` map
 ├── .beads/                       # ONE shared Dolt task graph for ALL repos
 ├── .gitmodules                   # authoritative path+URL for each product repo
-├── .github/workflowscadre-merge-train.yml   # (or .gitlab-ci.yml)
+├── .github/workflows/cadre-merge-train.yml  # (or .gitlab-ci.yml)
 ├── repos/api/                    # product repo (submodule)
 ├── repos/web/                    # product repo (submodule)
 └── .worktrees/<id>/<repo>/       # per-repo track worktrees

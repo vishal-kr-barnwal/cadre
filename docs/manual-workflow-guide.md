@@ -94,7 +94,8 @@ Before using any Cadre workflow, ensure:
 1. Git is installed and initialized in your project
 2. You have write access to the project directory
 3. For implementation: `cadre/` directory exists with required files
-4. Beads CLI (`bd`) installed for persistent memory (Cadre will attempt Beads integration; if unavailable, you can choose to continue without it)
+4. Beads CLI (`bd`) installed for persistent memory. Cadre requires Beads during
+   setup and halts if it is unavailable.
 
 ### Installing Beads
 
@@ -1039,4 +1040,4 @@ cadre-implement <track_id>
 | Missing files | Run `cadre-setup` or `cadre-validate` |
 | Beads not syncing | Check `cadre/beads.json` has `enabled: true` |
 | Lost context after compaction | Use `bd show <id> --long` to recover |
-| bd command fails | Cadre continues without Beads (graceful degradation) |
+| bd command fails | Cadre retries once when appropriate, then halts for repair |

@@ -207,7 +207,8 @@ Display:
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip this section silently
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     saving the handoff.
 
 2. **Save Context to Beads with Full Structure:**
    ```bash
@@ -246,15 +247,10 @@ Display:
    Notes should be self-contained - no conversation context assumed.
    Include technical specifics, not vague progress.
 
-5. **Force Sync to Remote:**
-   ```bash
-   bd dolt push  # Ensures changes reach remote immediately
-   ```
-   - **`sync_mode: "shared"` (monorepo OR polyrepo):** also run the sync
-     postamble (see `references/cadre-sync.md`) — commit the `cadre/` changes,
-     make the `bd dolt push` mandatory, and `git push <control_remote>
-     <control_branch>` — so a teammate can pick up the handoff. This is gated on
-     `sync_mode == "shared"` alone, not on topology. Product code stays local.
+5. **Publish Handoff State:**
+   - Commit the `cadre/` changes, then call MCP `cadre_sync_control_plane` with
+     `mode: "post"` so a teammate can pick up the handoff in shared mode. It
+     no-ops in local mode. Product code stays local.
 
 **Benefit:** Beads notes survive context compaction, enabling seamless session resume.
 
@@ -301,9 +297,8 @@ instead of the machine content.
 3a. **Route the work to the recipient (Beads):** the prose in step 3 only
    *describes* the handoff — this step makes the track actually land in the
    recipient's queue. Run the standard Beads availability check (see
-   `references/beads-integration.md`); if `BEADS_AVAILABLE=false`, skip this step
-   silently and tell the user the prose handoff was written but the track could not
-   be auto-routed (no Beads). When Beads is available, for the resolved epic
+   `references/beads-integration.md`); if `BEADS_AVAILABLE=false`, HALT before
+   marking the handoff complete. When Beads is available, for the resolved epic
    (`cadre-<track_id>` / the `beads_epic` in `metadata.json`):
    - **Set the ASSIGNEE + `handoff:pending` label — never the owner.** Ownership
      intentionally stays with the author until the recipient picks the track up, so
@@ -333,9 +328,9 @@ instead of the machine content.
      ```
    - If any `bd` command fails, follow the Beads Error Handler Protocol (see
      `references/beads-error-handler.md`) — the prose handoff stands either way.
-   - In `sync_mode: "shared"`, run the sync postamble (see
-     `references/cadre-sync.md`) so the assignee/label/mail reach the recipient's
-     control plane; `bd dolt push` is mandatory there. Product code stays local.
+   - Call MCP `cadre_sync_control_plane` with `mode: "post"` so the
+     assignee/label/mail reach the recipient's control plane in shared mode.
+     Product code stays local.
 
 4. **SUPPRESS machine dumps:** in `--for-teammate` mode do NOT include raw
    `bd show` output, `git log`, or parallel-worker JSON, and skip the §4 / §9
@@ -345,5 +340,5 @@ instead of the machine content.
 5. **Present:** show the `cadre/tracks/<track_id>/HANDOFF.md` location, note that it is a
    teammate-oriented handoff, and report the routing outcome — that the epic was
    assigned to `<recipient-identity>` with the `handoff:pending` label and that the
-   recipient was notified by `bd mail` (or that routing was skipped because no
-   recipient was named / Beads was unavailable).
+   recipient was notified by `bd mail` (or that the workflow halted before completion
+   because no recipient was named or Beads required repair).

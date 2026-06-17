@@ -22,14 +22,14 @@ local.
 - Resolve the project root with `cadre_current_root` using the per-call `root`
   argument. Use the returned root for all MCP calls in this workflow.
 - If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
-- **Sync preamble (shared mode).** If `cadre/config.json` has `sync_mode == "shared"`
-  (in **both** monorepo and polyrepo — never gate on topology), run the **sync
-  preamble** from `references/cadre-sync.md` now — `git pull --rebase` the control
-  plane + `bd dolt pull` — **before** the ownership guard and review gate below. Ship
-  otherwise reads `metadata.review` from local disk only, so without this a teammate's
-  cross-machine `changes_requested` (or an advanced `reviewed_sha`) is invisible and
-  the gate clears on a stale local approval. In `local` mode (or when `config.json` is
-  absent) skip the preamble — today's single-machine behavior is unchanged.
+- Run the standard Beads availability check (`references/beads-error-handler.md`).
+  If `BEADS_AVAILABLE=false`, HALT and restore the Beads prerequisite before any
+  rebase or push work.
+- **Sync preamble (shared mode).** Call MCP `cadre_sync_control_plane` with
+  `mode: "pre"` before the ownership guard and review gate. It no-ops in local
+  mode and runs the shared pull/Dolt sync when `sync_mode == "shared"`, so a
+  teammate's `changes_requested` or advanced `reviewed_sha` is visible before
+  shipping.
 - If a `track_id` is provided, use it; otherwise list completed (`[x]`) tracks not yet
   archived and ask the user to choose.
 - Read `cadre/tracks/<track_id>/metadata.json` for `git_branch`
@@ -41,23 +41,19 @@ local.
   If it halts, stop.
 - **Review gate.** Call `cadre_review_gate` with `root` and `trackId`. This MCP
   result is authoritative for verdict, blocking findings, and self-review policy.
-  - **Absent** (the result contains reason `No recorded review verdict`) → no structured
-    gate recorded. Keep the existing soft behavior: confirm the track has been
-    reviewed (a `## Review` entry in `learnings.md` with a "Ready to ship" verdict).
-    If not, suggest `cadre-review <track_id>` first and ask whether to proceed
-    anyway. **If the user proceeds without a recorded review, log the override** so a
-    deliberate bypass is distinguishable from drift: append an audit line to
-    `learnings.md` (`OVERRIDE: shipped without a recorded review — operator
-    <git-identity>, <YYYY-MM-DDThh:mm:ssZ>`) and, if Beads is available, mirror it to
-    the epic (`bd note <epic_id> "OVERRIDE: shipped without recorded review (<git-identity>)" --json`).
-  - **Any blocking MCP reason other than absent review** → **REFUSE**:
+  - **Any blocking MCP reason** (including no recorded review or missing
+    `reviewed_sha`) → **REFUSE**:
     > "🚫 Track `<track_id>` has not cleared review (verdict:
     > `<verdict>`, blocking findings: `<blocking_count>`). Resolve the findings
     > and re-run `cadre-review <track_id>` before shipping."
     Then halt — do **not** rebase or push.
+  - **Explicit override flags:** only if the workflow arguments include
+    `--allow-unreviewed` or `--allow-unpinned-review`, the operator may bypass the
+    matching reason after logging an `OVERRIDE:` line to `learnings.md` and a Beads
+    note on the epic. These flags are exceptional compatibility valves; default
+    ship behavior is hard-gated.
   - **Clean** (`ok: true`) → the gate is satisfied; proceed without further
-    confirmation. Surface any MCP warnings (for example older reviews without
-    `reviewed_sha`) as non-blocking notes.
+    confirmation. Surface any MCP warnings as non-blocking notes.
 
 ## 2. Flush Dolt + Rebase + Prepare PR
 
@@ -93,29 +89,18 @@ For the selected track:
 4. **Re-read the review gate, then push (TOCTOU close):** the MCP verdict read in
    §1 is a point-in-time snapshot; a reviewer may have flipped it to
    `changes_requested` during the (slow) Dolt-flush + rebase above. **Call
-   `cadre_review_gate` again immediately before pushing** and abort if it now
-   blocks. The same
-   re-read also enforces **`reviewed_sha`** — the track-branch HEAD captured at
-   review time (`metadata.review.reviewed_sha`, written by `cadre-review`). If the
-   branch advanced past the reviewed commit (new work landed after the review), the
-   approval no longer covers what you are about to ship, so re-review is needed.
-   Compare against the **pre-rebase** tip (`$prerebase_head` from step 3) — the
-   rebase-onto-main in step 3 rewrites the tip, so comparing the post-rebase HEAD
-   would false-positive on a clean track:
+   `cadre_review_gate` again immediately before pushing with `headSha:
+   "$prerebase_head"` and abort if it now blocks. The same re-read enforces
+   **`reviewed_sha`** against the pre-rebase tip, so a clean rebase does not
+   false-positive but new work after review still requires re-review:
    ```bash
-   # Call MCP: cadre_review_gate { "root": "<root>", "trackId": "<track_id>" }.
-   # If ok=false for any reason other than an explicitly approved absent-review
-   # override from §1, abort before push.
-   # reviewed_sha guard: did the branch advance past the reviewed commit?
-   reviewed_sha=$(jq -r '.review.reviewed_sha // ""' "cadre/tracks/<track_id>/metadata.json")
-   if [ -n "$reviewed_sha" ] && [ "$reviewed_sha" != "$prerebase_head" ]; then
-     echo "🚫 Branch advanced past reviewed commit $reviewed_sha (pre-rebase tip $prerebase_head). Re-review needed — re-run cadre-review <track_id> before shipping."
-     exit 1
-   fi
+   # Call MCP: cadre_review_gate { "root": "<root>", "trackId": "<track_id>", "headSha": "$prerebase_head" }.
+   # If ok=false for any reason not explicitly allowed by an override flag from
+   # §1, abort before push.
    git push origin track/<track_id> --force-with-lease
    ```
-   When `reviewed_sha` is absent (older tracks reviewed before the field existed),
-   skip the guard — only the verdict/blocking check applies.
+   When `reviewed_sha` is absent, the MCP gate blocks by default. Proceed only
+   with the explicit `--allow-unpinned-review` override described in §1.
 
 5. **Announce / open the PR:**
 
@@ -180,14 +165,9 @@ flushed Dolt state, but `cadre-ship` otherwise pushes **product code only**
 (`git push origin track/<id>`). In shared mode that owner-claim and any control-plane
 state must also reach teammates, or the team never learns the track shipped. If
 `cadre/config.json` has `sync_mode == "shared"` (in **both** monorepo and polyrepo —
-never gate on topology), run the **sync postamble** from `references/cadre-sync.md`:
-
-1. Commit the `cadre/` changes (the owner mirror from the §1 guard, plus any
-   key-scoped `metadata.json` writes). Key-scoped jq only, never a full-file rewrite.
-2. **`bd dolt push` is MANDATORY** here to publish the claim to the shared task graph.
-3. `git push <control_remote> <control_branch>` to publish the control plane.
-4. On push rejection, re-run the preamble then push again — **bounded** per
-   `references/cadre-sync.md` (do not loop unbounded).
+never gate on topology), commit the `cadre/` changes, then call MCP
+`cadre_sync_control_plane` with `mode: "post"`. Use `references/cadre-sync.md`
+only for interpreting a failed sync or performing bounded manual repair.
 
 This publishes **only the control plane**; the product-code push stays in §2. In
 `local` mode (or when `config.json` is absent), skip this section — today's

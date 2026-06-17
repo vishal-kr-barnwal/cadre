@@ -25,6 +25,7 @@ Create a new track from the workflow arguments.
    - `cadre/product.md`
    - `cadre/tech-stack.md`
    - `cadre/workflow.md`
+   - `cadre/beads.json`
 
 2. **Handle Missing Files:**
    - If ANY missing: HALT immediately
@@ -35,12 +36,17 @@ Create a new track from the workflow arguments.
    `"polyrepo"`, this is **monorepo mode** — every step below behaves exactly as
    today; ignore the polyrepo-only notes. If `mode == "polyrepo"`, follow
    `references/polyrepo-git.md` for the per-repo branch/worktree model and the
-   repo annotation. If `cadre/config.json` has `sync_mode: "shared"`, run the
-   sync preamble from `references/cadre-sync.md` before mutating any state.
+   repo annotation. Call MCP `cadre_sync_control_plane` with `mode: "pre"`
+   before mutating state; it no-ops unless `cadre/config.json` has
+   `sync_mode: "shared"`.
 
 4. **Load existing track inventory via MCP:** Call `cadre_team_status` with
    `root`. Use the returned `tracks[]` for duplicate-name, dependency-prompt, and
    existing-owner context instead of scanning `tracks.md` for authoritative state.
+
+5. **Beads prerequisite:** Run the standard Beads availability check
+   (`references/beads-error-handler.md`). If unavailable, HALT; track creation must
+   not proceed without the durable Beads epic/task graph.
 
 ---
 
@@ -48,7 +54,10 @@ Create a new track from the workflow arguments.
 
 ### 2.1 Get Track Description and Determine Type
 
-1. **Load Project Context:** Read `cadre/` directory files.
+1. **Load Project Context:** Read the minimal project context needed for this
+   track: `cadre/product.md`, `cadre/tech-stack.md`, `cadre/workflow.md`, and
+   `cadre/patterns.md` if present. Do not read unrelated track histories unless
+   the user asks for them.
 
 2. **Get Track Description:**
    - **If workflow arguments are provided:** Use them as the track description
@@ -56,7 +65,15 @@ Create a new track from the workflow arguments.
      > "Please provide a brief description of the track (feature, bug fix, chore, etc.) you wish to start."
      Wait for response.
 
-3. **Infer Track Type:** Analyze description to classify as "Feature" or "Something Else" (Bug, Chore, Refactor). Do NOT ask user to classify.
+3. **Parse mode flags:** Support faster creation modes:
+   - `--quick`: ask only questions that would materially change scope or risk.
+   - `--defaults`: use medium priority, no dependencies, no time estimate, and
+     skip optional prompts unless required for correctness.
+   - `--from-brief`: treat the workflow arguments as the source brief and avoid
+     restating questions that the brief already answers.
+
+4. **Infer Track Type:** Analyze description to classify as "Feature" or
+   "Something Else" (Bug, Chore, Refactor). Do NOT ask user to classify.
 
 ---
 
@@ -65,7 +82,7 @@ Create a new track from the workflow arguments.
 1. **Announce:**
    > "I'll now guide you through questions to build a comprehensive `spec.md` for this track."
 
-2. **Questioning Phase (3-5 questions):**
+2. **Questioning Phase (batched, 0-5 questions):**
 
    **Question Classification - CRITICAL:**
    - **1. Classify Question Type:** Before EACH question, classify as:
@@ -77,16 +94,20 @@ Create a new track from the workflow arguments.
      - **If Exclusive Choice:** Direct question, do NOT add multi-select
 
    - **3. Interaction Flow:**
-     - **CRITICAL:** Ask ONE question at a time. Wait for response before next question.
-     - Last option for every question MUST be "Type your own answer"
-     - Confirm understanding by summarizing before moving on
+     - Ask a compact batch of the 2-3 highest-value questions when possible.
+     - Ask one question at a time only when the previous answer determines the next
+       branch.
+     - Last option for every choice-style question MUST be "Type your own answer".
+     - In `--quick` or `--from-brief` mode, ask zero questions when the brief is
+       already specific enough to produce a useful spec.
+     - Summarize assumptions once before drafting instead of after every answer.
 
-   **If FEATURE (3-5 questions):**
+   **If FEATURE (normally 2-5 questions; fewer in quick/from-brief modes):**
    - Clarifying questions about the feature
    - Implementation approach, interactions, inputs/outputs
    - UI/UX considerations, data involved
 
-   **If SOMETHING ELSE - Bug, Chore, etc. (2-3 questions):**
+   **If SOMETHING ELSE - Bug, Chore, etc. (normally 1-3 questions):**
    - Reproduction steps for bugs
    - Specific scope for chores
    - Success criteria
@@ -277,13 +298,13 @@ Create a new track from the workflow arguments.
      `<!-- repo: -->` annotation (defaulting to `default_repo`) and compare the
      **`(repo, file)` tuple**, not the bare path — the same relative path in two
      different repos is **not** a collision.
-   - **Collect every other active track's claims:** an *active* track is any
+   - **Collect every other planned/active track's claims:** an included track is any
      `cadre/tracks/*/metadata.json` whose `status` is not `completed`, `archived`,
      or `skipped` (i.e. `new`, `in_progress`, or `blocked`). Parse the `files:`
      (and polyrepo `repo:`) annotations from each such track's `plan.md`.
    - **Report overlaps:** if any `(repo, file)` tuple is claimed by both this track
-     and another active track, warn (do NOT halt):
-     > "⚠️ File overlap: `<repo>/<file>` is also claimed by active track
+     and another planned/active track, warn (do NOT halt):
+     > "⚠️ File overlap: `<repo>/<file>` is also claimed by planned/active track
      > `<other_track_id>` (owner: `<owner>`). Two tracks editing the same file may
      > conflict at ship/land. Consider narrowing scope or coordinating."
      List one line per overlapping tuple (naming the other track and its `owner`,
@@ -291,6 +312,9 @@ Create a new track from the workflow arguments.
      cross-owner file-overlap check, surfaced early at creation time.
    - **Degrade silently:** if another track's `plan.md` is missing or unparseable,
      skip it without error. This advisory never blocks track creation.
+   - After the track artifacts are written, call MCP `cadre_plan_integrity` with
+     `root` and the new `trackId`. Treat errors as plan-generation defects to fix
+     before committing; surface warnings for user awareness.
 
 4. **User Confirmation:**
    > "I've drafted the implementation plan. Please review:"
@@ -315,9 +339,16 @@ Create a new track from the workflow arguments.
    - List existing directories in `cadre/tracks/`
    - Extract short names from track IDs (`shortname_YYYYMMDD` → `shortname`)
    - If proposed short name matches existing:
-     - **HALT** creation
-     - Explain track with that name exists
-     - Suggest different name or resuming existing track
+     - Present the existing matching track IDs and their statuses.
+     - Ask the user to choose exactly one path:
+       - Resume/use the existing track, then stop this creation workflow.
+       - Rename the new track's short name, then continue with the renamed value.
+       - Create a separate same-shortname track, then continue and require the
+         collision-proof suffix below.
+       - Stop without creating anything.
+     - If the user has passed `--quick`, `--defaults`, or `--from-brief` and the
+       brief clearly requests a separate follow-up track, choose the
+       same-shortname suffixed path without prompting and note the decision.
 
 2. **Generate Track ID:** Create base ID: `shortname_YYYYMMDD`.
    - **Collision-proof suffix:** if a directory `cadre/tracks/<shortname_YYYYMMDD>`
@@ -338,22 +369,28 @@ Create a new track from the workflow arguments.
      needs to honor the re-suffix.
 
 3. **Ask for Priority:**
-   > "What priority should this track have?"
-   > A) 🔴 Critical - Blocking other work
-   > B) 🟠 High - Important, do soon
-   > C) 🟡 Medium - Normal priority (default)
-   > D) 🟢 Low - Nice to have
+   - If `--defaults` is present, set `"medium"` without prompting.
+   - Otherwise ask:
+     > "What priority should this track have?"
+     > A) 🔴 Critical - Blocking other work
+     > B) 🟠 High - Important, do soon
+     > C) 🟡 Medium - Normal priority (default)
+     > D) 🟢 Low - Nice to have
 
    Default to "medium" if skipped.
 
 4. **Ask for Dependencies (Optional):**
-   > "Does this track depend on any other tracks being completed first?"
+   - If `--defaults` is present, set `depends_on: []` without prompting.
+   - Otherwise ask:
+     > "Does this track depend on any other tracks being completed first?"
    - If yes: List incomplete tracks from the `cadre_team_status` result, let user select
    - Store selected track_ids in `depends_on` array
    - Default to empty array if skipped or no incomplete tracks
 
 5. **Ask for Time Estimate (Optional):**
-   > "Estimated hours to complete? (Enter number or skip)"
+   - If `--defaults` is present, set `estimated_hours: null` without prompting.
+   - Otherwise ask:
+     > "Estimated hours to complete? (Enter number or skip)"
    - Store in `estimated_hours` or null if skipped
 
 6. **Create Directory:** `cadre/tracks/<track_id>/`
@@ -517,10 +554,8 @@ Create a new track from the workflow arguments.
    - Check if `bd` command exists: `which bd`
    - If command not found:
      > "⚠️ Beads CLI (`bd`) is not installed. Beads provides persistent task memory across sessions."
-     > "A) Continue without Beads integration"
-     > "B) Stop - I'll install Beads first (see: https://github.com/steveyegge/beads)"
-     - If user chooses A: Skip remaining Beads steps, continue to completion
-     - If user chooses B: HALT and wait for user to install
+     > "Install Beads, then re-run this workflow."
+     - HALT. Cadre tracks require Beads; do not create a file-only track.
 
 2. **Create Epic for Track with Full Context (idempotent):**
    - Map priority: critical=0, high=1, medium=2, low=3
@@ -649,23 +684,14 @@ Create a new track from the workflow arguments.
 
 **ERROR HANDLING:** If any `bd` command fails during steps 2-8:
 - Announce the specific error
-- Ask user:
-  > "⚠️ Beads command failed: <error message>"
-  > "A) Continue without Beads integration - track files are already created"
-  > "B) Retry the failed command"
-  > "C) Stop - I'll fix the issue first"
-- If A: Skip remaining Beads steps, announce track created without Beads sync
-- If B: Retry the failed command
-- If C: HALT and wait for user
+- Follow `references/beads-error-handler.md`: retry once or halt. Do not leave a
+  new track without its Beads epic/tasks.
 
 ---
 
 ## 3.0 SYNC POSTAMBLE (shared mode only)
 
-If `cadre/config.json` has `sync_mode: "shared"`, publish the control plane
-per `references/cadre-sync.md`: `bd dolt push` then
-`git push <control_remote> <control_branch>`. This applies in **both monorepo and
-polyrepo** topologies — the control-plane publish is gated on `sync_mode`, never
-on topology. In `local` mode (or when `sync_mode` is absent), commits stay
-local — do not push. Product-repo CODE is still never auto-pushed regardless of
-sync mode; only the control plane is published here.
+After committing the new track control-plane files, call MCP
+`cadre_sync_control_plane` with `mode: "post"`. It publishes only when
+`sync_mode == "shared"` and no-ops in local mode. Product-repo CODE is still never
+auto-pushed regardless of topology; only the control plane is published here.

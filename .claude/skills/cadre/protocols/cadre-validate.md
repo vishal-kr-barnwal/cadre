@@ -19,9 +19,10 @@ Validate the integrity of this Cadre project.
 2. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
    Use its `tracks[]` and status/owner/reviewer data as the authoritative
    multi-track inventory for validation.
-3. **Parse plans through MCP:** For each `cadre/tracks/<track_id>/plan.md`, call
-   `cadre_parse_plan` with `root` and the relative `planPath`. Use the returned
-   phases/tasks/annotations for plan-integrity and annotation checks.
+3. **Validate plans through MCP:** Call `cadre_plan_integrity` with `root` for
+   the fleet-wide plan annotation/task-key/dependency check. For any track that
+   needs detailed reporting, call `cadre_track_context` or `cadre_parse_plan` with
+   the relative `planPath`.
 
 ## 0. Sync Preamble (shared mode only)
 
@@ -30,11 +31,10 @@ owners, registers the merge driver, and regenerates the index. Run against a sta
 local snapshot, those fixes both reconcile the wrong picture and stay local, so
 read `cadre/config.json` `sync_mode` first.
 
-- `sync_mode == "shared"` → run the **sync preamble** from `references/cadre-sync.md`
-  now (pull control plane with `git pull --rebase` + `bd dolt pull`) **before**
-  diagnosing anything in the sections below, so the lease sweep, owner checks, and
-  index-drift detection reconcile the *current* shared truth — not a stale local
-  copy. The matching **sync postamble** runs in step 7 after fixes are applied.
+- Call MCP `cadre_sync_control_plane` with `mode: "pre"` before diagnosing
+  anything below. It no-ops in local mode and syncs the shared control plane when
+  configured, so lease sweep, owner checks, and index-drift detection reconcile
+  the current shared truth. The matching post call runs in step 7 after fixes.
 - Absent or `sync_mode == "local"` → skip the preamble/postamble entirely (today's
   behavior; nothing is pulled or pushed).
 
@@ -101,11 +101,16 @@ hand-flips a marker to "reconcile."
 
 ## 5. Plan Integrity
 
-For each `plan.md`, use the `cadre_parse_plan` result:
-- Must have at least one phase and task
-- Valid markers only: `[ ]`, `[~]`, `[x]`, `[!]`
-- Completed tracks should have all tasks completed
-- Validate parallel execution annotations if present
+Use the `cadre_plan_integrity` result as the authoritative plan-integrity
+baseline:
+- Missing `<!-- files: ... -->` annotations are warnings because collision and
+  parallel checks depend on them.
+- Duplicate task keys, invalid repo routing, and unparseable dependency shapes
+  are errors.
+- For completed tracks, compare `cadre_track_context.task_counts` with metadata
+  status and warn if tasks remain pending/in progress.
+- Use `cadre_parse_plan` only for rendering line-specific details that are not in
+  the integrity payload.
 
 ## 5a. Parallel Execution Validation
 
@@ -208,8 +213,7 @@ For each track whose `metadata.json` carries a non-null `lease` object
   On `1`, **then** mirror the cleared state to `metadata.json` with the key-scoped
   `jq '.lease = null'` write above (Dolt is canonical; the file is its mirror). On
   `0`, treat the track as foreign-held again and skip it. If `bd` is unavailable,
-  fall back to the local re-read-and-recheck path above (the file becomes the only
-  guard, exactly as in monorepo mode).
+  HALT and restore the Beads prerequisite.
 
 ### 5c.2 Team invariants
 
@@ -244,9 +248,8 @@ For each track whose `metadata.json` carries a non-null `lease` object
    #                    metadata.json stamp unwritten and report it as owned.
    ```
    On `1`, mirror `owner` to `metadata.json` with the key-scoped `jq` write above; on
-   `0`, skip the stamp (a teammate claimed it first). If `bd` is unavailable, fall
-   back to the local key-scoped `jq` stamp (file is the only guard, as in monorepo
-   mode).
+   `0`, skip the stamp (a teammate claimed it first). If `bd` is unavailable, HALT
+   and restore the Beads prerequisite.
 
 (c) **`ours` merge driver registered.** Runs whenever `.beads/** merge=ours` is
    present in `.gitattributes` (every full-Beads project — monorepo + polyrepo,
@@ -317,13 +320,10 @@ place** (e.g. `jq '.lease = null'`, `jq '.owner = $id'`) — never a full-file
 rewrite — so concurrent sibling writes in shared mode aren't clobbered.
 
 **Sync postamble (shared mode only).** Once the chosen fixes are applied, publish
-the reconciled control plane rather than leaving the repairs local. When
-`sync_mode == "shared"` (resolved in step 0), run the **sync postamble** from
-`references/cadre-sync.md`: commit the `cadre/` changes (lease clears, owner
-stamps, regenerated index, repaired state files), make the `bd dolt push`
-**mandatory** (Dolt is the canonical shared task graph — the lease/owner CAS
-writes above live there), then `git push` the control plane; on push rejection,
-re-run the preamble (pull --rebase + dolt pull) and push again. In absent/`local`
+the reconciled control plane rather than leaving the repairs local. Commit the
+`cadre/` changes, then call MCP `cadre_sync_control_plane` with `mode: "post"`.
+It no-ops in local mode and performs the shared Beads/Git publish when
+configured. In absent/`local`
 mode, skip the postamble — fixes stay local as today. Product-repo CODE is never
 pushed here; only the control plane is published.
 
@@ -335,7 +335,8 @@ pushed here; only the control plane is published.
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip this section silently
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     validation.
 
 2. **Verify Beads Integration:**
    - Task status sync between Beads and plan.md

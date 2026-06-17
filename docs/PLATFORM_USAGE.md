@@ -121,8 +121,9 @@ bd dolt push
 bd dolt pull
 ```
 
-Cadre still works without Beads, but team-scale use is much stronger with Beads
-enabled.
+Cadre requires Beads. The `bd` CLI and `cadre/beads.json` task graph are part of
+the setup contract because ownership, handoffs, review labels, and compaction
+survival depend on them.
 
 ## Install Cadre
 
@@ -535,9 +536,11 @@ Useful MCP tools:
 |------|---------|
 | `cadre_ping` | Verify that the required Cadre MCP runtime is available. |
 | `cadre_current_root` | Resolve a supplied `root` to the Cadre project root. |
+| `cadre_live_status` | Cheap default status summary. |
 | `cadre_team_status` | Structured team board. |
-| `cadre_available_work` | Unblocked work to pick up. |
-| `cadre_collision_scan` | Cross-track file overlap. |
+| `cadre_available_work` | Ready unowned work plus stale held work that can be reclaimed. |
+| `cadre_set_track_status` | Set `metadata.json.status` and regenerate `tracks.md`. |
+| `cadre_collision_scan` | Cross-track exact, prefix, and glob file overlaps. |
 | `cadre_review_gate` | Whether a track can ship/land. |
 | `cadre_polyrepo_preflight` | Local polyrepo sanity checks. |
 | `cadre_regen_index` | Regenerate `tracks.md`. |
@@ -547,10 +550,12 @@ Workflow routing:
 | Workflow checkpoint | MCP tool |
 |--------------------|----------|
 | Project root resolution | `cadre_current_root` |
+| Cheap default status | `cadre_live_status` |
 | Track inventory, active/completed selection, owner/reviewer summaries | `cadre_team_status` |
-| Next unblocked work | `cadre_available_work` |
-| Cross-track file overlaps | `cadre_collision_scan` |
+| Next unblocked or reclaimable work | `cadre_available_work` |
+| Cross-track exact, prefix, and glob file overlaps | `cadre_collision_scan` |
 | Phase/task/annotation parsing | `cadre_parse_plan` |
+| Track status mutation | `cadre_set_track_status` |
 | Derived `tracks.md` rebuilds | `cadre_regen_index` |
 | Ship/land review enforcement | `cadre_review_gate` |
 | Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |

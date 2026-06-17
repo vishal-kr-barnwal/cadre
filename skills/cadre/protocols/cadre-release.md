@@ -89,10 +89,10 @@ git tag -a <version> -m "Release <version>"
   > "Release <version> committed and tagged locally. Push when ready:
   >   `git push && git push origin <version>`"
 
-## 7. Beads Sync (optional)
+## 7. Beads Sync
 
 1. **Availability Check:** run the standard Beads availability check
-   (see `references/beads-error-handler.md`); if `BEADS_AVAILABLE=false`, skip.
+   (see `references/beads-error-handler.md`); if `BEADS_AVAILABLE=false`, HALT.
 2. Record the release marker:
    ```bash
    bd note <project_or_epic> "RELEASE <version> <date>: <n> tracks, <n> commits." --json

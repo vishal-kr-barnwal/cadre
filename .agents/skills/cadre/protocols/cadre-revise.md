@@ -97,12 +97,8 @@ Append to `cadre/tracks/<track_id>/revisions.md`:
 git add cadre/tracks/<track_id>/
 git commit -m "cadre(revise): Update spec/plan for <track_id>"
 ```
-- **Control-plane sync (`sync_mode == "shared"` — both topologies):** if
-  `cadre/config.json` has `sync_mode == "shared"`, also offer to toggle `sync_mode`
-  here (the "later overridable" path, mirroring `cadre-refresh`), then run the
-  **sync postamble** from `references/cadre-sync.md` after committing — `bd dolt
-  push` (mandatory in shared mode) then `git push <control_remote> <control_branch>`
-  to publish the control plane — so teammates see the revision. This gates on
+- **Control-plane sync:** after committing, call MCP `cadre_sync_control_plane`
+  with `mode: "post"` so teammates see the revision in shared mode. This gates on
   `sync_mode == "shared"` alone, **regardless of topology** (monorepo OR polyrepo) —
   never on polyrepo. The spec/plan conflict-surfacing rules (`spec.md`/`plan.md` stay
   on normal merge, never auto-clobbered) apply per `references/cadre-sync.md`.
@@ -146,7 +142,8 @@ Revisions are valuable learnings - they indicate gaps in initial understanding.
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip this section silently
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     revising.
 
 2. **Sync Task Changes:**
    - NEW tasks: 

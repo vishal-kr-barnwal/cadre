@@ -62,8 +62,8 @@ const TOOLS = [
     },
   },
   {
-    name: "cadre_available_work",
-    description: "Return new, unowned tracks whose dependencies are complete.",
+    name: "cadre_live_status",
+    description: "Return a compact live-status summary for the default status view.",
     inputSchema: {
       type: "object",
       properties: { root: { type: "string" } },
@@ -72,11 +72,144 @@ const TOOLS = [
     },
   },
   {
-    name: "cadre_collision_scan",
-    description: "Return cross-track file collisions from plan <!-- files: --> claims.",
+    name: "cadre_available_work",
+    description: "Return unowned ready tracks plus stale held tracks that can be reclaimed.",
     inputSchema: {
       type: "object",
       properties: { root: { type: "string" } },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_set_track_status",
+    description: "Set metadata.json.status for a track and regenerate cadre/tracks.md.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["new", "in_progress", "completed", "blocked", "skipped"],
+        },
+      },
+      required: ["root", "trackId", "status"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_collision_scan",
+    description: "Return cross-track file collisions from plan <!-- files: --> claims, including prefix/glob overlaps.",
+    inputSchema: {
+      type: "object",
+      properties: { root: { type: "string" } },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_track_context",
+    description: "Return one bounded context payload for a track: metadata, parsed plan, counts, worktree routing, hold state, and review state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+      },
+      required: ["root", "trackId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_plan_integrity",
+    description: "Validate Cadre plan task annotations, task keys, dependency references, repo routing, and parallel file-claim shape.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_claim_track",
+    description: "Claim a track for the current identity, mirror owner/lease metadata, and create implement_state.json.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        identity: { type: "string" },
+        takeover: { type: "boolean" },
+      },
+      required: ["root", "trackId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_record_task_result",
+    description: "Record a task result in plan.md plus metadata last_task_result/last_coverage.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        phaseIndex: { type: "number" },
+        taskIndex: { type: "number" },
+        status: { type: "string", enum: ["pending", "new", "in_progress", "completed", "blocked", "skipped"] },
+        commitSha: { type: "string" },
+        coverage: { type: "number" },
+      },
+      required: ["root", "trackId", "phaseIndex", "taskIndex"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_record_review",
+    description: "Write metadata.review with review_seq, self-review detection, override guard, and immediate review-gate evaluation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        verdict: { type: "string", enum: ["approved", "changes_requested"] },
+        blockingCount: { type: "number" },
+        reviewer: { type: "string" },
+        coverage: { type: "number" },
+        reviewedSha: { type: "string" },
+        allowOverride: { type: "boolean" },
+      },
+      required: ["root", "trackId", "verdict"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_sync_control_plane",
+    description: "Run the shared-mode control-plane sync preamble or postamble as a structured operation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        mode: { type: "string", enum: ["pre", "post"] },
+      },
+      required: ["root", "mode"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_lsp_review",
+    description: "Run the Cadre LSP/code-intelligence review helper and return structured findings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        base: { type: "string" },
+        head: { type: "string" },
+        config: { type: "string" },
+      },
       required: ["root"],
       additionalProperties: false,
     },
@@ -89,6 +222,7 @@ const TOOLS = [
       properties: {
         trackId: { type: "string" },
         root: { type: "string" },
+        headSha: { type: "string" },
       },
       required: ["trackId", "root"],
       additionalProperties: false,
@@ -219,12 +353,30 @@ function toolCall(name, args) {
     }
     case "cadre_team_status":
       return asTextJson(core.teamStatus(root));
+    case "cadre_live_status":
+      return asTextJson(core.liveStatus(root));
     case "cadre_available_work":
       return asTextJson(core.availableWork(root));
+    case "cadre_set_track_status":
+      return asTextJson(core.setTrackStatus(root, args.trackId, args.status));
     case "cadre_collision_scan":
       return asTextJson(core.collisionScan(root));
+    case "cadre_track_context":
+      return asTextJson(core.trackContext(root, args.trackId));
+    case "cadre_plan_integrity":
+      return asTextJson(core.planIntegrity(root, args.trackId || null));
+    case "cadre_claim_track":
+      return asTextJson(core.claimTrack(root, args.trackId, args));
+    case "cadre_record_task_result":
+      return asTextJson(core.recordTaskResult(root, args));
+    case "cadre_record_review":
+      return asTextJson(core.recordReview(root, args));
+    case "cadre_sync_control_plane":
+      return asTextJson(core.syncControlPlane(root, args));
+    case "cadre_lsp_review":
+      return asTextJson(core.lspReview(root, args));
     case "cadre_review_gate":
-      return asTextJson(core.reviewGate(root, args.trackId));
+      return asTextJson(core.reviewGate(root, args.trackId, args));
     case "cadre_polyrepo_preflight":
       return asTextJson(core.polyrepoPreflight(root));
     default:
@@ -253,6 +405,18 @@ function resourceList() {
         description: "Cross-track file claim collisions. Read with ?root=/path/to/project.",
         mimeType: "application/json",
       },
+      {
+        uri: "cadre://plan-integrity",
+        name: "Cadre plan integrity",
+        description: "Plan annotation and dependency validation. Read with ?root=/path/to/project and optional &trackId=<id>.",
+        mimeType: "application/json",
+      },
+      {
+        uri: "cadre://track-context",
+        name: "Cadre track context",
+        description: "Bounded per-track context. Read with ?root=/path/to/project&trackId=<id>.",
+        mimeType: "application/json",
+      },
     ],
   };
 }
@@ -260,7 +424,7 @@ function resourceList() {
 function parseResourceUri(uri) {
   const [base, query = ""] = uri.split("?");
   const params = new URLSearchParams(query);
-  return { base, root: params.get("root") };
+  return { base, root: params.get("root"), trackId: params.get("trackId") };
 }
 
 function resourceRead(uri) {
@@ -270,6 +434,8 @@ function resourceRead(uri) {
   if (resource.base === "cadre://tracks") value = core.listTracks(root).map((track) => track.metadata);
   else if (resource.base === "cadre://team-status") value = core.teamStatus(root);
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
+  else if (resource.base === "cadre://plan-integrity") value = core.planIntegrity(root, resource.trackId || null);
+  else if (resource.base === "cadre://track-context") value = core.trackContext(root, resource.trackId);
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   return {
     contents: [

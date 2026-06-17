@@ -62,7 +62,7 @@ until you pick it up, so `cadre-status` Team View can group the pending handoff 
 
 ### Atomic claim (Beads-CAS — the real serialization point)
 
-When Beads is enabled (`beads_enabled`; see `references/beads-integration.md`),
+When Beads is configured (`beads_enabled`; see `references/beads-integration.md`),
 the **claim itself** must be a single compare-and-set against the shared Dolt
 task graph — not a read-then-write — so two operators racing to take the same
 **free** (or stale) track cannot both win. In the **default monorepo** mode the
@@ -93,11 +93,8 @@ window. On a handoff pickup, also clear the `handoff:pending` label
 `references/beads-integration.md`.
 
 On a win, **mirror** the owner into `metadata.json` so the file reflects Beads.
-This `jq` mirror is also the **offline fallback**: when `bd` is unavailable, there
-is no CAS, so stamp `owner` directly and rely on the read-decide-write +
-control-plane `git push --rebase` round-trip (shared mode) / the §3 guard
-(monorepo) to detect a racing claim — a push rejection means a sibling won, so
-re-read ownership and treat the track as foreign-held.
+If `bd` is unavailable, HALT and restore the Beads prerequisite; do not replace
+the CAS with a file-only read-decide-write claim.
 
 Always write `owner` with a **key-scoped** `jq` update (never a full-file
 rewrite), so a concurrent sibling write to another key is not clobbered:

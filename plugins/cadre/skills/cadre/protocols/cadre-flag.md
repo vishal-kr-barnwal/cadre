@@ -24,12 +24,9 @@ Before reading or resolving any track state, reconcile the control plane so the
 flag lands on top of teammates' latest work (and so the ownership guard sees the
 current owner/lease, not a stale local view):
 
-- **Shared sync mode** (`cadre/config.json` `sync_mode == "shared"`): run the sync
-  preamble (`references/cadre-sync.md`) — `git pull --rebase <control_remote>
-  <control_branch>` then `bd dolt pull` — before resolving the active track or
-  touching `plan.md`/`metadata.json`. This mirrors the postamble in step 6.5, so
-  flag reconciles before it mutates rather than after. In `local`/monorepo mode
-  there is nothing to pull; skip this step.
+- Call MCP `cadre_sync_control_plane` with `mode: "pre"` before resolving the
+  active track or touching `plan.md`/`metadata.json`. It no-ops in local mode and
+  reconciles shared state before the flag mutation when configured.
 
 ## 1. Determine Mode
 
@@ -83,17 +80,18 @@ For `skipped`, also ask the disposition:
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip to step 6
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     flagging.
 
 2. **Resolve the task's Beads id from the `beads_tasks` map** in `metadata.json`
    (there is **no** top-level `beads_task_id` field — the schema is a `beads_tasks`
    object keyed `phase{N}_task{M}`). Derive the key for the flagged task and look it
-   up; if there is no entry, skip to step 6 (nothing to sync). Use the resolved id as
-   `<task_id>` below:
+   up; if there is no entry, HALT and repair metadata rather than losing Beads
+   state. Use the resolved id as `<task_id>` below:
    ```bash
    META="cadre/tracks/<track_id>/metadata.json"
    task_id="$(jq -r '.beads_tasks["phase<N>_task<M>"] // empty' "$META")"
-   [ -z "$task_id" ] && echo "No Beads task mapped for this task; skipping Beads sync." # → step 6
+   [ -z "$task_id" ] && echo "No Beads task mapped for this task; repair metadata before flagging." && exit 1
    ```
 
    **If `blocked`:**
@@ -121,16 +119,9 @@ For `skipped`, also ask the disposition:
 
 ## 6. Update Track Status
 
-Flagging a task can change the *track's* status. Set the track's
-`metadata.json.status` with a key-scoped jq write so the source of truth drives the
-`tracks.md` markers (`[!]` / `[-]`) — these were previously unreachable because the
-status was only ever set on the task. Use a portable jq update (BSD + GNU):
-
-```bash
-META="cadre/tracks/<track_id>/metadata.json"
-tmp="$(mktemp)"
-jq --arg s "<new_status>" '.status = $s' "$META" > "$tmp" && mv "$tmp" "$META"
-```
+Flagging a task can change the *track's* status. Use MCP `cadre_set_track_status`
+so `metadata.json.status` (the source of truth) and the derived `tracks.md`
+marker update together. Do not hand-edit the marker.
 
 Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skipped`):
 - **`blocked`** — the flag leaves the track blocked with no ready task to advance to
@@ -139,8 +130,8 @@ Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skip
 - Otherwise leave **`in_progress`** — the track advanced to a next task (the common
   `skipped` "will complete later" / "no longer needed" path that moved `[~]` forward).
 
-Then call MCP `cadre_regen_index` with `root` so `tracks.md` reflects the new track
-marker. Require `ok: true`; halt and surface the MCP error if it fails.
+Call `cadre_set_track_status` with `root`, `trackId`, and the chosen
+`<new_status>`. Require `ok: true`; halt and surface the MCP error if it fails.
 
 ## 6.5 Commit & Propagate (so teammates see the flag)
 
@@ -156,11 +147,8 @@ git add cadre/tracks/<track_id>/ cadre/tracks.md
 git commit -m "cadre(flag): <blocked|skipped> <task> in <track_id> — <reason>"
 ```
 
-- **Shared sync mode** (`cadre/config.json` `sync_mode == "shared"`): also run the
-  sync postamble (`references/cadre-sync.md`) — `bd dolt push` then
-  `git push <control_remote> <control_branch>` — so the blocker/skip propagates to
-  teammates right away (matching `cadre-revise` and `cadre-handoff`). In
-  `local`/monorepo mode the commit stays local, as elsewhere.
+- After committing, call MCP `cadre_sync_control_plane` with `mode: "post"` so the
+  blocker/skip propagates in shared mode. It no-ops in local mode.
 
 ## 7. Confirm
 - `blocked`: announce the task is blocked and on what.

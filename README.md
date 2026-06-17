@@ -21,7 +21,7 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 **Spec-first SDLC.** Every track flows through plan → implement (TDD) → **review → ship (monorepo) / land (polyrepo) → archive → release**. `cadre-review` is an enforced quality gate: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `cadre-ship` / `cadre-land` refuse to proceed on `changes_requested` or blocking findings.
 
-**Two AI coding tools, one source of truth.** The 16 Cadre workflow protocols run through plugin-bundled skills on Claude Code and OpenAI Codex. Both plugin packages are generated from [`skills/cadre/protocols/`](skills/cadre/protocols/) (run `scripts/generate-skills.sh --check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
+**Two AI coding tools, one source of truth.** The 16 Cadre workflow protocols run through plugin-bundled skills on Claude Code and OpenAI Codex. Both plugin packages are generated from [`skills/cadre/SKILL.md`](skills/cadre/SKILL.md) and [`skills/cadre/protocols/`](skills/cadre/protocols/) (run `scripts/generate-skills.sh --check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
 
 **Built for teams.**
 - **Per-person identity + advisory leases** — assignees use your git committer identity (`user.email` → `user.name`); `metadata.json` carries `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In shared sync mode a track can hold an advisory lease (a no-op in monorepo/local modes; stale leases swept by `cadre-validate`).
@@ -66,7 +66,8 @@ Verify installation:
 bd --version
 ```
 
-> **Note:** Beads integration is always attempted for persistent memory. If the `bd` CLI is unavailable or fails, you'll be prompted to choose whether to continue without it.
+> **Note:** Beads is a Cadre setup prerequisite. `cadre-setup` halts until the
+> `bd` CLI is installed and working; Cadre does not create file-only tracks.
 
 ---
 
@@ -97,7 +98,7 @@ The plugins bundle the Cadre skill, workflow protocols, templates, and MCP
 server. LSP setup/review helpers are bundled as scripts and remain opt-in per
 project through `cadre/lsp.json`.
 
-> Claude and Codex plugin bundles are generated from the master protocols in [`skills/cadre/protocols/`](skills/cadre/protocols/) by [`scripts/generate-skills.sh`](scripts/generate-skills.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
+> Claude and Codex plugin bundles are generated from [`skills/cadre/SKILL.md`](skills/cadre/SKILL.md), the master protocols in [`skills/cadre/protocols/`](skills/cadre/protocols/), references, and templates by [`scripts/generate-skills.sh`](scripts/generate-skills.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
 
 ---
 
@@ -301,6 +302,7 @@ Skills provide:
 
 ```
 Cadre/
+├── skills/cadre/SKILL.md    # Master Cadre skill activation/routing text
 ├── skills/cadre/protocols/  # Master workflow protocols (edit these)
 ├── .claude/
 │   └── skills/          # Generated Claude skill bundle used for packaging

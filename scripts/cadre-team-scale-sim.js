@@ -4,7 +4,6 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawnSync } = require("child_process");
 const core = require("./cadre-core");
 
 function write(file, content) {
@@ -96,11 +95,8 @@ function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-scale-"));
   buildFixture(root);
 
-  const regen = spawnSync("bash", [
-    path.resolve(__dirname, "..", "templates", "scripts", "cadre-regen-index.sh"),
-    root,
-  ], { encoding: "utf8" });
-  assert(regen.status === 0, regen.stderr || "regen-index failed");
+  const regen = core.regenIndex(root);
+  assert(regen.ok === true, regen.stderr || regen.error || "regen-index failed");
 
   const status = core.teamStatus(root);
   const collisions = core.collisionScan(root);

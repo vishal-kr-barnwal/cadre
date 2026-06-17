@@ -1,6 +1,6 @@
 # Cadre + Beads Integration
 
-> **Status**: Implemented  
+> **Status**: Implemented
 > **Cadre Version**: 2.0.0
 
 ## Overview
@@ -15,7 +15,8 @@ This spec defines how Cadre's context-driven development methodology integrates 
 1. **Cadre owns planning** - Specs, product vision, and phase organization
 2. **Beads owns execution** - Task tracking, dependencies, and persistent memory
 3. **Bidirectional sync** - Changes in either system reflect in both
-4. **Graceful degradation** - If Beads unavailable, user can choose to continue without it
+4. **Required durability** - If Beads is unavailable, Cadre halts until the
+   prerequisite is restored.
 5. **One graph in polyrepo** - In polyrepo mode the Beads Dolt DB at the control
    repo is the **single shared task graph for all product repos** (submodules get
    no own `.beads/`). In `sync_mode: "shared"` Dolt is the canonical source teammates
@@ -109,7 +110,7 @@ Beads Actions:
 5. For each phase task in plan.md:
    bd create "Write failing auth tests" -P bd-a3f8 -p 1
    → Returns: bd-a3f8.1
-   
+
    bd create "Implement JWT middleware" -P bd-a3f8 -p 1
    → Returns: bd-a3f8.2
 
@@ -140,7 +141,7 @@ Combined Workflow:
 1. Cadre loads spec.md and plan.md for context
 2. Get AI-optimized context:
    bd prime
-   
+
 3. Query Beads for ready tasks:
    bd ready --parent bd-a3f8
    → Shows tasks with no blockers
@@ -160,11 +161,11 @@ Combined Workflow:
    KEY DECISION: RS256 over HS256 for key rotation
    FILES CHANGED: auth.test.ts, auth.ts
    COMMIT: abc123"
-   
+
 7. Close with auto-advance:
    bd close bd-a3f8.1 --continue --reason "Task completed"
    (The --continue flag auto-advances to next step)
-   
+
 8. Cadre updates plan.md with commit SHA
 ```
 
@@ -203,7 +204,7 @@ Actions:
 1. Cadre marks task [B] in plan.md
 2. Beads records blocker:
    bd update bd-a3f8.2 --status blocked --note "External API not ready"
-   
+
 3. If blocking relationship to another task:
    bd dep add bd-a3f8.2 bd-external-api
 ```
@@ -573,7 +574,7 @@ bd dep add <issue> external:project-a:auth-api
 
 2. **Skill loading** - Load the `cadre` and `beads` skills separately or merge them into a single combined skill?
 
-4. **Fallback behavior** - ~~If `bd` not installed, silent skip or prompt to install?~~ **Resolved**: Always attempt Beads; prompt user to choose if unavailable.
+4. **Fallback behavior** - ~~If `bd` not installed, silent skip or prompt to install?~~ **Resolved**: Beads is required; halt until `bd` is installed and working.
 
 ## References
 

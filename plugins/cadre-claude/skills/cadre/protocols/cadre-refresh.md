@@ -20,13 +20,10 @@ argument. Use the returned root for all MCP calls in this workflow. Call
 `cadre_team_status` to load the active track inventory before analyzing track or
 learnings scope.
 
-**Control-plane sync preamble (`sync_mode == "shared"` — both topologies):** if
-`cadre/config.json` has `sync_mode == "shared"`, run the **sync preamble** from
-`references/cadre-sync.md` (`git pull --rebase` + `bd dolt pull`) **before** reading
-or mutating `cadre/` — refresh consolidates learnings into `patterns.md` and rewrites
-context docs, so it must reconcile teammates' updates first (the matching postamble in
-section 8 publishes after). Gates on `sync_mode == "shared"` alone, regardless of
-topology.
+**Control-plane sync preamble:** call MCP `cadre_sync_control_plane` with
+`mode: "pre"` before reading or mutating `cadre/`. It no-ops in local mode and
+syncs the shared control plane when configured, so refresh consolidates current
+teammate updates before rewriting context docs.
 
 ## 2. Determine Scope
 
@@ -81,12 +78,9 @@ git add cadre/
 git commit -m "cadre(refresh): Sync context with codebase"
 ```
 
-**Control-plane sync (`sync_mode == "shared"` — both topologies):** if
-`cadre/config.json` has `sync_mode == "shared"`, run the **sync postamble** from
-`references/cadre-sync.md` after committing — `bd dolt push` (mandatory in shared
-mode) then `git push <control_remote> <control_branch>` to publish the refreshed
-control plane. This gates on `sync_mode == "shared"` alone, **regardless of
-topology** (monorepo OR polyrepo) — never on polyrepo. Product code is never
+**Control-plane sync:** after committing, call MCP `cadre_sync_control_plane`
+with `mode: "post"`. It publishes only when `sync_mode == "shared"` and no-ops
+in local mode. Product code is never
 auto-pushed.
 
 ---
@@ -205,11 +199,10 @@ choices made at setup. See `references/polyrepo-git.md` and `references/cadre-sy
    `git submodule update --init --remote` — offer it here only (never automatic).
 
 5. **Commit + publish:** commit `repos.json`/`config.json`/`.gitattributes`
-   changes; when the resulting `config.json` `sync_mode == "shared"` run the sync
-   postamble from `references/cadre-sync.md` (`bd dolt push` then control-plane
-   push). This publish gates on `sync_mode == "shared"` alone — not on topology —
-   so a refresh that toggles `local → shared` (step 2) publishes the control plane
-   on the very same run.
+   changes, then call MCP `cadre_sync_control_plane` with `mode: "post"`. This
+   publishes only when the resulting `config.json` has `sync_mode == "shared"`, so
+   a refresh that toggles `local → shared` publishes the control plane on the same
+   run.
 
 ---
 
@@ -287,7 +280,8 @@ that skipped LSP during `cadre-setup`, or for codebases that gained a language.
    git add cadre/lsp.json
    git commit -m "cadre(refresh): Configure LSP servers"
    ```
-   In shared mode, run the sync postamble from `references/cadre-sync.md`.
+  Then call MCP `cadre_sync_control_plane` with `mode: "post"`; it no-ops unless
+  shared mode is configured.
 
 ---
 
@@ -297,7 +291,8 @@ that skipped LSP during `cadre-setup`, or for codebases that gained a language.
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip this section silently
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     continuing refresh.
 
 2. **Analyze Beads vs Cadre Drift:**
    - Tasks done in Beads but `[ ]` in plan.md

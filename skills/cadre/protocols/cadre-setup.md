@@ -22,6 +22,14 @@ Initialize this project with context-driven development. Follow this workflow pr
 > Project-scoped MCP calls begin as soon as this workflow creates or confirms
 > `cadre/`.
 
+0. **Prerequisite check (Beads is required):** Cadre setup requires the `bd` CLI.
+   Run `which bd` and `bd --version` before any project mutation.
+   - If either command fails, **HALT** and tell the user to install Beads first
+     (`npm install -g @beads/bd`, `brew install beads`, or the project-documented
+     installer). Do not offer file-only mode during setup.
+   - If `.beads/` already exists but `bd` is unavailable, treat the project as
+     misconfigured and halt until the CLI is restored.
+
 1. **Read State File:** Check for `cadre/setup_state.json`
    - If it does NOT exist, this is a new project. Proceed to Section 1.1.
    - If it exists, read its content.
@@ -58,7 +66,7 @@ Present to user:
 > 2. **Product Definition:** Define vision, guidelines, and tech stack
 > 3. **Configuration:** Select code style guides and workflow
 > 4. **LSP Setup:** Configure optional language-server code intelligence
-> 5. **Beads Integration:** Set up persistent task memory
+> 5. **Beads Integration:** Set up required persistent task memory
 >
 > Let's get started!"
 
@@ -442,15 +450,9 @@ configured later with `cadre-refresh --lsp` if the user skips now.**
 **PROTOCOL: Set up Beads integration for persistent task memory.**
 
 1. **Check for Beads CLI:**
-   - Run `which bd` to detect if Beads is installed
-   - **If NOT found:**
-     > "⚠️ Beads CLI (`bd`) is not installed. Beads provides persistent task memory across sessions."
-     > "A) Continue without Beads integration"
-     > "B) Stop - I'll install Beads first"
-     - If A: Set `beads_available = false`, then go to the sync-mode step so a
-       team can still share `cadre/` tracks without Beads — **Section 2.7a** if
-       `topology == "monorepo"`, **Section 2.7b** if `topology == "polyrepo"`.
-     - If B: HALT and wait for user
+   - Run `which bd` and `bd --version`.
+   - **If either fails:** HALT. Beads is a setup prerequisite; do not continue in
+     file-only mode.
 
 2. **If Beads Available, Enable Full Integration:**
    - Do not ask for a Beads mode. Cadre uses full Beads integration by default so
@@ -464,14 +466,10 @@ configured later with `cadre-refresh --lsp` if the user skips now.**
      ```
    - **If command fails:**
      > "⚠️ Beads command failed: <error message>"
-     > "A) Continue without Beads integration"
-     > "B) Retry the failed command"
-     > "C) Stop - I'll fix the issue first"
-     - If A: Set `beads_available = false`, then go to the sync-mode step (so a
-       team can still share `cadre/` tracks without Beads) — **Section 2.7a** if
-       `topology == "monorepo"`, **Section 2.7b** if `topology == "polyrepo"`.
-     - If B: Retry the command
-     - If C: HALT and wait for user
+     > "A) Retry the failed command"
+     > "B) Stop - I'll fix the issue first"
+     - If A: Retry the command once.
+     - If B, or if the retry fails: HALT and wait for user.
    - Create `cadre/beads.json` from the template: copy
      `<TEMPLATES_DIR>/beads.json` (resolved in 2.4) to `cadre/beads.json`.
      **Copy the template verbatim** — it is the canonical schema; do not hand-write
@@ -539,6 +537,9 @@ here exactly as it does in polyrepo. See `references/cadre-sync.md`.**
    - `require_second_reviewer`: leave `false` (template default). When a team flips
      it to `true`, `cadre-ship` refuses a track approved by its own owner
      (`review.self_reviewed`), forcing a second reviewer.
+   - `allow_unreviewed_ship` and `allow_unpinned_review_ship`: leave `false`
+     (template defaults). These keep `cadre-ship` hard-gated on a structured
+     review and `reviewed_sha`; teams may flip them only for legacy compatibility.
    - `control_remote`, `control_branch` from step 2 (write these whenever
      `sync_mode == "shared"` so the sync pre/postamble can publish the control
      plane; harmless defaults in `local` mode).
@@ -628,6 +629,10 @@ and `references/polyrepo-git.md`.**
    - `require_second_reviewer`: leave `false` (template default). When a team flips
      it to `true`, `cadre-ship` and `cadre-land` refuse a track approved by its own
      owner (`review.self_reviewed`), forcing a second reviewer.
+   - `allow_unreviewed_ship` and `allow_unpinned_review_ship`: leave `false`
+     (template defaults). These keep `cadre-ship` / `cadre-land` hard-gated on a
+     structured review and `reviewed_sha`; teams may flip them only for legacy
+     compatibility.
    - `control_remote`, `control_branch` from step 4
    - `pr_provider`: `"github"` or `"gitlab"`
    - `merge_train.enabled`: false only if C; `merge_train.auto_fire`: true for A,
@@ -635,7 +640,7 @@ and `references/polyrepo-git.md`.**
 
 6. **Scaffold the merge-train CI (only if `merge_train.enabled`):** copy from
    `<TEMPLATES_DIR>/ci/` the file matching `pr_provider` into the control repo:
-   - GitHub → `.github/workflowscadre-merge-train.yml`
+   - GitHub → `.github/workflows/cadre-merge-train.yml`
    - GitLab → `.gitlab-ci.yml` (if one already exists, tell the user to `include:`
      the template instead of overwriting; copy it as
      `cadre-merge-train.gitlab-ci.yml` and print include guidance).
@@ -717,10 +722,8 @@ and `references/polyrepo-git.md`.**
    - In monorepo mode this also stages `config.json` (and `.gitattributes` if
      shared mode extended it). In polyrepo mode this additionally stages
      `repos.json`, `.gitmodules`, and any scaffolded CI file.
-4. **Publish control plane (`sync_mode == "shared"` only — monorepo OR polyrepo):**
-   this is the first publish of the control plane — follow the sync postamble in
-   `references/cadre-sync.md`: `bd dolt push` then
-   `git push <control_remote> <control_branch>`. In `local` mode (the monorepo
-   default, or any repo without `config.json`), do **not** push — commits stay
-   local as today. Product-repo CODE is never pushed here regardless of sync mode.
+4. **Publish control plane:** this is the first publish of the control plane.
+   After the setup commit, call MCP `cadre_sync_control_plane` with
+   `mode: "post"`. It publishes only when `sync_mode == "shared"` and no-ops in
+   local mode. Product-repo CODE is never pushed here regardless of sync mode.
 5. **Next Steps:** "Run `cadre-newtrack` to begin work."

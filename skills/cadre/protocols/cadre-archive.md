@@ -13,8 +13,9 @@ argument. Use the returned root for all MCP calls in this workflow.
 Read `cadre/repos.json` and `cadre/config.json`. If `repos.json` is
 absent or `mode` ≠ `"polyrepo"` → monorepo mode; every step behaves as today. If
 `mode == "polyrepo"`, worktree teardown and the safety-net branch push are
-**per-repo** (see `references/polyrepo-git.md`). If `sync_mode == "shared"`, run
-the sync preamble and, at the end, the postamble (push the control plane).
+**per-repo** (see `references/polyrepo-git.md`). Call MCP
+`cadre_sync_control_plane` with `mode: "pre"` before mutation; it no-ops outside
+shared mode. At the end, call it again with `mode: "post"` after committing.
 
 ## 1. Find Completed Tracks
 Select completed tracks by reading the **source of truth** through MCP: call
@@ -165,7 +166,8 @@ git commit -m "cadre(archive): archive <track_id> [, <track_id2> ...]"
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip this section silently
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     archiving.
 
 2. **Clear Stale Parallel Assignees:**
    - For each archived track, clear any leftover parallel worker assignees:
@@ -196,11 +198,9 @@ git commit -m "cadre(archive): archive <track_id> [, <track_id2> ...]"
    ```
    - Skip if `.beads/` has no changes after compaction.
 
-6. **Publish control plane (`sync_mode: "shared"` only):** run the sync
-   postamble from `references/cadre-sync.md` — `bd dolt push` then
-   `git push <control_remote> <control_branch>` — so teammates see the archived
-   state. This applies in **both monorepo and polyrepo** shared mode (the control
-   plane is published whenever `sync_mode == "shared"`, independent of topology).
+6. **Publish control plane:** after committing, call MCP
+   `cadre_sync_control_plane` with `mode: "post"` so teammates see the archived
+   state in shared mode. It no-ops in local mode.
    In `local` mode, commits stay local. This publishes only the control plane;
    the polyrepo product-CODE safety-net branch push (step 3.2a) is separate and
    stays as-is.

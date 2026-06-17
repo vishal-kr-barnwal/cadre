@@ -25,6 +25,7 @@ Implement the requested track from the workflow arguments.
    - `cadre/product.md`
    - `cadre/tech-stack.md`
    - `cadre/workflow.md`
+   - `cadre/beads.json`
 
 2. **Handle Missing Files:**
    - If ANY missing: HALT immediately
@@ -37,9 +38,10 @@ Implement the requested track from the workflow arguments.
    - `mode == "polyrepo"` → follow `references/polyrepo-git.md`: each task routes
      to its `<!-- repo: -->` target (absent → `default_repo`), and branches /
      worktrees / commits are **per-repo**.
-   - `config.json` `sync_mode == "shared"` → run the **sync preamble** from
-     `references/cadre-sync.md` now (pull control plane + `bd dolt pull`)
-     before reading or mutating any state.
+   - `config.json` `sync_mode == "shared"` → call MCP
+     `cadre_sync_control_plane` with `mode: "pre"` now before reading or
+     mutating any state. Use `references/cadre-sync.md` only for interpreting
+     failures or manually repairing a broken checkout.
 
 4. **Load structured track inventory via MCP:** Call `cadre_team_status` with
    `root`. Use the returned `tracks[]` for status, owner, reviewer, and review
@@ -53,12 +55,10 @@ Implement the requested track from the workflow arguments.
 
 1. **Check for User Input:** Check if track name provided as argument.
 
-2. **Parse Tracks File:** Read `cadre/tracks.md`
-   - Split by `---` separator to identify track sections
-   - Extract: status (`[ ]`, `[~]`, `[x]`), description, folder link
-   - **CRITICAL:** If no track sections found: "The tracks file is empty or malformed." → HALT
-   - This read is for human-readable descriptions only. Authoritative status and
-     ownership come from `cadre_team_status`.
+2. **Use structured inventory first:** Use `cadre_team_status` and, after a
+   candidate is chosen, `cadre_track_context` for display labels, ownership,
+   review state, task counts, Beads IDs, and parsed plan data. Read
+   `cadre/tracks.md` only if a human-facing label is missing from MCP output.
 
 3. **Select Track:**
 
@@ -82,43 +82,18 @@ Implement the requested track from the workflow arguments.
    - If all complete: "No incomplete tracks found. All tasks completed!" → HALT
 
 3b. **Ownership guard & claim at selection (both topologies):**
-   - Compute `<git-identity>` (`git config user.email` → `user.name` → null) and run
-     the **Ownership Guard** (`references/ownership-guard.md`) for the selected
-     track. This is what prevents the **default monorepo** collision where two
-     people both pick the same next track — the advisory `lease` is a no-op there,
-     so the guard relies on `metadata.json.owner` + `implement_state.json` instead.
-   - **Atomic claim (Beads-CAS — preferred when `beads_enabled`):** the real
-     serialization point in the **default monorepo** mode (where the advisory `lease`
-     is a no-op) is a single conditional write against the shared Dolt task graph, so
-     two pickers can't both win. Read the track's `beads_epic` from `metadata.json`,
-     then attempt one compare-and-set that claims the epic only if it is unheld or
-     stale (staleness window per `references/ownership-guard.md §5`):
-     ```bash
-     bd sql "UPDATE issues SET assignee='<git-identity>'
-             WHERE id='<beads_epic>'
-               AND (assignee IS NULL OR assignee=''
-                    OR assignee='<git-identity>'
-                    OR updated_at < datetime('now','-30 minutes'))"
-     ```
-     Read **rows-affected**: `1` → **you won** the claim; `0` → someone else already
-     holds it → treat as **foreign-held** (offer take-over / pick-another per the
-     guard). On a win, **mirror** the owner into `metadata.json` via key-scoped jq
-     (`jq --arg o "<git-identity>" '.owner = $o'`) so the file mirrors Beads. The
-     `OR assignee='<git-identity>'` clause keeps the claim idempotent for the rightful
-     holder — re-running on your own track, or picking up a track **handed off to you**
-     (assignee == you; see `references/ownership-guard.md §3`), wins cleanly instead of
-     locking you out for the staleness window. On a handoff pickup, also clear the
-     label (`bd label remove <beads_epic> handoff:pending --json`). Ground the exact `bd`
-     interface in `references/beads-integration.md`.
-   - **Fallback (no `bd`, or `bd` unavailable):** use today's read-decide-write —
-     stamp `owner = <git-identity>` on `metadata.json` (key-scoped jq), then rely on
-     the control-plane `git push --rebase` round-trip (shared mode) / the Ownership
-     Guard (monorepo) to detect a racing claim. A push rejection means a sibling won;
-     re-read ownership and treat as foreign-held.
-   - **Claim immediately** so a second picker hits the guard: after the claim above,
-     create `implement_state.json` now (status `starting`, `owner`, `last_updated`) —
-     before doing any work. If the guard (or a lost CAS) reported the track
-     foreign-held and the user chose **Stop**, return to track selection.
+   - Compute `<git-identity>` (`git config user.email` → `user.name` → null).
+   - Call MCP `cadre_claim_track` with `root`, `trackId`, and `identity`. This is
+     the structured ownership guard: it claims Beads when present, mirrors owner
+     and shared-mode lease metadata, and creates `implement_state.json` before any
+     work begins.
+   - If the tool returns `foreign-held`, list the holder and ask whether to stop,
+     pick another track, or retry with `takeover: true` after explicit user
+     confirmation. If it reports missing Beads, HALT and restore the Beads
+     prerequisite; do not replace the claim with an ad hoc file write.
+   - After a successful claim, call `cadre_track_context` for the selected track
+     and use that single payload for metadata, parsed plan, worktree routing,
+     task counts, review state, and Beads task IDs.
 
 3b-1. **Cross-track file-collision check at selection (both topologies):**
    - `<!-- files: path1, path2 -->` is now a first-class plan artifact emitted by
@@ -174,18 +149,9 @@ Implement the requested track from the workflow arguments.
 2. **Update Status to 'In Progress':**
    - `cadre/tracks.md` is a DERIVED INDEX — never flip its marker in place
      (no `sed`/Edit on the `## [..] Track:` line).
-   - **Step a — write the source of truth:** set this track's `metadata.json`
-     `"status"` to `"in_progress"` with key-scoped jq (preserves every other key):
-     ```bash
-     META="cadre/tracks/<track_id>/metadata.json"; tmp="$(mktemp)"
-     jq '.status = "in_progress"' "$META" > "$tmp" && mv "$tmp" "$META"
-     ```
-   - **Step b — regenerate the index:** then call MCP `cadre_regen_index` with
-     `root` (it rebuilds only the region between
-     `<!-- cadre:index:start -->` and `<!-- cadre:index:end -->` from each
-     track's metadata status + name, preserving the preamble). Require `ok: true`
-     or halt. The selected track's `## [~] Track:` line appears in the regenerated
-     region automatically. Do not inline the algorithm here.
+   - Call MCP `cadre_set_track_status` with `root`, `trackId`, and
+     `status: "in_progress"`. Require `ok: true`; it updates the metadata source
+     of truth and regenerates the index. Do not inline the write/splice algorithm.
 
 3. **Load Track Context:**
    - Resolve `<track_id>` from workflow arguments (when a track was named) or from the
@@ -202,7 +168,7 @@ Implement the requested track from the workflow arguments.
      and annotations for dependency graph construction and task iteration; keep
      the file read only for human-readable task text and edits.
 
-3a. **Load Context (Beads-first, files as fallback):**
+3a. **Load Context (Beads-first, files as bounded backup):**
 
     This is the **single** Beads-context load — prime exactly **once** (the prior
     split into two steps re-primed redundantly, and the order was wrong: it primed
@@ -210,11 +176,9 @@ Implement the requested track from the workflow arguments.
 
     **Step 1 — Detect `bd` BEFORE priming:** Run `which bd`.
     - **If NOT found:**
-      > "⚠️ Beads CLI (`bd`) is not installed. Beads provides persistent task memory across sessions."
-      > "A) Continue without Beads integration"
-      > "B) Stop - I'll install Beads first"
-      - If A: set `beads_enabled = false`, skip to **FILE FALLBACK** below.
-      - If B: HALT and wait for user.
+      > "⚠️ Beads CLI (`bd`) is not installed. Cadre setup requires Beads."
+      > "Install or restore Beads, then re-run `cadre-implement`."
+      - HALT. Do not continue in file-only mode.
     - **If found:** set `beads_enabled = true`.
 
     **Step 2 — Prime once + load epic context (if `beads_enabled`):**
@@ -237,7 +201,7 @@ Implement the requested track from the workflow arguments.
     Advisory only: **Beads remains the source of truth**; if the handoff and Beads
     disagree, trust Beads.
 
-    **FILE FALLBACK (if Beads disabled or degraded):**
+    **BOUNDED FILE BACKUP:**
     - **Read Project Patterns:** If `cadre/patterns.md` exists:
       - Read and announce: "📚 **Codebase Patterns:** Found X patterns from previous tracks"
     - **Read Track Learnings:** If `cadre/tracks/<track_id>/learnings.md` exists:
@@ -246,6 +210,7 @@ Implement the requested track from the workflow arguments.
     - **Read Previous Track Learnings (optional):** For similar tracks in archive:
       - Scan `cadre/archive/` for tracks with similar names/descriptions
       - Read their `learnings.md` for relevant patterns
+    This supplements Beads; it is not a replacement for the durable task graph.
 
 3c. **Switch to Track Worktree:**
 
@@ -307,9 +272,8 @@ Implement the requested track from the workflow arguments.
      `1` → you hold it — mirror `owner = <git-identity>` into `metadata.json`
      (key-scoped jq) and `implement_state.json`, then resume. `0` → a sibling already
      holds it → treat as **foreign-held**: fall back to the take-over prompt above, or
-     pick another track. When `bd` is unavailable there is no CAS — stamp `owner` and
-     rely on the control-plane `git push --rebase` round-trip (shared mode) / the
-     Ownership Guard (monorepo) to detect a racing claim, exactly as §3b's fallback.
+     pick another track. If `bd` is unavailable, HALT and restore the Beads
+     prerequisite.
    - Announce: "Resuming implementation from [current_phase] (Phase [current_phase_index + 1]) - Task [current_task_index + 1]"
    - Skip to indicated phase and task within that phase
 
@@ -483,8 +447,9 @@ Implement the requested track from the workflow arguments.
       **d1. Announce:** "Executing tasks from plan.md following workflow.md procedures."
 
       **d2. Iterate Through Tasks:** Loop through each task from the
-      `cadre_parse_plan` result one by one, applying progress edits back to
-      `plan.md`.
+      `cadre_track_context.plan` / `cadre_parse_plan` result one by one. Use MCP
+      `cadre_record_task_result` for marker/SHA/coverage writes instead of
+      hand-editing the task line.
 
       **d3. For Each Task:**
           - **i-0. Resolve Task Repo & Working Root (POLYREPO ONLY):** Read the
@@ -505,16 +470,17 @@ Implement the requested track from the workflow arguments.
                  (the assignee is the current operator's git identity, **never** the
                  literal "cadre")
                - **If `bd` command fails:**
-                 > "⚠️ Beads command failed: <error message>"
-                 > "A) Continue without Beads integration"
-                 > "B) Retry the failed command"
-                 > "C) Stop - I'll fix the issue first"
-                 - If A: Set `beads_enabled = false`, continue
-                 - If B: Retry the command
-                 - If C: HALT and wait for user
-           - **i-b. Beads Task Complete (If Enabled):** After marking task `[x]` complete:
+                 Follow `references/beads-error-handler.md`: retry once or halt.
+           - **i-b. Task Complete (MCP first, Beads mirrored):** After the code is
+             committed and verification passes, call `cadre_record_task_result`
+             with `root`, `trackId`, `phaseIndex`, `taskIndex`, `status:
+             "completed"`, the commit SHA, and measured coverage when available.
+             The returned `task_key` and `beads_task_id` identify the Beads task to
+             close and the plan row already updated by MCP.
+           - **i-c. Beads Task Complete (If Enabled):**
              - **ONLY if `beads_enabled` is true:**
-               - Look up `beads_task_id` from `beads_tasks` mapping (same key as i-a)
+               - Use the `beads_task_id` returned by `cadre_record_task_result`
+                 (fallback to the `beads_tasks` map from `cadre_track_context`).
                - If found:
                  - Add structured completion notes:
                    ```bash
@@ -528,13 +494,7 @@ Implement the requested track from the workflow arguments.
                  - If discovered work during implementation:
                    `bd create "<issue>" -t bug -p 2 --deps discovered-from:<current_task_id> --json`
                - **If `bd` command fails:**
-                 > "⚠️ Beads command failed: <error message>"
-                 > "A) Continue without Beads integration"
-                 > "B) Retry the failed command"
-                 > "C) Stop - I'll fix the issue first"
-                 - If A: Set `beads_enabled = false`, continue
-                 - If B: Retry the command
-                 - If C: HALT and wait for user
+                 Follow `references/beads-error-handler.md`: retry once or halt.
       - **ii. Update Implementation State:** After marking task in progress:
         - Set `current_phase` to current phase name
         - Set `current_phase_index` to current phase number (zero-based)
@@ -553,15 +513,11 @@ Implement the requested track from the workflow arguments.
           IN PROGRESS: Phase N+1 - <next_phase>
           NEXT: <first_task_of_next_phase>
           KEY DECISIONS: <major decisions made this phase>" --json
-          bd dolt push
           ```
           - **If any command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-        - **Control-plane sync (`sync_mode: "shared"` — both topologies):** after
-          the phase checkpoint commit to `cadre/`, run the sync postamble in
-          `references/cadre-sync.md` — `bd dolt push` is **mandatory** here (not
-          optional), then `git push <control_remote> <control_branch>`. This gates on
-          `config.json` `sync_mode == "shared"` **regardless of topology** (monorepo
-          or polyrepo): the control plane is shared orchestration state, never code.
+        - **Control-plane sync:** after the phase checkpoint commit to `cadre/`,
+          call MCP `cadre_sync_control_plane` with `mode: "post"`. This no-ops in
+          local mode and publishes shared orchestration state when configured.
           **Product code is never pushed** at phase completion. In `local` mode,
           commits stay local as today.
         - **Check phase graph for next ready phases:**
@@ -621,16 +577,9 @@ Implement the requested track from the workflow arguments.
 6. **Finalize Track:**
    - After all tasks complete, mark the track completed via the WRITE protocol
      (never flip the `cadre/tracks.md` marker in place — no `sed`/Edit):
-     - **Step a — write the source of truth:** set this track's `metadata.json`
-       `"status"` to `"completed"` with key-scoped jq:
-       ```bash
-       META="cadre/tracks/<track_id>/metadata.json"; tmp="$(mktemp)"
-       jq '.status = "completed"' "$META" > "$tmp" && mv "$tmp" "$META"
-       ```
-     - **Step b — regenerate the index:** then call MCP `cadre_regen_index` with
-       `root`. The track's line is rebuilt as `## [x] Track:` in the marked region
-       from its metadata; the preamble is preserved. Require `ok: true`; do not
-       inline the algorithm.
+     call MCP `cadre_set_track_status` with `root`, `trackId`, and
+     `status: "completed"`. Require `ok: true`; it updates metadata and
+     regenerates the index.
    - **Clean Up State:** Delete `cadre/tracks/<track_id>/implement_state.json`
    - **Elevate Patterns:** Prompt for pattern consolidation (see step 5e)
    - Announce track fully complete
@@ -806,34 +755,11 @@ Session/thread ref if available
      a group, and the merge train merges them (product repos first, control repo
      last). Surface: "2. `cadre-land` — open + link the cross-repo PR group".
 
-3. **Ask for User Choice (cleanup now):**
-   > "Or handle the track folder now:"
-   > A) **Archive** - Move to `cadre/archive/` and remove from tracks file
-   > B) **Delete** - Permanently delete folder and remove from tracks file
-   > C) **Skip** - Leave in tracks file (recommended until reviewed + shipped)
-   >
-   > Please enter A, B, or C.
-
-4. **Handle User Response:**
-
-   **If A (Archive):**
-   - Create `cadre/archive/` if not exists
-   - Move `cadre/tracks/<track_id>` to `cadre/archive/<track_id>`
-   - Remove track section from `cadre/tracks.md`
-   - Announce: "Track '<description>' has been successfully archived."
-
-   **If B (Delete):**
-   - **CRITICAL WARNING:** Ask final confirmation:
-     > "WARNING: This will permanently delete the track folder. This cannot be undone. Are you sure? (yes/no)"
-   - If 'yes':
-     - Delete `cadre/tracks/<track_id>`
-     - Remove track section from `cadre/tracks.md`
-     - Announce: "Track '<description>' has been permanently deleted."
-   - If 'no':
-     - Announce: "Deletion cancelled. Track unchanged."
-
-   **If C (Skip) or other:**
-   - Announce: "Completed track will remain in your tracks file."
+3. **Do not archive or delete here.** Leave the completed track in
+   `cadre/tracks/` until it has passed `cadre-review` and ship/land preparation.
+   If the user wants cleanup, route them to `cadre-archive`; that workflow moves
+   the folder and calls `cadre_regen_index`. Never remove sections from
+   `cadre/tracks.md` inside implement.
 
 ---
 

@@ -11,19 +11,48 @@ const DEFAULT_IGNORES = new Set([
   ".svn",
   ".beads",
   ".worktrees",
+  ".agents",
+  ".claude",
+  ".cache",
+  ".codex",
+  ".dart_tool",
+  ".gradle",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".serverless",
   "node_modules",
   "vendor",
   "dist",
   "build",
+  "coverage",
+  "out",
   "target",
   ".next",
+  ".nuxt",
+  ".parcel-cache",
+  ".svelte-kit",
   ".turbo",
+  ".vite",
   ".venv",
   "venv",
   "__pycache__",
+  "__generated__",
+  "generated",
+  "gen",
+  "tmp",
+  "temp",
+  "logs",
+  "Pods",
+  "DerivedData",
   ".idea",
   ".vscode",
 ]);
+
+const DEFAULT_IGNORE_PATHS = [
+  "plugins/cadre",
+  "plugins/cadre-claude",
+];
 
 const LANGUAGE_RULES = [
   {
@@ -159,15 +188,38 @@ function parseArgs(argv) {
   return args;
 }
 
-function commandExists(command) {
+function commandAvailability(command) {
   const result = spawnSync("sh", ["-lc", `command -v ${shellQuote(command)}`], {
     encoding: "utf8",
   });
-  return result.status === 0;
+  if (result.status === 0) {
+    return {
+      state: "available",
+      command,
+      path: result.stdout.trim().split(/\r?\n/)[0] || command,
+    };
+  }
+  return {
+    state: "missing",
+    command,
+    message: (result.stderr || result.stdout || "Command not found on PATH").trim(),
+  };
 }
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function normalizeRel(file) {
+  return file.split(path.sep).join("/");
+}
+
+function shouldIgnore(root, fullPath, name) {
+  if (DEFAULT_IGNORES.has(name)) return true;
+  const rel = normalizeRel(path.relative(root, fullPath));
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
 }
 
 function scanFiles(root) {
@@ -182,8 +234,8 @@ function scanFiles(root) {
       return;
     }
     for (const entry of entries) {
-      if (DEFAULT_IGNORES.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      if (shouldIgnore(root, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;
@@ -227,6 +279,7 @@ function recommend(root) {
     for (const ext of rule.extensions) {
       sampleFiles.push(...(scan.samples.get(ext) || []));
     }
+    const availability = commandAvailability(rule.command);
     return {
       id: rule.id,
       label: rule.label,
@@ -236,7 +289,8 @@ function recommend(root) {
       install: rule.install,
       files,
       samples: sampleFiles.slice(0, 8),
-      available: commandExists(rule.command),
+      available: availability.state === "available",
+      availability,
     };
   }).filter(Boolean);
 }
@@ -289,6 +343,7 @@ function main() {
     missingCommands: missingCommands.map((rec) => ({
       id: rec.id,
       command: rec.command,
+      availability: rec.availability,
       install: rec.install,
     })),
     written,

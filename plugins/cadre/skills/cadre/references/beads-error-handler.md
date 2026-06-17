@@ -5,41 +5,30 @@ Shared error handling for all Cadre workflows that use `bd` CLI commands.
 
 ## Standard Error Response
 
+Beads is a Cadre prerequisite after `cadre-setup`. A missing or failing `bd`
+command means the Cadre environment is broken, not a normal file-only mode.
+
 When any `bd` command fails, present this to the user:
 
 > "⚠️ Beads command failed: `<error message>`"
-> A) Continue without Beads — degrade to file-only mode for this session
-> B) Retry command once
-> C) Stop — I'll fix the issue first
+> A) Retry command once
+> B) Stop — I'll fix the issue first
 
 **If A selected:**
-- Set `beads_enabled = false` for the remainder of this session
-- All task tracking via `plan.md` markers only (`[ ]`, `[~]`, `[x]`, `[!]`)
-- Cadre workflows continue normally — no Beads state updates
-- Announce: "Continuing in file-only mode. Beads will not be updated this session."
-
-**If B selected:**
 - Retry the exact failed command once
 - If it succeeds: resume normal flow
-- If it fails again: re-present only options A and C (no more retries)
+- If it fails again: HALT and announce the failed command and error
 
-**If C selected:**
+**If B selected:**
 - HALT immediately
 - Announce the failed command and error so user can fix
 - Wait for user instructions before proceeding
 
-## Degraded Mode Behavior
+## No File-Only Degraded Mode
 
-When `beads_enabled = false` (set by option A or initial unavailability):
-
-| Normal Action | Degraded Fallback |
-|---------------|-------------------|
-| `bd update --status in_progress` | Mark `[~]` in plan.md only |
-| `bd close --continue` | Mark `[x]` in plan.md, manually check next task |
-| `bd note <id> "..."` | Append to `learnings.md` only |
-| `bd ready --parent <id>` | Read plan.md for next `[ ]` task |
-| `bd dolt push` | Skip (no remote sync) |
-| `bd compact` | Skip (no compaction) |
+Do not silently continue without Beads. The durable task graph, ownership CAS,
+handoff routing, review labels, and compaction survival all depend on Beads. If a
+workflow reaches this handler, either retry once or halt for repair.
 
 ## Usage in Workflows
 
@@ -66,4 +55,6 @@ if which bd > /dev/null 2>&1; then
 fi
 ```
 
-If `BEADS_AVAILABLE=false`: skip all `bd` commands silently, use file-only mode from the start.
+If `BEADS_AVAILABLE=false`: HALT and tell the user to restore the Beads
+prerequisite (`bd` on PATH and `cadre/beads.json` present/enabled). Do not skip
+`bd` commands silently.

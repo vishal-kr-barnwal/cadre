@@ -26,8 +26,9 @@ machine-recorded coverage, and a derived `tracks.md` index.
 | **Claude Code** | plugin-capable Claude Code | `plugins/cadre-claude/` | `.claude-plugin/marketplace.json` | `$cadre`, then `cadre-setup` | `CLAUDE.md` | generated bundle |
 | **OpenAI Codex** | current plugins | `plugins/cadre/` | `.agents/plugins/marketplace.json` | `$cadre`, then `cadre-setup` | `AGENTS.md` | generated bundle |
 
-> The master workflow protocols in `skills/cadre/protocols/cadre-*.md` are the single source of
-> truth. Claude Code and Codex plugin bundles are generated from them by
+> The source skill in `skills/cadre/SKILL.md` and master workflow protocols in
+> `skills/cadre/protocols/cadre-*.md` are the single source of truth. Claude Code
+> and Codex plugin bundles are generated from them by
 > [`scripts/generate-skills.sh`](../scripts/generate-skills.sh).
 
 Both platforms operate on the **same** `cadre/` and `.beads/`
@@ -52,8 +53,8 @@ Verify:
 bd --version
 ```
 
-Beads integration is always attempted. If `bd` is unavailable, Cadre prompts
-you to continue without persistent memory.
+Beads is required. If `bd` is unavailable, `cadre-setup` halts until the CLI is
+installed and working.
 
 Clone the repo once if you want to inspect or test the marketplace locally:
 
@@ -108,8 +109,9 @@ The plugin source is `plugins/cadre/`. It includes:
 
 ## How bundles are generated
 
-Claude Code and Codex plugin bundles are **generated** from the master workflow
-protocols in `skills/cadre/protocols/cadre-*.md` by:
+Claude Code and Codex plugin bundles are **generated** from the source skill in
+`skills/cadre/SKILL.md` and master workflow protocols in
+`skills/cadre/protocols/cadre-*.md` by:
 
 ```bash
 bash scripts/generate-skills.sh
@@ -120,11 +122,13 @@ platform-specific plugin packages with bundled skills:
 
 | Transform | Claude Code | Codex |
 |-----------|-------------|-------|
+| Skill activation text | generated into `plugins/cadre-claude/skills/cadre/SKILL.md` | generated into `plugins/cadre/skills/cadre/SKILL.md` |
 | Protocol bodies | generated into `plugins/cadre-claude/skills/cadre/protocols/` | generated into `plugins/cadre/skills/cadre/protocols/` |
-| Frontmatter | preserved | skill metadata lives in `SKILL.md` |
+| Protocol frontmatter | transformed into generated protocol comments | transformed into generated protocol comments |
 | Worker-dispatch reference | `Task` tool | `worker` agent type |
 | `references/beads-error-handler.md` (agnostic) | copied into plugin skill references | copied into plugin skill references |
-| `references/parallel-execution.md`, `template-locator.md` (sliced) | only Claude's section | only Codex's section |
+| `references/beads-integration.md` (doc-backed) | copied from `docs/BEADS_INTEGRATION.md` | copied from `docs/BEADS_INTEGRATION.md` |
+| Sliced references (`parallel-execution.md`, `template-locator.md`, `polyrepo-git.md`, `cadre-sync.md`, `ownership-guard.md`) | only Claude's section | only Codex's section |
 | `templates/` bundle | copied into `plugins/cadre-claude/skills/cadre/templates/` | copied into `plugins/cadre/skills/cadre/templates/` |
 | Plugin package | generated into `plugins/cadre-claude/` | generated into `plugins/cadre/` |
 | Marketplace | generated into `.claude-plugin/marketplace.json` | generated into `.agents/plugins/marketplace.json` |
@@ -152,7 +156,9 @@ file, so it works from plugin cache installs without knowing the cache root.
 Edit templates only in the canonical `templates/` directory and regenerate.
 
 Generated files carry an `AUTO-GENERATED` marker. **Do not hand-edit them** —
-edit the master protocol in `skills/cadre/protocols/` and regenerate. To verify the committed output is in
+edit `skills/cadre/SKILL.md`, master protocols in `skills/cadre/protocols/`,
+reference masters in `scripts/agent-refs/`, or templates in `templates/`, then
+regenerate. To verify the committed output is in
 sync (e.g. in CI):
 
 ```bash
@@ -203,7 +209,8 @@ recorded in the [Changelog](../CHANGELOG.md).
 
 When adding or changing a workflow protocol:
 
-1. Edit the master protocol in `skills/cadre/protocols/`.
+1. Edit `skills/cadre/SKILL.md`, a master protocol in `skills/cadre/protocols/`,
+   a reference master in `scripts/agent-refs/`, or a template in `templates/`.
 2. Run `bash scripts/generate-skills.sh` to regenerate plugin bundles.
 3. Bump the version in `README.md`.
 4. Note the change in the README "What's New" section.

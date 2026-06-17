@@ -41,12 +41,17 @@ Revert Cadre work using the workflow arguments.
    `references/polyrepo-git.md`): each recorded SHA belongs to the repo named by
    its task's `<!-- repo: -->` annotation, and reverts run inside that repo. This
    is the highest-risk polyrepo operation — group by repo, revert reverse-order
-   within each repo, and **halt on the first conflict in any repo.** If
-   `config.json` `sync_mode == "shared"`, run the sync preamble first.
+   within each repo, and **halt on the first conflict in any repo.** Call MCP
+   `cadre_sync_control_plane` with `mode: "pre"` first; it no-ops outside shared
+   mode.
 
 4. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
    Use the returned `tracks[]` as the authoritative track/status/owner inventory
    during target selection.
+
+5. **Beads prerequisite:** Run the standard Beads availability check
+   (`references/beads-error-handler.md`). If `BEADS_AVAILABLE=false`, HALT and
+   restore the Beads prerequisite before reverting code or control-plane state.
 
 ---
 
@@ -285,14 +290,9 @@ over), stop here.
      - **No implementation work survives** (the track is back to a clean slate —
        e.g. a full-track revert, or the only completed work was reverted) → `new`.
      - **Never leave it `completed`** after a revert.
-   - Write it with a **key-scoped** jq update (portable BSD + GNU), the same pattern
-     every status-mutating workflow uses, so only `.status` changes:
-     ```bash
-     META="cadre/tracks/<track_id>/metadata.json"
-     tmp="$(mktemp)"
-     jq --arg s "<new_status>" '.status = $s' "$META" > "$tmp" && mv "$tmp" "$META"
-     ```
-     (`<new_status>` ∈ `in_progress` | `new`, per the rule above.)
+   - Call MCP `cadre_set_track_status` with `root`, `trackId`, and the computed
+     `<new_status>` (`in_progress` or `new`). Require `ok: true`; this updates
+     metadata and regenerates the derived index.
 
 4. **Reset `plan.md` markers (consistent with the new `metadata.status`):**
    - Parse the relevant `plan.md` file(s) with `cadre_parse_plan`, then edit the
@@ -313,21 +313,16 @@ over), stop here.
    git-revert `tracks.md` to undo its marker (Phase 2 already excludes it from the
    product/code revert chains for this reason). Instead, regenerate it so the cache
    follows the source of truth you just fixed:
-  - Call MCP `cadre_regen_index` with `root`. It rewrites the
-    `## [<marker>] Track:` line for `<track_id>` from the new `metadata.status`
-    (`in_progress` → `[~]`, `new` → `[ ]`) and is idempotent. Require `ok: true`.
+  - The prior `cadre_set_track_status` call already regenerated the index from the
+    new `metadata.status` (`in_progress` → `[~]`, `new` → `[ ]`). If subsequent
+    plan-marker edits require a different status, call `cadre_set_track_status`
+    again with the corrected value and require `ok: true`.
    - Commit the regenerated `tracks.md` (with the metadata + plan resets) as the
      plan-sync correction. Because the marker now flows from `metadata.status`, a
      **later `--regen-index` can no longer resurrect a stale `[x]`.**
-   - **Shared sync mode (`cadre/config.json` `sync_mode == "shared"`):** publish the
-     correction **at this commit site** — run the sync postamble
-     (`references/cadre-sync.md`): `bd dolt push` then
-     `git push <control_remote> <control_branch>` — so the corrected source of truth
-     (`metadata.status`) and regenerated index reach teammates. Do **not** couple this
-     publish to Beads availability: Section 7.0's postamble only covers the Beads task
-     reopen, so if `BEADS_AVAILABLE=false` the metadata/index correction would
-     otherwise sit unpublished. This metadata/index publish must run whenever
-     `sync_mode == "shared"`. Product code stays local.
+   - Publish the correction **at this commit site** by calling MCP
+     `cadre_sync_control_plane` with `mode: "post"` after committing. It no-ops in
+     local mode and publishes the corrected metadata/index in shared mode.
 
 6. **Announce Completion:**
    > "Revert complete. [Target] has been reverted. Source of truth
@@ -349,7 +344,6 @@ over), stop here.
      bd worktree remove .worktrees/<track_id>
      ```
      - **If `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-       - Degraded fallback: `git worktree remove .worktrees/<track_id> --force`
    - Delete the branch: `git branch -D track/<track_id>`
    - Announce: "Worktree `.worktrees/<track_id>` and branch `track/<track_id>` removed."
 
@@ -378,5 +372,5 @@ over), stop here.
    - For task/phase revert: reopen only affected tasks
    - For track revert: `bd reopen <epic_id> --reason "Track reverted" --json`
    - **If any `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-   - **Shared mode:** run the sync postamble (`bd dolt push` + control-plane push)
-     from `references/cadre-sync.md` so teammates see the revert.
+   - Call MCP `cadre_sync_control_plane` with `mode: "post"` so teammates see the
+     revert in shared mode.

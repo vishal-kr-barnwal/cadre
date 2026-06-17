@@ -25,22 +25,26 @@ behavior is unchanged):
   the unblocked, unowned work a teammate can pick up. Like `--team`, it performs the
   full multi-track scan.
 - `--collisions` → run the **File Collisions** board in section 14: cross-track
-  `(repo, file)` overlaps mined from every active track's plan `<!-- files: -->`
-  annotations. Like `--team`, it performs the full multi-track scan.
+  `(repo, file)` overlaps mined from every planned/active track's plan
+  `<!-- files: -->` annotations. Like `--team`, it performs the full multi-track scan.
 - otherwise → show the live status (sections 1-8) and, in polyrepo mode, the PR
   group / merge-train surface in section 5c.
 
 **MCP routing for this workflow (required):**
 - First resolve the project root with `cadre_current_root` using the per-call
   `root` argument.
-- Use `cadre_team_status` for all multi-track status, ownership, reviewer, and
-  status-count data (`--team`, `--mine`, `--repos`, and the multi-track parts of
-  bare status). Read files only for details the MCP payload does not expose yet
-  (for example active-task snippets from `plan.md`).
+- Use `cadre_live_status` for bare status. It returns the compact active-track
+  summary and task counts without making the agent manually scan every plan.
+- Use `cadre_team_status` for full multi-track status, ownership, reviewer, and
+  status-count data (`--team`, `--mine`, `--repos`). Read files only for details
+  the MCP payload does not expose yet.
 - Use `cadre_regen_index` for `--regen-index`; do not run the helper script or
   reimplement the splice directly from the workflow.
 - Use `cadre_available_work` for `--available` / `--unowned`.
 - Use `cadre_collision_scan` for `--collisions`.
+- Use `cadre_track_context` when a status view needs task-level detail for one
+  track. Use `cadre_plan_integrity` for validation-style plan warnings rather
+  than scanning every `plan.md` in the status workflow.
 - For resource reads, use `cadre://team-status?root=<absolute-or-encoded-root>` or
   `cadre://collisions?root=<absolute-or-encoded-root>` with the same per-call root
   contract.
@@ -51,8 +55,8 @@ the active owner, resolve `--mine`, and group team WIP.
 
 **Cheap by default:** full multi-track MCP scans run **only** under the
 multi-track modes — `--team`, `--mine`, `--repos`, `--available`/`--unowned`, or
-`--collisions`. Bare `cadre-status` reads only `tracks.md` + the active track
-details that are not yet exposed by MCP, exactly as before.
+`--collisions`. Bare `cadre-status` calls `cadre_live_status` and reads only
+active-track details that are not yet exposed by MCP.
 
 **Status source of truth:** each track's `metadata.json.status`
 (`new`|`in_progress`|`completed`|`blocked`|`skipped`) is authoritative. `tracks.md`
@@ -66,9 +70,12 @@ If `cadre/tracks.md` doesn't exist, tell user to run `cadre-setup` first.
 
 ## 2. Read State
 
-- Read `cadre/tracks.md` only as the human-readable derived index/mirror.
-- Call `cadre_team_status` with `root` to load the track inventory and status
-  source-of-truth view. Use its `tracks[]` records for multi-track status,
+- Read `cadre/tracks.md` only as the human-readable derived index/mirror when a
+  human-facing index label is needed.
+- For bare status, call `cadre_live_status` with `root` and use its
+  `active_tracks[]`, `task_counts`, and `by_status` fields.
+- For multi-track modes, call `cadre_team_status` with `root` to load the track
+  inventory and status source-of-truth view. Use its `tracks[]` records for
   ownership, reviewer, and review-verdict summaries.
 - Read `cadre/tracks/<track_id>/plan.md` only for tracks whose task-level details
   are needed for the requested view.
@@ -88,14 +95,10 @@ each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"`:
 
 ## 3. Calculate Progress
 
-For each track:
-- Read `metadata.json` to get priority and depends_on
-- Count total tasks (lines with `- [ ]`, `- [~]`, `- [x]`)
-- Count completed `[x]`
-- Count in-progress `[~]`
-- Count pending `[ ]`
-- Calculate percentage: (completed / total) * 100
-- Check if blocked (has incomplete dependencies)
+For bare status, use `cadre_live_status.task_counts`; do not scan every track's
+plan. For a selected active track or an expanded status mode, use
+`cadre_track_context.task_counts` and `cadre_track_context.plan` so task counts,
+commit SHAs, and task keys come from the same parser used by implement/review.
 
 ## 4. Present Summary
 
@@ -258,7 +261,8 @@ Based on status:
 
 1. **Availability Check:**
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: skip this section silently
+   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
+     rendering Beads-backed status.
 
 2. **Gather Beads Status:**
    - Run `bd ready --json` to get tasks with no blockers
@@ -347,14 +351,14 @@ shareable project summary instead of the on-screen status.
 
 **Run only when workflow arguments contain `--team` or `--mine`.** This is the only
 flow that performs the **full multi-track scan**; it is a no-op for bare
-`cadre-status` (keeping the default cheap). Everything here degrades
-gracefully — if `bd` is unavailable, fall back to the filesystem scan; if a data
-source is missing, omit that sub-section silently.
+`cadre-status` (keeping the default cheap). Run the Beads availability check; if
+`bd` is unavailable, HALT. If a non-Beads detail source is missing, omit that
+sub-section silently.
 
 1. **Gather WIP.**
-   - **Preferred (Beads):** run the standard availability check; if available,
+   - **Beads:** run the standard availability check, then
      `bd list --status in_progress --json` and group issues by `assignee`.
-   - **Fallback (filesystem):** scan every `cadre/tracks/<id>/metadata.json`;
+   - **Filesystem mirror:** scan every `cadre/tracks/<id>/metadata.json`;
      a track is WIP if its `plan.md` has a `[~]` task or its `metadata.json` has a
      non-null `lease`. Group by `metadata.json.owner` (fallback `assignee`).
    - For `--mine`, filter both sources to `<git-identity>` (owner/assignee match).
@@ -364,14 +368,13 @@ source is missing, omit that sub-section silently.
    `assignee` + the Beads label `handoff:pending` (the `owner` is intentionally left
    on the author, so this is invisible to an owner-only scan). Surface it so the
    recipient actually sees the work waiting for them:
-   - **Beads (preferred):** when `bd` is available,
+   - **Beads:** run the standard availability check, then
      `bd list --label handoff:pending --json`; group entries by `assignee` (the
      recipient). Each entry's epic id maps back to its track (`cadre-<track_id>` /
      the `beads_epic` in `metadata.json`).
    - For `--mine`, filter to epics whose `assignee` equals `<git-identity>` — these
      are handoffs waiting for **you** to pick up.
-   - If `bd` is unavailable, omit this sub-section silently (the `handoff:pending`
-     routing is Beads-only).
+   - If `bd` is unavailable, HALT and restore the Beads prerequisite.
 
 2. **Gather the Review Queue.** A track is in the review queue when **any** of:
    - `metadata.json.review.verdict == "changes_requested"` **or**
@@ -489,8 +492,9 @@ Everything here degrades silently if a remote/`gh` is unavailable.
 `metadata.json.status` (the single source of truth). This is the **canonical
 regeneration entrypoint**: every workflow that changes a track's status writes the
 new value to that track's `metadata.json` and then runs this procedure (rather than
-hand-editing a marker in `tracks.md`). It is **idempotent**, pure bash/jq, and
-**bd-independent** — running it twice in a row leaves the file byte-identical.
+hand-editing a marker in `tracks.md`). It is **idempotent**, implemented in Cadre
+MCP, and **bd-independent** — running it twice in a row leaves the file
+byte-identical.
 
 **Marker map** (status → index marker):
 
@@ -552,21 +556,23 @@ merge — this is the whole point of the source-of-truth split.
 **Run only when workflow arguments contain `--available` or `--unowned`.** The "what
 unblocked work can I pick up?" board — a first-class answer for a teammate (or an
 idle agent) looking for the next thing to start, instead of eyeballing `tracks.md`.
-Like `--team`, this performs the full multi-track scan and degrades gracefully.
+Like `--team`, this performs the full multi-track scan and requires Beads.
 
 1. **Identity:** compute `<git-identity>` (see Identity above).
 
-2. **Select candidates via MCP.** Call `cadre_available_work` with `root`. A track
-   is **available** when ALL hold:
+2. **Select candidates via MCP.** Call `cadre_available_work` with `root`. It
+   returns `available[]` (free to start) and `reclaimable[]` (held by stale
+   lease/state). A track is **available** when ALL hold:
    - `metadata.json.status` is `new` (marker `[ ]`) — not in progress, completed,
      blocked, or skipped; AND
-   - it is **unowned** — `metadata.json.owner` is null/absent (or, shared mode, any
-     `lease` is stale, older than the canonical window in
-     `references/ownership-guard.md`); AND
+   - it is **unowned** — `metadata.json.owner` is null/absent; AND
    - it has **no incomplete dependencies** — every id in `metadata.json.depends_on`
      resolves to a track whose `metadata.json.status == "completed"`.
-   - **Beads (preferred):** `bd ready --json` already returns unblocked, unassigned
-     work; intersect it with the new/unowned tracks above when `bd` is available.
+   - **Reclaimable:** held tracks appear separately when their lease or
+     `implement_state.json` timestamp is stale (older than the canonical
+     30-minute window in `references/ownership-guard.md`).
+   - **Beads:** if `bd ready --json` is also consulted, intersect it with
+     `available[]`; do not hide MCP `reclaimable[]`.
 
 3. **Present** the MCP result (sorted by priority, then `track_id`):
 
@@ -590,22 +596,21 @@ Like `--team`, this performs the full multi-track scan and degrades gracefully.
 ## 14. FILE COLLISIONS (`--collisions`)
 
 **Run only when workflow arguments contain `--collisions`.** The "is anyone else about
-to touch the same file as me?" board — it mines every **active** track's plan
+to touch the same file as me?" board — it mines every **planned or active** track's plan
 `<!-- files: ... -->` annotations and reports cross-track `(repo, file)` overlaps
 **before** they collide at merge time. The `<!-- files: path1, path2 -->`
 annotation is a first-class plan artifact emitted for **every** task in `plan.md`
 (not only parallel phases), so this scan sees the whole fleet's file footprint.
-Like `--team`, this performs the full multi-track scan and degrades gracefully.
+Like `--team`, this performs the full multi-track scan and requires Beads.
 
-1. **Scan via MCP.** Call `cadre_collision_scan` with `root`. A track is
-   **active** when its
-   `metadata.json.status` is `in_progress` or `blocked` (markers `[~]` / `[!]`) —
-   i.e. someone is mid-flight on it. Skip `new`, `completed`, and `skipped` tracks
-   (a `new` track owns no files yet; finished/abandoned ones no longer contend).
+1. **Scan via MCP.** Call `cadre_collision_scan` with `root`. A track is included
+   when its `metadata.json.status` is `new`, `in_progress`, or `blocked`
+   (markers `[ ]`, `[~]`, `[!]`). Skip `completed` and `skipped` tracks.
 
-2. **Use MCP-mined file claims.** The tool parses each active track's
+2. **Use MCP-mined file claims.** The tool parses each included track's
    `cadre/tracks/<track_id>/plan.md` and collect every task's
-   `<!-- files: ... -->` annotation, splitting on commas and trimming whitespace.
+   `<!-- files: ... -->` annotation, splitting on commas, trimming whitespace,
+   normalizing paths, and recognizing exact, directory-prefix, and glob overlaps.
    Build a claim list of `(track_id, repo, file)` tuples:
    - **Resolve the repo per task.** In **polyrepo** mode a task is annotated with
      `<!-- repo: <name> -->` (default repo from `repos.json` when absent); use that
@@ -615,30 +620,30 @@ Like `--team`, this performs the full multi-track scan and degrades gracefully.
      two different submodule repos is **not** a collision in polyrepo mode.
 
 3. **Use MCP-computed overlaps.** A
-   **collision** is any `(repo, file)` tuple claimed by tasks in **two or more
-   different active tracks** (same file claimed twice *within one track* is normal
-   sequencing, not a collision — ignore it). For each colliding tuple, record the
-   set of contending track IDs (and, when known, each track's `owner` for a
-   "coordinate with @whom" hint).
+   **collision** is any exact, directory-prefix, or glob overlap claimed by tasks
+   in **two or more different included tracks**. Same file claimed twice *within
+   one track* is normal sequencing, not a collision. For each colliding overlap,
+   record the set of contending track IDs, the collision `kind` (`exact` or
+   `overlap`), and each track's `owner` when known.
 
 4. **Present** (one row per colliding `(repo, file)`, sorted by repo then file):
 
    ```
-   ## Cadre — File Collisions (active tracks)
+   ## Cadre — File Collisions (planned/active tracks)
 
    | Repo | File | Contending tracks |
    |------|------|-------------------|
    | api  | src/auth/session.ts | auth_20260615 (@alice), billing_20260616 (@bob) |
    | .    | README.md           | docs_20260617 (@carol), search_20260614 (@alice) |
 
-   ⚠️ 2 file collisions across 4 active tracks — coordinate before both land.
+   ⚠️ 2 file collisions across 4 planned/active tracks — coordinate before both land.
    ```
 
    - In monorepo mode the `Repo` column shows the `.` sentinel; you MAY collapse it
      to a single-column `File` table since there is only one repo.
-   - If no `(repo, file)` tuple is claimed by more than one active track, print
-     `No cross-track file collisions among active tracks.`
-   - If active tracks exist but **none** carry `<!-- files: -->` annotations (e.g.
+   - If no `(repo, file)` tuple is claimed by more than one planned/active track, print
+     `No cross-track file collisions among planned/active tracks.`
+   - If planned/active tracks exist but **none** carry `<!-- files: -->` annotations (e.g.
      legacy plans created before the annotation was first-class), print
-     `No <!-- files: --> annotations found on active tracks — cannot compute
+     `No <!-- files: --> annotations found on planned/active tracks — cannot compute
      collisions.` so the empty result isn't mistaken for "all clear".

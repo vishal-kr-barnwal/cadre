@@ -28,11 +28,20 @@ offers these tools:
 | `cadre_ping` | Verify that the required Cadre MCP runtime is available. |
 | `cadre_current_root` | Resolve a caller-provided path to the Cadre project root. |
 | `cadre_regen_index` | Rebuild `cadre/tracks.md` from `metadata.json.status`. |
-| `cadre_parse_plan` | Parse phases, tasks, and annotations from `plan.md`. |
+| `cadre_parse_plan` | Parse phases, tasks, annotations, task keys, and recorded commit SHAs from `plan.md`. |
 | `cadre_team_status` | Group tracks by owner and status. |
-| `cadre_available_work` | List new, unowned tracks whose dependencies are met. |
-| `cadre_collision_scan` | Report cross-track `(repo, file)` overlaps from `<!-- files: -->`. |
-| `cadre_review_gate` | Evaluate whether `metadata.review` clears ship/land. |
+| `cadre_live_status` | Return the compact default status summary without agent-side plan scans. |
+| `cadre_available_work` | List ready unowned tracks and stale held tracks that can be reclaimed. |
+| `cadre_set_track_status` | Set `metadata.json.status` and regenerate `cadre/tracks.md`. |
+| `cadre_collision_scan` | Report cross-track exact, prefix, and glob file overlaps from `<!-- files: -->`. |
+| `cadre_track_context` | Return a bounded per-track context payload: metadata, parsed plan, counts, hold state, worktree routing, review state, and Beads IDs. |
+| `cadre_plan_integrity` | Validate plan annotations, task keys, dependency references, repo routing, and parallel file-claim shape. |
+| `cadre_claim_track` | Claim ownership, mirror owner/lease metadata, and create `implement_state.json`. |
+| `cadre_record_task_result` | Record task marker/SHA/coverage results in `plan.md` and `metadata.json`. |
+| `cadre_record_review` | Write the structured review verdict with reviewer-race guard and immediate gate evaluation. |
+| `cadre_sync_control_plane` | Run the shared-mode sync preamble or postamble as a structured operation. |
+| `cadre_lsp_review` | Run the Cadre LSP/code-intelligence review helper and return structured findings. |
+| `cadre_review_gate` | Evaluate whether `metadata.review` clears ship/land; optional `headSha` enforces `reviewed_sha` pinning. |
 | `cadre_polyrepo_preflight` | Run local polyrepo manifest/submodule checks. |
 
 It also exposes resources:
@@ -42,6 +51,8 @@ It also exposes resources:
 | `cadre://tracks?root=/path/to/project` | Raw per-track metadata. |
 | `cadre://team-status?root=/path/to/project` | Team board data. |
 | `cadre://collisions?root=/path/to/project` | Cross-track collision data. |
+| `cadre://plan-integrity?root=/path/to/project` | Plan validation across tracks, or one track with `&trackId=<id>`. |
+| `cadre://track-context?root=/path/to/project&trackId=<id>` | Bounded context for one track. |
 
 Cadre workflows require MCP. At the start of a Cadre workflow, callers should
 verify MCP availability with `cadre_ping`. If Cadre MCP
@@ -71,11 +82,20 @@ Workflow routing:
 |--------------------|----------|
 | Project root resolution | `cadre_current_root` |
 | Track inventory, active/completed selection, owner/reviewer summaries | `cadre_team_status` |
+| Cheap default status | `cadre_live_status` |
 | Next unblocked work | `cadre_available_work` |
 | Cross-track file overlaps | `cadre_collision_scan` |
 | Phase/task/annotation parsing | `cadre_parse_plan` |
+| Track-specific context packet | `cadre_track_context` |
+| Plan annotation validation | `cadre_plan_integrity` |
+| Ownership claim | `cadre_claim_track` |
+| Per-task result write | `cadre_record_task_result` |
+| Track status mutation | `cadre_set_track_status` |
 | Derived `tracks.md` rebuilds | `cadre_regen_index` |
+| Structured review write | `cadre_record_review` |
 | Ship/land review enforcement | `cadre_review_gate` |
+| Shared-mode pre/post sync | `cadre_sync_control_plane` |
+| Code-intelligence review | `cadre_lsp_review` |
 | Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |
 
 ### Plugin packaging
@@ -89,9 +109,8 @@ The generated Claude Code and Codex plugins both bundle this MCP server:
 
 The server code and `cadre-core.js` are copied into each plugin's `scripts/`
 directory so installed plugin cache paths do not depend on the development
-checkout. `cadre_regen_index` also resolves the bundled
-`cadre-regen-index.sh` helper from the plugin templates, so the user project
-does not need its own copy of the helper script.
+checkout. `cadre_regen_index` is implemented inside the MCP core and rebuilds the
+marked index region directly from per-track metadata.
 
 ## LSP Review Helper
 

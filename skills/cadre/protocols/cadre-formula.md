@@ -221,7 +221,7 @@ bd mol distill <beads_epic_id> \
   (`bd mol pour <name>` and `cadre-formula wisp <name>`,
   `cadre-formula show <name>`).
 - **Failure:** display the error and follow the Beads Error Handler Protocol
-  (see `references/beads-error-handler.md`); suggest manual extraction as fallback.
+  (see `references/beads-error-handler.md`); retry once when appropriate or halt.
 
 ### 6.6 Register with Cadre (Optional)
 1. Create `cadre/templates/<template_name>/` if absent.

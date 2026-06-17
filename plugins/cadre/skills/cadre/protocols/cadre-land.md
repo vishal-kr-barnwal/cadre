@@ -36,14 +36,17 @@ last** — once every sibling PR is approved and CI-green.
    argument. Use the returned root for all MCP calls in this workflow.
 2. If `cadre/tracks.md` doesn't exist → tell the user to run `cadre-setup`
    first and halt.
-3. Read `cadre/repos.json`. If absent or `mode` ≠ `"polyrepo"` →
+3. Run the standard Beads availability check (`references/beads-error-handler.md`).
+   If `BEADS_AVAILABLE=false`, HALT and restore the Beads prerequisite before any
+   push or PR work.
+4. Read `cadre/repos.json`. If absent or `mode` ≠ `"polyrepo"` →
    > "This is a monorepo project. Use `cadre-ship <track_id>` to push the
    > branch and open a single PR."
    and halt.
-4. Read `cadre/config.json` for `pr_provider` (`github`|`gitlab`) and
-   `merge_train`. If `sync_mode: "shared"`, run the sync preamble
-   (`references/cadre-sync.md`) first.
-5. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
+5. Read `cadre/config.json` for `pr_provider` (`github`|`gitlab`) and
+   `merge_train`. Call MCP `cadre_sync_control_plane` with `mode: "pre"` first;
+   it no-ops outside shared mode.
+6. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
    tracks not yet archived and ask. Resolve the active track from
    `metadata.json.status` (source of truth), never the derived `tracks.md` cache.
    Read `cadre/tracks/<track_id>/metadata.json` for the `repos` map.
@@ -54,26 +57,25 @@ last** — once every sibling PR is approved and CI-green.
    you are the holder / your identity is `null`) your next `metadata.json` write
    sets `owner = <git-identity>` via key-scoped `jq`. This applies in **both**
    monorepo and polyrepo and even where the advisory `lease` is a no-op.
-6. **Gate — reviewed?** Call `cadre_review_gate` with `root` and `trackId`. The
+7. **Gate — reviewed?** Call `cadre_review_gate` with `root` and `trackId`. The
    machine-readable MCP review gate in **§1.5** is authoritative — do **not**
-   prompt here unconditionally. Only when the MCP result contains reason
-   `No recorded review verdict` may you fall back to the soft prompt (suggest
-   `cadre-review <track_id>` and ask whether to proceed anyway). If a review
-   exists, take **no** action here — §1.5 either refuses or proceeds. Never ask
-   "proceed anyway?" against an approved track.
+   prompt here unconditionally. Missing review data and missing `reviewed_sha`
+   block by default. Only explicit override flags (`--allow-unreviewed` or
+   `--allow-unpinned-review`) may bypass the matching reason, and the override
+   must be logged to `learnings.md` and the Beads epic.
 
 ### 1.5 Review-Gate Enforcement (machine-readable)
 
 Use the `cadre_review_gate` result and enforce it **before** any push/PR work:
 
-- **`review` absent** (`verdict == "absent"`) → keep today's behavior: the soft
-  confirmation prompt from the section-1 step-5 "reviewed?" gate (ask whether to
-  proceed anyway). Do not block. This is the **only** branch that prompts.
-- **Any blocking MCP reason other than absent review** →
+- **Any blocking MCP reason** (including absent review or missing
+  `reviewed_sha`) →
   **REFUSE.** Print a clear message naming the verdict and blocking count, e.g.
   > "Track `<track_id>` has an unresolved review (verdict: changes_requested,
   > <n> blocking findings). Resolve them and re-run `cadre-review` before
   > landing." — then halt without opening any PR.
+- **Explicit override flags** (`--allow-unreviewed`, `--allow-unpinned-review`) →
+  only bypass the matching reason after an `OVERRIDE:` audit line and Beads note.
 - **`ok: true`** → proceed. Surface any MCP warnings (for example older reviews
   without `reviewed_sha`) as non-blocking notes.
 
@@ -191,33 +193,19 @@ continue to step 3.
 **Re-read the review gate first (TOCTOU close).** The MCP verdict checked in §1.5 is a
 point-in-time snapshot; the preflight + sync above can take a while, during which a
 reviewer may flip it. Call `cadre_review_gate` again immediately before the first
-push and abort if it now blocks — do **not** open a partial group against a
-freshly-blocked track.
-
-**Then enforce `reviewed_sha` (the control branch must not have advanced past the
-reviewed commit).** `cadre-review` records `metadata.review.reviewed_sha` = the
-**control-repo** track-branch HEAD it actually reviewed — a single scalar. It is
-**control-repo-scoped; do NOT fan it across product repos.** Each product repo has a
-different HEAD, so comparing the one control SHA against every repo's tip would
-false-abort essentially every polyrepo landing. Per-product-repo advancement is
-observed downstream by the merge train, not here. Compare `reviewed_sha` against the
-**control repo's PRE-REBASE tip** captured in §2b step 4 (`prerebase_tip_control`) —
-**not** the post-rebase HEAD, so a rebase-onto-base does not false-positive. If the
-control pre-rebase tip differs from `reviewed_sha` (the control branch genuinely
-advanced past the reviewed commit), **abort** (or soft-prompt re-review):
+push with `headSha: "$prerebase_tip_control"` and abort if it now blocks — do
+**not** open a partial group against a freshly-blocked track. The `headSha` check
+compares the control-repo pre-rebase tip to `metadata.review.reviewed_sha`; do not
+fan that scalar across product repos. Per-product-repo advancement is observed
+downstream by the merge train.
 ```bash
-# reviewed_sha is absent on tracks reviewed before this field existed -> skip (no regression)
-reviewed_sha=$(jq -r '.review.reviewed_sha // empty' "$META")
-tip="$prerebase_tip_control"   # control repo's tip captured in §2b step 4, BEFORE any rebase
-if [ -n "$reviewed_sha" ] && [ -n "$tip" ] && [ "$tip" != "$reviewed_sha" ]; then
-  echo "🚫 control: branch advanced past reviewed commit ${reviewed_sha} (pre-rebase tip ${tip}); re-review needed."
-  echo "   Re-run cadre-review <track_id>, or confirm to proceed anyway."
-  exit 1   # abort; on a soft-prompt build, ask instead of exiting
-fi
+# Call MCP: cadre_review_gate { "root": "<root>", "trackId": "<track_id>", "headSha": "$prerebase_tip_control" }
+# If ok=false, abort before push unless an explicit logged override applies.
 ```
-A missing `reviewed_sha` (older review, or `bd`/review predating this field) **skips
-this check** — never block a previously-valid review. Use the pre-rebase tip so the
-§2b rebase-onto-base offer cannot make a clean branch look advanced.
+A missing `reviewed_sha` blocks by default through `cadre_review_gate`. Proceed
+only with the explicit `--allow-unpinned-review` override described above. Use
+the pre-rebase tip so the §2b rebase-onto-base offer cannot make a clean branch
+look advanced.
 
 For each entry in `metadata.json.repos` (and the control repo), make sure the
 `track/<track_id>` branch is on its remote so a PR can be opened from it. This is
@@ -233,9 +221,10 @@ git -C <submodule_path> push origin track/<track_id> --force-with-lease
 git push <control_remote> track/<track_id> --force-with-lease
 ```
 
-Product code is pushed here for the PR — this is the sanctioned push point (commits
-were kept local through implement). Flush Dolt first if shared:
-`bd dolt push`.
+Product code is pushed here for the PR — this is the sanctioned push point
+(commits were kept local through implement). Before product pushes in shared
+mode, call MCP `cadre_sync_control_plane` with `mode: "post"` after committing
+any control-plane changes so Beads/control state is published.
 
 ---
 
