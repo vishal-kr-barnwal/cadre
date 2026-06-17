@@ -3,8 +3,8 @@
 # naming to "Cadre". Renames conductor/ -> cadre/ and rewrites /conductor-*
 # command references and conductor/ path references inside the moved files.
 #
-# Re-install the toolkit afterward so your platform picks up the cadre-* command
-# files (e.g. re-run scripts/install.sh, or `/plugin install cadre` in Claude Code).
+# Re-install the plugin afterward so your platform picks up the Cadre workflow
+# skill (for example, `/plugin install cadre@cadre` in Claude Code).
 #
 # Usage:
 #   bash scripts/migrate-to-cadre.sh [--dry-run]
@@ -41,7 +41,7 @@ fi
 
 say ""
 say "Done. Next:"
-say "  • Reinstall the toolkit so your platform gets the cadre-* commands"
-say "    (re-run scripts/install.sh, or '/plugin install cadre' in Claude Code)."
+say "  • Reinstall the Cadre plugin so your platform gets the Cadre workflow skill"
+say "    (Claude Code: '/plugin install cadre@cadre'; Codex: 'codex plugin add cadre@cadre')."
 say "  • Commit the rename: git add -A && git commit -m 'chore: migrate conductor/ -> cadre/'"
 $DRY && say "(dry-run — no changes were written)"

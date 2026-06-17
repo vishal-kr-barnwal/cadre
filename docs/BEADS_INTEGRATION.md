@@ -577,6 +577,6 @@ bd dep add <issue> external:project-a:auth-api
 
 ## References
 
-- [Cadre Skill](../.claude/skills/cadre/SKILL.md)
+- [Cadre Skill](../plugins/cadre-claude/skills/cadre/SKILL.md)
 - [Beads Documentation](https://github.com/steveyegge/beads)
 - [Beads Agent Instructions](https://github.com/steveyegge/beads/blob/main/AGENT_INSTRUCTIONS.md)

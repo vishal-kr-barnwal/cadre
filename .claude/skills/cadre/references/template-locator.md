@@ -2,7 +2,7 @@
 # Locating the Cadre Templates Directory
 
 Cadre ships starter templates — `workflow.md`, `patterns.md`, `learnings.md`,
-`beads.json`, and `code_styleguides/` — bundled with the installed skills.
+`beads.json`, and `code_styleguides/` — bundled with the active Cadre skill.
 `cadre-setup` and `cadre-newtrack` copy from them. The same bundle also carries
 **helper scripts** under `<TEMPLATES_DIR>/scripts/` that workflow protocols run **in place**
 (they are not copied into `cadre/`) — currently `cadre-regen-index.sh`, the
@@ -10,11 +10,12 @@ deterministic `tracks.md` rebuilder behind `cadre-status --regen-index`.
 
 ## Resolve `<TEMPLATES_DIR>`
 
-Probe with `ls` and use the **FIRST** of these paths that exists:
+Probe with `ls` and use the **FIRST** of these paths that exists. Start with
+the path relative to this reference file so plugin-installed skills work from
+Claude/Codex plugin cache directories without knowing the cache root.
 
-1. `.claude/skills/cadre/templates/` — project install
-2. `~/.claude/skills/cadre/templates/` — global install
-3. `templates/` — running inside a Cadre clone
+1. `../templates/` relative to this `references/template-locator.md` file — active plugin skill bundle
+2. `templates/` — running inside a Cadre clone during development
 
 If none exist, tell the user the templates bundle is missing (point them to the
 Install & Version Guide, `docs/INSTALL.md`) and ask whether to continue with

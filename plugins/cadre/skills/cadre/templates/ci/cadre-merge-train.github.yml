@@ -1,0 +1,248 @@
+# Cadre cross-repo merge train (GitHub Actions).
+#
+# Scaffolded into the CONTROL repo at .github/workflows/cadre-merge-train.yml
+# by /cadre-setup when pr_provider == "github" and merge_train.enabled.
+#
+# What it does: when every PR in a track group (label `cadre-track:<id>`,
+# spread across the control repo + product submodule repos) is APPROVED and
+# CI-GREEN, it merges them in a fixed order — PRODUCT repos first, then bumps
+# each submodule gitlink to the freshly-merged SHA on the control track branch,
+# then merges the CONTROL PR LAST. The control PR is the single "seal" commit;
+# there is no true cross-repo atomic merge, so on any failure it HALTS, leaves
+# already-merged product PRs in place, comments the failure, and re-fires once
+# the failing repo is green again.
+#
+# PREREQUISITE — cross-repo token: the default GITHUB_TOKEN cannot act on other
+# repos. Provide a PAT or GitHub App installation token (scopes: repo, workflow,
+# read:org) with write access to EVERY product repo, stored as the
+# `CADRE_TRAIN_TOKEN` secret in this control repo.
+#
+# Also configure branch protection on every product repo's default branch and on
+# the control branch: require approvals + the relevant status checks. The train
+# only automates the merge click; protection is what enforces review/CI.
+
+name: cadre-merge-train
+
+# TRIGGER MODEL: pull_request_review / check_suite fire only for events in THIS
+# (control) repo — i.e. when the CONTROL PR is reviewed or its checks complete, the
+# job derives the track from that PR's group label and tries to land. A review/green
+# on a PRODUCT repo does NOT fire this workflow. To auto-fire on product-repo
+# approvals, either (a) have each product repo send a `repository_dispatch` to this
+# repo on approval (carrying the track id), or (b) dispatch manually with the track
+# id, or (c) add a `schedule:` and extend the job to scan open control-repo PRs for
+# group labels (the job is idempotent + re-runnable). Re-running `/cadre-land`
+# also re-checks status from your machine.
+on:
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+  # schedule:
+  #   - cron: "*/5 * * * *"   # uncomment for auto-fire on product-repo approvals
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "Track id to attempt to land (e.g. auth_20260609)"
+        required: true
+
+# Per-track concurrency: serialize landings WITHIN a track, but let different
+# tracks land in parallel — otherwise one stalled/conflicted track blocks every
+# other (see /cadre-land §7). The track id is known here only for workflow_dispatch;
+# for review/check events we key on the triggering control PR (one control PR per
+# track, so per-PR == per-track), falling back to run_id so we never collapse
+# unrelated events onto one global lane.
+concurrency:
+  group: cadre-merge-train-${{ github.event.inputs.track || github.event.pull_request.number || github.event.check_suite.pull_requests[0].number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout control repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CADRE_TRAIN_TOKEN }}
+          submodules: false
+          fetch-depth: 0
+
+      - name: Run merge train
+        env:
+          GH_TOKEN: ${{ secrets.CADRE_TRAIN_TOKEN }}
+          EVENT_TRACK: ${{ github.event.inputs.track }}
+        run: |
+          set -euo pipefail
+
+          # --- Resolve the track id and the group label -------------------------
+          PREFIX="$(jq -r '.merge_train.group_label_prefix // "cadre-track"' cadre/config.json)"
+          AUTO_FIRE="$(jq -r '.merge_train.auto_fire // true' cadre/config.json)"
+          CONTROL_REPO="${GITHUB_REPOSITORY}"
+
+          # Derive the candidate track from the triggering PR's labels, or from
+          # the manual dispatch input.
+          TRACK="${EVENT_TRACK:-}"
+          if [ -z "$TRACK" ]; then
+            PR_NUMBER="$(jq -r '.pull_request.number // .check_suite.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")"
+            if [ -n "$PR_NUMBER" ]; then
+              TRACK="$(gh pr view "$PR_NUMBER" --repo "$CONTROL_REPO" --json labels \
+                       --jq ".labels[].name | select(startswith(\"${PREFIX}:\")) | sub(\"${PREFIX}:\"; \"\")" || true)"
+            fi
+          fi
+          if [ -z "$TRACK" ]; then echo "No track group on this event; nothing to do."; exit 0; fi
+          LABEL="${PREFIX}:${TRACK}"
+          echo "Track=$TRACK  Label=$LABEL  auto_fire=$AUTO_FIRE"
+          if [ "$AUTO_FIRE" != "true" ] && [ -z "$EVENT_TRACK" ]; then
+            echo "auto_fire disabled; only workflow_dispatch may land. Exiting."; exit 0
+          fi
+
+          # --- Helper: is a PR approved AND all required checks green? -----------
+          pr_ready() { # repo  pr_number
+            local repo="$1" num="$2"
+            local decision state
+            decision="$(gh pr view "$num" --repo "$repo" --json reviewDecision --jq '.reviewDecision')"
+            state="$(gh pr view "$num" --repo "$repo" --json statusCheckRollup \
+                     --jq '[.statusCheckRollup[]?.conclusion // .statusCheckRollup[]?.state] | map(select(. != null and . != "SUCCESS" and . != "NEUTRAL" and . != "SKIPPED")) | length')"
+            [ "$decision" = "APPROVED" ] && [ "$state" = "0" ]
+          }
+
+          # --- Gather the group from metadata.json ------------------------------
+          META="cadre/tracks/${TRACK}/metadata.json"
+          if [ ! -f "$META" ]; then echo "No metadata for $TRACK; abort."; exit 1; fi
+
+          # Ordered repo list: metadata.merge_order entries first (in their given
+          # order), then the alphabetical remainder. Never drop a repo, never
+          # duplicate one — a name listed in merge_order but absent from .repos is
+          # ignored; a repo absent from merge_order falls into the alpha tail.
+          # De-dupe $head preserving first-seen order — a user typo such as
+          # "repo-order: api > api > web" would otherwise process api twice.
+          mapfile -t REPO_NAMES < <(jq -r '
+            (.merge_order // []) as $order
+            | (.repos | keys) as $all
+            | ($order
+               | map(select(. as $n | $all | index($n)))
+               | reduce .[] as $n ([]; if (index($n)) then . else . + [$n] end)) as $head
+            | ($all | map(select(. as $n | $head | index($n) | not)) | sort) as $tail
+            | ($head + $tail)[]
+          ' "$META")
+          CONTROL_PR="$(jq -r '.control_pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+
+          # --- Phase 1: verify EVERY sibling PR is approved + green -------------
+          # Also classify each product PR as landed (already MERGED) vs blocking
+          # (not ready), so a HALF-LANDED train can surface what is still holding
+          # it up on the control PR instead of failing silently.
+          echo "::group::Pre-flight verification"
+          LANDED=""; BLOCKING=""; HALT=0
+          for name in "${REPO_NAMES[@]}"; do
+            repo="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
+            pr="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+            [ -z "$pr" ] && continue
+            echo "check $repo#$pr"
+            state="$(gh pr view "$pr" --repo "$repo" --json state --jq '.state')"
+            if [ "$state" = "MERGED" ]; then
+              LANDED="${LANDED:+$LANDED, }${name} (${repo}#${pr})"
+              continue
+            fi
+            if ! pr_ready "$repo" "$pr"; then
+              BLOCKING="${BLOCKING:+$BLOCKING, }${name} (${repo}#${pr})"
+              HALT=1
+            fi
+          done
+          # If the train is half-landed (>=1 product PR merged) and something is
+          # still blocking, post/refresh a status comment on the control PR.
+          if [ "$HALT" = "1" ]; then
+            if [ -n "$LANDED" ] && [ -n "$CONTROL_PR" ]; then
+              MARKER="<!-- cadre-merge-train:status -->"
+              BODY="${MARKER}
+          🚧 **cadre merge-train — half landed.**
+          Already merged: ${LANDED:-(none)}
+          Still blocking: ${BLOCKING:-(none)}
+
+          The merged product PRs cannot be reverted automatically; the train will
+          re-fire and complete once the blocking repos are approved + green."
+              # Refresh the existing status comment if present, else create one.
+              existing="$(gh pr view "$CONTROL_PR" --repo "$CONTROL_REPO" --json comments \
+                          --jq "[.comments[] | select(.body | startswith(\"${MARKER}\"))][0].id // empty" || true)"
+              if [ -n "$existing" ]; then
+                gh api -X PATCH "repos/${CONTROL_REPO}/issues/comments/${existing}" -f body="$BODY" >/dev/null || true
+              else
+                gh pr comment "$CONTROL_PR" --repo "$CONTROL_REPO" --body "$BODY" || true
+              fi
+            fi
+            echo "Product PR(s) not ready (blocking: ${BLOCKING:-?}); halting."
+            echo "::endgroup::"
+            exit 0
+          fi
+          if [ -n "$CONTROL_PR" ]; then
+            pr_ready "$CONTROL_REPO" "$CONTROL_PR" || { echo "Control PR not ready; halting."; exit 0; }
+          fi
+          echo "::endgroup::"
+
+          # --- Phase 2: merge each PRODUCT PR, capture new default-branch SHA ---
+          git config user.name  "cadre-merge-train"
+          git config user.email "cadre-merge-train@users.noreply.github.com"
+          BRANCH="track/${TRACK}"
+          git fetch origin "$BRANCH" && git checkout "$BRANCH"
+
+          for name in "${REPO_NAMES[@]}"; do
+            repo="$(jq -r --arg n "$name" '.repos[$n].repo_slug // empty' "$META")"
+            pr="$(jq -r --arg n "$name" '.repos[$n].pr_url // empty' "$META" | sed -E 's#.*/([0-9]+)/?$#\1#')"
+            sub="$(jq -r --arg n "$name" '.repos[$n].submodule_path // empty' "$META")"
+            [ -z "$pr" ] && continue
+            echo "::group::Merge product $repo#$pr"
+            # Idempotent re-fire: if this PR is ALREADY merged (e.g. an earlier
+            # train run merged it but then halted on a sibling), do NOT re-merge —
+            # but STILL reconstruct its gitlink bump below so a re-fire converges.
+            pr_state="$(gh pr view "$pr" --repo "$repo" --json state --jq '.state')"
+            if [ "$pr_state" = "MERGED" ]; then
+              echo "  $repo#$pr already MERGED; skipping merge, reconstructing gitlink bump."
+            else
+              pr_ready "$repo" "$pr" || { echo "REGRESSED before merge: $repo#$pr. Halting."; exit 1; }
+              # Merge with a MERGE COMMIT (squash disabled by guardrail) so the
+              # gitlink can pin to a single deterministic merge SHA.
+              gh pr merge "$pr" --repo "$repo" --merge --delete-branch=false
+            fi
+            # Pin the gitlink to the MERGE COMMIT (not the branch head): the base
+            # branch may have advanced past our merge by the time we read it, so
+            # pinning the head would silently capture unrelated commits.
+            base="$(gh pr view "$pr" --repo "$repo" --json baseRefName --jq '.baseRefName')"
+            new_sha="$(gh pr view "$pr" --repo "$repo" --json mergeCommit --jq '.mergeCommit.oid')"
+            if [ -z "$new_sha" ] || [ "$new_sha" = "null" ]; then
+              # Merge commit (squash disabled by guardrail) not yet readable; do
+              # NOT bump to a wrong/empty SHA — halt and let the train re-fire.
+              echo "  ${name}: merge commit not yet available; halting to re-fire."
+              echo "::endgroup::"
+              exit 1
+            fi
+            echo "  ${name} -> ${new_sha} (merge commit)"
+            # Bump the submodule gitlink on the control track branch.
+            # Fetch the base branch ref (fetch-by-bare-SHA is rejected by many hosts),
+            # which now contains the just-merged commit, then pin the gitlink to it.
+            git -C "$sub" fetch origin "$base" || git submodule update --init "$sub"
+            git -C "$sub" checkout "$new_sha"
+            git add "$sub"
+            echo "::endgroup::"
+          done
+
+          # --- Phase 3: commit submodule bumps, push control track branch ------
+          if ! git diff --cached --quiet; then
+            git commit -m "cadre(train): bump submodules to merged SHAs for ${TRACK}"
+            git push origin "$BRANCH"
+          fi
+
+          # --- Phase 4: re-await control PR check on bumped commit, merge LAST -
+          if [ -n "$CONTROL_PR" ]; then
+            echo "Waiting for control PR #$CONTROL_PR checks on bumped commit..."
+            for _ in $(seq 1 30); do
+              if pr_ready "$CONTROL_REPO" "$CONTROL_PR"; then
+                # Merge commit (squash disabled by guardrail) for the control seal PR too.
+                gh pr merge "$CONTROL_PR" --repo "$CONTROL_REPO" --merge --delete-branch
+                echo "Merge train complete for ${TRACK}."
+                exit 0
+              fi
+              sleep 20
+            done
+            gh pr comment "$CONTROL_PR" --repo "$CONTROL_REPO" \
+              --body "⚠️ cadre merge-train: product PRs merged and submodules bumped, but the control PR's checks did not go green in time. Re-run when CI passes."
+            echo "Control PR not green after bump; product PRs already merged. Halting (re-fires later)."
+            exit 1
+          fi

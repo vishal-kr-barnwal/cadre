@@ -12,7 +12,7 @@
 #      master workflow protocols/ source, re-run `bash scripts/generate-skills.sh`,
 #      and commit the regenerated trees.
 #   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
-#      every script under scripts/, so a broken generator/installer can't merge.
+#      every script under scripts/, so a broken generator/helper can't merge.
 #   3. agent context parity — when `scripts/check-agent-context.sh` exists, asserts
 #      AGENTS.md and CLAUDE.md both carry the team-scale safety rules.
 #   4. tracks.md freshness — regenerates cadre/tracks.md from each track's

@@ -21,7 +21,7 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 **Spec-first SDLC.** Every track flows through plan → implement (TDD) → **review → ship (monorepo) / land (polyrepo) → archive → release**. `cadre-review` is an enforced quality gate: it records its verdict in `metadata.json` (`review.verdict` ∈ `approved` | `changes_requested`, plus `blocking_count`), and `cadre-ship` / `cadre-land` refuse to proceed on `changes_requested` or blocking findings.
 
-**Two AI coding tools, one source of truth.** The 16 Cadre workflow protocols run through skills on Claude Code and OpenAI Codex. Both skill bundles are generated from [`skills/cadre/protocols/`](skills/cadre/protocols/) (run `scripts/generate-skills.sh --check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
+**Two AI coding tools, one source of truth.** The 16 Cadre workflow protocols run through plugin-bundled skills on Claude Code and OpenAI Codex. Both plugin packages are generated from [`skills/cadre/protocols/`](skills/cadre/protocols/) (run `scripts/generate-skills.sh --check` in CI to catch drift). Both tools operate on the same `cadre/` and `.beads/` directories, so you can mix them on one repo (e.g. plan in Codex, implement in Claude Code).
 
 **Built for teams.**
 - **Per-person identity + advisory leases** — assignees use your git committer identity (`user.email` → `user.name`); `metadata.json` carries `owner`, `reviewer`, `review`, `lease`, and `merge_order`. In shared sync mode a track can hold an advisory lease (a no-op in monorepo/local modes; stale leases swept by `cadre-validate`).
@@ -37,8 +37,8 @@ Together, they enable AI agents to manage long-horizon development tasks without
 
 | Platform | How | Invoke |
 |----------|-----|--------|
-| **Claude Code** | skills | `$cadre`, then `cadre-setup` |
-| **OpenAI Codex** | repo/user skills + `AGENTS.md` | `$cadre`, then `cadre-setup` |
+| **Claude Code** | plugin | `$cadre`, then `cadre-setup` |
+| **OpenAI Codex** | plugin + `AGENTS.md` | `$cadre`, then `cadre-setup` |
 
 See the **[Install & Version Guide](docs/INSTALL.md)** for the full compatibility matrix and per-platform setup. Installation summaries are below.
 
@@ -72,62 +72,32 @@ bd --version
 
 ## Installation
 
-### Quick install (recommended)
-
-Clone the repo and run the installer. It detects which supported CLIs you have,
-lets you pick which to set up, and installs them either **globally** (`~/`) or
-into a **project** directory:
+Cadre ships repo-local plugin marketplaces for both supported tools:
 
 ```bash
 git clone https://github.com/vishal-kr-barnwal/Cadre.git
 cd Cadre
-bash scripts/install.sh
 ```
+
+Claude Code:
+
+```text
+/plugin marketplace add vishal-kr-barnwal/Cadre
+/plugin install cadre@cadre
+```
+
+OpenAI Codex:
 
 ```bash
-# Non-interactive examples
-bash scripts/install.sh --all --global         # every detected tool, globally
-bash scripts/install.sh --project=~/my-app claude codex   # selected tools, into a project
-bash scripts/install.sh --dry-run              # preview without writing anything
+codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse plugins/cadre
+codex plugin add cadre@cadre
 ```
 
-Prefer to copy things yourself? The per-platform manual steps are below and in
-the [Install & Version Guide](docs/INSTALL.md).
+The plugins bundle the Cadre skill, workflow protocols, templates, and MCP
+server. LSP setup/review helpers are bundled as scripts and remain opt-in per
+project through `cadre/lsp.json`.
 
-### Claude Code
-
-Clone the repo once, then copy the skills into your config:
-
-```bash
-git clone https://github.com/vishal-kr-barnwal/Cadre.git
-
-# Global install (available in every project)
-cp -r Cadre/.claude/skills/*   ~/.claude/skills/
-```
-
-To scope the install to a single project instead, copy into that project's `.claude/`:
-
-```bash
-cp -r Cadre/.claude/skills   your-project/.claude/skills
-```
-
-> **Smaller context window?** Copy only the `cadre` skill (`.claude/skills/cadre`) — it already includes Beads integration. Add the `beads` and `skill-creator` skills only if you want standalone Beads usage or to build your own skills.
-
-### OpenAI Codex
-
-Codex reads skills from `.agents/skills` in a project, or from `~/.agents/skills`
-globally:
-
-```bash
-mkdir -p your-project/.agents/skills
-cp -r Cadre/.agents/skills/. your-project/.agents/skills/
-cp AGENTS.md your-project/AGENTS.md   # project context
-```
-
-Invoke the Cadre skill explicitly with `$cadre`, or ask naturally for
-`cadre-setup`, `cadre-newtrack Add OAuth login`, and so on.
-
-> Claude and Codex skill bundles are generated from the master protocols in [`skills/cadre/protocols/`](skills/cadre/protocols/) by [`scripts/generate-skills.sh`](scripts/generate-skills.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
+> Claude and Codex plugin bundles are generated from the master protocols in [`skills/cadre/protocols/`](skills/cadre/protocols/) by [`scripts/generate-skills.sh`](scripts/generate-skills.sh). See the [Install & Version Guide](docs/INSTALL.md) for details.
 
 ---
 
@@ -304,19 +274,18 @@ platform (Claude Code, Codex).
 
 ## Skills
 
-Located in `.claude/skills/`:
+The supported installable package is the Cadre plugin. It bundles one primary
+skill:
 
 | Skill | Description |
 |-------|-------------|
 | **cadre** | Context-driven development methodology. Auto-activates when `cadre/` directory exists. Routes natural language to bundled workflow protocols. |
-| **beads** | Persistent task memory that survives conversation compaction. Auto-activates when `.beads/` directory exists. Integrates with Cadre for cross-session memory. |
-| **skill-creator** | Guide for creating and packaging new AI agent skills. |
 
 ### How Skills Work
 
 Skills auto-activate based on project structure:
 - `cadre/` directory → Cadre skill loads
-- `.beads/` directory → Beads skill loads
+- `.beads/` directory plus `cadre/beads.json` → Beads-aware Cadre flows are enabled
 - Both present → Integrated workflow enabled
 
 Skills provide:
@@ -334,9 +303,14 @@ Skills provide:
 Cadre/
 ├── skills/cadre/protocols/  # Master workflow protocols (edit these)
 ├── .claude/
-│   └── skills/          # Claude Code skills
-├── .agents/skills/      # OpenAI Codex repo skills
-├── scripts/             # install/generate scripts, Cadre MCP server, LSP review helper
+│   └── skills/          # Generated Claude skill bundle used for packaging
+├── .agents/skills/      # Generated Codex skill bundle used for packaging
+├── .claude-plugin/      # Claude Code plugin marketplace
+├── .agents/plugins/     # OpenAI Codex plugin marketplace
+├── plugins/
+│   ├── cadre-claude/    # Generated Claude Code plugin
+│   └── cadre/           # Generated OpenAI Codex plugin
+├── scripts/             # bundle generator, Cadre MCP server, LSP review helper
 ├── templates/           # Workflow + styleguide templates, ci/ (merge-train + drift-check)
 ├── docs/                # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md            # Claude Code context

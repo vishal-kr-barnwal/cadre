@@ -43,6 +43,19 @@ It also exposes resources:
 
 Set `CADRE_ROOT=/path/to/project` when launching from outside the project root.
 
+### Plugin packaging
+
+The generated Claude Code and Codex plugins both bundle this MCP server:
+
+| Platform | Plugin path | MCP config |
+|----------|-------------|------------|
+| Claude Code | `plugins/cadre-claude/` | `mcp-config.json` |
+| OpenAI Codex | `plugins/cadre/` | `.mcp.json` |
+
+The server code and `cadre-core.js` are copied into each plugin's `scripts/`
+directory so installed plugin cache paths do not depend on the development
+checkout.
+
 ## LSP Review Helper
 
 Cadre can configure LSP during setup, or later with refresh:
@@ -101,6 +114,14 @@ The helper:
 
 The output is advisory unless the reviewer treats a live external caller of a
 removed or renamed symbol as blocking.
+
+### Plugin packaging
+
+Claude Code supports plugin-level LSP server declarations, but Cadre does not
+ship language-server binaries. Instead, both generated plugins bundle
+`cadre-lsp-setup.js` and `cadre-lsp-review.js` under `scripts/`; Cadre workflows
+use those helpers to create or read each project's `cadre/lsp.json`. This keeps
+LSP opt-in per repo and avoids starting irrelevant language servers globally.
 
 ## Recommended Rollout
 

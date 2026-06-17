@@ -18,14 +18,16 @@ It works through skill-first workflow protocols on Claude Code and OpenAI Codex.
 Cadre/
 ├── skills/cadre/protocols/ # Master workflow protocols (edit these)
 ├── .claude/
-│   └── skills/             # Claude Code skills
-│       ├── cadre/      # Context-driven development skill
-│       ├── beads/          # Persistent task memory skill
-│       └── skill-creator/  # Skill creation guide
-├── .agents/skills/         # OpenAI Codex repo skills
+│   └── skills/             # Generated Claude skill bundle used for packaging
+│       └── cadre/
+├── .agents/skills/         # Generated Codex skill bundle used for packaging
+├── .claude-plugin/         # Claude Code plugin marketplace
+├── .agents/plugins/        # OpenAI Codex plugin marketplace
+├── plugins/
+│   ├── cadre-claude/       # Generated Claude Code plugin
+│   └── cadre/              # Generated OpenAI Codex plugin
 ├── scripts/
-│   ├── install.sh          # Interactive installer (detect CLIs, global/project)
-│   ├── generate-skills.sh  # Generates Claude/Codex skill bundles
+│   ├── generate-skills.sh  # Generates Claude/Codex plugin bundles
 │   ├── agent-refs/         # Masters for per-agent-sliced references (AGENT blocks)
 │   ├── migrate-to-cadre.sh # Migrate an existing conductor/ project to cadre/
 │   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration (legacy)
@@ -35,9 +37,10 @@ Cadre/
 └── AGENTS.md               # Codex context
 ```
 
-> **Generated outputs** under `.claude/skills/cadre/` and
-> `.agents/skills/cadre/` are derived from `skills/cadre/protocols/`,
-> `scripts/agent-refs/`, and `templates/` by
+> **Generated outputs** under `.claude/skills/cadre/`,
+> `.agents/skills/cadre/`, `plugins/cadre-claude/`, `plugins/cadre/`,
+> `.claude-plugin/marketplace.json`, and `.agents/plugins/marketplace.json`
+> are derived from `skills/cadre/protocols/`, `scripts/agent-refs/`, and `templates/` by
 > `scripts/generate-skills.sh`. Edit the master sources and regenerate — do not
 > hand-edit generated files. CI can run
 > `bash scripts/generate-skills.sh --check` to detect drift. Ready-made
@@ -72,9 +75,7 @@ All platforms use the same workflow names through the `$cadre` skill.
 
 | Skill | Location | Purpose |
 |-------|----------|---------|
-| **cadre** | `.claude/skills/cadre/` | Auto-activates when `cadre/` exists. Provides intent mapping and proactive behaviors. |
-| **beads** | `.claude/skills/beads/` | Auto-activates when `.beads/` exists. Provides persistent memory across sessions. |
-| **skill-creator** | `.claude/skills/skill-creator/` | Guide for creating new AI agent skills. |
+| **cadre** | `plugins/cadre-claude/skills/cadre/` and `plugins/cadre/skills/cadre/` | Plugin-bundled workflow skill. Auto-activates when `cadre/` exists. Provides intent mapping and proactive behaviors. |
 
 ### Generated Artifacts (in user projects)
 
@@ -237,7 +238,7 @@ At phase completion:
 
 ## Development Notes
 
-- Master workflow protocols are Markdown in `skills/cadre/protocols/`; Claude and Codex skill bundles are generated from them by `scripts/generate-skills.sh`
+- Master workflow protocols are Markdown in `skills/cadre/protocols/`; Claude and Codex plugin bundles are generated from them by `scripts/generate-skills.sh`
 - Skills use SKILL.md format with references/ subdirectory
 - Skills bundle generated workflow-protocol copies under `protocols/`; edit only the top-level master `skills/cadre/protocols/cadre-*.md` files and regenerate
 - State is tracked in JSON files (setup_state.json, implement_state.json, metadata.json)

@@ -35,9 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AGENTS/CLAUDE semantic context drift guard (`scripts/check-agent-context.sh`).
 
 ### Changed
+- Installation is now plugin-only for both Claude Code and OpenAI Codex. The
+  generated plugin packages bundle the Cadre skill, workflow protocols,
+  templates, MCP config, and helper scripts.
+- Moved the shared Beads error-handler reference to `scripts/agent-refs/` so it
+  is copied into generated plugin skill bundles from a real source file instead
+  of from another generated artifact.
 - Synced Codex-facing `AGENTS.md` with the newer team-scale review,
   ownership, coverage, collision, and shared-control-plane rules.
 - Added MCP/LSP rollout guidance in `docs/MCP_LSP.md`.
+
+### Removed
+- Deleted the legacy `scripts/install.sh` copy-based installer and removed
+  manual skill-copy installation instructions from the docs.
 
 ## [2.0.0] — 2026-06-16
 

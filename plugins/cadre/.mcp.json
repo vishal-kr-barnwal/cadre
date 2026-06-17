@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "cadre": {
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/mcp/cadre-server.js"
+      ]
+    }
+  }
+}

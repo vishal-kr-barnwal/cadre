@@ -126,30 +126,33 @@ enabled.
 
 ## Install Cadre
 
-Clone Cadre and run the installer:
+Install Cadre through the plugin marketplaces:
 
 ```bash
 git clone https://github.com/vishal-kr-barnwal/Cadre.git
 cd Cadre
-bash scripts/install.sh
 ```
 
-Common non-interactive installs:
+Claude Code:
+
+```text
+/plugin marketplace add vishal-kr-barnwal/Cadre
+/plugin install cadre@cadre
+```
+
+OpenAI Codex:
 
 ```bash
-# Install all detected tools globally
-bash scripts/install.sh --all --global
-
-# Install Claude Code and Codex support into one project
-bash scripts/install.sh --project=~/my-app --yes claude codex
+codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse plugins/cadre
+codex plugin add cadre@cadre
 ```
 
 Supported primary surfaces:
 
 | Surface | Cadre form |
 |---------|------------|
-| Claude Code | Skill plus bundled workflow protocols. |
-| OpenAI Codex | Repo/user skills plus `AGENTS.md`. |
+| Claude Code | Plugin with bundled workflow protocols. |
+| OpenAI Codex | Plugin with bundled workflow protocols plus `AGENTS.md` context. |
 
 Install Beads too:
 

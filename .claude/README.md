@@ -6,14 +6,12 @@ Cadre helps you plan before you build - creating specs, implementation plans, an
 
 ## Installation
 
-### Option 1: Claude Code Plugin (Recommended)
-
 ```bash
 # Add the marketplace
 /plugin marketplace add vishal-kr-barnwal/Cadre
 
 # Install the plugin
-/plugin install cadre
+/plugin install cadre@cadre
 
 # Verify installation
 /help
@@ -22,54 +20,18 @@ Cadre helps you plan before you build - creating specs, implementation plans, an
 This installs:
 - **Cadre skills** that auto-activate for cadre projects
 - **16 bundled workflow protocols** inside the Cadre skill
+- **Cadre MCP server config** for deterministic status, collision, and review-gate checks
+- **LSP setup/review helper scripts** used by Cadre workflows when a project opts into `cadre/lsp.json`
 
-### Option 2: Agent Skills Compatible CLI
+The generated Claude Code plugin lives at `plugins/cadre-claude/`; the marketplace
+catalog lives at `.claude-plugin/marketplace.json`.
 
-If your CLI supports the [Agent Skills specification](https://agentskills.io):
-
-```bash
-# Point to the skill directory
-skills/cadre/
-├── SKILL.md                    # Entry point - overview, intent mapping, workflow routing
-├── protocols/                  # Generated workflow protocols
-└── references/
-    ├── workflows.md            # Workflow overview, state files, Beads & parallel overview
-    ├── structure.md            # Directory structure reference
-    ├── beads-integration.md    # Beads session protocol, CLI commands, chemistry
-    ├── learnings-system.md     # Ralph-style knowledge capture
-    ├── patterns-template.md    # Template for cadre/patterns.md
-    └── learnings-template.md   # Template for track learnings.md
-```
-
-> Workflow protocols are bundled under the skill as generated copies. Edit the
-> master `skills/cadre/protocols/cadre-*.md` files in the repo root, then run
-> `scripts/generate-skills.sh` to refresh the skill bundle.
-
-The skill follows the Agent Skills spec with full frontmatter:
-- `name`: cadre
-- `description`: Context-driven development methodology
-- `license`: Apache-2.0
-- `compatibility`: Claude Code, OpenAI Codex, any Agent Skills compatible CLI
-- `metadata`: version, author, repository, keywords
-
-### Option 3: Manual Installation
-
-Copy to your project:
-```bash
-cp -r /path/to/cadre/.claude your-project/
-```
-
-Or for global access (all projects):
-```bash
-cp -r /path/to/cadre/* ~/
-cp -r /path/to/cadre/.claude/skills/* ~/.claude/skills/
-```
-
-### Option 4: Other platforms (Codex)
-
-The same 16 workflow protocols ship for OpenAI Codex as repo/user skills. See the
-[Install & Version Guide](../docs/INSTALL.md) for per-platform setup. They are
-generated from the master workflow protocols in `skills/cadre/protocols/` by `scripts/generate-skills.sh`.
+The same 16 workflow protocols ship for OpenAI Codex through the generated
+Codex plugin at `plugins/cadre/`, with a repo marketplace at
+`.agents/plugins/marketplace.json`. See the
+[Install & Version Guide](../docs/INSTALL.md) for per-platform setup. Plugin
+bundles are generated from the master workflow protocols in
+`skills/cadre/protocols/` by `scripts/generate-skills.sh`.
 
 ## Workflows
 
@@ -167,25 +129,18 @@ in Codex, implement in Claude Code) with full compatibility.
 See the [Install & Version Guide](../docs/INSTALL.md) for the compatibility
 matrix and per-platform setup.
 
-## File Structure
+## Plugin Structure
 
 ```
-.claude/
-├── skills/
-│   ├── cadre/                # Context-driven development skill
-│   │   ├── SKILL.md          # Entry point (overview, intent mapping, workflow routing)
-│   │   ├── protocols/        # Generated workflow protocols (16)
-│   │   ├── references/
-│   │       ├── workflows.md      # Workflow overview, state files, Beads & parallel overview
-│   │       ├── structure.md      # Directory structure reference
-│   │       ├── beads-integration.md
-│   │       ├── learnings-system.md
-│   │       ├── patterns-template.md
-│   │       └── learnings-template.md
-│   │   └── templates/
-│   ├── beads/                    # Persistent task memory skill
-│   └── skill-creator/            # Skill development guide
-└── README.md                     # This file
+plugins/cadre-claude/
+├── .claude-plugin/plugin.json
+├── skills/cadre/
+│   ├── SKILL.md              # Entry point (overview, intent mapping, workflow routing)
+│   ├── protocols/            # Generated workflow protocols (16)
+│   ├── references/           # Generated workflow references
+│   └── templates/            # Bundled setup templates and helper scripts
+├── mcp-config.json
+└── scripts/                  # Cadre MCP server and helper scripts
 ```
 
 ## Links

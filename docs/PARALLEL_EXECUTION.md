@@ -208,8 +208,8 @@ function detectConflicts(tasks: ParallelTask[]): Conflict[] {
 ## Worker Spawning
 
 The worker prompt below is platform-agnostic; only the **dispatch mechanism**
-differs per tool. See [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
-(bundled with every skill bundle) for the full table:
+differs per tool. See [`parallel-execution.md`](../plugins/cadre-claude/skills/cadre/references/parallel-execution.md)
+(bundled with every plugin skill) for the full table:
 
 | Platform | Dispatch |
 |----------|----------|
@@ -269,8 +269,8 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
 ## Cadre-Implement Changes
 
 > The coordinator mechanics below now live in the sliced reference
-> [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
-> (bundled with every skill bundle), not inline in `cadre-implement.md`. The
+> [`parallel-execution.md`](../plugins/cadre-claude/skills/cadre/references/parallel-execution.md)
+> (bundled with every plugin skill), not inline in `cadre-implement.md`. The
 > per-worker prompt stays inline in `cadre-implement.md`. This section
 > documents the design.
 

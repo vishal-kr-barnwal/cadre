@@ -1,0 +1,22 @@
+{
+  "name": "cadre",
+  "displayName": "Cadre",
+  "version": "2.0.0",
+  "description": "Skill-first Cadre workflows with bundled MCP tooling for context-driven development.",
+  "author": {
+    "name": "Vishal Barnwal",
+    "url": "https://github.com/vishal-kr-barnwal"
+  },
+  "homepage": "https://github.com/vishal-kr-barnwal/Cadre",
+  "repository": "https://github.com/vishal-kr-barnwal/Cadre",
+  "license": "Apache-2.0",
+  "keywords": [
+    "cadre",
+    "context-driven-development",
+    "skills",
+    "beads",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./mcp-config.json"
+}

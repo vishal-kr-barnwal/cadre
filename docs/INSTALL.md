@@ -1,15 +1,15 @@
 # Install & Version Guide
 
 Cadre ships the same 16 workflow protocols to Claude Code and OpenAI Codex.
-This guide covers installation for each platform and explains how versioning
-and skill-bundle generation work.
+This guide covers plugin installation for each platform and explains how
+versioning and generated bundles work.
 
 - [Version & compatibility matrix](#version--compatibility-matrix)
 - [Prerequisite: Beads](#prerequisite-beads)
-- [Per-platform installation](#per-platform-installation)
+- [Plugin install](#plugin-install)
   - [Claude Code](#claude-code)
   - [OpenAI Codex](#openai-codex)
-- [How skills are generated](#how-skills-are-generated)
+- [How bundles are generated](#how-bundles-are-generated)
 - [MCP and LSP helpers](#mcp-and-lsp-helpers)
 - [Versioning policy](#versioning-policy)
 
@@ -18,16 +18,16 @@ and skill-bundle generation work.
 ## Version & compatibility matrix
 
 Current release: **v2.0.0** — team-scale hardening for 10–20 person teams,
-Claude/Codex skill surfaces, ownership guards, review sequencing,
+Claude/Codex plugin skill surfaces, ownership guards, review sequencing,
 machine-recorded coverage, and a derived `tracks.md` index.
 
-| Platform | Min. version | Workflow directory | Format | Invoke | Context file | Source of truth |
-|----------|--------------|--------------------|--------|--------|--------------|-----------------|
-| **Claude Code** | 1.0+ | `.claude/skills/` | Agent Skill `SKILL.md` + references | `$cadre`, then `cadre-setup` | `CLAUDE.md` | generated bundle |
-| **OpenAI Codex** | current skills | `.agents/skills/` | Agent Skill `SKILL.md` + references | `$cadre`, then `cadre-setup` | `AGENTS.md` | generated bundle |
+| Platform | Min. version | Plugin path | Marketplace | Invoke | Context file | Source of truth |
+|----------|--------------|-------------|-------------|--------|--------------|-----------------|
+| **Claude Code** | plugin-capable Claude Code | `plugins/cadre-claude/` | `.claude-plugin/marketplace.json` | `$cadre`, then `cadre-setup` | `CLAUDE.md` | generated bundle |
+| **OpenAI Codex** | current plugins | `plugins/cadre/` | `.agents/plugins/marketplace.json` | `$cadre`, then `cadre-setup` | `AGENTS.md` | generated bundle |
 
 > The master workflow protocols in `skills/cadre/protocols/cadre-*.md` are the single source of
-> truth. Claude Code and Codex skill bundles are generated from them by
+> truth. Claude Code and Codex plugin bundles are generated from them by
 > [`scripts/generate-skills.sh`](../scripts/generate-skills.sh).
 
 Both platforms operate on the **same** `cadre/` and `.beads/`
@@ -55,7 +55,7 @@ bd --version
 Beads integration is always attempted. If `bd` is unavailable, Cadre prompts
 you to continue without persistent memory.
 
-Clone the repo once — every install below copies from it:
+Clone the repo once if you want to inspect or test the marketplace locally:
 
 ```bash
 git clone https://github.com/vishal-kr-barnwal/Cadre.git
@@ -64,95 +64,70 @@ cd Cadre
 
 ---
 
-## Automated install
+## Plugin install
 
-The quickest path is the interactive installer, which detects your CLIs, lets
-you choose tools, and installs globally or into a project:
-
-```bash
-bash scripts/install.sh              # interactive
-bash scripts/install.sh --all --global
-bash scripts/install.sh --project=DIR --yes claude codex
-bash scripts/install.sh --dry-run    # preview only
-```
-
-| Flag | Effect |
-|------|--------|
-| `--global` | Install into `~/` (home config) |
-| `--project[=DIR]` | Install into `DIR` (default: current directory) |
-| `--all` | Select every detected tool (implies `--yes`) |
-| `-y`, `--yes` | Skip the confirmation prompt |
-| `--dry-run` | Print actions without writing |
-| positional `claude codex` | Preselect tools |
-
-The manual per-platform steps below do the same copies by hand.
-
-## Per-platform installation
+Plugins are the only supported installation path. They bundle the Cadre skill,
+workflow protocols, templates, MCP server config, and helper scripts behind one
+install.
 
 ### Claude Code
 
-Copy the skills into your Claude config.
+Claude reads the marketplace at `.claude-plugin/marketplace.json`:
 
-```bash
-# Global (every project)
-cp -r .claude/skills/*   ~/.claude/skills/
-
-# Or scope to a single project
-cp -r .claude/skills   your-project/.claude/skills
+```text
+/plugin marketplace add vishal-kr-barnwal/Cadre
+/plugin install cadre@cadre
 ```
 
-Context lives in `CLAUDE.md`. Invoke explicitly with `$cadre`, or ask for
-`cadre-setup`, `cadre-newtrack`, etc.
+The plugin source is `plugins/cadre-claude/`. It includes:
+
+- `skills/cadre/` generated for Claude Code
+- `mcp-config.json` for the Cadre MCP server
+- `scripts/` with the MCP server, core helpers, and LSP setup/review helpers
 
 ### OpenAI Codex
 
-Codex reads repo-scoped skills from `.agents/skills` and user-scoped skills from
-`~/.agents/skills`.
+Codex reads the marketplace at `.agents/plugins/marketplace.json`:
 
 ```bash
-# Project install
-mkdir -p your-project/.agents/skills
-cp -r .agents/skills/. your-project/.agents/skills/
-
-# Or global install for your user
-mkdir -p ~/.agents/skills
-cp -r .agents/skills/. ~/.agents/skills/
+codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse plugins/cadre
+codex plugin add cadre@cadre
 ```
 
-Add Cadre context to your project so Codex knows the conventions. Copy the
-template `AGENTS.md` into the project root (or run `/init` and paste the
-relevant sections):
+When you are already working inside a cloned Cadre repo, Codex can also discover
+the repo marketplace at `.agents/plugins/marketplace.json` after restart.
 
-```bash
-cp AGENTS.md your-project/AGENTS.md
-```
+The plugin source is `plugins/cadre/`. It includes:
 
-Invoke explicitly with `$cadre`, or ask naturally for `cadre-setup`,
-`cadre-newtrack Add OAuth login`, and so on. The Cadre skill routes the request
-to the master protocol in `skills/cadre/protocols/`.
+- `.codex-plugin/plugin.json`
+- `skills/cadre/` generated for Codex
+- `.mcp.json` for the Cadre MCP server
+- `scripts/` with the MCP server, core helpers, and LSP setup/review helpers
 
 ---
 
-## How skills are generated
+## How bundles are generated
 
-Claude Code and Codex skill bundles are **generated** from the
-master workflow protocols in `skills/cadre/protocols/cadre-*.md` by:
+Claude Code and Codex plugin bundles are **generated** from the master workflow
+protocols in `skills/cadre/protocols/cadre-*.md` by:
 
 ```bash
 bash scripts/generate-skills.sh
 ```
 
 This reads each master protocol's frontmatter and body, then emits
-platform-specific skill bundles:
+platform-specific plugin packages with bundled skills:
 
 | Transform | Claude Code | Codex |
 |-----------|-------------|-------|
-| Protocol bodies | generated into `.claude/skills/cadre/protocols/` | generated into `.agents/skills/cadre/protocols/` |
+| Protocol bodies | generated into `plugins/cadre-claude/skills/cadre/protocols/` | generated into `plugins/cadre/skills/cadre/protocols/` |
 | Frontmatter | preserved | skill metadata lives in `SKILL.md` |
 | Worker-dispatch reference | `Task` tool | `worker` agent type |
-| `references/beads-error-handler.md` (agnostic) | skill reference | copied into `.agents/skills/cadre/references/` |
+| `references/beads-error-handler.md` (agnostic) | copied into plugin skill references | copied into plugin skill references |
 | `references/parallel-execution.md`, `template-locator.md` (sliced) | only Claude's section | only Codex's section |
-| `templates/` bundle | copied into `.claude/skills/cadre/templates/` | copied into `.agents/skills/cadre/templates/` |
+| `templates/` bundle | copied into `plugins/cadre-claude/skills/cadre/templates/` | copied into `plugins/cadre/skills/cadre/templates/` |
+| Plugin package | generated into `plugins/cadre-claude/` | generated into `plugins/cadre/` |
+| Marketplace | generated into `.claude-plugin/marketplace.json` | generated into `.agents/plugins/marketplace.json` |
 
 ### Per-agent slicing (token optimization)
 
@@ -168,14 +143,12 @@ substituted per platform. Edit the masters in `scripts/agent-refs/`
 
 `cadre-setup` copies starter files (`workflow.md`, `code_styleguides/`, …)
 into your project. Those live in the canonical `templates/` directory, and the
-generator bundles a copy into the Codex skill at
-`.agents/skills/cadre/templates/` — plus the Claude skill at
-`.claude/skills/cadre/templates/`. Because each platform's install command
-copies its whole directory, the templates ship with the workflow.
+generator bundles a copy into each plugin skill at
+`plugins/<platform>/skills/cadre/templates/`.
 
 `cadre-setup` then **discovers** the templates directory at runtime by
-probing those install locations (including `~/.agents/skills/cadre/templates/`
-for global Codex skills), so it works regardless of which tool or install scope you use.
+resolving `../templates/` relative to the active `references/template-locator.md`
+file, so it works from plugin cache installs without knowing the cache root.
 Edit templates only in the canonical `templates/` directory and regenerate.
 
 Generated files carry an `AUTO-GENERATED` marker. **Do not hand-edit them** —
@@ -186,12 +159,12 @@ sync (e.g. in CI):
 bash scripts/generate-skills.sh --check
 ```
 
-This exits non-zero if any generated file is stale.
+This exits non-zero if any generated build artifact, plugin, or marketplace file is stale.
 
 A ready-made drift gate ships at
 `templates/ci/cadre-monorepo-check.{github,gitlab}.yml` — drop the one for
 your CI into place and it runs `generate-skills.sh --check` (plus `bash -n` on
-the generator and installer scripts) on every PR. The `templates/` directory now includes a
+the generator and runtime helper scripts) on every PR. The `templates/` directory now includes a
 `ci/` subdirectory carrying both this monorepo-check and the polyrepo
 merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
 
@@ -231,7 +204,7 @@ recorded in the [Changelog](../CHANGELOG.md).
 When adding or changing a workflow protocol:
 
 1. Edit the master protocol in `skills/cadre/protocols/`.
-2. Run `bash scripts/generate-skills.sh` to regenerate skill bundles.
+2. Run `bash scripts/generate-skills.sh` to regenerate plugin bundles.
 3. Bump the version in `README.md`.
 4. Note the change in the README "What's New" section.
 
