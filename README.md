@@ -344,7 +344,7 @@ Cadre/
 │   ├── commands/        # Claude Code slash commands (16) — canonical source
 │   └── skills/          # Skills (cadre, beads, skill-creator)
 ├── .codex/prompts/      # OpenAI Codex CLI commands (generated)
-├── scripts/             # install.sh, generate-commands.sh, migrate-to-cadre.sh
+├── scripts/             # install/generate scripts, Cadre MCP server, LSP review helper
 ├── templates/           # Workflow + styleguide templates, ci/ (merge-train + drift-check)
 ├── docs/                # Documentation (see docs/INSTALL.md)
 ├── CLAUDE.md            # Claude Code context
@@ -559,6 +559,7 @@ Session/thread ref if available
 - [Manual Workflow Guide](docs/manual-workflow-guide.md)
 - [Beads Integration](docs/BEADS_INTEGRATION.md)
 - [Parallel Execution](docs/PARALLEL_EXECUTION.md)
+- [MCP and LSP Integration](docs/MCP_LSP.md)
 - [Beads Official Docs](https://github.com/steveyegge/beads)
 
 ---

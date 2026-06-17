@@ -1,7 +1,7 @@
 # Cadre + Beads Integration
 
 > **Status**: Implemented  
-> **Version**: 0.2.0
+> **Cadre Version**: 2.0.0
 
 ## Overview
 

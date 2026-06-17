@@ -13,13 +13,15 @@
 #      and commit the regenerated trees.
 #   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
 #      every script under scripts/, so a broken generator/installer can't merge.
-#   3. tracks.md freshness — regenerates cadre/tracks.md from each track's
+#   3. agent context parity — when `scripts/check-agent-context.sh` exists, asserts
+#      AGENTS.md and CLAUDE.md both carry the team-scale safety rules.
+#   4. tracks.md freshness — regenerates cadre/tracks.md from each track's
 #      metadata.json.status (the source of truth) into a scratch file and fails if
 #      the committed index is STALE or hand-edited. The fix is always:
 #      `/cadre-status --regen-index` (never hand-merge tracks.md markers).
-#   4. .gitattributes guard (shared mode only) — asserts the required `merge=ours`
+#   5. .gitattributes guard (shared mode only) — asserts the required `merge=ours`
 #      lines exist so the control-plane merge contract isn't silently dropped.
-#   5. review gate (track MRs only) — asserts the track's metadata.review cleared:
+#   6. review gate (track MRs only) — asserts the track's metadata.review cleared:
 #      verdict approved, no blocking findings, no disallowed self-review, and
 #      reviewed_sha is present. (SHA-equality against the MR head is only a
 #      non-blocking WARNING — ship/land rebase rewrites the tip, so CI cannot match
@@ -44,6 +46,8 @@ cadre-monorepo-check:
     - bash scripts/generate-commands.sh --check
     # Parse-only (-n) — validates every script without executing it.
     - bash -n scripts/*.sh
+    # Semantic smoke test for safety-critical context shared across agent files.
+    - '[ ! -f scripts/check-agent-context.sh ] || bash scripts/check-agent-context.sh'
     # tracks.md is a DERIVED cache, not an authority: it must equal the output of
     # the regen-index script (which rebuilds it from each track's
     # metadata.json.status, the single source of truth). Catches a stale index or a

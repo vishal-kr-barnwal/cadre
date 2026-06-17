@@ -170,7 +170,10 @@ Phases can execute tasks in parallel using sub-agents:
 - Tasks have `<!-- files: ... -->` for exclusive file ownership
 - Use `<!-- depends: taskN -->` for task dependencies
 - Coordinator spawns workers via Task() tool
-- State tracked in `parallel_state.json`
+- `<!-- files: ... -->` is emitted for every task, not only parallel phases, so
+  status/collision/validate flows can catch cross-track file overlap
+- State tracked in `parallel_state.json` as an audit log; Beads dependencies drive
+  coordination
 
 ### Task Workflow (TDD)
 1. Select task from plan.md (or use `bd ready` if Beads enabled)
@@ -178,12 +181,23 @@ Phases can execute tasks in parallel using sub-agents:
 3. Write failing tests (Red)
 4. Implement to pass (Green)
 5. Refactor
-6. Verify >80% coverage
+6. Verify >80% coverage with the configured coverage tool; record the measured
+   percentage in `metadata.last_coverage` so review can copy it into
+   `metadata.review.coverage`
 7. Commit with message format: `<type>(<scope>): <description>`
 8. Update plan.md with commit SHA
 9. If Beads: `bd done <id> --note "commit: <sha>"`
 
-**Important:** All commits stay local. Cadre never pushes automatically - users decide when to push.
+**Important:** Product code stays local until `/cadre-ship` (monorepo) or
+`/cadre-land` (polyrepo). In shared sync mode, only the control plane
+(`cadre/` + Beads) is pushed/pulled for collaboration.
+
+Agent-local state files (`setup_state.json`, `refresh_state.json`, and
+non-shared `implement_state.json` / `parallel_state.json`) are git-ignored via
+`cadre/.gitignore`. Shared state files rely on the `ours` merge driver
+(`.beads/**` and `parallel_state.json` carry `merge=ours`), so every Beads
+project must register it with `git config merge.ours.driver true`; otherwise git
+can inject text conflict markers into Dolt DB files.
 
 ### Beads Integration
 When Beads is enabled (`cadre/beads.json` with `enabled: true`):
@@ -236,3 +250,4 @@ At phase completion:
 - [Manual Workflow Guide](docs/manual-workflow-guide.md) - Step-by-step command reference
 - [Beads Integration](docs/BEADS_INTEGRATION.md) - How Cadre and Beads work together
 - [Parallel Execution](docs/PARALLEL_EXECUTION.md) - Parallel task execution design
+- [MCP and LSP Integration](docs/MCP_LSP.md) - Cadre MCP tools/resources and LSP review helper rollout

@@ -97,14 +97,22 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    declared, skip this pass and note in the report that no machine typecheck was
    available (do not fabricate a green result).
 
-2. **Cross-track regression via code intelligence.** Where a code-intelligence
+2. **Cross-track regression via code intelligence.** Prefer the bundled LSP review
+   helper when present:
+   ```bash
+   node scripts/cadre-lsp-review.js --base main --head <git_branch> --json
+   ```
+   It reads optional `cadre/lsp.json`, talks to the configured language server(s),
+   and reports references outside the track diff for changed/removed symbols. If it
+   returns `available: false` (no config) or a non-blocking skip finding, note that
+   code intelligence was unavailable and continue. Where another code-intelligence
    backend is available (LSP `find-references` / `incoming-calls`, or an equivalent),
-   for each symbol the diff **changed signature of or removed**, look up its callers
-   and surface any that live **outside** the track diff — those are call sites this
-   track may have broken in code it didn't touch (a cross-track regression).
-   Report them as findings (blocking when a removed/renamed symbol still has live
-   callers). **Degrade gracefully:** if no LSP / code-intelligence backend is
-   available, skip this pass and note it in the report.
+   use it the same way: for each symbol the diff **changed signature of or removed**,
+   look up its callers and surface any that live **outside** the track diff — those
+   are call sites this track may have broken in code it didn't touch (a cross-track
+   regression). Report them as findings (blocking when a removed/renamed symbol still
+   has live callers). **Degrade gracefully:** if no LSP / code-intelligence backend
+   is available, skip this pass and note it in the report.
 
 ## 5. Record Findings
 

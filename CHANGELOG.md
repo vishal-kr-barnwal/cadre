@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Initial dependency-free Cadre MCP server (`scripts/mcp/cadre-server.js`) with
+  tools/resources for index regeneration, plan parsing, team status, available
+  work, collision scans, review-gate checks, and polyrepo local preflight.
+- LSP review helper (`scripts/cadre-lsp-review.js`) for best-effort external
+  reference detection during `/cadre-review`.
+- Team-scale simulation script (`scripts/cadre-team-scale-sim.js`) and
+  AGENTS/CLAUDE semantic context drift guard (`scripts/check-agent-context.sh`).
+
+### Changed
+- Synced Codex-facing `AGENTS.md` with the newer team-scale review,
+  ownership, coverage, collision, and shared-control-plane rules.
+- Added MCP/LSP rollout guidance in `docs/MCP_LSP.md`.
+
 ## [2.0.0] — 2026-06-16
 
 Team-scale hardening (10–20 person teams) plus a platform-surface trim. The
@@ -362,6 +376,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
+[2.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v2.0.0
 [1.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v1.0.0
 [0.3.4]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.4
 [0.3.3]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.3

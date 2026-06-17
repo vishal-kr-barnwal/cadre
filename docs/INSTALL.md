@@ -10,13 +10,16 @@ generation work.
   - [Claude Code](#claude-code)
   - [OpenAI Codex CLI](#openai-codex-cli)
 - [How commands are generated](#how-commands-are-generated)
+- [MCP and LSP helpers](#mcp-and-lsp-helpers)
 - [Versioning policy](#versioning-policy)
 
 ---
 
 ## Version & compatibility matrix
 
-Current release: **v1.0.0** — renamed to **Cadre** (was Conductor-Beads), plus a team-scale SDLC tail (review → ship/land → archive → release with an enforced review gate), polyrepo cross-repo PRs with a no-squash merge-commit merge train, and a derived `tracks.md` index.
+Current release: **v2.0.0** — team-scale hardening for 10–20 person teams,
+Claude/Codex-only command surfaces, ownership guards, review sequencing,
+machine-recorded coverage, and a derived `tracks.md` index.
 
 | Platform | Min. version | Commands directory | Command format | Invoke | Context file | Source of truth |
 |----------|--------------|--------------------|----------------|--------|--------------|-----------------|
@@ -193,6 +196,22 @@ your CI into place and it runs `generate-commands.sh --check` (plus `bash -n` on
 the command scripts) on every PR. The `templates/` directory now includes a
 `ci/` subdirectory carrying both this monorepo-check and the polyrepo
 merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
+
+---
+
+## MCP and LSP helpers
+
+Cadre also ships optional runtime helpers for teams that want lower-token, more
+deterministic agent integrations:
+
+- `node scripts/mcp/cadre-server.js` starts a dependency-free MCP server exposing
+  Cadre tools/resources for track status, collision scans, review gates, and
+  index regeneration.
+- `node scripts/cadre-lsp-review.js --base main --head track/<id> --json` runs a
+  best-effort LSP reference scan when `cadre/lsp.json` configures language
+  servers.
+
+See [MCP and LSP Integration](MCP_LSP.md) for setup and rollout guidance.
 
 ---
 
