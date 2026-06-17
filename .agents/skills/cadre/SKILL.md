@@ -95,6 +95,7 @@ Workflow tool routing:
 | `cadre_current_root` | Resolve the per-call project root at the start of every project-scoped workflow. |
 | `cadre_live_status` | Cheap bare `cadre-status` summary. |
 | `cadre_team_status` | Track inventory, active/completed track selection, owner/reviewer/status summaries. |
+| `cadre_team_board` | Rich low-token team board for WIP, handoffs, review queue, blockers, and optional Beads label evidence. |
 | `cadre_available_work` | `cadre-status --available` and default `cadre-implement` candidate selection, including stale reclaimable work. |
 | `cadre_prepare_implementation` | Preferred `cadre-implement` start packet: selected track, optional ownership claim, context, collisions, available work, and plan integrity in one bounded call. |
 | `cadre_collision_scan` | Cross-track file overlap checks, including exact, prefix, and glob overlaps. |
@@ -104,6 +105,8 @@ Workflow tool routing:
 | `cadre_claim_track` | Track ownership claim, Beads assignment check, metadata owner/lease mirror, and `implement_state.json` creation. |
 | `cadre_create_beads_tree` | Preferred Beads initialization for `cadre-newtrack`: create/plan epic, phases, tasks, dependencies, notes, and metadata Beads IDs. |
 | `cadre_record_task_result` | Task marker/SHA/coverage result recording in `plan.md` and `metadata.json`. |
+| `cadre_complete_task` | Preferred task-completion transaction: run coverage/tests, enforce threshold, then record plan/metadata/Beads together. |
+| `cadre_record_parallel_worker` | Coordinator-owned parallel worker audit/status update; after clean merge it may invoke `cadre_complete_task`. |
 | `cadre_set_track_status` | Track status mutations plus `cadre/tracks.md` regeneration. |
 | `cadre_record_review` | Structured review verdict write with reviewer race guard, `review_seq`, self-review flag, coverage, and gate check. |
 | `cadre_regen_index` | Manual rebuilds of `cadre/tracks.md`; never hand-edit or reimplement index splicing. |
@@ -129,9 +132,32 @@ Preferred packet checkpoints:
 - New track planning: `cadre_lsp_impact` before plan confirmation, then
   `cadre_create_beads_tree` after track files are written.
 - Implementation start: `cadre_prepare_implementation`.
+- Task completion: `cadre_complete_task` after the code commit, before any plan
+  row is marked complete.
+- Team status: `cadre_team_board` for `--team` / `--mine` rich boards.
 - Review: `cadre_review_assist` to frame the evidence, plus
   `cadre_lsp_warm_review` / `cadre_lsp_review` for semantic regressions.
 - Revision: `cadre_lsp_impact` before rewriting plans that touch existing code.
+
+## External Provider MCP Evidence
+
+Cadre MCP remains the authoritative orchestration layer: track status,
+ownership, review gates, Beads IDs, and index regeneration live in `cadre/` and
+`.beads/`. GitHub/GitLab MCP servers may be used as **evidence providers** for
+PRs, reviews, CI, Actions/job logs, issues, and discussion context, but their
+data must be folded back into Cadre through `cadre_review_assist`,
+`cadre_pr_ci_status`, `cadre_record_review`, Beads notes, or track learnings.
+Never treat a provider label, issue state, or PR review as the source of truth
+for Cadre track status unless a Cadre MCP write records the corresponding
+decision.
+
+When available, prefer official provider MCPs for deep PR/CI evidence:
+- GitHub MCP for repository, issue, pull request, review, check, and Actions log
+  evidence.
+- GitLab MCP for merge request, pipeline, job log, issue, and approval evidence.
+
+If provider MCP tools are unavailable, degrade to `gh`/`glab` through
+`cadre_pr_ci_status` and record the limitation in the review or ship report.
 
 ## Beads Integration
 

@@ -43,6 +43,8 @@ behavior is unchanged):
 - Use `cadre_team_status` for full multi-track status, ownership, reviewer, and
   status-count data (`--team`, `--mine`, `--repos`). Read files only for details
   the MCP payload does not expose yet.
+- Use `cadre_team_board` for rich `--team` / `--mine` output: WIP, incoming
+  handoffs, review queue, blockers, and Beads label evidence in one bounded packet.
 - Use `cadre_regen_index` for `--regen-index`; do not run the helper script or
   reimplement the splice directly from the workflow.
 - Use `cadre_available_work` for `--available` / `--unowned`.
@@ -362,26 +364,21 @@ flow that performs the **full multi-track scan**; it is a no-op for bare
 `bd` is unavailable, HALT. If a non-Beads detail source is missing, omit that
 sub-section silently.
 
-1. **Gather WIP.**
-   - **Beads:** run the standard availability check, then
-     `bd list --status in_progress --json` and group issues by `assignee`.
-   - **Filesystem mirror:** scan every `cadre/tracks/<id>/metadata.json`;
-     a track is WIP if its `plan.md` has a `[~]` task or its `metadata.json` has a
-     non-null `lease`. Group by `metadata.json.owner` (fallback `assignee`).
-   - For `--mine`, filter both sources to `<git-identity>` (owner/assignee match).
+1. **Gather board data through MCP.** Call `cadre_team_board` with `root` and
+   `mine: true` for `--mine`; otherwise pass `mine: false`. Use its `wip[]`,
+   `incoming_handoffs[]`, `review_queue[]`, `blockers[]`, and `beads` fields as the
+   source of truth for this view. Do not re-run `bd list` / `bd ready` manually
+   unless the packet reports a specific unavailable or failed sub-query that needs
+   repair.
 
 1a. **Gather incoming handoffs.** A track that was routed by
    `cadre-handoff --for-teammate` lands in its *recipient's* queue via the epic's
    `assignee` + the Beads label `handoff:pending` (the `owner` is intentionally left
    on the author, so this is invisible to an owner-only scan). Surface it so the
    recipient actually sees the work waiting for them:
-   - **Beads:** run the standard availability check, then
-     `bd list --label handoff:pending --json`; group entries by `assignee` (the
-     recipient). Each entry's epic id maps back to its track (`cadre-<track_id>` /
-     the `beads_epic` in `metadata.json`).
-   - For `--mine`, filter to epics whose `assignee` equals `<git-identity>` — these
-     are handoffs waiting for **you** to pick up.
-   - If `bd` is unavailable, HALT and restore the Beads prerequisite.
+   These are already included in `cadre_team_board.incoming_handoffs[]`; render
+   them from the packet. If `beads.available` is false, show that incoming handoff
+   evidence is unavailable rather than silently treating the queue as empty.
 
 2. **Gather the Review Queue.** A track is in the review queue when **any** of:
    - `metadata.json.review.verdict == "changes_requested"` **or**
@@ -391,16 +388,14 @@ sub-section silently.
      assigned via `cadre-review --request` but hasn't reviewed yet → **Awaiting
      review**) — query via `bd list --label review:changes --json` /
      `--label review:ready --json` / `--label review:requested --json` when `bd` is
-     available.
+     available. In normal operation this label evidence comes from
+     `cadre_team_board.review_queue[]`.
    - Annotate each entry with its `metadata.json.reviewer` when set (for
      **Awaiting review** this is the *assigned* reviewer, so load is visible).
 
 3. **Gather blocked-on edges.**
-   - **Beads:** from each in-progress/ready issue's `depends_on`, list the
-     blocking issue(s).
-   - **Filesystem:** include any task line marked `[!]` (read its reason from the
-     track's `blockers.md` if present), plus tracks blocked by incomplete
-     `metadata.json.depends_on`.
+   Use `cadre_team_board.blockers[]`; it includes metadata dependency blockers and
+   task-level `[!]` / `[~]` markers, plus optional Beads evidence when available.
 
 4. **Present:**
 

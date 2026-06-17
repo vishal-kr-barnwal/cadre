@@ -121,6 +121,16 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    removed/renamed symbols as blocking findings; other external references are
    warnings unless the semantic change clearly breaks callers.
 
+3. **Provider evidence (GitHub/GitLab MCP when available).** If official
+   GitHub/GitLab MCP tools are installed in the client, use them to fetch PR/MR
+   review state, CI/check conclusions, Actions/job log failures, linked issues, and
+   discussion context for the track branch or PR. Treat this as evidence only:
+   summarize it in the review report and, when useful, mirror the durable summary
+   to Beads notes. The Cadre verdict is still written only by
+   `cadre_record_review`, and `cadre_review_gate` remains the authority for ship
+   readiness. If provider MCP tools are unavailable, fall back to
+   `cadre_pr_ci_status` (`gh`/`glab`) and note the reduced evidence surface.
+
 ## 5. Record Findings
 
 Append a review entry to `cadre/tracks/<track_id>/learnings.md`:

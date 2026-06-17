@@ -75,7 +75,15 @@ test("MCP root resolution rejects harness skill directories without project stat
     await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
-    for (const name of ["cadre_prepare_implementation", "cadre_create_beads_tree", "cadre_review_assist", "cadre_lsp_impact"]) {
+    for (const name of [
+      "cadre_prepare_implementation",
+      "cadre_create_beads_tree",
+      "cadre_complete_task",
+      "cadre_record_parallel_worker",
+      "cadre_team_board",
+      "cadre_review_assist",
+      "cadre_lsp_impact",
+    ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);
     }
 

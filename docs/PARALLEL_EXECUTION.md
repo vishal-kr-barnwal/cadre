@@ -236,8 +236,8 @@ Task({
     ## Instructions
     1. Follow workflow.md for TDD implementation
     2. Only modify files in your owned list
-    3. On completion, update parallel_state.json with your status
-    4. Commit with message: "feat(${scope}): ${description}"
+    3. Commit with message: "feat(${scope}): ${description}"
+    4. Return commit/test/coverage evidence to the coordinator
     5. NEVER run git push - all commits stay local
     
     ## Spec Context
@@ -253,16 +253,12 @@ Task({
 
 ### Worker Completion Protocol
 
-Each worker updates state on completion:
-
-```bash
-# Worker reads current state
-state=$(cat cadre/tracks/<track_id>/parallel_state.json)
-
-# Worker updates its own status
-jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" | .commit_sha = "abc1234" else . end)' \
-  cadre/tracks/<track_id>/parallel_state.json > tmp.json && mv tmp.json cadre/tracks/<track_id>/parallel_state.json
-```
+Workers do not edit Cadre state directly. Each worker returns a structured
+evidence packet to the coordinator: worker id, task key, commit SHA, tests run,
+coverage value/source, files changed, and notes. The coordinator records that
+packet through MCP `cadre_record_parallel_worker`. After a clean merge-back, the
+coordinator calls the same tool with `status: "merged"` and `completeTask: true`
+so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
 
 ---
 
@@ -313,7 +309,8 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
         - Workers run concurrently
    
    f. **Monitor Completion:**
-      - Poll `parallel_state.json` for worker status changes
+      - Wait for worker results and let the coordinator record status through
+        MCP `cadre_record_parallel_worker`
       - When a worker completes:
         - Check if dependent tasks can now start
         - Spawn newly unblocked tasks
@@ -321,7 +318,8 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
    g. **Aggregate Results:**
       - Wait for all workers to complete
       - Collect commit SHAs from all workers
-      - Update plan.md with all task completions
+      - Call `cadre_record_parallel_worker` with `completeTask: true` after each
+        clean merge to update plan.md and Beads
       - Proceed to phase checkpoint
 
 3. **Beads Integration (if enabled):**
@@ -420,7 +418,8 @@ bd create "Found race condition" \
 bd note <beads_task_id> "COMPLETED: commit <sha>
 DURATION: <time>
 FILES_MODIFIED: <list>" --json
-bd close <beads_task_id> --reason "Task completed" --json
+# Coordinator only, after clean merge-back:
+cadre_record_parallel_worker { status: "merged", completeTask: true, ... }
 ```
 
 ### Concurrent Safety Guarantees
@@ -456,7 +455,7 @@ bd update <beads_task_id> --status open \
    - Offer to retry or skip
 
 2. **Worker Error:** If worker reports error
-   - Log error in parallel_state.json
+   - Record the failure through `cadre_record_parallel_worker`
    - Block dependent tasks
    - Ask user for resolution
 

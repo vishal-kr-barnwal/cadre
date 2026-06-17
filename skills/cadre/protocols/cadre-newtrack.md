@@ -562,9 +562,11 @@ Create a new track from the workflow arguments.
 **Preferred MCP path:** after the track files and plan are written, call
 `cadre_create_beads_tree` first with `dryRun: true`, then again without `dryRun`
 after the planned epic/tasks/dependencies and metadata patch look correct. It
-creates the deterministic epic, phases, tasks, dependencies, initialization notes,
-parallel file-ownership notes, and the `metadata.json` `beads_epic` /
-`beads_tasks` patch in one structured operation. If the live call returns
+creates the deterministic epic, phases, tasks, dependencies, design/acceptance
+context, initialization notes, parallel file-ownership notes, and the
+`metadata.json` `beads_epic` / `beads_tasks` patch in one structured operation.
+Workers rely on this Beads context during parallel execution, so repair MCP
+errors instead of recreating a partial context-less tree by hand. If the live call returns
 `ok: true`, skip the raw `bd create` / `bd dep add` sequence below and continue to
 publish. If it returns an actionable error, repair that error; do not silently
 create a file-only track.

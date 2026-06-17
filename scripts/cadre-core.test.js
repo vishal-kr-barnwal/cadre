@@ -146,7 +146,69 @@ test("createBeadsTree dryRun plans epic, tasks, deps, notes, and metadata patch"
     assert.ok(result.beads_tasks.phase1);
     assert.ok(result.beads_tasks.phase1_task2);
     assert.ok(result.commands.some((entry) => entry.args[0] === "dep"));
+    assert.ok(result.commands.some((entry) => entry.args.includes("--design")));
+    assert.ok(result.commands.some((entry) => entry.args.includes("--acceptance")));
     assert.equal(result.metadata_patch.beads_epic, "cadre-beads_20260617");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask gates plan mutation on measured coverage", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-task-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "complete_20260617", samplePlan("complete_20260617"));
+
+    const low = core.completeTask(root, {
+      trackId: "complete_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+      commitSha: "abcdef123456",
+      command: "printf 'Statements : 72%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(low.ok, false);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "complete_20260617", "plan.md"), "utf8"), /- \[ \] Task 1/);
+
+    const ok = core.completeTask(root, {
+      trackId: "complete_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+      commitSha: "abcdef123456",
+      command: "printf 'Statements : 86%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(ok.ok, true);
+    const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "complete_20260617", "plan.md"), "utf8");
+    assert.match(plan, /- \[x\] Task 1: Implement core \(abcdef123456\)/);
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "complete_20260617", "metadata.json"), "utf8"));
+    assert.equal(metadata.last_coverage, 86);
+    assert.equal(metadata.last_task_result.task_key, "phase1_task1");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("teamBoard returns WIP, review queue, and blockers without Beads", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-board-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "active_20260617", samplePlan("active_20260617"), {
+      status: "in_progress",
+      owner: "dev@example.com",
+      review: { verdict: "changes_requested", blocking_count: 1 },
+    });
+    writeTrack(root, "blocked_20260617", samplePlan("blocked_20260617"), {
+      depends_on: ["missing_20260617"],
+    });
+
+    const board = core.teamBoard(root);
+    assert.equal(board.ok, true);
+    assert.ok(board.wip.some((item) => item.track_id === "active_20260617"));
+    assert.ok(board.review_queue.some((item) => item.track_id === "active_20260617"));
+    assert.ok(board.blockers.some((item) => item.track_id === "blocked_20260617"));
+    assert.equal(typeof board.beads.available, "boolean");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

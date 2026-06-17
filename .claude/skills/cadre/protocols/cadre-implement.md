@@ -422,17 +422,19 @@ Implement the requested track from the workflow arguments.
                back into the track branch (references/parallel-execution.md §6).
                Closing here would auto-advance your dependents BEFORE merge-back, so a
                merge-back conflict could not hold them — defeating the dependency gate.
-            7. Update parallel_state.json: set your worker entry status='awaiting_merge',
-               commit_sha=<sha> (audit log only — do NOT run bd dolt push). The
-               coordinator transitions it to 'merged' (clean) or 'conflict' at
-               merge-back.
+            7. Return a structured evidence summary to the coordinator:
+               worker_id, phaseIndex, taskIndex, beads_task_id, commit_sha,
+               tests_run, coverage value/source, files_changed, and notes.
+               Do NOT edit `parallel_state.json`; the coordinator records your
+               evidence through MCP `cadre_record_parallel_worker`.
 
             ## Success Criteria
             - All tests pass, coverage >80%
             - Commit created with proper message
             - Structured completion note added (`bd note`); task left OPEN for the
               coordinator to close at clean merge-back
-            - parallel_state.json updated to status='awaiting_merge' (audit log)
+            - Structured evidence returned to the coordinator; no Cadre state file
+              edited directly by the worker
         ```
 
       After the coordinator mechanics in `references/parallel-execution.md` finish
@@ -451,8 +453,12 @@ Implement the requested track from the workflow arguments.
         closes it. Surface any retained `conflict` workers to the user before
         continuing.
       - Only when **no** worker is left in `conflict`:
-        - Update `plan.md`: mark all merged parallel tasks `[x]`, append commit SHAs
-          (a `conflict` task stays unmarked until its worktree is resolved + merged)
+        - For each cleanly merged worker, call MCP
+          `cadre_record_parallel_worker` with `status: "merged"` and
+          `completeTask: true`. That invokes `cadre_complete_task` after merge-back
+          so coverage, plan row, metadata, Beads note/close, and audit state are
+          recorded together. A `conflict` task stays unmarked until its worktree is
+          resolved + merged.
         - Delete `parallel_state.json`
         - Check phase graph: are there other ready phases to process?
           - If yes: Go back to step 5a2 to process next ready phase(s)
@@ -466,8 +472,8 @@ Implement the requested track from the workflow arguments.
 
       **d2. Iterate Through Tasks:** Loop through each task from the
       `cadre_track_context.plan` / `cadre_parse_plan` result one by one. Use MCP
-      `cadre_record_task_result` for marker/SHA/coverage writes instead of
-      hand-editing the task line.
+      `cadre_complete_task` for normal completion so coverage, marker/SHA,
+      metadata, and Beads writes succeed or fail together.
 
       **d3. For Each Task:**
           - **i-0. Resolve Task Repo & Working Root (POLYREPO ONLY):** Read the
@@ -491,30 +497,27 @@ Implement the requested track from the workflow arguments.
                  literal "cadre")
                - **If `bd` command fails:**
                  Follow `references/beads-error-handler.md`: retry once or halt.
-           - **i-b. Task Complete (MCP first, Beads mirrored):** After the code is
-             committed and verification passes, call `cadre_record_task_result`
-             with `root`, `trackId`, `phaseIndex`, `taskIndex`, `status:
-             "completed"`, the commit SHA, and measured coverage when available.
-             The returned `task_key` and `beads_task_id` identify the Beads task to
-             close and the plan row already updated by MCP.
-           - **i-c. Beads Task Complete (If Enabled):**
-             - **ONLY if `beads_enabled` is true:**
-               - Use the `beads_task_id` returned by `cadre_record_task_result`
-                 (fallback to the `beads_tasks` map from `cadre_track_context`).
-               - If found:
-                 - Add structured completion notes with MCP
-                   `cadre_beads_write` (`operation: "note"`, `id:
-                   <beads_task_id>`, `note: "COMPLETED: ..."`).
-                 - Close with auto-advance using MCP `cadre_beads_write`
-                   (`operation: "close"`, `id: <beads_task_id>`, `continue:
-                   true`, `reason: "Task completed"`).
-                   (The `--continue` flag auto-advances to next step if available)
-                 - If discovered work during implementation:
-                   call MCP `cadre_beads_write` with `operation: "create"`,
-                   `type: "bug"`, `priority: "2"`, and `deps:
-                   "discovered-from:<current_task_id>"`.
-               - **If `bd` command fails:**
-                 Follow `references/beads-error-handler.md`: retry once or halt.
+           - **i-b. Task Complete (single MCP transaction):** After the code is
+             committed, call MCP `cadre_complete_task` with `root`, `trackId`,
+             `phaseIndex`, `taskIndex`, the commit SHA, and an explicit coverage
+             command only when the project config/package scripts do not declare
+             one. This tool runs the configured tests/coverage first, enforces the
+             threshold from `workflow.md` / `cadre/config.json`, and only then marks
+             the plan task `[x]`, records `metadata.last_test_run` /
+             `metadata.last_coverage`, appends the commit SHA, writes the Beads
+             completion note, and closes the Beads task with `--continue`.
+             - If `cadre_complete_task` returns `ok: false`, the plan row was not
+               marked complete. Fix the failing tests/coverage gap, configure the
+               coverage command, or obtain an explicit override and retry with the
+               corresponding `allowMissingCoverage` / `allowLowCoverage` flag plus a
+               note in `learnings.md`.
+             - Do not call `cadre_record_task_result` directly for normal task
+               completion; reserve it for repair/import cases where coverage has
+               already been independently recorded.
+           - **i-c. Discovered Work (If Needed):** If implementation reveals a
+             separate bug or follow-up, call MCP `cadre_beads_write` with
+             `operation: "create"`, `type: "bug"`, `priority: "2"`, and `deps:
+             "discovered-from:<current_task_id>"`.
       - **ii. Update Implementation State:** After marking task in progress:
         - Set `current_phase` to current phase name
         - Set `current_phase_index` to current phase number (zero-based)
@@ -556,20 +559,10 @@ Implement the requested track from the workflow arguments.
 
       **d5. Self-Check & Issue Handling:**
       - After implementation, run tests, linting, type checks.
-      - **Machine-verified coverage gate (do not self-assert):** the TDD bar in
-        `workflow.md` (default >80%) must be **measured**, not claimed. Run the
-        project's coverage tool through MCP `cadre_test_coverage` (pass `root`,
-        `trackId`, `phaseIndex`, and `taskIndex`; pass an explicit `command`
-        only when `cadre/config.json` / package scripts do not declare one), and:
-        - If it is **below** the `workflow.md` threshold → treat as an issue: do not
-          mark the task `[x]`; either add the missing tests (preferred) or, if the
-          gap is intentional, require an explicit user override and note it.
-        - Record the **measured number** through `cadre_test_coverage`; it writes
-          `metadata.last_test_run` and `metadata.last_coverage` so `cadre-review`
-          can copy it into `review.coverage`. "Tests pass, coverage >80%" must be
-          a recorded measurement, never free prose.
-        - If no coverage tool is configured in `workflow.md`, say so explicitly
-          (don't silently treat the bar as met) and proceed only with user awareness.
+      - **Machine-verified coverage gate (do not self-assert):** normal task
+        completion must go through `cadre_complete_task`; do not mark `[x]` first
+        and measure later. Use standalone `cadre_test_coverage` only for diagnostic
+        or preflight runs where no plan/Beads mutation should happen.
       - If issues found, analyze the root cause:
       
       **Issue Analysis Decision Tree:**

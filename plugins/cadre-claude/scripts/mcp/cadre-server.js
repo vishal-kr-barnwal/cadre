@@ -72,6 +72,19 @@ const TOOLS = [
     },
   },
   {
+    name: "cadre_team_board",
+    description: "Return a richer low-token team board: WIP, handoffs, review queue, blockers, and optional Beads label evidence.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        mine: { type: "boolean" },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cadre_live_status",
     description: "Return a compact live-status summary for the default status view.",
     inputSchema: {
@@ -190,6 +203,62 @@ const TOOLS = [
         coverage: { type: "number" },
       },
       required: ["root", "trackId", "phaseIndex", "taskIndex"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_complete_task",
+    description: "Run the configured coverage/test command, enforce the threshold, then atomically record the plan task, metadata, and Beads completion.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        phaseIndex: { type: "number" },
+        taskIndex: { type: "number" },
+        commitSha: { type: "string" },
+        command: { type: "string" },
+        timeoutMs: { type: "number" },
+        coverageThreshold: { type: "number" },
+        allowMissingCoverage: { type: "boolean" },
+        allowLowCoverage: { type: "boolean" },
+        summary: { type: "string" },
+        reason: { type: "string" },
+        beadsTaskId: { type: "string" },
+      },
+      required: ["root", "trackId", "phaseIndex", "taskIndex"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cadre_record_parallel_worker",
+    description: "Coordinator-owned parallel worker audit update; optionally completes the plan task after a clean merge using cadre_complete_task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        trackId: { type: "string" },
+        workerId: { type: "string" },
+        status: { type: "string", enum: ["in_progress", "awaiting_merge", "merged", "conflict", "failed"] },
+        phaseIndex: { type: "number" },
+        taskIndex: { type: "number" },
+        beadsTaskId: { type: "string" },
+        repo: { type: "string" },
+        worktree: { type: "string" },
+        branch: { type: "string" },
+        commitSha: { type: "string" },
+        coverage: { type: "number" },
+        evidence: { type: "object" },
+        completeTask: { type: "boolean" },
+        command: { type: "string" },
+        timeoutMs: { type: "number" },
+        coverageThreshold: { type: "number" },
+        allowMissingCoverage: { type: "boolean" },
+        allowLowCoverage: { type: "boolean" },
+        summary: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["root", "trackId", "workerId", "status"],
       additionalProperties: false,
     },
   },
@@ -646,6 +715,8 @@ async function toolCall(name, args) {
     }
     case "cadre_team_status":
       return asTextJson(core.teamStatus(root));
+    case "cadre_team_board":
+      return asTextJson(core.teamBoard(root, args));
     case "cadre_live_status":
       return asTextJson(core.liveStatus(root));
     case "cadre_available_work":
@@ -664,6 +735,10 @@ async function toolCall(name, args) {
       return asTextJson(core.claimTrack(root, args.trackId, args));
     case "cadre_record_task_result":
       return asTextJson(core.recordTaskResult(root, args));
+    case "cadre_complete_task":
+      return asTextJson(core.completeTask(root, args));
+    case "cadre_record_parallel_worker":
+      return asTextJson(core.recordParallelWorker(root, args));
     case "cadre_create_beads_tree":
       return asTextJson(core.createBeadsTree(root, args));
     case "cadre_record_review":
@@ -711,6 +786,12 @@ function resourceList() {
         mimeType: "application/json",
       },
       {
+        uri: "cadre://team-board",
+        name: "Cadre team board",
+        description: "Rich team board with WIP, handoffs, review queue, blockers, and Beads evidence. Read with ?root=/path/to/project.",
+        mimeType: "application/json",
+      },
+      {
         uri: "cadre://collisions",
         name: "Cadre file collisions",
         description: "Cross-track file claim collisions. Read with ?root=/path/to/project.",
@@ -741,7 +822,7 @@ function resourceList() {
 function parseResourceUri(uri) {
   const [base, query = ""] = uri.split("?");
   const params = new URLSearchParams(query);
-  return { base, root: params.get("root"), trackId: params.get("trackId"), symbol: params.get("symbol") };
+  return { base, root: params.get("root"), trackId: params.get("trackId"), symbol: params.get("symbol"), mine: params.get("mine") };
 }
 
 function resourceRead(uri) {
@@ -750,6 +831,7 @@ function resourceRead(uri) {
   let value;
   if (resource.base === "cadre://tracks") value = core.listTracks(root).map((track) => track.metadata);
   else if (resource.base === "cadre://team-status") value = core.teamStatus(root);
+  else if (resource.base === "cadre://team-board") value = core.teamBoard(root, { mine: resource.mine === "true" });
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://plan-integrity") value = core.planIntegrity(root, resource.trackId || null);
   else if (resource.base === "cadre://track-context") value = core.trackContext(root, resource.trackId);

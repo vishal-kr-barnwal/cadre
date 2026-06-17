@@ -274,6 +274,7 @@ class LspClient {
     this.pending = new Map();
     this.buffer = Buffer.alloc(0);
     this.opened = new Map();
+    this.publishedDiagnostics = new Map();
   }
 
   start() {
@@ -337,6 +338,8 @@ class LspClient {
         clearTimeout(pending.timer);
         if (message.error) pending.reject(new Error(message.error.message));
         else pending.resolve(message.result);
+      } else if (message.method === "textDocument/publishDiagnostics" && message.params && message.params.uri) {
+        this.publishedDiagnostics.set(message.params.uri, message.params.diagnostics || []);
       }
     }
   }
@@ -420,6 +423,31 @@ class LspClient {
       position,
       context: { includeDeclaration: false },
     });
+  }
+
+  async definition(file, position) {
+    return this.request("textDocument/definition", {
+      textDocument: { uri: pathToFileURL(path.join(this.root, file)).href },
+      position,
+    });
+  }
+
+  async typeDefinition(file, position) {
+    return this.request("textDocument/typeDefinition", {
+      textDocument: { uri: pathToFileURL(path.join(this.root, file)).href },
+      position,
+    });
+  }
+
+  async implementation(file, position) {
+    return this.request("textDocument/implementation", {
+      textDocument: { uri: pathToFileURL(path.join(this.root, file)).href },
+      position,
+    });
+  }
+
+  diagnostics(file) {
+    return this.publishedDiagnostics.get(pathToFileURL(path.join(this.root, file)).href) || [];
   }
 
   async shutdown() {
@@ -570,6 +598,83 @@ function lspRefToLocation(root, ref) {
   }
 }
 
+function locationsFromResult(root, value) {
+  const items = Array.isArray(value) ? value : (value ? [value] : []);
+  return items
+    .map((item) => {
+      const ref = item.targetUri
+        ? { uri: item.targetUri, range: item.targetSelectionRange || item.targetRange }
+        : item;
+      return lspRefToLocation(root, ref);
+    })
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+async function optionalLocations(client, kind, file, position, root) {
+  try {
+    if (kind === "definition") return locationsFromResult(root, await client.definition(file, position));
+    if (kind === "typeDefinition") return locationsFromResult(root, await client.typeDefinition(file, position));
+    if (kind === "implementation") return locationsFromResult(root, await client.implementation(file, position));
+  } catch (_) {
+    return [];
+  }
+  return [];
+}
+
+function diagnosticFinding(server, file, diagnostic) {
+  const severity = diagnostic.severity === 1 ? "blocking" : "warning";
+  return {
+    severity,
+    type: "diagnostic",
+    code: diagnostic.code || "lsp_diagnostic",
+    server: server.id || server.command,
+    file,
+    line: diagnostic.range && diagnostic.range.start ? diagnostic.range.start.line + 1 : null,
+    message: diagnostic.message || "LSP diagnostic",
+  };
+}
+
+function nearbyFileHints(root, files) {
+  const manifests = new Set();
+  const tests = new Set();
+  const manifestNames = new Set([
+    "package.json",
+    "pyproject.toml",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+  ]);
+  for (const file of files || []) {
+    let dir = path.dirname(path.join(root, file));
+    while (dir.startsWith(root)) {
+      for (const name of manifestNames) {
+        const candidate = path.join(dir, name);
+        if (fs.existsSync(candidate)) manifests.add(normalizeRel(path.relative(root, candidate)));
+      }
+      if (dir === root) break;
+      dir = path.dirname(dir);
+    }
+    const parsed = path.parse(file);
+    const candidates = [
+      path.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+      path.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+      path.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+      path.join("test", file),
+      path.join("tests", file),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(path.join(root, candidate))) tests.add(normalizeRel(candidate));
+    }
+  }
+  return {
+    package_manifests: Array.from(manifests).slice(0, 20),
+    likely_tests: Array.from(tests).slice(0, 30),
+  };
+}
+
 async function runReview(options = {}) {
   const args = {
     base: options.base || "main",
@@ -681,6 +786,24 @@ async function runReview(options = {}) {
           .map((entry) => entry.path)
       ));
       for (const file of openFiles) client.open(file);
+      await new Promise((resolve) => setTimeout(resolve, positiveInt(server.diagnosticsDelayMs, 250)));
+      serverReport.diagnostics = [];
+      serverReport.symbolEvidence = [];
+      for (const file of openFiles) {
+        for (const diagnostic of client.diagnostics(file)) {
+          const item = {
+            file,
+            line: diagnostic.range && diagnostic.range.start ? diagnostic.range.start.line + 1 : null,
+            severity: diagnostic.severity || null,
+            code: diagnostic.code || null,
+            message: diagnostic.message || "",
+          };
+          serverReport.diagnostics.push(item);
+          if (diagnostic.severity === 1 || diagnostic.severity === 2) {
+            findings.push(diagnosticFinding(server, file, diagnostic));
+          }
+        }
+      }
 
       for (const file of openFiles) {
         const candidates = Array.from(allCandidates.values())
@@ -697,6 +820,16 @@ async function runReview(options = {}) {
             continue;
           }
           const refs = (await client.references(file, symbol.selectionRange.start)) || [];
+          const definitions = await optionalLocations(client, "definition", file, symbol.selectionRange.start, root);
+          const typeDefinitions = await optionalLocations(client, "typeDefinition", file, symbol.selectionRange.start, root);
+          const implementations = await optionalLocations(client, "implementation", file, symbol.selectionRange.start, root);
+          serverReport.symbolEvidence.push({
+            symbol: candidate.name,
+            file,
+            definitions,
+            typeDefinitions,
+            implementations,
+          });
           const externalRefs = refs
             .map((ref) => lspRefToLocation(root, ref))
             .filter(Boolean)
@@ -739,6 +872,7 @@ async function runReview(options = {}) {
     config: args.config,
     changedFiles: files,
     changedEntries: entries,
+    fileHints: nearbyFileHints(root, files),
     servers: serverReports,
     findings,
   };

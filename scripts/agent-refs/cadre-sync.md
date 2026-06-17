@@ -71,12 +71,20 @@ postamble push after mutation.
      not `jq '{…whole object…}'`. Sibling workflows (review, implement, ship) may
      write different keys of the same file concurrently; a full rewrite clobbers
      a teammate's just-written key, a scoped assignment preserves it.
-2. Make the Beads Dolt push **mandatory** (not optional) in shared mode — Dolt is
+2. **Safety-classify the push surface.** Before any postamble push, Cadre MCP
+   checks the dirty worktree and the unpushed commit range against the configured
+   `control_remote`/`control_branch`. Only control-plane paths may be dirty or
+   ahead: `cadre/`, `.beads/`, `.gitattributes`, `.gitmodules`, and Cadre merge
+   train CI files. If non-control-plane files are dirty or included in unpushed
+   commits, `cadre_sync_control_plane` refuses the push and reports the offending
+   files. This matters especially in shared monorepos, where product code and
+   control-plane state share one Git repository.
+3. Make the Beads Dolt push **mandatory** (not optional) in shared mode — Dolt is
    the canonical shared task graph; tracks.md / state JSON are its human-readable
    mirror. Run the `bd dolt push` that `beads.json` `pushOn*` triggers would fire,
    even if that trigger is set to optional.
-3. `git push <control_remote> <control_branch>` to publish the control plane.
-4. On push rejection (someone else pushed): re-run the preamble (pull --rebase +
+4. `git push <control_remote> <control_branch>` to publish the control plane.
+5. On push rejection (someone else pushed): re-run the preamble (pull --rebase +
    dolt pull), resolve per the rules above, then push again — but **bounded**: retry
    at most **5 times** with a short backoff between attempts (e.g. 1s, 2s, 4s…). If
    still rejected after 5 attempts, **stop and surface to the user** rather than
@@ -84,7 +92,7 @@ postamble push after mutation.
    (e.g. `patterns.md`), **recompute** your edit against the freshly-pulled file on
    each retry — re-run the dedup-before-append against the new base — instead of
    replaying the prior textual hunk, which would re-conflict on every iteration.
-5. **On rejection due to a duplicate `track_id`** (a `git push` non-fast-forward
+6. **On rejection due to a duplicate `track_id`** (a `git push` non-fast-forward
    or `bd dolt push` rejection where the conflicting object is a track another
    teammate created with the *same* `shortname_YYYYMMDD` ID): a sibling claimed
    the ID first. Do **not** force-push or overwrite theirs. Instead, re-suffix
