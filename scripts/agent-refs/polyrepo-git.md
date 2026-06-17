@@ -1,10 +1,10 @@
 # Polyrepo Git & Worktree Mechanics
 
 Cadre supports two topologies. **Everything in this file is conditional on
-the project being in polyrepo mode** — in monorepo mode every command behaves
+the project being in polyrepo mode** — in monorepo mode every workflow behaves
 exactly as it always has, and you can ignore this file.
 
-## Topology check (run first, on every git-touching command)
+## Topology check (run first, on every git-touching workflow)
 
 1. Read `cadre/repos.json`.
    - **Absent, or `"mode"` ≠ `"polyrepo"`** → **monorepo mode.** The repo root is
@@ -57,7 +57,7 @@ order in which the track's repos should land:
 - **Semantics:** product-repos-first, **control-repo-last** is the intended
   default — land the code repos in this order, then the control repo. Each entry
   is a `repos[].name`.
-- **Source:** `/cadre-newtrack` parses a `<!-- repo-order: api > web -->`
+- **Source:** `cadre-newtrack` parses a `<!-- repo-order: api > web -->`
   hint from `plan.md` into this array (left-to-right, `>`-separated).
 - **Array only — no topo-sort, no cycle detection.** It is a plain ordered list,
   not a dependency graph. Trust the author's order verbatim.
@@ -104,7 +104,7 @@ in your environment, operate directly on the submodule checkout with a per-repo
 - **Branch:** every touched repo uses the same name `track/<id>` on its own
   history. Branches are independent across repos.
 - **Code is NEVER pushed by implement.** All product-repo commits stay local
-  until `/cadre-land` (or archive's safety-net push) sends branch heads up
+  until `cadre-land` (or archive's safety-net push) sends branch heads up
   for PRs. Only the control plane (`cadre/` + `.beads/`) is pushed earlier,
   and only in shared sync mode.
 - **Revert (per-repo chains):** group recorded SHAs by repo. Within each repo run
@@ -115,8 +115,8 @@ in your environment, operate directly on the submodule checkout with a per-repo
 ## Polyrepo preflight asserts
 
 A reusable set of per-repo sanity checks to run **before** opening cross-repo
-PRs or validating a polyrepo track. `/cadre-land` Step 1b and
-`/cadre-validate` both reference this section — run the same asserts so
+PRs or validating a polyrepo track. `cadre-land` Step 1b and
+`cadre-validate` both reference this section — run the same asserts so
 `land` never opens a PR on a state `validate` would have flagged. For each repo
 in the track (resolve via `metadata.json.repos`), assert:
 

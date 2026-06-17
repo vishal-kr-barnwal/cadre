@@ -1,0 +1,59 @@
+# Beads Error Handler Protocol
+
+Shared error handling for all Cadre workflows that use `bd` CLI commands.
+
+## Standard Error Response
+
+Beads is a Cadre prerequisite after `cadre-setup`. A missing or failing `bd`
+command means the Cadre environment is broken, not a normal file-only mode.
+
+When any `bd` command fails, present this to the user:
+
+> "⚠️ Beads command failed: `<error message>`"
+> A) Retry command once
+> B) Stop — I'll fix the issue first
+
+**If A selected:**
+- Retry the exact failed command once
+- If it succeeds: resume normal flow
+- If it fails again: HALT and announce the failed command and error
+
+**If B selected:**
+- HALT immediately
+- Announce the failed command and error so user can fix
+- Wait for user instructions before proceeding
+
+## No File-Only Degraded Mode
+
+Do not silently continue without Beads. The durable task graph, ownership CAS,
+handoff routing, review labels, and compaction survival all depend on Beads. If a
+workflow reaches this handler, either retry once or halt for repair.
+
+## Usage in Workflows
+
+Every Cadre workflow that calls `bd` should reference this protocol instead of inlining the A/B/C options. Example:
+
+```markdown
+Run: bd update <task_id> --status in_progress --json
+→ If this fails: Follow Beads Error Handler Protocol
+  (see references/beads-error-handler.md)
+```
+
+## Availability Check (Run First)
+
+Before any `bd` command in any Cadre flow:
+
+```bash
+BEADS_AVAILABLE=false
+if which bd > /dev/null 2>&1; then
+  if [ -f cadre/beads.json ]; then
+    if grep -q '"enabled"[[:space:]]*:[[:space:]]*true' cadre/beads.json 2>/dev/null; then
+      BEADS_AVAILABLE=true
+    fi
+  fi
+fi
+```
+
+If `BEADS_AVAILABLE=false`: HALT and tell the user to restore the Beads
+prerequisite (`bd` on PATH and `cadre/beads.json` present/enabled). Do not skip
+`bd` commands silently.

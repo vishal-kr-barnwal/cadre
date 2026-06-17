@@ -1,0 +1,25 @@
+{
+  "name": "cadre",
+  "owner": {
+    "name": "Vishal Barnwal"
+  },
+  "description": "Cadre skill-first workflows for Claude Code.",
+  "plugins": [
+    {
+      "name": "cadre",
+      "source": "./plugins/cadre-claude",
+      "description": "Skill-first Cadre workflows with bundled MCP tooling for context-driven development.",
+      "version": "2.0.0",
+      "author": {
+        "name": "Vishal Barnwal"
+      },
+      "category": "productivity",
+      "tags": [
+        "cadre",
+        "skills",
+        "mcp",
+        "context-driven-development"
+      ]
+    }
+  ]
+}

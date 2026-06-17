@@ -87,6 +87,9 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 - If NO `<!-- depends: -->` annotation: Phase depends on ALL previous phases (sequential, default behavior)
 - If `<!-- depends: -->` is empty: Phase has NO dependencies (can run parallel with any phase)
 - If `<!-- depends: phase1, phase2 -->`: Phase waits for listed phases only
+- Runtime scheduling is not inferred ad hoc by the agent. `cadre-implement` calls
+  MCP `cadre_phase_schedule`, then dispatches only the returned
+  conflict-free `ready_groups[]`.
 
 #### Task-Level Annotations
 
@@ -126,8 +129,8 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
             └─────────────────┼─────────────────┘
                               ▼
                     ┌─────────────────┐
-                    │  State Store    │
-                    │  (JSON files)   │
+                    │ Coordinator MCP │
+                    │ + Beads Graph   │
                     └─────────────────┘
 ```
 
@@ -145,7 +148,7 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
       "worker_id": "worker_1_auth",
       "task": "Task 1: Create auth module",
       "files": ["src/auth.ts", "src/auth.test.ts"],
-      "status": "completed",
+      "status": "merged",
       "started_at": "2024-12-30T10:00:00Z",
       "completed_at": "2024-12-30T10:05:00Z",
       "commit_sha": "abc1234"
@@ -158,10 +161,6 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
       "started_at": "2024-12-30T10:00:00Z"
     }
   ],
-  "file_locks": {
-    "src/auth.ts": "worker_1_auth",
-    "src/config.ts": "worker_2_config"
-  },
   "completed_workers": 1,
   "total_workers": 3
 }
@@ -177,18 +176,14 @@ Prevent multiple workers from modifying the same file simultaneously.
 ### Implementation
 
 1. **Pre-spawn validation**: Before spawning workers, validate no file conflicts
-2. **Lock acquisition**: Record file locks in `parallel_state.json`
-3. **Lock release**: Remove lock when worker completes
-4. **Conflict detection**: If conflicts found, fall back to sequential execution
+2. **Coordinator audit**: Record worker/file ownership through
+   `cadre_record_parallel_worker`; `parallel_state.json` is audit-only
+3. **Dependency coordination**: Beads dependencies and assignees determine which
+   workers can start and which dependents are unblocked
+4. **Conflict detection**: If plan-level conflicts are found, fall back to
+   sequential execution or revise the plan before spawning workers
 
 ```typescript
-interface FileLock {
-  path: string;
-  worker_id: string;
-  acquired_at: string;
-  ttl_seconds: number;  // Auto-release after timeout (default: 3600)
-}
-
 function detectConflicts(tasks: ParallelTask[]): Conflict[] {
   const fileMap = new Map<string, string[]>();
   for (const task of tasks) {
@@ -208,13 +203,13 @@ function detectConflicts(tasks: ParallelTask[]): Conflict[] {
 ## Worker Spawning
 
 The worker prompt below is platform-agnostic; only the **dispatch mechanism**
-differs per tool. See [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
-(bundled with every command set) for the full table:
+differs per tool. See [`parallel-execution.md`](../plugins/cadre-claude/skills/cadre/references/parallel-execution.md)
+(bundled with every plugin skill) for the full table:
 
 | Platform | Dispatch |
 |----------|----------|
 | **Claude Code** | `Task` tool, one call per worker (awaitable) |
-| **OpenAI Codex CLI** | spawn parallel agents with the `worker` agent type; manage via `/agent` |
+| **OpenAI Codex** | use multi-agent tools to spawn one `worker` sub-agent per task and wait for the wave |
 | **No parallel primitive** | sequential fallback — one agent runs each task in its worktree |
 
 ### Example: Claude Code's Task() Tool
@@ -236,8 +231,8 @@ Task({
     ## Instructions
     1. Follow workflow.md for TDD implementation
     2. Only modify files in your owned list
-    3. On completion, update parallel_state.json with your status
-    4. Commit with message: "feat(${scope}): ${description}"
+    3. Commit with message: "feat(${scope}): ${description}"
+    4. Return commit/test/coverage evidence to the coordinator
     5. NEVER run git push - all commits stay local
     
     ## Spec Context
@@ -253,24 +248,20 @@ Task({
 
 ### Worker Completion Protocol
 
-Each worker updates state on completion:
-
-```bash
-# Worker reads current state
-state=$(cat cadre/tracks/<track_id>/parallel_state.json)
-
-# Worker updates its own status
-jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" | .commit_sha = "abc1234" else . end)' \
-  cadre/tracks/<track_id>/parallel_state.json > tmp.json && mv tmp.json cadre/tracks/<track_id>/parallel_state.json
-```
+Workers do not edit Cadre state directly. Each worker returns a structured
+evidence packet to the coordinator: worker id, task key, commit SHA, tests run,
+coverage value/source, files changed, and notes. The coordinator records that
+packet through MCP `cadre_record_parallel_worker`. After a clean merge-back, the
+coordinator calls the same tool with `status: "merged"` and `completeTask: true`
+so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
 
 ---
 
 ## Cadre-Implement Changes
 
 > The coordinator mechanics below now live in the sliced reference
-> [`parallel-execution.md`](../.claude/skills/cadre/references/parallel-execution.md)
-> (bundled with every command set), not inline in `cadre-implement.md`. The
+> [`parallel-execution.md`](../plugins/cadre-claude/skills/cadre/references/parallel-execution.md)
+> (bundled with every plugin skill), not inline in `cadre-implement.md`. The
 > per-worker prompt stays inline in `cadre-implement.md`. This section
 > documents the design.
 
@@ -313,7 +304,8 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
         - Workers run concurrently
    
    f. **Monitor Completion:**
-      - Poll `parallel_state.json` for worker status changes
+      - Wait for worker results and let the coordinator record status through
+        MCP `cadre_record_parallel_worker`
       - When a worker completes:
         - Check if dependent tasks can now start
         - Spawn newly unblocked tasks
@@ -321,13 +313,14 @@ jq '.workers |= map(if .worker_id == "worker_1_auth" then .status = "completed" 
    g. **Aggregate Results:**
       - Wait for all workers to complete
       - Collect commit SHAs from all workers
-      - Update plan.md with all task completions
+      - Call `cadre_record_parallel_worker` with `completeTask: true` after each
+        clean merge to update plan.md and Beads
       - Proceed to phase checkpoint
 
 3. **Beads Integration (if enabled):**
-   - Parallel tasks can update Beads concurrently
-   - Use `bd update <id> --status in_progress` at worker start
-   - Use `bd close <id>` at worker completion
+   - The coordinator updates Beads task status through Cadre MCP/`bd`
+   - Workers return commit/test/coverage evidence, not direct completion writes
+   - Dependents unblock only after clean merge-back and `cadre_complete_task`
 ```
 
 ---
@@ -402,26 +395,25 @@ COMMITS: <sha_list>" --json
 
 ### Worker Protocol
 
-```bash
-# At worker start (claimed by coordinator already)
-bd note <beads_task_id> "WORKER: <worker_id>
-TASK: <task_description>
-FILES: <exclusive_files>
-STARTED: <timestamp>" --json
+Workers return evidence to the coordinator instead of directly mutating Cadre or
+Beads completion state:
 
-# During execution - discovered issues
-bd create "Found race condition" \
-  -t bug -p 2 \
-  --deps discovered-from:<beads_task_id> \
-  --assignee <worker_id> \
-  --json
-
-# At worker completion
-bd note <beads_task_id> "COMPLETED: commit <sha>
-DURATION: <time>
-FILES_MODIFIED: <list>" --json
-bd close <beads_task_id> --reason "Task completed" --json
+```json
+{
+  "worker_id": "worker_1_auth",
+  "task_key": "task-1",
+  "commit_sha": "abc1234",
+  "tests": ["npm test -- auth"],
+  "coverage": 84.2,
+  "files_changed": ["src/auth.ts", "src/auth.test.ts"],
+  "notes": ["Found and fixed token expiry edge case"]
+}
 ```
+
+The coordinator records start/progress/failure through
+`cadre_record_parallel_worker`. After a clean merge-back, it calls the same MCP
+tool with `status: "merged"` and `completeTask: true`; discovered issues become
+coordinator-owned Beads notes or follow-up tasks.
 
 ### Concurrent Safety Guarantees
 
@@ -456,7 +448,7 @@ bd update <beads_task_id> --status open \
    - Offer to retry or skip
 
 2. **Worker Error:** If worker reports error
-   - Log error in parallel_state.json
+   - Record the failure through `cadre_record_parallel_worker`
    - Block dependent tasks
    - Ask user for resolution
 
@@ -565,11 +557,11 @@ Dolt graph still coordinates all workers regardless of repo.
 
 ---
 
-## Commands Reference
+## Workflow Reference
 
-| Command | Description |
+| Workflow | Description |
 |---------|-------------|
-| `/cadre-implement` | Now supports parallel phases (repo-scoped in polyrepo) |
-| `/cadre-newtrack` | Asks about parallel execution |
-| `/cadre-status` | Shows parallel worker status |
-| `/cadre-validate` | Validates parallel annotations |
+| `cadre-implement` | Now supports parallel phases (repo-scoped in polyrepo) |
+| `cadre-newtrack` | Asks about parallel execution |
+| `cadre-status` | Shows parallel worker status |
+| `cadre-validate` | Validates parallel annotations |

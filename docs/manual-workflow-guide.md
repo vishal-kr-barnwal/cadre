@@ -1,6 +1,9 @@
-# Manual Workflow Guide
+# Workflow Protocol Guide
 
-This guide explains how to work with Cadre commands manually without relying on skills or auto-activation. Use this when you need precise control over the workflow or when skills don't behave as expected.
+This guide explains how to drive Cadre through the `$cadre` skill while keeping
+precise control over the underlying workflow protocol. Use it when you want the
+step-by-step behavior for a workflow such as `cadre-setup`,
+`cadre-newtrack`, or `cadre-implement`.
 
 ## Workflow Overview
 
@@ -66,12 +69,12 @@ flowchart TD
 
 ### Quick Reference
 
-| Workflow | Commands |
+| Workflow | Sequence |
 |----------|----------|
 | **Standard** | `setup` → `bd init` → `newtrack` → `implement` → `review` → `ship` (or `land`) → `archive` → `release` |
 | **Multi-Section** | `implement` → `handoff` → *(new session)* → `implement` |
 | **Parallel Tasks** | `newtrack` (enable parallel) → `implement` (spawns workers) |
-| **Session Resume** | `bd ready` → `bd show --notes` → `implement` |
+| **Session Resume** | `bd ready` → `bd show --long` → `implement` |
 | **Blocked Task** | `flag blocked` → `flag skipped` or wait → continue |
 | **Plan Changes** | `revise` → continue `implement` |
 | **Undo Work** | `revert` (track / phase / task) |
@@ -80,22 +83,19 @@ flowchart TD
 | **Templates** | `formula list` → `formula wisp` or `bd mol pour` |
 | **Create Template** | complete track → `formula create` → `formula show` |
 
-## Why Manual Mode?
+## Why Use This Guide?
 
-Skills are convenient but can sometimes:
-- Skip steps or misinterpret context
-- Not follow the exact workflow sequence
-- Miss state file updates
-
-Manual command invocation gives you **full control** over each step.
+Skill-routed workflows keep Claude and Codex on the same protocol source while
+still letting you inspect each step, state file, and verification point.
 
 ## Prerequisites
 
-Before using any command, ensure:
+Before using any Cadre workflow, ensure:
 1. Git is installed and initialized in your project
 2. You have write access to the project directory
 3. For implementation: `cadre/` directory exists with required files
-4. Beads CLI (`bd`) installed for persistent memory (Cadre will attempt Beads integration; if unavailable, you can choose to continue without it)
+4. Beads CLI (`bd`) installed for persistent memory. Cadre requires Beads during
+   setup and halts if it is unavailable.
 
 ### Installing Beads
 
@@ -115,9 +115,9 @@ bd --version
 
 ---
 
-## Command Workflows
+## Cadre Workflows
 
-### 1. `/cadre-setup`
+### 1. `cadre-setup`
 
 **Purpose**: Initialize a new project with Cadre methodology.
 
@@ -126,8 +126,8 @@ bd --version
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-setup
+Step 1: Ask the Cadre skill for the workflow
+   cadre-setup
 
 Step 2: Answer project type questions
    - Brownfield (existing code) vs Greenfield (new project)
@@ -141,9 +141,9 @@ Step 3: Complete each section (max 5 questions each)
    e) Workflow → creates workflow.md
 
 Step 4: Beads Integration (if bd CLI detected)
-   - Choose: Full integration, Stealth mode, or Skip
+   - Full Beads integration is enabled by default
    - Creates cadre/beads.json if enabled
-   - Runs bd init or bd init --stealth
+   - Runs bd init --non-interactive --role maintainer
 
 Step 5: Create initial track
    - Approve track proposal
@@ -189,7 +189,7 @@ setup sets `mode`)
 
 ---
 
-### 2. `/cadre-newtrack`
+### 2. `cadre-newtrack`
 
 **Purpose**: Create a new feature or bug fix track.
 
@@ -198,10 +198,10 @@ setup sets `mode`)
 **Manual workflow**:
 
 ```
-Step 1: Run the command (optionally with description)
-   /cadre-newtrack "Add user authentication"
+Step 1: Ask the Cadre skill for the workflow (optionally with a description)
+   cadre-newtrack "Add user authentication"
    # or without description for interactive mode
-   /cadre-newtrack
+   cadre-newtrack
 
 Step 2: Define track details
    - Type: feature, bug, or improvement
@@ -238,7 +238,7 @@ cadre/tracks/<shortname_YYYYMMDD>/
 
 ---
 
-### 3. `/cadre-implement`
+### 3. `cadre-implement`
 
 **Purpose**: Execute tasks from a track's plan.
 
@@ -247,10 +247,10 @@ cadre/tracks/<shortname_YYYYMMDD>/
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-implement
+Step 1: Ask the Cadre skill for the workflow
+   cadre-implement
    # or specify track
-   /cadre-implement auth_20241219
+   cadre-implement auth_20241219
 
 Step 2: Track selection (if not specified)
    - First non-completed track is auto-selected
@@ -315,7 +315,7 @@ Step 8: Track completion
 
 ---
 
-### 4. `/cadre-status`
+### 4. `cadre-status`
 
 **Purpose**: Display project progress overview.
 
@@ -324,8 +324,8 @@ Step 8: Track completion
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-status
+Step 1: Ask the Cadre skill for the workflow
+   cadre-status
 
 Step 2: Review output
    - Overall progress percentage
@@ -353,12 +353,12 @@ Step 3 (If Beads enabled):
 `--team`, `--mine`, and `--repos` are the only modes that read per-track
 `metadata.json` (for ownership, leases, review state).
 
-**No state file**: Read-only command (apart from `--regen-index`, which rewrites
+**No state file**: Read-only workflow (apart from `--regen-index`, which rewrites
 the `tracks.md` cache, and `--export`, which writes a summary).
 
 ---
 
-### 5. `/cadre-validate`
+### 5. `cadre-validate`
 
 **Purpose**: Check project integrity and fix issues.
 
@@ -371,8 +371,8 @@ the `tracks.md` cache, and `--export`, which writes a summary).
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-validate
+Step 1: Ask the Cadre skill for the workflow
+   cadre-validate
 
 Step 2: Review findings
    - Missing files
@@ -387,15 +387,15 @@ Step 3: Choose fix option
    C) Skip (report only)
 
 Step 4: If staleness detected
-   - Suggests /cadre-refresh
+   - Suggests cadre-refresh
 ```
 
 ---
 
-### 6. `/cadre-flag`
+### 6. `cadre-flag`
 
 **Purpose**: Flag the current task as **blocked** or **skipped** (merges the former
-`/cadre-block` and `/cadre-skip`).
+`cadre-block` and `cadre-skip`).
 
 **When to use**: A task cannot proceed (blocked on an external dependency) or should
 be set aside (skipped — not applicable, or deferred).
@@ -403,9 +403,9 @@ be set aside (skipped — not applicable, or deferred).
 **Manual workflow**:
 
 ```
-Step 1: Run the command with a mode
-   /cadre-flag blocked      # waiting on something external
-   /cadre-flag skipped      # set the task aside
+Step 1: Ask the Cadre skill for the workflow with a mode
+   cadre-flag blocked      # waiting on something external
+   cadre-flag skipped      # set the task aside
 
 Step 2: Select / confirm the task (defaults to the in-progress task)
 
@@ -426,7 +426,7 @@ Step 4: Updates applied
 
 ---
 
-### 7. `/cadre-review`
+### 7. `cadre-review`
 
 **Purpose**: Review a track's diff before shipping — the quality gate between
 implement and ship.
@@ -437,8 +437,8 @@ pushing/opening a PR.
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-review [track_id]
+Step 1: Ask the Cadre skill for the workflow
+   cadre-review [track_id]
 
 Step 2: Cadre computes the diff
    - git diff main...track/<track_id>
@@ -454,11 +454,11 @@ Step 4: Findings recorded
    - Beads label set: review:ready (clean) or review:changes (blocking)
 
 Step 5: Routed to next step
-   - Ready to ship → suggests /cadre-ship (or /cadre-land in polyrepo)
-   - Changes requested → suggests /cadre-revise or /cadre-flag
+   - Ready to ship → suggests cadre-ship (or cadre-land in polyrepo)
+   - Changes requested → suggests cadre-revise or cadre-flag
 ```
 
-**Review gate:** `metadata.review` is what `/cadre-ship` and `/cadre-land`
+**Review gate:** `metadata.review` is what `cadre-ship` and `cadre-land`
 enforce — `verdict: "approved"` with `blocking_count: 0` clears the gate;
 `changes_requested` or any blocking findings make them refuse.
 
@@ -468,7 +468,7 @@ but still records the verdict (the warning is non-blocking).
 
 ---
 
-### 8. `/cadre-revise`
+### 8. `cadre-revise`
 
 **Purpose**: Update spec/plan when implementation reveals issues.
 
@@ -479,8 +479,8 @@ but still records the verdict (the warning is non-blocking).
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-revise
+Step 1: Ask the Cadre skill for the workflow
+   cadre-revise
 
 Step 2: Select what to revise
    A) Spec only
@@ -501,7 +501,7 @@ Step 5: Approve changes
 
 ---
 
-### 9. `/cadre-revert`
+### 9. `cadre-revert`
 
 **Purpose**: Git-aware revert of work.
 
@@ -510,8 +510,8 @@ Step 5: Approve changes
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-revert
+Step 1: Ask the Cadre skill for the workflow
+   cadre-revert
 
 Step 2: Select revert scope
    A) Entire track
@@ -529,7 +529,7 @@ Step 4: Confirm revert
 
 ---
 
-### 10. `/cadre-archive`
+### 10. `cadre-archive`
 
 **Purpose**: Move completed tracks to archive.
 
@@ -538,8 +538,8 @@ Step 4: Confirm revert
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-archive
+Step 1: Ask the Cadre skill for the workflow
+   cadre-archive
 
 Step 2: Select tracks to archive
    - Only completed [x] tracks shown
@@ -552,18 +552,18 @@ Step 4: Tracks moved to cadre/archive/
 
 ---
 
-### 11. `/cadre-status --export`
+### 11. `cadre-status --export`
 
-**Purpose**: Generate a project summary report (formerly `/cadre-export`, now a
-mode of `/cadre-status`).
+**Purpose**: Generate a project summary report (formerly `cadre-export`, now a
+mode of `cadre-status`).
 
 **When to use**: Documentation, handoff, review.
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command with the flag
-   /cadre-status --export
+Step 1: Ask the Cadre skill for the workflow with the flag
+   cadre-status --export
 
 Step 2: Cadre gathers all cadre/ files + progress stats
    - plus Beads statistics (bd stats) if available
@@ -576,7 +576,7 @@ Step 3: Choose save option
 
 ---
 
-### 12. `/cadre-refresh`
+### 12. `cadre-refresh`
 
 **Purpose**: Sync context docs with current codebase.
 
@@ -588,8 +588,8 @@ Step 3: Choose save option
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-refresh [scope]
+Step 1: Ask the Cadre skill for the workflow
+   cadre-refresh [scope]
    
    Scopes: all, tech, product, workflow, track
 
@@ -610,7 +610,7 @@ Step 4: Approve changes
 
 ---
 
-### 13. `/cadre-handoff`
+### 13. `cadre-handoff`
 
 **Purpose**: Create context handoff for transferring implementation to next section/session.
 
@@ -623,10 +623,10 @@ Step 4: Approve changes
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-handoff
+Step 1: Ask the Cadre skill for the workflow
+   cadre-handoff
    # goal-first prose for a human teammate:
-   /cadre-handoff --for-teammate
+   cadre-handoff --for-teammate
 
 Step 2: Context gathering
    - Current phase and task position
@@ -662,14 +662,14 @@ overwritten and trimmed on each run — there are no per-timestamp `handoff_*.md
 and each track keeps its own current handoff. The `--for-teammate` mode writes goal-first
 prose into that same file instead of the machine dump.
 
-**Auto-detection**: The implement command will suggest handoff when:
+**Auto-detection**: The implement workflow will suggest handoff when:
 - 5+ tasks completed without handoff
 - Phase boundary with >50% tasks remaining
 - User mentions context issues
 
 ---
 
-### 14. `/cadre-formula`
+### 14. `cadre-formula`
 
 **Purpose**: List and manage track workflow templates (Beads formulas).
 
@@ -683,10 +683,10 @@ prose into that same file instead of the machine dump.
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-formula           # List all formulas
-   /cadre-formula list      # Same as above
-   /cadre-formula show auth # Show specific formula
+Step 1: Ask the Cadre skill for the workflow
+   cadre-formula           # List all formulas
+   cadre-formula list      # Same as above
+   cadre-formula show auth # Show specific formula
 
 Step 2: For "list" subcommand
    - Runs: bd formula list --json
@@ -710,17 +710,17 @@ Step 3: For "show <name>" subcommand
 
 **Usage:**
 - bd mol pour <name> - Create persistent track
-- /cadre-formula wisp <name> - Create ephemeral exploration
+- cadre-formula wisp <name> - Create ephemeral exploration
 ```
 
 The `create` and `wisp` subcommands are documented in sections 15 and 16.
 
 ---
 
-### 15. `/cadre-formula wisp`
+### 15. `cadre-formula wisp`
 
 **Purpose**: Create an ephemeral exploration track, no audit trail (formerly
-`/cadre-wisp`).
+`cadre-wisp`).
 
 **When to use**: 
 - Quick exploration before committing to a full track
@@ -733,10 +733,10 @@ The `create` and `wisp` subcommands are documented in sections 15 and 16.
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-formula wisp                    # Interactive mode
-   /cadre-formula wisp auth-module        # Use specific formula
-   /cadre-formula wisp auth --var name=payments
+Step 1: Ask the Cadre skill for the workflow
+   cadre-formula wisp                    # Interactive mode
+   cadre-formula wisp auth-module        # Use specific formula
+   cadre-formula wisp auth --var name=payments
 
 Step 2: Formula selection
    - If provided, use specified formula
@@ -759,17 +759,17 @@ bd mol burn <wisp>                  # Delete without trace
 ```
 
 **Transition to persistent track**:
-- A) Convert to track: `/cadre-newtrack` with findings
+- A) Convert to track: `cadre-newtrack` with findings
 - B) Create follow-up issues: `bd create`
 - C) Squash with digest
 - D) Burn (discard)
 
 ---
 
-### 16. `/cadre-formula create`
+### 16. `cadre-formula create`
 
 **Purpose**: Extract a reusable template from a completed track (formerly
-`/cadre-distill`).
+`cadre-distill`).
 
 **When to use**: 
 - Track completed successfully
@@ -783,9 +783,9 @@ bd mol burn <wisp>                  # Delete without trace
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-formula create auth_20241219
-   /cadre-formula create auth_20241219 --as "auth-module"
+Step 1: Ask the Cadre skill for the workflow
+   cadre-formula create auth_20241219
+   cadre-formula create auth_20241219 --as "auth-module"
 
 Step 2: Track validation
    - Track must be completed [x]
@@ -797,7 +797,7 @@ Step 3: Variable analysis
    - Proposes variables: {{module_name}}, {{token_type}}
 
 Step 4: Template extraction
-   - Runs: bd mol distill <epic_id> --as "<name>" --var ...
+   - Runs: bd mol distill <epic_id> "<name>" --var ...
    - Creates reusable formula
 
 Step 5: Optional Cadre registration
@@ -813,30 +813,30 @@ Step 6: Cleanup options
 **Template usage after extraction**:
 ```bash
 # List templates
-/cadre-formula list
+cadre-formula list
 
 # View template
-/cadre-formula show <template_name>
+cadre-formula show <template_name>
 
 # Create from template
 bd mol pour <template> --var module_name=payments
-/cadre-formula wisp <template> --var module_name=cache
+cadre-formula wisp <template> --var module_name=cache
 ```
 
 ---
 
-### 17. `/cadre-ship`
+### 17. `cadre-ship`
 
 **Purpose**: Rebase a reviewed track onto main, push it, and prepare the PR. The only
 Cadre step that pushes to a remote.
 
-**When to use**: After `/cadre-review` clears a track and before `/cadre-archive`.
+**When to use**: After `cadre-review` clears a track and before `cadre-archive`.
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-ship [track_id]
+Step 1: Ask the Cadre skill for the workflow
+   cadre-ship [track_id]
 
 Step 2: Review gate (enforced — reads metadata.review)
    - changes_requested OR blocking_count > 0 → REFUSE (halt; resolve and re-review)
@@ -855,24 +855,24 @@ Step 4: PR guidance
      (gh / glab; falls back to printing the command if the CLI is unauthenticated)
 ```
 
-**Review gate:** `/cadre-ship` refuses to rebase or push when the track's
+**Review gate:** `cadre-ship` refuses to rebase or push when the track's
 `metadata.review.verdict` is `changes_requested` or `blocking_count > 0`. An
 absent `review` block falls back to today's soft prompt; a clean approved review
 proceeds without further confirmation.
 
 ---
 
-### 18. `/cadre-land`
+### 18. `cadre-land`
 
-**Purpose**: Polyrepo only. Open and link the cross-repo PR group for a track, then let the merge train land it. The polyrepo counterpart to `/cadre-ship`.
+**Purpose**: Polyrepo only. Open and link the cross-repo PR group for a track, then let the merge train land it. The polyrepo counterpart to `cadre-ship`.
 
-**When to use**: After `/cadre-review` clears a track, in a polyrepo control repo (`cadre/repos.json` with `mode: "polyrepo"`).
+**When to use**: After `cadre-review` clears a track, in a polyrepo control repo (`cadre/repos.json` with `mode: "polyrepo"`).
 
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-land [track_id]
+Step 1: Ask the Cadre skill for the workflow
+   cadre-land [track_id]
 
 Step 2: Review gate (enforced — same as ship; reads metadata.review)
    - changes_requested OR blocking_count > 0 → REFUSE
@@ -893,11 +893,11 @@ Step 5: Merge train (CI)
      idempotent on re-fire; posts a half-landed status comment on the control PR
 ```
 
-**Review gate:** identical to `/cadre-ship` — refuses on `changes_requested` / `blocking_count > 0`; absent review falls back to a soft prompt.
+**Review gate:** identical to `cadre-ship` — refuses on `changes_requested` / `blocking_count > 0`; absent review falls back to a soft prompt.
 
 ---
 
-### 19. `/cadre-release`
+### 19. `cadre-release`
 
 **Purpose**: Cut a local release — changelog entry + version tag across shipped/
 archived tracks. Local only; never pushes.
@@ -907,9 +907,9 @@ archived tracks. Local only; never pushes.
 **Manual workflow**:
 
 ```
-Step 1: Run the command
-   /cadre-release            # suggest a bump
-   /cadre-release minor      # or major|patch|<version>
+Step 1: Ask the Cadre skill for the workflow
+   cadre-release            # suggest a bump
+   cadre-release minor      # or major|patch|<version>
 
 Step 2: Determine range + version
    - From last git tag to HEAD; semver bump from change types
@@ -933,7 +933,7 @@ When Beads integration is enabled, use these commands alongside Cadre:
 | `bd ready` | List tasks with no blockers |
 | `bd ready --parent <id>` | List ready tasks for specific track |
 | `bd show <id>` | View task details and notes |
-| `bd show <id> --notes` | View notes (survives compaction) |
+| `bd show <id> --long` | View details and notes (survives compaction) |
 | `bd update <id> --status in_progress` | Start working on task |
 | `bd note <id> "Progress..."` | Add progress notes |
 | `bd close <id> --continue` | Complete task and auto-advance |
@@ -952,16 +952,16 @@ When Beads integration is enabled, use these commands alongside Cadre:
 | `bd mol wisp <template>` | Create ephemeral exploration |
 | `bd mol current` | Show current step in molecule |
 | `bd mol squash <id>` | Compress completed molecule |
-| `bd mol distill <epic> --as "Name"` | Extract template from work |
+| `bd mol distill <epic> "Name"` | Extract template from work |
 
-### Template Commands (under `/cadre-formula`)
+### Template Workflows (under `cadre-formula`)
 
 | Command | Purpose |
 |---------|---------|
-| `/cadre-formula list` | List and manage track templates |
-| `/cadre-formula show <name>` | Show a template's structure and variables |
-| `/cadre-formula create <track_id>` | Extract reusable template from a completed track |
-| `/cadre-formula wisp [formula]` | Create ephemeral exploration track |
+| `cadre-formula list` | List and manage track templates |
+| `cadre-formula show <name>` | Show a template's structure and variables |
+| `cadre-formula create <track_id>` | Extract reusable template from a completed track |
+| `cadre-formula wisp [formula]` | Create ephemeral exploration track |
 
 ### Session Resume with Beads
 
@@ -972,13 +972,13 @@ After context compaction or starting a new session:
 bd ready
 
 # 2. Get context from notes
-bd show <task-id> --notes
+bd show <task-id> --long
 
 # 3. Load Cadre context
 # Read: cadre/tracks/<track_id>/spec.md, plan.md
 
 # 4. Resume implementation
-/cadre-implement <track_id>
+cadre-implement <track_id>
 ```
 
 ---
@@ -992,7 +992,7 @@ bd show <task-id> --notes
 | `config.json` | Sync mode, PR provider, `auto_open`, merge train (polyrepo/shared) | `cadre/` |
 | `repos.json` | Submodule manifest + `mode: "polyrepo"` (polyrepo only) | `cadre/` |
 | `refresh_state.json` | Refresh progress | `cadre/` |
-| `tracks.md` | **Derived** track index — rebuilt by `/cadre-status --regen-index`; never hand-edit | `cadre/` |
+| `tracks.md` | **Derived** track index — rebuilt by `cadre-status --regen-index`; never hand-edit | `cadre/` |
 | `HANDOFF.md` | Per-track rolling handoff (overwritten/trimmed each run) | `cadre/tracks/<track_id>/` |
 | `implement_state.json` | Phase-aware implementation resume | `cadre/tracks/<id>/` |
 | `metadata.json` | Track config + Beads epic ID; **source of truth for `status`**; also holds `owner`/`reviewer`/`review`/`lease`/`merge_order` | `cadre/tracks/<id>/` |
@@ -1004,19 +1004,19 @@ bd show <task-id> --notes
 
 ## Tips for Manual Usage
 
-1. **Always check state files** before running commands to understand current progress
+1. **Always check state files** before running workflows to understand current progress
 
-2. **Use `/cadre-status`** frequently to see the big picture
+2. **Use `cadre-status`** frequently to see the big picture
 
 3. **Use `bd ready`** to find tasks with no blockers (if Beads enabled)
 
-4. **Run `/cadre-validate`** after manual edits to catch issues
+4. **Run `cadre-validate`** after manual edits to catch issues
 
 5. **Commit frequently** - each task should have its own commit
 
 6. **Source of truth:** `metadata.json.status` is the single source of truth for a
    track's status — `cadre/tracks.md` is a **derived cache** rebuilt by
-   `/cadre-status --regen-index`, so never hand-edit its markers. `plan.md`
+   `cadre-status --regen-index`, so never hand-edit its markers. `plan.md`
    checkboxes track per-task progress within a track.
 
 7. **Add notes to Beads** - they survive context compaction
@@ -1033,11 +1033,11 @@ bd show <task-id> --notes
 
 | Issue | Solution |
 |-------|----------|
-| Command stalls | Check state file, resume or restart |
+| Workflow stalls | Check state file, resume or restart |
 | Wrong track selected | Use explicit track ID parameter |
 | Task stuck in progress | Manually update `[~]` to `[ ]` in plan.md |
-| Dependency loop | Use `/cadre-validate` to detect |
-| Missing files | Run `/cadre-setup` or `/cadre-validate` |
+| Dependency loop | Use `cadre-validate` to detect |
+| Missing files | Run `cadre-setup` or `cadre-validate` |
 | Beads not syncing | Check `cadre/beads.json` has `enabled: true` |
-| Lost context after compaction | Use `bd show <id> --notes` to recover |
-| bd command fails | Cadre continues without Beads (graceful degradation) |
+| Lost context after compaction | Use `bd show <id> --long` to recover |
+| bd command fails | Cadre retries once when appropriate, then halts for repair |

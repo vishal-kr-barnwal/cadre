@@ -1,24 +1,26 @@
 # Locating the Cadre Templates Directory
 
 Cadre ships starter templates — `workflow.md`, `patterns.md`, `learnings.md`,
-`beads.json`, and `code_styleguides/` — bundled with the installed commands.
+`beads.json`, and `code_styleguides/` — bundled with the active Cadre skill.
 `cadre-setup` and `cadre-newtrack` copy from them. The same bundle also carries
-**helper scripts** under `<TEMPLATES_DIR>/scripts/` that commands run **in place**
-(they are not copied into `cadre/`) — currently `cadre-regen-index.sh`, the
-deterministic `tracks.md` rebuilder behind `/cadre-status --regen-index`.
+**helper scripts** under `<TEMPLATES_DIR>/scripts/` that workflow protocols run **in place**
+(they are not copied into `cadre/`) — currently the optional LSP setup/review
+helpers. `tracks.md` regeneration is owned by MCP `cadre_regen_index`; do not
+route workflows to a template shell script for that operation.
 
 ## Resolve `<TEMPLATES_DIR>`
 
-Probe with `ls` and use the **FIRST** of these paths that exists:
+Probe with `ls` and use the **FIRST** of these paths that exists. Start with
+the path relative to this reference file so plugin-installed skills work from
+Claude/Codex plugin cache directories without knowing the cache root.
 
 <!-- AGENT:claude -->
-1. `.claude/skills/cadre/templates/` — project install
-2. `~/.claude/skills/cadre/templates/` — global install
-3. `templates/` — running inside a Cadre clone
+1. `../templates/` relative to this `references/template-locator.md` file — active plugin skill bundle
+2. `templates/` — running inside a Cadre clone during development
 <!-- /AGENT:claude -->
 <!-- AGENT:codex -->
-1. `~/.codex/prompts/templates/` — Codex custom prompts are global
-2. `templates/` — running inside a Cadre clone
+1. `../templates/` relative to this `references/template-locator.md` file — active plugin skill bundle
+2. `templates/` — running inside a Cadre clone during development
 <!-- /AGENT:codex -->
 
 If none exist, tell the user the templates bundle is missing (point them to the
@@ -33,5 +35,7 @@ sensible built-in defaults instead of copying files.
 | `patterns.md` | `cadre/patterns.md` | project-level institutional knowledge |
 | `learnings.md` | `cadre/tracks/<track_id>/learnings.md` | replace `{{track_id}}` with the track id |
 | `code_styleguides/<lang>.md` | `cadre/code_styleguides/` | only the selected guides |
-| `beads.json` | `cadre/beads.json` | setup sets `mode` (`normal`/`stealth`) |
-| `scripts/cadre-regen-index.sh` | *(run in place)* | `bash <TEMPLATES_DIR>/scripts/cadre-regen-index.sh` — rebuilds `tracks.md` |
+| `beads.json` | `cadre/beads.json` | setup copies full-mode Beads config (`mode: "normal"`) |
+| `scripts/cadre-lsp-setup.js` | *(run in place)* | `node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json` — recommend/write `cadre/lsp.json` |
+| `scripts/cadre-lsp-review.js` | *(run in place through MCP when possible)* | `cadre_lsp_warm_review` preferred, `cadre_lsp_review` fallback / `node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --json` — code-intelligence review |
+| `scripts/cadre-lsp-daemon.js` | *(managed by MCP)* | persistent LSP daemon used by `cadre_lsp_warm_review` |

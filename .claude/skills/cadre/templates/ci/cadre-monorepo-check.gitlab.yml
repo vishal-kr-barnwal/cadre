@@ -3,16 +3,30 @@
 # Scaffolded into the repo as `.gitlab-ci.yml` (or `include:`-d from an existing
 # pipeline). This is the OPTIONAL drift-gate half of the PR-open / CI hook: it
 # guards the "edit canonical -> regenerate -> commit" contract for the generated
-# command sets.
+# skill bundles.
 #
 # What it does: on every merge-request pipeline it checks out the repo and runs
-#   1. `bash scripts/generate-commands.sh --check` — regenerates the Codex
-#      command set (.codex/prompts) into a scratch dir and
+#   1. `bash scripts/generate-skills.sh --check` — regenerates Claude/Codex
+#      skill bundles into a scratch dir and
 #      fails if the committed output is STALE. The fix is always: edit the
-#      canonical .claude/commands/ source, re-run `bash scripts/generate-commands.sh`,
+#      master workflow protocols/ source, re-run `bash scripts/generate-skills.sh`,
 #      and commit the regenerated trees.
 #   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
-#      every script under scripts/, so a broken generator/installer can't merge.
+#      every script under scripts/, so a broken generator/helper can't merge.
+#   3. agent context parity — when `scripts/check-agent-context.sh` exists, asserts
+#      AGENTS.md and CLAUDE.md both carry the team-scale safety rules.
+#   4. tracks.md freshness — regenerates cadre/tracks.md from each track's
+#      metadata.json.status (the source of truth) into a scratch file and fails if
+#      the committed index is STALE or hand-edited. The fix is always:
+#      `/cadre-status --regen-index` (never hand-merge tracks.md markers).
+#   5. .gitattributes guard (shared mode only) — asserts the required `merge=ours`
+#      lines exist so the control-plane merge contract isn't silently dropped.
+#   6. review gate (track MRs only) — asserts the track's metadata.review cleared:
+#      verdict approved, no blocking findings, no disallowed self-review, and
+#      reviewed_sha is present. (SHA-equality against the MR head is only a
+#      non-blocking WARNING — ship/land rebase rewrites the tip, so CI cannot match
+#      the ephemeral pre-rebase tip; the hard out-of-band-push guard runs at push
+#      time in /cadre-ship and /cadre-land.)
 #
 # Keep this minimal: no Beads, no `bd` — the task graph is not part of CI. The
 # only tools needed are bash + jq + git, installed below on a small Alpine image.
@@ -27,8 +41,121 @@ cadre-monorepo-check:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - apk add --no-cache bash jq git >/dev/null 2>&1 || true
-    # Fails if .claude/commands/ was edited without regenerating the per-platform
-    # command sets. Fix: re-run generate-commands.sh and commit the output.
-    - bash scripts/generate-commands.sh --check
+    # Fails if skill protocol sources changed without regenerating the
+    # per-platform skill bundles. Fix: re-run generate-skills.sh and commit.
+    - bash scripts/generate-skills.sh --check
     # Parse-only (-n) — validates every script without executing it.
     - bash -n scripts/*.sh
+    # Semantic smoke test for safety-critical context shared across agent files.
+    - '[ ! -f scripts/check-agent-context.sh ] || bash scripts/check-agent-context.sh'
+    # tracks.md is a DERIVED cache, not an authority: it must equal the output of
+    # the regen-index script (which rebuilds it from each track's
+    # metadata.json.status, the single source of truth). Catches a stale index or a
+    # hand-edited/hand-merged marker. Fix: `/cadre-status --regen-index` and commit.
+    # Skip cleanly when the project has no cadre/ index yet.
+    - |
+      set -eu   # match the GitHub variant's fail-fast semantics (busybox sh swallows
+                # non-final failures otherwise, e.g. a regen-index crash -> false PASS)
+      if [ ! -f cadre/tracks.md ]; then
+        echo "No cadre/tracks.md — skipping freshness gate (project not initialized)."
+      else
+        expected="$(mktemp)"
+        cp cadre/tracks.md "$expected"
+        bash templates/scripts/cadre-regen-index.sh .
+        if ! diff -u "$expected" cadre/tracks.md; then
+          echo "ERROR: cadre/tracks.md is STALE or hand-edited. Run '/cadre-status --regen-index' and commit the result — never hand-merge tracks.md markers."
+          exit 1
+        fi
+        echo "cadre/tracks.md matches metadata.json.status."
+      fi
+    # In shared sync mode the control-plane merge contract lives in .gitattributes
+    # (the `merge=ours` lines for the Dolt DB and ephemeral parallel_state.json).
+    # Assert those lines exist so they can't be silently dropped. NOTE: the
+    # per-clone merge DRIVER itself (`git config merge.ours.driver true`) CANNOT be
+    # CI-asserted — CI checks out a fresh clone and never performs a Cadre merge, so
+    # that local config is absent by design and self-heals via the sync preamble. We
+    # only check the committed .gitattributes lines here. Gated on
+    # sync_mode == "shared"; a no-op in local mode.
+    - |
+      set -eu
+      mode="$(jq -r '.sync_mode // "local"' cadre/config.json 2>/dev/null || echo local)"
+      if [ "$mode" != "shared" ]; then
+        echo "sync_mode is '$mode' (not shared) — skipping .gitattributes guard."
+      else
+        missing=0
+        for line in \
+          '.beads/** merge=ours' \
+          'cadre/tracks/**/parallel_state.json  merge=ours'; do
+          pat="$(printf '%s' "$line" | sed 's/  */[[:space:]][[:space:]]*/g')"
+          if ! grep -Eq "$pat" .gitattributes 2>/dev/null; then
+            echo "ERROR: Missing required shared-mode .gitattributes line: $line"
+            missing=1
+          fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+        echo ".gitattributes contains the required merge=ours lines."
+      fi
+
+# Track MRs must clear review before they can merge. A "track MR" is one whose
+# source branch is `track/<track_id>`; non-track MRs (docs, infra, the canonical
+# command edits this very file guards) skip this job. The gate re-asserts in CI
+# what /cadre-ship and /cadre-land enforce at push time, closing the
+# out-of-band-push hole: someone could push a new commit onto an already-approved
+# branch and open/merge an MR without re-running /cadre-review.
+cadre-review-gate:
+  stage: check
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - apk add --no-cache bash jq git >/dev/null 2>&1 || true
+    - |
+      set -eu   # match the GitHub variant's fail-fast semantics
+      # CI_MERGE_REQUEST_SOURCE_BRANCH_SHA is the unmerged source tip — the commit
+      # being merged.
+      HEAD_REF="$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+      MR_HEAD_SHA="$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA"
+      case "$HEAD_REF" in
+        track/*) track_id="${HEAD_REF#track/}" ;;
+        *)
+          echo "Source branch '$HEAD_REF' is not a track branch — review gate not applicable."
+          exit 0 ;;
+      esac
+      META="cadre/tracks/$track_id/metadata.json"
+      if [ ! -f "$META" ]; then
+        echo "ERROR: Track branch '$HEAD_REF' has no $META — cannot verify review. Did the track metadata get committed?"
+        exit 1
+      fi
+      verdict=$(jq -r '.review.verdict // "absent"' "$META")
+      blocking=$(jq -r '.review.blocking_count // 0' "$META")
+      self_reviewed=$(jq -r '.review.self_reviewed // false' "$META")
+      reviewed_sha=$(jq -r '.review.reviewed_sha // ""' "$META")
+      require_second=$(jq -r '.require_second_reviewer // false' cadre/config.json 2>/dev/null || echo false)
+      if [ "$verdict" = "absent" ]; then
+        echo "ERROR: Track '$track_id' has no recorded review verdict. Run /cadre-review before merging."
+        exit 1
+      fi
+      if [ "$verdict" != "approved" ] || [ "$blocking" -gt 0 ]; then
+        echo "ERROR: Track '$track_id' has not cleared review (verdict: $verdict, blocking findings: $blocking). Resolve findings and re-run /cadre-review."
+        exit 1
+      fi
+      if [ "$require_second" = "true" ] && [ "$self_reviewed" = "true" ]; then
+        echo "ERROR: Track '$track_id' has only a self-review but require_second_reviewer is set. A different reviewer must approve."
+        exit 1
+      fi
+      # reviewed_sha should be present (it pins the verdict to a reviewed commit).
+      if [ -z "$reviewed_sha" ]; then
+        echo "ERROR: Track '$track_id' is missing review.reviewed_sha. Re-run /cadre-review to pin the verdict to a commit."
+        exit 1
+      fi
+      # reviewed_sha is the PRE-REBASE reviewed commit. /cadre-ship and /cadre-land
+      # rebase track/<id> onto main before pushing, which REWRITES the tip — so the MR
+      # head here is the post-rebase commit and will NOT equal reviewed_sha on a
+      # legitimate ship. CI cannot see the ephemeral local pre-rebase tip that
+      # ship/land compare against, so a strict equality here would false-block every
+      # shipped track. The HARD enforcement lives at push time in /cadre-ship and
+      # /cadre-land (they compare the pre-rebase tip). Here we only WARN (non-blocking).
+      if [ "$reviewed_sha" != "$MR_HEAD_SHA" ]; then
+        echo "WARNING: MR head $MR_HEAD_SHA differs from review.reviewed_sha $reviewed_sha — expected after a rebase-on-ship. Ensure no UN-reviewed code landed after review; the push-time guard in /cadre-ship|/cadre-land enforces this."
+      fi
+      echo "Track '$track_id' review cleared: approved, 0 blocking, reviewed_sha present."

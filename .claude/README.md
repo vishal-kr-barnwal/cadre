@@ -6,90 +6,56 @@ Cadre helps you plan before you build - creating specs, implementation plans, an
 
 ## Installation
 
-### Option 1: Claude Code Plugin (Recommended)
-
 ```bash
 # Add the marketplace
 /plugin marketplace add vishal-kr-barnwal/Cadre
 
 # Install the plugin
-/plugin install cadre
+/plugin install cadre@cadre
 
 # Verify installation
 /help
 ```
 
 This installs:
-- **16 slash commands** for direct invocation
-- **1 skill** that auto-activates for cadre projects
+- **Cadre skills** that auto-activate for cadre projects
+- **16 bundled workflow protocols** inside the Cadre skill
+- **Cadre MCP server config** for deterministic status, collision, and review-gate checks
+- **LSP setup/review helper scripts** used by Cadre workflows when a project opts into `cadre/lsp.json`
 
-### Option 2: Agent Skills Compatible CLI
+The generated Claude Code plugin lives at `plugins/cadre-claude/`; the marketplace
+catalog lives at `.claude-plugin/marketplace.json`.
 
-If your CLI supports the [Agent Skills specification](https://agentskills.io):
+The same 16 workflow protocols ship for OpenAI Codex through the generated
+Codex plugin at `plugins/cadre/`, with a repo marketplace at
+`.agents/plugins/marketplace.json`. See the
+[Install & Version Guide](../docs/INSTALL.md) for per-platform setup. Plugin
+bundles are generated from the master workflow protocols in
+`skills/cadre/protocols/` by `scripts/generate-skills.sh`.
 
-```bash
-# Point to the skill directory
-skills/cadre/
-├── SKILL.md                    # Entry point - overview, intent mapping, command routing
-└── references/
-    ├── workflows.md            # Workflow overview, state files, Beads & parallel overview
-    ├── structure.md            # Directory structure reference
-    ├── beads-integration.md    # Beads session protocol, CLI commands, chemistry
-    ├── learnings-system.md     # Ralph-style knowledge capture
-    ├── patterns-template.md    # Template for cadre/patterns.md
-    └── learnings-template.md   # Template for track learnings.md
-```
+## Workflows
 
-> Command protocols are not duplicated under the skill. Each command's full
-> step-by-step protocol lives in the canonical `.claude/commands/cadre-*.md`
-> (16 commands); `SKILL.md` links to them directly.
+Ask the `$cadre` skill for one of these workflow names, or describe the goal in
+plain language and let the skill route to the right protocol.
 
-The skill follows the Agent Skills spec with full frontmatter:
-- `name`: cadre
-- `description`: Context-driven development methodology
-- `license`: Apache-2.0
-- `compatibility`: Claude Code, OpenAI Codex CLI, any Agent Skills compatible CLI
-- `metadata`: version, author, repository, keywords
-
-### Option 3: Manual Installation
-
-Copy to your project:
-```bash
-cp -r /path/to/cadre/.claude your-project/
-```
-
-Or for global access (all projects):
-```bash
-cp -r /path/to/cadre/.claude/commands/* ~/.claude/commands/
-cp -r /path/to/cadre/.claude/skills/* ~/.claude/skills/
-```
-
-### Option 4: Other platforms (Codex)
-
-The same 16 commands ship for OpenAI Codex CLI. See the
-[Install & Version Guide](../docs/INSTALL.md) for per-platform setup. They are
-generated from these Claude commands by `scripts/generate-commands.sh`.
-
-## Commands
-
-| Command | Description |
+| Workflow | Description |
 |---------|-------------|
-| `/cadre-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
-| `/cadre-newtrack [desc]` | Create new feature/bug track with spec and plan |
-| `/cadre-implement [id]` | Execute tasks from track's plan (TDD workflow) |
-| `/cadre-status [--export]` | Display progress overview (or export a summary) |
-| `/cadre-revert` | Git-aware revert of tracks, phases, or tasks |
-| `/cadre-validate` | Validate project integrity |
-| `/cadre-flag <blocked\|skipped>` | Flag the current task as blocked or skipped |
-| `/cadre-revise` | Update spec/plan when issues found |
-| `/cadre-review` | Review a track's diff before shipping (quality gate) |
-| `/cadre-ship` | Rebase a reviewed track onto main, push, prepare the PR (monorepo) |
-| `/cadre-land` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
-| `/cadre-archive` | Archive completed tracks (local cleanup + learnings) |
-| `/cadre-release` | Cut a local release — changelog + version tag |
-| `/cadre-handoff` | Create context handoff for session transfer |
-| `/cadre-refresh` | Sync context docs with codebase state |
-| `/cadre-formula` | Manage track templates: list, show, create, ephemeral wisp |
+| `cadre-setup` | Initialize project with product.md, tech-stack.md, workflow.md |
+| `cadre-newtrack [desc]` | Create new feature/bug track with spec and plan |
+| `cadre-implement [id]` | Execute tasks from track's plan (TDD workflow) |
+| `cadre-status [--export]` | Display progress overview (or export a summary) |
+| `cadre-revert` | Git-aware revert of tracks, phases, or tasks |
+| `cadre-validate` | Validate project integrity |
+| `cadre-flag <blocked\|skipped>` | Flag the current task as blocked or skipped |
+| `cadre-revise` | Update spec/plan when issues found |
+| `cadre-review` | Review a track's diff before shipping (quality gate) |
+| `cadre-ship` | Rebase a reviewed track onto main, push, prepare the PR (monorepo) |
+| `cadre-land` | Polyrepo: open + link the cross-repo PR group; merge train lands it |
+| `cadre-archive` | Archive completed tracks (local cleanup + learnings) |
+| `cadre-release` | Cut a local release — changelog + version tag |
+| `cadre-handoff` | Create context handoff for session transfer |
+| `cadre-refresh` | Sync context docs with codebase state |
+| `cadre-formula` | Manage track templates: list, show, create, ephemeral wisp |
 
 ## Skill (Auto-Activation)
 
@@ -107,7 +73,7 @@ You can also use natural language:
 ## How It Works
 
 ### 1. Setup
-Run `/cadre-setup` to initialize your project with:
+Ask the Cadre skill for `cadre-setup` to initialize your project with:
 ```
 cadre/
 ├── product.md           # What you're building and for whom
@@ -119,7 +85,7 @@ cadre/
 ```
 
 ### 2. Create Tracks
-Run `/cadre-newtrack "Add user authentication"` to create:
+Ask the Cadre skill for `cadre-newtrack "Add user authentication"` to create:
 ```
 cadre/tracks/auth_20241219/
 ├── metadata.json        # Track type, status, dates, priority
@@ -129,7 +95,7 @@ cadre/tracks/auth_20241219/
 ```
 
 ### 3. Implement
-Run `/cadre-implement` to execute the plan:
+Ask the Cadre skill for `cadre-implement` to execute the plan:
 - Follows TDD: Write tests → Implement → Refactor
 - Commits after each task with conventional messages
 - Updates plan.md with progress and commit SHAs
@@ -137,7 +103,7 @@ Run `/cadre-implement` to execute the plan:
 - Verifies at phase completion
 
 ### 4. Track Progress
-Run `/cadre-status` to see:
+Ask the Cadre skill for `cadre-status` to see:
 - Overall project progress with priority grouping
 - Current active track and task
 - Parallel worker status (if active)
@@ -155,55 +121,34 @@ Throughout cadre files:
 
 ## Cross-platform interoperability
 
-Projects work across every supported tool — Claude Code and OpenAI Codex CLI.
-Both invoke the same command name (e.g. `/cadre-setup`) and operate on the same
+Projects work across every supported tool — Claude Code and OpenAI Codex.
+Both use the same workflow names (e.g. `cadre-setup`) and operate on the same
 `cadre/` and `.beads/` directories, so you can mix tools on one repo (e.g. plan
 in Codex, implement in Claude Code) with full compatibility.
 
 See the [Install & Version Guide](../docs/INSTALL.md) for the compatibility
 matrix and per-platform setup.
 
-## File Structure
+## Plugin Structure
 
 ```
-.claude/
-├── commands/                     # Claude Code slash commands (16)
-│   ├── cadre-setup.md
-│   ├── cadre-newtrack.md
-│   ├── cadre-implement.md
-│   ├── cadre-status.md
-│   ├── cadre-revert.md
-│   ├── cadre-validate.md
-│   ├── cadre-flag.md
-│   ├── cadre-revise.md
-│   ├── cadre-review.md
-│   ├── cadre-ship.md
-│   ├── cadre-land.md
-│   ├── cadre-archive.md
-│   ├── cadre-release.md
-│   ├── cadre-handoff.md
-│   ├── cadre-refresh.md
-│   └── cadre-formula.md
-├── skills/
-│   ├── cadre/                # Context-driven development skill
-│   │   ├── SKILL.md              # Entry point (overview, intent mapping, command routing)
-│   │   └── references/
-│   │       ├── workflows.md      # Workflow overview, state files, Beads & parallel overview
-│   │       ├── structure.md      # Directory structure reference
-│   │       ├── beads-integration.md
-│   │       ├── learnings-system.md
-│   │       ├── patterns-template.md
-│   │       └── learnings-template.md
-│   │       # Command protocols live in canonical .claude/commands/cadre-*.md (16)
-│   ├── beads/                    # Persistent task memory skill
-│   └── skill-creator/            # Skill development guide
-└── README.md                     # This file
+plugins/cadre-claude/
+├── .claude-plugin/plugin.json
+├── skills/cadre/
+│   ├── SKILL.md              # Entry point (overview, intent mapping, workflow routing)
+│   ├── protocols/            # Generated workflow protocols (16)
+│   ├── references/           # Generated workflow references
+│   └── templates/            # Bundled setup templates and helper scripts
+├── mcp-config.json
+└── scripts/                  # Cadre MCP server and helper scripts
 ```
 
 ## Links
 
 - [GitHub Repository](https://github.com/vishal-kr-barnwal/Cadre)
 - [Install & Version Guide](../docs/INSTALL.md)
+- [Platform Usage Guide](../docs/PLATFORM_USAGE.md)
+- [MCP and LSP Integration](../docs/MCP_LSP.md)
 - [Agent Skills Specification](https://agentskills.io)
 
 ## License

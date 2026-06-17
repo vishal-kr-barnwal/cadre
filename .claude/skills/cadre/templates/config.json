@@ -2,10 +2,13 @@
   "sync_mode": "local",
   "auto_open": false,
   "require_second_reviewer": false,
+  "allow_unreviewed_ship": false,
+  "allow_unpinned_review_ship": false,
   "control_remote": "origin",
   "control_branch": "main",
   "pull_on_command_start": true,
   "pr_provider": "github",
+  "coverage_command": "",
   "merge_train": {
     "enabled": true,
     "auto_fire": true,

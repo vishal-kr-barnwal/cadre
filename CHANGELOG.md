@@ -19,6 +19,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Optional LSP setup flow for `/cadre-setup` plus `/cadre-refresh --lsp`, backed
+  by a bundled scanner that recommends language servers, writes/appends
+  `cadre/lsp.json`, and reports missing install commands.
+- Detailed platform usage guide (`docs/PLATFORM_USAGE.md`) covering installation,
+  setup, topology choice, daily workflows, review/ship/land, team operation,
+  MCP/LSP usage, CI, and troubleshooting.
+- Initial dependency-free Cadre MCP server (`scripts/mcp/cadre-server.js`) with
+  tools/resources for index regeneration, plan parsing, team status, available
+  work, collision scans, review-gate checks, and polyrepo local preflight.
+- LSP review helper (`scripts/cadre-lsp-review.js`) for best-effort external
+  reference detection during `/cadre-review`.
+- Team-scale simulation script (`scripts/cadre-team-scale-sim.js`) and
+  AGENTS/CLAUDE semantic context drift guard (`scripts/check-agent-context.sh`).
+
+### Changed
+- Installation is now plugin-only for both Claude Code and OpenAI Codex. The
+  generated plugin packages bundle the Cadre skill, workflow protocols,
+  templates, MCP config, and helper scripts.
+- The Cadre MCP server now requires project-scoped tools to receive a per-call
+  `root` argument, avoiding shared mutable project state when one long-running
+  MCP process serves multiple project sessions.
+- Cadre skills and generated workflow protocols now treat MCP as required:
+  workflows must verify `cadre_ping` and halt if Cadre MCP tools are unavailable.
+- Wired every Cadre workflow protocol through its deterministic MCP checkpoints:
+  root resolution, team status, available work, collision scans, plan parsing,
+  review gates, polyrepo preflight, and index regeneration.
+- Moved the shared Beads error-handler reference to `scripts/agent-refs/` so it
+  is copied into generated plugin skill bundles from a real source file instead
+  of from another generated artifact.
+- Synced Codex-facing `AGENTS.md` with the newer team-scale review,
+  ownership, coverage, collision, and shared-control-plane rules.
+- Added MCP/LSP rollout guidance in `docs/MCP_LSP.md`.
+
+### Removed
+- Deleted the legacy `scripts/install.sh` copy-based installer and removed
+  manual skill-copy installation instructions from the docs.
+
 ## [2.0.0] — 2026-06-16
 
 Team-scale hardening (10–20 person teams) plus a platform-surface trim. The
@@ -362,6 +400,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
+[2.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v2.0.0
 [1.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v1.0.0
 [0.3.4]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.4
 [0.3.3]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.3
