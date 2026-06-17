@@ -198,7 +198,11 @@ git commit -m "cadre(archive): archive <track_id> [, <track_id2> ...]"
    ```
    - Skip if `.beads/` has no changes after compaction.
 
-6. **Publish control plane (polyrepo + `sync_mode: "shared"` only):** run the sync
+6. **Publish control plane (`sync_mode: "shared"` only):** run the sync
    postamble from `references/cadre-sync.md` — `bd dolt push` then
    `git push <control_remote> <control_branch>` — so teammates see the archived
-   state. In `local`/monorepo mode, commits stay local.
+   state. This applies in **both monorepo and polyrepo** shared mode (the control
+   plane is published whenever `sync_mode == "shared"`, independent of topology).
+   In `local` mode, commits stay local. This publishes only the control plane;
+   the polyrepo product-CODE safety-net branch push (step 3.2a) is separate and
+   stays as-is.

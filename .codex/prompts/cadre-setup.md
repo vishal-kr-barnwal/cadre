@@ -32,6 +32,8 @@ Initialize this project with context-driven development. Follow this workflow pr
    - If `STEP` is `"2.3_tech_stack"`: Announce "Resuming: Tech Stack complete. Next: Code Styleguides." → Proceed to **Section 2.4**
    - If `STEP` is `"2.4_code_styleguides"`: Announce "Resuming: Styleguides complete. Next: Workflow." → Proceed to **Section 2.5**
    - If `STEP` is `"2.5_workflow"`: Announce "Resuming: Scaffolding complete. Next: Beads Integration." → Proceed to **Section 2.7**
+   - If `STEP` is `"2.7_beads_monorepo"`: Announce "Resuming: Beads complete. Next: Sync Mode." → Proceed to **Section 2.7a**
+   - If `STEP` is `"2.7a_sync_mode_mono"`: Announce "Resuming: Sync mode configured. Next: Finalize." → Proceed to **Section 2.8**
    - If `STEP` is `"2.7_beads_polyrepo"`: Announce "Resuming: Beads complete. Next: Sync Mode & PR Provider." → Proceed to **Section 2.7b**
    - If `STEP` is `"2.7b_sync_mode"`: Announce "Resuming: Sync mode configured. Next: Finalize." → Proceed to **Section 2.8**
    - If `STEP` is `"complete"`:
@@ -82,7 +84,9 @@ Present to user:
      >
      > Please respond with A or B.
    - If denied, halt and await instructions.
-   - **Code Analysis:**
+   - **Code Analysis:** *(These probes are read-only and independent, so they may be
+     fanned out in parallel — e.g. one tool call per artifact — rather than run
+     strictly serially; collect the results before drafting.)*
      - Respect `.gitignore` and any agent ignore patterns (e.g. `.aiexclude`)
      - Analyze README.md, package.json, directory structure
      - Extract: Programming Language, Frameworks, Database Drivers
@@ -125,9 +129,10 @@ multi-repo control plane (polyrepo). This decides whether polyrepo-only steps ru
 
 3. **Branch:**
    - **If A (monorepo):** Announce "Single-repo project — polyrepo steps skipped."
-     → Proceed to **Section 2.1**. *(All later sections behave exactly as today;
-     no `repos.json`/`config.json` are written unless the user later opts in via
-     `/cadre-refresh`.)*
+     → Proceed to **Section 2.1**. *(No `repos.json` is written, and the
+     submodule/PR-provider/merge-train steps are skipped. A monorepo still gets a
+     sync-mode prompt + `config.json` at **Section 2.7a** so a shared-mode team can
+     share tracks/Beads/leases — sync is topology-independent, not polyrepo-only.)*
    - **If B (polyrepo):** → Proceed to **Section 2.0b**.
 
 ---
@@ -366,7 +371,9 @@ only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the mod
      > "⚠️ Beads CLI (`bd`) is not installed. Beads provides persistent task memory across sessions."
      > "A) Continue without Beads integration"
      > "B) Stop - I'll install Beads first"
-     - If A: Set `beads_available = false`, skip to Section 2.8
+     - If A: Set `beads_available = false`, then go to the sync-mode step so a
+       team can still share `cadre/` tracks without Beads — **Section 2.7a** if
+       `topology == "monorepo"`, **Section 2.7b** if `topology == "polyrepo"`.
      - If B: HALT and wait for user
 
 2. **If Beads Available, Ask User:**
@@ -383,7 +390,9 @@ only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the mod
      > "A) Continue without Beads integration"
      > "B) Retry the failed command"
      > "C) Stop - I'll fix the issue first"
-     - If A: Set `beads_available = false`, skip to Section 2.8
+     - If A: Set `beads_available = false`, then go to the sync-mode step (so a
+       team can still share `cadre/` tracks without Beads) — **Section 2.7a** if
+       `topology == "monorepo"`, **Section 2.7b** if `topology == "polyrepo"`.
      - If B: Retry the command
      - If C: HALT and wait for user
    - Create `cadre/beads.json` from the template: copy
@@ -437,8 +446,82 @@ only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the mod
    - **If `topology == "polyrepo"`:** write
      `{"last_successful_step": "2.7_beads_polyrepo", "topology": "polyrepo"}` and
      proceed to **Section 2.7b**.
-   - **Else (monorepo — unchanged behavior):** write
-     `{"last_successful_step": "complete"}` and proceed to **Section 2.8**.
+   - **Else (monorepo):** write
+     `{"last_successful_step": "2.7_beads_monorepo", "topology": "monorepo"}` and
+     proceed to **Section 2.7a**.
+
+---
+
+### 2.7a Sync Mode (Monorepo only)
+
+**PROTOCOL: Decide whether this single repo's control plane (cadre/ + Beads task
+graph) is shared with teammates. Run only when `topology == "monorepo"`. Sync is
+topology-independent — `sync_mode == "shared"` enables shared tracks/Beads/leases
+here exactly as it does in polyrepo. See `references/cadre-sync.md`.**
+
+1. **Choose sync mode:**
+   > "How should this repo's control plane (cadre/ + Beads task graph) be shared?"
+   > A) **Shared** — push/pull `cadre/` + Beads to a remote so teammates see the same tracks/tasks/leases *(product CODE still stays local until you ship it)*
+   > B) **Local** — keep everything local *(today's default behavior)*
+   >
+   > Please respond with A or B. (Default: B.)
+
+2. **Probe control remote/branch:** determine `control_remote` (default `origin`)
+   and `control_branch` (`git symbolic-ref --short HEAD`, default `main`).
+
+3. **Write `cadre/config.json`:** copy `<TEMPLATES_DIR>/config.json` (resolved in
+   2.4) to `cadre/config.json`, then set:
+   - `sync_mode`: `"shared"` (A) or `"local"` (B). This is the master gate for all
+     team/shared behaviors across commands; `"local"` keeps today's behavior.
+   - `auto_open`: leave `false` (template default). Opt-in hook that lets
+     `/cadre-ship` auto-open the PR after a clean push; teams flip it to `true`
+     manually. Keep it present so `ship` can read it without a fallback.
+   - `require_second_reviewer`: leave `false` (template default). When a team flips
+     it to `true`, `/cadre-ship` refuses a track approved by its own owner
+     (`review.self_reviewed`), forcing a second reviewer.
+   - `control_remote`, `control_branch` from step 2 (write these whenever
+     `sync_mode == "shared"` so the sync pre/postamble can publish the control
+     plane; harmless defaults in `local` mode).
+   - Leave the polyrepo-only keys at their template defaults: there is no
+     `pr_provider`/`merge_train` decision in a monorepo (no cross-repo PR group),
+     so do **not** prompt for them — the template values are inert without
+     `repos.json`.
+
+4. **Register the merge driver & extend `.gitattributes` (only if
+   `sync_mode == "shared"`):** mirror the shared-state setup in
+   `references/cadre-sync.md` so synced control-plane state resolves cleanly.
+   - Append to project-root `.gitattributes` (skip lines already present), then
+     `git add .gitattributes`:
+     ```
+     # Per-track resume state — these are SCALAR JSON objects, NOT newline-delimited
+     # records, so `merge=union` would interleave both sides into INVALID JSON and
+     # corrupt resume. Pin to main's copy (parallel_state.json is ephemeral and
+     # deleted at phase end); let implement_state.json conflict surface as a normal
+     # merge so a real divergence is never silently lost.
+     cadre/tracks/**/parallel_state.json  merge=ours
+     ```
+     Leave `implement_state.json` on **normal merge** (no attribute) so a genuine
+     resume-state divergence surfaces as a conflict instead of being clobbered.
+     Leave `config.json` / `spec.md` / `plan.md` on normal merge too, so structural
+     conflicts surface intentionally.
+   - **Register the `ours` merge driver (CRITICAL):** an unregistered `ours` driver
+     makes git fall back to its default text merge, which injects conflict markers
+     into the pinned state files. Check and register:
+     ```bash
+     git config merge.ours.driver >/dev/null 2>&1 || git config merge.ours.driver true
+     ```
+     This is idempotent with any registration already performed in Section 2.7 / 3a
+     (which covers `.beads/** merge=ours` for full-Beads projects); the check-then-set
+     guard makes it a no-op when already set and the sole registration when Beads was
+     skipped, so the per-track `merge=ours` attribute written above always has a live
+     driver.
+
+5. **Commit State:**
+   ```json
+   {"last_successful_step": "2.7a_sync_mode_mono", "topology": "monorepo"}
+   ```
+
+6. **Continue:** Proceed to **Section 2.8**.
 
 ---
 
@@ -550,9 +633,12 @@ and `references/polyrepo-git.md`.**
      setup_state.json
      refresh_state.json
      ```
-   - **ADDITIONALLY** ignore per-track resume state **only when NOT shared mode**
-     (i.e. monorepo, OR polyrepo with `sync_mode == "local"`). In shared mode this
-     state is intentionally synced (see Section 2.7b), so do NOT ignore it there:
+   - **ADDITIONALLY** ignore per-track resume state **only when `sync_mode != "shared"`**
+     (any repo in local mode, or with no `config.json`) — **topology-independent**, so
+     a **shared monorepo** (Section 2.7a) does NOT get these ignore lines, exactly like
+     a shared polyrepo. In shared mode this state is intentionally synced (Section 2.7a
+     / 2.7b), and the `parallel_state.json  merge=ours` driver added there is dead code
+     on a gitignored file — so do NOT ignore it there:
      ```gitignore
      # Per-track resume state — local-only; in shared mode this is synced instead
      tracks/**/implement_state.json
@@ -565,11 +651,13 @@ and `references/polyrepo-git.md`.**
 
 1. **Announce Completion:** "Project setup completed! You can now initiate a track using the `newTrack` command."
 2. **Commit Files:** `git add cadre && git commit -m "cadre(setup): Add cadre setup files"`
-   - In polyrepo mode this also stages `repos.json`, `config.json`, `.gitmodules`,
-     and any scaffolded CI file.
-3. **Publish control plane (polyrepo + `sync_mode == "shared"` only):** this is
-   the first publish of the control plane — follow the sync postamble in
+   - In monorepo mode this also stages `config.json` (and `.gitattributes` if
+     shared mode extended it). In polyrepo mode this additionally stages
+     `repos.json`, `.gitmodules`, and any scaffolded CI file.
+3. **Publish control plane (`sync_mode == "shared"` only — monorepo OR polyrepo):**
+   this is the first publish of the control plane — follow the sync postamble in
    `references/cadre-sync.md`: `bd dolt push` then
-   `git push <control_remote> <control_branch>`. In `local` mode (or monorepo),
-   do **not** push — commits stay local as today.
+   `git push <control_remote> <control_branch>`. In `local` mode (the monorepo
+   default, or any repo without `config.json`), do **not** push — commits stay
+   local as today. Product-repo CODE is never pushed here regardless of sync mode.
 4. **Next Steps:** "Run `/cadre-newtrack` to begin work."

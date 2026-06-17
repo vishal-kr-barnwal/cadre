@@ -83,9 +83,16 @@ Append to `cadre/tracks/<track_id>/revisions.md`:
 git add cadre/tracks/<track_id>/
 git commit -m "cadre(revise): Update spec/plan for <track_id>"
 ```
-- **Polyrepo + `sync_mode: "shared"`:** also offer to toggle `sync_mode` here (the
-  "later overridable" path, mirroring `/cadre-refresh`), then run the sync
-  postamble (`bd dolt push` + control-plane push) so teammates see the revision.
+- **Control-plane sync (`sync_mode == "shared"` — both topologies):** if
+  `cadre/config.json` has `sync_mode == "shared"`, also offer to toggle `sync_mode`
+  here (the "later overridable" path, mirroring `/cadre-refresh`), then run the
+  **sync postamble** from `references/cadre-sync.md` after committing — `bd dolt
+  push` (mandatory in shared mode) then `git push <control_remote> <control_branch>`
+  to publish the control plane — so teammates see the revision. This gates on
+  `sync_mode == "shared"` alone, **regardless of topology** (monorepo OR polyrepo) —
+  never on polyrepo. The spec/plan conflict-surfacing rules (`spec.md`/`plan.md` stay
+  on normal merge, never auto-clobbered) apply per `references/cadre-sync.md`.
+  Product code is never auto-pushed.
 
 ## 7. Announce
 Report what was revised and suggest `/cadre-implement` to continue.

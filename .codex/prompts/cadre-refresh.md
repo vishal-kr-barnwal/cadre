@@ -9,6 +9,14 @@ Sync cadre context documentation with the current codebase state.
 
 Check cadre/ exists with core files. If not, suggest `/cadre-setup`.
 
+**Control-plane sync preamble (`sync_mode == "shared"` — both topologies):** if
+`cadre/config.json` has `sync_mode == "shared"`, run the **sync preamble** from
+`references/cadre-sync.md` (`git pull --rebase` + `bd dolt pull`) **before** reading
+or mutating `cadre/` — refresh consolidates learnings into `patterns.md` and rewrites
+context docs, so it must reconcile teammates' updates first (the matching postamble in
+section 8 publishes after). Gates on `sync_mode == "shared"` alone, regardless of
+topology.
+
 ## 2. Determine Scope
 
 If no argument, ask:
@@ -19,6 +27,13 @@ If no argument, ask:
 - `track [id]` - Specific track
 - `repos` - **Polyrepo only:** reconcile `repos.json` ↔ `.gitmodules`, toggle
   `sync_mode` / per-repo `enabled` (see section 8b)
+
+**Flags:**
+- `--all` - For the learnings consolidation pass (section 8a), read **every**
+  active **and** archived track's `learnings.md` (full-history consolidation).
+  Without it, learnings consolidation defaults to **active + recently-touched**
+  tracks only — archived learnings are already elevated into `patterns.md` at
+  archive time, so the default need not re-read the whole archive.
 
 ## 3. Analyze Drift
 
@@ -52,15 +67,36 @@ git add cadre/
 git commit -m "cadre(refresh): Sync context with codebase"
 ```
 
+**Control-plane sync (`sync_mode == "shared"` — both topologies):** if
+`cadre/config.json` has `sync_mode == "shared"`, run the **sync postamble** from
+`references/cadre-sync.md` after committing — `bd dolt push` (mandatory in shared
+mode) then `git push <control_remote> <control_branch>` to publish the refreshed
+control plane. This gates on `sync_mode == "shared"` alone, **regardless of
+topology** (monorepo OR polyrepo) — never on polyrepo. Product code is never
+auto-pushed.
+
 ---
 
 ## 8a. CONSOLIDATE LEARNINGS (Pattern Flywheel)
 
 **PROTOCOL: Aggregate and consolidate learnings across all tracks into project patterns.**
 
-1. **Scan All Track Learnings:**
-   - Read `learnings.md` from all tracks in `cadre/tracks/*/`
-   - Read `learnings.md` from all archived tracks in `cadre/archive/*/`
+1. **Scan In-Scope Track Learnings:**
+   - **Default (scoped):** read `learnings.md` only from **active +
+     recently-touched** tracks — every track in `cadre/tracks/*/` (the active
+     set), plus any **recently-archived** track in `cadre/archive/*/` (e.g.
+     archived within the last refresh window / a handful of most-recent archives).
+     Skip the rest of the archive. This keeps the pass cheap and **O(active)**
+     rather than O(cumulative history): `/cadre-archive` already **elevates** each
+     archived track's learnings into `patterns.md` at archive time, so re-reading
+     every historical archived `learnings.md` here would only re-derive patterns
+     that are already consolidated.
+   - **`--all` flag (full-history):** when invoked with the `--all` flag (e.g.
+     `/cadre-refresh --all` or `/cadre-refresh all --all`), read
+     `learnings.md` from **all** tracks in `cadre/tracks/*/` **and all** archived
+     tracks in `cadre/archive/*/` — the full historical consolidation. Use this to
+     rebuild `patterns.md` from scratch or to backfill after archives that
+     pre-date the elevation step.
 
 2. **Extract Pattern Candidates:**
    - Find patterns mentioned 2+ times across different tracks
@@ -153,7 +189,11 @@ choices made at setup. See `references/polyrepo-git.md` and `references/cadre-sy
    `git submodule update --init --remote` — offer it here only (never automatic).
 
 5. **Commit + publish:** commit `repos.json`/`config.json`/`.gitattributes`
-   changes; in shared mode run the sync postamble (`bd dolt push` + control-plane push).
+   changes; when the resulting `config.json` `sync_mode == "shared"` run the sync
+   postamble from `references/cadre-sync.md` (`bd dolt push` then control-plane
+   push). This publish gates on `sync_mode == "shared"` alone — not on topology —
+   so a refresh that toggles `local → shared` (step 2) publishes the control plane
+   on the very same run.
 
 ---
 
