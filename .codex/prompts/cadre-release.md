@@ -15,9 +15,13 @@ If `cadre/tracks.md` doesn't exist, tell the user to run `/cadre-setup` first.
 
 ## 2. Determine the Range
 
-1. Find the last release tag:
+1. Find the last release tag. **Fetch tags first** (read-only — this never pushes)
+   so the range and version see tags a teammate already cut and pushed; without it
+   the range double-counts commits already covered by their tag and the new tag can
+   collide:
    ```bash
-   git describe --tags --abbrev=0 2>/dev/null    # most recent tag, if any
+   git fetch --tags --quiet 2>/dev/null || true   # read-only; offline / no remote → skip
+   git describe --tags --abbrev=0 2>/dev/null      # most recent tag, if any
    ```
 2. The release covers tracks completed since that tag — primarily **archived** tracks
    (`cadre/archive/*/`) plus any `[x]` tracks not yet archived. Read each track's
@@ -64,6 +68,13 @@ git log <last_tag>..HEAD --no-merges --pretty=format:'%h %s'
 ```bash
 git add CHANGELOG.md
 git commit -m "chore(release): <version>"
+# Refuse to clobber an existing tag — never use -f (force-moving a tag silently
+# rewrites a release another clone may already hold). If <version> already exists
+# (locally or just fetched in §2), stop and ask for a different version.
+if git rev-parse -q --verify "refs/tags/<version>" >/dev/null; then
+  echo "🚫 Tag <version> already exists (local or fetched). Choose a different version."
+  exit 1
+fi
 git tag -a <version> -m "Release <version>"
 ```
 - **Do not push.** Announce:

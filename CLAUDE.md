@@ -119,15 +119,20 @@ A track is a logical unit of work (feature or bug fix). Each track has:
 ### Review Gate (New!)
 A track must pass review before it ships. `/cadre-review` writes
 `metadata.review` (`verdict` ∈ `approved` | `changes_requested`, `blocking_count`,
-`date`, `reviewer`, `coverage`, `self_reviewed`) and sets the Beads label
+`date`, `reviewer`, `coverage`, `self_reviewed`, `reviewed_sha`, `review_seq`) and
+sets the Beads label
 `review:ready` or `review:changes` (`/cadre-review --request` assigns a reviewer and
 sets `review:requested`). `coverage` carries the machine-measured number from
-`/cadre-implement`'s coverage gate (no longer self-asserted prose). `/cadre-ship`
+`/cadre-implement`'s coverage gate (no longer self-asserted prose). `review_seq` is a
+monotonic per-write counter; review runs **no owner ownership-guard** (a reviewer is
+not the owner), so that counter plus an **anti-downgrade guard** (an `approved` may
+not silently bury another reviewer's open `changes_requested` without a logged
+override) are what make concurrent reviews safe. `/cadre-ship`
 and `/cadre-land` then **refuse** to proceed on `changes_requested`,
 `blocking_count > 0`, or (when `config.json` `require_second_reviewer` is set) a
-`self_reviewed` approval; they also **re-read the verdict immediately before
-pushing** to close the review→ship TOCTOU window. An absent `review` block yields a
-soft prompt, and a clean approval proceeds.
+`self_reviewed` approval; they also run the shared-mode sync preamble and **re-read
+the verdict immediately before pushing** to close the review→ship TOCTOU window. An
+absent `review` block yields a soft prompt, and a clean approval proceeds.
 
 ### Identity, Ownership & Leases (New!)
 Assignees use the git committer identity (`user.email` → `user.name`), never a

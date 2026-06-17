@@ -45,8 +45,14 @@ on:
         description: "Track id to attempt to land (e.g. auth_20260609)"
         required: true
 
+# Per-track concurrency: serialize landings WITHIN a track, but let different
+# tracks land in parallel — otherwise one stalled/conflicted track blocks every
+# other (see /cadre-land §7). The track id is known here only for workflow_dispatch;
+# for review/check events we key on the triggering control PR (one control PR per
+# track, so per-PR == per-track), falling back to run_id so we never collapse
+# unrelated events onto one global lane.
 concurrency:
-  group: cadre-merge-train
+  group: cadre-merge-train-${{ github.event.inputs.track || github.event.pull_request.number || github.event.check_suite.pull_requests[0].number || github.run_id }}
   cancel-in-progress: false
 
 jobs:

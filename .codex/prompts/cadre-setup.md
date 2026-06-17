@@ -398,23 +398,10 @@ only when `topology == "polyrepo"`. See `references/polyrepo-git.md` for the mod
    - Create `cadre/beads.json` from the template: copy
      `<TEMPLATES_DIR>/beads.json` (resolved in 2.4) to `cadre/beads.json`,
      then set `"mode"` to `"stealth"` if the user chose stealth (B); leave it
-     `"normal"` for full integration (A). This is the canonical schema — do not
-     hand-write a different set of keys:
-     ```json
-     {
-       "enabled": true,
-       "mode": "normal",
-       "memoryStrategy": "beads-primary",
-       "epicPrefix": "cadre",
-       "autoCreateTasks": true,
-       "compactOnPhaseComplete": true,
-       "pushOnTaskComplete": false,
-       "pushOnPhaseComplete": true,
-       "pushOnTrackComplete": true,
-       "worktreePerTrack": true,
-       "worktreePerWorker": true
-     }
-     ```
+     `"normal"` for full integration (A). **Copy the template verbatim** — it is the
+     canonical schema; do not hand-write the keys here (an inline copy would silently
+     drift from `templates/beads.json`). The only field you change after copying is
+     `"mode"`.
    - Announce: "Beads integration enabled in [normal/stealth] mode."
    - **Polyrepo note (`topology == "polyrepo"`):** run `bd init` at the **control
      repo root** only (this step is already correct). Submodules get **no** own

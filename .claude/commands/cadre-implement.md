@@ -144,6 +144,11 @@ Implement track: $ARGUMENTS
        > "Do you want to proceed anyway?"
        > A) Yes - Proceed despite incomplete dependencies
        > B) No - Implement dependencies first
+     - If A: **log the override** so a deliberate bypass is distinguishable from
+       drift — append an audit line to the track's `learnings.md`
+       (`OVERRIDE: implemented past incomplete dependencies [<dep_ids>] — operator
+       <git-identity>, <YYYY-MM-DDThh:mm:ssZ>`) and, if Beads is available, mirror it
+       (`bd note <epic_id> "OVERRIDE: started past incomplete deps [<dep_ids>] (<git-identity>)" --json`).
      - If B: Suggest `/cadre-implement <first_dependency>`
 
 5. **Handle No Selection:** If no track selected, inform user and await instructions.
@@ -278,6 +283,19 @@ Implement track: $ARGUMENTS
      - If `owner` is `null`/absent (legacy or unattributed state), or the current
        `<git-identity>` is `null`, or `owner` matches `<git-identity>`: resume
        **silently** (no prompt).
+   - **Atomic re-claim before resuming (closes the resume-path race).** Resuming a
+     **named** track lands here without passing the §3b selection claim, so the
+     atomic Beads-CAS was never run — two operators resuming a track whose `owner`
+     is `null` would *both* clear the silent-resume branch above and both proceed.
+     Before announcing, run the **same atomic Beads-CAS claim** as
+     `references/ownership-guard.md §4` against the track's `beads_epic` (claim only
+     if unheld / stale / yours; staleness window per §5). Read **rows-affected**:
+     `1` → you hold it — mirror `owner = <git-identity>` into `metadata.json`
+     (key-scoped jq) and `implement_state.json`, then resume. `0` → a sibling already
+     holds it → treat as **foreign-held**: fall back to the take-over prompt above, or
+     pick another track. When `bd` is unavailable there is no CAS — stamp `owner` and
+     rely on the control-plane `git push --rebase` round-trip (shared mode) / the
+     Ownership Guard (monorepo) to detect a racing claim, exactly as §3b's fallback.
    - Announce: "Resuming implementation from [current_phase] (Phase [current_phase_index + 1]) - Task [current_task_index + 1]"
    - Skip to indicated phase and task within that phase
 

@@ -73,7 +73,16 @@ For `skipped`, also ask the disposition:
    - Run the standard Beads availability check (see `references/beads-error-handler.md`)
    - If `BEADS_AVAILABLE=false`: skip to step 6
 
-2. **Sync (if task has `beads_task_id` in track metadata):**
+2. **Resolve the task's Beads id from the `beads_tasks` map** in `metadata.json`
+   (there is **no** top-level `beads_task_id` field — the schema is a `beads_tasks`
+   object keyed `phase{N}_task{M}`). Derive the key for the flagged task and look it
+   up; if there is no entry, skip to step 6 (nothing to sync). Use the resolved id as
+   `<task_id>` below:
+   ```bash
+   META="cadre/tracks/<track_id>/metadata.json"
+   task_id="$(jq -r '.beads_tasks["phase<N>_task<M>"] // empty' "$META")"
+   [ -z "$task_id" ] && echo "No Beads task mapped for this task; skipping Beads sync." # → step 6
+   ```
 
    **If `blocked`:**
    ```bash

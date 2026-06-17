@@ -222,8 +222,17 @@ over), stop here.
 **GOAL: Execute revert, verify plan state, handle errors gracefully.**
 
 1. **Execute Reverts:**
-   - **MONOREPO:** run `git revert --no-edit <sha>` for each commit, most recent
-     first, working backward.
+   - **MONOREPO:** revert on the **track's own branch**, not whatever happens to be
+     checked out. Resolve `git_branch` from `metadata.json` (default
+     `track/<track_id>`) and check it out (or operate in its worktree) first, so the
+     revert commits land on the track branch:
+     ```bash
+     BRANCH="$(jq -r '.git_branch // "track/<track_id>"' cadre/tracks/<track_id>/metadata.json)"
+     git rev-parse --verify "$BRANCH" >/dev/null 2>&1 && git checkout "$BRANCH"
+     ```
+     Then run `git revert --no-edit <sha>` for each commit, most recent first,
+     working backward. (If the branch no longer exists — e.g. a shipped+deleted
+     track — confirm the intended target with the user before reverting on HEAD.)
    - **POLYREPO — per-repo chains (see `references/polyrepo-git.md`):** process one
      repo at a time. Within each repo, revert its SHAs reverse-chronologically:
      ```bash

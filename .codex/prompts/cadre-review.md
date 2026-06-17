@@ -143,15 +143,39 @@ SELF=false; [ -n "$ME" ] && [ "$ME" = "$OWNER" ] && SELF=true
 # advanced past it, they demand a re-review (see those commands' verdict re-read).
 BRANCH="$(jq -r '.git_branch // "track/<track_id>"' "$META")"
 REVIEWED_SHA="$(git rev-parse "$BRANCH" 2>/dev/null || git rev-parse HEAD)"
+
+# --- Reviewer-race guard + monotonic sequence (no server CAS) -----------------
+# review has no compare-and-set, so two reviewers can race and the second write
+# wins last. Re-read the verdict currently on disk: review_seq gives every write a
+# monotonic id (for audit + downstream detection), and the anti-downgrade check
+# stops an `approved` from SILENTLY burying a DIFFERENT reviewer's still-open
+# `changes_requested`. (In shared mode the §8 postamble pull-rebase also surfaces a
+# truly concurrent cross-clone `.review` write as a normal-merge conflict on
+# metadata.json — this guard covers the same-clone / already-pulled case.)
+CUR_VERDICT="$(jq -r '.review.verdict // "absent"' "$META")"
+CUR_BLOCKING="$(jq -r '.review.blocking_count // 0' "$META")"
+CUR_REVIEWER="$(jq -r '.review.reviewer // ""' "$META")"
+REVIEW_SEQ="$(( $(jq -r '.review.review_seq // 0' "$META") + 1 ))"
+NEW_VERDICT="<approved|changes_requested>"
+if [ "$NEW_VERDICT" = "approved" ] \
+   && { [ "$CUR_VERDICT" = "changes_requested" ] || [ "$CUR_BLOCKING" -gt 0 ]; } \
+   && [ -n "$CUR_REVIEWER" ] && [ "$CUR_REVIEWER" != "$ME" ]; then
+  echo "⚠️ $CUR_REVIEWER already requested changes ($CUR_BLOCKING blocking). Approving overrides their verdict."
+  # Ask the user to confirm the override. On NO → HALT without writing. On YES →
+  # append the superseded verdict to learnings.md (OVERRIDE: approved over
+  # $CUR_REVIEWER's changes_requested — <git-identity>, <date>) before writing below.
+fi
+
 tmp="$(mktemp)"
-jq --arg verdict "<approved|changes_requested>" \
+jq --arg verdict "$NEW_VERDICT" \
    --argjson blocking <blocking_count> \
    --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
    --argjson reviewer "$REVIEWER" \
    --argjson coverage "$COVERAGE" \
    --argjson self "$SELF" \
    --arg reviewed_sha "$REVIEWED_SHA" \
-   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer, coverage: $coverage, self_reviewed: $self, reviewed_sha: $reviewed_sha}' \
+   --argjson seq "$REVIEW_SEQ" \
+   '.review = {verdict: $verdict, blocking_count: $blocking, date: $date, reviewer: $reviewer, coverage: $coverage, self_reviewed: $self, reviewed_sha: $reviewed_sha, review_seq: $seq}' \
    "$META" > "$tmp" && mv "$tmp" "$META"
 ```
 - `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
@@ -166,6 +190,12 @@ jq --arg verdict "<approved|changes_requested>" \
   the recorded verdict reflects a real measurement, not a self-asserted "tests pass".
   If a track was reviewed with `coverage: null`, note that coverage was never
   measured.
+- `review_seq` is a monotonic counter (previous `review_seq` + 1, starting at 1). It
+  is **not** a lock — review intentionally runs **no owner ownership-guard** (a
+  reviewer is deliberately not the track owner). The sequence plus the anti-downgrade
+  guard above are what make concurrent reviews safe: every verdict gets a distinct,
+  increasing id for audit, and an `approved` cannot silently erase another reviewer's
+  open `changes_requested` without an explicit, logged override.
 - **Self-review (warn, or hard-block when configured):** if `metadata.json.owner`
   equals the reviewer `<git-identity>`, the operator is reviewing their own track.
   Read `cadre/config.json` `require_second_reviewer` (default **false**):

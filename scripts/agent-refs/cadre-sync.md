@@ -77,7 +77,13 @@ postamble push after mutation.
    even if that trigger is set to optional.
 3. `git push <control_remote> <control_branch>` to publish the control plane.
 4. On push rejection (someone else pushed): re-run the preamble (pull --rebase +
-   dolt pull), resolve per the rules above, then push again.
+   dolt pull), resolve per the rules above, then push again — but **bounded**: retry
+   at most **5 times** with a short backoff between attempts (e.g. 1s, 2s, 4s…). If
+   still rejected after 5 attempts, **stop and surface to the user** rather than
+   looping forever on a busy control branch. For a **read-modify-write** project file
+   (e.g. `patterns.md`), **recompute** your edit against the freshly-pulled file on
+   each retry — re-run the dedup-before-append against the new base — instead of
+   replaying the prior textual hunk, which would re-conflict on every iteration.
 5. **On rejection due to a duplicate `track_id`** (a `git push` non-fast-forward
    or `bd dolt push` rejection where the conflicting object is a track another
    teammate created with the *same* `shortname_YYYYMMDD` ID): a sibling claimed
@@ -104,15 +110,25 @@ postamble push after mutation.
 .beads/** merge=ours
 # Ephemeral per-track state — rebuilt next dispatch; keep our side, don't conflict
 cadre/tracks/**/parallel_state.json  merge=ours
+# Append-only markdown logs — keep BOTH sides on merge so concurrent appends never
+# conflict (safe precisely because these are append-only line logs, not JSON objects).
+cadre/patterns.md                     merge=union
+cadre/tracks/**/learnings.md          merge=union
+cadre/tracks/**/blockers.md           merge=union
+cadre/tracks/**/skipped.md            merge=union
+cadre/tracks/**/revisions.md          merge=union
 ```
 
-> **Why not `merge=union`?** `union` concatenates both sides' lines, which is
-> only safe for append-only line logs. `parallel_state.json` and
+> **Why `merge=union` for the markdown logs but not the JSON?** `union` concatenates
+> both sides' lines, which is correct for **append-only line logs** — hence
+> `patterns.md` and the per-track `learnings.md` / `blockers.md` / `skipped.md` /
+> `revisions.md` use it, so two operators' concurrent appends both survive instead of
+> conflicting on every push-rebase. But `parallel_state.json` and
 > `implement_state.json` are single JSON objects — unioning them interleaves
 > keys/braces into invalid JSON. `parallel_state.json` uses `merge=ours`;
-> `implement_state.json` stays on the **normal merge** (no attribute) — either
-> way a conflict is resolved by discarding the stale copy and regenerating, never
-> by blindly splicing.
+> `implement_state.json` stays on the **normal merge** (no attribute) — either way a
+> conflict is resolved by discarding the stale copy and regenerating, never by
+> blindly splicing.
 
 These drivers only take effect once registered (see "Driver registration"
 below). Leave `repos.json` / `config.json` / `spec.md` / `plan.md` on normal

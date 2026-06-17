@@ -19,6 +19,14 @@ local.
 ## 1. Verify Setup & Select Track
 
 - If `cadre/tracks.md` doesn't exist, tell the user to run `/cadre-setup` first.
+- **Sync preamble (shared mode).** If `cadre/config.json` has `sync_mode == "shared"`
+  (in **both** monorepo and polyrepo — never gate on topology), run the **sync
+  preamble** from `references/cadre-sync.md` now — `git pull --rebase` the control
+  plane + `bd dolt pull` — **before** the ownership guard and review gate below. Ship
+  otherwise reads `metadata.review` from local disk only, so without this a teammate's
+  cross-machine `changes_requested` (or an advanced `reviewed_sha`) is invisible and
+  the gate clears on a stale local approval. In `local` mode (or when `config.json` is
+  absent) skip the preamble — today's single-machine behavior is unchanged.
 - If a `track_id` is provided, use it; otherwise list completed (`[x]`) tracks not yet
   archived and ask the user to choose.
 - Read `cadre/tracks/<track_id>/metadata.json` for `git_branch`
@@ -42,7 +50,11 @@ local.
     gate recorded. Keep the existing soft behavior: confirm the track has been
     reviewed (a `## Review` entry in `learnings.md` with a "Ready to ship" verdict).
     If not, suggest `/cadre-review <track_id>` first and ask whether to proceed
-    anyway.
+    anyway. **If the user proceeds without a recorded review, log the override** so a
+    deliberate bypass is distinguishable from drift: append an audit line to
+    `learnings.md` (`OVERRIDE: shipped without a recorded review — operator
+    <git-identity>, <YYYY-MM-DDThh:mm:ssZ>`) and, if Beads is available, mirror it to
+    the epic (`bd note <epic_id> "OVERRIDE: shipped without recorded review (<git-identity>)" --json`).
   - **`$verdict == "changes_requested"` OR `$blocking > 0`** → **REFUSE**:
     > "🚫 Track `<track_id>` has not cleared review (verdict:
     > `$verdict`, blocking findings: `$blocking`). Resolve the findings
@@ -174,7 +186,27 @@ For the selected track:
      the create command as a manual fallback and tell the user to open the PR
      themselves.
 
-## 3. Next Step
+## 3. Publish the Control Plane (shared mode)
+
+The §1 ownership guard mirrored `owner` into `metadata.json` and §2 committed the
+flushed Dolt state, but `/cadre-ship` otherwise pushes **product code only**
+(`git push origin track/<id>`). In shared mode that owner-claim and any control-plane
+state must also reach teammates, or the team never learns the track shipped. If
+`cadre/config.json` has `sync_mode == "shared"` (in **both** monorepo and polyrepo —
+never gate on topology), run the **sync postamble** from `references/cadre-sync.md`:
+
+1. Commit the `cadre/` changes (the owner mirror from the §1 guard, plus any
+   key-scoped `metadata.json` writes). Key-scoped jq only, never a full-file rewrite.
+2. **`bd dolt push` is MANDATORY** here to publish the claim to the shared task graph.
+3. `git push <control_remote> <control_branch>` to publish the control plane.
+4. On push rejection, re-run the preamble then push again — **bounded** per
+   `references/cadre-sync.md` (do not loop unbounded).
+
+This publishes **only the control plane**; the product-code push stays in §2. In
+`local` mode (or when `config.json` is absent), skip this section — today's
+single-machine behavior is unchanged.
+
+## 4. Next Step
 
 Once the PR is open (or merged), run `/cadre-archive <track_id>` to extract
 learnings, tear down the worktree, and move the track to `cadre/archive/`.

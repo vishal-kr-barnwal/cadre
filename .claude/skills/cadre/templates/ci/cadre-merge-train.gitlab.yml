@@ -28,9 +28,11 @@ stages:
 cadre-merge-train:
   stage: merge-train
   image: registry.gitlab.com/gitlab-org/cli:latest
-  # Serialize trains so two pipelines never merge/bump submodules concurrently
-  # (GitLab equivalent of the GitHub `concurrency` group on this workflow).
-  resource_group: cadre-merge-train
+  # Serialize trains PER TRACK so two pipelines never merge/bump submodules
+  # concurrently for the same track, while different tracks still land in parallel
+  # (a single global lane would let one stalled track block every other — see
+  # /cadre-land §7). CADRE_TRACK is the required track id for this run.
+  resource_group: cadre-merge-train-$CADRE_TRACK
   rules:
     # GitLab has no cross-project "sibling MR approved" webhook, so this job is
     # driven by: a recurring **pipeline schedule** (set CADRE_TRACK on the
