@@ -1533,6 +1533,136 @@ function implementationPrep(root, args = {}) {
     warnings
   };
 }
+function likelyTestCandidatesForFile(root, file) {
+  const normalized = normalizeClaimPath(file);
+  if (!normalized) return [];
+  const parsed = import_node_path.default.parse(normalized);
+  const candidates = [
+    import_node_path.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+    import_node_path.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+    import_node_path.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+    import_node_path.default.join("test", normalized),
+    import_node_path.default.join("tests", normalized)
+  ].map((candidate) => normalizeClaimPath(candidate));
+  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path.default.join(root, candidate)))));
+}
+function planAssist(root, args = {}) {
+  const trackId = args.trackId || args.track_id || null;
+  const track = trackId ? findTrack(root, trackId) : null;
+  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
+  const topology = loadTopology(root);
+  const plan = args.planText ? parsePlanText(args.planText) : track ? parsePlanFile(track.plan_path) : null;
+  if (!plan) return { ok: false, error: "trackId or planText is required" };
+  const repoErrors = track ? unresolvedPlanRepos(root, track, args) : [];
+  const claims = (plan.tasks || []).map((task) => {
+    const repo = topology.polyrepo ? task.repo || topology.defaultRepo : ".";
+    return {
+      phase_index: task.phase_index,
+      task_index: task.task_index,
+      task_key: task.task_key,
+      title: task.title,
+      repo,
+      files: task.files || [],
+      depends: task.depends || [],
+      likely_tests: (task.files || []).flatMap((file) => likelyTestCandidatesForFile(root, file))
+    };
+  });
+  const fileClaims = {};
+  for (const claim of claims) {
+    const repo = asString(claim.repo, ".");
+    if (!fileClaims[repo]) fileClaims[repo] = [];
+    fileClaims[repo].push(...asStringArray(claim.files));
+  }
+  const rawFileClaims = Object.fromEntries(Object.entries(fileClaims).map(([repo, files2]) => [repo, [...files2]]));
+  for (const repo of Object.keys(fileClaims)) {
+    const files2 = fileClaims[repo] || [];
+    fileClaims[repo] = Array.from(new Set(files2.map(normalizeClaimPath).filter(Boolean))).sort();
+  }
+  const duplicateClaims = Object.entries(rawFileClaims).flatMap(([repo, files2]) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const file of files2) counts.set(file, (counts.get(file) || 0) + 1);
+    return Array.from(counts.entries()).filter(([, count]) => count > 1).map(([file, count]) => ({ repo, file, count }));
+  });
+  const phases = (plan.phases || []).map((phase) => {
+    const phaseClaims = claims.filter((claim) => claim.phase_index === phase.phase_index);
+    const phaseFiles = phaseClaims.flatMap((claim) => asStringArray(claim.files).map((file) => `${claim.repo}:${normalizeClaimPath(file)}`));
+    return {
+      phase_index: phase.phase_index,
+      title: phase.title,
+      execution: phase.annotations.execution || "sequential",
+      tasks: phase.tasks.length,
+      parallel_candidate: phaseClaims.length > 1 && new Set(phaseFiles).size === phaseFiles.length
+    };
+  });
+  const files = Array.from(new Set(Object.values(fileClaims).flat())).slice(0, Number(args.limit || 50));
+  const semanticImpact = files.length > 0 ? lspImpact(root, { files, limit: args.limit || 50 }) : null;
+  const schedule = track ? phaseSchedule(root, { ...args, trackId: track.track_id }) : null;
+  return {
+    ok: repoErrors.length === 0 && plan.ok !== false,
+    root,
+    track_id: track?.track_id || trackId,
+    topology: {
+      polyrepo: topology.polyrepo,
+      default_repo: topology.defaultRepo
+    },
+    claims,
+    file_claims: fileClaims,
+    duplicate_claims: duplicateClaims,
+    likely_tests: Array.from(new Set(claims.flatMap((claim) => asStringArray(claim.likely_tests)))).sort(),
+    phases,
+    schedule,
+    semantic_impact: semanticImpact,
+    errors: [...plan.errors || [], ...repoErrors],
+    warnings: plan.warnings || []
+  };
+}
+function worktreePlan(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return repoError;
+  const topology = loadTopology(root);
+  const branch = args.branch || track.metadata.git_branch || `track/${track.track_id}`;
+  const entries = topology.polyrepo ? repoEntriesForTrack(root, track, args) : [{
+    repo: ".",
+    root,
+    path: ".",
+    source: "project-root",
+    base: args.base || "main",
+    head: branch
+  }];
+  const plans = entries.map((entry) => {
+    const repo = asString(entry.repo, ".");
+    const repoBranch = args.branch || entry.head || branch;
+    const base = args.base || entry.base || "main";
+    const relWorktree = topology.polyrepo ? `.worktrees/${track.track_id}/${safeName(repo)}` : asOptionalString(track.metadata.worktree_path) || `.worktrees/${track.track_id}`;
+    const absWorktree = import_node_path.default.resolve(root, relWorktree);
+    return {
+      repo,
+      source_root: entry.root,
+      source_path: entry.path,
+      worktree_path: relWorktree,
+      branch: repoBranch,
+      base,
+      exists: fileExists(absWorktree),
+      commands: [
+        {
+          command: "git",
+          args: ["worktree", "add", "-B", repoBranch, absWorktree, base],
+          cwd: entry.root
+        }
+      ]
+    };
+  });
+  return {
+    ok: true,
+    root,
+    track_id: track.track_id,
+    execute: false,
+    topology: topology.polyrepo ? "polyrepo" : "monorepo",
+    plans
+  };
+}
 function planIntegrity(root, trackId = null) {
   const topology = loadTopology(root);
   const foundTrack = trackId ? findTrack(root, trackId) : null;
@@ -3388,7 +3518,7 @@ var TOOLS = [
   ),
   packetSchema(
     { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
-    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree"]
+    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"]
   ),
   packetSchema(
     { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
@@ -3741,6 +3871,8 @@ function trackPacket(args) {
   if (action === "phase_schedule") return envelope(phaseSchedule(root, args));
   if (action === "prepare_implementation") return envelope(implementationPrep(root, args));
   if (action === "create_beads_tree") return envelope(createBeadsTree(root, args));
+  if (action === "plan_assist") return envelope(planAssist(root, args));
+  if (action === "worktree_plan") return envelope(worktreePlan(root, args));
   return envelope({ ok: false, error: `Unknown cadre_track action: ${action}` });
 }
 function mutatePacket(args) {

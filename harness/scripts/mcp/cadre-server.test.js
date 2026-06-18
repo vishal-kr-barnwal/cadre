@@ -187,6 +187,10 @@ test("MCP root resolution rejects harness skill directories without project stat
     ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);
     }
+    const trackTool = tools.tools.find((tool) => tool.name === "cadre_track");
+    const trackActions = trackTool.inputSchema.properties.action.enum;
+    assert.ok(trackActions.includes("plan_assist"));
+    assert.ok(trackActions.includes("worktree_plan"));
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(

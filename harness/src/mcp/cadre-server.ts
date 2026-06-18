@@ -107,7 +107,7 @@ const TOOLS = [
   ),
   packetSchema(
     { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
-    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree"]
+    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"]
   ),
   packetSchema(
     { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
@@ -489,6 +489,8 @@ function trackPacket(args: RuntimeArgs): RuntimeEnvelope {
   if (action === "phase_schedule") return envelope(core.phaseSchedule(root, args));
   if (action === "prepare_implementation") return envelope(core.implementationPrep(root, args));
   if (action === "create_beads_tree") return envelope(core.createBeadsTree(root, args));
+  if (action === "plan_assist") return envelope(core.planAssist(root, args));
+  if (action === "worktree_plan") return envelope(core.worktreePlan(root, args));
   return envelope({ ok: false, error: `Unknown cadre_track action: ${action}` });
 }
 

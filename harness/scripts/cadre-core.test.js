@@ -200,6 +200,31 @@ test("implementationPrep returns bounded candidate context", () => {
   }
 });
 
+test("planAssist and worktreePlan return bounded planning evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plan-assist-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "assist_20260617", samplePlan("assist_20260617"));
+    write(path.join(root, "src", "core.js"), "function core() { return true; }\n");
+    write(path.join(root, "src", "core.test.js"), "test('core', () => {});\n");
+
+    const assist = core.planAssist(root, { trackId: "assist_20260617", limit: 20 });
+    assert.equal(assist.ok, true);
+    assert.ok(assist.file_claims["."].includes("src/core.js"));
+    assert.ok(assist.likely_tests.includes("src/core.test.js"));
+    assert.ok(assist.phases.some((phase) => phase.phase_index === 1 && phase.parallel_candidate === true));
+    assert.equal(assist.semantic_impact.ok, true);
+
+    const worktrees = core.worktreePlan(root, { trackId: "assist_20260617" });
+    assert.equal(worktrees.ok, true);
+    assert.equal(worktrees.execute, false);
+    assert.equal(worktrees.plans[0].repo, ".");
+    assert.ok(worktrees.plans[0].commands[0].args.includes(path.join(root, ".worktrees", "assist_20260617")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("createBeadsTree dryRun plans epic, tasks, deps, notes, and metadata patch", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-tree-test-"));
   try {
