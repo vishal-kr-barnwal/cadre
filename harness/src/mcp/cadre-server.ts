@@ -110,6 +110,10 @@ const TOOLS = [
     ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"]
   ),
   packetSchema(
+    { name: "cadre_parallel", text: "Cadre parallel packet: plan worker waves, dry-run worker setup, record finishes, merge back, and cleanup." },
+    ["plan", "next_wave", "setup_workers", "record_finish", "merge_back", "cleanup"]
+  ),
+  packetSchema(
     { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
     ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"]
   ),
@@ -516,6 +520,11 @@ function mutatePacket(args: RuntimeArgs): RuntimeEnvelope {
   return envelope({ ok: false, error: `Unknown cadre_mutate action: ${action}` });
 }
 
+function parallelPacket(args: RuntimeArgs): RuntimeEnvelope {
+  const root = requireCadreRoot(args);
+  return envelope(core.parallelWorkflow(root, args));
+}
+
 async function reviewPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
   const root = requireCadreRoot(args);
   const action = args.action || "assist";
@@ -595,6 +604,7 @@ async function toolCall(name: string, args: RuntimeArgs = {}): Promise<TextJsonR
   if (name === "cadre_project") return asTextJson(await projectPacket(args));
   if (name === "cadre_status") return asTextJson(statusPacket(args));
   if (name === "cadre_track") return asTextJson(trackPacket(args));
+  if (name === "cadre_parallel") return asTextJson(parallelPacket(args));
   if (name === "cadre_mutate") return asTextJson(mutatePacket(args));
   if (name === "cadre_complete_task") {
     const root = requireCadreRoot(args);

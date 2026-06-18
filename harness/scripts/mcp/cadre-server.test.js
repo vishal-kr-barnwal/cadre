@@ -178,6 +178,7 @@ test("MCP root resolution rejects harness skill directories without project stat
       "cadre_project",
       "cadre_status",
       "cadre_track",
+      "cadre_parallel",
       "cadre_mutate",
       "cadre_complete_task",
       "cadre_beads",
@@ -191,6 +192,10 @@ test("MCP root resolution rejects harness skill directories without project stat
     const trackActions = trackTool.inputSchema.properties.action.enum;
     assert.ok(trackActions.includes("plan_assist"));
     assert.ok(trackActions.includes("worktree_plan"));
+    const parallelTool = tools.tools.find((tool) => tool.name === "cadre_parallel");
+    const parallelActions = parallelTool.inputSchema.properties.action.enum;
+    assert.ok(parallelActions.includes("next_wave"));
+    assert.ok(parallelActions.includes("setup_workers"));
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(

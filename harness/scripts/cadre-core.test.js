@@ -225,6 +225,62 @@ test("planAssist and worktreePlan return bounded planning evidence", () => {
   }
 });
 
+test("parallelWorkflow plans waves and keeps mutating actions dry-run by default", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-parallel-packet-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "parallel_20260617", samplePlan("parallel_20260617"));
+
+    const next = core.parallelWorkflow(root, { action: "next_wave", trackId: "parallel_20260617" });
+    assert.equal(next.ok, true);
+    assert.deepEqual(next.phase_ids, ["phase1"]);
+    assert.equal(next.workers.length, 2);
+
+    const setup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617" });
+    assert.equal(setup.ok, true);
+    assert.equal(setup.dry_run, true);
+    assert.equal(setup.commands.length, 2);
+    assert.equal(setup.results.length, 0);
+
+    const dryRecord = core.parallelWorkflow(root, {
+      action: "record_finish",
+      trackId: "parallel_20260617",
+      workerId: "worker-one",
+      phaseIndex: 1,
+      taskIndex: 1,
+    });
+    assert.equal(dryRecord.ok, true);
+    assert.equal(dryRecord.dry_run, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "parallel_20260617", "parallel_state.json")), false);
+
+    const recorded = core.parallelWorkflow(root, {
+      action: "record_finish",
+      execute: true,
+      trackId: "parallel_20260617",
+      workerId: "worker-one",
+      status: "awaiting_merge",
+      phaseIndex: 1,
+      taskIndex: 1,
+      branch: "track/parallel-worker-one",
+      worktree: ".worktrees/parallel_20260617/worker-one",
+      repo: ".",
+    });
+    assert.equal(recorded.ok, true);
+    assert.equal(recorded.summary.completed_workers, 1);
+
+    const merge = core.parallelWorkflow(root, { action: "merge_back", trackId: "parallel_20260617" });
+    assert.equal(merge.ok, true);
+    assert.equal(merge.dry_run, true);
+    assert.ok(merge.commands[0].args.includes("track/parallel-worker-one"));
+
+    const cleanup = core.parallelWorkflow(root, { action: "cleanup", trackId: "parallel_20260617" });
+    assert.equal(cleanup.ok, true);
+    assert.equal(cleanup.commands[0].args[2], ".worktrees/parallel_20260617/worker-one");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("createBeadsTree dryRun plans epic, tasks, deps, notes, and metadata patch", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-tree-test-"));
   try {

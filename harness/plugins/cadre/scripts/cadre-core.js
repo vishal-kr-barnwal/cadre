@@ -53,6 +53,7 @@ __export(cadre_core_exports, {
   lspImpact: () => lspImpact,
   lspReview: () => lspReview,
   metadataPatch: () => metadataPatch,
+  parallelWorkflow: () => parallelWorkflow,
   parsePlanFile: () => parsePlanFile,
   parsePlanText: () => parsePlanText,
   phaseSchedule: () => phaseSchedule,
@@ -2699,6 +2700,154 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
     }
   };
 }
+function parallelStatePath(track) {
+  return import_node_path.default.join(track.dir, "parallel_state.json");
+}
+function readParallelState(track) {
+  const existing = readJson(parallelStatePath(track), {
+    track_id: track.track_id,
+    execution_mode: "parallel",
+    started_at: utcNow(),
+    workers: []
+  });
+  const existingObject = isRecord(existing) ? asJsonObject(existing) : {};
+  return {
+    ...existingObject,
+    track_id: asOptionalString(existingObject.track_id) || track.track_id,
+    execution_mode: asOptionalString(existingObject.execution_mode) || "parallel",
+    started_at: asOptionalString(existingObject.started_at) || utcNow(),
+    workers: Array.isArray(existingObject.workers) ? existingObject.workers.map((worker) => asJsonObject(worker)) : []
+  };
+}
+function parallelWorkersForWave(root, track, args = {}) {
+  const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
+  if (schedule.ok === false) return schedule;
+  const readyGroups = Array.isArray(schedule.ready_groups) ? schedule.ready_groups : [];
+  const groupIndex = Number(args.groupIndex || 0);
+  const phaseIds = asStringArray(readyGroups[groupIndex]);
+  const phases = asArray(schedule.phases);
+  const workers = phases.filter((phase) => phaseIds.includes(asString(phase.phase_id))).flatMap((phase) => asArray(phase.tasks).map((task) => ({
+    worker_id: `${track.track_id}_${asString(task.task_key)}`,
+    phase_id: asString(phase.phase_id),
+    phase_index: asNumber(phase.phase_index),
+    task_index: asNumber(task.task_index),
+    task_key: asString(task.task_key),
+    title: asString(task.title),
+    marker: asString(task.marker),
+    repo: asString(task.repo, "."),
+    files: asStringArray(task.files),
+    branch: `${track.metadata.git_branch || `track/${track.track_id}`}-${safeName(task.task_key)}`
+  }))).filter((worker) => !["x", "-"].includes(worker.marker));
+  return {
+    ok: true,
+    track_id: track.track_id,
+    schedule,
+    group_index: groupIndex,
+    phase_ids: phaseIds,
+    workers
+  };
+}
+function plannedCommand(command, args, cwd) {
+  return { command, args, cwd };
+}
+function runPlannedCommands(commands) {
+  return commands.map((entry) => runCommand(asString(entry.command), asStringArray(entry.args), { cwd: asString(entry.cwd) }));
+}
+function parallelSetupWorkers(root, track, args = {}) {
+  const wave = parallelWorkersForWave(root, track, args);
+  if (wave.ok === false) return wave;
+  const topology = loadTopology(root);
+  const entries = new Map(repoEntriesForTrack(root, track, args).map((entry) => [entry.repo, entry]));
+  const commands = [];
+  for (const worker of asArray(wave.workers)) {
+    const repo = asString(worker.repo, ".");
+    const entry = entries.get(repo) || { root, base: args.base || "main" };
+    const worktree = import_node_path.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    commands.push(plannedCommand(
+      "git",
+      ["worktree", "add", "-B", asString(worker.branch), worktree, asString(entry.base || args.base || "main")],
+      asString(entry.root || root)
+    ));
+  }
+  const execute = args.execute === true;
+  return {
+    ok: true,
+    track_id: track.track_id,
+    action: "setup_workers",
+    execute,
+    dry_run: !execute,
+    topology: topology.polyrepo ? "polyrepo" : "monorepo",
+    workers: wave.workers,
+    commands,
+    results: execute ? runPlannedCommands(commands) : []
+  };
+}
+function parallelMergeBack(root, track, args = {}) {
+  const state = readParallelState(track);
+  const workers = state.workers.filter((worker) => !args.workerId || worker.worker_id === args.workerId);
+  const commands = workers.filter((worker) => worker.branch || worker.commit_sha).map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.branch)], root));
+  const execute = args.execute === true;
+  return {
+    ok: true,
+    track_id: track.track_id,
+    action: "merge_back",
+    execute,
+    dry_run: !execute,
+    workers,
+    commands,
+    results: execute ? runPlannedCommands(commands) : []
+  };
+}
+function parallelCleanup(root, track, args = {}) {
+  const state = readParallelState(track);
+  const workers = state.workers.filter((worker) => worker.worktree);
+  const commands = workers.map((worker) => plannedCommand("git", ["worktree", "remove", asString(worker.worktree)], root));
+  const execute = args.execute === true;
+  return {
+    ok: true,
+    track_id: track.track_id,
+    action: "cleanup",
+    execute,
+    dry_run: !execute,
+    workers,
+    commands,
+    results: execute ? runPlannedCommands(commands) : []
+  };
+}
+function parallelWorkflow(root, args = {}) {
+  const action = args.action || "plan";
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return repoError;
+  if (action === "plan") {
+    const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
+    return { ok: schedule.ok !== false, track_id: track.track_id, schedule, state: readParallelState(track) };
+  }
+  if (action === "next_wave") return parallelWorkersForWave(root, track, args);
+  if (action === "setup_workers") return parallelSetupWorkers(root, track, args);
+  if (action === "record_finish") {
+    if (args.execute !== true) {
+      return {
+        ok: true,
+        track_id: track.track_id,
+        action,
+        dry_run: true,
+        planned_record: {
+          worker_id: args.workerId || args.worker_id,
+          status: args.status || "awaiting_merge",
+          phase_index: args.phaseIndex ?? null,
+          task_index: args.taskIndex ?? null,
+          commit_sha: args.commitSha || null
+        }
+      };
+    }
+    return recordParallelWorker(root, { ...args, trackId: track.track_id, status: args.status || "awaiting_merge" });
+  }
+  if (action === "merge_back") return parallelMergeBack(root, track, args);
+  if (action === "cleanup") return parallelCleanup(root, track, args);
+  return { ok: false, error: `Unknown parallel action: ${action}` };
+}
 function recordReview(root, args = {}) {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
@@ -3625,6 +3774,7 @@ ${body}${body ? "\n" : ""}${end}
   lspImpact,
   lspReview,
   metadataPatch,
+  parallelWorkflow,
   parsePlanFile,
   parsePlanText,
   phaseSchedule,
