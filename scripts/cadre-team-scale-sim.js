@@ -4,6 +4,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { spawn, spawnSync } = require("child_process");
 const core = require("./cadre-core");
 
 function write(file, content) {
@@ -52,6 +53,9 @@ function plan(id, index) {
 }
 
 function buildFixture(root) {
+  spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
+  spawnSync("git", ["config", "user.email", "scale@example.com"], { cwd: root, encoding: "utf8" });
+  spawnSync("git", ["config", "user.name", "Scale Sim"], { cwd: root, encoding: "utf8" });
   write(path.join(root, "cadre", "tracks.md"), `# Tracks
 
 <!-- cadre:index:start -->
@@ -86,11 +90,58 @@ function buildFixture(root) {
   }
 }
 
+function runWorker(root, trackId, index) {
+  const code = `
+const core = require(${JSON.stringify(path.resolve(__dirname, "cadre-core.js"))});
+const [root, trackId, index] = JSON.parse(process.argv[1]);
+const identity = "worker" + index + "@example.com";
+const claim = core.claimTrack(root, trackId, { identity, takeover: true });
+const complete = core.completeTask(root, {
+  trackId,
+  phaseIndex: 1,
+  taskIndex: 1,
+  commitSha: ("feedface" + String(index).padStart(4, "0")).slice(0, 12),
+  command: "printf 'Statements : 91%%\\\\n'",
+  coverageThreshold: 80
+});
+const review = core.recordReview(root, {
+  trackId,
+  verdict: "approved",
+  reviewer: "reviewer" + index + "@example.com",
+  blockingCount: 0,
+  coverage: 91,
+  override: true
+});
+const ok = claim.ok && complete.ok && review.ok;
+console.log(JSON.stringify({ ok, trackId, claim, complete, review }));
+process.exit(ok ? 0 : 1);
+`;
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["-e", code, JSON.stringify([root, trackId, index])], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    child.on("close", (code, signal) => {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(stdout.trim().split(/\n/).pop() || "null");
+      } catch (_) {
+        // Keep raw output below.
+      }
+      resolve({ ok: code === 0 && parsed && parsed.ok, code, signal, stdout, stderr, parsed });
+    });
+  });
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function main() {
+async function main() {
   const keep = process.argv.includes("--keep");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-scale-"));
   buildFixture(root);
@@ -109,6 +160,16 @@ function main() {
   assert(available.available.length === 4, `expected 4 available tracks, got ${available.available.length}`);
   assert(gate.ok === true, `expected completed reviewed track to pass gate: ${gate.reasons.join(", ")}`);
 
+  const trackIds = core.listTracks(root).map((track) => track.track_id);
+  const workers = await Promise.all(trackIds.map((trackId, index) => runWorker(root, trackId, index + 1)));
+  const failedWorkers = workers.filter((worker) => !worker.ok);
+  assert(failedWorkers.length === 0, `expected all concurrent workers to pass: ${JSON.stringify(failedWorkers.slice(0, 3), null, 2)}`);
+  const completedAfterWorkers = core.listTracks(root).filter((track) => {
+    const metadata = JSON.parse(fs.readFileSync(track.metadata_path, "utf8"));
+    return metadata.last_task_result && metadata.review && metadata.review.verdict === "approved";
+  });
+  assert(completedAfterWorkers.length === 20, `expected 20 claimed/reviewed/completed tracks, got ${completedAfterWorkers.length}`);
+
   const result = {
     ok: true,
     fixture: root,
@@ -116,6 +177,7 @@ function main() {
     owners: Object.keys(status.by_owner).length,
     collisions: collisions.collisions.length,
     available: available.available.length,
+    concurrent_workers: workers.length,
   };
   console.log(JSON.stringify(result, null, 2));
 
@@ -125,7 +187,10 @@ function main() {
 }
 
 try {
-  main();
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
 } catch (error) {
   console.error(error.message);
   process.exit(1);

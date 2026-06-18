@@ -60,6 +60,34 @@ function samplePlan(id) {
 `;
 }
 
+function installFakeBd(root) {
+  const bin = path.join(root, "bin");
+  const bd = path.join(bin, "bd");
+  write(bd, `#!/bin/sh
+printf '%s\n' "$*" >> "$PWD/bd.log"
+case "$1" in
+  show)
+    if [ -f "$PWD/bd-notes.txt" ]; then cat "$PWD/bd-notes.txt"; else printf '{}\n'; fi
+    ;;
+  note)
+    printf '%s\n' "$3" >> "$PWD/bd-notes.txt"
+    printf '{"ok":true}\n'
+    ;;
+  sql)
+    printf 'Rows affected: 3\n'
+    ;;
+  close|label|dep|create|ready|list|update|mail|formula|admin|rules|dolt|worktree)
+    printf '{"ok":true}\n'
+    ;;
+  *)
+    printf '{"ok":true}\n'
+    ;;
+esac
+`);
+  fs.chmodSync(bd, 0o755);
+  return bin;
+}
+
 test("repoMap filters generated bundles and local variable noise", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-core-test-"));
   try {
@@ -197,6 +225,34 @@ test("metadataPatch preserves unrelated metadata while patching selected keys", 
     const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "patch_20260617", "metadata.json"), "utf8"));
     assert.equal(metadata.owner, "new@example.com");
     assert.equal(metadata.review.verdict, "changes_requested");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("lock primitives reject live holders and recover stale locks", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lock-test-"));
+  try {
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    const first = core.acquireLock(root, "track:lock_20260617");
+    assert.equal(first.ok, true);
+
+    const conflict = core.acquireLock(root, "track:lock_20260617");
+    assert.equal(conflict.ok, false);
+    assert.equal(conflict.conflict, true);
+    assert.equal(conflict.stale, false);
+
+    write(path.join(first.dir, "owner.json"), JSON.stringify({
+      name: "track:lock_20260617",
+      pid: process.pid,
+      owner: "stale@example.com",
+      acquired_at: "2000-01-01T00:00:00.000Z",
+      updated_at: "2000-01-01T00:00:00.000Z",
+    }, null, 2));
+    const recovered = core.acquireLock(root, "track:lock_20260617");
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.attempts, 2);
+    assert.equal(core.releaseLock(recovered).ok, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -344,6 +400,101 @@ test("completeTask refuses mapped Beads tasks when bd is unavailable without mut
     assert.equal(metadata.last_test_run, undefined);
   } finally {
     process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask writes a recovery journal and avoids duplicate Beads notes on retry", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-journal-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    const fakeBin = installFakeBd(root);
+    process.env.PATH = `${fakeBin}:${oldPath}`;
+    writeTrack(root, "journal_20260617", samplePlan("journal_20260617"), {
+      beads_epic: "cadre-journal_20260617",
+      beads_tasks: { phase1_task1: "bd-task-1" },
+    });
+
+    const args = {
+      trackId: "journal_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+      commitSha: "abcdef123456",
+      command: "printf 'Statements : 87%%\\n'",
+      coverageThreshold: 80,
+    };
+    const first = core.completeTask(root, args);
+    assert.equal(first.ok, true);
+    const second = core.completeTask(root, args);
+    assert.equal(second.ok, true);
+    assert.equal(second.beads.note.skipped, true);
+    assert.equal(second.beads.close.skipped, true);
+
+    const journal = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "journal_20260617", "completion_journal.json"), "utf8"));
+    const entries = Object.values(journal.entries);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].stage, "completed");
+    assert.equal(entries[0].beads_note_written, true);
+    assert.equal(entries[0].beads_close_written, true);
+
+    const log = fs.readFileSync(path.join(root, "bd.log"), "utf8").trim().split(/\n/);
+    assert.equal(log.filter((line) => line.startsWith("note ")).length, 1);
+    assert.equal(log.filter((line) => line.startsWith("close ")).length, 1);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("beadsTaskWrite covers expanded CLI operations and SQL rows affected parsing", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-wrapper-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    const fakeBin = installFakeBd(root);
+    process.env.PATH = `${fakeBin}:${oldPath}`;
+
+    const sql = core.beadsTaskWrite(root, { operation: "sql", sql: "update beads set status='closed'" });
+    assert.equal(sql.ok, true);
+    assert.equal(sql.rows_affected, 3);
+
+    const create = core.beadsTaskWrite(root, {
+      operation: "create",
+      title: "Keep label order",
+      labels: ["review:ready", "team:api"],
+    });
+    assert.equal(create.ok, true);
+    const label = core.beadsTaskWrite(root, { operation: "label_add", id: "bd-1", label: "review:ready" });
+    assert.equal(label.ok, true);
+    const dep = core.beadsTaskWrite(root, { operation: "dep_add", id: "bd-2", dependsOn: "bd-1" });
+    assert.equal(dep.ok, true);
+
+    const log = fs.readFileSync(path.join(root, "bd.log"), "utf8");
+    assert.match(log, /create Keep label order --json --labels review:ready,team:api/);
+    assert.match(log, /label add bd-1 review:ready --json/);
+    assert.match(log, /dep add bd-2 bd-1 --json/);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shared control-plane post sync fails closed when remote verification fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-sync-fail-closed-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({
+      sync_mode: "shared",
+      control_remote: "origin",
+      control_branch: "main",
+    }, null, 2));
+
+    const result = core.syncControlPlane(root, { mode: "post" });
+    assert.equal(result.ok, false);
+    assert.match(result.safety.reason, /Unable to verify origin\/main/);
+    assert.equal(result.commands.some((cmd) => cmd.command.includes("git push")), false);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

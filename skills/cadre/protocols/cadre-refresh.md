@@ -10,12 +10,12 @@ Sync cadre context documentation with the current codebase state.
 
 Check cadre/ exists with core files. If not, suggest `cadre-setup`.
 
-Resolve the project root with `cadre_current_root` using the per-call `root`
+Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
 argument. Use the returned root for all MCP calls in this workflow. Call
-`cadre_team_status` to load the active track inventory before analyzing track or
+`cadre_status` with `action: "team"` to load the active track inventory before analyzing track or
 learnings scope.
 
-**Control-plane sync preamble:** call MCP `cadre_sync_control_plane` with
+**Control-plane sync preamble:** call MCP `cadre_project` with `action: "sync_control_plane"` with
 `mode: "pre"` before reading or mutating `cadre/`. It no-ops in local mode and
 syncs the shared control plane when configured, so refresh consolidates current
 teammate updates before rewriting context docs.
@@ -73,7 +73,7 @@ git add cadre/
 git commit -m "cadre(refresh): Sync context with codebase"
 ```
 
-**Control-plane sync:** after committing, call MCP `cadre_sync_control_plane`
+**Control-plane sync:** after committing, call MCP `cadre_project` with `action: "sync_control_plane"`
 with `mode: "post"`. It publishes only when `sync_mode == "shared"` and no-ops
 in local mode. Product code is never
 auto-pushed.
@@ -172,7 +172,7 @@ auto-pushed.
 choices made at setup. See `references/polyrepo-git.md` and `references/cadre-sync.md`.
 
 1. **Reconcile manifest vs `.gitmodules`:**
-   - First call `cadre_polyrepo_preflight` with `root` and include its returned
+   - First call `cadre_project` with `action: "polyrepo_preflight"` with `root` and include its returned
      errors/warnings in the reconcile report.
    - Submodules in `.gitmodules` not in `repos.json` → offer to **add** entries
      (prompt for `default_branch`/`enabled`).
@@ -194,7 +194,7 @@ choices made at setup. See `references/polyrepo-git.md` and `references/cadre-sy
    `git submodule update --init --remote` — offer it here only (never automatic).
 
 5. **Commit + publish:** commit `repos.json`/`config.json`/`.gitattributes`
-   changes, then call MCP `cadre_sync_control_plane` with `mode: "post"`. This
+   changes, then call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"`. This
    publishes only when the resulting `config.json` has `sync_mode == "shared"`, so
    a refresh that toggles `local → shared` publishes the control plane on the same
    run.
@@ -209,7 +209,7 @@ track status (via the keyed reconciles above, completed-track detection, or simp
 to pick up edits made by other workflows/teammates), so rebuild the index so it
 mirrors current metadata.
 
-- After applying updates, call MCP `cadre_regen_index` with `root` (it scans every
+- After applying updates, call MCP `cadre_mutate` with `action: "regen_index"` with `root` (it scans every
   `cadre/tracks/*/metadata.json`, sorts by `track_id`, and rebuilds only the
   content between the `<!-- cadre:index:start -->` / `<!-- cadre:index:end -->`
   markers, preserving the human-authored preamble). Require `ok: true`; do NOT
@@ -275,7 +275,7 @@ that skipped LSP during `cadre-setup`, or for codebases that gained a language.
    git add cadre/lsp.json
    git commit -m "cadre(refresh): Configure LSP servers"
    ```
-  Then call MCP `cadre_sync_control_plane` with `mode: "post"`; it no-ops unless
+  Then call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"`; it no-ops unless
   shared mode is configured.
 
 ---

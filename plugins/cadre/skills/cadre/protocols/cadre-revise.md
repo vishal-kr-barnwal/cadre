@@ -5,7 +5,7 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
-> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
 
 # Cadre Revise
 
@@ -13,8 +13,8 @@ Update specifications and plans when implementation reveals issues, requirements
 
 ## 1. Identify Track
 - **Resolve the active track from the source of truth, not the derived cache.**
-  First call `cadre_current_root` with the workflow `root`, then call
-  `cadre_team_status` with that resolved root. Use the returned `tracks[]` to find
+  First call `cadre_project` with `action: "root"` with the workflow `root`, then call
+  `cadre_status` with `action: "team"` with that resolved root. Use the returned `tracks[]` to find
   `status == "in_progress"` (in shared mode, filter to the one whose
   `owner`/`assignee` equals `<git-identity>`), exactly as `cadre-status` does. The
   `[~]` marker in `cadre/tracks.md` is a
@@ -29,10 +29,10 @@ Update specifications and plans when implementation reveals issues, requirements
   revising a track a teammate is mid-implementation on, in monorepo mode too. If it
   halts, stop here.
 - Read `metadata.json` — check `worktree_path` field for active parallel execution
-- Call `cadre_parse_plan` with `root` and the selected track's relative `planPath`
+- Call `cadre_track` with `action: "parse_plan"` with `root` and the selected track's relative `planPath`
   before editing. Use the parsed phases/tasks/annotations to validate plan changes.
 - When the revision touches existing files, public symbols, APIs, routes, or module
-  boundaries, call MCP `cadre_lsp_impact` with the relevant `files[]` and/or
+  boundaries, call MCP `cadre_intel` with `action: "lsp_impact"` with the relevant `files[]` and/or
   `symbols[]`. Use its references/file-symbol output to identify affected tasks,
   tests, and follow-up work before rewriting the plan.
 
@@ -73,13 +73,13 @@ Append to `cadre/tracks/<track_id>/revisions.md`:
 - Update `spec.md` and/or `plan.md` as needed
 - Add "Last Revised" marker at top of updated files
 - New tasks: `[ ]`, Removed tasks: `[-] [REMOVED: reason]`
-- Re-run MCP `cadre_plan_integrity` for the revised track. If existing files,
+- Re-run MCP `cadre_track` with `action: "integrity"` for the revised track. If existing files,
   public symbols, APIs, routes, or module boundaries changed, re-run
-  `cadre_lsp_impact` with the final `files[]`/`symbols[]` set and carry any
+  `cadre_intel` with `action: "lsp_impact"` with the final `files[]`/`symbols[]` set and carry any
   affected callers/tests into the revised plan before committing.
-- After modifying `plan.md`, call `cadre_parse_plan` again. If parsing returns no
+- After modifying `plan.md`, call `cadre_track` with `action: "parse_plan"` again. If parsing returns no
   phases/tasks or loses required annotations, fix the plan before committing.
-- Call `cadre_collision_scan` with `root` after plan changes that alter
+- Call `cadre_status` with `action: "collisions"` with `root` after plan changes that alter
   `<!-- files: -->` or `<!-- repo: -->` annotations; warn about any new overlaps.
 - **Phase-level parallel changes:**
   - Add/modify `<!-- depends: -->` annotations for phase dependencies
@@ -105,7 +105,7 @@ Append to `cadre/tracks/<track_id>/revisions.md`:
 git add cadre/tracks/<track_id>/
 git commit -m "cadre(revise): Update spec/plan for <track_id>"
 ```
-- **Control-plane sync:** after committing, call MCP `cadre_sync_control_plane`
+- **Control-plane sync:** after committing, call MCP `cadre_project` with `action: "sync_control_plane"`
   with `mode: "post"` so teammates see the revision in shared mode. This gates on
   `sync_mode == "shared"` alone, **regardless of topology** (monorepo OR polyrepo) —
   never on polyrepo. The spec/plan conflict-surfacing rules (`spec.md`/`plan.md` stay

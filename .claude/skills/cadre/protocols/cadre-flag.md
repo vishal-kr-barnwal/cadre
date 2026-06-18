@@ -5,7 +5,7 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
-> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
 
 # Cadre Flag
 
@@ -17,14 +17,14 @@ the resulting status marker and Beads sync differ.
 
 ## 0. Sync Preamble (shared mode)
 
-Resolve the project root with `cadre_current_root` using the per-call `root`
+Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
 argument. Use the returned root for all MCP calls in this workflow.
 
 Before reading or resolving any track state, reconcile the control plane so the
 flag lands on top of teammates' latest work (and so the ownership guard sees the
 current owner/lease, not a stale local view):
 
-- Call MCP `cadre_sync_control_plane` with `mode: "pre"` before resolving the
+- Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"` before resolving the
   active track or touching `plan.md`/`metadata.json`. It no-ops in local mode and
   reconciles shared state before the flag mutation when configured.
 
@@ -47,8 +47,8 @@ Any remaining text after the mode is the reason.
   `metadata.json.status == "in_progress"` (the source of truth; fall back to the
   `[~]` track in `tracks.md` only if no metadata says so). Then find the in-progress
   (`[~]`) task in that track's `plan.md`.
-- Use `cadre_team_status` with `root` to resolve the active track inventory, then
-  call `cadre_parse_plan` with `root` and the active track's relative `planPath` to
+- Use `cadre_status` with `action: "team"` with `root` to resolve the active track inventory, then
+  call `cadre_track` with `action: "parse_plan"` with `root` and the active track's relative `planPath` to
   locate the task and task indexes. Edit `plan.md` only after the task is resolved.
 - **Ownership guard:** before changing the plan or metadata, run the Ownership Guard
   (`references/ownership-guard.md`) for the resolved track; if it halts, stop. Don't
@@ -119,7 +119,7 @@ For `skipped`, also ask the disposition:
 
 ## 6. Update Track Status
 
-Flagging a task can change the *track's* status. Use MCP `cadre_set_track_status`
+Flagging a task can change the *track's* status. Use MCP `cadre_mutate` with `action: "set_status"`
 so `metadata.json.status` (the source of truth) and the derived `tracks.md`
 marker update together. Do not hand-edit the marker.
 
@@ -130,7 +130,7 @@ Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skip
 - Otherwise leave **`in_progress`** — the track advanced to a next task (the common
   `skipped` "will complete later" / "no longer needed" path that moved `[~]` forward).
 
-Call `cadre_set_track_status` with `root`, `trackId`, and the chosen
+Call `cadre_mutate` with `action: "set_status"` with `root`, `trackId`, and the chosen
 `<new_status>`. Require `ok: true`; halt and surface the MCP error if it fails.
 
 ## 6.5 Commit & Propagate (so teammates see the flag)
@@ -147,7 +147,7 @@ git add cadre/tracks/<track_id>/ cadre/tracks.md
 git commit -m "cadre(flag): <blocked|skipped> <task> in <track_id> — <reason>"
 ```
 
-- After committing, call MCP `cadre_sync_control_plane` with `mode: "post"` so the
+- After committing, call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"` so the
   blocker/skip propagates in shared mode. It no-ops in local mode.
 
 ## 7. Confirm

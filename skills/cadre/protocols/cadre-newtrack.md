@@ -17,7 +17,7 @@ Create a new track from the workflow arguments.
 
 **PROTOCOL: Verify Cadre environment is properly set up.**
 
-0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+0. **Resolve project root via MCP:** Call `cadre_project` with `action: "root"` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for all project-scoped MCP calls in this workflow.
 
@@ -36,11 +36,11 @@ Create a new track from the workflow arguments.
    `"polyrepo"`, this is **monorepo mode** — every step below behaves exactly as
    today; ignore the polyrepo-only notes. If `mode == "polyrepo"`, follow
    `references/polyrepo-git.md` for the per-repo branch/worktree model and the
-   repo annotation. Call MCP `cadre_sync_control_plane` with `mode: "pre"`
+   repo annotation. Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"`
    before mutating state; it no-ops unless `cadre/config.json` has
    `sync_mode: "shared"`.
 
-4. **Load existing track inventory via MCP:** Call `cadre_team_status` with
+4. **Load existing track inventory via MCP:** Call `cadre_status` with `action: "team"` with
    `root`. Use the returned `tracks[]` for duplicate-name, dependency-prompt, and
    existing-owner context instead of scanning `tracks.md` for authoritative state.
 
@@ -179,7 +179,7 @@ Create a new track from the workflow arguments.
         - File ownership conflicts between phases (do ready phases claim the same repo+file?)
         - Independent scopes (can Phase 1 and Phase 2 run without coordination?)
       - Phase-level parallelism is executed only through the concrete scheduler:
-        `cadre_phase_schedule` computes ready groups and splits conflicting phases.
+        `cadre_track` with `action: "phase_schedule"` computes ready groups and splits conflicting phases.
 
    c. **Present Parallel Execution Options:**
       > "I've analyzed the plan for parallel execution potential:"
@@ -212,7 +212,7 @@ Create a new track from the workflow arguments.
         - Leave the annotation absent for the default sequential rule (a phase
           depends on the previous phase).
         - Do not rely on prose alone: `cadre-implement` will call
-          `cadre_phase_schedule` to compute the actual ready groups and file-conflict
+          `cadre_track` with `action: "phase_schedule"` to compute the actual ready groups and file-conflict
           splits.
       
       **Example Output:**
@@ -255,7 +255,7 @@ Create a new track from the workflow arguments.
 
 3.1. **Semantic impact check (when existing code is touched):**
    - If the drafted plan names existing files, public symbols, APIs, routes, or
-     modules, call MCP `cadre_lsp_impact` with `root`, the relevant `files[]` and/or
+     modules, call MCP `cadre_intel` with `action: "lsp_impact"` with `root`, the relevant `files[]` and/or
      `symbols[]`, and a small `limit`. Use its references/file-symbol output to
      refine `<!-- files: -->` ownership, identify likely tests/callers, and warn
      about hidden integration work before the user confirms the plan. If LSP is not
@@ -302,7 +302,7 @@ Create a new track from the workflow arguments.
    Now that every task carries a `<!-- files: -->` annotation (and, in polyrepo, a
    `<!-- repo: -->` annotation), warn if this new track's claimed files overlap
    another **active** track's claimed files.
-   - **Use MCP for the existing-fleet side:** call `cadre_collision_scan` with
+   - **Use MCP for the existing-fleet side:** call `cadre_status` with `action: "collisions"` with
      `root` and use its returned active-track claims/collisions as the canonical
      view of current cross-track overlap. For the new, not-yet-written draft plan,
      parse the draft in memory using the same `<!-- repo: -->` / `<!-- files: -->`
@@ -328,7 +328,7 @@ Create a new track from the workflow arguments.
      cross-owner file-overlap check, surfaced early at creation time.
    - **Degrade silently:** if another track's `plan.md` is missing or unparseable,
      skip it without error. This advisory never blocks track creation.
-   - After the track artifacts are written, call MCP `cadre_plan_integrity` with
+   - After the track artifacts are written, call MCP `cadre_track` with `action: "integrity"` with
      `root` and the new `trackId`. Treat errors as plan-generation defects to fix
      before committing; surface warnings for user awareness.
 
@@ -379,7 +379,7 @@ Create a new track from the workflow arguments.
      `track_id` (a push / `bd dolt push` conflict), re-suffix the track — rename the
      track DIRECTORY, the `metadata.json` `track_id` (key-scoped `jq`), the
      `track/<track_id>` branch(es), and the Beads epic title + `cadre-track:<id>`
-     label — then call MCP `cadre_regen_index` and
+     label — then call MCP `cadre_mutate` with `action: "regen_index"` and
      re-publish. The detailed rejection-recovery branch lives in
      `references/cadre-sync.md` (owned by the sync master); this workflow only
      needs to honor the re-suffix.
@@ -399,7 +399,7 @@ Create a new track from the workflow arguments.
    - If `--defaults` is present, set `depends_on: []` without prompting.
    - Otherwise ask:
      > "Does this track depend on any other tracks being completed first?"
-   - If yes: List incomplete tracks from the `cadre_team_status` result, let user select
+   - If yes: List incomplete tracks from the `cadre_status` with `action: "team"` result, let user select
    - Store selected track_ids in `depends_on` array
    - Default to empty array if skipped or no incomplete tracks
 
@@ -478,7 +478,7 @@ Create a new track from the workflow arguments.
    alphabetical order).
 
 7. **Beads dry-run before any track files are written:**
-   - Call MCP `cadre_create_beads_tree` with `dryRun: true`, `trackId`,
+   - Call MCP `cadre_track` with `action: "create_beads_tree"` with `dryRun: true`, `trackId`,
      `planText`, `specText`, and the metadata draft from step 6.
    - Require `ok: true`. If it fails, HALT before creating
      `cadre/tracks/<track_id>/`, before regenerating `tracks.md`, before committing,
@@ -494,7 +494,7 @@ Create a new track from the workflow arguments.
 
 8a. **Create live Beads metadata before index/commit/worktree:**
    - Immediately after the scaffold files exist, call MCP
-     `cadre_create_beads_tree` again without `dryRun`.
+     `cadre_track` with `action: "create_beads_tree"` again without `dryRun`.
    - Require `ok: true`; this creates/repairs the deterministic Beads epic/tree and
      patches `metadata.json` with `beads_epic` and `beads_tasks` using the
      key-scoped CAS helper.
@@ -544,7 +544,7 @@ Create a new track from the workflow arguments.
    - `cadre/tracks.md` is a DERIVED INDEX, never hand-edited. The new track's
      `metadata.json` already carries `"status": "new"` (step 8), which is the
      single source of truth. Do NOT append a `## [ ] Track:` block in place.
-   - Instead, call `cadre_regen_index` with `root`. Require `ok: true`; on failure,
+   - Instead, call `cadre_mutate` with `action: "regen_index"` with `root`. Require `ok: true`; on failure,
      halt and surface the MCP error. The new track (marker `[ ]` from status `new`)
      appears in the regenerated region automatically. Do not inline the algorithm.
 
@@ -589,7 +589,7 @@ Create a new track from the workflow arguments.
 **PROTOCOL: Sync track with Beads for persistent task memory.**
 
 **Preferred MCP path:** the dry-run belongs before project mutation in step 7
-(`cadre_create_beads_tree` with `dryRun: true`, draft `planText`, `specText`,
+(`cadre_track` with `action: "create_beads_tree"` with `dryRun: true`, draft `planText`, `specText`,
 and metadata). The live call belongs immediately after scaffold files exist in
 step 8a, before index regeneration, commit, or worktree creation. The live call
 creates the deterministic epic, phases, tasks, dependencies, design/acceptance
@@ -645,7 +645,7 @@ that error; do not silently create a file-only track.
      `metadata.beads_epic` in step 5).
 
 3. **Create Tasks for Each Phase with Context:**
-   - Parse `plan.md` for phases and tasks with `cadre_parse_plan`:
+   - Parse `plan.md` for phases and tasks with `cadre_track` with `action: "parse_plan"`:
      ```json
      { "root": "/absolute/path/to/project", "planPath": "cadre/tracks/<track_id>/plan.md" }
      ```
@@ -743,6 +743,6 @@ that error; do not silently create a file-only track.
 ## 3.0 SYNC POSTAMBLE (shared mode only)
 
 After committing the new track control-plane files, call MCP
-`cadre_sync_control_plane` with `mode: "post"`. It publishes only when
+`cadre_project` with `action: "sync_control_plane"` with `mode: "post"`. It publishes only when
 `sync_mode == "shared"` and no-ops in local mode. Product-repo CODE is still never
 auto-pushed regardless of topology; only the control plane is published here.

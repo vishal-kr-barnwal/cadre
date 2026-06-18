@@ -5,7 +5,7 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
-> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
 
 <!-- 
 SYSTEM DIRECTIVE: You are an AI agent for the Cadre framework.
@@ -22,7 +22,7 @@ Implement the requested track from the workflow arguments.
 
 **PROTOCOL: Verify Cadre environment is properly set up.**
 
-0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+0. **Resolve project root via MCP:** Call `cadre_project` with `action: "root"` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for every project-scoped MCP call in this workflow.
 
@@ -44,23 +44,23 @@ Implement the requested track from the workflow arguments.
      to its `<!-- repo: -->` target (absent → `default_repo`), and branches /
      worktrees / commits are **per-repo**.
    - `config.json` `sync_mode == "shared"` → call MCP
-     `cadre_sync_control_plane` with `mode: "pre"` now before reading or
+     `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"` now before reading or
      mutating any state. Use `references/cadre-sync.md` only for interpreting
      failures or manually repairing a broken checkout.
 
-4. **Load structured track inventory via MCP:** Call `cadre_team_status` with
+4. **Load structured track inventory via MCP:** Call `cadre_status` with `action: "team"` with
    `root`. Use the returned `tracks[]` for status, owner, reviewer, and review
    context instead of treating `tracks.md` as authoritative.
 
 5. **Preferred bounded start packet:** before manually walking sections 2.0-3.0,
-   call MCP `cadre_prepare_implementation` with `root`, optional `trackId` from
+   call MCP `cadre_track` with `action: "prepare_implementation"` with `root`, optional `trackId` from
    workflow arguments, `identity`, and `claim: true` when you are ready to claim.
    This single call returns the selected track, ownership claim result, bounded
-   `cadre_track_context`, available-work data, selected-track collisions, and
-   `cadre_plan_integrity`. Use that packet as the source for the selection,
+   `cadre_track` with `action: "context"`, available-work data, selected-track collisions, and
+   `cadre_track` with `action: "integrity"`. Use that packet as the source for the selection,
    ownership, collision, plan-integrity, and resume displays below. Do not repeat
-   the same fleet scan with `cadre_team_status`, `cadre_available_work`,
-   `cadre_collision_scan`, or `cadre_claim_track` unless the packet reports that a
+   the same fleet scan with `cadre_status` with `action: "team"`, `cadre_status` with `action: "available"`,
+   `cadre_status` with `action: "collisions"`, or `cadre_mutate` with `action: "claim"` unless the packet reports that a
    narrower repair/follow-up is needed.
 
 ---
@@ -71,8 +71,8 @@ Implement the requested track from the workflow arguments.
 
 1. **Check for User Input:** Check if track name provided as argument.
 
-2. **Use structured inventory first:** Use `cadre_team_status` and, after a
-   candidate is chosen, `cadre_track_context` for display labels, ownership,
+2. **Use structured inventory first:** Use `cadre_status` with `action: "team"` and, after a
+   candidate is chosen, `cadre_track` with `action: "context"` for display labels, ownership,
    review state, task counts, Beads IDs, and parsed plan data. Read
    `cadre/tracks.md` only if a human-facing label is missing from MCP output.
 
@@ -84,10 +84,10 @@ Implement the requested track from the workflow arguments.
    - If no match or ambiguous: Inform user, suggest next available track
 
    **If no track name provided:**
-   - Call `cadre_available_work` with `root` and prefer the first returned track.
+   - Call `cadre_status` with `action: "available"` with `root` and prefer the first returned track.
      This MCP result is the authoritative "next unblocked, unowned" candidate set.
    - If MCP returns no available candidates, resolve each remaining incomplete
-     track's status from the `cadre_team_status` result.
+     track's status from the `cadre_status` with `action: "team"` result.
      **Prefer a `new`, unowned track**; **skip** tracks that are `in_progress` with a
      *different* non-null `owner` (a teammate is already on it). Select the first
      available track.
@@ -99,9 +99,9 @@ Implement the requested track from the workflow arguments.
 
 3b. **Ownership guard & claim at selection (both topologies):**
    - Compute `<git-identity>` (`git config user.email` → `user.name` → null).
-   - Prefer the claim result from `cadre_prepare_implementation` when that call was
-     used with `claim: true`; otherwise call MCP `cadre_claim_track` directly.
-   - When no prior packet claim exists, call MCP `cadre_claim_track` with `root`,
+   - Prefer the claim result from `cadre_track` with `action: "prepare_implementation"` when that call was
+     used with `claim: true`; otherwise call MCP `cadre_mutate` with `action: "claim"` directly.
+   - When no prior packet claim exists, call MCP `cadre_mutate` with `action: "claim"` with `root`,
      `trackId`, and `identity`. This is the structured ownership guard: it claims
      Beads when present, mirrors owner and shared-mode lease metadata, and creates
      `implement_state.json` before any work begins.
@@ -109,7 +109,7 @@ Implement the requested track from the workflow arguments.
      pick another track, or retry with `takeover: true` after explicit user
      confirmation. If it reports missing Beads, HALT and restore the Beads
      prerequisite; do not replace the claim with an ad hoc file write.
-   - After a successful claim, call `cadre_track_context` for the selected track
+   - After a successful claim, call `cadre_track` with `action: "context"` for the selected track
      and use that single payload for metadata, parsed plan, worktree routing,
      task counts, review state, and Beads task IDs.
 
@@ -118,7 +118,7 @@ Implement the requested track from the workflow arguments.
      `cadre-newtrack` for **every** task (not only parallel phases), so the selected
      track's full file footprint is known up front. Before starting work, warn if it
      overlaps another **active** track's footprint.
-   - **Use MCP — do not invent a new scanner.** Call `cadre_collision_scan` with
+   - **Use MCP — do not invent a new scanner.** Call `cadre_status` with `action: "collisions"` with
      `root`. Compare the selected track's file claims against the returned active
      collisions and claims:
      - **POLYREPO:** compare `(repo, file)` tuples (resolve each task's
@@ -167,7 +167,7 @@ Implement the requested track from the workflow arguments.
 2. **Update Status to 'In Progress':**
    - `cadre/tracks.md` is a DERIVED INDEX — never flip its marker in place
      (no `sed`/Edit on the `## [..] Track:` line).
-   - Call MCP `cadre_set_track_status` with `root`, `trackId`, and
+   - Call MCP `cadre_mutate` with `action: "set_status"` with `root`, `trackId`, and
      `status: "in_progress"`. Require `ok: true`; it updates the metadata source
      of truth and regenerates the index. Do not inline the write/splice algorithm.
 
@@ -181,7 +181,7 @@ Implement the requested track from the workflow arguments.
      - `cadre/tracks/<track_id>/spec.md`
      - `cadre/workflow.md`
    - **Error Handling:** If any read fails, STOP and inform user
-   - Also call `cadre_parse_plan` with `root` and
+   - Also call `cadre_track` with `action: "parse_plan"` with `root` and
      `planPath: "cadre/tracks/<track_id>/plan.md"`. Use its parsed phases, tasks,
      and annotations for dependency graph construction and task iteration; keep
      the file read only for human-readable task text and edits.
@@ -317,7 +317,7 @@ Implement the requested track from the workflow arguments.
    Only when `config.json` `sync_mode == "shared"`. After reading
    `metadata.json`, claim/refresh the track lease per the metadata `lease` schema:
    `{ "owner": <git-identity>, "host": <hostname>, "acquired_at": <ISO-8601 UTC>,
-   "heartbeat_at": <ISO-8601 UTC> }`. Prefer MCP `cadre_heartbeat_track` for the
+   "heartbeat_at": <ISO-8601 UTC> }`. Prefer MCP `cadre_mutate` with `action: "heartbeat"` for the
    refresh write; raw `jq '.lease = $obj'` is only a fallback, and must remain
    key-scoped.
 
@@ -334,7 +334,7 @@ Implement the requested track from the workflow arguments.
      > Take over the lease? A) Yes  B) Pick another track  C) Cancel"
      - If A: overwrite `lease`. If B: return to step 2. If C: HALT.
    - **Heartbeat is periodic, decoupled from state writes.** Call MCP
-     `cadre_heartbeat_track` on every state write (steps ii/iii) **and**
+     `cadre_mutate` with `action: "heartbeat"` on every state write (steps ii/iii) **and**
      independently on a timer well inside the canonical staleness window
      (`references/ownership-guard.md §5`) — e.g. roughly every third of the window —
      so a long quiet build or a slow-running test suite (no state write for many
@@ -346,14 +346,14 @@ Implement the requested track from the workflow arguments.
 5. **Determine Execution Mode and Execute Phases/Tasks:**
 
    a. **Call the phase scheduler packet:**
-      - Call MCP `cadre_phase_schedule` with `root` and `trackId`.
+      - Call MCP `cadre_track` with `action: "phase_schedule"` with `root` and `trackId`.
       - If it returns `ok: false`, HALT and fix `errors[]` (unknown phase deps,
         cycles, or invalid annotations) before executing tasks.
       - Use `ready_groups[]` as the only source of truth for phase dispatch:
         each inner array is a conflict-free set of phases that may run
         concurrently. Multiple inner arrays mean the scheduler found ready phases
         that must be serialized because of repo/file ownership conflicts; run group
-        1 to completion, then call `cadre_phase_schedule` again before considering
+        1 to completion, then call `cadre_track` with `action: "phase_schedule"` again before considering
         group 2.
       - If `ready_groups[]` is empty and unfinished phases remain, the track is
         blocked on incomplete dependencies or blocked tasks; report the blocking
@@ -373,7 +373,7 @@ Implement the requested track from the workflow arguments.
           phase has `<!-- execution: parallel -->`; nested task waves still follow
           `references/parallel-execution.md`.
       - After every phase in the group reaches completed/skipped tasks, call
-        `cadre_phase_schedule` again. Continue until no ready group remains.
+        `cadre_track` with `action: "phase_schedule"` again. Continue until no ready group remains.
 
    b. **Parse Task Execution Mode (for current phase):**
       - For the current phase, check for `<!-- execution: parallel -->` annotation
@@ -442,7 +442,7 @@ Implement the requested track from the workflow arguments.
                worker_id, phaseIndex, taskIndex, beads_task_id, commit_sha,
                tests_run, coverage value/source, files_changed, and notes.
                Do NOT edit `parallel_state.json`; the coordinator records your
-               evidence through MCP `cadre_record_parallel_worker`.
+               evidence through MCP `cadre_mutate` with `action: "record_worker"`.
 
             ## Success Criteria
             - All tests pass, coverage >80%
@@ -470,13 +470,13 @@ Implement the requested track from the workflow arguments.
         continuing.
       - Only when **no** worker is left in `conflict`:
         - For each cleanly merged worker, call MCP
-          `cadre_record_parallel_worker` with `status: "merged"` and
+          `cadre_mutate` with `action: "record_worker"` with `status: "merged"` and
           `completeTask: true`. That invokes `cadre_complete_task` after merge-back
           so coverage, plan row, metadata, Beads note/close, and audit state are
           recorded together. A `conflict` task stays unmarked until its worktree is
           resolved + merged.
         - Delete `parallel_state.json`
-        - Call MCP `cadre_phase_schedule` again:
+        - Call MCP `cadre_track` with `action: "phase_schedule"` again:
           - If it returns non-empty `ready_groups[]`: Go back to step 5a2.
           - If no unfinished phases remain: Proceed to step 6 (Finalize Track).
           - If unfinished phases remain with no ready group: report the blocking
@@ -489,7 +489,7 @@ Implement the requested track from the workflow arguments.
       **d1. Announce:** "Executing tasks from plan.md following workflow.md procedures."
 
       **d2. Iterate Through Tasks:** Loop through each task from the
-      `cadre_track_context.plan` / `cadre_parse_plan` result one by one. Use MCP
+      `cadre_track` with `action: "context"` and its `plan`, or `cadre_track` with `action: "parse_plan"`, one by one. Use MCP
       `cadre_complete_task` for normal completion so coverage, marker/SHA,
       metadata, and Beads writes succeed or fail together.
 
@@ -508,7 +508,7 @@ Implement the requested track from the workflow arguments.
              - **ONLY if `beads_enabled` is true:**
                - Generate task key from phase index and task index (e.g., `phase1_task1` for first task in first phase)
                - Look up `beads_task_id` from `beads_tasks` mapping in metadata.json using task key
-              - If found, call MCP `cadre_beads_write` with `operation:
+              - If found, call MCP `cadre_beads` with `operation:
                 "update"`, `id: <beads_task_id>`, `status: "in_progress"`,
                 and `assignee: <git-identity>`
                  (the assignee is the current operator's git identity, **never** the
@@ -529,11 +529,11 @@ Implement the requested track from the workflow arguments.
                coverage command, or obtain an explicit override and retry with the
                corresponding `allowMissingCoverage` / `allowLowCoverage` flag plus a
                note in `learnings.md`.
-             - Do not call `cadre_record_task_result` directly for normal task
+             - Do not call `cadre_mutate` with `action: "record_task_result"` directly for normal task
                completion; reserve it for repair/import cases where coverage has
                already been independently recorded.
            - **i-c. Discovered Work (If Needed):** If implementation reveals a
-             separate bug or follow-up, call MCP `cadre_beads_write` with
+             separate bug or follow-up, call MCP `cadre_beads` with
              `operation: "create"`, `type: "bug"`, `priority: "2"`, and `deps:
              "discovered-from:<current_task_id>"`.
       - **ii. Update Implementation State:** After marking task in progress:
@@ -543,7 +543,7 @@ Implement the requested track from the workflow arguments.
         - Set `owner` to the current `<git-identity>`
         - Set `last_updated` to current timestamp (ISO-8601)
         - Set `status` to "in_progress"
-        - Refresh the heartbeat through MCP `cadre_heartbeat_track` (the lease
+        - Refresh the heartbeat through MCP `cadre_mutate` with `action: "heartbeat"` (the lease
           portion is only active in shared mode).
       - **iii. On Phase Completion:** When all tasks in a phase are complete:
         - Add phase name to `completed_phases` array
@@ -557,12 +557,12 @@ Implement the requested track from the workflow arguments.
           ```
           - **If any command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
         - **Control-plane sync:** after the phase checkpoint commit to `cadre/`,
-          call MCP `cadre_sync_control_plane` with `mode: "post"`. This no-ops in
+          call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"`. This no-ops in
           local mode and publishes shared orchestration state when configured.
           **Product code is never pushed** at phase completion. In `local` mode,
           commits stay local as today.
         - **Check scheduler for next ready phases:**
-          - Call MCP `cadre_phase_schedule` again.
+          - Call MCP `cadre_track` with `action: "phase_schedule"` again.
           - If it returns non-empty `ready_groups[]` → Go back to step 5a2.
           - If no ready groups and unfinished phases remain → report the blocking
             statuses and halt.
@@ -581,7 +581,7 @@ Implement the requested track from the workflow arguments.
       - After implementation, run tests, linting, type checks.
       - **Machine-verified coverage gate (do not self-assert):** normal task
         completion must go through `cadre_complete_task`; do not mark `[x]` first
-        and measure later. Use standalone `cadre_test_coverage` only for diagnostic
+        and measure later. Use standalone `cadre_job` with `action: "start", type: "coverage"` only for diagnostic
         or preflight runs where no plan/Beads mutation should happen.
       - If issues found, analyze the root cause:
       
@@ -610,7 +610,7 @@ Implement the requested track from the workflow arguments.
 6. **Finalize Track:**
    - After all tasks complete, mark the track completed via the WRITE protocol
      (never flip the `cadre/tracks.md` marker in place — no `sed`/Edit):
-     call MCP `cadre_set_track_status` with `root`, `trackId`, and
+     call MCP `cadre_mutate` with `action: "set_status"` with `root`, `trackId`, and
      `status: "completed"`. Require `ok: true`; it updates metadata and
      regenerates the index.
    - **Clean Up State:** Delete `cadre/tracks/<track_id>/implement_state.json`
@@ -791,7 +791,7 @@ Session/thread ref if available
 3. **Do not archive or delete here.** Leave the completed track in
    `cadre/tracks/` until it has passed `cadre-review` and ship/land preparation.
    If the user wants cleanup, route them to `cadre-archive`; that workflow moves
-   the folder and calls `cadre_regen_index`. Never remove sections from
+   the folder and calls `cadre_mutate` with `action: "regen_index"`. Never remove sections from
    `cadre/tracks.md` inside implement.
 
 ---

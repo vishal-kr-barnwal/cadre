@@ -76,7 +76,7 @@ postamble push after mutation.
    `control_remote`/`control_branch`. Only control-plane paths may be dirty or
    ahead: `cadre/`, `.beads/`, `.gitattributes`, `.gitmodules`, and Cadre merge
    train CI files. If non-control-plane files are dirty or included in unpushed
-   commits, `cadre_sync_control_plane` refuses the push and reports the offending
+   commits, `cadre_project` with `action: "sync_control_plane"` refuses the push and reports the offending
    files. This matters especially in shared monorepos, where product code and
    control-plane state share one Git repository.
 3. Make the Beads Dolt push **mandatory** (not optional) in shared mode — Dolt is

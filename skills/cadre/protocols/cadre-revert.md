@@ -20,7 +20,7 @@ Revert Cadre work using the workflow arguments.
 
 **PROTOCOL: Verify project is properly set up before proceeding.**
 
-0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+0. **Resolve project root via MCP:** Call `cadre_project` with `action: "root"` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for every project-scoped MCP call in this workflow.
 
@@ -37,10 +37,10 @@ Revert Cadre work using the workflow arguments.
    its task's `<!-- repo: -->` annotation, and reverts run inside that repo. This
    is the highest-risk polyrepo operation — group by repo, revert reverse-order
    within each repo, and **halt on the first conflict in any repo.** Call MCP
-   `cadre_sync_control_plane` with `mode: "pre"` first; it no-ops outside shared
+   `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"` first; it no-ops outside shared
    mode.
 
-4. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
+4. **Load structured inventory via MCP:** Call `cadre_status` with `action: "team"` with `root`.
    Use the returned `tracks[]` as the authoritative track/status/owner inventory
    during target selection.
 
@@ -64,8 +64,8 @@ Revert Cadre work using the workflow arguments.
 
    ### PATH A: Direct Confirmation
 
-   1. Find the specific track, phase, or task using `cadre_team_status` plus
-      `cadre_parse_plan` for the relevant `plan.md`
+   1. Find the specific track, phase, or task using `cadre_status` with `action: "team"` plus
+      `cadre_track` with `action: "parse_plan"` for the relevant `plan.md`
    2. Ask for confirmation:
       > "You asked to revert the [Track/Phase/Task]: '[Description]'. Is this correct?"
       > A) Yes
@@ -76,8 +76,8 @@ Revert Cadre work using the workflow arguments.
    ### PATH B: Guided Selection Menu
 
    1. **Identify Revert Candidates:**
-      - **Scan All Plans through MCP:** use `cadre_team_status` for track
-        inventory and `cadre_parse_plan` for every `cadre/tracks/*/plan.md`
+      - **Scan All Plans through MCP:** use `cadre_status` with `action: "team"` for track
+        inventory and `cadre_track` with `action: "parse_plan"` for every `cadre/tracks/*/plan.md`
       - **Prioritize In-Progress:** Find ALL Tracks, Phases, Tasks marked `[~]`
       - **Fallback to Completed:** If NO in-progress items found, find 5 most recently completed (`[x]`)
 
@@ -157,7 +157,7 @@ over), stop here.
      final state (so a partial prior run is healed, not duplicated).
 
 1. **Identify Implementation Commits:**
-   - Call `cadre_parse_plan` for the target track and find primary SHA(s) for all
+   - Call `cadre_track` with `action: "parse_plan"` for the target track and find primary SHA(s) for all
      tasks/phases recorded in target's `plan.md`
    - **POLYREPO:** for each task, read its `<!-- repo: -->` annotation (absent →
      `default_repo`) and tag the SHA with that repo. A multi-repo task records
@@ -273,7 +273,7 @@ over), stop here.
 3. **Reset the source of truth (`metadata.json.status`) FIRST:**
    `metadata.json.status` is the single source of truth; `cadre/tracks.md` is a
    **derived cache** (step 5). If you only reset `plan.md` markers and leave
-   `metadata.status` at `completed`, the next MCP `cadre_regen_index` will
+   `metadata.status` at `completed`, the next MCP `cadre_mutate` with `action: "regen_index"` will
    **resurrect the stale `[x]`** and silently erase this revert. So fix metadata
    here, **before** touching any derived marker.
    - Read `cadre/tracks/<track_id>/metadata.json`. Compute the correct post-revert
@@ -285,12 +285,12 @@ over), stop here.
      - **No implementation work survives** (the track is back to a clean slate —
        e.g. a full-track revert, or the only completed work was reverted) → `new`.
      - **Never leave it `completed`** after a revert.
-   - Call MCP `cadre_set_track_status` with `root`, `trackId`, and the computed
+   - Call MCP `cadre_mutate` with `action: "set_status"` with `root`, `trackId`, and the computed
      `<new_status>` (`in_progress` or `new`). Require `ok: true`; this updates
      metadata and regenerates the derived index.
 
 4. **Reset `plan.md` markers (consistent with the new `metadata.status`):**
-   - Parse the relevant `plan.md` file(s) with `cadre_parse_plan`, then edit the
+   - Parse the relevant `plan.md` file(s) with `cadre_track` with `action: "parse_plan"`, then edit the
      files to reset markers
    - Ensure reverted item correctly reset:
      - Change `[x]` back to `[ ]` for reverted tasks
@@ -308,15 +308,15 @@ over), stop here.
    git-revert `tracks.md` to undo its marker (Phase 2 already excludes it from the
    product/code revert chains for this reason). Instead, regenerate it so the cache
    follows the source of truth you just fixed:
-  - The prior `cadre_set_track_status` call already regenerated the index from the
+  - The prior `cadre_mutate` with `action: "set_status"` call already regenerated the index from the
     new `metadata.status` (`in_progress` → `[~]`, `new` → `[ ]`). If subsequent
-    plan-marker edits require a different status, call `cadre_set_track_status`
+    plan-marker edits require a different status, call `cadre_mutate` with `action: "set_status"`
     again with the corrected value and require `ok: true`.
    - Commit the regenerated `tracks.md` (with the metadata + plan resets) as the
      plan-sync correction. Because the marker now flows from `metadata.status`, a
      **later `--regen-index` can no longer resurrect a stale `[x]`.**
    - Publish the correction **at this commit site** by calling MCP
-     `cadre_sync_control_plane` with `mode: "post"` after committing. It no-ops in
+     `cadre_project` with `action: "sync_control_plane"` with `mode: "post"` after committing. It no-ops in
      local mode and publishes the corrected metadata/index in shared mode.
 
 6. **Announce Completion:**
@@ -367,5 +367,5 @@ over), stop here.
    - For task/phase revert: reopen only affected tasks
    - For track revert: `bd reopen <epic_id> --reason "Track reverted" --json`
    - **If any `bd` command fails:** → Follow Beads Error Handler Protocol (references/beads-error-handler.md)
-   - Call MCP `cadre_sync_control_plane` with `mode: "post"` so teammates see the
+   - Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"` so teammates see the
      revert in shared mode.

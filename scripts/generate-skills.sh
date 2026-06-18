@@ -158,7 +158,7 @@ generate_protocols() {
 	      printf '<!-- %s -->\n\n' "$desc"
 	      printf '> When this protocol references `references/...`, resolve it against the parent skill directory.\n\n'
 	      printf '> Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.\n\n'
-	      printf '> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.\n\n'
+	      printf '> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.\n\n'
 	      printf '%s\n' "$body"
 	    } | write_file "$(out_path "$dest_dir/$name.md")"
   done
@@ -245,10 +245,12 @@ copy_plugin_scripts() {
   rm -rf "$dest"
   mkdir -p "$dest/mcp"
   cp "$REPO_ROOT/scripts/cadre-core.js" "$dest/cadre-core.js"
+  cp "$REPO_ROOT/scripts/cadre-job-runner.js" "$dest/cadre-job-runner.js"
   cp "$REPO_ROOT/scripts/cadre-lsp-setup.js" "$dest/cadre-lsp-setup.js"
   cp "$REPO_ROOT/scripts/cadre-lsp-review.js" "$dest/cadre-lsp-review.js"
   cp "$REPO_ROOT/scripts/cadre-lsp-daemon.js" "$dest/cadre-lsp-daemon.js"
   cp "$REPO_ROOT/scripts/mcp/cadre-server.js" "$dest/mcp/cadre-server.js"
+  chmod +x "$dest/cadre-job-runner.js" "$dest/mcp/cadre-server.js"
 }
 
 write_codex_plugin_manifest() {
@@ -374,12 +376,13 @@ workflows can copy or invoke them. They are not auto-registered as plugin LSP
 servers because Cadre configures per-project language servers in
 \`cadre/lsp.json\`.
 
-Cadre MCP is a required runtime. Use \`cadre_ping\` to verify the server is
-available. All project-scoped MCP tools require a per-call \`root\` argument.
+Cadre MCP is a required runtime. Use \`cadre_project\` with
+\`{"action":"ping"}\` to verify the server is available. All project-scoped MCP
+tools require a per-call \`root\` argument.
 The server normalizes that path by walking upward to the nearest directory
 containing \`cadre/\`, so callers may pass either the project root or a path
-inside it. Use \`cadre_current_root\` with \`root\` to inspect the resolved
-project root.
+inside it. Use \`cadre_project\` with \`{"action":"root"}\` and \`root\` to
+inspect the resolved project root.
 EOF
 }
 

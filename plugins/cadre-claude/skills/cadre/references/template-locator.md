@@ -6,7 +6,7 @@ Cadre ships starter templates — `workflow.md`, `patterns.md`, `learnings.md`,
 `cadre-setup` and `cadre-newtrack` copy from them. The same bundle also carries
 **helper scripts** under `<TEMPLATES_DIR>/scripts/` that workflow protocols run **in place**
 (they are not copied into `cadre/`) — currently the optional LSP setup/review
-helpers. `tracks.md` regeneration is owned by MCP `cadre_regen_index`; do not
+helpers. `tracks.md` regeneration is owned by MCP `cadre_mutate` with `action: "regen_index"`; do not
 route workflows to a template shell script for that operation.
 
 ## Resolve `<TEMPLATES_DIR>`
@@ -32,5 +32,5 @@ sensible built-in defaults instead of copying files.
 | `code_styleguides/<lang>.md` | `cadre/code_styleguides/` | only the selected guides |
 | `beads.json` | `cadre/beads.json` | setup copies full-mode Beads config (`mode: "normal"`) |
 | `scripts/cadre-lsp-setup.js` | *(run in place)* | `node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json` — recommend/write `cadre/lsp.json` |
-| `scripts/cadre-lsp-review.js` | *(run in place through MCP when possible)* | `cadre_lsp_warm_review` preferred, `cadre_lsp_review` fallback / `node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --json` — code-intelligence review |
-| `scripts/cadre-lsp-daemon.js` | *(managed by MCP)* | persistent LSP daemon used by `cadre_lsp_warm_review` |
+| `scripts/cadre-lsp-review.js` | *(run in place through MCP when possible)* | `cadre_intel` with `action: "lsp_warm_review"` preferred, `cadre_intel` with `action: "lsp_review"` fallback / `node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --json` — code-intelligence review |
+| `scripts/cadre-lsp-daemon.js` | *(managed by MCP)* | persistent LSP daemon used by `cadre_intel` with `action: "lsp_warm_review"` |

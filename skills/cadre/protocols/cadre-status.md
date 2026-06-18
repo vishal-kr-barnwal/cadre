@@ -34,25 +34,25 @@ behavior is unchanged):
   group / merge-train surface in section 5c.
 
 **MCP routing for this workflow (required):**
-- First resolve the project root with `cadre_current_root` using the per-call
+- First resolve the project root with `cadre_project` with `action: "root"` using the per-call
   `root` argument.
-- Use `cadre_doctor` for `--doctor`, and whenever setup/tool availability is the
+- Use `cadre_project` with `action: "doctor"` for `--doctor`, and whenever setup/tool availability is the
   actual question. Do not simulate the doctor by hand with scattered shell probes.
-- Use `cadre_live_status` for bare status. It returns the compact active-track
+- Use `cadre_status` with `action: "live"` for bare status. It returns the compact active-track
   summary and task counts without making the agent manually scan every plan.
-- Use `cadre_team_status` for full multi-track status, ownership, reviewer, and
+- Use `cadre_status` with `action: "team"` for full multi-track status, ownership, reviewer, and
   status-count data (`--team`, `--mine`, `--repos`). Read files only for details
   the MCP payload does not expose yet.
-- Use `cadre_team_board` for rich `--team` / `--mine` output: WIP, incoming
+- Use `cadre_status` with `action: "board"` for rich `--team` / `--mine` output: WIP, incoming
   handoffs, review queue, blockers, and Beads label evidence in one bounded packet.
-- Use `cadre_regen_index` for `--regen-index`; do not run the helper script or
+- Use `cadre_mutate` with `action: "regen_index"` for `--regen-index`; do not run the helper script or
   reimplement the splice directly from the workflow.
-- Use `cadre_available_work` for `--available` / `--unowned`.
-- Use `cadre_collision_scan` for `--collisions`.
-- Use `cadre_track_context` when a status view needs task-level detail for one
-  track. Use `cadre_plan_integrity` for validation-style plan warnings rather
+- Use `cadre_status` with `action: "available"` for `--available` / `--unowned`.
+- Use `cadre_status` with `action: "collisions"` for `--collisions`.
+- Use `cadre_track` with `action: "context"` when a status view needs task-level detail for one
+  track. Use `cadre_track` with `action: "integrity"` for validation-style plan warnings rather
   than scanning every `plan.md` in the status workflow.
-- For resource reads, use `cadre://team-status?root=<absolute-or-encoded-root>` or
+- For resource reads, use `cadre://team-board?root=<absolute-or-encoded-root>` or
   `cadre://collisions?root=<absolute-or-encoded-root>` with the same per-call root
   contract.
 
@@ -62,7 +62,7 @@ the active owner, resolve `--mine`, and group team WIP.
 
 **Cheap by default:** full multi-track MCP scans run **only** under the
 multi-track modes — `--team`, `--mine`, `--repos`, `--available`/`--unowned`, or
-`--collisions`. Bare `cadre-status` calls `cadre_live_status` and reads only
+`--collisions`. Bare `cadre-status` calls `cadre_status` with `action: "live"` and reads only
 active-track details that are not yet exposed by MCP.
 
 **Status source of truth:** each track's `metadata.json.status`
@@ -73,7 +73,7 @@ section 12. Never hand-flip a marker in `tracks.md`; update the track's
 
 ## 1. Check Setup
 
-If `cadre/tracks.md` doesn't exist, call `cadre_doctor` with `root` before
+If `cadre/tracks.md` doesn't exist, call `cadre_project` with `action: "doctor"` with `root` before
 answering. If doctor reports no valid Cadre project markers, tell user to run
 `cadre-setup` first. If markers exist but a file is missing, report the specific
 doctor finding and suggest `cadre-validate` or the named repair.
@@ -82,9 +82,9 @@ doctor finding and suggest `cadre-validate` or the named repair.
 
 - Read `cadre/tracks.md` only as the human-readable derived index/mirror when a
   human-facing index label is needed.
-- For bare status, call `cadre_live_status` with `root` and use its
+- For bare status, call `cadre_status` with `action: "live"` with `root` and use its
   `active_tracks[]`, `task_counts`, and `by_status` fields.
-- For multi-track modes, call `cadre_team_status` with `root` to load the track
+- For multi-track modes, call `cadre_status` with `action: "team"` with `root` to load the track
   inventory and status source-of-truth view. Use its `tracks[]` records for
   ownership, reviewer, and review-verdict summaries.
 - Read `cadre/tracks/<track_id>/plan.md` only for tracks whose task-level details
@@ -101,13 +101,13 @@ each `cadre/tracks/<id>/metadata.json` for `status == "in_progress"`:
   marker still works as a fallback if no metadata reports `in_progress` (e.g.
   pre-status tracks). If the metadata-derived active track and the `tracks.md` marker
   disagree, prefer metadata and note that the index is stale — run
-  MCP `cadre_regen_index` to refresh it.
+  MCP `cadre_mutate` with `action: "regen_index"` to refresh it.
 
 ## 3. Calculate Progress
 
-For bare status, use `cadre_live_status.task_counts`; do not scan every track's
+For bare status, use `cadre_status` with `action: "live"` and its `task_counts`; do not scan every track's
 plan. For a selected active track or an expanded status mode, use
-`cadre_track_context.task_counts` and `cadre_track_context.plan` so task counts,
+`cadre_track` with `action: "context"` and its `task_counts` / `plan` so task counts,
 commit SHAs, and task keys come from the same parser used by implement/review.
 
 ## 4. Present Summary
@@ -226,7 +226,7 @@ monorepo mode). Surface the cross-repo PR group and the merge-train order for th
    `repos.json.merge_train.group_label_prefix` (default `cadre-track`); the
    label is `<prefix>:<track_id>`.
 
-2. **List the PR group.** Prefer MCP `cadre_pr_ci_status` for every recorded
+2. **List the PR group.** Prefer MCP `cadre_review` with `action: "pr_ci_status"` for every recorded
    product/control PR URL or branch so provider status and CI arrive as
    structured data. If the provider CLI is unavailable, **degrade silently** to
    the recorded URLs in `metadata.json.repos[*].pr_url` and
@@ -364,7 +364,7 @@ flow that performs the **full multi-track scan**; it is a no-op for bare
 `bd` is unavailable, HALT. If a non-Beads detail source is missing, omit that
 sub-section silently.
 
-1. **Gather board data through MCP.** Call `cadre_team_board` with `root` and
+1. **Gather board data through MCP.** Call `cadre_status` with `action: "board"` with `root` and
    `mine: true` for `--mine`; otherwise pass `mine: false`. Use its `wip[]`,
    `incoming_handoffs[]`, `review_queue[]`, `blockers[]`, and `beads` fields as the
    source of truth for this view. Do not re-run `bd list` / `bd ready` manually
@@ -376,7 +376,7 @@ sub-section silently.
    `assignee` + the Beads label `handoff:pending` (the `owner` is intentionally left
    on the author, so this is invisible to an owner-only scan). Surface it so the
    recipient actually sees the work waiting for them:
-   These are already included in `cadre_team_board.incoming_handoffs[]`; render
+   These are already included in `cadre_status` with `action: "board"` under `incoming_handoffs[]`; render
    them from the packet. If `beads.available` is false, show that incoming handoff
    evidence is unavailable rather than silently treating the queue as empty.
 
@@ -389,12 +389,12 @@ sub-section silently.
      review**) — query via `bd list --label review:changes --json` /
      `--label review:ready --json` / `--label review:requested --json` when `bd` is
      available. In normal operation this label evidence comes from
-     `cadre_team_board.review_queue[]`.
+     `cadre_status` with `action: "board"` under `review_queue[]`.
    - Annotate each entry with its `metadata.json.reviewer` when set (for
      **Awaiting review** this is the *assigned* reviewer, so load is visible).
 
 3. **Gather blocked-on edges.**
-   Use `cadre_team_board.blockers[]`; it includes metadata dependency blockers and
+   Use `cadre_status` with `action: "board"` under `blockers[]`; it includes metadata dependency blockers and
    task-level `[!]` / `[~]` markers, plus optional Beads evidence when available.
 
 4. **Present:**
@@ -533,20 +533,20 @@ greps `## [..] Track:` keeps working unchanged. Use `metadata.json.name` for
 { "root": "/absolute/path/to/project" }
 ```
 
-Use `cadre_regen_index` and require `ok: true` in the returned JSON. It enumerates
+Use `cadre_mutate` with `action: "regen_index"` and require `ok: true` in the returned JSON. It enumerates
 `cadre/tracks/*/metadata.json` (deterministically sorted), emits one
 `## [<marker>] Track: <name>` line per track (using the marker map above;
 `name` → fallback `track_id`), and splices that body between the sentinels while
 preserving any human preamble above `start` and trailer below `end`. It is
 idempotent and bd-independent.
 
-If `cadre_regen_index` fails, halt and surface the MCP error. Do not fall back to
+If `cadre_mutate` with `action: "regen_index"` fails, halt and surface the MCP error. Do not fall back to
 hand-editing markers or reimplementing the splice in the workflow.
 
 **Shared-mode merge conflicts.** Because the index is **derived**, a Git merge
 conflict in `cadre/tracks.md` is resolved deterministically by **regenerating
 it** rather than hand-merging: take either side (or `git checkout --theirs/--ours
-cadre/tracks.md`), then call MCP `cadre_regen_index` to rebuild the
+cadre/tracks.md`), then call MCP `cadre_mutate` with `action: "regen_index"` to rebuild the
 marked region from each per-track `metadata.json`. Per-track metadata rarely
 collides (each track owns its own file), so the derived index never needs a manual
 merge — this is the whole point of the source-of-truth split.
@@ -562,7 +562,7 @@ Like `--team`, this performs the full multi-track scan and requires Beads.
 
 1. **Identity:** compute `<git-identity>` (see Identity above).
 
-2. **Select candidates via MCP.** Call `cadre_available_work` with `root`. It
+2. **Select candidates via MCP.** Call `cadre_status` with `action: "available"` with `root`. It
    returns `available[]` (free to start) and `reclaimable[]` (held by stale
    lease/state). A track is **available** when ALL hold:
    - `metadata.json.status` is `new` (marker `[ ]`) — not in progress, completed,
@@ -605,7 +605,7 @@ annotation is a first-class plan artifact emitted for **every** task in `plan.md
 (not only parallel phases), so this scan sees the whole fleet's file footprint.
 Like `--team`, this performs the full multi-track scan and requires Beads.
 
-1. **Scan via MCP.** Call `cadre_collision_scan` with `root`. A track is included
+1. **Scan via MCP.** Call `cadre_status` with `action: "collisions"` with `root`. A track is included
    when its `metadata.json.status` is `new`, `in_progress`, or `blocked`
    (markers `[ ]`, `[~]`, `[!]`). Skip `completed` and `skipped` tracks.
 
@@ -657,7 +657,7 @@ Like `--team`, this performs the full multi-track scan and requires Beads.
 **Run only when workflow arguments contain `--doctor`.** This is the low-token
 health view for "is Cadre wired correctly here?"
 
-1. **Call MCP `cadre_doctor`.** Pass `root` as the current project path or any
+1. **Call MCP `cadre_project` with `action: "doctor"`.** Pass `root` as the current project path or any
    path inside it. The tool may be used before a valid Cadre project exists; it
    reports project-marker status separately from runtime availability.
 2. **Present grouped findings:**

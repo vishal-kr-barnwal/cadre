@@ -68,6 +68,19 @@ function parseTextJson(result) {
   return JSON.parse(result.content[0].text);
 }
 
+async function waitForJob(request, jobId) {
+  for (let i = 0; i < 20; i += 1) {
+    const result = await request("tools/call", {
+      name: "cadre_job",
+      arguments: { action: "result", jobId },
+    });
+    const parsed = parseTextJson(result);
+    if (parsed.data.job.status !== "running") return parsed;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${jobId}`);
+}
+
 test("MCP root resolution rejects harness skill directories without project state", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-test-"));
   const { server, request } = startServer();
@@ -76,17 +89,15 @@ test("MCP root resolution rejects harness skill directories without project stat
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
     for (const name of [
-      "cadre_prepare_implementation",
-      "cadre_phase_schedule",
-      "cadre_metadata_patch",
-      "cadre_heartbeat_track",
-      "cadre_create_beads_tree",
+      "cadre_project",
+      "cadre_status",
+      "cadre_track",
+      "cadre_mutate",
       "cadre_complete_task",
-      "cadre_record_parallel_worker",
-      "cadre_team_board",
-      "cadre_review_assist",
-      "cadre_review_machine_gate",
-      "cadre_lsp_impact",
+      "cadre_beads",
+      "cadre_job",
+      "cadre_review",
+      "cadre_intel",
     ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);
     }
@@ -94,24 +105,38 @@ test("MCP root resolution rejects harness skill directories without project stat
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
       request("tools/call", {
-        name: "cadre_current_root",
-        arguments: { root: path.join(root, "harness", "skills", "cadre") },
+        name: "cadre_project",
+        arguments: { action: "root", root: path.join(root, "harness", "skills", "cadre") },
       }),
-      /requires a per-call root/
+      /requires \{ root \}/
     );
 
     write(path.join(root, "project", "cadre", "setup_state.json"), "{}\n");
     const valid = await request("tools/call", {
-      name: "cadre_current_root",
-      arguments: { root: path.join(root, "project", "cadre") },
+      name: "cadre_project",
+      arguments: { action: "root", root: path.join(root, "project", "cadre") },
     });
-    assert.equal(parseTextJson(valid).root, path.join(root, "project"));
+    assert.equal(parseTextJson(valid).data.root, path.join(root, "project"));
 
     const doctor = await request("tools/call", {
-      name: "cadre_doctor",
-      arguments: { root: path.join(root, "harness", "skills", "cadre") },
+      name: "cadre_project",
+      arguments: { action: "doctor", root: path.join(root, "harness", "skills", "cadre") },
     });
-    assert.equal(parseTextJson(doctor).checks.cadre_project.ok, false);
+    assert.equal(parseTextJson(doctor).data.checks.cadre_project.ok, false);
+
+    const job = await request("tools/call", {
+      name: "cadre_job",
+      arguments: {
+        action: "start",
+        type: "coverage",
+        root: path.join(root, "project"),
+        args: { command: "printf 'Statements : 91%%\\n'", coverageThreshold: 80 },
+      },
+    });
+    const jobId = parseTextJson(job).job.id;
+    const completed = await waitForJob(request, jobId);
+    assert.equal(completed.ok, true);
+    assert.equal(completed.data.result.coverage, 91);
   } finally {
     server.kill();
     fs.rmSync(root, { recursive: true, force: true });

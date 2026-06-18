@@ -15,6 +15,7 @@ const STATUS_MARKERS = {
 };
 const VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
 const STALE_LEASE_MS = 30 * 60 * 1000;
+const LOCK_STALE_MS = STALE_LEASE_MS;
 
 function readJson(file, fallback = null) {
   try {
@@ -30,11 +31,132 @@ function writeJson(file, value) {
   fs.renameSync(tmp, file);
 }
 
+function safeName(value) {
+  return String(value || "lock")
+    .replace(/[^A-Za-z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 160) || "lock";
+}
+
+function lockRoot(root) {
+  return path.join(root, "cadre", ".locks");
+}
+
+function processAlive(pid) {
+  const numeric = Number(pid);
+  if (!Number.isInteger(numeric) || numeric <= 0) return false;
+  try {
+    process.kill(numeric, 0);
+    return true;
+  } catch (error) {
+    return error && error.code === "EPERM";
+  }
+}
+
+function readLockInfo(lockDir) {
+  return readJson(path.join(lockDir, "owner.json"), null) || {};
+}
+
+function lockIsStale(info, nowMs = Date.now()) {
+  const stamp = Date.parse(info.updated_at || info.acquired_at || "");
+  if (Number.isFinite(stamp) && nowMs - stamp > LOCK_STALE_MS) return true;
+  if (info.pid && !processAlive(info.pid)) return true;
+  return false;
+}
+
+function acquireLock(root, name, options = {}) {
+  const now = utcNow();
+  const dir = path.join(lockRoot(root), `${safeName(name)}.lock`);
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  for (let attempt = 1; attempt <= Number(options.retries || 3); attempt += 1) {
+    try {
+      fs.mkdirSync(dir);
+      const info = {
+        name,
+        pid: process.pid,
+        owner: options.owner || gitIdentity(root) || null,
+        acquired_at: now,
+        updated_at: now,
+        hostname: require("os").hostname(),
+      };
+      writeJson(path.join(dir, "owner.json"), info);
+      return { ok: true, dir, info, attempts: attempt };
+    } catch (error) {
+      if (error.code !== "EEXIST") {
+        return { ok: false, dir, error: error.message, attempts: attempt };
+      }
+      const current = readLockInfo(dir);
+      if (lockIsStale(current)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+          continue;
+        } catch (removeError) {
+          return {
+            ok: false,
+            dir,
+            conflict: true,
+            stale: true,
+            holder: current,
+            error: removeError.message,
+            attempts: attempt,
+          };
+        }
+      }
+      return {
+        ok: false,
+        dir,
+        conflict: true,
+        stale: false,
+        holder: current,
+        error: `Lock already held: ${name}`,
+        attempts: attempt,
+      };
+    }
+  }
+  return { ok: false, dir, conflict: true, error: `Unable to acquire lock: ${name}` };
+}
+
+function releaseLock(lock) {
+  if (!lock || !lock.ok || !lock.dir) return { ok: true, skipped: true };
+  try {
+    fs.rmSync(lock.dir, { recursive: true, force: true });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+function withLock(root, name, fn, options = {}) {
+  const lock = acquireLock(root, name, options);
+  if (!lock.ok) return { ok: false, stage: "lock", lock };
+  try {
+    const value = fn(lock);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return Object.prototype.hasOwnProperty.call(value, "ok")
+        ? { ...value, lock }
+        : { ok: true, value, lock };
+    }
+    return { ok: true, value, lock };
+  } catch (error) {
+    return { ok: false, stage: "locked_operation", error: error.message, lock };
+  } finally {
+    releaseLock(lock);
+  }
+}
+
+function trackLockName(trackId) {
+  return `track:${trackId}`;
+}
+
+function withTrackLock(root, trackId, fn, options = {}) {
+  return withLock(root, trackLockName(trackId), fn, options);
+}
+
 function textHash(text) {
   return crypto.createHash("sha256").update(String(text || "")).digest("hex");
 }
 
-function patchJsonFile(file, patcher, options = {}) {
+function patchJsonFileUnlocked(file, patcher, options = {}) {
   const retries = Number(options.retries || 5);
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     let beforeText;
@@ -82,6 +204,13 @@ function patchJsonFile(file, patcher, options = {}) {
     error: `JSON file changed during patch after ${retries} retries`,
     conflict: true,
   };
+}
+
+function patchJsonFile(file, patcher, options = {}) {
+  if (options.root && options.lockName && options.lock !== false) {
+    return withLock(options.root, options.lockName, () => patchJsonFileUnlocked(file, patcher, { ...options, lock: false }), options.lockOptions || {});
+  }
+  return patchJsonFileUnlocked(file, patcher, options);
 }
 
 function utcNow() {
@@ -200,8 +329,13 @@ function controlPlaneSyncSafety(root, mode, remote, branch) {
   if (fetch.ok && rev.ok) {
     diff = runCommand("git", ["diff", "--name-only", `${remoteRef}..HEAD`], { cwd: root });
   } else {
-    safety.warnings.push(`Unable to verify ${remoteRef}; falling back to last-commit file classification`);
-    diff = runCommand("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], { cwd: root });
+    return {
+      ...safety,
+      ok: false,
+      reason: `Unable to verify ${remoteRef}; refusing control-plane post-sync rather than classifying only the last commit`,
+      fetch,
+      rev,
+    };
   }
   const aheadFiles = diff.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const unsafeAheadFiles = aheadFiles.filter((file) => !isControlPlaneFile(file));
@@ -1706,7 +1840,10 @@ function createBeadsTree(root, args = {}) {
       ...metadata,
       beads_epic: epicId,
       beads_tasks: beadsTasks,
-    }));
+    }), {
+      root,
+      lockName: trackLockName(track.track_id),
+    });
     if (!metadataPatch.ok) {
       return { ok: false, available: true, stage: "metadata_patch", commands, results, metadata_patch: metadataPatch };
     }
@@ -1788,7 +1925,10 @@ function metadataPatch(root, args = {}) {
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
   const patch = args.patch && typeof args.patch === "object" ? args.patch : null;
   if (!patch) return { ok: false, error: "patch object is required" };
-  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }));
+  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }), {
+    root,
+    lockName: trackLockName(track.track_id),
+  });
   return {
     ok: result.ok,
     track_id: track.track_id,
@@ -1801,6 +1941,10 @@ function metadataPatch(root, args = {}) {
 function heartbeatTrack(root, args = {}) {
   const track = findTrack(root, args.trackId || args.track_id);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => heartbeatTrackUnlocked(root, track, args));
+}
+
+function heartbeatTrackUnlocked(root, track, args = {}) {
   const identity = args.identity || gitIdentity(root) || track.metadata.owner || null;
   const now = args.now || utcNow();
   const topology = loadTopology(root);
@@ -1816,7 +1960,7 @@ function heartbeatTrack(root, args = {}) {
     metadata.owner = metadata.owner || identity;
     metadata.updated_at = now;
     return metadata;
-  });
+  }, { lock: false });
   const statePath = path.join(track.dir, "implement_state.json");
   let stateResult = null;
   if (fileExists(statePath)) {
@@ -1824,7 +1968,7 @@ function heartbeatTrack(root, args = {}) {
       ...state,
       owner: state.owner || identity,
       last_updated: now,
-    }));
+    }), { lock: false });
   }
   let beads = null;
   const epic = track.metadata.beads_epic;
@@ -1845,6 +1989,10 @@ function heartbeatTrack(root, args = {}) {
 function claimTrack(root, trackId, options = {}) {
   const track = findTrack(root, trackId);
   if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  return withTrackLock(root, track.track_id, () => claimTrackUnlocked(root, track, options));
+}
+
+function claimTrackUnlocked(root, track, options = {}) {
   const identity = options.identity || gitIdentity(root);
   if (!identity) return { ok: false, error: "No git identity found for claim" };
   const now = utcNow();
@@ -1908,7 +2056,7 @@ function claimTrack(root, trackId, options = {}) {
       };
     }
     return metadata;
-  });
+  }, { lock: false });
   if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult, commands };
   const statePath = path.join(track.dir, "implement_state.json");
   writeJson(statePath, {
@@ -1940,21 +2088,23 @@ function setTrackStatus(root, trackId, status) {
   if (!track) {
     return { ok: false, error: `Track not found: ${trackId}` };
   }
-  const metadata = patchJsonFile(track.metadata_path, (current) => ({
-    ...current,
-    status,
-  }));
-  if (!metadata.ok) {
-    return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
-  }
-  const regen = regenIndex(root);
-  return {
-    ok: Boolean(regen.ok),
-    track_id: trackId,
-    status,
-    metadata,
-    regen,
-  };
+  return withTrackLock(root, trackId, () => {
+    const metadata = patchJsonFile(track.metadata_path, (current) => ({
+      ...current,
+      status,
+    }), { lock: false });
+    if (!metadata.ok) {
+      return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
+    }
+    const regen = regenIndex(root);
+    return {
+      ok: Boolean(regen.ok),
+      track_id: trackId,
+      status,
+      metadata,
+      regen,
+    };
+  });
 }
 
 function markerForStatus(status) {
@@ -1968,7 +2118,7 @@ function markerForStatus(status) {
   }[status] || status;
 }
 
-function recordTaskResult(root, args = {}) {
+function recordTaskResultUnlocked(root, args = {}) {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
   const plan = parsePlanFile(track.plan_path);
@@ -2024,6 +2174,37 @@ function recordTaskResult(root, args = {}) {
     beads_task_id: metadata.value && metadata.value.beads_tasks ? metadata.value.beads_tasks[task.task_key] || null : null,
     metadata,
   };
+}
+
+function recordTaskResult(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  if (args.lock === false) return recordTaskResultUnlocked(root, args);
+  return withTrackLock(root, track.track_id, () => recordTaskResultUnlocked(root, { ...args, lock: false }));
+}
+
+function completionJournalPath(track) {
+  return path.join(track.dir, "completion_journal.json");
+}
+
+function readCompletionJournal(track) {
+  const value = readJson(completionJournalPath(track), { entries: {} });
+  if (!value || typeof value !== "object") return { entries: {} };
+  if (!value.entries || typeof value.entries !== "object") value.entries = {};
+  return value;
+}
+
+function writeCompletionJournal(track, journal) {
+  writeJson(completionJournalPath(track), journal);
+}
+
+function patchCompletionJournal(track, key, patcher) {
+  const journal = readCompletionJournal(track);
+  const before = journal.entries[key] || {};
+  journal.entries[key] = patcher({ ...before }, journal);
+  journal.updated_at = utcNow();
+  writeCompletionJournal(track, journal);
+  return journal.entries[key];
 }
 
 function completeTask(root, args = {}) {
@@ -2118,29 +2299,6 @@ function completeTask(root, args = {}) {
     beads.skipped_reason = "Track has no Beads task mapping";
   } else {
     beads.attempted = true;
-    const sha = args.commitSha ? String(args.commitSha).slice(0, 12) : "unknown";
-    const note = [
-      `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha.slice(0, 7)}`,
-      `COMPLETED: ${task.title}`,
-      `COMMIT: ${sha}`,
-      `COVERAGE: ${coverage.coverage == null ? "unmeasured" : `${coverage.coverage}%`}`,
-      args.summary ? `SUMMARY: ${args.summary}` : null,
-    ].filter(Boolean).join("\n");
-    beads.note = beadsTaskWrite(root, { operation: "note", id: beadsTaskId, note });
-    if (beads.note.ok) {
-      beads.close = beadsTaskWrite(root, {
-        operation: "close",
-        id: beadsTaskId,
-        continue: true,
-        reason: args.reason || `commit: ${args.commitSha || "completed"}`,
-      });
-    }
-    if (beads.note && !beads.note.ok) {
-      return { ok: false, stage: "beads_note", threshold, working_root: workingRoot, coverage, beads };
-    }
-    if (beads.close && !beads.close.ok) {
-      return { ok: false, stage: "beads_close", threshold, working_root: workingRoot, coverage, beads };
-    }
   }
 
   const lastTestRun = {
@@ -2155,34 +2313,138 @@ function completeTask(root, args = {}) {
     allow_missing_coverage: allowMissingCoverage,
     allow_low_coverage: allowLowCoverage,
   };
-  const taskResult = recordTaskResult(root, {
-    trackId: args.trackId,
-    phaseIndex,
-    taskIndex,
-    status: args.status || "completed",
-    commitSha: args.commitSha,
-    coverage: coverage.coverage,
-    repo: workingRoot.repo,
-    workingRoot: path.relative(root, workingRoot.path) || ".",
-    lastTestRun,
-  });
-  if (!taskResult.ok) return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, beads };
+  const sha = args.commitSha ? String(args.commitSha).slice(0, 12) : "unknown";
+  const dedupKey = `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha.slice(0, 7)}`;
+  const journalKey = `${phaseIndex}:${taskIndex}:${sha}`;
+  const recordState = () => {
+    const entry = patchCompletionJournal(track, journalKey, (current) => ({
+      ...current,
+      stage: current.stage || "started",
+      track_id: track.track_id,
+      phase_index: phaseIndex,
+      task_index: taskIndex,
+      task_key: task.task_key,
+      commit_sha: sha,
+      dedup_key: dedupKey,
+      started_at: current.started_at || utcNow(),
+    }));
+    const taskResult = recordTaskResultUnlocked(root, {
+      trackId: args.trackId,
+      phaseIndex,
+      taskIndex,
+      status: args.status || "completed",
+      commitSha: args.commitSha,
+      coverage: coverage.coverage,
+      repo: workingRoot.repo,
+      workingRoot: path.relative(root, workingRoot.path) || ".",
+      lastTestRun,
+    });
+    if (!taskResult.ok) {
+      patchCompletionJournal(track, journalKey, (current) => ({
+        ...current,
+        stage: "record_task_result_failed",
+        error: taskResult.error || taskResult.stage || "record task result failed",
+      }));
+      return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, beads, journal: entry };
+    }
+    const recordedEntry = patchCompletionJournal(track, journalKey, (current) => ({
+      ...current,
+      stage: "state_recorded",
+      state_recorded_at: utcNow(),
+      task_result: {
+        task_key: taskResult.task_key,
+        commit_sha: taskResult.commit_sha,
+        line: taskResult.line,
+      },
+    }));
+    return { ok: true, task_result: taskResult, journal: recordedEntry };
+  };
+  const stateResult = args.lock === false
+    ? recordState()
+    : withTrackLock(root, track.track_id, recordState);
+  if (!stateResult.ok) return { ...stateResult, threshold, working_root: workingRoot, coverage, beads };
+
+  if (beadsTaskId) {
+    const latest = readCompletionJournal(track).entries[journalKey] || {};
+    if (!latest.beads_note_written) {
+      const note = [
+        dedupKey,
+        `COMPLETED: ${task.title}`,
+        `COMMIT: ${sha}`,
+        `COVERAGE: ${coverage.coverage == null ? "unmeasured" : `${coverage.coverage}%`}`,
+        args.summary ? `SUMMARY: ${args.summary}` : null,
+      ].filter(Boolean).join("\n");
+      beads.note = beadsTaskWrite(root, { operation: "note", id: beadsTaskId, note, dedupKey });
+      if (!beads.note.ok) return { ok: false, stage: "beads_note", threshold, working_root: workingRoot, coverage, task_result: stateResult.task_result, beads, journal: latest };
+      const writeNote = () => patchCompletionJournal(track, journalKey, (current) => ({
+        ...current,
+        stage: "beads_note_written",
+        beads_note_written: true,
+        beads_note_at: utcNow(),
+      }));
+      if (args.lock === false) writeNote();
+      else {
+        const noteJournal = withTrackLock(root, track.track_id, writeNote);
+        if (!noteJournal.ok) return { ...noteJournal, stage: "journal_note", threshold, working_root: workingRoot, coverage, task_result: stateResult.task_result, beads };
+      }
+    } else {
+      beads.note = { ok: true, skipped: true, reason: "completion journal already recorded Beads note" };
+    }
+
+    const afterNote = readCompletionJournal(track).entries[journalKey] || {};
+    if (!afterNote.beads_close_written) {
+      beads.close = beadsTaskWrite(root, {
+        operation: "close",
+        id: beadsTaskId,
+        continue: true,
+        reason: args.reason || `commit: ${args.commitSha || "completed"}`,
+      });
+      if (!beads.close.ok) return { ok: false, stage: "beads_close", threshold, working_root: workingRoot, coverage, task_result: stateResult.task_result, beads, journal: afterNote };
+      const writeClose = () => patchCompletionJournal(track, journalKey, (current) => ({
+        ...current,
+        stage: "beads_closed",
+        beads_close_written: true,
+        beads_close_at: utcNow(),
+      }));
+      if (args.lock === false) writeClose();
+      else {
+        const closeJournal = withTrackLock(root, track.track_id, writeClose);
+        if (!closeJournal.ok) return { ...closeJournal, stage: "journal_close", threshold, working_root: workingRoot, coverage, task_result: stateResult.task_result, beads };
+      }
+    } else {
+      beads.close = { ok: true, skipped: true, reason: "completion journal already recorded Beads close" };
+    }
+  }
+
+  const markComplete = () => patchCompletionJournal(track, journalKey, (current) => ({
+    ...current,
+    stage: "completed",
+    completed_at: current.completed_at || utcNow(),
+  }));
+  const completedJournal = args.lock === false
+    ? markComplete()
+    : withTrackLock(root, track.track_id, markComplete);
 
   return {
     ok: true,
     track_id: track.track_id,
-    task_key: taskResult.task_key,
+    task_key: stateResult.task_result.task_key,
     working_root: workingRoot,
     threshold,
     coverage,
-    task_result: taskResult,
+    task_result: stateResult.task_result,
     beads,
+    journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal,
   };
 }
 
 function recordParallelWorker(root, args = {}) {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  return withTrackLock(root, track.track_id, () => recordParallelWorkerUnlocked(root, track, args));
+}
+
+function recordParallelWorkerUnlocked(root, track, args = {}) {
   const workerId = args.workerId || args.worker_id;
   if (!workerId) return { ok: false, error: "workerId is required" };
   const status = args.status || "awaiting_merge";
@@ -2243,6 +2505,7 @@ function recordParallelWorker(root, args = {}) {
       beadsTaskId: nextWorker.beads_task_id,
       repo: nextWorker.repo || args.repo,
       workingRoot: args.workingRoot || nextWorker.worktree || args.worktree,
+      lock: false,
     });
     if (!completion.ok) return { ok: false, stage: "complete_task", state_path: statePath, worker: nextWorker, completion };
   }
@@ -2266,6 +2529,10 @@ function recordParallelWorker(root, args = {}) {
 function recordReview(root, args = {}) {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  return withTrackLock(root, track.track_id, () => recordReviewUnlocked(root, track, args));
+}
+
+function recordReviewUnlocked(root, track, args = {}) {
   const verdict = args.verdict;
   if (!["approved", "changes_requested"].includes(verdict)) {
     return { ok: false, error: `Invalid review verdict: ${verdict}` };
@@ -2295,7 +2562,7 @@ function recordReview(root, args = {}) {
       review_seq: Number(existing.review_seq || 0) + 1,
     };
     return current;
-  });
+  }, { lock: false });
   if (!metadata.ok) {
     return {
       ok: false,
@@ -2358,7 +2625,8 @@ function testCoverage(root, args = {}) {
   let task_result = null;
   let metadata = null;
   if (track) {
-    metadata = patchJsonFile(track.metadata_path, (current) => {
+    const writeCoverage = () => {
+      metadata = patchJsonFile(track.metadata_path, (current) => {
       current.last_test_run = {
       command,
       cwd: coverageRun.cwd || workingRoot.path,
@@ -2370,7 +2638,11 @@ function testCoverage(root, args = {}) {
       };
       if (typeof coverage === "number") current.last_coverage = coverage;
       return current;
-    });
+      }, { lock: false });
+      return metadata;
+    };
+    const metadataWrite = withTrackLock(root, track.track_id, writeCoverage);
+    if (!metadataWrite.ok) return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_lock", metadata: metadataWrite };
     if (!metadata.ok) {
       return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata };
     }
@@ -2657,7 +2929,9 @@ function reviewAssist(root, args = {}) {
     todos: scanReviewTodos(entry.cwd || root, entry.files, todoLimit),
   }));
   const todos = repoTodos.flatMap((entry) => entry.todos.map((todo) => ({ ...todo, repo: entry.repo }))).slice(0, todoLimit);
-  const lsp = args.includeLsp === false ? null : lspReview(root, { base, head, config: args.config });
+  const lsp = args.includeLsp === false
+    ? null
+    : (args.lspResult || args.lsp_result || lspReview(root, { base, head, config: args.config }));
   const machineGate = args.includeMachine === false ? null : reviewMachineGate(root, args);
   const blocking = [];
   if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
@@ -2814,8 +3088,10 @@ function lspImpact(root, args = {}) {
     if (isIgnoredRepoMapFile(file)) continue;
     fileSymbols[file] = extractRepoSymbols(root, file, limit);
   }
-  const review = args.base || args.head
-    ? lspReview(root, { base: args.base || "main", head: args.head || "HEAD", config: args.config })
+  const review = args.lspResult || args.lsp_result
+    ? (args.lspResult || args.lsp_result)
+    : args.base || args.head
+      ? lspReview(root, { base: args.base || "main", head: args.head || "HEAD", config: args.config })
     : null;
   return {
     ok: true,
@@ -2930,18 +3206,35 @@ function beadsTaskWrite(root, args = {}) {
     const bdArgs = ["ready", "--json"];
     if (args.parent) bdArgs.push("--parent", String(args.parent));
     runBd(bdArgs);
+  } else if (op === "list") {
+    const bdArgs = ["list", "--json"];
+    if (args.status) bdArgs.push("--status", String(args.status));
+    if (args.label) bdArgs.push("--label", String(args.label));
+    if (args.parent) bdArgs.push("--parent", String(args.parent));
+    runBd(bdArgs);
   } else if (op === "show") {
     if (!id) return { ok: false, available: true, error: "id is required for show" };
-    runBd(["show", String(id), "--json"]);
+    const bdArgs = ["show", String(id)];
+    if (args.long === true) bdArgs.push("--long");
+    bdArgs.push("--json");
+    runBd(bdArgs);
   } else if (op === "update") {
     if (!id) return { ok: false, available: true, error: "id is required for update" };
     const bdArgs = ["update", String(id), "--json"];
     if (args.status) bdArgs.push("--status", String(args.status));
     if (Object.prototype.hasOwnProperty.call(args, "assignee")) bdArgs.push("--assignee", String(args.assignee || ""));
     if (args.priority) bdArgs.push("--priority", String(args.priority));
+    if (args.notes) bdArgs.push("--notes", String(args.notes));
     runBd(bdArgs);
   } else if (op === "note") {
     if (!id || !args.note) return { ok: false, available: true, error: "id and note are required for note" };
+    if (args.dedupKey) {
+      const show = runCommand("bd", ["show", String(id), "--long", "--json"], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+      commands.push(show);
+      if (show.ok && `${show.stdout}\n${show.stderr}`.includes(String(args.dedupKey))) {
+        return { ok: true, available: true, operation: op, skipped: true, reason: "dedupKey already present", commands, json: parseCommandJson(show) };
+      }
+    }
     runBd(["note", String(id), String(args.note), "--json"]);
   } else if (op === "close") {
     if (!id) return { ok: false, available: true, error: "id is required for close" };
@@ -2951,26 +3244,65 @@ function beadsTaskWrite(root, args = {}) {
   } else if (op === "label_add" || op === "label_remove") {
     if (!id || !args.label) return { ok: false, available: true, error: "id and label are required for label operations" };
     runBd(["label", op === "label_add" ? "add" : "remove", String(id), String(args.label), "--json"]);
-  } else if (op === "dep_add") {
-    if (!id || !args.dependsOn) return { ok: false, available: true, error: "id and dependsOn are required for dep_add" };
-    runBd(["dep", "add", String(id), String(args.dependsOn), "--json"]);
+  } else if (op === "dep_add" || op === "dep_remove") {
+    if (!id || !args.dependsOn) return { ok: false, available: true, error: "id and dependsOn are required for dependency operations" };
+    runBd(["dep", op === "dep_add" ? "add" : "remove", String(id), String(args.dependsOn), "--json"]);
   } else if (op === "create") {
     if (!args.title) return { ok: false, available: true, error: "title is required for create" };
     const bdArgs = ["create", String(args.title), "--json"];
+    if (args.id) bdArgs.push("--id", String(args.id));
     if (args.type) bdArgs.push("-t", String(args.type));
     if (args.parent) bdArgs.push("--parent", String(args.parent));
     if (args.priority) bdArgs.push("-p", String(args.priority));
     if (args.deps) bdArgs.push("--deps", String(args.deps));
+    if (args.labels) bdArgs.push("--labels", Array.isArray(args.labels) ? args.labels.join(",") : String(args.labels));
+    if (args.design) bdArgs.push("--design", String(args.design));
+    if (args.acceptance) bdArgs.push("--acceptance", String(args.acceptance));
+    if (args.ephemeral === true) bdArgs.push("--ephemeral");
+    runBd(bdArgs);
+  } else if (op === "mail_send") {
+    if (!args.to || !args.subject) return { ok: false, available: true, error: "to and subject are required for mail_send" };
+    const bdArgs = ["mail", "send", String(args.to), "--subject", String(args.subject), "--json"];
+    if (args.body) bdArgs.push("--body", String(args.body));
+    runBd(bdArgs);
+  } else if (op === "formula_list") {
+    runBd(["formula", "list", "--json"]);
+  } else if (op === "formula_show") {
+    if (!args.name) return { ok: false, available: true, error: "name is required for formula_show" };
+    runBd(["formula", "show", String(args.name), "--json"]);
+  } else if (op === "compact") {
+    if (args.all === true) runBd(["admin", "compact", "--auto", "--all"]);
+    else if (id) runBd(["admin", "compact", "--auto", "--id", String(id)]);
+    else return { ok: false, available: true, error: "id or all=true is required for compact" };
+  } else if (op === "rules_compact") {
+    runBd(["rules", "compact", "--auto"]);
+  } else if (op === "dolt_pull" || op === "dolt_push") {
+    runBd(["dolt", op === "dolt_pull" ? "pull" : "push"]);
+  } else if (op === "sql") {
+    if (!args.sql) return { ok: false, available: true, error: "sql is required for sql" };
+    runBd(["sql", String(args.sql)]);
+  } else if (op === "worktree_create") {
+    if (!args.path || !args.branch) return { ok: false, available: true, error: "path and branch are required for worktree_create" };
+    runBd(["worktree", "create", String(args.path), "--branch", String(args.branch)]);
+  } else if (op === "worktree_remove") {
+    if (!args.path) return { ok: false, available: true, error: "path is required for worktree_remove" };
+    const bdArgs = ["worktree", "remove", String(args.path)];
+    if (args.force === true) bdArgs.push("--force");
     runBd(bdArgs);
   } else {
     return {
       ok: false,
       available: true,
       error: `Unsupported Beads operation: ${op}`,
-      operations: ["ready", "show", "update", "note", "close", "label_add", "label_remove", "dep_add", "create"],
+      operations: [
+        "ready", "list", "show", "update", "note", "close",
+        "label_add", "label_remove", "dep_add", "dep_remove", "create",
+        "mail_send", "formula_list", "formula_show", "compact", "rules_compact",
+        "dolt_pull", "dolt_push", "sql", "worktree_create", "worktree_remove",
+      ],
     };
   }
-  const ok = commands.every((cmd) => cmd.ok);
+  const ok = commands.every((cmd) => cmd.ok || (op === "close" && /already|closed/i.test(`${cmd.stdout}\n${cmd.stderr}`)));
   let json = null;
   const last = commands[commands.length - 1];
   try {
@@ -2978,7 +3310,15 @@ function beadsTaskWrite(root, args = {}) {
   } catch (_) {
     // Keep raw output.
   }
-  return { ok, available: true, operation: op, commands, json };
+  const rowsAffectedMatch = last ? `${last.stdout}\n${last.stderr}`.match(/(?:rows?\s+affected|affected\s+rows?)\D+(\d+)/i) : null;
+  return {
+    ok,
+    available: true,
+    operation: op,
+    commands,
+    json,
+    rows_affected: rowsAffectedMatch ? Number(rowsAffectedMatch[1]) : null,
+  };
 }
 
 function lspReview(root, args = {}) {
@@ -3036,7 +3376,10 @@ function polyrepoPreflight(root) {
   return { ok: errors.length === 0, polyrepo: true, checks, errors };
 }
 
-function regenIndex(root) {
+function regenIndex(root, options = {}) {
+  if (options.lock !== false) {
+    return withLock(root, "tracks-index", () => regenIndex(root, { ...options, lock: false }));
+  }
   const tracksFile = path.join(root, "cadre", "tracks.md");
   const start = "<!-- cadre:index:start -->";
   const end = "<!-- cadre:index:end -->";
@@ -3075,6 +3418,7 @@ function regenIndex(root) {
 
 module.exports = {
   STATUS_MARKERS,
+  acquireLock,
   availableWork,
   beadsTaskWrite,
   claimTrack,
@@ -3107,6 +3451,7 @@ module.exports = {
   reviewAssist,
   reviewGate,
   reviewMachineGate,
+  releaseLock,
   setTrackStatus,
   syncControlPlane,
   teamBoard,
@@ -3114,4 +3459,6 @@ module.exports = {
   testCoverage,
   heartbeatTrack,
   trackContext,
+  withLock,
+  withTrackLock,
 };

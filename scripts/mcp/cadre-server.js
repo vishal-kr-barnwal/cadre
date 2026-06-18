@@ -9,573 +9,81 @@ const core = require("../cadre-core");
 
 const PROTOCOL_VERSION = "2025-11-25";
 
+const packetSchema = (description, actionEnum = null) => ({
+  name: description.name,
+  description: description.text,
+  inputSchema: {
+    type: "object",
+    properties: {
+      root: { type: "string" },
+      action: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
+      async: { type: "boolean" },
+      trackId: { type: "string" },
+      track_id: { type: "string" },
+      phaseIndex: { type: "number" },
+      taskIndex: { type: "number" },
+      planPath: { type: "string" },
+      status: { type: "string" },
+      patch: { type: "object" },
+      identity: { type: "string" },
+      takeover: { type: "boolean" },
+      base: { type: "string" },
+      head: { type: "string" },
+      config: { type: "string" },
+      operation: { type: "string" },
+      id: { type: "string" },
+      command: { type: "string" },
+      machineCommand: { type: "string" },
+      timeoutMs: { type: "number" },
+      provider: { type: "string" },
+      symbol: { type: "string" },
+      symbols: { type: "array", items: { type: "string" } },
+      files: { type: "array", items: { type: "string" } },
+      args: { type: "object" },
+      type: { type: "string" },
+      jobId: { type: "string" },
+    },
+    additionalProperties: true,
+  },
+});
+
 const TOOLS = [
-  {
-    name: "cadre_ping",
-    description: "Verify that the required Cadre MCP runtime is available.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_current_root",
-    description: "Resolve a caller-provided path to the Cadre project root.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_doctor",
-    description: "Diagnose Cadre runtime wiring, project markers, Beads, LSP, provider CLIs, and generated-bundle checks.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_regen_index",
-    description: "Regenerate cadre/tracks.md from per-track metadata.json status.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_parse_plan",
-    description: "Parse a Cadre plan.md and return phases, tasks, and annotations.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        planPath: { type: "string" },
-        root: { type: "string" },
-      },
-      required: ["planPath", "root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_phase_schedule",
-    description: "Compute the concrete phase-level scheduler packet: dependencies, ready phases, conflict-aware ready groups, and errors.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-      },
-      required: ["root", "trackId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_team_status",
-    description: "Return team status grouped by owner and track status.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_team_board",
-    description: "Return a richer low-token team board: WIP, handoffs, review queue, blockers, and optional Beads label evidence.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        mine: { type: "boolean" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_live_status",
-    description: "Return a compact live-status summary for the default status view.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_available_work",
-    description: "Return unowned ready tracks plus stale held tracks that can be reclaimed.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_prepare_implementation",
-    description: "Return one bounded implementation-start packet: selected track, optional claim, context, collisions, available work, and plan integrity.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        identity: { type: "string" },
-        claim: { type: "boolean" },
-        takeover: { type: "boolean" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_set_track_status",
-    description: "Set metadata.json.status for a track and regenerate cadre/tracks.md.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        status: {
-          type: "string",
-          enum: ["new", "in_progress", "completed", "blocked", "skipped"],
-        },
-      },
-      required: ["root", "trackId", "status"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_metadata_patch",
-    description: "Apply a top-level metadata.json patch with CAS retry semantics and report conflict/error details.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        patch: { type: "object" },
-      },
-      required: ["root", "trackId", "patch"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_collision_scan",
-    description: "Return cross-track file collisions from plan <!-- files: --> claims, including prefix/glob overlaps.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_track_context",
-    description: "Return one bounded context payload for a track: metadata, parsed plan, counts, worktree routing, hold state, and review state.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-      },
-      required: ["root", "trackId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_plan_integrity",
-    description: "Validate Cadre plan task annotations, task keys, dependency references, repo routing, and parallel file-claim shape.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_claim_track",
-    description: "Claim a track for the current identity, mirror owner/lease metadata, and create implement_state.json.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        identity: { type: "string" },
-        takeover: { type: "boolean" },
-      },
-      required: ["root", "trackId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_heartbeat_track",
-    description: "Refresh a track owner's shared lease/implement-state heartbeat and mirror Beads assignment when available.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        identity: { type: "string" },
-        now: { type: "string" },
-      },
-      required: ["root", "trackId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_record_task_result",
-    description: "Record a task result in plan.md plus metadata last_task_result/last_coverage.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        phaseIndex: { type: "number" },
-        taskIndex: { type: "number" },
-        status: { type: "string", enum: ["pending", "new", "in_progress", "completed", "blocked", "skipped"] },
-        commitSha: { type: "string" },
-        coverage: { type: "number" },
-      },
-      required: ["root", "trackId", "phaseIndex", "taskIndex"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_complete_task",
-    description: "Run the configured coverage/test command, enforce the threshold, then atomically record the plan task, metadata, and Beads completion.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        phaseIndex: { type: "number" },
-        taskIndex: { type: "number" },
-        commitSha: { type: "string" },
-        command: { type: "string" },
-        timeoutMs: { type: "number" },
-        coverageThreshold: { type: "number" },
-        allowMissingCoverage: { type: "boolean" },
-        allowLowCoverage: { type: "boolean" },
-        summary: { type: "string" },
-        reason: { type: "string" },
-        beadsTaskId: { type: "string" },
-        repo: { type: "string" },
-        workingRoot: { type: "string" },
-      },
-      required: ["root", "trackId", "phaseIndex", "taskIndex"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_record_parallel_worker",
-    description: "Coordinator-owned parallel worker audit update; optionally completes the plan task after a clean merge using cadre_complete_task.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        workerId: { type: "string" },
-        status: { type: "string", enum: ["in_progress", "awaiting_merge", "merged", "conflict", "failed"] },
-        phaseIndex: { type: "number" },
-        taskIndex: { type: "number" },
-        beadsTaskId: { type: "string" },
-        repo: { type: "string" },
-        worktree: { type: "string" },
-        branch: { type: "string" },
-        commitSha: { type: "string" },
-        coverage: { type: "number" },
-        evidence: { type: "object" },
-        completeTask: { type: "boolean" },
-        command: { type: "string" },
-        timeoutMs: { type: "number" },
-        coverageThreshold: { type: "number" },
-        allowMissingCoverage: { type: "boolean" },
-        allowLowCoverage: { type: "boolean" },
-        summary: { type: "string" },
-        reason: { type: "string" },
-        workingRoot: { type: "string" },
-      },
-      required: ["root", "trackId", "workerId", "status"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_create_beads_tree",
-    description: "Create or plan the Beads epic/phase/task/dependency tree for one Cadre track, then patch metadata with returned Beads IDs.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        identity: { type: "string" },
-        epicId: { type: "string" },
-        dryRun: { type: "boolean" },
-        planText: { type: "string" },
-        specText: { type: "string" },
-        metadata: { type: "object" },
-      },
-      required: ["root", "trackId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_record_review",
-    description: "Write metadata.review with review_seq, self-review detection, override guard, and immediate review-gate evaluation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        verdict: { type: "string", enum: ["approved", "changes_requested"] },
-        blockingCount: { type: "number" },
-        reviewer: { type: "string" },
-        coverage: { type: "number" },
-        reviewedSha: { type: "string" },
-        reviewedShas: { type: "object" },
-        date: { type: "string" },
-        allowOverride: { type: "boolean" },
-      },
-      required: ["root", "trackId", "verdict"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_review_assist",
-    description: "Assemble a review fallback packet: diff surface, unfinished plan tasks, TODO/stub scan, coverage, and LSP findings.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        base: { type: "string" },
-        head: { type: "string" },
-        includeLsp: { type: "boolean" },
-        includeMachine: { type: "boolean" },
-        machineCommand: { type: "string" },
-        config: { type: "string" },
-        todoLimit: { type: "number" },
-        repo: { type: "string" },
-      },
-      required: ["root", "trackId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_review_machine_gate",
-    description: "Run the configured review machine gate (typecheck/build/check/lint) inside MCP, per repo for polyrepo tracks.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        trackId: { type: "string" },
-        repo: { type: "string" },
-        workingRoot: { type: "string" },
-        machineCommand: { type: "string" },
-        command: { type: "string" },
-        timeoutMs: { type: "number" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_sync_control_plane",
-    description: "Run the shared-mode control-plane sync preamble or postamble as a structured operation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        mode: { type: "string", enum: ["pre", "post"] },
-      },
-      required: ["root", "mode"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_lsp_review",
-    description: "Run the Cadre LSP/code-intelligence review helper and return structured findings.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        base: { type: "string" },
-        head: { type: "string" },
-        config: { type: "string" },
-        timeoutMs: { type: "number" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_lsp_warm_review",
-    description: "Run the LSP/code-intelligence review through the persistent daemon so language servers stay warm across calls.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        base: { type: "string" },
-        head: { type: "string" },
-        config: { type: "string" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_lsp_daemon_status",
-    description: "Return persistent LSP daemon status and warm language-server sessions.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_lsp_daemon_shutdown",
-    description: "Stop the persistent LSP daemon and all warm language-server sessions.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_test_coverage",
-    description: "Run the project's configured test/coverage command, parse measured coverage, and optionally record it on a track/task.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        command: { type: "string" },
-        timeoutMs: { type: "number" },
-        trackId: { type: "string" },
-        phaseIndex: { type: "number" },
-        taskIndex: { type: "number" },
-        status: { type: "string", enum: ["pending", "new", "in_progress", "completed", "blocked", "skipped"] },
-        commitSha: { type: "string" },
-        repo: { type: "string" },
-        workingRoot: { type: "string" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_pr_ci_status",
-    description: "Read GitHub/GitLab PR/MR and CI status for a track branch or explicit PR/MR.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        provider: { type: "string", enum: ["github", "gitlab"] },
-        trackId: { type: "string" },
-        branch: { type: "string" },
-        pr: { type: "string" },
-        mr: { type: "string" },
-        prNumber: { type: "number" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_repo_map",
-    description: "Return a compact semantic repository map, or low-token references for a requested symbol.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        symbol: { type: "string" },
-        limit: { type: "number" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_lsp_impact",
-    description: "Return semantic impact data for symbols/files using repo-map references plus optional LSP diff review.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        symbol: { type: "string" },
-        symbols: { type: "array", items: { type: "string" } },
-        files: { type: "array", items: { type: "string" } },
-        base: { type: "string" },
-        head: { type: "string" },
-        config: { type: "string" },
-        limit: { type: "number" },
-      },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_beads_write",
-    description: "Run structured Beads task operations such as update, note, close, label changes, dependency add, create, ready, or show.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        operation: {
-          type: "string",
-          enum: ["ready", "show", "update", "note", "close", "label_add", "label_remove", "dep_add", "create"],
-        },
-        id: { type: "string" },
-        taskId: { type: "string" },
-        issueId: { type: "string" },
-        parent: { type: "string" },
-        status: { type: "string" },
-        assignee: { type: "string" },
-        priority: { type: "string" },
-        note: { type: "string" },
-        reason: { type: "string" },
-        continue: { type: "boolean" },
-        label: { type: "string" },
-        dependsOn: { type: "string" },
-        title: { type: "string" },
-        type: { type: "string" },
-        deps: { type: "string" },
-      },
-      required: ["root", "operation"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_review_gate",
-    description: "Evaluate whether a track's metadata.review clears the ship/land gate.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        trackId: { type: "string" },
-        root: { type: "string" },
-        headSha: { type: "string" },
-        headShas: { type: "object" },
-      },
-      required: ["trackId", "root"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "cadre_polyrepo_preflight",
-    description: "Run local polyrepo manifest and submodule sanity checks.",
-    inputSchema: {
-      type: "object",
-      properties: { root: { type: "string" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  },
+  packetSchema(
+    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, sync, and polyrepo preflight." },
+    ["ping", "doctor", "root", "topology", "sync_control_plane", "polyrepo_preflight"]
+  ),
+  packetSchema(
+    { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
+    ["live", "team", "mine", "available", "collisions", "board"]
+  ),
+  packetSchema(
+    { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
+    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree"]
+  ),
+  packetSchema(
+    { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
+    ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"]
+  ),
+  packetSchema(
+    { name: "cadre_complete_task", text: "Journaled task completion: coverage gate, locked plan/metadata writes, and idempotent Beads note/close." },
+    null
+  ),
+  packetSchema(
+    { name: "cadre_beads", text: "CLI-backed Beads packet for ready/list/show/update/note/close/labels/deps/create/mail/formula/compact/dolt/sql/worktree." },
+    null
+  ),
+  packetSchema(
+    { name: "cadre_job", text: "Cadre job packet: start, status, result, cancel, and list process-local long-running jobs." },
+    ["start", "status", "result", "cancel", "list"]
+  ),
+  packetSchema(
+    { name: "cadre_review", text: "Cadre review packet: review assist, machine gate, review gate, and PR/CI status." },
+    ["assist", "machine_gate", "gate", "pr_ci_status"]
+  ),
+  packetSchema(
+    { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
+    ["repo_map", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown"]
+  ),
 ];
 
 function isDirectory(file) {
@@ -619,9 +127,7 @@ function normalizePathCandidate(value) {
   }
   candidate = path.resolve(candidate);
   try {
-    if (fs.existsSync(candidate) && !fs.statSync(candidate).isDirectory()) {
-      candidate = path.dirname(candidate);
-    }
+    if (fs.existsSync(candidate) && !fs.statSync(candidate).isDirectory()) candidate = path.dirname(candidate);
   } catch (_) {
     return null;
   }
@@ -631,12 +137,9 @@ function normalizePathCandidate(value) {
 function findCadreRoot(start) {
   let dir = normalizePathCandidate(start);
   if (!dir) return null;
-
   while (true) {
     if (hasCadreProjectState(dir)) return dir;
-    if (path.basename(dir) === "cadre" && isCadreStateDirectory(dir)) {
-      return path.dirname(dir);
-    }
+    if (path.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return path.dirname(dir);
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -651,20 +154,12 @@ function rootFromCandidate(candidate) {
   return { root: normalized, has_cadre: false };
 }
 
-function resolveRootInfo(args = {}) {
-  const explicit = typeof args.root === "string" && args.root.trim() !== "";
-  if (!explicit) return null;
-  const resolved = rootFromCandidate(args.root);
-  return resolved ? { ...resolved, source: "argument.root" } : null;
-}
-
 function requireCadreRoot(args = {}) {
-  const info = resolveRootInfo(args);
+  const info = rootFromCandidate(args.root);
   if (info && info.has_cadre) return info.root;
   throw Object.assign(
     new Error(
-      `This Cadre MCP tool requires a per-call root argument pointing at, or inside, a project containing cadre/. ` +
-        `Received: ${args.root || "(missing)"}`
+      `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`
     ),
     { code: -32602 }
   );
@@ -672,13 +167,18 @@ function requireCadreRoot(args = {}) {
 
 function asTextJson(value) {
   return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(value, null, 2),
-      },
-    ],
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
   };
+}
+
+function envelope(value) {
+  const ok = value && Object.prototype.hasOwnProperty.call(value, "ok") ? Boolean(value.ok) : true;
+  const warnings = Array.isArray(value && value.warnings) ? value.warnings : [];
+  const errors = ok ? [] : [value && (value.error || value.reason || value.stage) || "Cadre operation failed"];
+  const out = { ok, data: value || null, warnings, errors };
+  if (value && value.commands) out.commands = value.commands;
+  if (value && value.job) out.job = value.job;
+  return out;
 }
 
 class LspDaemonClient {
@@ -750,153 +250,281 @@ class LspDaemonClient {
   }
 }
 
-const lspDaemon = new LspDaemonClient();
+class JobManager {
+  constructor() {
+    this.jobs = new Map();
+    this.nextId = 1;
+    this.ttlMs = 60 * 60 * 1000;
+  }
 
-async function toolCall(name, args) {
-  if (name === "cadre_ping") {
-    return asTextJson({
+  cleanup() {
+    const now = Date.now();
+    for (const [id, job] of this.jobs.entries()) {
+      const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
+      if (finished && now - Date.parse(job.finished_at || job.started_at) > this.ttlMs) this.jobs.delete(id);
+    }
+  }
+
+  start(type, root, args = {}) {
+    this.cleanup();
+    const id = `job_${this.nextId++}`;
+    const runner = path.resolve(__dirname, "..", "cadre-job-runner.js");
+    const proc = spawn(process.execPath, [runner], {
+      cwd: path.resolve(__dirname, "..", ".."),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const job = {
+      id,
+      type,
+      root,
+      args,
+      status: "running",
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      stdout: "",
+      stderr: "",
+      result: null,
+      exit_code: null,
+      signal: null,
+      proc,
+    };
+    this.jobs.set(id, job);
+    proc.stdout.on("data", (chunk) => {
+      job.stdout += chunk.toString("utf8");
+    });
+    proc.stderr.on("data", (chunk) => {
+      job.stderr += chunk.toString("utf8");
+    });
+    proc.on("close", (code, signal) => {
+      job.exit_code = code;
+      job.signal = signal || null;
+      job.finished_at = new Date().toISOString();
+      try {
+        job.result = JSON.parse(job.stdout || "{}");
+      } catch (_) {
+        job.result = { ok: false, error: "Job returned invalid JSON", stdout_tail: job.stdout.slice(-4000) };
+      }
+      if (job.status !== "cancelled") job.status = code === 0 && job.result && job.result.ok !== false ? "succeeded" : "failed";
+      job.proc = null;
+    });
+    proc.stdin.end(JSON.stringify({ type, root, args }));
+    return this.summary(job);
+  }
+
+  summary(job) {
+    return {
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      started_at: job.started_at,
+      finished_at: job.finished_at,
+      exit_code: job.exit_code,
+      signal: job.signal,
+      stdout_tail: job.stdout.slice(-4000),
+      stderr_tail: job.stderr.slice(-4000),
+    };
+  }
+
+  get(id) {
+    this.cleanup();
+    return this.jobs.get(id) || null;
+  }
+
+  cancel(id) {
+    const job = this.get(id);
+    if (!job) return { ok: false, error: `Job not found: ${id}` };
+    if (job.proc && job.status === "running") {
+      job.status = "cancelled";
+      job.proc.kill("SIGTERM");
+    }
+    return { ok: true, job: this.summary(job) };
+  }
+
+  result(id) {
+    const job = this.get(id);
+    if (!job) return { ok: false, error: `Job not found: ${id}` };
+    return { ok: job.status === "succeeded", job: this.summary(job), result: job.result };
+  }
+
+  list() {
+    this.cleanup();
+    return { ok: true, jobs: Array.from(this.jobs.values()).map((job) => this.summary(job)) };
+  }
+}
+
+const lspDaemon = new LspDaemonClient();
+const jobs = new JobManager();
+
+function jobTypeForPacket(name, args) {
+  if (name === "cadre_complete_task") return "complete_task";
+  if (name === "cadre_review" && args.action === "assist") return "review_assist";
+  if (name === "cadre_review" && args.action === "machine_gate") return "machine_gate";
+  if (name === "cadre_intel" && args.action === "lsp_review") return "lsp_review";
+  if (name === "cadre_intel" && args.action === "lsp_impact") return "lsp_impact";
+  return args.type || null;
+}
+
+function jobEnvelope(type, root, args) {
+  return envelope({ ok: true, job: jobs.start(type, root, args) });
+}
+
+async function projectPacket(args) {
+  const action = args.action || "ping";
+  if (action === "ping") {
+    return envelope({
       ok: true,
       protocolVersion: PROTOCOL_VERSION,
       server: "cadre",
-      rootContract: "project-scoped tools require a per-call root argument",
+      rootContract: "project-scoped tools require { root } per call",
     });
   }
-  if (name === "cadre_doctor") {
-    const info = rootFromCandidate(args && args.root ? args.root : process.cwd());
-    return asTextJson(core.doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
+  if (action === "doctor") {
+    const info = rootFromCandidate(args.root || process.cwd());
+    return envelope(core.doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
   }
-  if (name === "cadre_current_root") {
-    const root = requireCadreRoot(args || {});
-    return asTextJson({
-      root,
-      source: "argument.root",
-    });
+  if (action === "root") {
+    const root = requireCadreRoot(args);
+    return envelope({ ok: true, root, source: "argument.root" });
   }
-  if (name === "cadre_lsp_daemon_status") {
-    return asTextJson(await lspDaemon.request("status", {}, 5000));
-  }
-  if (name === "cadre_lsp_daemon_shutdown") {
-    return asTextJson(await lspDaemon.shutdown());
-  }
+  const root = requireCadreRoot(args);
+  if (action === "topology") return envelope({ ok: true, root, topology: core.loadTopology(root) });
+  if (action === "sync_control_plane") return envelope(core.syncControlPlane(root, args));
+  if (action === "polyrepo_preflight") return envelope(core.polyrepoPreflight(root));
+  return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });
+}
 
-  const root = requireCadreRoot(args || {});
-  switch (name) {
-    case "cadre_regen_index":
-      return asTextJson(core.regenIndex(root));
-    case "cadre_parse_plan": {
-      const planPath = path.resolve(root, args.planPath);
-      return asTextJson(core.parsePlanFile(planPath));
+function statusPacket(args) {
+  const root = requireCadreRoot(args);
+  const action = args.action || "live";
+  if (action === "live") return envelope(core.liveStatus(root));
+  if (action === "team") return envelope(core.teamStatus(root));
+  if (action === "mine") return envelope(core.teamBoard(root, { ...args, mine: true }));
+  if (action === "available") return envelope(core.availableWork(root));
+  if (action === "collisions") return envelope(core.collisionScan(root));
+  if (action === "board") return envelope(core.teamBoard(root, args));
+  return envelope({ ok: false, error: `Unknown cadre_status action: ${action}` });
+}
+
+function trackPacket(args) {
+  const root = requireCadreRoot(args);
+  const action = args.action || "context";
+  if (action === "context") return envelope(core.trackContext(root, args.trackId || args.track_id));
+  if (action === "parse_plan") return envelope(core.parsePlanFile(path.resolve(root, args.planPath)));
+  if (action === "integrity") return envelope(core.planIntegrity(root, args.trackId || args.track_id || null));
+  if (action === "phase_schedule") return envelope(core.phaseSchedule(root, args));
+  if (action === "prepare_implementation") return envelope(core.implementationPrep(root, args));
+  if (action === "create_beads_tree") return envelope(core.createBeadsTree(root, args));
+  return envelope({ ok: false, error: `Unknown cadre_track action: ${action}` });
+}
+
+function mutatePacket(args) {
+  const root = requireCadreRoot(args);
+  const action = args.action;
+  if (action === "claim") return envelope(core.claimTrack(root, args.trackId || args.track_id, args));
+  if (action === "heartbeat") return envelope(core.heartbeatTrack(root, args));
+  if (action === "set_status") return envelope(core.setTrackStatus(root, args.trackId || args.track_id, args.status));
+  if (action === "metadata_patch") return envelope(core.metadataPatch(root, args));
+  if (action === "record_review") return envelope(core.recordReview(root, args));
+  if (action === "record_worker") return envelope(core.recordParallelWorker(root, args));
+  if (action === "record_task_result") return envelope(core.recordTaskResult(root, args));
+  if (action === "regen_index") return envelope(core.regenIndex(root));
+  return envelope({ ok: false, error: `Unknown cadre_mutate action: ${action}` });
+}
+
+async function reviewPacket(args) {
+  const root = requireCadreRoot(args);
+  const action = args.action || "assist";
+  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_review", args), root, args);
+  if (action === "assist") {
+    let lspResult = null;
+    if (args.includeLsp !== false) {
+      lspResult = await lspDaemon.request(
+        "review",
+        { ...args, root, base: args.base || "main", head: args.head || "HEAD" },
+        Number(args.timeoutMs || 120000)
+      ).catch((error) => ({ available: false, reason: error.message, findings: [] }));
     }
-    case "cadre_phase_schedule":
-      return asTextJson(core.phaseSchedule(root, args));
-    case "cadre_team_status":
-      return asTextJson(core.teamStatus(root));
-    case "cadre_team_board":
-      return asTextJson(core.teamBoard(root, args));
-    case "cadre_live_status":
-      return asTextJson(core.liveStatus(root));
-    case "cadre_available_work":
-      return asTextJson(core.availableWork(root));
-    case "cadre_prepare_implementation":
-      return asTextJson(core.implementationPrep(root, args));
-    case "cadre_set_track_status":
-      return asTextJson(core.setTrackStatus(root, args.trackId, args.status));
-    case "cadre_metadata_patch":
-      return asTextJson(core.metadataPatch(root, args));
-    case "cadre_collision_scan":
-      return asTextJson(core.collisionScan(root));
-    case "cadre_track_context":
-      return asTextJson(core.trackContext(root, args.trackId));
-    case "cadre_plan_integrity":
-      return asTextJson(core.planIntegrity(root, args.trackId || null));
-    case "cadre_claim_track":
-      return asTextJson(core.claimTrack(root, args.trackId, args));
-    case "cadre_heartbeat_track":
-      return asTextJson(core.heartbeatTrack(root, args));
-    case "cadre_record_task_result":
-      return asTextJson(core.recordTaskResult(root, args));
-    case "cadre_complete_task":
-      return asTextJson(core.completeTask(root, args));
-    case "cadre_record_parallel_worker":
-      return asTextJson(core.recordParallelWorker(root, args));
-    case "cadre_create_beads_tree":
-      return asTextJson(core.createBeadsTree(root, args));
-    case "cadre_record_review":
-      return asTextJson(core.recordReview(root, args));
-    case "cadre_review_assist":
-      return asTextJson(core.reviewAssist(root, args));
-    case "cadre_review_machine_gate":
-      return asTextJson(core.reviewMachineGate(root, args));
-    case "cadre_sync_control_plane":
-      return asTextJson(core.syncControlPlane(root, args));
-    case "cadre_lsp_review":
-      return asTextJson(core.lspReview(root, args));
-    case "cadre_lsp_warm_review":
-      return asTextJson(await lspDaemon.request("review", { ...args, root }, Number(args.timeoutMs || 120000)));
-    case "cadre_test_coverage":
-      return asTextJson(core.testCoverage(root, args));
-    case "cadre_pr_ci_status":
-      return asTextJson(core.prCiStatus(root, args));
-    case "cadre_repo_map":
-      return asTextJson(core.repoMap(root, args));
-    case "cadre_lsp_impact":
-      return asTextJson(core.lspImpact(root, args));
-    case "cadre_beads_write":
-      return asTextJson(core.beadsTaskWrite(root, args));
-    case "cadre_review_gate":
-      return asTextJson(core.reviewGate(root, args.trackId, args));
-    case "cadre_polyrepo_preflight":
-      return asTextJson(core.polyrepoPreflight(root));
-    default:
-      throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
+    return envelope(core.reviewAssist(root, { ...args, lspResult }));
   }
+  if (action === "machine_gate") return envelope(core.reviewMachineGate(root, args));
+  if (action === "gate") return envelope(core.reviewGate(root, args.trackId || args.track_id, args));
+  if (action === "pr_ci_status") return envelope(core.prCiStatus(root, args));
+  return envelope({ ok: false, error: `Unknown cadre_review action: ${action}` });
+}
+
+async function intelPacket(args) {
+  const daemonRoot = args.root ? rootFromCandidate(args.root) : null;
+  const root = args.action && args.action.startsWith("lsp_daemon")
+    ? (daemonRoot ? daemonRoot.root : process.cwd())
+    : requireCadreRoot(args);
+  const action = args.action || "repo_map";
+  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args);
+  if (action === "repo_map") return envelope(core.repoMap(root, args));
+  if (action === "lsp_impact") {
+    let lspResult = null;
+    if ((args.base || args.head) && args.includeLsp !== false) {
+      lspResult = await lspDaemon.request(
+        "review",
+        { ...args, root, base: args.base || "main", head: args.head || "HEAD" },
+        Number(args.timeoutMs || 120000)
+      ).catch((error) => ({ available: false, reason: error.message, findings: [] }));
+    }
+    return envelope(core.lspImpact(root, { ...args, lspResult }));
+  }
+  if (action === "lsp_review") return envelope(core.lspReview(root, args));
+  if (action === "lsp_warm_review") {
+    return envelope(await lspDaemon.request("review", { ...args, root }, Number(args.timeoutMs || 120000)));
+  }
+  if (action === "lsp_daemon_status") return envelope(await lspDaemon.request("status", {}, 5000));
+  if (action === "lsp_daemon_shutdown") return envelope(await lspDaemon.shutdown());
+  return envelope({ ok: false, error: `Unknown cadre_intel action: ${action}` });
+}
+
+function jobPacket(args) {
+  const action = args.action || "status";
+  if (action === "start") {
+    const root = requireCadreRoot(args);
+    const type = args.type;
+    if (!type) return envelope({ ok: false, error: "type is required for cadre_job start" });
+    return jobEnvelope(type, root, args.args || args);
+  }
+  if (action === "status") {
+    const job = jobs.get(args.jobId || args.id);
+    return envelope(job ? { ok: true, job: jobs.summary(job) } : { ok: false, error: `Job not found: ${args.jobId || args.id}` });
+  }
+  if (action === "result") return envelope(jobs.result(args.jobId || args.id));
+  if (action === "cancel") return envelope(jobs.cancel(args.jobId || args.id));
+  if (action === "list") return envelope(jobs.list());
+  return envelope({ ok: false, error: `Unknown cadre_job action: ${action}` });
+}
+
+async function toolCall(name, args = {}) {
+  if (name === "cadre_project") return asTextJson(await projectPacket(args));
+  if (name === "cadre_status") return asTextJson(statusPacket(args));
+  if (name === "cadre_track") return asTextJson(trackPacket(args));
+  if (name === "cadre_mutate") return asTextJson(mutatePacket(args));
+  if (name === "cadre_complete_task") {
+    const root = requireCadreRoot(args);
+    if (args.async === true) return asTextJson(jobEnvelope("complete_task", root, args));
+    return asTextJson(envelope(core.completeTask(root, args)));
+  }
+  if (name === "cadre_beads") {
+    const root = requireCadreRoot(args);
+    return asTextJson(envelope(core.beadsTaskWrite(root, args)));
+  }
+  if (name === "cadre_job") return asTextJson(jobPacket(args));
+  if (name === "cadre_review") return asTextJson(await reviewPacket(args));
+  if (name === "cadre_intel") return asTextJson(await intelPacket(args));
+  throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
 }
 
 function resourceList() {
   return {
     resources: [
-      {
-        uri: "cadre://tracks",
-        name: "Cadre tracks",
-        description: "Per-track metadata from cadre/tracks/*/metadata.json. Read with ?root=/path/to/project.",
-        mimeType: "application/json",
-      },
-      {
-        uri: "cadre://team-status",
-        name: "Cadre team status",
-        description: "Team board grouped by owner and status. Read with ?root=/path/to/project.",
-        mimeType: "application/json",
-      },
-      {
-        uri: "cadre://team-board",
-        name: "Cadre team board",
-        description: "Rich team board with WIP, handoffs, review queue, blockers, and Beads evidence. Read with ?root=/path/to/project.",
-        mimeType: "application/json",
-      },
-      {
-        uri: "cadre://collisions",
-        name: "Cadre file collisions",
-        description: "Cross-track file claim collisions. Read with ?root=/path/to/project.",
-        mimeType: "application/json",
-      },
-      {
-        uri: "cadre://plan-integrity",
-        name: "Cadre plan integrity",
-        description: "Plan annotation and dependency validation. Read with ?root=/path/to/project and optional &trackId=<id>.",
-        mimeType: "application/json",
-      },
-      {
-        uri: "cadre://track-context",
-        name: "Cadre track context",
-        description: "Bounded per-track context. Read with ?root=/path/to/project&trackId=<id>.",
-        mimeType: "application/json",
-      },
-      {
-        uri: "cadre://repo-map",
-        name: "Cadre semantic repo map",
-        description: "Compact repository symbol map. Read with ?root=/path/to/project and optional &symbol=<name>.",
-        mimeType: "application/json",
-      },
+      { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project.", mimeType: "application/json" },
+      { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
     ],
   };
 }
@@ -904,30 +532,19 @@ function resourceList() {
 function parseResourceUri(uri) {
   const [base, query = ""] = uri.split("?");
   const params = new URLSearchParams(query);
-  return { base, root: params.get("root"), trackId: params.get("trackId"), symbol: params.get("symbol"), mine: params.get("mine") };
+  return { base, root: params.get("root"), trackId: params.get("trackId"), symbol: params.get("symbol") };
 }
 
 function resourceRead(uri) {
   const resource = parseResourceUri(uri);
   const root = requireCadreRoot({ root: resource.root });
   let value;
-  if (resource.base === "cadre://tracks") value = core.listTracks(root).map((track) => track.metadata);
-  else if (resource.base === "cadre://team-status") value = core.teamStatus(root);
-  else if (resource.base === "cadre://team-board") value = core.teamBoard(root, { mine: resource.mine === "true" });
-  else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
-  else if (resource.base === "cadre://plan-integrity") value = core.planIntegrity(root, resource.trackId || null);
+  if (resource.base === "cadre://team-board") value = core.teamBoard(root);
   else if (resource.base === "cadre://track-context") value = core.trackContext(root, resource.trackId);
+  else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = core.repoMap(root, { symbol: resource.symbol || null });
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
-  return {
-    contents: [
-      {
-        uri,
-        mimeType: "application/json",
-        text: JSON.stringify(value, null, 2),
-      },
-    ],
-  };
+  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
 }
 
 async function handle(message) {
@@ -936,14 +553,8 @@ async function handle(message) {
   if (method === "initialize") {
     return {
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: {
-        resources: { listChanged: false },
-        tools: { listChanged: false },
-      },
-      serverInfo: {
-        name: "cadre",
-        version: "2.0.0",
-      },
+      capabilities: { resources: { listChanged: false }, tools: { listChanged: false } },
+      serverInfo: { name: "cadre", version: "2.0.0" },
     };
   }
   if (method === "notifications/initialized") return undefined;
@@ -970,10 +581,7 @@ function respondError(message, error) {
   send({
     jsonrpc: "2.0",
     id: message.id,
-    error: {
-      code: error.code || -32603,
-      message: error.message || String(error),
-    },
+    error: { code: error.code || -32603, message: error.message || String(error) },
   });
 }
 
@@ -1003,9 +611,7 @@ process.stdin.on("data", (chunk) => {
         .then((result) => {
           if (result !== undefined) respond(message, result);
         })
-        .catch((error) => {
-          respondError(message || { id: null }, error);
-        });
+        .catch((error) => respondError(message || { id: null }, error));
     } catch (error) {
       respondError(message || { id: null }, error);
     }

@@ -19,13 +19,13 @@ local.
 
 ## 1. Verify Setup & Select Track
 
-- Resolve the project root with `cadre_current_root` using the per-call `root`
+- Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
   argument. Use the returned root for all MCP calls in this workflow.
 - If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
 - Run the standard Beads availability check (`references/beads-error-handler.md`).
   If `BEADS_AVAILABLE=false`, HALT and restore the Beads prerequisite before any
   rebase or push work.
-- **Sync preamble (shared mode).** Call MCP `cadre_sync_control_plane` with
+- **Sync preamble (shared mode).** Call MCP `cadre_project` with `action: "sync_control_plane"` with
   `mode: "pre"` before the ownership guard and review gate. It no-ops in local
   mode and runs the shared pull/Dolt sync when `sync_mode == "shared"`, so a
   teammate's `changes_requested` or advanced `reviewed_sha` is visible before
@@ -39,7 +39,7 @@ local.
   from concurrently shipping the same track in **any** topology (in default monorepo
   mode the advisory `lease` is a no-op, so this guard is the only serialization).
   If it halts, stop.
-- **Review gate.** Call `cadre_review_gate` with `root` and `trackId`. This MCP
+- **Review gate.** Call `cadre_review` with `action: "gate"` with `root` and `trackId`. This MCP
   result is authoritative for verdict, blocking findings, and self-review policy.
   - **Any blocking MCP reason** (including no recorded review or missing
     `reviewed_sha`) → **REFUSE**:
@@ -89,12 +89,12 @@ For the selected track:
 4. **Re-read the review gate, then push (TOCTOU close):** the MCP verdict read in
    §1 is a point-in-time snapshot; a reviewer may have flipped it to
    `changes_requested` during the (slow) Dolt-flush + rebase above. **Call
-   `cadre_review_gate` again immediately before pushing with `headSha:
+   `cadre_review` with `action: "gate"` again immediately before pushing with `headSha:
    "$prerebase_head"` and abort if it now blocks. The same re-read enforces
    **`reviewed_sha`** against the pre-rebase tip, so a clean rebase does not
    false-positive but new work after review still requires re-review:
    ```bash
-   # Call MCP: cadre_review_gate { "root": "<root>", "trackId": "<track_id>", "headSha": "$prerebase_head" }.
+   # Call MCP: cadre_review { "action": "gate", "root": "<root>", "trackId": "<track_id>", "headSha": "$prerebase_head" }.
    # If ok=false for any reason not explicitly allowed by an override flag from
    # §1, abort before push.
    git push origin track/<track_id> --force-with-lease
@@ -159,7 +159,7 @@ For the selected track:
      themselves.
 
    - **After a PR/MR exists or the branch was pushed for manual PR creation:**
-     call MCP `cadre_pr_ci_status` with `root`, `trackId`, `provider`, and
+     call MCP `cadre_review` with `action: "pr_ci_status"` with `root`, `trackId`, `provider`, and
      `branch: "track/<track_id>"`. Surface the structured URL/state/review/check
      summary when available; if the provider CLI is unavailable, keep the manual
      PR guidance and do not fail the ship.
@@ -172,7 +172,7 @@ flushed Dolt state, but `cadre-ship` otherwise pushes **product code only**
 state must also reach teammates, or the team never learns the track shipped. If
 `cadre/config.json` has `sync_mode == "shared"` (in **both** monorepo and polyrepo —
 never gate on topology), commit the `cadre/` changes, then call MCP
-`cadre_sync_control_plane` with `mode: "post"`. Use `references/cadre-sync.md`
+`cadre_project` with `action: "sync_control_plane"` with `mode: "post"`. Use `references/cadre-sync.md`
 only for interpreting a failed sync or performing bounded manual repair.
 
 This publishes **only the control plane**; the product-code push stays in §2. In

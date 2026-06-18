@@ -27,7 +27,7 @@ last** — once every sibling PR is approved and CI-green.
 
 ## 1. Verify Setup & Topology
 
-1. Resolve the project root with `cadre_current_root` using the per-call `root`
+1. Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
    argument. Use the returned root for all MCP calls in this workflow.
 2. If `cadre/tracks.md` doesn't exist → tell the user to run `cadre-setup`
    first and halt.
@@ -39,7 +39,7 @@ last** — once every sibling PR is approved and CI-green.
    > branch and open a single PR."
    and halt.
 5. Read `cadre/config.json` for `pr_provider` (`github`|`gitlab`) and
-   `merge_train`. Call MCP `cadre_sync_control_plane` with `mode: "pre"` first;
+   `merge_train`. Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"` first;
    it no-ops outside shared mode.
 6. **Select track:** if `track_id` is provided, use it; else list completed (`[x]`)
    tracks not yet archived and ask. Resolve the active track from
@@ -52,7 +52,7 @@ last** — once every sibling PR is approved and CI-green.
    you are the holder / your identity is `null`) your next `metadata.json` write
    sets `owner = <git-identity>` via key-scoped `jq`. This applies in **both**
    monorepo and polyrepo and even where the advisory `lease` is a no-op.
-7. **Gate — reviewed?** Call `cadre_review_gate` with `root` and `trackId`. The
+7. **Gate — reviewed?** Call `cadre_review` with `action: "gate"` with `root` and `trackId`. The
    machine-readable MCP review gate in **§1.5** is authoritative — do **not**
    prompt here unconditionally. Missing review data and missing reviewed commit pins
    block by default. Only explicit override flags (`--allow-unreviewed` or
@@ -61,7 +61,7 @@ last** — once every sibling PR is approved and CI-green.
 
 ### 1.5 Review-Gate Enforcement (machine-readable)
 
-Use the `cadre_review_gate` result and enforce it **before** any push/PR work:
+Use the `cadre_review` with `action: "gate"` result and enforce it **before** any push/PR work:
 
 - **Any blocking MCP reason** (including absent review or missing reviewed pins) →
   **REFUSE.** Print a clear message naming the verdict and blocking count, e.g.
@@ -88,7 +88,7 @@ Use the `cadre_review_gate` result and enforce it **before** any push/PR work:
 
 Validate **EVERY** touched repo first. This is a gate: if **any** check fails,
 **halt before opening (or pushing for) ANY PR** — never open a partial group.
-First call `cadre_polyrepo_preflight` with `root`. If it returns `ok: false`,
+First call `cadre_project` with `action: "polyrepo_preflight"` with `root`. If it returns `ok: false`,
 surface the returned errors and halt before any push/PR work. Then follow the
 remaining **preflight asserts in `references/polyrepo-git.md`** for checks not yet
 covered by MCP; this workflow just drives the loop over `metadata.json.repos`
@@ -187,13 +187,14 @@ continue to step 3.
 point-in-time snapshot; the preflight + sync above can take a while, during which a
 reviewer may flip it. Capture the current pre-push tip of every product repo in
 `metadata.json.repos` (`headShas: { "<repo>": "<sha>" }`) plus the control repo
-scalar `headSha` when present, then call `cadre_review_gate` immediately before the
+scalar `headSha` when present, then call `cadre_review` with `action: "gate"` immediately before the
 first push. Abort if it now blocks — do **not** open a partial group against a
 freshly-blocked track. The gate compares `headShas` against
 `metadata.review.reviewed_shas`, so product-repo work that advanced after review
 requires re-review.
 ```bash
-# Call MCP: cadre_review_gate {
+# Call MCP: cadre_review {
+#   "action": "gate",
 #   "root": "<root>",
 #   "trackId": "<track_id>",
 #   "headSha": "$prerebase_tip_control",
@@ -201,7 +202,7 @@ requires re-review.
 # }
 # If ok=false, abort before push unless an explicit logged override applies.
 ```
-A missing reviewed pin blocks by default through `cadre_review_gate`. Proceed only
+A missing reviewed pin blocks by default through `cadre_review` with `action: "gate"`. Proceed only
 with the explicit `--allow-unpinned-review` override described above. Use
 pre-rebase/pre-push tips so the §2b rebase-onto-base offer cannot make a clean
 branch look advanced.
@@ -222,7 +223,7 @@ git push <control_remote> track/<track_id> --force-with-lease
 
 Product code is pushed here for the PR — this is the sanctioned push point
 (commits were kept local through implement). Before product pushes in shared
-mode, call MCP `cadre_sync_control_plane` with `mode: "post"` after committing
+mode, call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"` after committing
 any control-plane changes so Beads/control state is published.
 
 ---
@@ -362,7 +363,7 @@ can record them in `metadata.json` (step 5.2) on the next run.
 - CI status (green / running / failed)
 - Merge-train state: not-ready / ready (all approved + green) / merged
 
-Prefer MCP `cadre_pr_ci_status` for each recorded product/control PR URL or
+Prefer MCP `cadre_review` with `action: "pr_ci_status"` for each recorded product/control PR URL or
 branch so provider status, review decision, and check rollups arrive as
 structured data. If the provider CLI is unavailable, degrade to the recorded
 URLs in `metadata.json` and omit live state columns.

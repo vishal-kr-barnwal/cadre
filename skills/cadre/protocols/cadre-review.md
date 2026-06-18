@@ -25,19 +25,19 @@ the track to ship or routes issues back into the plan.
   ```
   `cadre-status --team` lists tracks `awaiting review` with their assigned reviewer,
   so review load can be distributed deliberately instead of landing on whoever
-  volunteers. Bracket this with MCP `cadre_sync_control_plane` (`mode: "pre"`
+  volunteers. Bracket this with MCP `cadre_project` with `action: "sync_control_plane"` (`mode: "pre"`
   before the assignment, `mode: "post"` after committing) so the assignment
   reaches the reviewer's clone in shared mode and no-ops in local mode.
 - **No flag** (default) → run the full review (sections 1-8) and record the verdict.
 
 ## 1. Verify Setup
 
-Resolve the project root with `cadre_current_root` using the per-call `root`
+Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
 argument. Use the returned root for all MCP calls in this workflow.
 
 If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
 
-**Sync preamble (shared mode).** Call MCP `cadre_sync_control_plane` with
+**Sync preamble (shared mode).** Call MCP `cadre_project` with `action: "sync_control_plane"` with
 `mode: "pre"` before reviewing. It no-ops in local mode and pulls the shared
 control plane plus Beads graph when `sync_mode == "shared"`, so the verdict lands
 on current spec/plan state.
@@ -47,9 +47,9 @@ on current spec/plan state.
 - If a `track_id` is provided, use it.
 - Otherwise pick the active (`[~]`) track, or — if none is in progress — list
   completed (`[x]`) tracks not yet archived and ask the user to choose.
-- Use `cadre_team_status` with `root` for active/completed track selection. Use
+- Use `cadre_status` with `action: "team"` with `root` for active/completed track selection. Use
   `tracks.md` markers only as human-readable fallback labels.
-- Call `cadre_track_context` for the selected track. Use its `track.git_branch`,
+- Call `cadre_track` with `action: "context"` for the selected track. Use its `track.git_branch`,
   parsed `plan`, task commit SHAs, `task_counts`, `review`, `last_coverage`, and
   Beads IDs. Read `spec.md` only for acceptance criteria prose.
 
@@ -61,7 +61,7 @@ git diff main...<git_branch>          # changes the track introduces vs main
 git diff main...<git_branch> --stat   # summary for the report
 ```
 If the branch is absent (work was done directly on the current branch), fall back to
-the track's commit range from the `cadre_parse_plan` task SHA data, or
+the track's commit range from the `cadre_track` with `action: "parse_plan"` task SHA data, or
 `git diff main...HEAD`.
 
 **POLYREPO (`metadata.json` has a `repos` map):** the track spans several repos.
@@ -79,7 +79,7 @@ If there are no changes, report that and stop.
 ## 4. Run the Review
 
 **Start with the structured review evidence packet.** Call MCP
-`cadre_review_assist` with `root`, `trackId`, `base`, and `head`. It returns the
+`cadre_review` with `action: "assist"` with `root`, `trackId`, `base`, and `head`. It returns the
 repo-aware diff surface (`repo_diffs[]` in polyrepo), unfinished plan tasks,
 TODO/FIXME/stub scan, recorded coverage, machine-gate evidence, and LSP findings
 when configured. Treat its `blocking_reasons[]` as the initial blocking-finding
@@ -88,13 +88,13 @@ set, and use the packet to scope any subsequent diff reads.
 **Delegate the actual review to the `/code-review` skill** when it is available
 so findings match the project's review conventions. Invoke `/code-review`
 (default effort) scoped to the track diff from step 3 plus the
-`cadre_review_assist` evidence. Also check the track-specific concerns:
+`cadre_review` with `action: "assist"` evidence. Also check the track-specific concerns:
 - Does the diff satisfy the acceptance criteria in `spec.md`?
 - Are all plan tasks marked `[x]` actually implemented (no stubs/TODOs)?
 - Tests present and passing for new behavior (per `workflow.md`'s coverage bar)?
 
 If `/code-review` is not available in the current client, continue with
-`cadre_review_assist` plus focused human inspection of the changed files. Do not
+`cadre_review` with `action: "assist"` plus focused human inspection of the changed files. Do not
 fall back to an unstructured full-diff read unless the packet identifies a file
 that needs manual review.
 
@@ -103,8 +103,8 @@ look outside the diff).** Run two automated passes and fold their results into t
 verdict — they catch regressions a diff-scoped reviewer cannot:
 
 1. **Typecheck / compile / build.** Use the `machine_gate` returned by
-   `cadre_review_assist`; if it was skipped or needs a different command, call MCP
-   `cadre_review_machine_gate` with `root`, `trackId`, and optional
+   `cadre_review` with `action: "assist"`; if it was skipped or needs a different command, call MCP
+   `cadre_review` with `action: "machine_gate"` with `root`, `trackId`, and optional
    `machineCommand`. In **polyrepo**, the tool runs per touched repo/worktree. Each
    unresolved type/compile/build error is a **blocking** finding; add the count to
    `blocking_count` (computed in §5) and list the relevant stderr/stdout tail in the
@@ -113,10 +113,10 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    result).
 
 2. **Cross-track regression via code intelligence.** Call MCP
-   `cadre_lsp_warm_review` with `root`, `base`, and `head` (`<git_branch>`). It
+   `cadre_intel` with `action: "lsp_warm_review"` with `root`, `base`, and `head` (`<git_branch>`). It
    routes through the persistent LSP daemon so repeated reviews reuse warm
    language servers. If the daemon path is unavailable, fall back to
-   `cadre_lsp_review`. Both return structured findings for changed, renamed, and
+   `cadre_intel` with `action: "lsp_review"`. Both return structured findings for changed, renamed, and
    removed symbols where possible. If the result has `available: false`, note that
    code intelligence was unavailable and continue. Treat live external callers of
    removed/renamed symbols as blocking findings; other external references are
@@ -128,9 +128,9 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    discussion context for the track branch or PR. Treat this as evidence only:
    summarize it in the review report and, when useful, mirror the durable summary
    to Beads notes. The Cadre verdict is still written only by
-   `cadre_record_review`, and `cadre_review_gate` remains the authority for ship
+   `cadre_mutate` with `action: "record_review"`, and `cadre_review` with `action: "gate"` remains the authority for ship
    readiness. If provider MCP tools are unavailable, fall back to
-   `cadre_pr_ci_status` (`gh`/`glab`) and note the reduced evidence surface.
+   `cadre_review` with `action: "pr_ci_status"` (`gh`/`glab`) and note the reduced evidence surface.
 
 ## 5. Record Findings
 
@@ -148,15 +148,15 @@ Then **record the structured verdict through MCP** so `cadre-ship` and
 `cadre-land` can enforce the review gate. Compute the reviewer identity
 `<git-identity>` = `git config user.email` (fallback `git config user.name`,
 else null). Count `blocking_count` = the number of blocking-severity findings.
-Call `cadre_record_review` with `root`, `trackId`, `verdict`, `blockingCount`,
-`reviewer`, and `coverage` (from `cadre_track_context.track.last_coverage` or
+Call `cadre_mutate` with `action: "record_review"` with `root`, `trackId`, `verdict`, `blockingCount`,
+`reviewer`, and `coverage` (from `cadre_track` with `action: "context"` under `track.last_coverage` or
 the latest measured value). The tool writes `metadata.review`, increments
 `review_seq`, detects self-review, refuses to silently override another
 reviewer's open `changes_requested`, captures `reviewed_sha` plus
 `reviewed_shas` per repo in polyrepo, and immediately
-returns the `cadre_review_gate` result.
+returns the `cadre_review` with `action: "gate"` result.
 
-If `cadre_record_review` returns `requires_override`, ask the user to confirm the
+If `cadre_mutate` with `action: "record_review"` returns `requires_override`, ask the user to confirm the
 override. On confirmation, append the superseded verdict to `learnings.md` and
 retry with `allowOverride: true`; otherwise halt without writing a new verdict.
 If the returned gate is not `ok` for an intended approval, fix the review data or
@@ -233,7 +233,7 @@ route changes before publishing.
 
 The verdict in `metadata.json` and the Beads label only help the shipper if they
 reach the shipper's clone. Commit the `cadre/` changes, then call MCP
-`cadre_sync_control_plane` with `mode: "post"`. The tool no-ops in local mode and
+`cadre_project` with `action: "sync_control_plane"` with `mode: "post"`. The tool no-ops in local mode and
 publishes the shared control plane when configured; use `references/cadre-sync.md`
 only for bounded manual repair if the structured sync reports a failure.
 

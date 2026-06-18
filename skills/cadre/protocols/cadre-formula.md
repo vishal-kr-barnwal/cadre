@@ -23,7 +23,7 @@ Subcommands:
 
 **PROTOCOL: Verify Beads is available for formula management.**
 
-0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+0. **Resolve project root via MCP:** Call `cadre_project` with `action: "root"` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for Cadre track lookup and plan parsing in this workflow.
 
@@ -183,11 +183,11 @@ After listing or showing formulas, include:
 **If track_id provided:**
 - Validate track exists in `cadre/tracks/<track_id>/`
 - Load `cadre/tracks/<track_id>/metadata.json`
-- Call `cadre_parse_plan` with `root` and the track's relative `planPath` before
+- Call `cadre_track` with `action: "parse_plan"` with `root` and the track's relative `planPath` before
   extracting structure.
 
 **If no track_id:**
-1. Call `cadre_team_status` with `root`, find tracks whose status is `completed`.
+1. Call `cadre_status` with `action: "team"` with `root`, find tracks whose status is `completed`.
 2. If completed tracks found, present a numbered list and ask the user to choose.
 3. If none:
    > "⚠️ No completed tracks found. Complete a track with `cadre-implement` first."
@@ -205,7 +205,7 @@ After listing or showing formulas, include:
 - Otherwise derive a kebab-case name from the track description and confirm.
 
 ### 6.4 Analyze Track for Variables
-Read `spec.md` and use the `cadre_parse_plan` result for `plan.md`; identify
+Read `spec.md` and use the `cadre_track` with `action: "parse_plan"` result for `plan.md`; identify
 specific names, versions, paths that should become `{{variables}}`. Propose them in
 a table and let the user adjust.
 

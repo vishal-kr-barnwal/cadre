@@ -5,7 +5,7 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
-> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_ping`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
 
 <!-- 
 SYSTEM DIRECTIVE: You are an AI agent for the Cadre framework.
@@ -28,7 +28,7 @@ Subcommands:
 
 **PROTOCOL: Verify Beads is available for formula management.**
 
-0. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+0. **Resolve project root via MCP:** Call `cadre_project` with `action: "root"` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for Cadre track lookup and plan parsing in this workflow.
 
@@ -188,11 +188,11 @@ After listing or showing formulas, include:
 **If track_id provided:**
 - Validate track exists in `cadre/tracks/<track_id>/`
 - Load `cadre/tracks/<track_id>/metadata.json`
-- Call `cadre_parse_plan` with `root` and the track's relative `planPath` before
+- Call `cadre_track` with `action: "parse_plan"` with `root` and the track's relative `planPath` before
   extracting structure.
 
 **If no track_id:**
-1. Call `cadre_team_status` with `root`, find tracks whose status is `completed`.
+1. Call `cadre_status` with `action: "team"` with `root`, find tracks whose status is `completed`.
 2. If completed tracks found, present a numbered list and ask the user to choose.
 3. If none:
    > "⚠️ No completed tracks found. Complete a track with `cadre-implement` first."
@@ -210,7 +210,7 @@ After listing or showing formulas, include:
 - Otherwise derive a kebab-case name from the track description and confirm.
 
 ### 6.4 Analyze Track for Variables
-Read `spec.md` and use the `cadre_parse_plan` result for `plan.md`; identify
+Read `spec.md` and use the `cadre_track` with `action: "parse_plan"` result for `plan.md`; identify
 specific names, versions, paths that should become `{{variables}}`. Propose them in
 a table and let the user adjust.
 

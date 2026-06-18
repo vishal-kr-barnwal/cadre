@@ -29,8 +29,8 @@ writes the track's rolling `cadre/tracks/<track_id>/HANDOFF.md` with a trimmed
 
 ## 1. Identify Active Track
 - **Resolve the active track from the source of truth, not the derived cache.**
-  First call `cadre_current_root` with the workflow `root`, then call
-  `cadre_team_status` with that resolved root. Use the returned `tracks[]` to find
+  First call `cadre_project` with `action: "root"` with the workflow `root`, then call
+  `cadre_status` with `action: "team"` with that resolved root. Use the returned `tracks[]` to find
   `status == "in_progress"` (in shared mode, filter to the one whose
   `owner`/`assignee` equals `<git-identity>`), as `cadre-status` does. Use the
   `[~]` marker in `cadre/tracks.md` only as a
@@ -41,7 +41,7 @@ writes the track's rolling `cadre/tracks/<track_id>/HANDOFF.md` with a trimmed
 - **Ownership guard:** run the Ownership Guard (`references/ownership-guard.md`)
   for the resolved track before writing/committing the handoff; if it halts, stop.
 - Load `spec.md`, `plan.md`, and `implement_state.json`
-- Call `cadre_parse_plan` with `root` and the active track's relative `planPath`.
+- Call `cadre_track` with `action: "parse_plan"` with `root` and the active track's relative `planPath`.
   Use the returned phases/tasks/annotations to compute progress, current task, and
   blocked markers for the handoff.
 - Read `metadata.json` — check for `worktree_path` field (indicates parallel execution may be in progress)
@@ -68,7 +68,7 @@ If `metadata.json` has a `worktree_path` field (or a `repos` map in polyrepo mod
 
 **Progress Analysis:**
 - Count completed `[x]`, in-progress `[~]`, pending `[ ]` tasks from the
-  `cadre_parse_plan` result
+  `cadre_track` with `action: "parse_plan"` result
 - Calculate overall percentage
 - Identify current phase and task position
 
@@ -243,7 +243,7 @@ Display:
    Include technical specifics, not vague progress.
 
 5. **Publish Handoff State:**
-   - Commit the `cadre/` changes, then call MCP `cadre_sync_control_plane` with
+   - Commit the `cadre/` changes, then call MCP `cadre_project` with `action: "sync_control_plane"` with
      `mode: "post"` so a teammate can pick up the handoff in shared mode. It
      no-ops in local mode. Product code stays local.
 
@@ -323,7 +323,7 @@ instead of the machine content.
      ```
    - If any `bd` command fails, follow the Beads Error Handler Protocol (see
      `references/beads-error-handler.md`) — the prose handoff stands either way.
-   - Call MCP `cadre_sync_control_plane` with `mode: "post"` so the
+   - Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"` so the
      assignee/label/mail reach the recipient's control plane in shared mode.
      Product code stays local.
 

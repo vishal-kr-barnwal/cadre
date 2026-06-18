@@ -8,20 +8,20 @@ Validate the integrity of this Cadre project.
 
 ## 0. MCP Baseline
 
-1. **Resolve project root via MCP:** Call `cadre_current_root` with the workflow
+1. **Resolve project root via MCP:** Call `cadre_project` with `action: "root"` with the workflow
    `root` argument (the current project root or any path inside it). Use the
    returned root for every project-scoped MCP call in this workflow.
-2. **Run diagnostics through MCP:** Call `cadre_doctor` with `root` and include its
+2. **Run diagnostics through MCP:** Call `cadre_project` with `action: "doctor"` with `root` and include its
    findings in the validation report. Use it for runtime/project-marker, Beads,
    LSP, provider CLI, merge-driver, and generated-bundle checks instead of
    repeating ad hoc shell probes throughout the workflow. Missing required runtime
    pieces are validation errors.
-3. **Load structured inventory via MCP:** Call `cadre_team_status` with `root`.
+3. **Load structured inventory via MCP:** Call `cadre_status` with `action: "team"` with `root`.
    Use its `tracks[]` and status/owner/reviewer data as the authoritative
    multi-track inventory for validation.
-4. **Validate plans through MCP:** Call `cadre_plan_integrity` with `root` for
+4. **Validate plans through MCP:** Call `cadre_track` with `action: "integrity"` with `root` for
    the fleet-wide plan annotation/task-key/dependency check. For any track that
-   needs detailed reporting, call `cadre_track_context` or `cadre_parse_plan` with
+   needs detailed reporting, call `cadre_track` with `action: "context"` or `cadre_track` with `action: "parse_plan"` with
    the relative `planPath`.
 
 ## 0. Sync Preamble (shared mode only)
@@ -31,7 +31,7 @@ owners, registers the merge driver, and regenerates the index. Run against a sta
 local snapshot, those fixes both reconcile the wrong picture and stay local, so
 read `cadre/config.json` `sync_mode` first.
 
-- Call MCP `cadre_sync_control_plane` with `mode: "pre"` before diagnosing
+- Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"` before diagnosing
   anything below. It no-ops in local mode and syncs the shared control plane when
   configured, so lease sweep, owner checks, and index-drift detection reconcile
   the current shared truth. The matching post call runs in step 7 after fixes.
@@ -49,7 +49,7 @@ Verify these files exist in `cadre/`:
 ## 2. Tracks Consistency
 
 Enumerate tracks from the **source of truth** — each `cadre/tracks/*/metadata.json`
-— preferably through the `cadre_team_status` result, never from the derived
+— preferably through the `cadre_status` with `action: "team"` result, never from the derived
 `tracks.md` index. For each track directory:
 - Verify files: `metadata.json`, `spec.md`, `plan.md`
 - Validate metadata.json has: track_id, type, status, created_at
@@ -69,7 +69,7 @@ Enumerate tracks from the **source of truth** — each `cadre/tracks/*/metadata.
 - A directory **with a valid `metadata.json` but absent from the `tracks.md`
   generated region** is **not** an orphan — it is **index drift** (the derived
   index simply hasn't been regenerated). Report it via the Index Drift check
-  (Section 4), fixable by MCP `cadre_regen_index`. Do not flag such a
+  (Section 4), fixable by MCP `cadre_mutate` with `action: "regen_index"`. Do not flag such a
   track as an orphan.
 
 ## 4. Index Drift
@@ -89,27 +89,27 @@ hand-flips a marker to "reconcile."
 - Report each drift as a ⚠️ Warning naming the track, the metadata status, and
   the (incorrect) marker currently in the index.
 - **Do not edit `tracks.md` markers by hand.** Offer in step 7 to fix all drift
-  at once by calling MCP `cadre_regen_index` (which
+  at once by calling MCP `cadre_mutate` with `action: "regen_index"` (which
   rebuilds the marked region deterministically from per-track metadata,
   preserving the human-authored preamble).
 
 > **Shared mode:** a `tracks.md` **merge conflict** is likewise resolved
-> deterministically by calling MCP `cadre_regen_index` — per-track
+> deterministically by calling MCP `cadre_mutate` with `action: "regen_index"` — per-track
 > `metadata.json` files rarely collide, and the derived index never needs a
 > manual merge. If you encounter conflict markers in `tracks.md`, regenerate
 > rather than hand-resolving.
 
 ## 5. Plan Integrity
 
-Use the `cadre_plan_integrity` result as the authoritative plan-integrity
+Use the `cadre_track` with `action: "integrity"` result as the authoritative plan-integrity
 baseline:
 - Missing `<!-- files: ... -->` annotations are warnings because collision and
   parallel checks depend on them.
 - Duplicate task keys, invalid repo routing, and unparseable dependency shapes
   are errors.
-- For completed tracks, compare `cadre_track_context.task_counts` with metadata
+- For completed tracks, compare `cadre_track` with `action: "context"` and its `task_counts` with metadata
   status and warn if tasks remain pending/in progress.
-- Use `cadre_parse_plan` only for rendering line-specific details that are not in
+- Use `cadre_track` with `action: "parse_plan"` only for rendering line-specific details that are not in
   the integrity payload.
 
 ## 5a. Parallel Execution Validation
@@ -130,7 +130,7 @@ For tracks with parallel execution annotations:
 silently in monorepo mode). See `references/polyrepo-git.md`.
 
 - **Preflight asserts:** run the shared **Preflight asserts** snippet in
-  `references/polyrepo-git.md` through MCP by calling `cadre_polyrepo_preflight`
+  `references/polyrepo-git.md` through MCP by calling `cadre_project` with `action: "polyrepo_preflight"`
   with `root` first. Surface each returned error as a ❌ Error here rather than
   halting, so the full report still renders. Use the reference snippet only for
   checks not yet represented in the MCP result; do not duplicate shared logic
@@ -218,7 +218,7 @@ For each track whose `metadata.json` carries a non-null `lease` object
 ### 5c.2 Team invariants
 
 (a) **No cross-owner file overlap.** Collect every in-progress track (status
-   `"in_progress"` from MCP/source metadata). Call `cadre_collision_scan` with
+   `"in_progress"` from MCP/source metadata). Call `cadre_status` with `action: "collisions"` with
    `root` and use its returned `(repo, file)` overlaps as the canonical overlap
    detector. If two in-progress tracks with **different** `owner` (fall back to
    Beads `assignee`) claim an overlapping file/glob, report a ❌ Error naming both
@@ -306,7 +306,7 @@ health). In monorepo/local mode omit it — those checks are no-ops there.
 
 Offer to fix auto-fixable issues:
 - Missing metadata fields
-- Index drift: regenerate `tracks.md` with MCP `cadre_regen_index`
+- Index drift: regenerate `tracks.md` with MCP `cadre_mutate` with `action: "regen_index"`
   (rebuild the marked region from per-track metadata) — never hand-edit a marker [4]
 - Orphan cleanup
 - Stale-lease clears (shared mode — set `lease` to null, key-scoped) [5c.1]
@@ -321,7 +321,7 @@ rewrite — so concurrent sibling writes in shared mode aren't clobbered.
 
 **Sync postamble (shared mode only).** Once the chosen fixes are applied, publish
 the reconciled control plane rather than leaving the repairs local. Commit the
-`cadre/` changes, then call MCP `cadre_sync_control_plane` with `mode: "post"`.
+`cadre/` changes, then call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"`.
 It no-ops in local mode and performs the shared Beads/Git publish when
 configured. In absent/`local`
 mode, skip the postamble — fixes stay local as today. Product-repo CODE is never

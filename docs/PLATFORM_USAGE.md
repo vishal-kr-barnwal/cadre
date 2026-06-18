@@ -531,38 +531,38 @@ normalizes that path by walking upward to the nearest directory containing
 `cadre/`, so callers may pass either the project root or a path inside it. This
 keeps one long-running MCP process safe across two sessions in different
 projects because no project root is stored globally. Verify MCP availability
-with `cadre_ping`; if Cadre MCP tools are unavailable,
+with `cadre_project` with `action: "ping"`; if Cadre MCP tools are unavailable,
 halt and ask the user to install, enable, or restart the Cadre plugin.
 
 Useful MCP tools:
 
 | Tool | Purpose |
 |------|---------|
-| `cadre_ping` | Verify that the required Cadre MCP runtime is available. |
-| `cadre_current_root` | Resolve a supplied `root` to the Cadre project root. |
-| `cadre_live_status` | Cheap default status summary. |
-| `cadre_team_status` | Structured team board. |
-| `cadre_available_work` | Ready unowned work plus stale held work that can be reclaimed. |
-| `cadre_set_track_status` | Set `metadata.json.status` and regenerate `tracks.md`. |
-| `cadre_collision_scan` | Cross-track exact, prefix, and glob file overlaps. |
-| `cadre_review_gate` | Whether a track can ship/land. |
-| `cadre_polyrepo_preflight` | Local polyrepo sanity checks. |
-| `cadre_regen_index` | Regenerate `tracks.md`. |
+| `cadre_project` with `action: "ping"` | Verify that the required Cadre MCP runtime is available. |
+| `cadre_project` with `action: "root"` | Resolve a supplied `root` to the Cadre project root. |
+| `cadre_status` with `action: "live"` | Cheap default status summary. |
+| `cadre_status` with `action: "team"` | Structured team board. |
+| `cadre_status` with `action: "available"` | Ready unowned work plus stale held work that can be reclaimed. |
+| `cadre_mutate` with `action: "set_status"` | Set `metadata.json.status` and regenerate `tracks.md`. |
+| `cadre_status` with `action: "collisions"` | Cross-track exact, prefix, and glob file overlaps. |
+| `cadre_review` with `action: "gate"` | Whether a track can ship/land. |
+| `cadre_project` with `action: "polyrepo_preflight"` | Local polyrepo sanity checks. |
+| `cadre_mutate` with `action: "regen_index"` | Regenerate `tracks.md`. |
 
 Workflow routing:
 
 | Workflow checkpoint | MCP tool |
 |--------------------|----------|
-| Project root resolution | `cadre_current_root` |
-| Cheap default status | `cadre_live_status` |
-| Track inventory, active/completed selection, owner/reviewer summaries | `cadre_team_status` |
-| Next unblocked or reclaimable work | `cadre_available_work` |
-| Cross-track exact, prefix, and glob file overlaps | `cadre_collision_scan` |
-| Phase/task/annotation parsing | `cadre_parse_plan` |
-| Track status mutation | `cadre_set_track_status` |
-| Derived `tracks.md` rebuilds | `cadre_regen_index` |
-| Ship/land review enforcement | `cadre_review_gate` |
-| Polyrepo setup/validate/refresh/land sanity checks | `cadre_polyrepo_preflight` |
+| Project root resolution | `cadre_project` with `action: "root"` |
+| Cheap default status | `cadre_status` with `action: "live"` |
+| Track inventory, active/completed selection, owner/reviewer summaries | `cadre_status` with `action: "team"` |
+| Next unblocked or reclaimable work | `cadre_status` with `action: "available"` |
+| Cross-track exact, prefix, and glob file overlaps | `cadre_status` with `action: "collisions"` |
+| Phase/task/annotation parsing | `cadre_track` with `action: "parse_plan"` |
+| Track status mutation | `cadre_mutate` with `action: "set_status"` |
+| Derived `tracks.md` rebuilds | `cadre_mutate` with `action: "regen_index"` |
+| Ship/land review enforcement | `cadre_review` with `action: "gate"` |
+| Polyrepo setup/validate/refresh/land sanity checks | `cadre_project` with `action: "polyrepo_preflight"` |
 
 MCP is the required deterministic integration layer for status, collision,
 review-gate, and index-regeneration checks. A client can call tools instead of

@@ -7,7 +7,7 @@ model**: dispatch every task whose dependencies are met, wait for the wave to
 finish, then dispatch the next wave.
 
 Phase-level parallelism is scheduled before this file is entered. The
-coordinator calls MCP `cadre_phase_schedule`, receives conflict-free
+coordinator calls MCP `cadre_track` with `action: "phase_schedule"`, receives conflict-free
 `ready_groups[]`, and then invokes this task-wave protocol independently for
 each ready phase that is marked `<!-- execution: parallel -->`.
 
@@ -31,10 +31,10 @@ optimization.
 - **One worktree per worker.** Workers only read/write inside their assigned
   `.worktrees/<track_id>_worker_<N>_<name>/`. Never let two workers share files.
 - **Cadre MCP + Beads are the coordinator, not worker file edits.** Pre-assign each wave's
-  tasks (`cadre_beads_write` update, or `bd update … --status in_progress --assignee …`
+  tasks (`cadre_beads` update, or `bd update … --status in_progress --assignee …`
   as a fallback) before dispatch. A task's
   dependents are released only on **clean integration**: the coordinator runs
-  `cadre_record_parallel_worker` with `completeTask: true` when that worker's
+  `cadre_mutate` with `action: "record_worker"` with `completeTask: true` when that worker's
   branch **merges cleanly** in §6, which runs `cadre_complete_task` and then
   marks dependent tasks ready for a later wave. A worker whose merge conflicts is
   left un-closed (its status is `conflict`), so its dependents stay blocked until a
@@ -143,7 +143,7 @@ dispatch normally.
 - Dispatch one worker per task in the wave using your platform's mechanism (see
   "Dispatching each worker" above), handing each the inline worker prompt from
   `cadre-implement`.
-- Record each spawned worker through MCP `cadre_record_parallel_worker` with
+- Record each spawned worker through MCP `cadre_mutate` with `action: "record_worker"` with
   `status: "in_progress"` so `parallel_state.json` remains a coordinator-owned
   audit log:
   ```json
@@ -216,12 +216,12 @@ running **`conflict_workers`** "needs manual resolution" list.
   if git merge --no-ff track_<track_id>_worker_<N>_<name> \
        -m "cadre(parallel): merge worker_<N>: <task_description>"; then
     # CLEAN MERGE: coordinator completes Cadre + Beads state atomically.
-    cadre_record_parallel_worker { status: "merged", completeTask: true, ... }
+    cadre_mutate { action: "record_worker", status: "merged", completeTask: true, ... }
     bd worktree remove .worktrees/<track_id>_worker_<N>_<name>
   else
     # CONFLICT: set aside — do NOT remove the worktree, do NOT close the task.
     git merge --abort
-    # MCP: cadre_record_parallel_worker { status: "conflict", ... }
+    # MCP: cadre_mutate { action: "record_worker", status: "conflict", ... }
     # add worker_<N> to conflict_workers; continue with the next worker.
   fi
   ```
@@ -232,11 +232,11 @@ running **`conflict_workers`** "needs manual resolution" list.
   # For each worker in completion order, in its repo:
   if git -C <submodule_path> merge --no-ff track_<track_id>_worker_<N>_<name> \
        -m "cadre(parallel): merge worker_<N> (<repo>): <task_description>"; then
-    cadre_record_parallel_worker { status: "merged", completeTask: true, ... }
+    cadre_mutate { action: "record_worker", status: "merged", completeTask: true, ... }
     git -C <submodule_path> worktree remove .worktrees/<track_id>/<repo>_worker_<N>_<name>
   else
     git -C <submodule_path> merge --abort
-    # MCP: cadre_record_parallel_worker { status: "conflict", ... }; add to conflict_workers; continue.
+    # MCP: cadre_mutate { action: "record_worker", status: "conflict", ... }; add to conflict_workers; continue.
   fi
   ```
   Never merge a worker branch from one repo into another repo's branch.
@@ -245,7 +245,7 @@ running **`conflict_workers`** "needs manual resolution" list.
   worktree + branch are torn down.
 - **Conflicting workers (`conflict`):** **set the worker aside and keep going.**
   Abort the in-progress merge, then **retain** its worktree + branch (do **not**
-  `worktree remove`), call `cadre_record_parallel_worker` with `status:
+  `worktree remove`), call `cadre_mutate` with `action: "record_worker"` with `status:
   "conflict"`, do
   **not** `bd close --continue` it (its Beads task stays not-done, so it does not
   release dependents — `bd ready --parent` keeps any transitive dependents
@@ -254,7 +254,7 @@ running **`conflict_workers`** "needs manual resolution" list.
 - **After the merge loop**, if `conflict_workers` is non-empty, report it and ask
   the user to resolve each retained worktree manually. Once a human resolves a
   retained worker's conflict, the coordinator merges it and calls
-  `cadre_record_parallel_worker` with `status: "merged"` and `completeTask: true`
+  `cadre_mutate` with `action: "record_worker"` with `status: "merged"` and `completeTask: true`
   — at which point its dependents become ready and dispatch in a **subsequent**
   wave (§5). Show the
   conflicting files (and, in polyrepo, the repo) for each.

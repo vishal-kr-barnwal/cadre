@@ -88,7 +88,7 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 - If `<!-- depends: -->` is empty: Phase has NO dependencies (can run parallel with any phase)
 - If `<!-- depends: phase1, phase2 -->`: Phase waits for listed phases only
 - Runtime scheduling is not inferred ad hoc by the agent. `cadre-implement` calls
-  MCP `cadre_phase_schedule`, then dispatches only the returned
+  MCP `cadre_track` with `action: "phase_schedule"`, then dispatches only the returned
   conflict-free `ready_groups[]`.
 
 #### Task-Level Annotations
@@ -177,7 +177,7 @@ Prevent multiple workers from modifying the same file simultaneously.
 
 1. **Pre-spawn validation**: Before spawning workers, validate no file conflicts
 2. **Coordinator audit**: Record worker/file ownership through
-   `cadre_record_parallel_worker`; `parallel_state.json` is audit-only
+   `cadre_mutate` with `action: "record_worker"`; `parallel_state.json` is audit-only
 3. **Dependency coordination**: Beads dependencies and assignees determine which
    workers can start and which dependents are unblocked
 4. **Conflict detection**: If plan-level conflicts are found, fall back to
@@ -251,7 +251,7 @@ Task({
 Workers do not edit Cadre state directly. Each worker returns a structured
 evidence packet to the coordinator: worker id, task key, commit SHA, tests run,
 coverage value/source, files changed, and notes. The coordinator records that
-packet through MCP `cadre_record_parallel_worker`. After a clean merge-back, the
+packet through MCP `cadre_mutate` with `action: "record_worker"`. After a clean merge-back, the
 coordinator calls the same tool with `status: "merged"` and `completeTask: true`
 so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
 
@@ -305,7 +305,7 @@ so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
    
    f. **Monitor Completion:**
       - Wait for worker results and let the coordinator record status through
-        MCP `cadre_record_parallel_worker`
+        MCP `cadre_mutate` with `action: "record_worker"`
       - When a worker completes:
         - Check if dependent tasks can now start
         - Spawn newly unblocked tasks
@@ -313,7 +313,7 @@ so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
    g. **Aggregate Results:**
       - Wait for all workers to complete
       - Collect commit SHAs from all workers
-      - Call `cadre_record_parallel_worker` with `completeTask: true` after each
+      - Call `cadre_mutate` with `action: "record_worker"` with `completeTask: true` after each
         clean merge to update plan.md and Beads
       - Proceed to phase checkpoint
 
@@ -411,7 +411,7 @@ Beads completion state:
 ```
 
 The coordinator records start/progress/failure through
-`cadre_record_parallel_worker`. After a clean merge-back, it calls the same MCP
+`cadre_mutate` with `action: "record_worker"`. After a clean merge-back, it calls the same MCP
 tool with `status: "merged"` and `completeTask: true`; discovered issues become
 coordinator-owned Beads notes or follow-up tasks.
 
@@ -448,7 +448,7 @@ bd update <beads_task_id> --status open \
    - Offer to retry or skip
 
 2. **Worker Error:** If worker reports error
-   - Record the failure through `cadre_record_parallel_worker`
+   - Record the failure through `cadre_mutate` with `action: "record_worker"`
    - Block dependent tasks
    - Ask user for resolution
 
