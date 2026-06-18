@@ -227,6 +227,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(reviewActions.includes("provider_evidence"));
     const intelTool = tools.tools.find((tool) => tool.name === "cadre_intel");
     const intelActions = intelTool.inputSchema.properties.action.enum;
+    assert.ok(intelActions.includes("lsp_setup"));
     assert.ok(intelActions.includes("workspace_diagnostics"));
     assert.ok(intelActions.includes("test_impact"));
     assert.ok(intelActions.includes("dependency_graph"));
@@ -240,6 +241,19 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://beads-summary"));
     assert.ok(uris.includes("cadre://review-evidence"));
     assert.ok(uris.includes("cadre://workspace-diagnostics"));
+    assert.ok(uris.includes("cadre://lsp-status"));
+    assert.ok(uris.includes("cadre://repo-topology"));
+    assert.ok(uris.includes("cadre://provider-actions"));
+    assert.ok(uris.includes("cadre://ship-plan"));
+    assert.ok(uris.includes("cadre://land-plan"));
+    assert.ok(uris.includes("cadre://release-plan"));
+    assert.ok(uris.includes("cadre://my-next-actions"));
+    assert.ok(uris.includes("cadre://review-queue"));
+    assert.ok(uris.includes("cadre://parallel-state"));
+    assert.ok(uris.includes("cadre://quality-gate"));
+    const templates = await request("resources/templates/list", {});
+    const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
+    assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
@@ -285,6 +299,11 @@ test("MCP root resolution rejects harness skill directories without project stat
     const completed = await waitForJob(request, jobId);
     assert.equal(completed.ok, true);
     assert.equal(completed.data.result.coverage, 91);
+    assert.equal(fs.existsSync(path.join(root, "project", "cadre", "jobs", `${jobId}.json`)), true);
+    const jobResource = await request("resources/read", {
+      uri: `cadre://job-result?root=${encodeURIComponent(path.join(root, "project"))}&jobId=${jobId}`,
+    });
+    assert.equal(JSON.parse(jobResource.contents[0].text).data.status, "succeeded");
   } finally {
     server.kill();
     fs.rmSync(root, { recursive: true, force: true });
@@ -360,6 +379,14 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     assert.equal(diagnostics.data.ok, true);
     assert.ok(diagnostics.data.adapters.some((adapter) => adapter.id === "node"));
 
+    const lspSetup = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { root, action: "lsp_setup" },
+    }));
+    assert.equal(lspSetup.data.ok, true);
+    assert.equal(lspSetup.data.dry_run, true);
+    assert.ok(lspSetup.data.recommended.some((entry) => entry.id === "typescript"));
+
     const evidence = parseTextJson(await request("tools/call", {
       name: "cadre_review",
       arguments: {
@@ -380,6 +407,36 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     });
     const parsedResource = JSON.parse(resource.contents[0].text);
     assert.equal(parsedResource.data.evidence.entries.length, 1);
+
+    const topologyResource = await request("resources/read", {
+      uri: `cadre://repo-topology?root=${encodeURIComponent(root)}`,
+    });
+    assert.equal(JSON.parse(topologyResource.contents[0].text).data.ok, true);
+
+    const lspResource = await request("resources/read", {
+      uri: `cadre://lsp-status?root=${encodeURIComponent(root)}`,
+    });
+    assert.equal(JSON.parse(lspResource.contents[0].text).data.ok, true);
+
+    const releaseResource = await request("resources/read", {
+      uri: `cadre://release-plan?root=${encodeURIComponent(root)}`,
+    });
+    assert.equal(JSON.parse(releaseResource.contents[0].text).data.workflow, "release");
+
+    const parallelResource = await request("resources/read", {
+      uri: `cadre://parallel-state?root=${encodeURIComponent(root)}&trackId=packets_20260618`,
+    });
+    assert.equal(JSON.parse(parallelResource.contents[0].text).data.track_id, "packets_20260618");
+
+    const gateResource = await request("resources/read", {
+      uri: `cadre://quality-gate?root=${encodeURIComponent(root)}&trackId=packets_20260618`,
+    });
+    assert.equal(JSON.parse(gateResource.contents[0].text).data.review_gate.track_id, "packets_20260618");
+
+    const actionsResource = await request("resources/read", {
+      uri: `cadre://my-next-actions?root=${encodeURIComponent(root)}`,
+    });
+    assert.equal(JSON.parse(actionsResource.contents[0].text).data.ok, true);
   } finally {
     server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });

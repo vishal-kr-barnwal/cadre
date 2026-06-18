@@ -12,10 +12,7 @@ const entries = [
   ["src/cadre-lsp-setup.ts", "scripts/cadre-lsp-setup.js"],
   ["src/cadre-lsp-review.ts", "scripts/cadre-lsp-review.js"],
   ["src/cadre-lsp-daemon.ts", "scripts/cadre-lsp-daemon.js"],
-  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.js"],
-  ["src/cadre-lsp-setup.ts", "templates/scripts/cadre-lsp-setup.js"],
-  ["src/cadre-lsp-review.ts", "templates/scripts/cadre-lsp-review.js"],
-  ["src/cadre-lsp-daemon.ts", "templates/scripts/cadre-lsp-daemon.js"]
+  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.js"]
 ];
 
 const banner = [

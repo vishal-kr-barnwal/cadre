@@ -310,6 +310,40 @@ function runCommand(command: string, args: string[], options: RunCommandOptions 
   return commandResult;
 }
 
+function plannedGitAction(id: string, kind: string, repo: string, cwd: string, args: string[], description: string): PlannedGitAction {
+  return {
+    id,
+    kind,
+    repo,
+    cwd,
+    command: "git",
+    args,
+    description,
+  };
+}
+
+function runPlannedGitActions(actions: PlannedGitAction[]): CommandResult[] {
+  return actions.map((action) => runCommand(action.command, action.args, { cwd: action.cwd }));
+}
+
+function actionResultsOk(results: CommandResult[]): boolean {
+  return results.every((result) => result.ok);
+}
+
+function hasProviderEvidence(args: RuntimeArgs = {}): boolean {
+  return Boolean(args.evidence || args.providerEvidence || args.provider_evidence);
+}
+
+function workflowPhaseState(args: RuntimeArgs, blocked: boolean, pendingProvider = false): WorkflowPhaseState {
+  if (blocked) return "blocked";
+  if (pendingProvider) return "pending_provider";
+  return args.execute === true ? "executed" : "ready";
+}
+
+function continuationToken(workflow: string, trackId: string | null | undefined, actions: unknown[]): string {
+  return textHash(JSON.stringify({ workflow, trackId, actions })).slice(0, 24);
+}
+
 function parsePorcelainFiles(text: unknown): string[] {
   return String(text || "")
     .split(/\r?\n/)
@@ -737,6 +771,33 @@ interface RepoExecutionEntry extends JsonObject {
   source: string;
   base?: string;
   head?: string;
+}
+
+type WorkflowPhaseState = "dry_run" | "ready" | "pending_provider" | "executed" | "blocked" | "recovery_required";
+
+interface PlannedGitAction extends JsonObject {
+  id: string;
+  kind: string;
+  repo: string;
+  cwd: string;
+  command: string;
+  args: string[];
+  description: string;
+}
+
+interface PlannedProviderAction extends JsonObject {
+  id: string;
+  provider: string;
+  kind: string;
+  repo: string;
+  track_id: string;
+  title: string;
+  source_branch?: string | null;
+  target_branch?: string | null;
+  body?: string;
+  labels?: string[];
+  evidence_key: string;
+  required_evidence: JsonObject | null;
 }
 
 interface DiffSurface extends JsonObject {
@@ -1761,11 +1822,120 @@ function workflowSummary(root: string, workflow: string, args: RuntimeArgs = {})
     workflow,
     packet_only: true,
     execute: args.execute === true,
+    phase_state: args.execute === true ? "executed" : "dry_run",
     response_mode: workflowResponseMode(args),
     detail_available: true,
     identity,
     generated_at: utcNow(),
   };
+}
+
+function resultOk(value: CoreResult | null | undefined): boolean {
+  return !value || value.ok !== false;
+}
+
+function withSharedControlPlaneSync(root: string, args: RuntimeArgs = {}, operation: string, fn: () => CoreResult): CoreResult {
+  const topology = loadTopology(root);
+  if (args.execute !== true || topology.config.sync_mode !== "shared" || (args as UnknownRecord).skipSync === true) {
+    return fn();
+  }
+  const syncPre = syncControlPlane(root, { mode: "pre" });
+  if (syncPre.ok === false) {
+    return {
+      ok: false,
+      phase_state: "blocked",
+      stage: "sync_pre",
+      operation,
+      sync_pre: syncPre,
+    };
+  }
+  const result = fn();
+  if (result.ok === false) {
+    return {
+      ...result,
+      sync_pre: syncPre,
+      sync_post: null,
+    };
+  }
+  const syncPost = syncControlPlane(root, { mode: "post" });
+  return {
+    ...result,
+    ok: resultOk(result) && syncPost.ok !== false,
+    phase_state: syncPost.ok === false ? "recovery_required" : result.phase_state,
+    sync_pre: syncPre,
+    sync_post: syncPost,
+  };
+}
+
+function compactObject(value: unknown, depth = 0): unknown {
+  if (value == null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    const limit = depth === 0 ? 80 : 25;
+    return value.slice(0, limit).map((item) => compactObject(item, depth + 1));
+  }
+  const source = asJsonObject(value);
+  const out: JsonObject = {};
+  for (const [key, entry] of Object.entries(source)) {
+    if (key === "content" && typeof entry === "string" && entry.length > 800) {
+      out[key] = `${entry.slice(0, 800)}\n...[truncated; request responseMode:\"detail\" for full content]`;
+      continue;
+    }
+    if (key === "plan" && isRecord(entry)) {
+      const plan = asJsonObject(entry);
+      out[key] = {
+        ok: plan.ok,
+        phases: Array.isArray(plan.phases) ? plan.phases.length : 0,
+        tasks: Array.isArray(plan.tasks) ? plan.tasks.length : 0,
+        warnings: Array.isArray(plan.warnings) ? plan.warnings.length : 0,
+        errors: Array.isArray(plan.errors) ? plan.errors.length : 0,
+      };
+      continue;
+    }
+    if (["stdout", "stderr"].includes(key) && typeof entry === "string" && entry.length > 1200) {
+      out[`${key}_tail`] = entry.slice(-1200);
+      out[`${key}_truncated`] = true;
+      continue;
+    }
+    if (["repo_diffs", "repo_todos", "commands", "results"].includes(key) && Array.isArray(entry)) {
+      out[key] = entry.slice(0, 20).map((item) => compactObject(item, depth + 1)) as JsonObject[];
+      out[`${key}_count`] = entry.length;
+      out[`${key}_truncated`] = entry.length > 20;
+      continue;
+    }
+    out[key] = depth > 5 ? "[depth-limit]" : compactObject(entry, depth + 1) as JsonObject | string | number | boolean | null | JsonObject[];
+  }
+  return out;
+}
+
+function workflowResourceUris(root: string, workflow: string, result: CoreResult): string[] {
+  const encodedRoot = encodeURIComponent(root);
+  const trackId = asOptionalString(result.track_id)
+    || asOptionalString(asJsonObject(result.track || {}).track_id)
+    || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
+  const uris = [
+    `cadre://team-board?root=${encodedRoot}`,
+    `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
+  ];
+  if (trackId) {
+    uris.push(`cadre://track-context?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
+    uris.push(`cadre://parallel-state?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
+  }
+  if (workflow === "ship" && trackId) uris.push(`cadre://ship-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
+  if (workflow === "land" && trackId) uris.push(`cadre://land-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
+  if (workflow === "release") uris.push(`cadre://release-plan?root=${encodedRoot}`);
+  return Array.from(new Set(uris));
+}
+
+function shapeWorkflowResponse(root: string, workflow: string, args: RuntimeArgs, result: CoreResult): CoreResult {
+  const mode = workflowResponseMode(args);
+  const enriched = {
+    ...result,
+    response_mode: mode,
+    detail_available: true,
+    resource_uris: workflowResourceUris(root, workflow, result),
+  };
+  if (mode === "detail") return enriched;
+  return compactObject(enriched) as CoreResult;
 }
 
 function templatePath(relativePath: string): string | null {
@@ -1793,6 +1963,178 @@ function packetText(value: unknown, fallback: string): string {
 
 function templateJson(relativePath: string, fallback: JsonObject): JsonObject {
   return readJson<JsonObject>(templatePath(relativePath) || "", fallback);
+}
+
+function configuredCiProvider(root: string, args: RuntimeArgs = {}): "github" | "gitlab" | null {
+  const raw = asOptionalString(args.ciProvider || args.ci_provider)
+    || asOptionalString(args.providerMode || args.provider_mode || args.provider)
+    || asOptionalString(loadTopology(root).config.provider_mode);
+  const provider = normalizeProviderMode(raw);
+  return provider === "github" || provider === "gitlab" ? provider : null;
+}
+
+function setupBeads(root: string, args: RuntimeArgs = {}): CoreResult {
+  const available = commandExists("bd", root);
+  const stateDir = path.join(root, ".beads");
+  const initialized = fileExists(stateDir);
+  const command = ["bd", "init", "--non-interactive", "--role", "maintainer"];
+  if (args.execute !== true) {
+    return {
+      ok: true,
+      available,
+      initialized,
+      dry_run: true,
+      planned_command: command,
+      state_path: ".beads",
+    };
+  }
+  if (!available) {
+    return {
+      ok: false,
+      available: false,
+      initialized: false,
+      required: true,
+      error: "Beads CLI (bd) is required for cadre-setup execute and was not found on PATH",
+    };
+  }
+  if (initialized) {
+    return {
+      ok: true,
+      available: true,
+      initialized: true,
+      skipped: true,
+      reason: ".beads already exists",
+      state_path: ".beads",
+    };
+  }
+  const result = runCommand("bd", command.slice(1), { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  return {
+    ok: result.ok,
+    available: true,
+    initialized: result.ok || fileExists(stateDir),
+    command,
+    result,
+    state_path: ".beads",
+  };
+}
+
+function setupGitattributes(root: string): CoreResult {
+  const file = path.join(root, ".gitattributes");
+  const required = [
+    ".beads/** merge=ours",
+    "cadre/tracks/**/parallel_state.json merge=ours",
+  ];
+  const existing = fileExists(file) ? fs.readFileSync(file, "utf8") : "";
+  const lines = existing.split(/\r?\n/).filter(Boolean);
+  let changed = false;
+  for (const line of required) {
+    if (!lines.includes(line)) {
+      lines.push(line);
+      changed = true;
+    }
+  }
+  if (changed || !fileExists(file)) {
+    fs.writeFileSync(file, `${lines.join("\n")}\n`);
+  }
+  const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root });
+  return {
+    ok: mergeDriver.ok,
+    path: path.relative(root, file),
+    changed,
+    merge_driver: mergeDriver,
+  };
+}
+
+function setupCiTemplates(root: string, provider: "github" | "gitlab" | null, args: RuntimeArgs = {}): CoreResult {
+  if (!provider) return { ok: true, skipped: true, reason: "No hosted provider selected" };
+  if (args.writeCi === false || args.write_ci === false) {
+    return { ok: true, skipped: true, reason: "writeCi=false" };
+  }
+  const topology = asOptionalString((args as UnknownRecord).topology)?.toLowerCase();
+  const polyrepo = topology === "polyrepo" || asJsonObject((args as UnknownRecord).repos).mode === "polyrepo" || (args as UnknownRecord).polyrepo === true;
+  const template = polyrepo
+    ? (provider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml")
+    : (provider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml");
+  const source = templatePath(template);
+  if (!source) return { ok: false, error: `Missing CI template ${template}` };
+  const target = provider === "github"
+    ? path.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml")
+    : path.join(root, ".gitlab-ci.yml");
+  if (fileExists(target) && args.force !== true) {
+    return { ok: true, skipped: true, provider, source: path.relative(root, source), path: path.relative(root, target) };
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(source, target);
+  return { ok: true, provider, source: path.relative(root, source), path: path.relative(root, target), written: true };
+}
+
+function setupSubmodulePlan(root: string, repos: JsonObject, args: RuntimeArgs = {}): CoreResult {
+  const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
+  const commands: PlannedGitAction[] = [];
+  for (const repo of entries) {
+    const name = asOptionalString(repo.name);
+    const url = asOptionalString(repo.url);
+    const submodulePath = asOptionalString(repo.submodule_path);
+    if (!name || !url || !submodulePath || repo.enabled === false) continue;
+    if (fileExists(path.join(root, submodulePath))) continue;
+    commands.push(plannedGitAction(
+      `submodule-${safeName(name)}`,
+      "submodule_add",
+      name,
+      root,
+      ["submodule", "add", url, submodulePath],
+      `Register ${name} as a product submodule`
+    ));
+  }
+  const execute = args.addSubmodules === true || args.add_submodules === true || args.executeSubmodules === true || args.execute_submodules === true;
+  const results = execute ? runPlannedGitActions(commands) : [];
+  return {
+    ok: !execute || actionResultsOk(results),
+    execute,
+    dry_run: !execute,
+    commands,
+    results,
+  };
+}
+
+function lspSetupHelperCandidates(root: string): string[] {
+  return [
+    path.join(__dirname, "cadre-lsp-setup.js"),
+    path.join(__dirname, "..", "cadre-lsp-setup.js"),
+    path.join(__dirname, "..", "..", "scripts", "cadre-lsp-setup.js"),
+    path.join(root, "cadre", "scripts", "cadre-lsp-setup.js"),
+  ];
+}
+
+function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
+  const helper = lspSetupHelperCandidates(root).find(fileExists);
+  if (!helper) {
+    return {
+      ok: false,
+      available: false,
+      reason: "No cadre-lsp-setup.js helper found",
+      checked: lspSetupHelperCandidates(root),
+    };
+  }
+  const config = asOptionalString(args.config) || "cadre/lsp.json";
+  const commandArgs = [helper, "--root", root, "--config", config, "--json"];
+  if (args.execute === true) commandArgs.push("--write");
+  const result = runCommand("node", commandArgs, { cwd: root, maxBuffer: 20 * 1024 * 1024 });
+  if (!result.ok) {
+    return { ok: false, available: true, helper, result, reason: "LSP setup helper failed" };
+  }
+  try {
+    return {
+      ok: true,
+      available: true,
+      helper,
+      execute: args.execute === true,
+      dry_run: args.execute !== true,
+      ...asJsonObject(JSON.parse(result.stdout || "{}")),
+    };
+  } catch {
+    return { ok: false, available: true, helper, result, reason: "LSP setup helper returned invalid JSON" };
+  }
 }
 
 function availableStyleGuideIds(): string[] {
@@ -2067,9 +2409,20 @@ function implementationStyleGuides(root: string, trackId: string | null | undefi
 function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "setup", args);
   const rawArgs = args as UnknownRecord;
+  const requestedTopology = asOptionalString(rawArgs.topology)?.toLowerCase();
+  const reposPayload = isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null;
+  const polyrepoRequested = Boolean(reposPayload && reposPayload.mode === "polyrepo")
+    || requestedTopology === "polyrepo"
+    || rawArgs.polyrepo === true;
   const styleGuides = setupStyleGuides(root, args);
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
+  const lspRecommendations = lspSetup(root, { ...args, execute: false });
+  const beadsPlan = setupBeads(root, { ...args, execute: false });
+  const configOverrides = asJsonObject(rawArgs.config);
+  const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
+  const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
+  const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
   const result: CoreResult = {
     ...summary,
     ok: styleGuides.ok,
@@ -2077,12 +2430,19 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),
     lsp: lspConfigStatus(root),
+    lsp_setup: lspRecommendations,
+    beads_init: beadsPlan,
     provider,
+    sync_mode: syncModeRecommendation,
+    sync_recommendation: teamSize >= 2 && syncModeRecommendation !== "shared"
+      ? "Team setup detected; use syncMode/shared sync for 10-20 person coordination."
+      : null,
     styleGuides,
     techStackSummary: techStackSummary(root, args),
     required_payload: args.execute === true
       ? ["productText", "techStack"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
+        .concat(polyrepoRequested && !reposPayload ? ["repos"] : [])
       : [],
     next_actions: provider.requires_confirmation === true
       ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
@@ -2108,6 +2468,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     ...(!asOptionalString(rawArgs.productText)?.trim() ? ["productText"] : []),
     ...(!techStackFromArgs(args) ? ["techStack"] : []),
     ...(provider.requires_confirmation === true || !providerMode ? ["providerMode"] : []),
+    ...(polyrepoRequested && !reposPayload ? ["repos"] : []),
   ];
   if (missingPayload.length > 0) {
     return {
@@ -2115,6 +2476,17 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
       ok: false,
       error: `Missing setup payload: ${missingPayload.join(", ")}`,
       missing_payload: missingPayload,
+    };
+  }
+  const beadsInit = setupBeads(root, args);
+  if (beadsInit.ok === false) {
+    return {
+      ...result,
+      ok: false,
+      phase_state: "blocked",
+      stage: "beads_init",
+      beads_init: beadsInit,
+      error: asOptionalString(beadsInit.error) || asOptionalString(beadsInit.reason) || "Beads initialization failed",
     };
   }
   const written: string[] = [];
@@ -2162,29 +2534,59 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   writeSetupJson("setup_state.json", {
     version: 1,
     packet_only: true,
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
     initialized_at: utcNow(),
     updated_at: utcNow(),
   });
-  writeSetupJson("config.json", {
-    sync_mode: "local",
+  const configPayload = {
+    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
     packet_only: true,
+    sync_mode: syncModeRecommendation,
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...(asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {}),
-    ...asJsonObject(rawArgs.config),
-  });
+    ...configOverrides,
+  };
+  writeSetupJson("config.json", configPayload);
   writeSetupJson("beads.json", {
     ...templateJson("beads.json", { enabled: true, mode: "normal" }),
     packet_only: true,
     ...asJsonObject(rawArgs.beadsConfig),
   });
-  if (isRecord(rawArgs.repos)) {
-    writeSetupJson("repos.json", asJsonObject(rawArgs.repos));
+  let repos: JsonObject | null = null;
+  if (reposPayload) {
+    repos = reposPayload;
+    writeSetupJson("repos.json", reposPayload);
   }
+  const lspWriteRequested = rawArgs.lsp === true
+    || args.setupLsp === true
+    || args.setup_lsp === true
+    || args.writeLsp === true
+    || args.write_lsp === true;
+  const lspSetupResult = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
+  const gitattributesNeeded = polyrepoRequested
+    || configPayload.sync_mode === "shared"
+    || rawArgs.writeGitattributes === true
+    || rawArgs.write_gitattributes === true;
+  const gitattributes = gitattributesNeeded ? setupGitattributes(root) : null;
+  const ciSetup = setupCiTemplates(
+    root,
+    configuredCiProvider(root, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null),
+    { ...args, topology: polyrepoRequested ? "polyrepo" : "monorepo" }
+  );
+  const polyrepoSetup = polyrepoRequested && repos
+    ? {
+      gitattributes,
+      ci: ciSetup,
+      submodules: setupSubmodulePlan(root, repos, args),
+    }
+    : null;
   return {
     ...result,
     ok: true,
     scaffolded: true,
+    phase_state: "executed",
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
     written,
     skipped,
     styleGuides: {
@@ -2192,6 +2594,11 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
       written: written.slice(beforeStyleWritten),
       skipped: skipped.slice(beforeStyleSkipped),
     },
+    lsp_setup: lspSetupResult,
+    beads_init: beadsInit,
+    gitattributes,
+    ci_setup: ciSetup,
+    polyrepo_setup: polyrepoSetup,
     force,
     doctor_after: doctor(root, { hasCadreProject: true }),
   };
@@ -2312,9 +2719,11 @@ function workflowReview(root: string, args: RuntimeArgs = {}): CoreResult {
   const review = reviewAssist(root, { ...args, trackId });
   const gate = reviewGate(root, trackId, args);
   const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  const pendingProvider = Boolean(provider && provider.ok === false);
   return {
     ...summary,
-    ok: review.ok !== false && (!provider || provider.ok !== false),
+    ok: review.ok !== false,
+    phase_state: pendingProvider ? "pending_provider" : summary.phase_state,
     track_context: context,
     review_assist: review,
     gate,
@@ -2356,6 +2765,8 @@ function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResult {
       tracks: tracks.map((track) => metadataTrackSummary(track)),
     };
   }
+  const syncPre = syncControlPlane(root, { mode: "pre" });
+  if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
   const archived: CoreResult[] = [];
   const archiveRoot = path.join(root, "cadre", "archive");
   fs.mkdirSync(archiveRoot, { recursive: true });
@@ -2369,7 +2780,17 @@ function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResult {
     archived.push({ track_id: track.track_id, ok: true, path: path.relative(root, target) });
   }
   const regen = regenIndex(root);
-  return { ...summary, ok: archived.every((item) => item.ok !== false) && regen.ok !== false, dry_run: false, archived, regen };
+  const syncPost = syncControlPlane(root, { mode: "post" });
+  return {
+    ...summary,
+    ok: archived.every((item) => item.ok !== false) && regen.ok !== false && syncPost.ok !== false,
+    phase_state: syncPost.ok === false ? "recovery_required" : "executed",
+    dry_run: false,
+    archived,
+    regen,
+    sync_pre: syncPre,
+    sync_post: syncPost,
+  };
 }
 
 function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -2401,18 +2822,122 @@ function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function providerActionKind(workflow: string, provider: string): string {
+  if (provider === "gitlab") return workflow === "land" ? "open_merge_request_group" : "open_merge_request";
+  return workflow === "land" ? "open_pull_request_group" : "open_pull_request";
+}
+
+function providerActionsForTrack(root: string, workflow: "ship" | "land", track: CadreTrack, args: RuntimeArgs = {}): PlannedProviderAction[] {
+  const provider = providerFromConfig(root, args);
+  if (provider === "local") return [];
+  const entries = workflow === "land"
+    ? repoEntriesForTrack(root, track, args)
+    : repoEntriesForTrack(root, track, { ...args, repo: args.repo || "." }).filter((entry) => entry.repo === "." || !loadTopology(root).polyrepo);
+  const label = `cadre-track:${track.track_id}`;
+  return entries.map((entry) => {
+    const repo = asString(entry.repo, ".");
+    const target = entry.head || track.metadata.git_branch || `track/${track.track_id}`;
+    return {
+      id: `${workflow}-${safeName(repo)}`,
+      provider,
+      kind: providerActionKind(workflow, provider),
+      repo,
+      track_id: track.track_id,
+      title: `${track.track_id}: ${track.metadata.description || track.metadata.name || track.track_id}`,
+      source_branch: target,
+      target_branch: entry.base || args.base || "main",
+      body: [
+        `Cadre track: ${track.track_id}`,
+        `Repo: ${repo}`,
+        "Provider evidence must be fetched through the installed provider MCP and written back to Cadre.",
+      ].join("\n"),
+      labels: [label],
+      evidence_key: `${provider}:${workflow}:${track.track_id}:${repo}`,
+      required_evidence: asJsonObject(providerEvidenceRequirement(root, { ...args, trackId: track.track_id })),
+    };
+  });
+}
+
+function shipGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
+  const remote = args.remote || "origin";
+  const base = args.base || "main";
+  const branch = args.branch || track.metadata.git_branch || `track/${track.track_id}`;
+  return [
+    plannedGitAction("ship-fetch", "fetch_base", ".", root, ["fetch", String(remote), String(base)], `Fetch ${remote}/${base}`),
+    plannedGitAction("ship-rebase", "rebase_base", ".", root, ["rebase", `${remote}/${base}`], `Rebase ${branch} onto ${remote}/${base}`),
+    plannedGitAction("ship-push", "push_branch", ".", root, ["push", "-u", String(remote), String(branch)], `Push ${branch}`),
+  ];
+}
+
+function landGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
+  const remote = args.remote || "origin";
+  const actions: PlannedGitAction[] = [];
+  for (const entry of repoEntriesForTrack(root, track, args)) {
+    const repo = asString(entry.repo, ".");
+    const branch = asString(entry.head || track.metadata.git_branch || `track/${track.track_id}`);
+    actions.push(plannedGitAction(
+      `land-push-${safeName(repo)}`,
+      "push_repo_branch",
+      repo,
+      asString(entry.root, root),
+      ["push", "-u", String(remote), branch],
+      `Push ${repo} branch ${branch}`
+    ));
+  }
+  actions.push(plannedGitAction(
+    "land-push-control",
+    "push_control_branch",
+    ".",
+    root,
+    ["push", String(remote), args.branch || "HEAD"],
+    "Push control-plane branch"
+  ));
+  return actions;
+}
+
+function persistProviderEvidenceIfSupplied(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult | null {
+  const evidence = args.evidence || args.providerEvidence || args.provider_evidence;
+  if (!evidence || args.execute !== true) return null;
+  return providerEvidence(root, {
+    ...args,
+    trackId: track.track_id,
+    evidence,
+  });
+}
+
 function workflowShip(root: string, args: RuntimeArgs = {}): CoreResult {
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "ship", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const track = findTrack(root, trackId);
+  if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
   const gate = reviewGate(root, trackId, args);
   const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  const providerActions = providerActionsForTrack(root, "ship", track, args);
+  const gitActions = shipGitActions(root, track, args);
+  const evidenceSupplied = hasProviderEvidence(args);
+  const pendingProvider = Boolean(provider && provider.ok === false && providerActions.length > 0 && !evidenceSupplied);
+  const blocked = gate.ok === false;
+  const evidenceWrite = persistProviderEvidenceIfSupplied(root, track, args);
+  const canExecuteGit = args.execute === true && !blocked && !evidenceSupplied && (!evidenceWrite || evidenceWrite.ok !== false);
+  const gitResults = canExecuteGit ? runPlannedGitActions(gitActions) : [];
+  const executionFailed = canExecuteGit && !actionResultsOk(gitResults);
+  const phaseState: WorkflowPhaseState = executionFailed
+    ? "recovery_required"
+    : workflowPhaseState(args, blocked || Boolean(evidenceWrite && evidenceWrite.ok === false), pendingProvider);
   return {
     ...summary,
-    ok: gate.ok !== false && (!provider || provider.ok !== false),
+    ok: gate.ok !== false && (!evidenceWrite || evidenceWrite.ok !== false) && !executionFailed,
+    phase_state: phaseState,
     gate,
     provider,
     pr_ci_status: provider,
+    provider_actions: providerActions,
+    git_actions: gitActions,
+    git_results: gitResults,
+    git_action_state: canExecuteGit ? "executed" : (evidenceSupplied ? "skipped_provider_evidence_continuation" : "pending_execute"),
+    provider_evidence_write: evidenceWrite,
+    continuation_token: continuationToken("ship", trackId, [...providerActions, ...gitActions]),
     required_provider_mcp: provider && provider.ok === false ? provider.required_provider_mcp || null : null,
     required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
     unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
@@ -2424,17 +2949,38 @@ function workflowLand(root: string, args: RuntimeArgs = {}): CoreResult {
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "land", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const track = findTrack(root, trackId);
+  if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
   const topology = loadTopology(root);
   const preflight = polyrepoPreflight(root);
   const gate = reviewGate(root, trackId, args);
   const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  const providerActions = topology.polyrepo && preflight.ok !== false ? providerActionsForTrack(root, "land", track, args) : [];
+  const gitActions = topology.polyrepo && preflight.ok !== false ? landGitActions(root, track, args) : [];
+  const evidenceSupplied = hasProviderEvidence(args);
+  const pendingProvider = Boolean(provider && provider.ok === false && providerActions.length > 0 && !evidenceSupplied);
+  const blocked = !topology.polyrepo || preflight.ok === false || gate.ok === false;
+  const evidenceWrite = persistProviderEvidenceIfSupplied(root, track, args);
+  const canExecuteGit = args.execute === true && !blocked && !evidenceSupplied && (!evidenceWrite || evidenceWrite.ok !== false);
+  const gitResults = canExecuteGit ? runPlannedGitActions(gitActions) : [];
+  const executionFailed = canExecuteGit && !actionResultsOk(gitResults);
+  const phaseState: WorkflowPhaseState = executionFailed
+    ? "recovery_required"
+    : workflowPhaseState(args, blocked || Boolean(evidenceWrite && evidenceWrite.ok === false), pendingProvider);
   return {
     ...summary,
-    ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false && (!provider || provider.ok !== false),
+    ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false && (!evidenceWrite || evidenceWrite.ok !== false) && !executionFailed,
+    phase_state: phaseState,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     preflight,
     gate,
     provider,
+    provider_actions: providerActions,
+    git_actions: gitActions,
+    git_results: gitResults,
+    git_action_state: canExecuteGit ? "executed" : (evidenceSupplied ? "skipped_provider_evidence_continuation" : "pending_execute"),
+    provider_evidence_write: evidenceWrite,
+    continuation_token: continuationToken("land", trackId, [...providerActions, ...gitActions]),
     required_provider_mcp: provider && provider.ok === false ? provider.required_provider_mcp || null : null,
     required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
     unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
@@ -2448,12 +2994,79 @@ function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResult {
   const completed = listTracks(root)
     .filter((track) => (track.metadata.status || "new") === "completed")
     .map((track) => metadataTrackSummary(track));
+  const version = args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`;
+  const releaseDir = path.join(root, "cadre", "releases");
+  const releaseSlug = safeName(version);
+  const releaseMd = path.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = path.join(releaseDir, `${releaseSlug}.json`);
+  const notes = asOptionalString(args.releaseNotes || args.release_notes)
+    || [
+      `# Release ${version}`,
+      "",
+      `Generated: ${utcNow()}`,
+      "",
+      "## Completed Tracks",
+      "",
+      ...completed.map((track) => `- ${track.track_id}: ${track.name}`),
+      "",
+    ].join("\n");
+  const rawArgs = args as UnknownRecord;
+  const gitActions = rawArgs.createTag === true || rawArgs.create_tag === true || rawArgs.tag === true
+    ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", String(version), "-m", `Cadre release ${version}`], `Create release tag ${version}`)]
+    : [];
+  if (args.execute !== true) {
+    return {
+      ...summary,
+      ok: true,
+      phase_state: "dry_run",
+      dry_run: true,
+      release_version: version,
+      completed_tracks: completed,
+      release_artifacts: [path.relative(root, releaseMd), path.relative(root, releaseJson)],
+      git_actions: gitActions,
+    };
+  }
+  fs.mkdirSync(releaseDir, { recursive: true });
+  fs.writeFileSync(releaseMd, notes.endsWith("\n") ? notes : `${notes}\n`);
+  writeJson(releaseJson, {
+    version: String(version),
+    generated_at: utcNow(),
+    completed_tracks: completed.map((track) => ({
+      track_id: track.track_id,
+      name: track.name,
+      status: track.status,
+      priority: track.priority,
+      owner: track.owner,
+      reviewer: track.reviewer,
+      beads_epic: track.beads_epic,
+      review: track.review,
+    })),
+  });
+  const indexPatch = patchJsonFile(path.join(root, "cadre", "setup_state.json"), (current) => {
+    current.last_release = {
+      version: String(version),
+      path: path.relative(root, releaseMd),
+      metadata: path.relative(root, releaseJson),
+      completed_tracks: completed.length,
+      released_at: utcNow(),
+    };
+    current.updated_at = utcNow();
+    return current;
+  }, { lock: false });
+  const gitResults = runPlannedGitActions(gitActions);
+  const gitOk = actionResultsOk(gitResults);
   return {
     ...summary,
-    ok: true,
+    ok: indexPatch.ok !== false && gitOk,
+    phase_state: gitOk ? "executed" : "recovery_required",
     dry_run: args.execute !== true,
     bump: args.bump || args.mode || "patch",
+    release_version: version,
     completed_tracks: completed,
+    release_artifacts: [path.relative(root, releaseMd), path.relative(root, releaseJson)],
+    setup_state: indexPatch,
+    git_actions: gitActions,
+    git_results: gitResults,
   };
 }
 
@@ -2469,8 +3082,123 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function revertGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
+  const plan = parsePlanFile(track.plan_path);
+  const requestedCommit = asOptionalString(args.commitSha || args.commit);
+  const commits = requestedCommit
+    ? [requestedCommit]
+    : Array.from(new Set(plan.tasks.flatMap((task) => asStringArray(task.commit_shas || []).concat(task.commit ? [task.commit] : [])))).filter(Boolean);
+  const topology = loadTopology(root);
+  return commits.reverse().map((commit, index) => {
+    const repo = asOptionalString(args.repo) || (topology.polyrepo ? topology.defaultRepo : ".");
+    const entry = repoEntriesForTrack(root, track, { ...args, repo }).find((item) => item.repo === repo);
+    return plannedGitAction(
+      `revert-${index + 1}`,
+      "revert_commit",
+      repo,
+      entry ? asString(entry.root, root) : root,
+      ["revert", "--no-edit", commit],
+      `Revert ${commit} in ${repo}`
+    );
+  });
+}
+
+function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "revert", args);
+  if (!trackId) return { ...summary, ok: false, phase_state: "blocked", error: "trackId is required" };
+  const track = findTrack(root, trackId);
+  if (!track) return { ...summary, ok: false, phase_state: "blocked", error: `Track not found: ${trackId}` };
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return { ...summary, ok: false, phase_state: "blocked", stage: "polyrepo_repo_resolution", repo_error: repoError };
+  const gitActions = revertGitActions(root, track, args);
+  if (gitActions.length === 0) {
+    return {
+      ...summary,
+      ok: false,
+      phase_state: "blocked",
+      track_context: trackContext(root, trackId),
+      reason: "No commit evidence found to revert; pass commitSha or record task commits first",
+      git_actions: gitActions,
+    };
+  }
+  const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
+  const gitOk = actionResultsOk(gitResults);
+  const statusResult = args.execute === true && gitOk
+    ? metadataPatch(root, {
+      trackId,
+      patch: {
+        status: "in_progress",
+        last_revert: {
+          reverted_at: utcNow(),
+          commits: gitActions.map((action) => action.args[action.args.length - 1]).filter((commit): commit is string => typeof commit === "string"),
+          reason: args.reason || null,
+        },
+      },
+    })
+    : null;
+  return {
+    ...summary,
+    ok: args.execute === true ? gitOk && (!statusResult || statusResult.ok !== false) : true,
+    phase_state: args.execute !== true ? "dry_run" : (gitOk ? "executed" : "recovery_required"),
+    dry_run: args.execute !== true,
+    track_context: trackContext(root, trackId),
+    git_actions: gitActions,
+    git_results: gitResults,
+    metadata_patch: statusResult,
+  };
+}
+
+function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "refresh", args);
+  const rawArgs = args as UnknownRecord;
+  const lspRequested = args.execute === true && (rawArgs.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true);
+  const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
+  const regen = args.execute === true ? regenIndex(root) : null;
+  const patternsPath = path.join(root, "cadre", "patterns.md");
+  let patterns: CoreResult | null = null;
+  if (args.execute === true && fileExists(patternsPath)) {
+    const text = fs.readFileSync(patternsPath, "utf8");
+    const stamp = `Last refreshed: ${utcNow().slice(0, 10)}`;
+    const next = /Last refreshed:\s*.*/.test(text)
+      ? text.replace(/Last refreshed:\s*.*/, stamp)
+      : `${text.replace(/\n*$/, "\n\n")}${stamp}\n`;
+    fs.writeFileSync(patternsPath, next);
+    patterns = { ok: true, path: path.relative(root, patternsPath), refreshed_at: stamp };
+  }
+  return {
+    ...summary,
+    ok: (!regen || regen.ok !== false) && lsp.ok !== false,
+    phase_state: args.execute === true ? "executed" : "dry_run",
+    doctor: doctor(root, { hasCadreProject: true }),
+    workspace: workspaceDiagnostics(root, { execute: false }),
+    dependency_graph: dependencyGraph(root),
+    lsp: lspConfigStatus(root),
+    lsp_setup: lsp,
+    regen,
+    patterns,
+  };
+}
+
 function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
+  const mutating = args.execute === true && [
+    "newtrack",
+    "new_track",
+    "handoff",
+    "release",
+    "revise",
+    "refresh",
+    "flag",
+    "revert",
+  ].includes(workflow);
+  if (mutating && (args as UnknownRecord).skipSync !== true) {
+    const result = withSharedControlPlaneSync(root, args, `workflow:${workflow}`, () =>
+      workflowPacket(root, { ...args, skipSync: true })
+    );
+    return shapeWorkflowResponse(root, workflow, args, result);
+  }
+  const result = (() => {
   switch (workflow) {
     case "setup":
     case "setup_assist":
@@ -2500,14 +3228,7 @@ function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
     case "revise":
       return workflowRevise(root, args);
     case "refresh":
-      return {
-        ...workflowSummary(root, "refresh", args),
-        ok: true,
-        doctor: doctor(root, { hasCadreProject: true }),
-        workspace: workspaceDiagnostics(root, { execute: false }),
-        dependency_graph: dependencyGraph(root),
-        lsp: lspConfigStatus(root),
-      };
+      return workflowRefresh(root, args);
     case "flag":
       {
         const trackId = selectedTrackId(root, args);
@@ -2556,11 +3277,7 @@ function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
         };
       }
     case "revert":
-      return {
-        ...workflowSummary(root, "revert", args),
-        ok: true,
-        track_context: selectedTrackId(root, args) ? trackContext(root, selectedTrackId(root, args)) : null,
-      };
+      return workflowRevert(root, args);
     case "formula":
       return {
         ...workflowSummary(root, "formula", args),
@@ -2574,6 +3291,8 @@ function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
         error: `Unknown Cadre workflow packet: ${workflow}`,
       };
   }
+  })();
+  return shapeWorkflowResponse(root, workflow, args, result);
 }
 
 function findTrack(root: string, trackId: string | null | undefined): CadreTrack | null {
@@ -3778,6 +4497,10 @@ function patchCompletionJournal(
 }
 
 function completeTask(root: string, args: RuntimeArgs = {}): CoreResult {
+  return withSharedControlPlaneSync(root, args, "complete_task", () => completeTaskInner(root, { ...args, skipSync: true }));
+}
+
+function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreResult {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
   const phaseIndex = Number(args.phaseIndex);
@@ -4022,6 +4745,10 @@ function completeTask(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 function recordParallelWorker(root: string, args: RuntimeArgs = {}): CoreResult {
+  return withSharedControlPlaneSync(root, args, "record_parallel_worker", () => recordParallelWorkerInner(root, args));
+}
+
+function recordParallelWorkerInner(root: string, args: RuntimeArgs = {}): CoreResult {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
   return withTrackLock(root, track.track_id, () => recordParallelWorkerUnlocked(root, track, args));
@@ -4033,6 +4760,9 @@ function recordParallelWorkerUnlocked(root: string, track: CadreTrack, args: Run
   const status = args.status || "awaiting_merge";
   const valid = new Set(["in_progress", "awaiting_merge", "merged", "conflict", "failed"]);
   if (!valid.has(status)) return { ok: false, error: `Invalid parallel worker status: ${status}` };
+  if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
+    return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };
+  }
 
   const statePath = path.join(track.dir, "parallel_state.json");
   const existing = readJson<unknown>(statePath, {
@@ -4147,18 +4877,68 @@ function parallelWorkersForWave(root: string, track: CadreTrack, args: RuntimeAr
   const readyGroups = Array.isArray(schedule.ready_groups) ? schedule.ready_groups : [];
   const groupIndex = Number(args.groupIndex || 0);
   const phaseIds = asStringArray(readyGroups[groupIndex]);
-  const phases = asArray(schedule.phases);
+  const plan = parsePlanFile(track.plan_path);
+  const state = readParallelState(track);
+  const activeWorkers = state.workers.filter((worker) =>
+    ["in_progress", "awaiting_merge", "merged"].includes(worker.status)
+  );
+  const activeTaskKeys = new Set(activeWorkers.map((worker) => asOptionalString(worker.task_key)).filter(Boolean));
+  const completeTaskKeys = new Set(
+    plan.tasks
+      .filter((task) => ["x", "-"].includes(task.marker))
+      .map((task) => task.task_key)
+      .concat(activeWorkers
+        .filter((worker) => ["awaiting_merge", "merged"].includes(worker.status))
+        .map((worker) => asString(worker.task_key))
+        .filter(Boolean))
+  );
+  const activeClaims = activeWorkers.flatMap((worker) => {
+    const phase = plan.phases.find((item) => item.phase_index === worker.phase_index);
+    const task = phase?.tasks.find((item) => item.task_index === worker.task_index || item.task_key === worker.task_key);
+    return (task?.files || []).map((file) => ({
+      repo: asOptionalString(worker.repo) || task?.repo || ".",
+      file: normalizeClaimPath(file),
+      worker_id: worker.worker_id,
+      task_key: worker.task_key,
+    }));
+  });
+  const normalizeTaskDependency = (phase: PlanPhase, dep: string): string => {
+    const taskMatch = dep.match(/^task(\d+)$/i);
+    if (taskMatch?.[1]) return `phase${phase.phase_index}_task${taskMatch[1]}`;
+    const phaseTaskMatch = dep.match(/^phase(\d+)_task(\d+)$/i);
+    if (phaseTaskMatch?.[1] && phaseTaskMatch[2]) return `phase${phaseTaskMatch[1]}_task${phaseTaskMatch[2]}`;
+    return dep;
+  };
+  const taskIsReady = (phase: PlanPhase, task: PlanTask): boolean => {
+    if (["x", "-", "!", "~"].includes(task.marker)) return false;
+    if (activeTaskKeys.has(task.task_key)) return false;
+    const dependencies = (task.depends || []).map((dep) => normalizeTaskDependency(phase, dep));
+    if (dependencies.some((dep) => !completeTaskKeys.has(dep))) return false;
+    const taskClaims = (task.files || []).map((file) => ({
+      repo: task.repo || loadTopology(root).defaultRepo || ".",
+      file: normalizeClaimPath(file),
+    }));
+    return taskClaims.every((claim) =>
+      activeClaims.every((active) => claim.repo !== active.repo || !claimsOverlap(claim.file, active.file))
+    );
+  };
+  const readyTasksForPhase = (phase: PlanPhase): PlanTask[] => {
+    const execution = asString(phase.annotations.execution, "sequential");
+    if (execution === "parallel") return phase.tasks.filter((task) => taskIsReady(phase, task));
+    const firstOpen = phase.tasks.find((task) => !["x", "-"].includes(task.marker));
+    return firstOpen && taskIsReady(phase, firstOpen) ? [firstOpen] : [];
+  };
+  const phases = plan.phases.filter((phase) => phaseIds.includes(`phase${phase.phase_index}`));
   const workers = phases
-    .filter((phase) => phaseIds.includes(asString(phase.phase_id)))
-    .flatMap((phase) => asArray(phase.tasks).map((task) => ({
+    .flatMap((phase) => readyTasksForPhase(phase).map((task) => ({
       worker_id: `${track.track_id}_${asString(task.task_key)}`,
-      phase_id: asString(phase.phase_id),
-      phase_index: asNumber(phase.phase_index),
-      task_index: asNumber(task.task_index),
+      phase_id: `phase${phase.phase_index}`,
+      phase_index: phase.phase_index,
+      task_index: task.task_index,
       task_key: asString(task.task_key),
       title: asString(task.title),
       marker: asString(task.marker),
-      repo: asString(task.repo, "."),
+      repo: asString(task.repo, loadTopology(root).defaultRepo || "."),
       files: asStringArray(task.files),
       branch: `${track.metadata.git_branch || `track/${track.track_id}`}-${safeName(task.task_key)}`,
     })))
@@ -4167,6 +4947,7 @@ function parallelWorkersForWave(root: string, track: CadreTrack, args: RuntimeAr
     ok: true,
     track_id: track.track_id,
     schedule,
+    state,
     group_index: groupIndex,
     phase_ids: phaseIds,
     workers,
@@ -4187,7 +4968,8 @@ function parallelSetupWorkers(root: string, track: CadreTrack, args: RuntimeArgs
   const topology = loadTopology(root);
   const entries = new Map(repoEntriesForTrack(root, track, args).map((entry) => [entry.repo, entry]));
   const commands: CoreResult[] = [];
-  for (const worker of asArray(wave.workers)) {
+  const workers: JsonObject[] = asArray(wave.workers).map((rawWorker): JsonObject => {
+    const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
     const worktree = path.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
@@ -4196,59 +4978,136 @@ function parallelSetupWorkers(root: string, track: CadreTrack, args: RuntimeArgs
       ["worktree", "add", "-B", asString(worker.branch), worktree, asString(entry.base || args.base || "main")],
       asString(entry.root || root)
     ));
-  }
+    return {
+      ...worker,
+      worktree,
+      source_root: asString(entry.root || root),
+    };
+  });
   const execute = args.execute === true;
+  const results = execute ? runPlannedCommands(commands) : [];
+  const stateRecords: CoreResult[] = [];
+  if (execute) {
+    workers.forEach((worker, index) => {
+      const commandResult = results[index];
+      if (commandResult && commandResult.ok) {
+        stateRecords.push(recordParallelWorker(root, {
+          ...args,
+          skipSync: true,
+          trackId: track.track_id,
+          workerId: asString(worker.worker_id),
+          status: "in_progress",
+          phaseIndex: asNumber(worker.phase_index),
+          taskIndex: asNumber(worker.task_index),
+          repo: asString(worker.repo, "."),
+          worktree: asString(worker.worktree),
+          branch: asString(worker.branch),
+        }));
+      }
+    });
+  }
   return {
-    ok: true,
+    ok: results.every((result) => result.ok) && stateRecords.every((record) => record.ok !== false),
     track_id: track.track_id,
     action: "setup_workers",
     execute,
     dry_run: !execute,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
-    workers: wave.workers,
+    workers,
     commands,
-    results: execute ? runPlannedCommands(commands) : [],
+    results,
+    state_records: stateRecords,
   };
+}
+
+function workerRepoRoot(root: string, track: CadreTrack, worker: ParallelWorker, args: RuntimeArgs = {}): string {
+  const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
+  const entry = repoEntriesForTrack(root, track, { ...args, repo }).find((item) => item.repo === repo);
+  return asString(entry?.root, root);
 }
 
 function parallelMergeBack(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const state = readParallelState(track);
-  const workers = state.workers.filter((worker) => !args.workerId || worker.worker_id === args.workerId);
+  const force = args.force === true;
+  const workers = state.workers
+    .filter((worker) => !args.workerId || worker.worker_id === args.workerId)
+    .filter((worker) => force || worker.status === "awaiting_merge");
+  const skipped = state.workers
+    .filter((worker) => !args.workerId || worker.worker_id === args.workerId)
+    .filter((worker) => !workers.includes(worker))
+    .map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not awaiting_merge" }));
   const commands = workers
     .filter((worker) => worker.branch || worker.commit_sha)
-    .map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.branch)], root));
+    .map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.branch)], workerRepoRoot(root, track, worker, args)));
   const execute = args.execute === true;
+  const results = execute ? runPlannedCommands(commands) : [];
+  const stateRecords: CoreResult[] = [];
+  if (execute) {
+    workers.forEach((worker, index) => {
+      const result = results[index];
+      if (result && result.ok) {
+        const recordArgs: RuntimeArgs = {
+          ...args,
+          skipSync: true,
+          trackId: track.track_id,
+          workerId: worker.worker_id,
+          status: "merged",
+        };
+        if (worker.phase_index != null) recordArgs.phaseIndex = worker.phase_index;
+        if (worker.task_index != null) recordArgs.taskIndex = worker.task_index;
+        if (worker.repo) recordArgs.repo = worker.repo;
+        if (worker.worktree) recordArgs.worktree = worker.worktree;
+        if (worker.branch) recordArgs.branch = worker.branch;
+        if (worker.commit_sha) recordArgs.commitSha = worker.commit_sha;
+        stateRecords.push(recordParallelWorker(root, recordArgs));
+      }
+    });
+  }
   return {
-    ok: true,
+    ok: results.every((result) => result.ok) && stateRecords.every((record) => record.ok !== false),
     track_id: track.track_id,
     action: "merge_back",
     execute,
     dry_run: !execute,
     workers,
+    skipped,
     commands,
-    results: execute ? runPlannedCommands(commands) : [],
+    results,
+    state_records: stateRecords,
   };
 }
 
 function parallelCleanup(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const state = readParallelState(track);
-  const workers = state.workers.filter((worker) => worker.worktree);
-  const commands = workers.map((worker) => plannedCommand("git", ["worktree", "remove", asString(worker.worktree)], root));
+  const force = args.force === true;
+  const workers = state.workers.filter((worker) => worker.worktree && (force || worker.status === "merged"));
+  const skipped = state.workers
+    .filter((worker) => worker.worktree && !workers.includes(worker))
+    .map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not merged" }));
+  const commands = workers.map((worker) => plannedCommand("git", ["worktree", "remove", asString(worker.worktree)], workerRepoRoot(root, track, worker, args)));
   const execute = args.execute === true;
+  const results = execute ? runPlannedCommands(commands) : [];
   return {
-    ok: true,
+    ok: results.every((result) => result.ok),
     track_id: track.track_id,
     action: "cleanup",
     execute,
     dry_run: !execute,
     workers,
+    skipped,
     commands,
-    results: execute ? runPlannedCommands(commands) : [],
+    results,
   };
 }
 
 function parallelWorkflow(root: string, args: RuntimeArgs = {}): CoreResult {
   const action = args.action || "plan";
+  const mutating = ["setup_workers", "record_finish", "merge_back", "cleanup"].includes(action);
+  if (mutating && args.execute === true && (args as UnknownRecord).skipSync !== true) {
+    return withSharedControlPlaneSync(root, args, `parallel:${action}`, () =>
+      parallelWorkflow(root, { ...args, skipSync: true })
+    );
+  }
   const track = findTrack(root, args.trackId || args.track_id);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
   const repoError = repoEntriesError(root, track, args);
@@ -4869,7 +5728,55 @@ function gitTrackedFiles(root: string): string[] {
     .filter((file) => !isIgnoredRepoMapFile(file));
 }
 
+function selectedRepoNames(args: RuntimeArgs = {}): Set<string> | null {
+  const values = [
+    asOptionalString(args.repo),
+    ...asStringArray((args as UnknownRecord).repos),
+  ].filter((value): value is string => Boolean(value));
+  return values.length > 0 ? new Set(values) : null;
+}
+
+function intelRepoRoots(root: string, args: RuntimeArgs = {}): RepoExecutionEntry[] {
+  const selected = selectedRepoNames(args);
+  const topology = loadTopology(root);
+  const control: RepoExecutionEntry = {
+    repo: ".",
+    root,
+    path: ".",
+    source: "control-root",
+  };
+  if (!topology.polyrepo) return selected && !selected.has(".") ? [] : [control];
+  const entries: RepoExecutionEntry[] = [control];
+  for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
+    const repo = asJsonObject(raw);
+    if (repo.enabled === false) continue;
+    const name = asOptionalString(repo.name);
+    const rel = asOptionalString(repo.submodule_path);
+    if (!name || !rel) continue;
+    entries.push({
+      repo: name,
+      root: path.resolve(root, rel),
+      path: rel,
+      source: "repos.json",
+    });
+  }
+  return selected ? entries.filter((entry) => selected.has(entry.repo)) : entries;
+}
+
+function combineLanguageCounts(entries: CoreResult[]): JsonObject {
+  const counts: Record<string, number> = {};
+  for (const entry of entries) {
+    const languages = asJsonObject(entry.by_language);
+    for (const [language, count] of Object.entries(languages)) {
+      counts[language] = (counts[language] || 0) + Number(count || 0);
+    }
+  }
+  return Object.fromEntries(Object.entries(counts).sort());
+}
+
 function languageForFile(file: string): string | null {
+  const base = path.basename(file);
+  if (base === "Dockerfile" || base === "Containerfile") return "dockerfile";
   return {
     ".js": "javascript",
     ".jsx": "javascript",
@@ -4883,6 +5790,56 @@ function languageForFile(file: string): string | null {
     ".swift": "swift",
     ".rb": "ruby",
     ".php": "php",
+    ".dart": "dart",
+    ".html": "html",
+    ".htm": "html",
+    ".css": "css",
+    ".scss": "css",
+    ".sass": "css",
+    ".less": "css",
+    ".json": "json",
+    ".jsonc": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".md": "markdown",
+    ".mdx": "markdown",
+    ".toml": "toml",
+    ".lua": "lua",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".zsh": "shell",
+    ".tf": "terraform",
+    ".tfvars": "terraform",
+    ".hcl": "terraform",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".clj": "clojure",
+    ".cljs": "clojure",
+    ".cljc": "clojure",
+    ".hs": "haskell",
+    ".lhs": "haskell",
+    ".ml": "ocaml",
+    ".mli": "ocaml",
+    ".zig": "zig",
+    ".nix": "nix",
+    ".elm": "elm",
+    ".vue": "vue",
+    ".svelte": "svelte",
+    ".xml": "xml",
+    ".xsd": "xml",
+    ".graphql": "graphql",
+    ".gql": "graphql",
+    ".prisma": "prisma",
+    ".proto": "protobuf",
+    ".c": "c-cpp",
+    ".h": "c-cpp",
+    ".cc": "c-cpp",
+    ".cpp": "c-cpp",
+    ".cxx": "c-cpp",
+    ".hpp": "c-cpp",
+    ".cs": "csharp",
   }[path.extname(file)] || null;
 }
 
@@ -4923,34 +5880,57 @@ function extractRepoSymbols(root: string, file: string, limitPerFile = 40): Repo
 function repoMap(root: string, args: RuntimeArgs = {}): CoreResult {
   const limit = Number(args.limit || 200);
   const symbol = args.symbol ? String(args.symbol) : null;
+  const repos = intelRepoRoots(root, args);
   if (symbol) {
-    const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-    const matches = result.stdout
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || ""))
-      .slice(0, limit)
-      .map((line) => {
-        const [file, lineNo, ...rest] = line.split(":");
-        return { file: file || "", line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
-      });
-    return { ok: result.ok || matches.length > 0, root, symbol, matches, truncated: matches.length >= limit };
+    const repoResults = repos.map((entry) => {
+      const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: entry.root, maxBuffer: 10 * 1024 * 1024 });
+      const matches = result.stdout
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || ""))
+        .slice(0, limit)
+        .map((line) => {
+          const [file, lineNo, ...rest] = line.split(":");
+          return { repo: entry.repo, file: file || "", line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
+        });
+      return { repo: entry.repo, root: entry.root, path: entry.path, ok: result.ok || matches.length > 0, matches, truncated: matches.length >= limit };
+    });
+    const matches = repoResults.flatMap((entry) => asArray(entry.matches)).slice(0, limit);
+    return { ok: repoResults.some((entry) => entry.ok) || matches.length > 0, root, symbol, matches, repos: repoResults, truncated: matches.length >= limit };
   }
-  const files = gitTrackedFiles(root);
-  const byLanguage: Record<string, number> = {};
-  const symbols: RepoSymbol[] = [];
-  for (const file of files) {
-    const language = languageForFile(file);
-    if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
-    if (symbols.length < limit) symbols.push(...extractRepoSymbols(root, file, 12));
-    if (symbols.length > limit) symbols.length = limit;
-  }
+  const repoResults = repos.map((entry) => {
+    const files = gitTrackedFiles(entry.root);
+    const byLanguage: Record<string, number> = {};
+    const symbols: RepoSymbol[] = [];
+    for (const file of files) {
+      const language = languageForFile(file);
+      if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
+      if (symbols.length < limit) symbols.push(...extractRepoSymbols(entry.root, file, 12).map((symbolEntry) => ({
+        ...symbolEntry,
+        repo: entry.repo,
+      })));
+      if (symbols.length > limit) symbols.length = limit;
+    }
+    return {
+      ok: true,
+      repo: entry.repo,
+      root: entry.root,
+      path: entry.path,
+      files: files.length,
+      by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
+      symbols,
+      truncated: symbols.length >= limit,
+    };
+  });
+  const files = repoResults.reduce((sum, entry) => sum + Number(entry.files || 0), 0);
+  const symbols = repoResults.flatMap((entry) => asArray(entry.symbols)).slice(0, limit);
   return {
     ok: true,
     root,
-    files: files.length,
-    by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
+    files,
+    by_language: combineLanguageCounts(repoResults),
     symbols,
+    repos: repoResults,
     truncated: symbols.length >= limit,
   };
 }
@@ -4965,10 +5945,24 @@ function lspImpact(root: string, args: RuntimeArgs = {}): CoreResult {
   for (const symbol of symbols.filter(Boolean)) {
     symbolResults[symbol] = repoMap(root, { symbol, limit });
   }
+  const repoEntries = intelRepoRoots(root, args);
+  const repoFileSymbols = repoEntries.map((entry) => {
+    const fileSymbols: Record<string, RepoSymbol[]> = {};
+    for (const file of files) {
+      if (isIgnoredRepoMapFile(file)) continue;
+      fileSymbols[file] = extractRepoSymbols(entry.root, file, limit).map((symbolEntry) => ({
+        ...symbolEntry,
+        repo: entry.repo,
+      }));
+    }
+    return { repo: entry.repo, root: entry.root, path: entry.path, files: fileSymbols };
+  });
   const fileSymbols: Record<string, RepoSymbol[]> = {};
-  for (const file of files) {
-    if (isIgnoredRepoMapFile(file)) continue;
-    fileSymbols[file] = extractRepoSymbols(root, file, limit);
+  for (const entry of repoFileSymbols) {
+    for (const [file, symbolsForFile] of Object.entries(asJsonObject(entry.files))) {
+      const key = entry.repo === "." ? file : `${entry.repo}:${file}`;
+      fileSymbols[key] = asArray(symbolsForFile) as RepoSymbol[];
+    }
   }
   const review = args.lspResult || args.lsp_result
     ? (args.lspResult || args.lsp_result)
@@ -4980,6 +5974,7 @@ function lspImpact(root: string, args: RuntimeArgs = {}): CoreResult {
     root,
     symbols: symbolResults,
     files: fileSymbols,
+    repos: repoFileSymbols,
     review,
   };
 }
@@ -5042,10 +6037,28 @@ function detectWorkspaceAdapters(root: string): CoreResult[] {
 }
 
 function workspaceDiagnostics(root: string, args: RuntimeArgs = {}): CoreResult {
-  const adapters = detectWorkspaceAdapters(root);
-  const commands = adapters.flatMap((adapter) =>
-    asStringArray(adapter.commands).map((command) => shellCommandPlan(command, root, asString(adapter.id)))
-  );
+  const repoEntries = intelRepoRoots(root, args);
+  const repoDiagnostics = repoEntries.map((entry) => {
+    const adapters: JsonObject[] = detectWorkspaceAdapters(entry.root).map((rawAdapter): JsonObject => {
+      const adapter = asJsonObject(rawAdapter);
+      return {
+      ...adapter,
+      repo: entry.repo,
+      cwd: entry.root,
+      path: entry.path,
+      };
+    });
+    const commands = adapters.flatMap((adapter) =>
+      asStringArray(adapter.commands).map((command) => ({
+        ...shellCommandPlan(command, entry.root, asString(adapter.id)),
+        repo: entry.repo,
+        path: entry.path,
+      }))
+    );
+    return { repo: entry.repo, root: entry.root, path: entry.path, adapters, commands };
+  });
+  const adapters = repoDiagnostics.flatMap((entry) => asArray(entry.adapters));
+  const commands = repoDiagnostics.flatMap((entry) => asArray(entry.commands));
   const execute = args.execute === true;
   return {
     ok: true,
@@ -5054,6 +6067,7 @@ function workspaceDiagnostics(root: string, args: RuntimeArgs = {}): CoreResult 
     dry_run: !execute,
     adapters,
     commands,
+    repos: repoDiagnostics,
     results: execute ? commands.map((entry) => runCommand(asString(entry.command), [], {
       cwd: asString(entry.cwd, root),
       shell: true,
@@ -5072,32 +6086,47 @@ function impactedFiles(root: string, args: RuntimeArgs = {}): string[] {
 }
 
 function testImpact(root: string, args: RuntimeArgs = {}): CoreResult {
-  const files = impactedFiles(root, args);
-  const likelyTests = Object.fromEntries(files.map((file) => [file, likelyTestCandidatesForFile(root, file)]));
-  const manifests = new Set<string>();
-  for (const file of files) {
-    let dir = path.dirname(path.join(root, file));
-    while (dir.startsWith(root)) {
-      for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
-        const candidate = path.join(dir, manifest);
-        if (fileExists(candidate)) manifests.add(normalizeClaimPath(path.relative(root, candidate)));
+  const repoEntries = intelRepoRoots(root, args);
+  const repoImpacts = repoEntries.map((entry) => {
+    const files = impactedFiles(entry.root, args);
+    const likelyTests = Object.fromEntries(files.map((file) => [file, likelyTestCandidatesForFile(entry.root, file)]));
+    const manifests = new Set<string>();
+    for (const file of files) {
+      let dir = path.dirname(path.join(entry.root, file));
+      while (dir.startsWith(entry.root)) {
+        for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
+          const candidate = path.join(dir, manifest);
+          if (fileExists(candidate)) manifests.add(normalizeClaimPath(path.relative(entry.root, candidate)));
+        }
+        if (dir === entry.root) break;
+        dir = path.dirname(dir);
       }
-      if (dir === root) break;
-      dir = path.dirname(dir);
     }
-  }
+    return {
+      repo: entry.repo,
+      root: entry.root,
+      path: entry.path,
+      files,
+      likely_tests: likelyTests,
+      manifests: Array.from(manifests).sort(),
+      adapters: detectWorkspaceAdapters(entry.root),
+    };
+  });
+  const primary = repoImpacts[0] || { files: [], likely_tests: {}, manifests: [], adapters: [] };
+  const files = asStringArray(primary.files);
   return {
     ok: true,
     root,
     files,
-    likely_tests: likelyTests,
-    manifests: Array.from(manifests).sort(),
-    adapters: detectWorkspaceAdapters(root),
+    likely_tests: asJsonObject(primary.likely_tests),
+    manifests: asStringArray(primary.manifests),
+    adapters: asArray(primary.adapters),
+    repos: repoImpacts,
   };
 }
 
-function dependencyGraph(root: string): CoreResult {
-  const files = gitTrackedFiles(root);
+function dependencyGraph(root: string, args: RuntimeArgs = {}): CoreResult {
+  const repoEntries = intelRepoRoots(root, args);
   const manifestPatterns = new Set([
     "package.json",
     "pyproject.toml",
@@ -5111,19 +6140,34 @@ function dependencyGraph(root: string): CoreResult {
     "WORKSPACE.bazel",
     "nx.json",
   ]);
-  const manifests = files
-    .filter((file) => manifestPatterns.has(path.basename(file)))
-    .map((file) => ({ file, dir: normalizeClaimPath(path.dirname(file)), kind: path.basename(file) }));
+  const repoGraphs = repoEntries.map((entry) => {
+    const files = gitTrackedFiles(entry.root);
+    const manifests = files
+      .filter((file) => manifestPatterns.has(path.basename(file)))
+      .map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(path.dirname(file)), kind: path.basename(file) }));
+    return {
+      repo: entry.repo,
+      root: entry.root,
+      path: entry.path,
+      manifests,
+      adapters: detectWorkspaceAdapters(entry.root),
+      edges: manifests.map((manifest) => ({
+        repo: entry.repo,
+        from: manifest.file,
+        to: manifest.dir || ".",
+        kind: "workspace_manifest",
+      })),
+    };
+  });
+  const manifests = repoGraphs.flatMap((entry) => asArray(entry.manifests));
+  const edges = repoGraphs.flatMap((entry) => asArray(entry.edges));
   return {
     ok: true,
     root,
     manifests,
-    adapters: detectWorkspaceAdapters(root),
-    edges: manifests.map((manifest) => ({
-      from: manifest.file,
-      to: ".",
-      kind: "workspace_manifest",
-    })),
+    adapters: repoGraphs.flatMap((entry) => asArray(entry.adapters)),
+    edges,
+    repos: repoGraphs,
   };
 }
 
@@ -5354,13 +6398,11 @@ function beadsTaskWrite(root: string, args: RuntimeArgs = {}): CoreResult {
 
 function lspReview(root: string, args: RuntimeArgs = {}): CoreResult {
   const candidates = [
-    path.join(root, "templates", "scripts", "cadre-lsp-review.js"),
     path.join(__dirname, "cadre-lsp-review.js"),
     path.join(__dirname, "..", "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "templates", "scripts", "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "..", "templates", "scripts", "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "skills", "cadre", "templates", "scripts", "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "..", "skills", "cadre", "templates", "scripts", "cadre-lsp-review.js"),
+    path.join(__dirname, "..", "scripts", "cadre-lsp-review.js"),
+    path.join(__dirname, "..", "..", "scripts", "cadre-lsp-review.js"),
+    path.join(root, "cadre", "scripts", "cadre-lsp-review.js"),
   ];
   const helper = candidates.find(fileExists);
   if (!helper) return { available: false, reason: "No cadre-lsp-review.js helper found", checked: candidates };
@@ -5473,8 +6515,10 @@ export {
   listTracks,
   liveStatus,
   loadTopology,
+  lspConfigStatus,
   lspImpact,
   lspReview,
+  lspSetup,
   metadataPatch,
   parallelWorkflow,
   parsePlanFile,

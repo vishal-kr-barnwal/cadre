@@ -47,6 +47,7 @@ interface Recommendation extends LanguageRule {
 
 interface LspConfig extends JsonObject {
   servers?: JsonObject[];
+  workspaceFolders?: JsonObject[];
 }
 
 const DEFAULT_IGNORES = new Set([
@@ -319,11 +320,30 @@ function serverKey(server: JsonObject): string {
   return id || command;
 }
 
-function mergeConfig(config: LspConfig, recommendations: Recommendation[]): { config: LspConfig; added: string[] } {
+function workspaceFolders(root: string): JsonObject[] {
+  const folders: JsonObject[] = [{ name: ".", path: "." }];
+  const reposPath = path.join(root, "cadre", "repos.json");
+  let repos: JsonObject = {};
+  try {
+    repos = asJsonObject(JSON.parse(fs.readFileSync(reposPath, "utf8")));
+  } catch {
+    return folders;
+  }
+  if (repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return folders;
+  for (const raw of repos.repos) {
+    const repo = asJsonObject(raw);
+    if (repo.enabled === false || typeof repo.name !== "string" || typeof repo.submodule_path !== "string") continue;
+    folders.push({ name: repo.name, path: repo.submodule_path });
+  }
+  return folders;
+}
+
+function mergeConfig(config: LspConfig, recommendations: Recommendation[], root: string): { config: LspConfig; added: string[] } {
   const servers = Array.isArray(config.servers) ? [...config.servers] : [];
   const next: LspConfig = {
     ...config,
     servers,
+    workspaceFolders: workspaceFolders(root),
   };
   const existing = new Set(servers.map(serverKey).filter(Boolean));
   const added: string[] = [];
@@ -356,7 +376,7 @@ function runCli(): void {
   let added: string[] = [];
 
   if (args.write) {
-    const merged = mergeConfig(config, recommendations);
+    const merged = mergeConfig(config, recommendations, args.root);
     saveConfig(args.configPath, merged.config);
     written = true;
     added = merged.added;
@@ -373,6 +393,7 @@ function runCli(): void {
       availability: rec.availability,
       install: rec.install,
     })),
+    workspaceFolders: workspaceFolders(args.root),
     written,
     added,
   };

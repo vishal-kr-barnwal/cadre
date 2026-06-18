@@ -12,8 +12,8 @@
 # Edit the source skill in `skills/cadre/SKILL.md`, protocol sources in
 # `skills/cadre/protocols/cadre-*.md`, reference slice masters in
 # `scripts/agent-refs/`, templates in `templates/`, and runtime TypeScript in
-# `src/`. Runtime JavaScript under `scripts/` and `templates/scripts/` is built
-# from `src/` by `pnpm build`. Generated files carry an AUTO-GENERATED marker;
+# `src/`. Runtime JavaScript under `scripts/` is built from `src/` by
+# `pnpm build`. Generated files carry an AUTO-GENERATED marker;
 # do not hand-edit generated bundles.
 #
 # Usage:
@@ -45,6 +45,9 @@ SLICED_REFS=(
   "scripts/agent-refs/polyrepo-git.md"
   "scripts/agent-refs/cadre-sync.md"
   "scripts/agent-refs/ownership-guard.md"
+  "scripts/agent-refs/mcp-contract.md"
+  "scripts/agent-refs/provider-evidence.md"
+  "scripts/agent-refs/team-ops.md"
 )
 
 TEMPLATES_SRC="templates"
@@ -106,7 +109,7 @@ extract_description() {
 dispatch_sentence() {
   case "$1" in
     claude) echo 'Use the **`Task` tool**, one call per worker (calls are awaitable); see `references/parallel-execution.md`.' ;;
-    codex)  echo 'Spawn parallel agents with the built-in `worker` agent type — one per task; "wait for all before continuing" (manage with `/agent`); see `references/parallel-execution.md`.' ;;
+    codex)  echo 'Spawn parallel agents with the built-in worker/multi-agent orchestration available in Codex — one per task; wait for all before continuing; see `references/parallel-execution.md`.' ;;
   esac
 }
 

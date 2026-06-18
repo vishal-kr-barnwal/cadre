@@ -306,11 +306,29 @@ function serverKey(server) {
   const command = typeof server.command === "string" ? server.command : "";
   return id || command;
 }
-function mergeConfig(config, recommendations) {
+function workspaceFolders(root) {
+  const folders = [{ name: ".", path: "." }];
+  const reposPath = import_node_path.default.join(root, "cadre", "repos.json");
+  let repos = {};
+  try {
+    repos = asJsonObject(JSON.parse(import_node_fs.default.readFileSync(reposPath, "utf8")));
+  } catch {
+    return folders;
+  }
+  if (repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return folders;
+  for (const raw of repos.repos) {
+    const repo = asJsonObject(raw);
+    if (repo.enabled === false || typeof repo.name !== "string" || typeof repo.submodule_path !== "string") continue;
+    folders.push({ name: repo.name, path: repo.submodule_path });
+  }
+  return folders;
+}
+function mergeConfig(config, recommendations, root) {
   const servers = Array.isArray(config.servers) ? [...config.servers] : [];
   const next = {
     ...config,
-    servers
+    servers,
+    workspaceFolders: workspaceFolders(root)
   };
   const existing = new Set(servers.map(serverKey).filter(Boolean));
   const added = [];
@@ -341,7 +359,7 @@ function runCli() {
   let written = false;
   let added = [];
   if (args.write) {
-    const merged = mergeConfig(config, recommendations);
+    const merged = mergeConfig(config, recommendations, args.root);
     saveConfig(args.configPath, merged.config);
     written = true;
     added = merged.added;
@@ -357,6 +375,7 @@ function runCli() {
       availability: rec.availability,
       install: rec.install
     })),
+    workspaceFolders: workspaceFolders(args.root),
     written,
     added
   };

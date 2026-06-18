@@ -51,6 +51,7 @@ offers these tools:
 | `cadre_review` with `action: "assist"` | Assemble review evidence: repo-aware diff surface, unfinished plan tasks, TODO/stub scan, coverage, machine gate, and LSP findings. |
 | `cadre_review` with `action: "machine_gate"` | Run configured typecheck/build/check/lint evidence inside MCP, per repo for polyrepo tracks. |
 | `cadre_project` with `action: "sync_control_plane"` | Run the shared-mode sync preamble or postamble as a structured operation. |
+| `cadre_intel` with `action: "lsp_setup"` | Detect language-server recommendations and optionally write `cadre/lsp.json`. |
 | `cadre_intel` with `action: "lsp_review"` | Run the Cadre LSP/code-intelligence review helper and return structured findings. |
 | `cadre_intel` with `action: "lsp_warm_review"` | Run code-intelligence review through a persistent daemon that reuses initialized language servers. |
 | `cadre_intel` with `action: "lsp_daemon_status"` | Inspect warm daemon sessions and open-document counts. |
@@ -71,6 +72,12 @@ It also exposes resources:
 | `cadre://collisions?root=/path/to/project` | Cross-track collision data. |
 | `cadre://track-context?root=/path/to/project&trackId=<id>` | Bounded context for one track. |
 | `cadre://repo-map?root=/path/to/project` | Compact semantic map; add `&symbol=<name>` for references. |
+| `cadre://lsp-status?root=/path/to/project` | Configured LSP servers plus setup recommendations. |
+| `cadre://repo-topology?root=/path/to/project` | Mono/polyrepo topology and configured product repos. |
+| `cadre://provider-actions?root=/path/to/project&trackId=<id>&workflow=ship|land` | Hosted provider action queue from a ship or land packet. |
+| `cadre://ship-plan?root=/path/to/project&trackId=<id>` | Compact ship dry-run plan. |
+| `cadre://land-plan?root=/path/to/project&trackId=<id>` | Compact land dry-run plan. |
+| `cadre://release-plan?root=/path/to/project` | Compact release dry-run plan. |
 
 Cadre workflows require MCP. At the start of a Cadre workflow, callers should
 verify MCP availability with `cadre_project` with `action: "ping"`. If Cadre MCP
@@ -121,9 +128,11 @@ Workflow routing:
 | Structured review write | `cadre_mutate` with `action: "record_review"` |
 | Ship/land review enforcement | `cadre_review` with `action: "gate"` |
 | Shared-mode pre/post sync | `cadre_project` with `action: "sync_control_plane"` |
+| LSP configuration | `cadre_intel` with `action: "lsp_setup"` |
 | Code-intelligence review | `cadre_intel` with `action: "lsp_warm_review"` preferred; `cadre_intel` with `action: "lsp_review"` fallback |
 | Review machine gate | `cadre_review` with `action: "machine_gate"` |
 | Coverage measurement and recording | `cadre_job` with `action: "start", type: "coverage"` |
+| Ship/land provider actions | `cadre_workflow` with `workflow: "ship"` or `"land"` returns provider action specs; provider MCP executes them; call the workflow packet back with `providerEvidence` |
 | PR/MR and CI status | Provider MCP query followed by `cadre_review` with `action: "provider_evidence"` or `action: "pr_ci_status"` with supplied evidence |
 | Low-token repo/symbol orientation | `cadre_intel` with `action: "repo_map"` or `cadre://repo-map` |
 | Beads task writes | `cadre_beads` |
@@ -207,12 +216,9 @@ cadre-setup          # includes an optional LSP recommendation step
 cadre-refresh --lsp  # rerun LSP recommendations later
 ```
 
-Both flows use the bundled setup helper:
-
-```bash
-node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json
-node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --write --json
-```
+Both flows use `cadre_intel` with `action: "lsp_setup"`. Call it without
+`execute:true` for recommendations and with `execute:true` to write
+`cadre/lsp.json`.
 
 The helper scans source file extensions and well-known filenames, recommends
 language servers across the detected languages, checks whether each server
@@ -221,11 +227,8 @@ without duplicating existing `servers[]` entries. If commands are missing,
 Cadre prints install commands and asks whether to write the config now or stop
 so the user can install the servers first.
 
-Cadre also ships a best-effort LSP review hook:
-
-```bash
-node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<track_id> --json
-```
+Cadre also ships a best-effort LSP review hook through `cadre_intel` with
+`action: "lsp_warm_review"`; `action: "lsp_review"` is the cold fallback.
 
 If `cadre/lsp.json` is absent, the helper exits successfully with
 `available: false`; review records that code intelligence was skipped. This keeps

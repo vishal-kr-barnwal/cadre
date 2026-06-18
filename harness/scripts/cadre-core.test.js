@@ -66,6 +66,10 @@ function installFakeBd(root) {
   write(bd, `#!/bin/sh
 printf '%s\n' "$*" >> "$PWD/bd.log"
 case "$1" in
+  init)
+    mkdir -p "$PWD/.beads"
+    printf '{"ok":true}\n'
+    ;;
   show)
     if [ -f "$PWD/bd-notes.txt" ]; then cat "$PWD/bd-notes.txt"; else printf '{}\n'; fi
     ;;
@@ -94,6 +98,10 @@ function installTrackCreationFakeBd(root) {
   write(bd, `#!/bin/sh
 printf '%s\n' "$*" >> "$PWD/bd.log"
 case "$1" in
+  init)
+    mkdir -p "$PWD/.beads"
+    printf '{"ok":true}\n'
+    ;;
   show)
     exit 1
     ;;
@@ -200,11 +208,19 @@ test("build emits every required runtime bundle path", () => {
     "scripts/cadre-lsp-review.js",
     "scripts/cadre-lsp-daemon.js",
     "scripts/mcp/cadre-server.js",
-    "templates/scripts/cadre-lsp-setup.js",
     "plugins/cadre/scripts/cadre-lsp-review.js",
     "plugins/cadre-claude/scripts/cadre-lsp-daemon.js",
   ]) {
     assert.equal(fs.existsSync(path.join(__dirname, "..", file)), true, `missing ${file}`);
+  }
+  for (const file of [
+    "templates/scripts/cadre-lsp-setup.js",
+    "templates/scripts/cadre-lsp-review.js",
+    "templates/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre/skills/cadre/templates/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-claude/skills/cadre/templates/scripts/cadre-lsp-review.js",
+  ]) {
+    assert.equal(fs.existsSync(path.join(__dirname, "..", file)), false, `duplicate helper should not be bundled: ${file}`);
   }
 });
 
@@ -259,12 +275,13 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     const next = core.parallelWorkflow(root, { action: "next_wave", trackId: "parallel_20260617" });
     assert.equal(next.ok, true);
     assert.deepEqual(next.phase_ids, ["phase1"]);
-    assert.equal(next.workers.length, 2);
+    assert.equal(next.workers.length, 1);
+    assert.equal(next.workers[0].task_key, "phase1_task1");
 
     const setup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617" });
     assert.equal(setup.ok, true);
     assert.equal(setup.dry_run, true);
-    assert.equal(setup.commands.length, 2);
+    assert.equal(setup.commands.length, 1);
     assert.equal(setup.results.length, 0);
 
     const dryRecord = core.parallelWorkflow(root, {
@@ -286,6 +303,7 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
       status: "awaiting_merge",
       phaseIndex: 1,
       taskIndex: 1,
+      commitSha: "abc1234",
       branch: "track/parallel-worker-one",
       worktree: ".worktrees/parallel_20260617/worker-one",
       repo: ".",
@@ -296,11 +314,12 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     const merge = core.parallelWorkflow(root, { action: "merge_back", trackId: "parallel_20260617" });
     assert.equal(merge.ok, true);
     assert.equal(merge.dry_run, true);
-    assert.ok(merge.commands[0].args.includes("track/parallel-worker-one"));
+    assert.ok(merge.commands[0].args.includes("abc1234"));
 
     const cleanup = core.parallelWorkflow(root, { action: "cleanup", trackId: "parallel_20260617" });
     assert.equal(cleanup.ok, true);
-    assert.equal(cleanup.commands[0].args[2], ".worktrees/parallel_20260617/worker-one");
+    assert.equal(cleanup.commands.length, 0);
+    assert.equal(cleanup.skipped[0].status, "awaiting_merge");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -706,8 +725,10 @@ test("fleetStatus and beadsSummary degrade cleanly", () => {
 
 test("workflow setup writes detected and requested style guides from templates", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-test-"));
+  const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
     write(path.join(root, "tsconfig.json"), "{}\n");
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
@@ -743,7 +764,9 @@ test("workflow setup writes detected and requested style guides from templates",
     const beads = JSON.parse(fs.readFileSync(path.join(root, "cadre", "beads.json"), "utf8"));
     assert.equal(beads.mode, "normal");
     assert.equal(beads.packet_only, true);
+    assert.equal(fs.existsSync(path.join(root, ".beads")), true);
   } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -752,7 +775,9 @@ test("workflow setup records provider mode from remotes or local intent", () => 
   const githubRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-github-provider-test-"));
   const gitlabRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-gitlab-provider-test-"));
   const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-local-provider-test-"));
+  const oldPath = process.env.PATH;
   try {
+    process.env.PATH = `${installTrackCreationFakeBd(githubRoot)}:${oldPath}`;
     git(githubRoot, ["init"]);
     git(githubRoot, ["remote", "add", "origin", "git@github.com:org/app.git"]);
     const githubSetup = core.workflowPacket(githubRoot, {
@@ -796,16 +821,62 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     assert.equal(localConfig.provider_mode, "local");
     assert.equal(localConfig.provider_mcp_required, false);
   } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(githubRoot, { recursive: true, force: true });
     fs.rmSync(gitlabRoot, { recursive: true, force: true });
     fs.rmSync(localRoot, { recursive: true, force: true });
   }
 });
 
-test("workflow setup asks for provider mode when remotes are ambiguous", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-ambiguous-provider-test-"));
+test("workflow setup scaffolds polyrepo control-plane assets and LSP config", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-polyrepo-test-"));
+  const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
+    write(path.join(root, "repos", "app", "src", "index.ts"), "export const app = true;\n");
+
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      topology: "polyrepo",
+      providerMode: "github",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+      lsp: true,
+      repos: {
+        mode: "polyrepo",
+        control_repo: { name: "control", path: "." },
+        default_repo: "app",
+        repos: [
+          { name: "app", submodule_path: "repos/app", url: "git@github.com:org/app.git", default_branch: "main", enabled: true },
+        ],
+      },
+    });
+
+    assert.equal(setup.ok, true);
+    assert.equal(setup.topology, "polyrepo");
+    assert.equal(setup.polyrepo_setup.gitattributes.ok, true);
+    assert.equal(setup.polyrepo_setup.ci.path, ".github/workflows/cadre-merge-train.yml");
+    assert.equal(setup.polyrepo_setup.submodules.dry_run, true);
+    assert.equal(fs.existsSync(path.join(root, ".github", "workflows", "cadre-merge-train.yml")), true);
+    assert.match(fs.readFileSync(path.join(root, ".gitattributes"), "utf8"), /\.beads\/\*\* merge=ours/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "repos.json")), true);
+    assert.equal(setup.lsp_setup.written, true);
+    assert.ok(setup.lsp_setup.added.includes("typescript"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup asks for provider mode when remotes are ambiguous", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-ambiguous-provider-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     git(root, ["remote", "add", "origin", "git@github.com:org/app.git"]);
     git(root, ["remote", "add", "mirror", "git@gitlab.com:org/app.git"]);
 
@@ -839,14 +910,17 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
     const config = JSON.parse(fs.readFileSync(path.join(root, "cadre", "config.json"), "utf8"));
     assert.equal(config.provider_mode, "local");
   } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("workflow setup asks for provider mode when hosted remote is unknown", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-unknown-provider-test-"));
+  const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     git(root, ["remote", "add", "origin", "git@example.internal:org/app.git"]);
 
     const blocked = core.workflowPacket(root, {
@@ -869,6 +943,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     assert.equal(local.ok, true);
     assert.equal(local.provider.provider_mode, "local");
   } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -892,10 +967,46 @@ test("workflow setup rejects unknown explicit style guide ids", () => {
   }
 });
 
-test("implementationPrep returns packet-selected style guides", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-implement-style-test-"));
+test("workflow setup execute requires Beads init before writing project state", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-beads-required-test-"));
+  const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-empty-path-"));
+  const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
+    process.env.PATH = emptyBin;
+
+    const dryRun = core.workflowPacket(root, {
+      workflow: "setup",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+      providerMode: "local",
+    });
+    assert.equal(dryRun.ok, true);
+    assert.equal(dryRun.beads_init.available, false);
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+      providerMode: "local",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "beads_init");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(emptyBin, { recursive: true, force: true });
+  }
+});
+
+test("implementationPrep returns packet-selected style guides", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-implement-style-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
     write(path.join(root, "tsconfig.json"), "{}\n");
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
@@ -942,6 +1053,7 @@ test("implementationPrep returns packet-selected style guides", () => {
     assert.ok(typeGuide.content.includes("TypeScript"));
     assert.ok(typeGuide.content.length <= 1200);
   } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -981,7 +1093,9 @@ test("workflow newtrack writes template-backed track learnings", () => {
 test("workflowPacket exposes packet-only routes for primary workflows", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-test-"));
   const setupRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-setup-test-"));
+  const oldPath = process.env.PATH;
   try {
+    process.env.PATH = `${installTrackCreationFakeBd(setupRoot)}:${oldPath}`;
     git(root, ["init"]);
     git(root, ["config", "user.email", "workflow@example.com"]);
     git(root, ["config", "user.name", "Workflow Test"]);
@@ -1050,6 +1164,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     assert.equal(metadata.status, "blocked");
     assert.equal(metadata.last_status_reason, "waiting for credentials");
   } finally {
+    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(setupRoot, { recursive: true, force: true });
   }
@@ -1084,6 +1199,72 @@ test("reviewAssist and lspImpact provide fallback review context", () => {
     assert.equal(impact.ok, true);
     assert.ok(impact.symbols.exportedCore.matches.length >= 1);
     assert.ok(impact.files["src/core.js"].some((symbol) => symbol.name === "exportedCore"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflowPacket compact responses trim heavy plan detail and expose resource URIs", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-response-mode-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "compact_20260618", samplePlan("compact_20260618"));
+
+    const compact = core.workflowPacket(root, {
+      workflow: "review",
+      trackId: "compact_20260618",
+      includeLsp: false,
+      includeMachine: false,
+    });
+    assert.equal(compact.response_mode, "compact");
+    assert.ok(compact.resource_uris.some((uri) => uri.includes("quality-gate")));
+    assert.equal(typeof compact.track_context.plan.phases, "number");
+
+    const detail = core.workflowPacket(root, {
+      workflow: "review",
+      trackId: "compact_20260618",
+      includeLsp: false,
+      includeMachine: false,
+      responseMode: "detail",
+    });
+    assert.equal(detail.response_mode, "detail");
+    assert.ok(Array.isArray(detail.track_context.plan.phases));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("polyrepo intel aggregates repo-qualified diagnostics and symbols", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-intel-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "api",
+      repos: [
+        { name: "api", submodule_path: "repos/api", enabled: true },
+        { name: "web", submodule_path: "repos/web", enabled: true },
+      ],
+    }, null, 2));
+    for (const repo of ["api", "web"]) {
+      const repoRoot = path.join(root, "repos", repo);
+      fs.mkdirSync(repoRoot, { recursive: true });
+      git(repoRoot, ["init"]);
+      write(path.join(repoRoot, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
+      write(path.join(repoRoot, "src", `${repo}.ts`), `export function ${repo}Symbol() { return true; }\n`);
+      git(repoRoot, ["add", "."]);
+    }
+
+    const map = core.repoMap(root, { limit: 20 });
+    assert.equal(map.ok, true);
+    assert.ok(map.repos.some((entry) => entry.repo === "api"));
+    assert.ok(map.symbols.some((symbol) => symbol.repo === "api" && symbol.name === "apiSymbol"));
+
+    const diagnostics = core.workspaceDiagnostics(root);
+    assert.ok(diagnostics.adapters.some((adapter) => adapter.repo === "web" && adapter.id === "node"));
+
+    const graph = core.dependencyGraph(root);
+    assert.ok(graph.manifests.some((manifest) => manifest.repo === "api" && manifest.file === "package.json"));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1202,7 +1383,8 @@ test("provider status is provider-MCP-only and local mode skips provider evidenc
       responseMode: "detail",
       prNumber: 42,
     });
-    assert.equal(review.ok, false);
+    assert.equal(review.ok, true);
+    assert.equal(review.phase_state, "pending_provider");
     assert.equal(review.response_mode, "detail");
     assert.equal(review.required_provider_mcp.provider, "github");
     assert.match(review.unsupported_reason, /provider_mode github requires github MCP evidence/);
@@ -1223,6 +1405,25 @@ test("provider status is provider-MCP-only and local mode skips provider evidenc
     assert.equal(local.skipped, true);
     assert.equal(local.provider_mode, "local");
     assert.match(local.reason, /no provider MCP evidence required/);
+
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ provider_mode: "github", provider_mcp_required: true }, null, 2));
+    const shipPlan = core.workflowPacket(root, {
+      workflow: "ship",
+      trackId: "provider_20260618",
+    });
+    assert.equal(shipPlan.phase_state, "pending_provider");
+    assert.equal(shipPlan.provider_actions.length, 1);
+    assert.equal(shipPlan.provider_actions[0].provider, "github");
+    assert.equal(shipPlan.git_actions.some((action) => action.kind === "push_branch"), true);
+    assert.ok(shipPlan.continuation_token);
+
+    const shipWithEvidence = core.workflowPacket(root, {
+      workflow: "ship",
+      trackId: "provider_20260618",
+      providerEvidence: { url: "https://github.com/org/app/pull/42", state: "OPEN", status_checks: "SUCCESS" },
+    });
+    assert.equal(shipWithEvidence.ok, true);
+    assert.equal(shipWithEvidence.phase_state, "ready");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1347,6 +1548,64 @@ test("polyrepo reviewAssist, machine gate, and review records are repo-aware", (
   }
 });
 
+test("polyrepo land plans provider actions and repo-scoped git pushes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-land-plan-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "owner@example.com"]);
+    git(root, ["config", "user.name", "Owner"]);
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "app",
+      repos: [
+        { name: "app", submodule_path: "repos/app", default_branch: "main", enabled: true },
+      ],
+    }, null, 2));
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({
+      provider_mode: "github",
+      provider_mcp_required: true,
+    }, null, 2));
+    fs.mkdirSync(path.join(root, "repos", "app"), { recursive: true });
+    git(path.join(root, "repos", "app"), ["init"]);
+
+    writeTrack(root, "land_20260618", `# Plan: land_20260618
+
+## Phase 1: App
+
+- [x] Task 1: Update app
+  <!-- repo: app -->
+  <!-- files: src/app.js -->
+`, {
+      owner: "owner@example.com",
+      review: {
+        verdict: "approved",
+        blocking_count: 0,
+        reviewed_shas: { app: "abc1234" },
+      },
+      repos: {
+        app: {
+          submodule_path: "repos/app",
+          git_branch: "track/land_20260618",
+          base_branch: "main",
+        },
+      },
+    });
+
+    const land = core.workflowPacket(root, {
+      workflow: "land",
+      trackId: "land_20260618",
+    });
+    assert.equal(land.phase_state, "pending_provider");
+    assert.equal(land.topology, "polyrepo");
+    assert.equal(land.preflight.ok, true);
+    assert.equal(land.provider_actions.length, 1);
+    assert.equal(land.provider_actions[0].repo, "app");
+    assert.ok(land.git_actions.some((action) => action.repo === "app" && action.cwd.endsWith(path.join("repos", "app"))));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("polyrepo workflows fail closed on unresolved task repos", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-missing-repo-test-"));
   try {
@@ -1424,6 +1683,74 @@ test("polyrepo workflows fail closed on unresolved task repos", () => {
     });
     assert.equal(review.ok, false);
     assert.equal(review.stage, "polyrepo_repo_resolution");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow revert, release, and refresh execute packet-owned local changes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-execute-workflows-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "owner@example.com"]);
+    git(root, ["config", "user.name", "Owner"]);
+    write(path.join(root, "cadre", "setup_state.json"), JSON.stringify({ version: 1 }, null, 2));
+    write(path.join(root, "cadre", "patterns.md"), "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n");
+    write(path.join(root, "src", "app.js"), "module.exports = 1;\n");
+    git(root, ["add", "src/app.js"]);
+    git(root, ["commit", "-m", "initial"]);
+    write(path.join(root, "src", "app.js"), "module.exports = 2;\n");
+    git(root, ["add", "src/app.js"]);
+    git(root, ["commit", "-m", "feature"]);
+    const sha = git(root, ["rev-parse", "--short=12", "HEAD"]).stdout.trim();
+
+    writeTrack(root, "execute_20260618", `# Plan: execute_20260618
+
+## Phase 1: Change
+
+- [x] Task 1: Change app (${sha})
+  <!-- files: src/app.js -->
+`, {
+      status: "completed",
+      review: {
+        verdict: "approved",
+        blocking_count: 0,
+        reviewed_sha: sha,
+      },
+    });
+
+    const revert = core.workflowPacket(root, {
+      workflow: "revert",
+      execute: true,
+      trackId: "execute_20260618",
+      reason: "test revert",
+    });
+    assert.equal(revert.ok, true);
+    assert.equal(revert.phase_state, "executed");
+    assert.equal(revert.git_results[0].ok, true);
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
+    assert.equal(metadata.status, "in_progress");
+    assert.equal(metadata.last_revert.reason, "test revert");
+
+    const release = core.workflowPacket(root, {
+      workflow: "release",
+      execute: true,
+      releaseVersion: "v1.2.3",
+    });
+    assert.equal(release.ok, true);
+    assert.equal(release.phase_state, "executed");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.md")), true);
+    const setupState = JSON.parse(fs.readFileSync(path.join(root, "cadre", "setup_state.json"), "utf8"));
+    assert.equal(setupState.last_release.version, "v1.2.3");
+
+    const refresh = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      lsp: true,
+    });
+    assert.equal(refresh.ok, true);
+    assert.equal(refresh.phase_state, "executed");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -152,12 +152,11 @@ into your project. Those live in the canonical `templates/` directory, and the
 generator bundles a copy into each plugin skill at
 `plugins/<platform>/skills/cadre/templates/`.
 
-`cadre-setup` then **discovers** the templates directory at runtime by
-resolving `../templates/` relative to the active `references/template-locator.md`
-file, so it works from plugin cache installs without knowing the cache root.
-Edit templates only in the canonical `templates/` directory and regenerate.
-The LSP helper scripts under `templates/scripts/` are generated runtime bundles;
-edit their TypeScript sources in `src/` instead.
+`cadre-setup` consumes those templates through Cadre MCP packets, so it works
+from plugin cache installs without agents copying files by hand. Edit templates
+only in the canonical `templates/` directory and regenerate. LSP helper runtime
+bundles live under plugin `scripts/` and are reached through `cadre_intel` with
+`action: "lsp_setup"`.
 
 Generated files carry an `AUTO-GENERATED` marker. **Do not hand-edit them** —
 edit `skills/cadre/SKILL.md`, master protocols in `skills/cadre/protocols/`,
@@ -189,12 +188,11 @@ Cadre plugins bundle a required MCP runtime plus optional LSP helpers:
   required by Cadre workflows for track status, collision scans, review gates,
   and index regeneration. Project-scoped MCP calls must include a per-call
   `root` argument.
-- `<TEMPLATES_DIR>/scripts/cadre-lsp-setup.js` scans a project, recommends
-  language servers, detects missing server commands, and appends `cadre/lsp.json`
-  entries during `cadre-setup` or `cadre-refresh --lsp`.
-- `<TEMPLATES_DIR>/scripts/cadre-lsp-review.js --base main --head track/<id>
-  --json` runs a best-effort LSP reference scan when `cadre/lsp.json` configures
-  language servers.
+- `cadre_intel` with `action: "lsp_setup"` scans a project, recommends language
+  servers, detects missing server commands, and writes `cadre/lsp.json` when
+  called with `execute:true`.
+- `cadre_intel` with `action: "lsp_warm_review"` runs a best-effort LSP
+  reference scan when `cadre/lsp.json` configures language servers.
 
 See [MCP and LSP Integration](MCP_LSP.md) for setup and rollout guidance.
 

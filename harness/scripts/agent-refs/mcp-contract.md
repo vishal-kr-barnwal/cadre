@@ -1,0 +1,56 @@
+# Cadre MCP Contract
+
+Cadre MCP is the runtime for workflow coordination. Every project-scoped packet
+must receive an explicit `root` argument. Setup-assist may run before `cadre/`
+exists; all other project calls resolve upward to an initialized Cadre project.
+
+## Primary Packets
+
+- `cadre_workflow` coordinates setup, newtrack, implement, status, validate,
+  review, ship, land, archive, release, handoff, refresh, flag, revert, revise,
+  and formula flows.
+- `cadre_project` handles ping, doctor, root, topology, tech-stack summary,
+  shared sync, and polyrepo preflight.
+- `cadre_status` returns live, team, mine, available, collision, fleet, and
+  Beads summary views.
+- `cadre_track` returns bounded track context, parsed plans, integrity checks,
+  phase schedules, implementation prep, planning evidence, and worktree plans.
+- `cadre_parallel` plans task waves, sets up workers, records worker finish
+  state, merges safe workers, and cleans merged workers.
+- `cadre_mutate` owns control-plane writes such as claim, heartbeat, status,
+  metadata, review, worker state, task result, and index regeneration.
+- `cadre_complete_task` performs the journaled task-completion transaction.
+- `cadre_review` owns review assistance, machine gates, review gates,
+  provider-evidence writes, and PR/MR/CI status normalization.
+- `cadre_intel` owns repo maps, LSP setup/review/impact, workspace diagnostics,
+  test impact, dependency graphs, and daemon lifecycle.
+- `cadre_job` starts, lists, cancels, and reads async job artifacts.
+
+## Response Modes
+
+Default compact responses include summaries, counts, warnings, next actions, and
+resource URIs. Use `responseMode: "detail"` for full plan bodies, full LSP
+evidence, long command outputs, or full style-guide content.
+
+## Compact Resources
+
+Use MCP resources for bounded dashboards:
+
+- `cadre://team-board?root=...`
+- `cadre://my-next-actions?root=...`
+- `cadre://review-queue?root=...`
+- `cadre://handoff-inbox?root=...`
+- `cadre://track-context?root=...&trackId=...`
+- `cadre://track-plan?root=...&trackId=...`
+- `cadre://parallel-state?root=...&trackId=...`
+- `cadre://quality-gate?root=...&trackId=...`
+- `cadre://repo-map?root=...`
+- `cadre://workspace-diagnostics?root=...`
+- `cadre://test-impact?root=...&files=...`
+- `cadre://lsp-status?root=...`
+- `cadre://repo-topology?root=...`
+- `cadre://provider-actions?root=...&trackId=...&workflow=ship|land`
+- `cadre://job-result?root=...&jobId=...`
+
+Resource templates are discoverable through MCP, so clients should prefer
+template discovery when available.

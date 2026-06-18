@@ -109,18 +109,17 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 ┌─────────────────────────────────────────────────────────────┐
 │                    CADRE IMPLEMENT                       │
 │                    (Coordinator Agent)                       │
-│  - Parses plan.md for parallel annotations                  │
-│  - Detects file conflicts                                   │
-│  - Spawns sub-agents via Task()                             │
-│  - Monitors completion via state files                      │
-│  - Aggregates results                                       │
+│  - Calls Cadre packets for schedule/conflict state           │
+│  - Dispatches packet-selected workers                       │
+│  - Records worker evidence through MCP                      │
+│  - Runs packet-owned merge-back and cleanup                 │
 └─────────────────────────────────────────────────────────────┘
                               │
             ┌─────────────────┼─────────────────┐
             ▼                 ▼                 ▼
     ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
     │  Worker 1   │   │  Worker 2   │   │  Worker 3   │
-    │  Task()     │   │  Task()     │   │  Task()     │
+    │ packet job  │   │ packet job  │   │ packet job  │
     │             │   │             │   │             │
     │ files:      │   │ files:      │   │ files:      │
     │ auth.ts     │   │ config.ts   │   │ utils.ts    │
@@ -137,6 +136,9 @@ Phase 2├─ Task 2B (files: models.ts)   ─┼→ Phase 2 Complete
 ### State Management
 
 #### `cadre/tracks/<track_id>/parallel_state.json`
+
+This file is packet-owned. It is shown here as an implementation artifact, not
+as a file agents should edit or reconstruct directly.
 
 ```json
 {
@@ -212,38 +214,22 @@ differs per tool. See [`parallel-execution.md`](../plugins/cadre-claude/skills/c
 | **OpenAI Codex** | use multi-agent tools to spawn one `worker` sub-agent per task and wait for the wave |
 | **No parallel primitive** | sequential fallback — one agent runs each task in its worktree |
 
-### Example: Claude Code's Task() Tool
+### Worker Dispatch Shape
+
+Claude Code uses `Task` once per returned worker. OpenAI Codex uses the
+available multi-agent worker primitive. Other platforms use a sequential
+fallback only when the Cadre packet permits it. The worker prompt carries the
+same packet payload on every platform:
 
 ```markdown
-Task({ 
-  description: "Implement Task 1: Create auth module",
-  prompt: `
-    You are a sub-agent implementing a single task for Cadre.
-    
-    ## Context
-    - Track: ${track_id}
-    - Phase: ${phase_name}
-    - Task: ${task_description}
-    
-    ## Files Owned (exclusive access)
-    ${files.join('\n')}
-    
-    ## Instructions
-    1. Follow workflow.md for TDD implementation
-    2. Only modify files in your owned list
-    3. Commit with message: "feat(${scope}): ${description}"
-    4. Return commit/test/coverage evidence to the coordinator
-    5. NEVER run git push - all commits stay local
-    
-    ## Spec Context
-    ${spec_excerpt}
-    
-    ## Success Criteria
-    - All tests pass
-    - Code coverage >80%
-    - Commit created with proper message
-  `
-})
+Track: ${track_id}
+Phase: ${phase_name}
+Task: ${task_description}
+Repo root/worktree: ${worker.worktree}
+Owned files: ${files.join('\n')}
+
+Follow workflow.md for TDD implementation, only modify packet-owned files, keep
+commits local, and return commit/test/coverage evidence to the coordinator.
 ```
 
 ### Worker Completion Protocol
@@ -267,61 +253,12 @@ so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
 
 ### Phase Processing (Updated)
 
-```markdown
-## 3.5 PARALLEL PHASE EXECUTION
-
-**PROTOCOL: Execute tasks in parallel when phase allows.**
-
-1. **Parse Phase Metadata:**
-   - Check for `<!-- execution: parallel -->` annotation
-   - If not found or `sequential`: Use existing sequential flow
-
-2. **Parallel Execution Flow (if parallel):**
-
-   a. **Parse Task Metadata:**
-      - Extract `files:` annotations for each task
-      - Extract `depends:` annotations for dependencies
-      
-   b. **Build Dependency Graph:**
-      - Identify tasks with no dependencies (can start immediately)
-      - Identify dependent tasks (must wait)
-   
-   c. **Detect File Conflicts:**
-      - Check if any two tasks share file ownership
-      - If conflicts exist:
-        > "⚠️ File conflict detected: [files] claimed by multiple tasks"
-        > "A) Resolve by making tasks sequential"
-        > "B) Continue - I'll handle file merging manually"
-   
-   d. **Initialize Parallel State:**
-      - Create `parallel_state.json`
-      - Record all workers and their file assignments
-   
-   e. **Spawn Workers:**
-      - For each task with no unmet dependencies:
-        - Create Task() with full context
-        - Include: spec excerpt, files owned, success criteria
-        - Workers run concurrently
-   
-   f. **Monitor Completion:**
-      - Wait for worker results and let the coordinator record status through
-        MCP `cadre_mutate` with `action: "record_worker"`
-      - When a worker completes:
-        - Check if dependent tasks can now start
-        - Spawn newly unblocked tasks
-   
-   g. **Aggregate Results:**
-      - Wait for all workers to complete
-      - Collect commit SHAs from all workers
-      - Call `cadre_mutate` with `action: "record_worker"` with `completeTask: true` after each
-        clean merge to update plan.md and Beads
-      - Proceed to phase checkpoint
-
-3. **Beads Integration (if enabled):**
-   - The coordinator updates Beads task status through Cadre MCP/`bd`
-   - Workers return commit/test/coverage evidence, not direct completion writes
-   - Dependents unblock only after clean merge-back and `cadre_complete_task`
-```
+`cadre-implement` does not parse or mutate parallel state itself. It calls
+`cadre_workflow` with `workflow: "implement"` to obtain the current schedule,
+then uses `cadre_parallel` actions in this order: `next_wave`, `setup_workers`,
+platform worker dispatch, `record_finish`, `merge_back`, and `cleanup`.
+Dependency release, file conflicts, Beads status, worker audit state, task
+completion, and cleanup remain packet-owned.
 
 ---
 
@@ -329,33 +266,11 @@ so `cadre_complete_task` records plan, metadata, coverage, and Beads together.
 
 ### Plan Generation with Parallel Annotations
 
-```markdown
-## 2.3a PARALLEL EXECUTION ANALYSIS
-
-**PROTOCOL: Analyze tasks for parallel execution potential.**
-
-1. **After Generating Plan:**
-   - Analyze each phase for parallelizable tasks
-   - Ask user:
-     > "I've identified potential for parallel execution in this track:"
-     > 
-     > **Phase 1: Setup** (3 tasks)
-     > - Tasks 1, 2, 3 have no file overlaps → Can run in parallel
-     > 
-     > **Phase 2: Implementation** (4 tasks)
-     > - Tasks 1, 2 can run in parallel (different files)
-     > - Tasks 3, 4 depend on Task 1 → Must be sequential
-     >
-     > "Would you like to enable parallel execution? (yes/no)"
-
-2. **If Yes:**
-   - Add `<!-- execution: parallel -->` to eligible phases
-   - Add `<!-- files: ... -->` annotations to each task
-   - Add `<!-- depends: ... -->` where needed
-
-3. **If No:**
-   - Keep all phases as `<!-- execution: sequential -->`
-```
+`cadre-newtrack` calls the new-track workflow packet with the generated plan
+text. The packet returns `plan_assist` with file-claim analysis,
+parallel-candidate phases, likely tests, semantic impact, and worktree planning.
+Agents use that packet output to revise the proposed plan before creating the
+track; they do not hand-maintain worker state.
 
 ---
 
@@ -370,27 +285,18 @@ Beads provides robust coordination for parallel task execution with its concurre
 | **Hash-based IDs** | No collision when parallel workers create tasks |
 | **Assignee field** | Each worker claims exclusive ownership |
 | **Dolt transactions** | Serializes concurrent writes safely |
-| **`bd ready --assignee`** | Workers query only their assigned tasks |
-| **`bd dolt push`** | Push changes to remote |
+| **Packet-assigned workers** | Workers receive only their ready task payload |
+| **Packet-owned sync** | Shared control-plane sync happens through Cadre MCP |
 
 ### Coordinator Protocol
 
-```bash
-# 1. Before spawning workers - pre-assign all tasks
-for task in parallel_tasks:
-    bd update <beads_task_id> --status in_progress \
-      --assignee worker_<N>_<name> \
-      --notes "PARALLEL WORKER: Started" \
-      --json
-
-# 2. Spawn workers via Task()
-# (Each worker gets its beads_task_id in the prompt)
-
-# 3. After all workers complete - aggregate and verify
-bd ready --parent <epic_id> --json  # Verify all complete
-bd note <epic_id> "PARALLEL PHASE COMPLETE: <phase>
-WORKERS: <N> succeeded
-COMMITS: <sha_list>" --json
+```text
+cadre_parallel { action: "next_wave" }
+cadre_parallel { action: "setup_workers", execute: true }
+dispatch exactly the returned workers using the current platform primitive
+cadre_parallel { action: "record_finish", execute: true, ...workerEvidence }
+cadre_parallel { action: "merge_back", execute: true }
+cadre_parallel { action: "cleanup", execute: true }
 ```
 
 ### Worker Protocol
@@ -427,13 +333,9 @@ coordinator-owned Beads notes or follow-up tasks.
 
 ### Error Recovery
 
-```bash
-# Coordinator detects worker timeout/failure
-bd update <beads_task_id> --status open \
-  --notes "Worker <id> timed out. Reassigning." \
-  --assignee "" \
-  --json
-```
+Coordinator recovery also goes through packets: record timeout or failure
+evidence with `cadre_parallel` / `cadre_mutate`, then let the next
+`cadre_parallel` packet release ownership, retry, or block with recovery steps.
 
 ---
 

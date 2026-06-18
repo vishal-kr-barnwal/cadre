@@ -5,7 +5,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as core from "../cadre-core";
 import type { JsonObject, RuntimeArgs, TextJsonResult, UnknownRecord } from "../types";
-import { asJsonObject, asOptionalString, errorCode, errorMessage, isRecord } from "../guards";
+import { asJsonObject, asOptionalString, asString, errorCode, errorMessage, isRecord } from "../guards";
 
 const PROTOCOL_VERSION = "2025-11-25";
 
@@ -43,6 +43,7 @@ interface JobRecord {
   exit_code: number | null;
   signal: NodeJS.Signals | null;
   proc: ChildProcessWithoutNullStreams | null;
+  artifact_path?: string;
 }
 
 interface McpMessage extends JsonObject {
@@ -56,6 +57,9 @@ interface ResourceQuery extends JsonObject {
   root: string | null;
   trackId: string | null;
   symbol: string | null;
+  workflow: string | null;
+  jobId: string | null;
+  files: string[];
 }
 
 const packetSchema = (description: ToolDescription, actionEnum: string[] | null = null): JsonObject => ({
@@ -104,6 +108,13 @@ const packetSchema = (description: ToolDescription, actionEnum: string[] | null 
       symbol: { type: "string" },
       symbols: { type: "array", items: { type: "string" } },
       files: { type: "array", items: { type: "string" } },
+      repo: { type: "string" },
+      repos: { type: "array", items: { type: "string" } },
+      workerId: { type: "string" },
+      worker_id: { type: "string" },
+      commitSha: { type: "string" },
+      force: { type: "boolean" },
+      allowNoCommit: { type: "boolean" },
       styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
       styleGuideMaxChars: { type: "number" },
       techStack: { type: "object" },
@@ -186,7 +197,7 @@ const TOOLS = [
   ),
   packetSchema(
     { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
-    ["repo_map", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
+    ["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
   ),
 ];
 
@@ -287,6 +298,36 @@ function envelope(value: unknown): RuntimeEnvelope {
   return out;
 }
 
+function syncedEnvelope(root: string, operation: string, fn: () => unknown): RuntimeEnvelope {
+  const syncPre = core.syncControlPlane(root, { mode: "pre" });
+  if (syncPre.ok === false) {
+    return envelope({
+      ok: false,
+      phase_state: "blocked",
+      stage: "sync_pre",
+      operation,
+      sync_pre: syncPre,
+    });
+  }
+  const value = asJsonObject(fn());
+  const valueOk = value.ok === false ? false : true;
+  if (!valueOk) {
+    return envelope({ ...value, sync_pre: syncPre, sync_post: null });
+  }
+  const syncPost = core.syncControlPlane(root, { mode: "post" });
+  return envelope({
+    ...value,
+    ok: valueOk && syncPost.ok !== false,
+    phase_state: syncPost.ok === false ? "recovery_required" : value.phase_state,
+    sync_pre: syncPre,
+    sync_post: syncPost,
+  });
+}
+
+function beadsOperationMutates(operation: unknown): boolean {
+  return !["ready", "list", "show", "formula_list"].includes(String(operation || ""));
+}
+
 class LspDaemonClient {
   proc: ChildProcessWithoutNullStreams | null;
   nextId: number;
@@ -381,6 +422,53 @@ class JobManager {
     this.ttlMs = 60 * 60 * 1000;
   }
 
+  jobDir(root: string): string {
+    return path.join(root, "cadre", "jobs");
+  }
+
+  jobPath(root: string, id: string): string {
+    return path.join(this.jobDir(root), `${id}.json`);
+  }
+
+  serialize(job: JobRecord): JsonObject {
+    return {
+      id: job.id,
+      type: job.type,
+      root: job.root,
+      args: job.args,
+      status: job.status,
+      started_at: job.started_at,
+      finished_at: job.finished_at,
+      stdout_tail: job.stdout.slice(-8000),
+      stderr_tail: job.stderr.slice(-8000),
+      result: asJsonObject(job.result),
+      exit_code: job.exit_code,
+      signal: job.signal,
+      artifact_path: job.artifact_path || path.relative(job.root, this.jobPath(job.root, job.id)),
+    };
+  }
+
+  persist(job: JobRecord): void {
+    try {
+      fs.mkdirSync(this.jobDir(job.root), { recursive: true });
+      const artifactPath = this.jobPath(job.root, job.id);
+      job.artifact_path = path.relative(job.root, artifactPath);
+      fs.writeFileSync(artifactPath, `${JSON.stringify(this.serialize(job), null, 2)}\n`);
+    } catch {
+      // Job persistence must not crash the MCP server.
+    }
+  }
+
+  loadPersisted(root: string, id: string | null | undefined): JsonObject | null {
+    if (!id) return null;
+    const file = this.jobPath(root, id);
+    try {
+      return asJsonObject(JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch {
+      return null;
+    }
+  }
+
   cleanup(): void {
     const now = Date.now();
     for (const [id, job] of this.jobs.entries()) {
@@ -413,6 +501,7 @@ class JobManager {
       proc,
     };
     this.jobs.set(id, job);
+    this.persist(job);
     proc.stdout.on("data", (chunk: Buffer) => {
       job.stdout += chunk.toString("utf8");
     });
@@ -431,6 +520,7 @@ class JobManager {
       const resultObject = asJsonObject(job.result);
       if (job.status !== "cancelled") job.status = code === 0 && resultObject.ok !== false ? "succeeded" : "failed";
       job.proc = null;
+      this.persist(job);
     });
     proc.stdin.end(JSON.stringify({ type, root, args }));
     return this.summary(job);
@@ -447,6 +537,7 @@ class JobManager {
       signal: job.signal,
       stdout_tail: job.stdout.slice(-4000),
       stderr_tail: job.stderr.slice(-4000),
+      artifact_path: job.artifact_path || path.relative(job.root, this.jobPath(job.root, job.id)),
     };
   }
 
@@ -462,6 +553,8 @@ class JobManager {
     if (job.proc && job.status === "running") {
       job.status = "cancelled";
       job.proc.kill("SIGTERM");
+      job.finished_at = new Date().toISOString();
+      this.persist(job);
     }
     return { ok: true, job: this.summary(job) };
   }
@@ -577,19 +670,19 @@ function mutatePacket(args: RuntimeArgs): RuntimeEnvelope {
   if (action === "claim") {
     const trackId = args.trackId || args.track_id;
     if (!trackId) return envelope({ ok: false, error: "trackId is required" });
-    return envelope(core.claimTrack(root, trackId, args));
+    return syncedEnvelope(root, "mutate:claim", () => core.claimTrack(root, trackId, args));
   }
-  if (action === "heartbeat") return envelope(core.heartbeatTrack(root, args));
+  if (action === "heartbeat") return syncedEnvelope(root, "mutate:heartbeat", () => core.heartbeatTrack(root, args));
   if (action === "set_status") {
     const trackId = args.trackId || args.track_id;
     if (!trackId || !args.status) return envelope({ ok: false, error: "trackId and status are required" });
-    return envelope(core.setTrackStatus(root, trackId, args.status));
+    return syncedEnvelope(root, "mutate:set_status", () => core.setTrackStatus(root, String(trackId), String(args.status)));
   }
-  if (action === "metadata_patch") return envelope(core.metadataPatch(root, args));
-  if (action === "record_review") return envelope(core.recordReview(root, args));
-  if (action === "record_worker") return envelope(core.recordParallelWorker(root, args));
-  if (action === "record_task_result") return envelope(core.recordTaskResult(root, args));
-  if (action === "regen_index") return envelope(core.regenIndex(root));
+  if (action === "metadata_patch") return syncedEnvelope(root, "mutate:metadata_patch", () => core.metadataPatch(root, args));
+  if (action === "record_review") return syncedEnvelope(root, "mutate:record_review", () => core.recordReview(root, args));
+  if (action === "record_worker") return syncedEnvelope(root, "mutate:record_worker", () => core.recordParallelWorker(root, { ...args, execute: false }));
+  if (action === "record_task_result") return syncedEnvelope(root, "mutate:record_task_result", () => core.recordTaskResult(root, args));
+  if (action === "regen_index") return syncedEnvelope(root, "mutate:regen_index", () => core.regenIndex(root));
   return envelope({ ok: false, error: `Unknown cadre_mutate action: ${action}` });
 }
 
@@ -622,7 +715,7 @@ async function reviewPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
     return envelope(core.reviewGate(root, trackId, args));
   }
   if (action === "pr_ci_status") return envelope(core.prCiStatus(root, args));
-  if (action === "provider_evidence") return envelope(core.providerEvidence(root, args));
+  if (action === "provider_evidence") return syncedEnvelope(root, "review:provider_evidence", () => core.providerEvidence(root, args));
   return envelope({ ok: false, error: `Unknown cadre_review action: ${action}` });
 }
 
@@ -634,9 +727,10 @@ async function intelPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
   const action = args.action || "repo_map";
   if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args);
   if (action === "repo_map") return envelope(core.repoMap(root, args));
+  if (action === "lsp_setup") return envelope(core.lspSetup(root, args));
   if (action === "workspace_diagnostics") return envelope(core.workspaceDiagnostics(root, args));
   if (action === "test_impact") return envelope(core.testImpact(root, args));
-  if (action === "dependency_graph") return envelope(core.dependencyGraph(root));
+  if (action === "dependency_graph") return envelope(core.dependencyGraph(root, args));
   if (action === "lsp_impact") {
     let lspResult: JsonObject | null = null;
     if ((args.base || args.head) && args.includeLsp !== false) {
@@ -669,9 +763,18 @@ function jobPacket(args: RuntimeArgs): RuntimeEnvelope {
   }
   if (action === "status") {
     const job = jobs.get(args.jobId || args.id);
-    return envelope(job ? { ok: true, job: jobs.summary(job) } : { ok: false, error: `Job not found: ${args.jobId || args.id}` });
+    if (job) return envelope({ ok: true, job: jobs.summary(job) });
+    const info = args.root ? rootFromCandidate(args.root) : null;
+    const persisted = info ? jobs.loadPersisted(info.root, args.jobId || args.id) : null;
+    return envelope(persisted ? { ok: true, job: persisted } : { ok: false, error: `Job not found: ${args.jobId || args.id}` });
   }
-  if (action === "result") return envelope(jobs.result(args.jobId || args.id));
+  if (action === "result") {
+    const live = jobs.result(args.jobId || args.id);
+    if (live.ok !== false) return envelope(live);
+    const info = args.root ? rootFromCandidate(args.root) : null;
+    const persisted = info ? jobs.loadPersisted(info.root, args.jobId || args.id) : null;
+    return envelope(persisted ? { ok: persisted.status === "succeeded", job: persisted, result: asJsonObject(persisted.result) } : live);
+  }
   if (action === "cancel") return envelope(jobs.cancel(args.jobId || args.id));
   if (action === "list") return envelope(jobs.list());
   return envelope({ ok: false, error: `Unknown cadre_job action: ${action}` });
@@ -687,10 +790,13 @@ async function toolCall(name: string, args: RuntimeArgs = {}): Promise<TextJsonR
   if (name === "cadre_complete_task") {
     const root = requireCadreRoot(args);
     if (args.async === true) return asTextJson(jobEnvelope("complete_task", root, args));
-    return asTextJson(envelope(core.completeTask(root, args)));
+    return asTextJson(syncedEnvelope(root, "complete_task", () => core.completeTask(root, { ...args, execute: false })));
   }
   if (name === "cadre_beads") {
     const root = requireCadreRoot(args);
+    if (beadsOperationMutates(args.operation)) {
+      return asTextJson(syncedEnvelope(root, `beads:${args.operation || "unknown"}`, () => core.beadsTaskWrite(root, args)));
+    }
     return asTextJson(envelope(core.beadsTaskWrite(root, args)));
   }
   if (name === "cadre_job") return asTextJson(jobPacket(args));
@@ -710,15 +816,58 @@ function resourceList(): JsonObject {
       { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
       { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://lsp-status", name: "Cadre LSP status", description: "Configured LSP servers plus setup recommendations. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://repo-topology", name: "Cadre repo topology", description: "Mono/polyrepo topology. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://provider-actions", name: "Cadre provider actions", description: "Provider action queue from ship/land packets. Read with ?root=/path&trackId=<id>&workflow=ship|land.", mimeType: "application/json" },
+      { uri: "cadre://ship-plan", name: "Cadre ship plan", description: "Ship workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://land-plan", name: "Cadre land plan", description: "Land workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://release-plan", name: "Cadre release plan", description: "Release workflow dry-run plan. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://my-next-actions", name: "Cadre next actions", description: "Mine/available/action queue. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://review-queue", name: "Cadre review queue", description: "Bounded tracks needing review/ship attention. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://handoff-inbox", name: "Cadre handoff inbox", description: "Incoming handoffs from team board and Beads. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://parallel-state", name: "Cadre parallel state", description: "Track parallel worker state. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://quality-gate", name: "Cadre quality gate", description: "Review and integrity gate summary. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b.", mimeType: "application/json" },
+      { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>.", mimeType: "application/json" },
     ],
   };
+}
+
+function resourceTemplatesList(): JsonObject {
+  const listed = resourceList();
+  const resources = Array.isArray(listed.resources) ? listed.resources : [];
+  const templates = resources.map((resource) => {
+    const uri = asString(asJsonObject(resource).uri);
+    const required = uri.includes("track") || uri.includes("quality") || uri.includes("parallel") || uri.includes("review-evidence")
+      ? ["root", "trackId"]
+      : uri.includes("job-result")
+        ? ["root", "jobId"]
+        : ["root"];
+    return {
+      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,jobId}`,
+      name: asJsonObject(resource).name,
+      description: asJsonObject(resource).description,
+      mimeType: "application/json",
+      required,
+    };
+  });
+  return { resourceTemplates: templates };
 }
 
 function parseResourceUri(uri: string): ResourceQuery {
   const [rawBase, query = ""] = uri.split("?");
   const base = rawBase || "";
   const params = new URLSearchParams(query);
-  return { base, root: params.get("root"), trackId: params.get("trackId"), symbol: params.get("symbol") };
+  return {
+    base,
+    root: params.get("root"),
+    trackId: params.get("trackId"),
+    symbol: params.get("symbol"),
+    workflow: params.get("workflow"),
+    jobId: params.get("jobId"),
+    files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean),
+  };
 }
 
 function resourceRead(uri: string): JsonObject {
@@ -733,6 +882,70 @@ function resourceRead(uri: string): JsonObject {
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
   else if (resource.base === "cadre://workspace-diagnostics") value = core.workspaceDiagnostics(root);
+  else if (resource.base === "cadre://lsp-status") value = { ok: true, status: core.lspConfigStatus(root), setup: core.lspSetup(root, { execute: false }) };
+  else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: core.loadTopology(root) };
+  else if (resource.base === "cadre://ship-plan") value = core.workflowPacket(root, { workflow: "ship", trackId: resource.trackId || undefined });
+  else if (resource.base === "cadre://land-plan") value = core.workflowPacket(root, { workflow: "land", trackId: resource.trackId || undefined });
+  else if (resource.base === "cadre://release-plan") value = core.workflowPacket(root, { workflow: "release" });
+  else if (resource.base === "cadre://my-next-actions") {
+    const mine = core.teamBoard(root, { mine: true });
+    const available = core.availableWork(root);
+    value = {
+      ok: mine.ok !== false && available.ok !== false,
+      mine: {
+        wip: Array.isArray(mine.wip) ? mine.wip : [],
+        incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
+        review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : [],
+      },
+      available: Array.isArray(available.available) ? available.available : [],
+      reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : [],
+    };
+  }
+  else if (resource.base === "cadre://review-queue") {
+    const board = core.teamBoard(root);
+    value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
+  }
+  else if (resource.base === "cadre://handoff-inbox") {
+    const board = core.teamBoard(root, { mine: true });
+    value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
+  }
+  else if (resource.base === "cadre://parallel-state") value = core.parallelWorkflow(root, { action: "plan", trackId: resource.trackId || undefined });
+  else if (resource.base === "cadre://quality-gate") {
+    if (!resource.trackId) value = { ok: false, error: "trackId is required" };
+    else value = {
+      ok: true,
+      track_id: resource.trackId,
+      integrity: core.planIntegrity(root, resource.trackId),
+      review_gate: core.reviewGate(root, resource.trackId, {}),
+      collisions: core.collisionScan(root),
+    };
+  }
+  else if (resource.base === "cadre://test-impact") value = core.testImpact(root, { files: resource.files });
+  else if (resource.base === "cadre://track-plan") {
+    const context = core.trackContext(root, resource.trackId);
+    const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
+    value = context.ok === false || !planPath
+      ? context
+      : core.parsePlanFile(path.resolve(root, planPath));
+  }
+  else if (resource.base === "cadre://job-result") {
+    const persisted = jobs.loadPersisted(root, resource.jobId);
+    value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
+  }
+  else if (resource.base === "cadre://provider-actions") {
+    const workflow = resource.workflow === "land" ? "land" : "ship";
+    const plan = asJsonObject(core.workflowPacket(root, { workflow, trackId: resource.trackId || undefined }));
+    value = {
+      ok: plan.ok !== false,
+      workflow,
+      track_id: resource.trackId,
+      phase_state: plan.phase_state,
+      provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
+      required_provider_mcp: plan.required_provider_mcp || null,
+      required_evidence: plan.required_evidence || null,
+      continuation_token: plan.continuation_token || null,
+    };
+  }
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
 }
@@ -756,6 +969,7 @@ async function handle(message: McpMessage): Promise<unknown> {
     return toolCall(name, asJsonObject(params.arguments) as RuntimeArgs);
   }
   if (method === "resources/list") return resourceList();
+  if (method === "resources/templates/list") return resourceTemplatesList();
   if (method === "resources/read") {
     const uri = asOptionalString(params.uri);
     if (!uri) throw Object.assign(new Error("resources/read requires params.uri"), { code: -32602 });

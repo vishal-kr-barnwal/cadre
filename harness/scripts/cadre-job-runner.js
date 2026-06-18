@@ -48,6 +48,9 @@ function asOptionalString(value) {
 function asNumber(value, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -286,6 +289,82 @@ function runCommand(command, args, options = {}) {
   };
   if (options.cwd !== void 0) commandResult.cwd = options.cwd;
   return commandResult;
+}
+function parsePorcelainFiles(text) {
+  return String(text || "").split(/\r?\n/).filter(Boolean).flatMap((line) => {
+    const raw = line.slice(3).trim();
+    if (!raw) return [];
+    if (raw.includes(" -> ")) return [raw.split(" -> ").pop() ?? ""];
+    return [raw.replace(/^"|"$/g, "")];
+  }).filter(Boolean);
+}
+function isControlPlaneFile(file) {
+  const normalized = String(file || "").replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized) return true;
+  if (normalized.startsWith("cadre/")) return true;
+  if (normalized.startsWith(".beads/")) return true;
+  if (normalized === ".gitattributes" || normalized === ".gitmodules") return true;
+  if (normalized === "cadre-merge-train.gitlab-ci.yml") return true;
+  if (normalized === ".gitlab-ci.yml") return true;
+  if (normalized.startsWith(".github/workflows/cadre-")) return true;
+  return false;
+}
+function controlPlaneSyncSafety(root, mode, remote, branch) {
+  const status = runCommand("git", ["status", "--porcelain"], { cwd: root });
+  const dirtyFiles = parsePorcelainFiles(status.stdout);
+  const unsafeDirtyFiles = dirtyFiles.filter((file) => !isControlPlaneFile(file));
+  const safety = {
+    ok: true,
+    mode,
+    remote,
+    branch,
+    dirty_files: dirtyFiles,
+    unsafe_dirty_files: unsafeDirtyFiles,
+    ahead_files: [],
+    unsafe_ahead_files: [],
+    warnings: []
+  };
+  if (!status.ok) {
+    return { ...safety, ok: false, reason: "Unable to inspect git status", status };
+  }
+  if (unsafeDirtyFiles.length > 0) {
+    return {
+      ...safety,
+      ok: false,
+      reason: "Working tree has non-control-plane changes; refusing control-plane sync"
+    };
+  }
+  if (mode !== "post") return safety;
+  const remoteRef = `${remote}/${branch}`;
+  const fetch = runCommand("git", ["fetch", "--quiet", remote, branch], { cwd: root });
+  const rev = runCommand("git", ["rev-parse", "--verify", remoteRef], { cwd: root });
+  let diff;
+  if (fetch.ok && rev.ok) {
+    diff = runCommand("git", ["diff", "--name-only", `${remoteRef}..HEAD`], { cwd: root });
+  } else {
+    return {
+      ...safety,
+      ok: false,
+      reason: `Unable to verify ${remoteRef}; refusing control-plane post-sync rather than classifying only the last commit`,
+      fetch,
+      rev
+    };
+  }
+  const aheadFiles = diff.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const unsafeAheadFiles = aheadFiles.filter((file) => !isControlPlaneFile(file));
+  safety.ahead_files = aheadFiles;
+  safety.unsafe_ahead_files = unsafeAheadFiles;
+  if (!diff.ok) {
+    return { ...safety, ok: false, reason: "Unable to classify unpushed commits", diff };
+  }
+  if (unsafeAheadFiles.length > 0) {
+    return {
+      ...safety,
+      ok: false,
+      reason: "Unpushed commits include non-control-plane files; refusing control-plane push"
+    };
+  }
+  return safety;
 }
 function commandExists(command, cwd) {
   const key = `${process.env.PATH || ""}\0${cwd}\0${command}`;
@@ -612,6 +691,41 @@ function asArray(value) {
   if (isRecord(value) && Array.isArray(value.data)) return value.data.filter(isRecord).map(asJsonObject);
   return [];
 }
+function resultOk(value) {
+  return !value || value.ok !== false;
+}
+function withSharedControlPlaneSync(root, args = {}, operation, fn) {
+  const topology = loadTopology(root);
+  if (args.execute !== true || topology.config.sync_mode !== "shared" || args.skipSync === true) {
+    return fn();
+  }
+  const syncPre = syncControlPlane(root, { mode: "pre" });
+  if (syncPre.ok === false) {
+    return {
+      ok: false,
+      phase_state: "blocked",
+      stage: "sync_pre",
+      operation,
+      sync_pre: syncPre
+    };
+  }
+  const result = fn();
+  if (result.ok === false) {
+    return {
+      ...result,
+      sync_pre: syncPre,
+      sync_post: null
+    };
+  }
+  const syncPost = syncControlPlane(root, { mode: "post" });
+  return {
+    ...result,
+    ok: resultOk(result) && syncPost.ok !== false,
+    phase_state: syncPost.ok === false ? "recovery_required" : result.phase_state,
+    sync_pre: syncPre,
+    sync_post: syncPost
+  };
+}
 function findTrack(root, trackId) {
   return listTracks(root).find((item) => item.track_id === trackId) || null;
 }
@@ -920,6 +1034,9 @@ function patchCompletionJournal(track, key, patcher) {
   return journal.entries[key];
 }
 function completeTask(root, args = {}) {
+  return withSharedControlPlaneSync(root, args, "complete_task", () => completeTaskInner(root, { ...args, skipSync: true }));
+}
+function completeTaskInner(root, args = {}) {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
   const phaseIndex = Number(args.phaseIndex);
@@ -1148,6 +1265,31 @@ function completeTask(root, args = {}) {
     beads,
     journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal
   };
+}
+function syncControlPlane(root, args = {}) {
+  const topology = loadTopology(root);
+  if (topology.config.sync_mode !== "shared") {
+    return { ok: true, skipped: true, reason: "sync_mode is not shared", commands: [] };
+  }
+  const mode = args.mode || "pre";
+  const remote = asOptionalString(topology.config.control_remote) || "origin";
+  const branch = asOptionalString(topology.config.control_branch) || "main";
+  const commands = [];
+  commands.push(runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root }));
+  const safety = controlPlaneSyncSafety(root, mode, remote, branch);
+  if (!safety.ok) {
+    return { ok: false, mode, remote, branch, safety, commands };
+  }
+  if (mode === "pre") {
+    commands.push(runCommand("git", ["pull", "--rebase", remote, branch], { cwd: root }));
+    if (commandExists("bd", root)) commands.push(runCommand("bd", ["dolt", "pull"], { cwd: root }));
+  } else if (mode === "post") {
+    if (commandExists("bd", root)) commands.push(runCommand("bd", ["dolt", "push"], { cwd: root }));
+    commands.push(runCommand("git", ["push", remote, branch], { cwd: root }));
+  } else {
+    return { ok: false, error: `Invalid sync mode: ${mode}`, commands };
+  }
+  return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, safety, commands };
 }
 function testCoverage(root, args = {}) {
   let track = null;
@@ -1464,7 +1606,52 @@ function gitTrackedFiles(root) {
   if (!result.ok) return [];
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).filter((file) => !isIgnoredRepoMapFile(file));
 }
+function selectedRepoNames(args = {}) {
+  const values = [
+    asOptionalString(args.repo),
+    ...asStringArray(args.repos)
+  ].filter((value) => Boolean(value));
+  return values.length > 0 ? new Set(values) : null;
+}
+function intelRepoRoots(root, args = {}) {
+  const selected = selectedRepoNames(args);
+  const topology = loadTopology(root);
+  const control = {
+    repo: ".",
+    root,
+    path: ".",
+    source: "control-root"
+  };
+  if (!topology.polyrepo) return selected && !selected.has(".") ? [] : [control];
+  const entries = [control];
+  for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
+    const repo = asJsonObject(raw);
+    if (repo.enabled === false) continue;
+    const name = asOptionalString(repo.name);
+    const rel = asOptionalString(repo.submodule_path);
+    if (!name || !rel) continue;
+    entries.push({
+      repo: name,
+      root: import_node_path.default.resolve(root, rel),
+      path: rel,
+      source: "repos.json"
+    });
+  }
+  return selected ? entries.filter((entry) => selected.has(entry.repo)) : entries;
+}
+function combineLanguageCounts(entries) {
+  const counts = {};
+  for (const entry of entries) {
+    const languages = asJsonObject(entry.by_language);
+    for (const [language, count] of Object.entries(languages)) {
+      counts[language] = (counts[language] || 0) + Number(count || 0);
+    }
+  }
+  return Object.fromEntries(Object.entries(counts).sort());
+}
 function languageForFile(file) {
+  const base = import_node_path.default.basename(file);
+  if (base === "Dockerfile" || base === "Containerfile") return "dockerfile";
   return {
     ".js": "javascript",
     ".jsx": "javascript",
@@ -1477,7 +1664,57 @@ function languageForFile(file) {
     ".kt": "kotlin",
     ".swift": "swift",
     ".rb": "ruby",
-    ".php": "php"
+    ".php": "php",
+    ".dart": "dart",
+    ".html": "html",
+    ".htm": "html",
+    ".css": "css",
+    ".scss": "css",
+    ".sass": "css",
+    ".less": "css",
+    ".json": "json",
+    ".jsonc": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".md": "markdown",
+    ".mdx": "markdown",
+    ".toml": "toml",
+    ".lua": "lua",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".zsh": "shell",
+    ".tf": "terraform",
+    ".tfvars": "terraform",
+    ".hcl": "terraform",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".clj": "clojure",
+    ".cljs": "clojure",
+    ".cljc": "clojure",
+    ".hs": "haskell",
+    ".lhs": "haskell",
+    ".ml": "ocaml",
+    ".mli": "ocaml",
+    ".zig": "zig",
+    ".nix": "nix",
+    ".elm": "elm",
+    ".vue": "vue",
+    ".svelte": "svelte",
+    ".xml": "xml",
+    ".xsd": "xml",
+    ".graphql": "graphql",
+    ".gql": "graphql",
+    ".prisma": "prisma",
+    ".proto": "protobuf",
+    ".c": "c-cpp",
+    ".h": "c-cpp",
+    ".cc": "c-cpp",
+    ".cpp": "c-cpp",
+    ".cxx": "c-cpp",
+    ".hpp": "c-cpp",
+    ".cs": "csharp"
   }[import_node_path.default.extname(file)] || null;
 }
 function extractRepoSymbols(root, file, limitPerFile = 40) {
@@ -1516,29 +1753,52 @@ function extractRepoSymbols(root, file, limitPerFile = 40) {
 function repoMap(root, args = {}) {
   const limit = Number(args.limit || 200);
   const symbol = args.symbol ? String(args.symbol) : null;
+  const repos = intelRepoRoots(root, args);
   if (symbol) {
-    const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-    const matches = result.stdout.split(/\r?\n/).filter(Boolean).filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || "")).slice(0, limit).map((line) => {
-      const [file, lineNo, ...rest] = line.split(":");
-      return { file: file || "", line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
+    const repoResults2 = repos.map((entry) => {
+      const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: entry.root, maxBuffer: 10 * 1024 * 1024 });
+      const matches2 = result.stdout.split(/\r?\n/).filter(Boolean).filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || "")).slice(0, limit).map((line) => {
+        const [file, lineNo, ...rest] = line.split(":");
+        return { repo: entry.repo, file: file || "", line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
+      });
+      return { repo: entry.repo, root: entry.root, path: entry.path, ok: result.ok || matches2.length > 0, matches: matches2, truncated: matches2.length >= limit };
     });
-    return { ok: result.ok || matches.length > 0, root, symbol, matches, truncated: matches.length >= limit };
+    const matches = repoResults2.flatMap((entry) => asArray(entry.matches)).slice(0, limit);
+    return { ok: repoResults2.some((entry) => entry.ok) || matches.length > 0, root, symbol, matches, repos: repoResults2, truncated: matches.length >= limit };
   }
-  const files = gitTrackedFiles(root);
-  const byLanguage = {};
-  const symbols = [];
-  for (const file of files) {
-    const language = languageForFile(file);
-    if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
-    if (symbols.length < limit) symbols.push(...extractRepoSymbols(root, file, 12));
-    if (symbols.length > limit) symbols.length = limit;
-  }
+  const repoResults = repos.map((entry) => {
+    const files2 = gitTrackedFiles(entry.root);
+    const byLanguage = {};
+    const symbols2 = [];
+    for (const file of files2) {
+      const language = languageForFile(file);
+      if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
+      if (symbols2.length < limit) symbols2.push(...extractRepoSymbols(entry.root, file, 12).map((symbolEntry) => ({
+        ...symbolEntry,
+        repo: entry.repo
+      })));
+      if (symbols2.length > limit) symbols2.length = limit;
+    }
+    return {
+      ok: true,
+      repo: entry.repo,
+      root: entry.root,
+      path: entry.path,
+      files: files2.length,
+      by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
+      symbols: symbols2,
+      truncated: symbols2.length >= limit
+    };
+  });
+  const files = repoResults.reduce((sum, entry) => sum + Number(entry.files || 0), 0);
+  const symbols = repoResults.flatMap((entry) => asArray(entry.symbols)).slice(0, limit);
   return {
     ok: true,
     root,
-    files: files.length,
-    by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
+    files,
+    by_language: combineLanguageCounts(repoResults),
     symbols,
+    repos: repoResults,
     truncated: symbols.length >= limit
   };
 }
@@ -1550,10 +1810,24 @@ function lspImpact(root, args = {}) {
   for (const symbol of symbols.filter(Boolean)) {
     symbolResults[symbol] = repoMap(root, { symbol, limit });
   }
+  const repoEntries = intelRepoRoots(root, args);
+  const repoFileSymbols = repoEntries.map((entry) => {
+    const fileSymbols2 = {};
+    for (const file of files) {
+      if (isIgnoredRepoMapFile(file)) continue;
+      fileSymbols2[file] = extractRepoSymbols(entry.root, file, limit).map((symbolEntry) => ({
+        ...symbolEntry,
+        repo: entry.repo
+      }));
+    }
+    return { repo: entry.repo, root: entry.root, path: entry.path, files: fileSymbols2 };
+  });
   const fileSymbols = {};
-  for (const file of files) {
-    if (isIgnoredRepoMapFile(file)) continue;
-    fileSymbols[file] = extractRepoSymbols(root, file, limit);
+  for (const entry of repoFileSymbols) {
+    for (const [file, symbolsForFile] of Object.entries(asJsonObject(entry.files))) {
+      const key = entry.repo === "." ? file : `${entry.repo}:${file}`;
+      fileSymbols[key] = asArray(symbolsForFile);
+    }
   }
   const review = args.lspResult || args.lsp_result ? args.lspResult || args.lsp_result : args.base || args.head ? lspReview(root, { base: args.base || "main", head: args.head || "HEAD", config: args.config }) : null;
   return {
@@ -1561,6 +1835,7 @@ function lspImpact(root, args = {}) {
     root,
     symbols: symbolResults,
     files: fileSymbols,
+    repos: repoFileSymbols,
     review
   };
 }
@@ -1715,13 +1990,11 @@ ${last.stderr}`.match(/(?:rows?\s+affected|affected\s+rows?)\D+(\d+)/i) : null;
 }
 function lspReview(root, args = {}) {
   const candidates = [
-    import_node_path.default.join(root, "templates", "scripts", "cadre-lsp-review.js"),
     import_node_path.default.join(__dirname, "cadre-lsp-review.js"),
     import_node_path.default.join(__dirname, "..", "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "templates", "scripts", "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "..", "templates", "scripts", "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "skills", "cadre", "templates", "scripts", "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "..", "skills", "cadre", "templates", "scripts", "cadre-lsp-review.js")
+    import_node_path.default.join(__dirname, "..", "scripts", "cadre-lsp-review.js"),
+    import_node_path.default.join(__dirname, "..", "..", "scripts", "cadre-lsp-review.js"),
+    import_node_path.default.join(root, "cadre", "scripts", "cadre-lsp-review.js")
   ];
   const helper = candidates.find(fileExists);
   if (!helper) return { available: false, reason: "No cadre-lsp-review.js helper found", checked: candidates };
