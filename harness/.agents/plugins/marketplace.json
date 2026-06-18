@@ -8,7 +8,7 @@
       "name": "cadre",
       "source": {
         "source": "local",
-        "path": "./harness/plugins/cadre"
+        "path": "./plugins/cadre"
       },
       "policy": {
         "installation": "AVAILABLE",

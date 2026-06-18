@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "cadre",
-      "source": "./harness/plugins/cadre-claude",
+      "source": "./plugins/cadre-claude",
       "description": "Skill-first Cadre workflows with bundled MCP tooling for context-driven development.",
       "version": "2.0.0",
       "author": {
