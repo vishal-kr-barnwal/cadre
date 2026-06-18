@@ -76,6 +76,7 @@ export interface TrackMetadata extends JsonObject {
   beads_tasks?: JsonObject;
   last_coverage?: number | null;
   review?: ReviewMetadata;
+  review_evidence?: JsonObject;
   lease?: LeaseMetadata;
 }
 

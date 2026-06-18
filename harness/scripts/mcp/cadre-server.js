@@ -2929,6 +2929,82 @@ function recordReviewUnlocked(root, track, args = {}) {
   const gate = reviewGate(root, track.track_id, args);
   return { ok: true, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate };
 }
+function reviewEvidencePath(track) {
+  return import_node_path.default.join(track.dir, "review-evidence.json");
+}
+function reviewEvidence(root, trackId) {
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const evidencePath = reviewEvidencePath(track);
+  const evidence = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path.default.relative(root, evidencePath),
+    evidence
+  };
+}
+function providerEvidence(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => providerEvidenceUnlocked(root, track, args));
+}
+function providerEvidenceUnlocked(root, track, args = {}) {
+  const evidencePath = reviewEvidencePath(track);
+  const existing = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  const entries = Array.isArray(existing.entries) ? existing.entries.map(asJsonObject) : [];
+  const findings = Array.isArray(args.findings) ? args.findings.map(asJsonObject) : [];
+  const blockingCount = findings.filter(
+    (finding) => finding.blocking === true || asString(finding.severity) === "blocking"
+  ).length;
+  const provider = args.provider || providerFromConfig(root, args);
+  const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  const providerStatus = fetched ? asJsonObject(fetched) : args.fetch === false ? null : asJsonObject(prCiStatus(root, args));
+  const entry = {
+    id: `review-${entries.length + 1}`,
+    recorded_at: utcNow(),
+    provider,
+    reviewer: args.reviewer || gitIdentity(root) || null,
+    reviewed_sha: args.reviewedSha || args.reviewed_sha || gitRevParse(root, "HEAD"),
+    blocking_count: Number(args.blockingCount ?? blockingCount),
+    verdict: args.verdict || null,
+    findings,
+    evidence: providerStatus,
+    notes: asOptionalString(args.notes) || null
+  };
+  const next = {
+    ...existing,
+    track_id: track.track_id,
+    entries: [...entries, entry],
+    updated_at: entry.recorded_at
+  };
+  writeJson(evidencePath, next);
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    current.review_evidence = {
+      path: import_node_path.default.relative(root, evidencePath),
+      entries: asArray(next.entries).length || entries.length + 1,
+      latest_id: entry.id,
+      latest_recorded_at: entry.recorded_at,
+      provider,
+      blocking_count: entry.blocking_count
+    };
+    return current;
+  }, { lock: false });
+  if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path.default.relative(root, evidencePath),
+    entry,
+    metadata
+  };
+}
 function syncControlPlane(root, args = {}) {
   const topology = loadTopology(root);
   if (topology.config.sync_mode !== "shared") {
@@ -3774,7 +3850,7 @@ var TOOLS = [
   ),
   packetSchema(
     { name: "cadre_review", text: "Cadre review packet: review assist, machine gate, review gate, and PR/CI status." },
-    ["assist", "machine_gate", "gate", "pr_ci_status"]
+    ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"]
   ),
   packetSchema(
     { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
@@ -4162,6 +4238,7 @@ async function reviewPacket(args) {
     return envelope(reviewGate(root, trackId, args));
   }
   if (action === "pr_ci_status") return envelope(prCiStatus(root, args));
+  if (action === "provider_evidence") return envelope(providerEvidence(root, args));
   return envelope({ ok: false, error: `Unknown cadre_review action: ${action}` });
 }
 async function intelPacket(args) {
@@ -4235,6 +4312,7 @@ function resourceList() {
       { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
       { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" }
     ]
@@ -4254,6 +4332,7 @@ function resourceRead(uri) {
   else if (resource.base === "cadre://fleet-board") value = fleetStatus(root);
   else if (resource.base === "cadre://beads-summary") value = beadsSummary(root);
   else if (resource.base === "cadre://track-context") value = trackContext(root, resource.trackId);
+  else if (resource.base === "cadre://review-evidence") value = reviewEvidence(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });

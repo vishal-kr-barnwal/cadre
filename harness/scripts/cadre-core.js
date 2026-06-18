@@ -64,6 +64,7 @@ __export(cadre_core_exports, {
   planIntegrity: () => planIntegrity,
   polyrepoPreflight: () => polyrepoPreflight,
   prCiStatus: () => prCiStatus,
+  providerEvidence: () => providerEvidence,
   recordParallelWorker: () => recordParallelWorker,
   recordReview: () => recordReview,
   recordTaskResult: () => recordTaskResult,
@@ -71,6 +72,7 @@ __export(cadre_core_exports, {
   releaseLock: () => releaseLock,
   repoMap: () => repoMap,
   reviewAssist: () => reviewAssist,
+  reviewEvidence: () => reviewEvidence,
   reviewGate: () => reviewGate,
   reviewMachineGate: () => reviewMachineGate,
   setTrackStatus: () => setTrackStatus,
@@ -2981,6 +2983,82 @@ function recordReviewUnlocked(root, track, args = {}) {
   const gate = reviewGate(root, track.track_id, args);
   return { ok: true, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate };
 }
+function reviewEvidencePath(track) {
+  return import_node_path.default.join(track.dir, "review-evidence.json");
+}
+function reviewEvidence(root, trackId) {
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const evidencePath = reviewEvidencePath(track);
+  const evidence = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path.default.relative(root, evidencePath),
+    evidence
+  };
+}
+function providerEvidence(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => providerEvidenceUnlocked(root, track, args));
+}
+function providerEvidenceUnlocked(root, track, args = {}) {
+  const evidencePath = reviewEvidencePath(track);
+  const existing = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  const entries = Array.isArray(existing.entries) ? existing.entries.map(asJsonObject) : [];
+  const findings = Array.isArray(args.findings) ? args.findings.map(asJsonObject) : [];
+  const blockingCount = findings.filter(
+    (finding) => finding.blocking === true || asString(finding.severity) === "blocking"
+  ).length;
+  const provider = args.provider || providerFromConfig(root, args);
+  const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  const providerStatus = fetched ? asJsonObject(fetched) : args.fetch === false ? null : asJsonObject(prCiStatus(root, args));
+  const entry = {
+    id: `review-${entries.length + 1}`,
+    recorded_at: utcNow(),
+    provider,
+    reviewer: args.reviewer || gitIdentity(root) || null,
+    reviewed_sha: args.reviewedSha || args.reviewed_sha || gitRevParse(root, "HEAD"),
+    blocking_count: Number(args.blockingCount ?? blockingCount),
+    verdict: args.verdict || null,
+    findings,
+    evidence: providerStatus,
+    notes: asOptionalString(args.notes) || null
+  };
+  const next = {
+    ...existing,
+    track_id: track.track_id,
+    entries: [...entries, entry],
+    updated_at: entry.recorded_at
+  };
+  writeJson(evidencePath, next);
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    current.review_evidence = {
+      path: import_node_path.default.relative(root, evidencePath),
+      entries: asArray(next.entries).length || entries.length + 1,
+      latest_id: entry.id,
+      latest_recorded_at: entry.recorded_at,
+      provider,
+      blocking_count: entry.blocking_count
+    };
+    return current;
+  }, { lock: false });
+  if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path.default.relative(root, evidencePath),
+    entry,
+    metadata
+  };
+}
 function syncControlPlane(root, args = {}) {
   const topology = loadTopology(root);
   if (topology.config.sync_mode !== "shared") {
@@ -3871,6 +3949,7 @@ ${body}${body ? "\n" : ""}${end}
   planIntegrity,
   polyrepoPreflight,
   prCiStatus,
+  providerEvidence,
   recordParallelWorker,
   recordReview,
   recordTaskResult,
@@ -3878,6 +3957,7 @@ ${body}${body ? "\n" : ""}${end}
   releaseLock,
   repoMap,
   reviewAssist,
+  reviewEvidence,
   reviewGate,
   reviewMachineGate,
   setTrackStatus,

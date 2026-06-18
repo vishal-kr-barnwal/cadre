@@ -712,6 +712,43 @@ test("reviewAssist and lspImpact provide fallback review context", () => {
   }
 });
 
+test("providerEvidence persists structured review evidence and metadata pointer", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-review-evidence-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "reviewer@example.com"]);
+    git(root, ["config", "user.name", "Reviewer"]);
+    writeTrack(root, "evidence_20260617", samplePlan("evidence_20260617"), {
+      owner: "owner@example.com",
+    });
+
+    const recorded = core.providerEvidence(root, {
+      trackId: "evidence_20260617",
+      provider: "github",
+      reviewer: "reviewer@example.com",
+      fetch: false,
+      findings: [
+        { id: "finding-1", severity: "blocking", message: "Needs a test" },
+        { id: "finding-2", severity: "warning", message: "Polish naming" },
+      ],
+      evidence: { pr: 42, checks: "pending" },
+    });
+    assert.equal(recorded.ok, true);
+    assert.equal(recorded.entry.blocking_count, 1);
+
+    const evidence = core.reviewEvidence(root, "evidence_20260617");
+    assert.equal(evidence.ok, true);
+    assert.equal(evidence.evidence.entries.length, 1);
+    assert.equal(evidence.evidence.entries[0].provider, "github");
+
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "evidence_20260617", "metadata.json"), "utf8"));
+    assert.equal(metadata.review_evidence.path, "cadre/tracks/evidence_20260617/review-evidence.json");
+    assert.equal(metadata.review_evidence.blocking_count, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("polyrepo reviewAssist, machine gate, and review records are repo-aware", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-review-test-"));
   try {

@@ -131,7 +131,7 @@ const TOOLS = [
   ),
   packetSchema(
     { name: "cadre_review", text: "Cadre review packet: review assist, machine gate, review gate, and PR/CI status." },
-    ["assist", "machine_gate", "gate", "pr_ci_status"]
+    ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"]
   ),
   packetSchema(
     { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
@@ -551,6 +551,7 @@ async function reviewPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
     return envelope(core.reviewGate(root, trackId, args));
   }
   if (action === "pr_ci_status") return envelope(core.prCiStatus(root, args));
+  if (action === "provider_evidence") return envelope(core.providerEvidence(root, args));
   return envelope({ ok: false, error: `Unknown cadre_review action: ${action}` });
 }
 
@@ -630,6 +631,7 @@ function resourceList(): JsonObject {
       { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
       { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
     ],
@@ -651,6 +653,7 @@ function resourceRead(uri: string): JsonObject {
   else if (resource.base === "cadre://fleet-board") value = core.fleetStatus(root);
   else if (resource.base === "cadre://beads-summary") value = core.beadsSummary(root);
   else if (resource.base === "cadre://track-context") value = core.trackContext(root, resource.trackId);
+  else if (resource.base === "cadre://review-evidence") value = core.reviewEvidence(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
