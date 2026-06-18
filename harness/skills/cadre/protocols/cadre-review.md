@@ -102,7 +102,9 @@ that needs manual review.
 look outside the diff).** Run two automated passes and fold their results into the
 verdict — they catch regressions a diff-scoped reviewer cannot:
 
-1. **Typecheck / compile / build.** Use the `machine_gate` returned by
+1. **Typecheck / compile / build.** First call MCP `cadre_intel` with
+   `action: "workspace_diagnostics"` to get detected build/test adapters and
+   command plans. Then use the `machine_gate` returned by
    `cadre_review` with `action: "assist"`; if it was skipped or needs a different command, call MCP
    `cadre_review` with `action: "machine_gate"` with `root`, `trackId`, and optional
    `machineCommand`. In **polyrepo**, the tool runs per touched repo/worktree. Each
@@ -126,11 +128,13 @@ verdict — they catch regressions a diff-scoped reviewer cannot:
    GitHub/GitLab MCP tools are installed in the client, use them to fetch PR/MR
    review state, CI/check conclusions, Actions/job log failures, linked issues, and
    discussion context for the track branch or PR. Treat this as evidence only:
-   summarize it in the review report and, when useful, mirror the durable summary
-   to Beads notes. The Cadre verdict is still written only by
+   summarize it in the review report, then persist the bounded summary through
+   MCP `cadre_review` with `action: "provider_evidence"` (`root`, `trackId`,
+   `provider`, `findings`, and `evidence`). The Cadre verdict is still written only by
    `cadre_mutate` with `action: "record_review"`, and `cadre_review` with `action: "gate"` remains the authority for ship
    readiness. If provider MCP tools are unavailable, fall back to
-   `cadre_review` with `action: "pr_ci_status"` (`gh`/`glab`) and note the reduced evidence surface.
+   `cadre_review` with `action: "pr_ci_status"` (`gh`/`glab`), then call
+   `provider_evidence` with the degraded payload so the limitation is durable.
 
 ## 5. Record Findings
 

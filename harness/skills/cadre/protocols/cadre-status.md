@@ -41,8 +41,14 @@ behavior is unchanged):
 - Use `cadre_status` with `action: "live"` for bare status. It returns the compact active-track
   summary and task counts without making the agent manually scan every plan.
 - Use `cadre_status` with `action: "team"` for full multi-track status, ownership, reviewer, and
-  status-count data (`--team`, `--mine`, `--repos`). Read files only for details
+  status-count data (`--team`, `--mine`). Read files only for details
   the MCP payload does not expose yet.
+- Use `cadre_status` with `action: "fleet"` for `--repos`; do not fan out raw
+  git/provider probes in the prompt unless the MCP payload marks a repo as
+  needing repair.
+- Use `cadre_status` with `action: "beads_summary"` when a status view needs
+  Beads ready/WIP/review evidence. If `bd` is unavailable, show the degraded
+  payload instead of halting bare status.
 - Use `cadre_status` with `action: "board"` for rich `--team` / `--mine` output: WIP, incoming
   handoffs, review queue, blockers, and Beads label evidence in one bounded packet.
 - Use `cadre_mutate` with `action: "regen_index"` for `--regen-index`; do not run the helper script or
@@ -52,9 +58,11 @@ behavior is unchanged):
 - Use `cadre_track` with `action: "context"` when a status view needs task-level detail for one
   track. Use `cadre_track` with `action: "integrity"` for validation-style plan warnings rather
   than scanning every `plan.md` in the status workflow.
-- For resource reads, use `cadre://team-board?root=<absolute-or-encoded-root>` or
-  `cadre://collisions?root=<absolute-or-encoded-root>` with the same per-call root
-  contract.
+- For resource reads, use `cadre://team-board?root=<absolute-or-encoded-root>`,
+  `cadre://fleet-board?root=<absolute-or-encoded-root>`,
+  `cadre://beads-summary?root=<absolute-or-encoded-root>`, or
+  `cadre://collisions?root=<absolute-or-encoded-root>` with the same per-call
+  root contract.
 
 **Identity:** compute `<git-identity>` once at runtime as
 `git config user.email` (fallback `git config user.name`, else null). Used to label

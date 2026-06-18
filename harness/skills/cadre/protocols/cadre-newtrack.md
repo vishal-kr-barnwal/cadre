@@ -166,6 +166,15 @@ Create a new track from the workflow arguments.
    - Replace `<Phase Name>` with actual phase name
 
 3. **Analyze for Parallel Execution Potential:**
+
+   **Packet-first planning check:** before doing manual analysis, call
+   `cadre_track` with `action: "plan_assist"` using the draft `planText` (and
+   `trackId` when files already exist), then call `cadre_intel` with
+   `action: "test_impact"` and `action: "dependency_graph"` for detected tests,
+   manifests, and build graph hints. Use those packet results as the primary
+   source for file claims, likely tests, phase dependencies, and parallel
+   candidates. Manual analysis below is only for gaps or user-facing
+   explanation.
    
    a. **Identify Parallelizable Tasks (within phases):**
       - For each phase, analyze tasks for:

@@ -382,21 +382,30 @@ Implement the requested track from the workflow arguments.
 
    c. **PARALLEL TASK EXECUTION FLOW:**
 
-      **If the phase is marked `<!-- execution: parallel -->`, STOP and follow
-      `references/parallel-execution.md` for coordinator mechanics** (wave parse,
-      file-conflict detection, worktree setup, worker monitoring, and merge-back).
-      Do **not** extract the polyrepo branch logic — that already defers to
-      `references/polyrepo-git.md`. The per-worker prompt below stays inline (it is
-      platform-invariant); hand it verbatim to each worker the coordinator spawns.
+      **If the phase is marked `<!-- execution: parallel -->`, use the
+      `cadre_parallel` packet sequence before doing any manual worker
+      coordination:**
+      1. `cadre_parallel` with `action: "next_wave"` to get the ready worker set.
+      2. `cadre_parallel` with `action: "setup_workers"` to get dry-run worktree
+         commands; run with `execute:true` only after reviewing the plan.
+      3. Dispatch workers from the returned `workers[]`.
+      4. For each finished worker, call `cadre_parallel` with
+         `action: "record_finish"` (`execute:true`) before merge-back.
+      5. Call `cadre_parallel` with `action: "merge_back"` and then
+         `action: "cleanup"`; both are dry-run by default and require
+         `execute:true` to mutate git state.
+
+      Use `references/parallel-execution.md` only when the packet reports a
+      repair/fallback condition or for the worker prompt below. Do **not**
+      reconstruct wave parsing, file-conflict detection, worktree setup, worker
+      monitoring, or merge-back from raw CLI snippets unless MCP is unavailable
+      and the workflow has explicitly halted for repair.
 
       **Cross-person file-conflict pre-flight (shared mode only):** when
-      `config.json` `sync_mode == "shared"`, in addition to the same-`files:`
-      overlap check among this phase's tasks, query Beads for in-progress tasks
-      owned by **other** people and warn before starting if any of them claim a
-      file this wave's tasks also claim:
-      ```bash
-      bd list --status in_progress --json   # inspect assignee + any files note
-      ```
+      `config.json` `sync_mode == "shared"`, call `cadre_status` with
+      `action: "beads_summary"` and use its bounded Beads evidence for
+      cross-owner warnings. Raw `bd list --status in_progress --json` is a
+      fallback/debug command only.
       - For each candidate file overlap where the other task's `assignee` !=
         current `<git-identity>`:
         > "⚠️ <file> is also being edited by <owner> (task <id>, in progress).
