@@ -684,3 +684,85 @@ test("polyrepo reviewAssist, machine gate, and review records are repo-aware", (
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("polyrepo workflows fail closed on unresolved task repos", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-missing-repo-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({ mode: "polyrepo", default_repo: "app" }, null, 2));
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({
+      coverage_command: "node -e \"require('fs').writeFileSync('coverage-ran.txt','yes')\"",
+      machine_gate_command: "node -e \"process.exit(0)\"",
+    }, null, 2));
+    fs.mkdirSync(path.join(root, "repos", "app"), { recursive: true });
+
+    const plan = `# Plan: missing_repo_20260617
+
+## Phase 1: App
+
+- [x] Task 1: Update ghost repo
+  <!-- repo: ghost -->
+  <!-- files: src/app.js -->
+`;
+    writeTrack(root, "missing_repo_20260617", plan, {
+      owner: "owner@example.com",
+      last_coverage: 91,
+      repos: {
+        app: {
+          submodule_path: "repos/app",
+          git_branch: "HEAD",
+          base_branch: "main",
+        },
+      },
+    });
+
+    const integrity = core.planIntegrity(root, "missing_repo_20260617");
+    assert.equal(integrity.ok, false);
+    assert.ok(integrity.errors.some((error) => error.repo === "ghost"));
+
+    const schedule = core.phaseSchedule(root, { trackId: "missing_repo_20260617" });
+    assert.equal(schedule.ok, false);
+    assert.ok(schedule.errors.some((error) => error.repo === "ghost"));
+
+    const completion = core.completeTask(root, {
+      trackId: "missing_repo_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+    });
+    assert.equal(completion.ok, false);
+    assert.equal(completion.stage, "polyrepo_repo_resolution");
+    assert.equal(fs.existsSync(path.join(root, "coverage-ran.txt")), false);
+
+    const coverage = core.testCoverage(root, {
+      trackId: "missing_repo_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+    });
+    assert.equal(coverage.ok, false);
+    assert.equal(coverage.stage, "polyrepo_repo_resolution");
+
+    const assist = core.reviewAssist(root, {
+      trackId: "missing_repo_20260617",
+      includeLsp: false,
+      includeMachine: false,
+    });
+    assert.equal(assist.ok, false);
+    assert.equal(assist.stage, "polyrepo_repo_resolution");
+
+    const machine = core.reviewMachineGate(root, {
+      trackId: "missing_repo_20260617",
+    });
+    assert.equal(machine.ok, false);
+    assert.equal(machine.stage, "polyrepo_repo_resolution");
+
+    const review = core.recordReview(root, {
+      trackId: "missing_repo_20260617",
+      verdict: "approved",
+      reviewer: "reviewer@example.com",
+    });
+    assert.equal(review.ok, false);
+    assert.equal(review.stage, "polyrepo_repo_resolution");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

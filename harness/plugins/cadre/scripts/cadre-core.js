@@ -932,6 +932,7 @@ function phaseSchedule(root, args = {}) {
   for (const cycle of cycles) {
     errors.push({ phase_id: cycle[0] || null, message: `Phase dependency cycle: ${cycle.join(" -> ")}` });
   }
+  errors.push(...unresolvedPlanRepos(root, track, args));
   const completed = new Set(phases.filter((phase) => phase.status === "completed").map((phase) => phase.phase_id));
   const ready = errors.length === 0 ? phases.filter((phase) => !["completed", "blocked"].includes(phase.status)).filter((phase) => phase.depends_on.every((dep) => completed.has(dep))) : [];
   const { groups, conflicts } = groupReadyPhases(ready);
@@ -1354,16 +1355,98 @@ function trackContext(root, trackId) {
     worktrees
   };
 }
+function topologyRepoEntries(topology) {
+  const entries = {};
+  for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
+    const repo = asJsonObject(raw);
+    const name = asOptionalString(repo.name);
+    if (!name) continue;
+    entries[name] = {
+      submodule_path: asOptionalString(repo.submodule_path) || "",
+      base_branch: asOptionalString(repo.default_branch) || asOptionalString(repo.base_branch) || "main"
+    };
+  }
+  return entries;
+}
+function trackRepoEntries(root, track) {
+  const topology = loadTopology(root);
+  const entries = topologyRepoEntries(topology);
+  const reposMetadata = isRecord(track.metadata.repos) ? track.metadata.repos : null;
+  if (reposMetadata) {
+    for (const [repo, rawInfo] of Object.entries(reposMetadata)) {
+      entries[repo] = { ...entries[repo], ...asJsonObject(rawInfo) };
+    }
+  }
+  return entries;
+}
+function availableRepoNames(root, track) {
+  return Object.keys(trackRepoEntries(root, track)).sort();
+}
+function unresolvedWorkingRoot(root, track, repo, task = null) {
+  return {
+    ok: false,
+    repo,
+    path: "",
+    source: "polyrepo-unresolved-repo",
+    error: `Unknown polyrepo task repo "${repo}" for track ${track.track_id}`,
+    unresolved_repo: repo,
+    available_repos: availableRepoNames(root, track),
+    track_id: track.track_id,
+    task_key: task?.task_key
+  };
+}
+function isWorkingRootError(value) {
+  return value.ok === false;
+}
+function unresolvedPlanRepos(root, track, args = {}) {
+  const topology = loadTopology(root);
+  if (!topology.polyrepo) return [];
+  const entries = trackRepoEntries(root, track);
+  const known = new Set(Object.keys(entries));
+  const plan = parsePlanFile(track.plan_path);
+  const errors = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const task of plan.tasks || []) {
+    const repo = asOptionalString(args.repo) || task.repo || topology.defaultRepo;
+    if (repo && known.has(repo)) continue;
+    const key = `${repo || ""}:${task.task_key}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    errors.push({
+      track_id: track.track_id,
+      task_key: task.task_key,
+      line: task.line,
+      repo: repo || null,
+      message: repo ? `Unknown polyrepo task repo "${repo}"` : "Task has no repo annotation and repos.json has no default_repo",
+      available_repos: Array.from(known).sort()
+    });
+  }
+  return errors;
+}
+function repoEntriesError(root, track, args = {}) {
+  const topology = loadTopology(root);
+  if (!topology.polyrepo) return null;
+  const entries = trackRepoEntries(root, track);
+  const requested = asOptionalString(args.repo);
+  const missing = requested ? entries[requested] ? [] : [{ repo: requested, message: `Unknown polyrepo repo "${requested}"` }] : unresolvedPlanRepos(root, track, args);
+  if (missing.length === 0) return null;
+  return {
+    ok: false,
+    stage: "polyrepo_repo_resolution",
+    track_id: track.track_id,
+    errors: missing,
+    available_repos: Object.keys(entries).sort()
+  };
+}
 function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
   if (args.workingRoot) {
     const candidate = import_node_path.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path.default.resolve(root, args.workingRoot);
     return { repo: args.repo || task?.repo || ".", path: candidate, source: "argument.workingRoot" };
   }
   const topology = loadTopology(root);
-  const reposMetadata = isRecord(track.metadata.repos) ? track.metadata.repos : null;
-  if (topology.polyrepo && reposMetadata) {
+  if (topology.polyrepo) {
     const repo = args.repo || task?.repo || topology.defaultRepo;
-    const info = typeof repo === "string" ? asJsonObject(reposMetadata[repo]) : {};
+    const info = typeof repo === "string" ? trackRepoEntries(root, track)[repo] || {} : {};
     if (Object.keys(info).length > 0) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
@@ -1372,7 +1455,7 @@ function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
         source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path"
       };
     }
-    return { repo, path: root, source: "polyrepo-missing-repo-fallback" };
+    return unresolvedWorkingRoot(root, track, String(repo || ""), task);
   }
   if (track.metadata.worktree_path) {
     const candidate = import_node_path.default.resolve(root, track.metadata.worktree_path);
@@ -1384,9 +1467,9 @@ function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
 }
 function repoEntriesForTrack(root, track, args = {}) {
   const topology = loadTopology(root);
-  const reposMetadata = isRecord(track.metadata.repos) ? track.metadata.repos : null;
-  if (topology.polyrepo && reposMetadata) {
-    return Object.entries(reposMetadata).filter(([repo]) => !args.repo || args.repo === repo).map(([repo, rawInfo]) => {
+  if (topology.polyrepo) {
+    const repos = trackRepoEntries(root, track);
+    return Object.entries(repos).filter(([repo]) => !args.repo || args.repo === repo).map(([repo, rawInfo]) => {
       const info = asJsonObject(rawInfo);
       const rel = info.worktree_path || info.submodule_path || "";
       return {
@@ -1414,6 +1497,8 @@ function gitRevParse(root, ref) {
   return result.ok ? result.stdout.trim() || null : null;
 }
 function reviewedShasForTrack(root, track, args = {}) {
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return repoError;
   const supplied = args.reviewedShas || args.reviewed_shas || null;
   const entries = repoEntriesForTrack(root, track, args);
   const reviewedShas = {};
@@ -1535,6 +1620,7 @@ function planIntegrity(root, trackId = null) {
         }
       }
     }
+    errors.push(...unresolvedPlanRepos(root, track));
   }
   return { ok: errors.length === 0, root, checked_tracks: tracks.length, errors, warnings };
 }
@@ -2171,6 +2257,15 @@ function completeTask(root, args = {}) {
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
   const workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+  if (isWorkingRootError(workingRoot)) {
+    return {
+      ok: false,
+      stage: "polyrepo_repo_resolution",
+      blocked: true,
+      working_root: workingRoot,
+      reason: workingRoot.error
+    };
+  }
   const coverage = runCoverage(root, args, workingRoot.path);
   const threshold = Number(args.coverageThreshold ?? coverageThreshold(root));
   const allowMissingCoverage = args.allowMissingCoverage === true;
@@ -2484,6 +2579,7 @@ function recordReviewUnlocked(root, track, args = {}) {
   }
   const reviewer = args.reviewer || gitIdentity(root);
   const pins = reviewedShasForTrack(root, track, args);
+  if (pins.ok === false) return pins;
   const metadata = patchJsonFile(track.metadata_path, (current) => {
     const existing = asJsonObject(current.review);
     const existingReviewer = asOptionalString(existing.reviewer);
@@ -2562,6 +2658,15 @@ function testCoverage(root, args = {}) {
       task = phase?.tasks.find((item) => item.task_index === Number(args.taskIndex)) || null;
     }
     workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+    if (isWorkingRootError(workingRoot)) {
+      return {
+        ok: false,
+        available: false,
+        stage: "polyrepo_repo_resolution",
+        working_root: workingRoot,
+        reason: workingRoot.error
+      };
+    }
   }
   const coverageRun = runCoverage(root, args, workingRoot.path);
   if (!coverageRun.available) return coverageRun;
@@ -2685,6 +2790,10 @@ function reviewMachineGate(root, args = {}) {
   const trackId = args.trackId || args.track_id || null;
   const track = trackId ? findTrack(root, trackId) : null;
   if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
+  if (track) {
+    const repoError = repoEntriesError(root, track, args);
+    if (repoError) return repoError;
+  }
   const entries = track ? repoEntriesForTrack(root, track, args) : [{
     repo: args.repo || ".",
     root: args.workingRoot ? import_node_path.default.resolve(root, args.workingRoot) : root,
@@ -2835,6 +2944,8 @@ function reviewAssist(root, args = {}) {
   if (!context.ok) return context;
   const track = findTrack(root, trackId);
   if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return repoError;
   const plan = parsePlanFile(track.plan_path);
   const base = args.base || "main";
   const head = args.head || track.metadata.git_branch || "HEAD";
