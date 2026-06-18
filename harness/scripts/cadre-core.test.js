@@ -712,6 +712,49 @@ test("reviewAssist and lspImpact provide fallback review context", () => {
   }
 });
 
+test("workspace diagnostics, test impact, and dependency graph expose polyglot evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-intel-graph-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "package.json"), JSON.stringify({
+      scripts: {
+        test: "node --test",
+        typecheck: "tsc --noEmit",
+      },
+      devDependencies: {
+        nx: "1.0.0",
+      },
+    }, null, 2));
+    write(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    write(path.join(root, "nx.json"), "{}\n");
+    write(path.join(root, "pyproject.toml"), "[tool.pytest.ini_options]\n");
+    write(path.join(root, "go.mod"), "module example.com/app\n");
+    write(path.join(root, "src", "app.ts"), "export const app = true;\n");
+    write(path.join(root, "src", "app.test.ts"), "test('app', () => {});\n");
+    git(root, ["add", "."]);
+
+    const diagnostics = core.workspaceDiagnostics(root);
+    assert.equal(diagnostics.ok, true);
+    assert.ok(diagnostics.adapters.some((adapter) => adapter.id === "node"));
+    assert.ok(diagnostics.adapters.some((adapter) => adapter.id === "pytest"));
+    assert.ok(diagnostics.adapters.some((adapter) => adapter.id === "go"));
+    assert.ok(diagnostics.adapters.some((adapter) => adapter.id === "nx"));
+    assert.ok(diagnostics.commands.some((command) => command.command === "pnpm test"));
+
+    const impact = core.testImpact(root, { files: ["src/app.ts"] });
+    assert.equal(impact.ok, true);
+    assert.deepEqual(impact.likely_tests["src/app.ts"], ["src/app.test.ts"]);
+    assert.ok(impact.manifests.includes("package.json"));
+
+    const graph = core.dependencyGraph(root);
+    assert.equal(graph.ok, true);
+    assert.ok(graph.manifests.some((manifest) => manifest.file === "package.json"));
+    assert.ok(graph.edges.some((edge) => edge.from === "package.json"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("providerEvidence persists structured review evidence and metadata pointer", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-review-evidence-test-"));
   try {

@@ -4027,6 +4027,149 @@ function lspImpact(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function shellCommandPlan(command: string, cwd: string, adapter: string): CoreResult {
+  return { adapter, command, cwd };
+}
+
+function detectWorkspaceAdapters(root: string): CoreResult[] {
+  const adapters: CoreResult[] = [];
+  const pkg = loadPackageJson(root);
+  if (pkg) {
+    const scripts = asJsonObject(pkg.scripts);
+    const runner = fileExists(path.join(root, "pnpm-lock.yaml"))
+      ? "pnpm"
+      : fileExists(path.join(root, "yarn.lock"))
+        ? "yarn"
+        : "npm run";
+    const scriptCommands = ["typecheck", "check", "test", "build", "lint"]
+      .filter((script) => scripts[script])
+      .map((script) => runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`);
+    adapters.push({
+      id: "node",
+      ecosystem: "javascript",
+      manifest: "package.json",
+      available: commandExists(runner.split(" ")[0] || "npm", root),
+      commands: scriptCommands,
+    });
+    if (fileExists(path.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
+      adapters.push({
+        id: "nx",
+        ecosystem: "javascript",
+        manifest: fileExists(path.join(root, "nx.json")) ? "nx.json" : "package.json",
+        available: commandExists("nx", root) || commandExists("pnpm", root) || commandExists("npx", root),
+        commands: ["nx affected -t test", "nx affected -t build"],
+      });
+    }
+  }
+  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(path.join(root, file)))) {
+    adapters.push({ id: "pytest", ecosystem: "python", manifest: "pyproject.toml", available: commandExists("pytest", root), commands: ["pytest"] });
+  }
+  if (fileExists(path.join(root, "go.mod"))) {
+    adapters.push({ id: "go", ecosystem: "go", manifest: "go.mod", available: commandExists("go", root), commands: ["go test ./..."] });
+  }
+  if (fileExists(path.join(root, "Cargo.toml"))) {
+    adapters.push({ id: "cargo", ecosystem: "rust", manifest: "Cargo.toml", available: commandExists("cargo", root), commands: ["cargo test"] });
+  }
+  if (fileExists(path.join(root, "pom.xml"))) {
+    adapters.push({ id: "maven", ecosystem: "java", manifest: "pom.xml", available: commandExists("mvn", root), commands: ["mvn test"] });
+  }
+  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(path.join(root, file)));
+  if (gradleManifest) {
+    const gradlew = fileExists(path.join(root, "gradlew")) ? "./gradlew" : "gradle";
+    adapters.push({ id: "gradle", ecosystem: "jvm", manifest: gradleManifest, available: gradlew === "./gradlew" || commandExists("gradle", root), commands: [`${gradlew} test`] });
+  }
+  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(path.join(root, file)))) {
+    adapters.push({ id: "bazel", ecosystem: "polyglot", manifest: "MODULE.bazel", available: commandExists("bazel", root), commands: ["bazel test //..."] });
+  }
+  return adapters;
+}
+
+function workspaceDiagnostics(root: string, args: RuntimeArgs = {}): CoreResult {
+  const adapters = detectWorkspaceAdapters(root);
+  const commands = adapters.flatMap((adapter) =>
+    asStringArray(adapter.commands).map((command) => shellCommandPlan(command, root, asString(adapter.id)))
+  );
+  const execute = args.execute === true;
+  return {
+    ok: true,
+    root,
+    execute,
+    dry_run: !execute,
+    adapters,
+    commands,
+    results: execute ? commands.map((entry) => runCommand(asString(entry.command), [], {
+      cwd: asString(entry.cwd, root),
+      shell: true,
+      timeoutMs: Number(args.timeoutMs || 10 * 60 * 1000),
+      maxBuffer: 30 * 1024 * 1024,
+    })) : [],
+  };
+}
+
+function impactedFiles(root: string, args: RuntimeArgs = {}): string[] {
+  if (Array.isArray(args.files) && args.files.length > 0) return args.files.map(normalizeClaimPath).filter(Boolean);
+  if (args.base || args.head) {
+    return diffSurface(root, args.base || "main", args.head || "HEAD").files;
+  }
+  return [];
+}
+
+function testImpact(root: string, args: RuntimeArgs = {}): CoreResult {
+  const files = impactedFiles(root, args);
+  const likelyTests = Object.fromEntries(files.map((file) => [file, likelyTestCandidatesForFile(root, file)]));
+  const manifests = new Set<string>();
+  for (const file of files) {
+    let dir = path.dirname(path.join(root, file));
+    while (dir.startsWith(root)) {
+      for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
+        const candidate = path.join(dir, manifest);
+        if (fileExists(candidate)) manifests.add(normalizeClaimPath(path.relative(root, candidate)));
+      }
+      if (dir === root) break;
+      dir = path.dirname(dir);
+    }
+  }
+  return {
+    ok: true,
+    root,
+    files,
+    likely_tests: likelyTests,
+    manifests: Array.from(manifests).sort(),
+    adapters: detectWorkspaceAdapters(root),
+  };
+}
+
+function dependencyGraph(root: string): CoreResult {
+  const files = gitTrackedFiles(root);
+  const manifestPatterns = new Set([
+    "package.json",
+    "pyproject.toml",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "MODULE.bazel",
+    "WORKSPACE",
+    "WORKSPACE.bazel",
+    "nx.json",
+  ]);
+  const manifests = files
+    .filter((file) => manifestPatterns.has(path.basename(file)))
+    .map((file) => ({ file, dir: normalizeClaimPath(path.dirname(file)), kind: path.basename(file) }));
+  return {
+    ok: true,
+    root,
+    manifests,
+    adapters: detectWorkspaceAdapters(root),
+    edges: manifests.map((manifest) => ({
+      from: manifest.file,
+      to: ".",
+      kind: "workspace_manifest",
+    })),
+  };
+}
+
 function lspConfigStatus(root: string): CoreResult {
   const configPath = path.join(root, "cadre", "lsp.json");
   const config = readJson<unknown>(configPath, null);
@@ -4370,6 +4513,7 @@ export {
   fleetStatus,
   gitIdentity,
   implementationPrep,
+  dependencyGraph,
   isCadreProjectRoot,
   isIgnoredRepoMapFile,
   listTracks,
@@ -4405,7 +4549,9 @@ export {
   testCoverage,
   heartbeatTrack,
   trackContext,
+  testImpact,
   worktreePlan,
+  workspaceDiagnostics,
   withLock,
   withTrackLock,
 };

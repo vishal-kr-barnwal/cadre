@@ -135,7 +135,7 @@ const TOOLS = [
   ),
   packetSchema(
     { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
-    ["repo_map", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown"]
+    ["repo_map", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
   ),
 ];
 
@@ -563,6 +563,9 @@ async function intelPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
   const action = args.action || "repo_map";
   if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args);
   if (action === "repo_map") return envelope(core.repoMap(root, args));
+  if (action === "workspace_diagnostics") return envelope(core.workspaceDiagnostics(root, args));
+  if (action === "test_impact") return envelope(core.testImpact(root, args));
+  if (action === "dependency_graph") return envelope(core.dependencyGraph(root));
   if (action === "lsp_impact") {
     let lspResult: JsonObject | null = null;
     if ((args.base || args.head) && args.includeLsp !== false) {
@@ -634,6 +637,7 @@ function resourceList(): JsonObject {
       { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
       { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
+      { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path.", mimeType: "application/json" },
     ],
   };
 }
@@ -656,6 +660,7 @@ function resourceRead(uri: string): JsonObject {
   else if (resource.base === "cadre://review-evidence") value = core.reviewEvidence(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
+  else if (resource.base === "cadre://workspace-diagnostics") value = core.workspaceDiagnostics(root);
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
 }

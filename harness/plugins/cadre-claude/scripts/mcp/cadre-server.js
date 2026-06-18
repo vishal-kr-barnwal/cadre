@@ -3435,6 +3435,135 @@ function lspImpact(root, args = {}) {
     review
   };
 }
+function shellCommandPlan(command, cwd, adapter) {
+  return { adapter, command, cwd };
+}
+function detectWorkspaceAdapters(root) {
+  const adapters = [];
+  const pkg = loadPackageJson(root);
+  if (pkg) {
+    const scripts = asJsonObject(pkg.scripts);
+    const runner = fileExists(import_node_path.default.join(root, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path.default.join(root, "yarn.lock")) ? "yarn" : "npm run";
+    const scriptCommands = ["typecheck", "check", "test", "build", "lint"].filter((script) => scripts[script]).map((script) => runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`);
+    adapters.push({
+      id: "node",
+      ecosystem: "javascript",
+      manifest: "package.json",
+      available: commandExists(runner.split(" ")[0] || "npm", root),
+      commands: scriptCommands
+    });
+    if (fileExists(import_node_path.default.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
+      adapters.push({
+        id: "nx",
+        ecosystem: "javascript",
+        manifest: fileExists(import_node_path.default.join(root, "nx.json")) ? "nx.json" : "package.json",
+        available: commandExists("nx", root) || commandExists("pnpm", root) || commandExists("npx", root),
+        commands: ["nx affected -t test", "nx affected -t build"]
+      });
+    }
+  }
+  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path.default.join(root, file)))) {
+    adapters.push({ id: "pytest", ecosystem: "python", manifest: "pyproject.toml", available: commandExists("pytest", root), commands: ["pytest"] });
+  }
+  if (fileExists(import_node_path.default.join(root, "go.mod"))) {
+    adapters.push({ id: "go", ecosystem: "go", manifest: "go.mod", available: commandExists("go", root), commands: ["go test ./..."] });
+  }
+  if (fileExists(import_node_path.default.join(root, "Cargo.toml"))) {
+    adapters.push({ id: "cargo", ecosystem: "rust", manifest: "Cargo.toml", available: commandExists("cargo", root), commands: ["cargo test"] });
+  }
+  if (fileExists(import_node_path.default.join(root, "pom.xml"))) {
+    adapters.push({ id: "maven", ecosystem: "java", manifest: "pom.xml", available: commandExists("mvn", root), commands: ["mvn test"] });
+  }
+  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path.default.join(root, file)));
+  if (gradleManifest) {
+    const gradlew = fileExists(import_node_path.default.join(root, "gradlew")) ? "./gradlew" : "gradle";
+    adapters.push({ id: "gradle", ecosystem: "jvm", manifest: gradleManifest, available: gradlew === "./gradlew" || commandExists("gradle", root), commands: [`${gradlew} test`] });
+  }
+  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path.default.join(root, file)))) {
+    adapters.push({ id: "bazel", ecosystem: "polyglot", manifest: "MODULE.bazel", available: commandExists("bazel", root), commands: ["bazel test //..."] });
+  }
+  return adapters;
+}
+function workspaceDiagnostics(root, args = {}) {
+  const adapters = detectWorkspaceAdapters(root);
+  const commands = adapters.flatMap(
+    (adapter) => asStringArray(adapter.commands).map((command) => shellCommandPlan(command, root, asString(adapter.id)))
+  );
+  const execute = args.execute === true;
+  return {
+    ok: true,
+    root,
+    execute,
+    dry_run: !execute,
+    adapters,
+    commands,
+    results: execute ? commands.map((entry) => runCommand(asString(entry.command), [], {
+      cwd: asString(entry.cwd, root),
+      shell: true,
+      timeoutMs: Number(args.timeoutMs || 10 * 60 * 1e3),
+      maxBuffer: 30 * 1024 * 1024
+    })) : []
+  };
+}
+function impactedFiles(root, args = {}) {
+  if (Array.isArray(args.files) && args.files.length > 0) return args.files.map(normalizeClaimPath).filter(Boolean);
+  if (args.base || args.head) {
+    return diffSurface(root, args.base || "main", args.head || "HEAD").files;
+  }
+  return [];
+}
+function testImpact(root, args = {}) {
+  const files = impactedFiles(root, args);
+  const likelyTests = Object.fromEntries(files.map((file) => [file, likelyTestCandidatesForFile(root, file)]));
+  const manifests = /* @__PURE__ */ new Set();
+  for (const file of files) {
+    let dir = import_node_path.default.dirname(import_node_path.default.join(root, file));
+    while (dir.startsWith(root)) {
+      for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
+        const candidate = import_node_path.default.join(dir, manifest);
+        if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path.default.relative(root, candidate)));
+      }
+      if (dir === root) break;
+      dir = import_node_path.default.dirname(dir);
+    }
+  }
+  return {
+    ok: true,
+    root,
+    files,
+    likely_tests: likelyTests,
+    manifests: Array.from(manifests).sort(),
+    adapters: detectWorkspaceAdapters(root)
+  };
+}
+function dependencyGraph(root) {
+  const files = gitTrackedFiles(root);
+  const manifestPatterns = /* @__PURE__ */ new Set([
+    "package.json",
+    "pyproject.toml",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "MODULE.bazel",
+    "WORKSPACE",
+    "WORKSPACE.bazel",
+    "nx.json"
+  ]);
+  const manifests = files.filter((file) => manifestPatterns.has(import_node_path.default.basename(file))).map((file) => ({ file, dir: normalizeClaimPath(import_node_path.default.dirname(file)), kind: import_node_path.default.basename(file) }));
+  return {
+    ok: true,
+    root,
+    manifests,
+    adapters: detectWorkspaceAdapters(root),
+    edges: manifests.map((manifest) => ({
+      from: manifest.file,
+      to: ".",
+      kind: "workspace_manifest"
+    }))
+  };
+}
 function lspConfigStatus(root) {
   const configPath = import_node_path.default.join(root, "cadre", "lsp.json");
   const config = readJson(configPath, null);
@@ -3854,7 +3983,7 @@ var TOOLS = [
   ),
   packetSchema(
     { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
-    ["repo_map", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown"]
+    ["repo_map", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
   )
 ];
 function isDirectory(file) {
@@ -4247,6 +4376,9 @@ async function intelPacket(args) {
   const action = args.action || "repo_map";
   if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args);
   if (action === "repo_map") return envelope(repoMap(root, args));
+  if (action === "workspace_diagnostics") return envelope(workspaceDiagnostics(root, args));
+  if (action === "test_impact") return envelope(testImpact(root, args));
+  if (action === "dependency_graph") return envelope(dependencyGraph(root));
   if (action === "lsp_impact") {
     let lspResult = null;
     if ((args.base || args.head) && args.includeLsp !== false) {
@@ -4314,7 +4446,8 @@ function resourceList() {
       { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
       { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
       { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" }
+      { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
+      { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path.", mimeType: "application/json" }
     ]
   };
 }
@@ -4335,6 +4468,7 @@ function resourceRead(uri) {
   else if (resource.base === "cadre://review-evidence") value = reviewEvidence(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
+  else if (resource.base === "cadre://workspace-diagnostics") value = workspaceDiagnostics(root);
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
 }

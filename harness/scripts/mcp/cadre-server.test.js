@@ -199,6 +199,11 @@ test("MCP root resolution rejects harness skill directories without project stat
     const reviewTool = tools.tools.find((tool) => tool.name === "cadre_review");
     const reviewActions = reviewTool.inputSchema.properties.action.enum;
     assert.ok(reviewActions.includes("provider_evidence"));
+    const intelTool = tools.tools.find((tool) => tool.name === "cadre_intel");
+    const intelActions = intelTool.inputSchema.properties.action.enum;
+    assert.ok(intelActions.includes("workspace_diagnostics"));
+    assert.ok(intelActions.includes("test_impact"));
+    assert.ok(intelActions.includes("dependency_graph"));
     const statusTool = tools.tools.find((tool) => tool.name === "cadre_status");
     const statusActions = statusTool.inputSchema.properties.action.enum;
     assert.ok(statusActions.includes("fleet"));
@@ -208,6 +213,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://fleet-board"));
     assert.ok(uris.includes("cadre://beads-summary"));
     assert.ok(uris.includes("cadre://review-evidence"));
+    assert.ok(uris.includes("cadre://workspace-diagnostics"));
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
