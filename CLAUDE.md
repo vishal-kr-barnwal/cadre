@@ -17,6 +17,7 @@ It works through skill-first workflow protocols on Claude Code and OpenAI Codex.
 ```
 Cadre/
 ├── skills/cadre/protocols/ # Master workflow protocols (edit these)
+├── src/                    # TypeScript source for MCP/LSP runtime bundles
 ├── .claude/
 │   └── skills/             # Generated Claude skill bundle used for packaging
 │       └── cadre/
@@ -28,6 +29,7 @@ Cadre/
 │   └── cadre/              # Generated OpenAI Codex plugin
 ├── scripts/
 │   ├── generate-skills.sh  # Generates Claude/Codex plugin bundles
+│   ├── build-runtime.mjs   # Bundles src/*.ts into runtime JS
 │   ├── agent-refs/         # Masters for per-agent-sliced references (AGENT blocks)
 │   ├── migrate-to-cadre.sh # Migrate an existing conductor/ project to cadre/
 │   └── migrate-v2.sh       # v0.1.0 -> v0.2.0 layout migration (legacy)
@@ -40,13 +42,15 @@ Cadre/
 > **Generated outputs** under `.claude/skills/cadre/`,
 > `.agents/skills/cadre/`, `plugins/cadre-claude/`, `plugins/cadre/`,
 > `.claude-plugin/marketplace.json`, and `.agents/plugins/marketplace.json`
-> are derived from `skills/cadre/protocols/`, `scripts/agent-refs/`, and `templates/` by
-> `scripts/generate-skills.sh`. Edit the master sources and regenerate — do not
+> are derived from `skills/cadre/protocols/`, `scripts/agent-refs/`,
+> `templates/`, and runtime TypeScript in `src/` by `pnpm generate`. Runtime JS
+> under `scripts/` and `templates/scripts/` is built with `pnpm build`. Edit the
+> master sources and regenerate — do not
 > hand-edit generated files. CI can run
-> `bash scripts/generate-skills.sh --check` to detect drift. Ready-made
+> `pnpm check` to detect drift. Ready-made
 > drift-gate workflows ship at
 > `templates/ci/cadre-monorepo-check.{github,gitlab}.yml` (they run
-> `generate-skills.sh --check` + `bash -n` on PRs).
+> `pnpm check` + `bash -n` on PRs).
 
 ### Workflows
 
@@ -238,7 +242,7 @@ At phase completion:
 
 ## Development Notes
 
-- Master workflow protocols are Markdown in `skills/cadre/protocols/`; Claude and Codex plugin bundles are generated from them by `scripts/generate-skills.sh`
+- Master workflow protocols are Markdown in `skills/cadre/protocols/`; MCP/LSP runtime sources are TypeScript in `src/`; Claude and Codex plugin bundles are generated from them by `pnpm generate`
 - Skills use SKILL.md format with references/ subdirectory
 - Skills bundle generated workflow-protocol copies under `protocols/`; edit only the top-level master `skills/cadre/protocols/cadre-*.md` files and regenerate
 - State is tracked in JSON files (setup_state.json, implement_state.json, metadata.json)

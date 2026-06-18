@@ -11,11 +11,15 @@
 #
 # Edit the source skill in `skills/cadre/SKILL.md`, protocol sources in
 # `skills/cadre/protocols/cadre-*.md`, reference slice masters in
-# `scripts/agent-refs/`, and templates in `templates/`. Generated files carry an
-# AUTO-GENERATED marker; do not hand-edit generated bundles.
+# `scripts/agent-refs/`, templates in `templates/`, and runtime TypeScript in
+# `src/`. Runtime JavaScript under `scripts/` and `templates/scripts/` is built
+# from `src/` by `pnpm build`. Generated files carry an AUTO-GENERATED marker;
+# do not hand-edit generated bundles.
 #
 # Usage:
-#   bash scripts/generate-skills.sh
+#   pnpm generate
+#   pnpm check
+#   CADRE_SKIP_RUNTIME_BUILD=1 bash scripts/generate-skills.sh
 #   bash scripts/generate-skills.sh --check
 #
 set -euo pipefail
@@ -250,7 +254,19 @@ copy_plugin_scripts() {
   cp "$REPO_ROOT/scripts/cadre-lsp-review.js" "$dest/cadre-lsp-review.js"
   cp "$REPO_ROOT/scripts/cadre-lsp-daemon.js" "$dest/cadre-lsp-daemon.js"
   cp "$REPO_ROOT/scripts/mcp/cadre-server.js" "$dest/mcp/cadre-server.js"
-  chmod +x "$dest/cadre-job-runner.js" "$dest/mcp/cadre-server.js"
+  chmod +x "$dest/cadre-core.js" "$dest/cadre-job-runner.js" "$dest/cadre-lsp-setup.js" \
+    "$dest/cadre-lsp-review.js" "$dest/cadre-lsp-daemon.js" "$dest/mcp/cadre-server.js"
+}
+
+build_runtime() {
+  if [[ "${CADRE_SKIP_RUNTIME_BUILD:-}" == "1" || "$MODE" == "--check" ]]; then
+    return
+  fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "error: pnpm is required to build Cadre runtime bundles from src/" >&2
+    exit 1
+  fi
+  pnpm -s build:runtime
 }
 
 write_codex_plugin_manifest() {
@@ -365,10 +381,10 @@ write_plugin_readme() {
 
 This generated plugin packages the Cadre skill, workflow protocols, templates,
 and MCP server for $platform. Edit the master workflow sources under
-\`skills/cadre/protocols/\`, then run:
+\`skills/cadre/protocols/\`, runtime TypeScript under \`src/\`, then run:
 
 \`\`\`bash
-bash scripts/generate-skills.sh
+pnpm generate
 \`\`\`
 
 The LSP setup and review helpers are bundled under \`scripts/\` so Cadre
@@ -487,6 +503,8 @@ main() {
     fi
   done
 
+  build_runtime
+
   generate_skill "$CLAUDE_SKILL_DIR"
   generate_skill "$CODEX_SKILL_DIR"
   generate_protocols "claude" "$CLAUDE_PROTOCOL_DIR"
@@ -539,7 +557,7 @@ main() {
     if ! $stale; then
       echo "✓ Generated plugin bundles are up to date."
     else
-      echo "✗ Generated skill/plugin output is stale. Run: bash scripts/generate-skills.sh" >&2
+      echo "✗ Generated skill/plugin output is stale. Run: pnpm generate" >&2
       exit 1
     fi
   else

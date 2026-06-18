@@ -140,6 +140,49 @@ test("isCadreProjectRoot requires real Cadre state markers", () => {
   }
 });
 
+test("parsePlanText captures annotations, repo ownership, and commit refs", () => {
+  const plan = core.parsePlanText(`# Plan
+
+## Phase 1: Typed Work
+<!-- execution: parallel -->
+<!-- depends: phase0 -->
+
+- [~] Task 1: Touch runtime commit: abc1234
+  <!-- files: src/runtime.ts, tests/runtime.test.ts -->
+  <!-- repo: app -->
+  <!-- depends: task0 -->
+  <!-- shas: app:deadbeef -->
+`);
+
+  assert.equal(plan.ok, true);
+  assert.equal(plan.phases.length, 1);
+  assert.equal(plan.tasks.length, 1);
+  assert.equal(plan.phases[0].annotations.execution, "parallel");
+  assert.equal(plan.phases[0].annotations.depends, "phase0");
+  assert.equal(plan.tasks[0].task_key, "phase1_task1");
+  assert.deepEqual(plan.tasks[0].files, ["src/runtime.ts", "tests/runtime.test.ts"]);
+  assert.equal(plan.tasks[0].repo, "app");
+  assert.deepEqual(plan.tasks[0].depends, ["task0"]);
+  assert.ok(plan.tasks[0].commit_shas.includes("abc1234"));
+  assert.equal(plan.tasks[0].repo_shas.app, "deadbeef");
+});
+
+test("build emits every required runtime bundle path", () => {
+  for (const file of [
+    "scripts/cadre-core.js",
+    "scripts/cadre-job-runner.js",
+    "scripts/cadre-lsp-setup.js",
+    "scripts/cadre-lsp-review.js",
+    "scripts/cadre-lsp-daemon.js",
+    "scripts/mcp/cadre-server.js",
+    "templates/scripts/cadre-lsp-setup.js",
+    "plugins/cadre/scripts/cadre-lsp-review.js",
+    "plugins/cadre-claude/scripts/cadre-lsp-daemon.js",
+  ]) {
+    assert.equal(fs.existsSync(path.join(__dirname, "..", file)), true, `missing ${file}`);
+  }
+});
+
 test("implementationPrep returns bounded candidate context", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-prep-test-"));
   try {

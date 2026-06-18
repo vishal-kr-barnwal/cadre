@@ -171,9 +171,10 @@ The generated Claude Code and Codex plugins both bundle this MCP server:
 | Claude Code | `plugins/cadre-claude/` | `mcp-config.json` |
 | OpenAI Codex | `plugins/cadre/` | `.mcp.json` |
 
-The server code and `cadre-core.js` are copied into each plugin's `scripts/`
-directory so installed plugin cache paths do not depend on the development
-checkout. `cadre_mutate` with `action: "regen_index"` is implemented inside the MCP core and rebuilds the
+The server code and `cadre-core.js` are built from TypeScript sources in `src/`
+and copied into each plugin's `scripts/` directory so installed plugin cache
+paths do not depend on the development checkout. `cadre_mutate` with
+`action: "regen_index"` is implemented inside the MCP core and rebuilds the
 marked index region directly from per-track metadata.
 
 ## LSP Review Helper
@@ -192,11 +193,12 @@ node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json
 node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --write --json
 ```
 
-The helper scans source file extensions, recommends language servers, checks
-whether each server command is available on PATH, and appends missing entries to
-`cadre/lsp.json` without duplicating existing `servers[]` entries. If commands
-are missing, Cadre prints install commands and asks whether to write the config
-now or stop so the user can install the servers first.
+The helper scans source file extensions and well-known filenames, recommends
+language servers across the detected languages, checks whether each server
+command is available on PATH, and appends missing entries to `cadre/lsp.json`
+without duplicating existing `servers[]` entries. If commands are missing,
+Cadre prints install commands and asks whether to write the config now or stop
+so the user can install the servers first.
 
 Cadre also ships a best-effort LSP review hook:
 
@@ -219,10 +221,35 @@ Example `cadre/lsp.json`:
       "command": "typescript-language-server",
       "args": ["--stdio"],
       "extensions": [".ts", ".tsx", ".js", ".jsx"]
+    },
+    {
+      "id": "python",
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "extensions": [".py", ".pyi"]
+    },
+    {
+      "id": "dockerfile",
+      "command": "docker-langserver",
+      "args": ["--stdio"],
+      "extensions": [],
+      "filenames": ["Dockerfile", "Containerfile"],
+      "languageIds": {
+        "Dockerfile": "dockerfile",
+        "Containerfile": "dockerfile"
+      }
     }
   ]
 }
 ```
+
+Built-in recommendations cover TypeScript/JavaScript, Python, Go, Rust, Java,
+Kotlin, Swift, C/C++/Objective-C, C#, PHP, Ruby, Dart, HTML, CSS, JSON, YAML,
+Markdown, TOML, Lua, shell, Terraform/HCL, Elixir, Scala, Clojure, Haskell,
+OCaml, Zig, Nix, Elm, Vue, Svelte, Dockerfile, XML, GraphQL, Prisma, and
+Protocol Buffers. Teams can add custom `servers[]` entries for any other
+language server; `extensions`, `filenames`, and `languageIds` control which
+files Cadre opens and what LSP language id is sent.
 
 The helper:
 
@@ -291,9 +318,10 @@ letting Beads own its Dolt database.
 
 Claude Code supports plugin-level LSP server declarations, but Cadre does not
 ship language-server binaries. Instead, both generated plugins bundle
-`cadre-lsp-setup.js` and `cadre-lsp-review.js` under `scripts/`; Cadre workflows
-use those helpers to create or read each project's `cadre/lsp.json`. This keeps
-LSP opt-in per repo and avoids starting irrelevant language servers globally.
+TypeScript-built `cadre-lsp-setup.js` and `cadre-lsp-review.js` under `scripts/`;
+Cadre workflows use those helpers to create or read each project's
+`cadre/lsp.json`. This keeps LSP opt-in per repo and avoids starting irrelevant
+language servers globally.
 
 ## Recommended Rollout
 

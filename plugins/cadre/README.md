@@ -4,10 +4,10 @@
 
 This generated plugin packages the Cadre skill, workflow protocols, templates,
 and MCP server for Codex. Edit the master workflow sources under
-`skills/cadre/protocols/`, then run:
+`skills/cadre/protocols/`, runtime TypeScript under `src/`, then run:
 
 ```bash
-bash scripts/generate-skills.sh
+pnpm generate
 ```
 
 The LSP setup and review helpers are bundled under `scripts/` so Cadre

@@ -1,0 +1,27 @@
+{
+  "name": "cadre-runtime",
+  "version": "2.0.0",
+  "private": true,
+  "description": "TypeScript-built runtime scripts for Cadre LSP and MCP tooling.",
+  "type": "commonjs",
+  "packageManager": "pnpm@11.4.0",
+  "main": "scripts/cadre-core.js",
+  "bin": {
+    "cadre-lsp-setup": "scripts/cadre-lsp-setup.js",
+    "cadre-lsp-review": "scripts/cadre-lsp-review.js",
+    "cadre-mcp": "scripts/mcp/cadre-server.js"
+  },
+  "scripts": {
+    "build": "node scripts/build-runtime.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "generate": "bash scripts/generate-skills.sh",
+    "check": "pnpm typecheck && pnpm build:runtime && bash scripts/generate-skills.sh --check && pnpm test",
+    "test": "node --test scripts/cadre-core.test.js scripts/mcp/cadre-server.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.4",
+    "esbuild": "^0.25.5",
+    "typescript": "^5.8.3"
+  }
+}

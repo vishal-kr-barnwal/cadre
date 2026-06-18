@@ -72,8 +72,10 @@ the workflow name as workflow arguments, e.g. `cadre-newtrack Add OAuth login`.
 Generated outputs under `.agents/skills/cadre/`, `.claude/skills/cadre/`,
 `plugins/cadre/`, `plugins/cadre-claude/`, `.agents/plugins/marketplace.json`,
 and `.claude-plugin/marketplace.json` are rebuilt by
-`bash scripts/generate-skills.sh`. Edit the master protocols, references, and
-templates instead of hand-editing generated bundles.
+`pnpm generate`. Runtime JavaScript under `scripts/` and `templates/scripts/`
+is built from TypeScript sources in `src/` by `pnpm build`. Edit the master
+protocols, references, templates, and runtime TypeScript instead of hand-editing
+generated bundles.
 
 ## TDD Task Workflow
 

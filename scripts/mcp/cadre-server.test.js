@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const test = require("node:test");
 
 function write(file, content) {
@@ -68,6 +68,36 @@ function parseTextJson(result) {
   return JSON.parse(result.content[0].text);
 }
 
+function requestDaemon(daemon, method, params = {}) {
+  const id = requestDaemon.nextId++;
+  daemon.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+  return new Promise((resolve, reject) => {
+    const onLine = (line) => {
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (message.id !== id) return;
+      cleanup();
+      if (message.error) reject(new Error(message.error.message || "daemon error"));
+      else resolve(message.result);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      requestDaemon.listeners.delete(id);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for daemon ${method}`));
+    }, 3000);
+    requestDaemon.listeners.set(id, onLine);
+  });
+}
+requestDaemon.nextId = 1;
+requestDaemon.listeners = new Map();
+
 async function waitForJob(request, jobId) {
   for (let i = 0; i < 20; i += 1) {
     const result = await request("tools/call", {
@@ -80,6 +110,62 @@ async function waitForJob(request, jobId) {
   }
   throw new Error(`Timed out waiting for ${jobId}`);
 }
+
+test("LSP setup JSON and daemon status/shutdown smoke", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-smoke-"));
+  const daemon = spawn(process.execPath, [path.join(__dirname, "..", "cadre-lsp-daemon.js")], {
+    cwd: path.resolve(__dirname, "..", ".."),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let daemonBuffer = "";
+  daemon.stdout.setEncoding("utf8");
+  daemon.stdout.on("data", (chunk) => {
+    daemonBuffer += chunk;
+    while (daemonBuffer.includes("\n")) {
+      const index = daemonBuffer.indexOf("\n");
+      const line = daemonBuffer.slice(0, index).trim();
+      daemonBuffer = daemonBuffer.slice(index + 1);
+      if (!line) continue;
+      for (const listener of requestDaemon.listeners.values()) listener(line);
+    }
+  });
+
+  try {
+    write(path.join(root, "src", "index.ts"), "export function typedSmoke() { return true; }\n");
+    write(path.join(root, "app", "main.py"), "def python_smoke():\n    return True\n");
+    write(path.join(root, "crates", "core", "lib.rs"), "pub fn rust_smoke() -> bool { true }\n");
+    write(path.join(root, "Dockerfile"), "FROM alpine\n");
+    write(path.join(root, "deploy", "service.yaml"), "name: smoke\n");
+    const setup = spawnSync(process.execPath, [
+      path.join(__dirname, "..", "cadre-lsp-setup.js"),
+      "--root",
+      root,
+      "--write",
+      "--json",
+    ], { encoding: "utf8" });
+    assert.equal(setup.status, 0, setup.stderr || setup.stdout);
+    const parsed = JSON.parse(setup.stdout);
+    assert.equal(parsed.root, root);
+    assert.ok(Array.isArray(parsed.recommended));
+    for (const id of ["typescript", "python", "rust", "dockerfile", "yaml"]) {
+      assert.ok(parsed.recommended.some((entry) => entry.id === id), `expected ${id} recommendation`);
+      assert.ok(parsed.added.includes(id), `expected ${id} to be written`);
+    }
+    const config = JSON.parse(fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8"));
+    const docker = config.servers.find((server) => server.id === "dockerfile");
+    assert.deepEqual(docker.filenames, ["Dockerfile", "Containerfile"]);
+    assert.equal(docker.languageIds.Dockerfile, "dockerfile");
+
+    const status = await requestDaemon(daemon, "status");
+    assert.equal(status.ok, true);
+    assert.deepEqual(status.servers, []);
+    const shutdown = await requestDaemon(daemon, "shutdown");
+    assert.equal(shutdown.ok, true);
+  } finally {
+    daemon.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("MCP root resolution rejects harness skill directories without project state", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-test-"));

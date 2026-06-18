@@ -110,11 +110,12 @@ The plugin source is `plugins/cadre/`. It includes:
 ## How bundles are generated
 
 Claude Code and Codex plugin bundles are **generated** from the source skill in
-`skills/cadre/SKILL.md` and master workflow protocols in
-`skills/cadre/protocols/cadre-*.md` by:
+`skills/cadre/SKILL.md`, master workflow protocols in
+`skills/cadre/protocols/cadre-*.md`, templates, references, and TypeScript
+runtime sources in `src/` by:
 
 ```bash
-bash scripts/generate-skills.sh
+pnpm generate
 ```
 
 This reads each master protocol's frontmatter and body, then emits
@@ -130,6 +131,7 @@ platform-specific plugin packages with bundled skills:
 | `references/beads-integration.md` (doc-backed) | copied from `docs/BEADS_INTEGRATION.md` | copied from `docs/BEADS_INTEGRATION.md` |
 | Sliced references (`parallel-execution.md`, `template-locator.md`, `polyrepo-git.md`, `cadre-sync.md`, `ownership-guard.md`) | only Claude's section | only Codex's section |
 | `templates/` bundle | copied into `plugins/cadre-claude/skills/cadre/templates/` | copied into `plugins/cadre/skills/cadre/templates/` |
+| Runtime JS bundles | built from `src/` into `scripts/` and copied into plugin `scripts/` | built from `src/` into `scripts/` and copied into plugin `scripts/` |
 | Plugin package | generated into `plugins/cadre-claude/` | generated into `plugins/cadre/` |
 | Marketplace | generated into `.claude-plugin/marketplace.json` | generated into `.agents/plugins/marketplace.json` |
 
@@ -154,23 +156,26 @@ generator bundles a copy into each plugin skill at
 resolving `../templates/` relative to the active `references/template-locator.md`
 file, so it works from plugin cache installs without knowing the cache root.
 Edit templates only in the canonical `templates/` directory and regenerate.
+The LSP helper scripts under `templates/scripts/` are generated runtime bundles;
+edit their TypeScript sources in `src/` instead.
 
 Generated files carry an `AUTO-GENERATED` marker. **Do not hand-edit them** —
 edit `skills/cadre/SKILL.md`, master protocols in `skills/cadre/protocols/`,
-reference masters in `scripts/agent-refs/`, or templates in `templates/`, then
+reference masters in `scripts/agent-refs/`, templates in `templates/`, or
+runtime TypeScript in `src/`, then
 regenerate. To verify the committed output is in
 sync (e.g. in CI):
 
 ```bash
-bash scripts/generate-skills.sh --check
+pnpm check
 ```
 
 This exits non-zero if any generated build artifact, plugin, or marketplace file is stale.
 
 A ready-made drift gate ships at
 `templates/ci/cadre-monorepo-check.{github,gitlab}.yml` — drop the one for
-your CI into place and it runs `generate-skills.sh --check` (plus `bash -n` on
-the generator and runtime helper scripts) on every PR. The `templates/` directory now includes a
+your CI into place and it runs `pnpm check` (plus `bash -n` on the generator)
+on every PR. The `templates/` directory now includes a
 `ci/` subdirectory carrying both this monorepo-check and the polyrepo
 merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
 
@@ -210,8 +215,9 @@ recorded in the [Changelog](../CHANGELOG.md).
 When adding or changing a workflow protocol:
 
 1. Edit `skills/cadre/SKILL.md`, a master protocol in `skills/cadre/protocols/`,
-   a reference master in `scripts/agent-refs/`, or a template in `templates/`.
-2. Run `bash scripts/generate-skills.sh` to regenerate plugin bundles.
+   a reference master in `scripts/agent-refs/`, a template in `templates/`, or
+   runtime TypeScript in `src/`.
+2. Run `pnpm generate` to regenerate runtime and plugin bundles.
 3. Bump the version in `README.md`.
 4. Note the change in the README "What's New" section.
 

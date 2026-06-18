@@ -6,11 +6,11 @@
 # and plugin bundles.
 #
 # What it does: on every pull_request it checks out the repo and runs
-#   1. `bash scripts/generate-skills.sh --check` — regenerates Claude/Codex
-#      skill bundles into a scratch dir and
-#      fails if the committed output is STALE. The fix is always: edit the
-#      master workflow protocols/ source, re-run `bash scripts/generate-skills.sh`,
-#      and commit the regenerated trees.
+#   1. `pnpm check` — builds runtime JS from TypeScript, verifies generated
+#      Claude/Codex skill/plugin bundles in a scratch dir, and runs tests. It
+#      fails if committed output is STALE. The fix is always: edit the master
+#      workflow protocols/source, re-run `pnpm generate`, and commit the
+#      regenerated trees.
 #   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
 #      every script under scripts/, so a broken generator/helper can't merge.
 #   3. agent context parity — when `scripts/check-agent-context.sh` exists, asserts
@@ -47,10 +47,21 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install PNPM dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
       - name: Check generated skill bundles are not stale
         # Fails if skill protocol sources changed without regenerating the
-        # per-platform skill bundles. Fix: re-run generate-skills.sh and commit.
-        run: bash scripts/generate-skills.sh --check
+        # per-platform skill bundles. Fix: re-run pnpm generate and commit.
+        run: pnpm check
 
       - name: Shell syntax check
         # Parse-only (-n) — validates every script without executing it.
