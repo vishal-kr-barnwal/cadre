@@ -35,11 +35,13 @@ packet-owned.
 
 ## Dispatching Each Worker
 
-Use Codex multi-agent tools when they are available: spawn one `worker` agent per
-packet worker, pass the worker prompt and packet payload, and wait for every
-worker in the wave before calling the next Cadre packet. If the multi-agent tool
-is not exposed, search for it with tool discovery. If no worker dispatch tool is
-available, halt and report that platform dispatch is unavailable.
+Use Codex multi-agent tools when they are available. Search tool discovery for
+`multi_agent_v1.spawn_agent`, then spawn one worker agent per packet worker,
+pass the worker prompt and packet payload, and wait with the corresponding
+multi-agent wait tool before calling the next Cadre packet. If
+`multi_agent_v1.spawn_agent` is unavailable, follow the packet's alternate
+dispatch instructions when present; otherwise halt with a clear
+`dispatch-unavailable` message instead of simulating worker state locally.
 
 ## Worker Rules
 

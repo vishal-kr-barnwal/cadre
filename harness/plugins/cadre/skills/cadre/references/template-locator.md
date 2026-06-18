@@ -6,6 +6,10 @@ learnings, Beads configuration, and language style guides. These assets are
 consumed by Cadre MCP packets. Agents should not locate template directories or
 copy template files by hand during workflows.
 
+The setup packet returns a template manifest with template ids, source paths,
+target paths, purpose, and scope. Use that manifest for explanation and review;
+do not infer setup writes by scanning the plugin cache or harness checkout.
+
 ## Packet Ownership
 
 - `cadre_workflow` with `workflow: "setup"` reports available setup evidence,

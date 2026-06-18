@@ -35,9 +35,11 @@ packet-owned.
 
 ## Dispatching Each Worker
 
-Call the **`Task` tool** once per worker using the worker prompt and packet
-payload. `Task` calls are awaitable; wait for every worker in the wave before
-calling the next Cadre packet.
+Call the generated `cadre-worker` plugin agent when it is available; otherwise
+call the **`Task` tool** once per worker. In both cases pass the worker prompt
+and packet payload. Use the worker worktree from the packet for isolation when
+the platform supports it. Worker calls are awaitable; wait for every worker in
+the wave before calling the next Cadre packet.
 
 ## Worker Rules
 

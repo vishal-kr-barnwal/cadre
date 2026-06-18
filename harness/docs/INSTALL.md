@@ -23,8 +23,8 @@ machine-recorded coverage, and a derived `tracks.md` index.
 
 | Platform | Min. version | Plugin path | Marketplace | Invoke | Context file | Source of truth |
 |----------|--------------|-------------|-------------|--------|--------------|-----------------|
-| **Claude Code** | plugin-capable Claude Code | `plugins/cadre-claude/` | `.claude-plugin/marketplace.json` | `$cadre`, then `cadre-setup` | `CLAUDE.md` | generated bundle |
-| **OpenAI Codex** | current plugins | `plugins/cadre/` | `.agents/plugins/marketplace.json` | `$cadre`, then `cadre-setup` | `AGENTS.md` | generated bundle |
+| **Claude Code** | plugin-capable Claude Code | repo root: `harness/plugins/cadre-claude/`; harness dev: `plugins/cadre-claude/` | `.claude-plugin/marketplace.json` | `$cadre`, then `cadre-setup` | `CLAUDE.md` | generated bundle |
+| **OpenAI Codex** | current plugins | repo root: `harness/plugins/cadre/`; harness dev: `plugins/cadre/` | `.agents/plugins/marketplace.json` | `$cadre`, then `cadre-setup` | `AGENTS.md` | generated bundle |
 
 > The source skill in `skills/cadre/SKILL.md` and master workflow protocols in
 > `skills/cadre/protocols/cadre-*.md` are the single source of truth. Claude Code
@@ -80,7 +80,9 @@ Claude reads the marketplace at `.claude-plugin/marketplace.json`:
 /plugin install cadre@cadre
 ```
 
-The plugin source is `plugins/cadre-claude/`. It includes:
+From the repository root marketplace shim, the plugin source is
+`harness/plugins/cadre-claude/`. Inside the harness package, the generated
+development marketplace points to `plugins/cadre-claude/`. It includes:
 
 - `skills/cadre/` generated for Claude Code
 - `mcp-config.json` for the Cadre MCP server
@@ -91,14 +93,16 @@ The plugin source is `plugins/cadre-claude/`. It includes:
 Codex reads the marketplace at `.agents/plugins/marketplace.json`:
 
 ```bash
-codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse plugins/cadre
+codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
 codex plugin add cadre@cadre
 ```
 
 When you are already working inside a cloned Cadre repo, Codex can also discover
 the repo marketplace at `.agents/plugins/marketplace.json` after restart.
 
-The plugin source is `plugins/cadre/`. It includes:
+From the repository root marketplace shim, the plugin source is
+`harness/plugins/cadre/`. Inside the harness package, the generated development
+marketplace points to `plugins/cadre/`. It includes:
 
 - `.codex-plugin/plugin.json`
 - `skills/cadre/` generated for Codex
@@ -133,7 +137,8 @@ platform-specific plugin packages with bundled skills:
 | `templates/` bundle | copied into `plugins/cadre-claude/skills/cadre/templates/` | copied into `plugins/cadre/skills/cadre/templates/` |
 | Runtime JS bundles | built from `src/` into `scripts/` and copied into plugin `scripts/` | built from `src/` into `scripts/` and copied into plugin `scripts/` |
 | Plugin package | generated into `plugins/cadre-claude/` | generated into `plugins/cadre/` |
-| Marketplace | generated into `.claude-plugin/marketplace.json` | generated into `.agents/plugins/marketplace.json` |
+| Harness-local marketplace | generated into `.claude-plugin/marketplace.json` pointing at `./plugins/cadre-claude` | generated into `.agents/plugins/marketplace.json` pointing at `./plugins/cadre` |
+| Repo-root marketplace shim | generated into `../.claude-plugin/marketplace.json` pointing at `./harness/plugins/cadre-claude` | generated into `../.agents/plugins/marketplace.json` pointing at `./harness/plugins/cadre` |
 
 ### Per-agent slicing (token optimization)
 
@@ -171,12 +176,14 @@ pnpm check
 
 This exits non-zero if any generated build artifact, plugin, or marketplace file is stale.
 
-A ready-made drift gate ships at
-`templates/ci/cadre-monorepo-check.{github,gitlab}.yml` — drop the one for
-your CI into place and it runs `pnpm check` (plus `bash -n` on the generator)
-on every PR. The `templates/` directory now includes a
-`ci/` subdirectory carrying both this monorepo-check and the polyrepo
-merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
+Target-project CI templates ship at
+`templates/ci/cadre-monorepo-check.{github,gitlab}.yml`. They skip cleanly
+before Cadre exists, verify `cadre/tracks.md` from track metadata, run the
+project gate command from `cadre/config.json` when configured, and enforce
+review metadata for `track/<id>` branches. Harness-package drift gates live
+separately as `templates/ci/cadre-harness-check.{github,gitlab}.yml` and are
+for this package repository only. The `templates/` directory also carries
+polyrepo merge-train workflows (`cadre-merge-train.{github,gitlab}.yml`).
 
 ---
 

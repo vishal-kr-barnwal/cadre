@@ -1665,6 +1665,9 @@ function packetText(value, fallback) {
 function templateJson(relativePath, fallback) {
   return readJson(templatePath(relativePath) || "", fallback);
 }
+function templateManifest() {
+  return templateJson("manifest.json", { templates: [] });
+}
 function configuredCiProvider(root, args = {}) {
   const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root).config.provider_mode);
   const provider = normalizeProviderMode(raw);
@@ -2081,6 +2084,7 @@ function workflowSetup(root, args = {}) {
     sync_mode: syncModeRecommendation,
     sync_recommendation: teamSize >= 2 && syncModeRecommendation !== "shared" ? "Team setup detected; use syncMode/shared sync for 10-20 person coordination." : null,
     styleGuides,
+    templates: templateManifest(),
     techStackSummary: techStackSummary(root, args),
     required_payload: args.execute === true ? ["productText", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
@@ -4413,6 +4417,68 @@ function plannedCommand(command, args, cwd) {
 function runPlannedCommands(commands) {
   return commands.map((entry) => runCommand(asString(entry.command), asStringArray(entry.args), { cwd: asString(entry.cwd) }));
 }
+function workerDispatchPayload(root, track, worker, worktree, sourceRoot) {
+  const workerId = asString(worker.worker_id);
+  const taskKey = asString(worker.task_key);
+  const repo = asString(worker.repo, ".");
+  const ownedFiles = asStringArray(worker.files);
+  const prompt = [
+    `You are a Cadre parallel worker for track ${track.track_id}.`,
+    `Worker: ${workerId}`,
+    `Task: ${taskKey} - ${asString(worker.title)}`,
+    `Repo: ${repo}`,
+    `Source root: ${sourceRoot}`,
+    `Worker worktree: ${worktree}`,
+    ownedFiles.length > 0 ? `Owned files: ${ownedFiles.join(", ")}` : "Owned files: none declared; inspect the task plan before editing.",
+    "Use only Cadre packets for Cadre, Beads, provider, index, and worker-state mutations.",
+    "Change only the assigned product files unless the task requires a narrowly related test or manifest update.",
+    "Run the smallest relevant tests first, then the configured project gate when practical.",
+    "Commit the worker worktree changes and return the structured result JSON."
+  ].join("\n");
+  return {
+    prompt,
+    repo,
+    worktree,
+    source_root: sourceRoot,
+    owned_files: ownedFiles,
+    expected_result_schema: {
+      type: "object",
+      required: ["worker_id", "task_key", "repo", "status", "summary", "files_changed", "tests", "commit_sha"],
+      properties: {
+        worker_id: { type: "string" },
+        task_key: { type: "string" },
+        repo: { type: "string" },
+        status: { type: "string", enum: ["awaiting_merge", "blocked"] },
+        summary: { type: "string" },
+        files_changed: { type: "array", items: { type: "string" } },
+        tests: { type: "array", items: { type: "object" } },
+        coverage: { type: ["number", "null"] },
+        commit_sha: { type: ["string", "null"] },
+        blockers: { type: "array", items: { type: "string" } }
+      }
+    },
+    evidence_requirements: {
+      commit: "Required unless blocked before code changes; record the commit SHA in record_finish.",
+      tests: "Include every command run, cwd, exit status, and relevant stdout/stderr tail.",
+      coverage: "Include parsed coverage when available or a reason coverage was not produced."
+    },
+    record_finish_packet: {
+      tool: "cadre_parallel",
+      arguments: {
+        root,
+        action: "record_finish",
+        trackId: track.track_id,
+        workerId,
+        status: "awaiting_merge",
+        phaseIndex: worker.phase_index,
+        taskIndex: worker.task_index,
+        repo,
+        commitSha: "<commit-sha>",
+        coverage: "<coverage-number-or-null>"
+      }
+    }
+  };
+}
 function parallelSetupWorkers(root, track, args = {}) {
   const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
@@ -4424,15 +4490,17 @@ function parallelSetupWorkers(root, track, args = {}) {
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
     const worktree = import_node_path.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    const sourceRoot = asString(entry.root || root);
     commands.push(plannedCommand(
       "git",
       ["worktree", "add", "-B", asString(worker.branch), worktree, asString(entry.base || args.base || "main")],
-      asString(entry.root || root)
+      sourceRoot
     ));
     return {
       ...worker,
       worktree,
-      source_root: asString(entry.root || root)
+      source_root: sourceRoot,
+      dispatch: workerDispatchPayload(root, track, worker, worktree, sourceRoot)
     };
   });
   const execute = args.execute === true;

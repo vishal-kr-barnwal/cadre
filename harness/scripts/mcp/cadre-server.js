@@ -26,6 +26,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/mcp/server-runtime.ts
+var import_node_fs4 = __toESM(require("node:fs"));
 var import_node_path6 = __toESM(require("node:path"));
 
 // src/core/application/cadre-runtime.ts
@@ -1599,6 +1600,9 @@ function packetText(value, fallback) {
 function templateJson(relativePath, fallback) {
   return readJson(templatePath(relativePath) || "", fallback);
 }
+function templateManifest() {
+  return templateJson("manifest.json", { templates: [] });
+}
 function configuredCiProvider(root, args = {}) {
   const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root).config.provider_mode);
   const provider = normalizeProviderMode(raw);
@@ -2015,6 +2019,7 @@ function workflowSetup(root, args = {}) {
     sync_mode: syncModeRecommendation,
     sync_recommendation: teamSize >= 2 && syncModeRecommendation !== "shared" ? "Team setup detected; use syncMode/shared sync for 10-20 person coordination." : null,
     styleGuides,
+    templates: templateManifest(),
     techStackSummary: techStackSummary(root, args),
     required_payload: args.execute === true ? ["productText", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
@@ -4347,6 +4352,68 @@ function plannedCommand(command, args, cwd) {
 function runPlannedCommands(commands) {
   return commands.map((entry) => runCommand(asString(entry.command), asStringArray(entry.args), { cwd: asString(entry.cwd) }));
 }
+function workerDispatchPayload(root, track, worker, worktree, sourceRoot) {
+  const workerId = asString(worker.worker_id);
+  const taskKey = asString(worker.task_key);
+  const repo = asString(worker.repo, ".");
+  const ownedFiles = asStringArray(worker.files);
+  const prompt = [
+    `You are a Cadre parallel worker for track ${track.track_id}.`,
+    `Worker: ${workerId}`,
+    `Task: ${taskKey} - ${asString(worker.title)}`,
+    `Repo: ${repo}`,
+    `Source root: ${sourceRoot}`,
+    `Worker worktree: ${worktree}`,
+    ownedFiles.length > 0 ? `Owned files: ${ownedFiles.join(", ")}` : "Owned files: none declared; inspect the task plan before editing.",
+    "Use only Cadre packets for Cadre, Beads, provider, index, and worker-state mutations.",
+    "Change only the assigned product files unless the task requires a narrowly related test or manifest update.",
+    "Run the smallest relevant tests first, then the configured project gate when practical.",
+    "Commit the worker worktree changes and return the structured result JSON."
+  ].join("\n");
+  return {
+    prompt,
+    repo,
+    worktree,
+    source_root: sourceRoot,
+    owned_files: ownedFiles,
+    expected_result_schema: {
+      type: "object",
+      required: ["worker_id", "task_key", "repo", "status", "summary", "files_changed", "tests", "commit_sha"],
+      properties: {
+        worker_id: { type: "string" },
+        task_key: { type: "string" },
+        repo: { type: "string" },
+        status: { type: "string", enum: ["awaiting_merge", "blocked"] },
+        summary: { type: "string" },
+        files_changed: { type: "array", items: { type: "string" } },
+        tests: { type: "array", items: { type: "object" } },
+        coverage: { type: ["number", "null"] },
+        commit_sha: { type: ["string", "null"] },
+        blockers: { type: "array", items: { type: "string" } }
+      }
+    },
+    evidence_requirements: {
+      commit: "Required unless blocked before code changes; record the commit SHA in record_finish.",
+      tests: "Include every command run, cwd, exit status, and relevant stdout/stderr tail.",
+      coverage: "Include parsed coverage when available or a reason coverage was not produced."
+    },
+    record_finish_packet: {
+      tool: "cadre_parallel",
+      arguments: {
+        root,
+        action: "record_finish",
+        trackId: track.track_id,
+        workerId,
+        status: "awaiting_merge",
+        phaseIndex: worker.phase_index,
+        taskIndex: worker.task_index,
+        repo,
+        commitSha: "<commit-sha>",
+        coverage: "<coverage-number-or-null>"
+      }
+    }
+  };
+}
 function parallelSetupWorkers(root, track, args = {}) {
   const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
@@ -4358,15 +4425,17 @@ function parallelSetupWorkers(root, track, args = {}) {
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
     const worktree = import_node_path.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    const sourceRoot = asString(entry.root || root);
     commands.push(plannedCommand(
       "git",
       ["worktree", "add", "-B", asString(worker.branch), worktree, asString(entry.base || args.base || "main")],
-      asString(entry.root || root)
+      sourceRoot
     ));
     return {
       ...worker,
       worktree,
-      source_root: asString(entry.root || root)
+      source_root: sourceRoot,
+      dispatch: workerDispatchPayload(root, track, worker, worktree, sourceRoot)
     };
   });
   const execute = args.execute === true;
@@ -6109,15 +6178,39 @@ function resourceList() {
 function resourceTemplatesList() {
   const listed = resourceList();
   const resources = Array.isArray(listed.resources) ? listed.resources : [];
+  const contracts = {
+    "cadre://team-board": { required: ["root"] },
+    "cadre://fleet-board": { required: ["root"] },
+    "cadre://beads-summary": { required: ["root"] },
+    "cadre://track-context": { required: ["root", "trackId"] },
+    "cadre://review-evidence": { required: ["root", "trackId"] },
+    "cadre://collisions": { required: ["root"] },
+    "cadre://repo-map": { required: ["root"] },
+    "cadre://workspace-diagnostics": { required: ["root"] },
+    "cadre://lsp-status": { required: ["root"] },
+    "cadre://repo-topology": { required: ["root"] },
+    "cadre://provider-actions": { required: ["root", "trackId", "workflow"] },
+    "cadre://ship-plan": { required: ["root", "trackId"] },
+    "cadre://land-plan": { required: ["root", "trackId"] },
+    "cadre://release-plan": { required: ["root"] },
+    "cadre://my-next-actions": { required: ["root"] },
+    "cadre://review-queue": { required: ["root"] },
+    "cadre://handoff-inbox": { required: ["root"] },
+    "cadre://parallel-state": { required: ["root", "trackId"] },
+    "cadre://quality-gate": { required: ["root", "trackId"] },
+    "cadre://test-impact": { required: ["root"], requiredAny: [["files"], ["base", "head"]] },
+    "cadre://track-plan": { required: ["root", "trackId"] },
+    "cadre://job-result": { required: ["root", "jobId"] }
+  };
   const templates = resources.map((resource) => {
     const uri = asString(asJsonObject(resource).uri);
-    const required = uri.includes("track") || uri.includes("quality") || uri.includes("parallel") || uri.includes("review-evidence") ? ["root", "trackId"] : uri.includes("job-result") ? ["root", "jobId"] : ["root"];
+    const contract = contracts[uri] || { required: ["root"] };
     return {
-      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,jobId}`,
+      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,base,head,jobId}`,
       name: asJsonObject(resource).name,
       description: asJsonObject(resource).description,
       mimeType: "application/json",
-      required
+      ...contract
     };
   });
   return { resourceTemplates: templates };
@@ -6133,6 +6226,8 @@ function parseResourceUri(uri) {
     symbol: params.get("symbol"),
     workflow: params.get("workflow"),
     jobId: params.get("jobId"),
+    baseRef: params.get("base"),
+    headRef: params.get("head"),
     files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean)
   };
 }
@@ -6182,7 +6277,11 @@ function resourceRead(uri, jobs2) {
       review_gate: reviewGate(root, resource.trackId, {}),
       collisions: collisionScan(root)
     };
-  } else if (resource.base === "cadre://test-impact") value = testImpact(root, { files: resource.files });
+  } else if (resource.base === "cadre://test-impact") value = testImpact(root, {
+    files: resource.files,
+    base: resource.baseRef || void 0,
+    head: resource.headRef || void 0
+  });
   else if (resource.base === "cadre://track-plan") {
     const context = trackContext(root, resource.trackId);
     const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
@@ -6209,147 +6308,336 @@ function resourceRead(uri, jobs2) {
 
 // src/mcp/tool-catalog.ts
 var PROTOCOL_VERSION = "2025-11-25";
-var packetSchema = (description, actionEnum = null) => ({
-  name: description.name,
-  description: description.text,
-  inputSchema: {
-    type: "object",
-    properties: {
-      root: { type: "string" },
-      action: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
-      workflow: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
-      execute: { type: "boolean" },
-      async: { type: "boolean" },
-      trackId: { type: "string" },
-      track_id: { type: "string" },
-      phaseIndex: { type: "number" },
-      taskIndex: { type: "number" },
-      planPath: { type: "string" },
-      status: { type: "string" },
-      patch: { type: "object" },
-      identity: { type: "string" },
-      takeover: { type: "boolean" },
-      base: { type: "string" },
-      head: { type: "string" },
-      config: { type: "string" },
-      operation: { type: "string" },
-      id: { type: "string" },
-      command: { type: "string" },
-      machineCommand: { type: "string" },
-      timeoutMs: { type: "number" },
-      provider: { type: "string" },
-      providerMode: { type: "string", enum: ["local", "github", "gitlab"] },
-      provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },
-      providerMcpAvailable: { type: "boolean" },
-      provider_mcp_available: { type: "boolean" },
-      githubMcpAvailable: { type: "boolean" },
-      gitlabMcpAvailable: { type: "boolean" },
-      providerEvidence: { oneOf: [{ type: "object" }, { type: "string" }] },
-      provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
-      remoteHost: { type: "string" },
-      remote_host: { type: "string" },
-      responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
-      response_mode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
-      detail: { type: "boolean" },
-      compact: { type: "boolean" },
-      symbol: { type: "string" },
-      symbols: { type: "array", items: { type: "string" } },
-      files: { type: "array", items: { type: "string" } },
-      repo: { type: "string" },
-      repos: { type: "array", items: { type: "string" } },
-      workerId: { type: "string" },
-      worker_id: { type: "string" },
-      commitSha: { type: "string" },
-      force: { type: "boolean" },
-      allowNoCommit: { type: "boolean" },
-      styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
-      styleGuideMaxChars: { type: "number" },
-      techStack: { type: "object" },
-      args: { type: "object" },
-      type: { type: "string" },
-      jobId: { type: "string" },
-      view: { type: "string" },
-      description: { type: "string" },
-      handoffText: { type: "string" },
-      bump: { type: "string" },
-      includeProvider: { type: "boolean" }
-    },
-    additionalProperties: true
-  }
-});
+var SERVER_INSTRUCTIONS = [
+  "Cadre MCP is the packet-owned runtime for Cadre workflows. Pass an explicit root on every project-scoped call; setup packets may use a root candidate before cadre/ exists.",
+  "Prefer compact responses and Cadre resources for dashboards, review queues, quality gates, repo maps, job results, and status views.",
+  "Do not mutate cadre/, Beads, provider state, indexes, worker state, or merge/cleanup state outside Cadre packets."
+].join(" ");
+var PROPS = {
+  root: { type: "string", description: "Absolute project root or a path inside it." },
+  action: { type: "string" },
+  workflow: { type: "string" },
+  execute: { type: "boolean", description: "Run a mutating packet when true; omitted or false is a dry-run where supported." },
+  async: { type: "boolean" },
+  trackId: { type: "string" },
+  track_id: { type: "string" },
+  phaseIndex: { type: "number" },
+  taskIndex: { type: "number" },
+  planPath: { type: "string" },
+  status: { type: "string" },
+  patch: { type: "object" },
+  identity: { type: "string" },
+  takeover: { type: "boolean" },
+  base: { type: "string" },
+  head: { type: "string" },
+  config: { type: "string" },
+  operation: { type: "string" },
+  id: { type: "string" },
+  command: { type: "string" },
+  machineCommand: { type: "string" },
+  timeoutMs: { type: "number" },
+  provider: { type: "string" },
+  providerMode: { type: "string", enum: ["local", "github", "gitlab"] },
+  provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },
+  providerEvidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+  provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+  continuationToken: { type: "string" },
+  continuation_token: { type: "string" },
+  responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
+  response_mode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
+  detail: { type: "boolean" },
+  compact: { type: "boolean" },
+  symbol: { type: "string" },
+  symbols: { type: "array", items: { type: "string" } },
+  files: { type: "array", items: { type: "string" } },
+  repo: { type: "string" },
+  repos: { type: "array", items: { type: "string" } },
+  workerId: { type: "string" },
+  worker_id: { type: "string" },
+  commitSha: { type: "string" },
+  coverage: { type: "number" },
+  force: { type: "boolean" },
+  allowNoCommit: { type: "boolean" },
+  completeTask: { type: "boolean" },
+  styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
+  styleGuideMaxChars: { type: "number" },
+  techStack: { type: "object" },
+  productText: { type: "string" },
+  specText: { type: "string" },
+  planText: { type: "string" },
+  args: { type: "object" },
+  type: { type: "string" },
+  jobId: { type: "string" },
+  view: { type: "string" },
+  description: { type: "string" },
+  handoffText: { type: "string" },
+  bump: { type: "string" },
+  includeProvider: { type: "boolean" },
+  includeLsp: { type: "boolean" },
+  includeMachine: { type: "boolean" }
+};
+function props(names, actionEnum, workflowEnum) {
+  const picked = {};
+  for (const name of names) picked[name] = PROPS[name];
+  if (actionEnum && picked.action) picked.action = { ...PROPS.action, enum: actionEnum };
+  if (workflowEnum && picked.workflow) picked.workflow = { ...PROPS.workflow, enum: workflowEnum };
+  return picked;
+}
+function trackIdAnyOf() {
+  return [{ required: ["trackId"] }, { required: ["track_id"] }];
+}
+function requireTrackForActions(actions) {
+  return {
+    if: { properties: { action: { enum: actions } }, required: ["action"] },
+    then: { anyOf: trackIdAnyOf() }
+  };
+}
+function requireRootForActions(actions) {
+  return {
+    if: { properties: { action: { enum: actions } }, required: ["action"] },
+    then: { required: ["root"] }
+  };
+}
+function packetSchema(options) {
+  const fieldNames = Array.from(/* @__PURE__ */ new Set(["root", ...options.fields || []]));
+  return {
+    name: options.name,
+    description: options.description,
+    inputSchema: {
+      type: "object",
+      properties: props(fieldNames, options.actionEnum, options.workflowEnum),
+      required: options.required || [],
+      ...options.anyOf ? { anyOf: options.anyOf } : {},
+      ...options.allOf ? { allOf: options.allOf } : {},
+      additionalProperties: true
+    }
+  };
+}
+var WORKFLOWS = [
+  "setup",
+  "setup_assist",
+  "setup_scaffold",
+  "newtrack",
+  "new_track",
+  "implement",
+  "status",
+  "review",
+  "validate",
+  "archive",
+  "handoff",
+  "ship",
+  "land",
+  "release",
+  "revise",
+  "refresh",
+  "flag",
+  "revert",
+  "formula"
+];
 var TOOLS = [
-  packetSchema(
-    {
-      name: "cadre_workflow",
-      text: "Packet-only Cadre workflow coordinator for setup, new track, implementation, status, review, validation, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows."
-    },
-    [
-      "setup",
-      "setup_assist",
-      "setup_scaffold",
-      "newtrack",
-      "new_track",
-      "implement",
-      "status",
-      "review",
-      "validate",
-      "archive",
-      "handoff",
-      "ship",
-      "land",
-      "release",
-      "revise",
-      "refresh",
-      "flag",
-      "revert",
-      "formula"
+  packetSchema({
+    name: "cadre_workflow",
+    description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows.",
+    workflowEnum: WORKFLOWS,
+    actionEnum: WORKFLOWS,
+    fields: ["workflow", "action", "execute", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "productText", "techStack", "specText", "planText", "description"],
+    required: ["root"],
+    anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
+    allOf: [{
+      if: { properties: { workflow: { enum: ["implement", "review", "ship", "land", "archive", "handoff", "flag", "revert", "revise"] } }, required: ["workflow"] },
+      then: { anyOf: trackIdAnyOf() }
+    }]
+  }),
+  packetSchema({
+    name: "cadre_project",
+    description: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight.",
+    actionEnum: ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"],
+    fields: ["action", "execute", "responseMode", "response_mode", "detail", "compact"],
+    required: ["action"],
+    allOf: [requireRootForActions(["root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"])]
+  }),
+  packetSchema({
+    name: "cadre_status",
+    description: "Cadre status packet: live, team, mine, available, collisions, fleet, Beads summary, and team board.",
+    actionEnum: ["live", "team", "mine", "available", "collisions", "board", "fleet", "beads_summary"],
+    fields: ["action", "identity", "view", "responseMode", "response_mode", "detail", "compact"],
+    required: ["root", "action"]
+  }),
+  packetSchema({
+    name: "cadre_track",
+    description: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, planning evidence, worktree planning, and Beads tree creation.",
+    actionEnum: ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"],
+    fields: ["action", "trackId", "track_id", "planPath", "execute", "identity", "takeover", "base", "head", "styleGuideIds", "styleGuideMaxChars", "responseMode", "response_mode", "detail", "compact"],
+    required: ["root", "action"],
+    allOf: [
+      requireTrackForActions(["context", "phase_schedule", "prepare_implementation", "create_beads_tree", "worktree_plan"]),
+      { if: { properties: { action: { enum: ["parse_plan"] } }, required: ["action"] }, then: { required: ["planPath"] } }
     ]
-  ),
-  packetSchema(
-    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight." },
-    ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"]
-  ),
-  packetSchema(
-    { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
-    ["live", "team", "mine", "available", "collisions", "board", "fleet", "beads_summary"]
-  ),
-  packetSchema(
-    { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
-    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"]
-  ),
-  packetSchema(
-    { name: "cadre_parallel", text: "Cadre parallel packet: plan worker waves, dry-run worker setup, record finishes, merge back, and cleanup." },
-    ["plan", "next_wave", "setup_workers", "record_finish", "merge_back", "cleanup"]
-  ),
-  packetSchema(
-    { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
-    ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"]
-  ),
-  packetSchema(
-    { name: "cadre_complete_task", text: "Journaled task completion: coverage gate, locked plan/metadata writes, and idempotent Beads note/close." },
-    null
-  ),
-  packetSchema(
-    { name: "cadre_beads", text: "CLI-backed Beads packet for ready/list/show/update/note/close/labels/deps/create/mail/formula/compact/dolt/sql/worktree." },
-    null
-  ),
-  packetSchema(
-    { name: "cadre_job", text: "Cadre job packet: start, status, result, cancel, and list process-local long-running jobs." },
-    ["start", "status", "result", "cancel", "list"]
-  ),
-  packetSchema(
-    { name: "cadre_review", text: "Cadre review packet: review assist, machine gate, review gate, and PR/CI status." },
-    ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"]
-  ),
-  packetSchema(
-    { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
-    ["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
-  )
+  }),
+  packetSchema({
+    name: "cadre_parallel",
+    description: "Cadre parallel packet: plan worker waves, setup workers, record finishes, merge back, and cleanup.",
+    actionEnum: ["plan", "next_wave", "setup_workers", "record_finish", "merge_back", "cleanup"],
+    fields: ["action", "trackId", "track_id", "execute", "phaseIndex", "taskIndex", "workerId", "worker_id", "status", "commitSha", "repo", "command", "timeoutMs", "force", "allowNoCommit", "completeTask", "responseMode", "response_mode", "detail", "compact"],
+    required: ["root", "action"],
+    anyOf: trackIdAnyOf()
+  }),
+  packetSchema({
+    name: "cadre_mutate",
+    description: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes.",
+    actionEnum: ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"],
+    fields: ["action", "trackId", "track_id", "execute", "status", "patch", "identity", "workerId", "worker_id", "phaseIndex", "taskIndex", "commitSha", "repo", "coverage", "command", "timeoutMs", "force"],
+    required: ["root", "action"],
+    allOf: [requireTrackForActions(["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result"])]
+  }),
+  packetSchema({
+    name: "cadre_complete_task",
+    description: "Journaled task completion: coverage gate, locked plan/metadata writes, and idempotent Beads note/close.",
+    fields: ["trackId", "track_id", "phaseIndex", "taskIndex", "commitSha", "repo", "command", "timeoutMs", "coverage", "force", "allowNoCommit", "async"],
+    required: ["root", "phaseIndex", "taskIndex"],
+    anyOf: trackIdAnyOf()
+  }),
+  packetSchema({
+    name: "cadre_beads",
+    description: "CLI-backed Beads packet for ready/list/show/update/note/close/labels/deps/create/mail/formula/compact/dolt/sql/worktree.",
+    fields: ["operation", "id", "description", "status", "patch", "args"],
+    required: ["root", "operation"]
+  }),
+  packetSchema({
+    name: "cadre_job",
+    description: "Cadre job packet: start, status, result, cancel, and list process-local long-running jobs.",
+    actionEnum: ["start", "status", "result", "cancel", "list"],
+    fields: ["action", "type", "jobId", "id", "args", "timeoutMs"],
+    required: ["action"],
+    allOf: [
+      requireRootForActions(["start"]),
+      { if: { properties: { action: { enum: ["status", "result", "cancel"] } }, required: ["action"] }, then: { anyOf: [{ required: ["jobId"] }, { required: ["id"] }] } }
+    ]
+  }),
+  packetSchema({
+    name: "cadre_review",
+    description: "Cadre review packet: review assist, machine gate, review gate, provider evidence, and PR/MR/CI status.",
+    actionEnum: ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"],
+    fields: ["action", "trackId", "track_id", "base", "head", "config", "machineCommand", "command", "providerEvidence", "provider_evidence", "includeLsp", "includeMachine", "async", "timeoutMs", "responseMode", "response_mode", "detail", "compact"],
+    required: ["root", "action"],
+    allOf: [requireTrackForActions(["assist", "gate", "provider_evidence"])]
+  }),
+  packetSchema({
+    name: "cadre_intel",
+    description: "Cadre code intelligence packet: repo map, LSP setup/impact/review, workspace diagnostics, test impact, dependency graph, and daemon lifecycle.",
+    actionEnum: ["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"],
+    fields: ["action", "trackId", "track_id", "base", "head", "config", "files", "symbol", "symbols", "repo", "repos", "execute", "async", "timeoutMs", "responseMode", "response_mode", "detail", "compact"],
+    required: ["action"],
+    allOf: [requireRootForActions(["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "workspace_diagnostics", "test_impact", "dependency_graph"])]
+  })
 ];
 
 // src/mcp/server-runtime.ts
 var lspDaemon = new LspDaemonClient();
 var jobs = new JobManager();
+function selectedRepos(args) {
+  const values = [
+    asOptionalString(args.repo),
+    ...Array.isArray(args.repos) ? args.repos.filter((item) => typeof item === "string") : []
+  ].filter((item) => Boolean(item));
+  return values.length > 0 ? new Set(values) : null;
+}
+function repoReviewTargets(root, args) {
+  const trackId = asOptionalString(args.trackId) || asOptionalString(args.track_id);
+  const selected = selectedRepos(args);
+  if (!trackId) return [{ repo: ".", path: ".", cwd: root, base: args.base || "main", head: args.head || "HEAD", source: "project-root" }];
+  const context = asJsonObject(trackContext(root, trackId));
+  const topology = asJsonObject(context.topology);
+  if (topology.polyrepo !== true) {
+    return [{ repo: ".", path: ".", cwd: root, base: args.base || "main", head: args.head || "HEAD", source: "project-root" }];
+  }
+  const track = asJsonObject(context.track);
+  const fromContext = Array.isArray(context.worktrees) ? context.worktrees.map((entry) => asJsonObject(entry)) : [];
+  const topologyInfo = asJsonObject(loadTopology(root));
+  const topologyRepos = asJsonObject(topologyInfo.repos);
+  const fromTopology = Array.isArray(topologyRepos.repos) ? topologyRepos.repos.map((entry) => asJsonObject(entry)) : [];
+  const rawTargets = fromContext.length > 0 ? fromContext : fromTopology;
+  const seen = /* @__PURE__ */ new Set();
+  return rawTargets.map((entry) => {
+    const repo = asOptionalString(entry.repo) || asOptionalString(entry.name) || ".";
+    if (selected && !selected.has(repo)) return null;
+    const rel = asOptionalString(entry.path) || asOptionalString(entry.worktree_path) || asOptionalString(entry.submodule_path) || ".";
+    const key = `${repo}:${rel}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return {
+      repo,
+      path: rel,
+      cwd: import_node_path6.default.isAbsolute(rel) ? rel : import_node_path6.default.resolve(root, rel),
+      base: args.base || asOptionalString(entry.base_branch) || asOptionalString(entry.default_branch) || "main",
+      head: args.head || asOptionalString(entry.git_branch) || asOptionalString(track.git_branch) || `track/${trackId}`,
+      source: asOptionalString(entry.source) || (entry.worktree_path ? "metadata.repos.worktree_path" : "repos.json")
+    };
+  }).filter((entry) => entry !== null);
+}
+function annotateRepoFindings(result, target) {
+  const findings = Array.isArray(result.findings) ? result.findings.map((finding) => asJsonObject(finding)) : [];
+  const repoPath = asOptionalString(target.path) || ".";
+  const cwd = asOptionalString(target.cwd) || "";
+  return findings.map((finding) => ({
+    ...finding,
+    repo: target.repo,
+    path: asOptionalString(finding.path) || asOptionalString(finding.file) || repoPath,
+    cwd,
+    repo_path: repoPath
+  }));
+}
+async function warmLspReview(root, args) {
+  const targets = repoReviewTargets(root, args);
+  const timeoutMs = Number(args.timeoutMs || 12e4);
+  const rawConfig = asOptionalString(args.config) || import_node_path6.default.join(root, "cadre", "lsp.json");
+  const config = import_node_path6.default.isAbsolute(rawConfig) ? rawConfig : import_node_path6.default.resolve(root, rawConfig);
+  if (targets.length <= 1 && targets[0]?.repo === ".") {
+    return asJsonObject(await lspDaemon.request(
+      "review",
+      { ...args, root, base: args.base || "main", head: args.head || "HEAD", config },
+      timeoutMs
+    ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
+  }
+  const repos = await Promise.all(targets.map(async (target) => {
+    const cwd = asOptionalString(target.cwd) || root;
+    const repo = asOptionalString(target.repo) || ".";
+    if (!import_node_fs4.default.existsSync(cwd)) {
+      const result2 = {
+        available: false,
+        reason: `Repo working root is missing: ${cwd}`,
+        findings: []
+      };
+      return { ...target, result: result2, findings: [] };
+    }
+    const result = asJsonObject(await lspDaemon.request(
+      "review",
+      {
+        ...args,
+        root: cwd,
+        base: asOptionalString(target.base) || args.base || "main",
+        head: asOptionalString(target.head) || args.head || "HEAD",
+        config
+      },
+      timeoutMs
+    ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
+    const findings2 = annotateRepoFindings(result, target);
+    return {
+      ...target,
+      repo,
+      result: { ...result, findings: findings2 },
+      findings: findings2
+    };
+  }));
+  const findings = repos.flatMap((entry) => Array.isArray(entry.findings) ? entry.findings : []);
+  return {
+    available: repos.some((entry) => asJsonObject(entry.result).available !== false),
+    polyrepo: true,
+    config,
+    repos,
+    findings
+  };
+}
 function jobTypeForPacket(name, args) {
   if (name === "cadre_complete_task") return "complete_task";
   if (name === "cadre_review" && args.action === "assist") return "review_assist";
@@ -6371,12 +6659,8 @@ async function workflowPacket2(args) {
   }
   const root = requireCadreRoot(args);
   if ((workflow === "review" || workflow === "revise") && args.includeLsp !== false) {
-    const lspResult = await lspDaemon.request(
-      "review",
-      { ...args, root, base: args.base || "main", head: args.head || "HEAD" },
-      Number(args.timeoutMs || 12e4)
-    ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] }));
-    return envelope(workflowPacket(root, { ...args, workflow, lspResult: asJsonObject(lspResult) }));
+    const lspResult = await warmLspReview(root, args);
+    return envelope(workflowPacket(root, { ...args, workflow, lspResult }));
   }
   return envelope(workflowPacket(root, { ...args, workflow }));
 }
@@ -6466,11 +6750,7 @@ async function reviewPacket(args) {
   if (action === "assist") {
     let lspResult = null;
     if (args.includeLsp !== false) {
-      lspResult = asJsonObject(await lspDaemon.request(
-        "review",
-        { ...args, root, base: args.base || "main", head: args.head || "HEAD" },
-        Number(args.timeoutMs || 12e4)
-      ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
+      lspResult = await warmLspReview(root, args);
     }
     const reviewArgs = { ...args };
     if (lspResult) reviewArgs.lspResult = lspResult;
@@ -6499,11 +6779,7 @@ async function intelPacket(args) {
   if (action === "lsp_impact") {
     let lspResult = null;
     if ((args.base || args.head) && args.includeLsp !== false) {
-      lspResult = asJsonObject(await lspDaemon.request(
-        "review",
-        { ...args, root, base: args.base || "main", head: args.head || "HEAD" },
-        Number(args.timeoutMs || 12e4)
-      ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
+      lspResult = await warmLspReview(root, args);
     }
     const impactArgs = { ...args };
     if (lspResult) impactArgs.lspResult = lspResult;
@@ -6511,7 +6787,7 @@ async function intelPacket(args) {
   }
   if (action === "lsp_review") return envelope(lspReview(root, args));
   if (action === "lsp_warm_review") {
-    return envelope(await lspDaemon.request("review", { ...args, root }, Number(args.timeoutMs || 12e4)));
+    return envelope(await warmLspReview(root, args));
   }
   if (action === "lsp_daemon_status") return envelope(await lspDaemon.request("status", {}, 5e3));
   if (action === "lsp_daemon_shutdown") return envelope(await lspDaemon.shutdown());
@@ -6574,7 +6850,8 @@ async function handle(message) {
     return {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { resources: { listChanged: false }, tools: { listChanged: false } },
-      serverInfo: { name: "cadre", version: "2.0.0" }
+      serverInfo: { name: "cadre", version: "2.0.0" },
+      instructions: SERVER_INSTRUCTIONS
     };
   }
   if (method === "notifications/initialized") return void 0;

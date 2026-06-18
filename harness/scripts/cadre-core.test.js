@@ -283,6 +283,12 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.equal(setup.dry_run, true);
     assert.equal(setup.commands.length, 1);
     assert.equal(setup.results.length, 0);
+    assert.equal(typeof setup.workers[0].dispatch.prompt, "string");
+    assert.ok(setup.workers[0].dispatch.prompt.includes("parallel_20260617"));
+    assert.deepEqual(setup.workers[0].dispatch.owned_files, ["src/core.js"]);
+    assert.ok(setup.workers[0].dispatch.expected_result_schema.required.includes("commit_sha"));
+    assert.equal(setup.workers[0].dispatch.record_finish_packet.tool, "cadre_parallel");
+    assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.trackId, "parallel_20260617");
 
     const dryRecord = core.parallelWorkflow(root, {
       action: "record_finish",
@@ -748,6 +754,8 @@ test("workflow setup writes detected and requested style guides from templates",
     });
 
     assert.equal(setup.ok, true);
+    assert.ok(setup.templates.templates.some((template) => template.id === "target-monorepo-ci"));
+    assert.ok(setup.templates.templates.some((template) => template.scope === "harness-only"));
     assert.equal(setup.styleGuides.source, "tech-stack.json");
     assert.ok(setup.styleGuides.detected.includes("typescript"));
     assert.ok(setup.styleGuides.detected.includes("html-css"));

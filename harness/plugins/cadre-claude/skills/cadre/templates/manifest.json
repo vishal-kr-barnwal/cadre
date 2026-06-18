@@ -1,0 +1,95 @@
+{
+  "templates": [
+    {
+      "id": "workflow",
+      "source": "workflow.md",
+      "target": "cadre/workflow.md",
+      "purpose": "Project development, verification, review, and commit expectations.",
+      "scope": "target-project"
+    },
+    {
+      "id": "patterns",
+      "source": "patterns.md",
+      "target": "cadre/patterns.md",
+      "purpose": "Reusable codebase patterns and completed-track learnings.",
+      "scope": "target-project"
+    },
+    {
+      "id": "learnings",
+      "source": "learnings.md",
+      "target": "cadre/tracks/<track_id>/learnings.md",
+      "purpose": "Per-track learning journal starter.",
+      "scope": "target-project"
+    },
+    {
+      "id": "config",
+      "source": "config.json",
+      "target": "cadre/config.json",
+      "purpose": "Cadre sync, provider, review, and quality defaults.",
+      "scope": "target-project"
+    },
+    {
+      "id": "beads",
+      "source": "beads.json",
+      "target": "cadre/beads.json",
+      "purpose": "Beads integration defaults.",
+      "scope": "target-project"
+    },
+    {
+      "id": "repos",
+      "source": "repos.json",
+      "target": "cadre/repos.json",
+      "purpose": "Polyrepo topology starter.",
+      "scope": "target-project"
+    },
+    {
+      "id": "style-guides",
+      "source": "code_styleguides/*.md",
+      "target": "cadre/code_styleguides/*.md",
+      "purpose": "Language-specific implementation guidance selected by setup packets.",
+      "scope": "target-project"
+    },
+    {
+      "id": "target-monorepo-ci",
+      "source": "ci/cadre-monorepo-check.github.yml",
+      "target": ".github/workflows/cadre-monorepo-check.yml",
+      "purpose": "Cadre target-project drift and review gate for GitHub monorepos.",
+      "scope": "target-project"
+    },
+    {
+      "id": "target-monorepo-ci-gitlab",
+      "source": "ci/cadre-monorepo-check.gitlab.yml",
+      "target": ".gitlab-ci.yml",
+      "purpose": "Cadre target-project drift and review gate for GitLab monorepos.",
+      "scope": "target-project"
+    },
+    {
+      "id": "polyrepo-merge-train-github",
+      "source": "ci/cadre-merge-train.github.yml",
+      "target": ".github/workflows/cadre-merge-train.yml",
+      "purpose": "Cross-repo merge train for GitHub polyrepo control repositories.",
+      "scope": "target-project"
+    },
+    {
+      "id": "polyrepo-merge-train-gitlab",
+      "source": "ci/cadre-merge-train.gitlab.yml",
+      "target": ".gitlab-ci.yml",
+      "purpose": "Cross-repo merge train for GitLab polyrepo control repositories.",
+      "scope": "target-project"
+    },
+    {
+      "id": "harness-check-github",
+      "source": "ci/cadre-harness-check.github.yml",
+      "target": ".github/workflows/cadre-harness-check.yml",
+      "purpose": "Cadre harness package generated-bundle and runtime check.",
+      "scope": "harness-only"
+    },
+    {
+      "id": "harness-check-gitlab",
+      "source": "ci/cadre-harness-check.gitlab.yml",
+      "target": ".gitlab-ci.yml",
+      "purpose": "Cadre harness package generated-bundle and runtime check.",
+      "scope": "harness-only"
+    }
+  ]
+}

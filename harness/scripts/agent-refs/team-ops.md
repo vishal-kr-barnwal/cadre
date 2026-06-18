@@ -39,9 +39,13 @@ results so clients can distinguish control-plane files from product-repo files.
 
 Recommended optional MCP additions for larger teams:
 
+- GitHub or GitLab provider MCP for PR/MR metadata, review approvals, CI status,
+  and hosted provider evidence.
 - Sourcegraph or internal code-search MCP for cross-repo symbol search when
   product repos are not fully local.
 - Issue tracker MCP such as Jira or Linear when roadmap evidence lives outside
   Cadre.
-- CI provider MCP for systems that are not covered by GitHub or GitLab.
+- CI-specific MCP for Buildkite, CircleCI, Argo, Jenkins, or other systems that
+  are not covered by GitHub/GitLab checks.
+- Sentry, Datadog, Honeycomb, or logging MCP for incident and runtime evidence.
 - Knowledge-base MCP for product/domain documents used as read-only evidence.

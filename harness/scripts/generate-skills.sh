@@ -25,6 +25,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_REPO="$(cd "$REPO_ROOT/.." && pwd)"
 cd "$REPO_ROOT"
 
 SOURCE_SKILL_FILE="skills/cadre/SKILL.md"
@@ -57,6 +58,8 @@ CLAUDE_PLUGIN_DIR="plugins/cadre-claude"
 CODEX_PLUGIN_DIR="plugins/cadre"
 CLAUDE_PLUGIN_MARKETPLACE=".claude-plugin/marketplace.json"
 CODEX_PLUGIN_MARKETPLACE=".agents/plugins/marketplace.json"
+ROOT_CLAUDE_PLUGIN_MARKETPLACE=".claude-plugin/marketplace.json"
+ROOT_CODEX_PLUGIN_MARKETPLACE=".agents/plugins/marketplace.json"
 
 CLAUDE_PROTOCOL_DIR="$CLAUDE_SKILL_DIR/protocols"
 CODEX_PROTOCOL_DIR="$CODEX_SKILL_DIR/protocols"
@@ -73,6 +76,14 @@ out_path() {
     printf '%s/%s' "$GEN_ROOT" "$1"
   else
     printf '%s/%s' "$REPO_ROOT" "$1"
+  fi
+}
+
+out_root_path() {
+  if [[ -n "$GEN_ROOT" ]]; then
+    printf '%s/root/%s' "$GEN_ROOT" "$1"
+  else
+    printf '%s/%s' "$ROOT_REPO" "$1"
   fi
 }
 
@@ -108,8 +119,8 @@ extract_description() {
 
 dispatch_sentence() {
   case "$1" in
-    claude) echo 'Use the **`Task` tool**, one call per worker (calls are awaitable); see `references/parallel-execution.md`.' ;;
-    codex)  echo 'Spawn parallel agents with the built-in worker/multi-agent orchestration available in Codex — one per task; wait for all before continuing; see `references/parallel-execution.md`.' ;;
+    claude) echo 'Use the generated `cadre-worker` plugin agent when available, otherwise the **`Task` tool**, one call per worker; see `references/parallel-execution.md`.' ;;
+    codex)  echo 'Use tool discovery for `multi_agent_v1.spawn_agent`; if unavailable, follow packet alternate dispatch instructions or halt with `dispatch-unavailable`; see `references/parallel-execution.md`.' ;;
   esac
 }
 
@@ -355,6 +366,7 @@ write_claude_plugin_manifest() {
     "mcp"
   ],
   "skills": "./skills/",
+  "agents": "./agents/",
   "mcpServers": "./mcp-config.json"
 }
 JSON
@@ -403,6 +415,92 @@ containing \`cadre/\`, so callers may pass either the project root or a path
 inside it. Use \`cadre_project\` with \`{"action":"root"}\` and \`root\` to
 inspect the resolved project root.
 EOF
+}
+
+write_claude_worker_agent() {
+  local agent_dir
+  agent_dir="$(out_path "$CLAUDE_PLUGIN_DIR/agents")"
+  mkdir -p "$agent_dir"
+  cat > "$agent_dir/cadre-worker.md" <<'EOF'
+---
+name: cadre-worker
+description: Execute one packet-assigned Cadre parallel worker task inside its provided worktree, then return structured evidence to the coordinator.
+isolation: worktree
+skills:
+  - cadre
+---
+
+You are a Cadre parallel worker. Execute only the task in the packet payload from
+the coordinator. Work only in the provided repo/worktree and only on assigned
+product files. Do not edit Cadre control-plane files, Beads state, provider
+state, worker topology, merge state, or cleanup state.
+
+Run the task's relevant product verification and commit product changes locally
+when the worker prompt asks for commit evidence. Return structured evidence:
+worker id, task key, repo, commit SHA, tests run, coverage when available, files
+changed, summary, and blockers. If implementation fails, return failure evidence
+instead of repairing Cadre state yourself.
+EOF
+}
+
+validate_generated_plugins() {
+  node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const root = process.cwd();
+const checks = [
+  ["plugins/cadre/.codex-plugin/plugin.json", ["name", "version", "skills", "mcpServers"]],
+  ["plugins/cadre/.mcp.json", ["mcpServers"]],
+  ["plugins/cadre-claude/.claude-plugin/plugin.json", ["name", "version", "skills", "mcpServers"]],
+  ["plugins/cadre-claude/mcp-config.json", ["mcpServers"]],
+];
+
+for (const [rel, keys] of checks) {
+  const file = path.join(root, rel);
+  if (!fs.existsSync(file)) throw new Error(`missing ${rel}`);
+  const json = JSON.parse(fs.readFileSync(file, "utf8"));
+  for (const key of keys) {
+    if (!(key in json)) throw new Error(`${rel} missing ${key}`);
+  }
+}
+
+const codexManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre/.codex-plugin/plugin.json"), "utf8"));
+if (codexManifest.skills !== "./skills/") throw new Error("Codex plugin manifest has wrong skills path");
+if (codexManifest.mcpServers !== "./.mcp.json") throw new Error("Codex plugin manifest has wrong MCP path");
+const claudeManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-claude/.claude-plugin/plugin.json"), "utf8"));
+if (claudeManifest.skills !== "./skills/") throw new Error("Claude plugin manifest has wrong skills path");
+if (claudeManifest.agents !== "./agents/") throw new Error("Claude plugin manifest has wrong agents path");
+if (claudeManifest.mcpServers !== "./mcp-config.json") throw new Error("Claude plugin manifest has wrong MCP path");
+
+const harnessCodexMarketplace = JSON.parse(fs.readFileSync(path.join(root, ".agents/plugins/marketplace.json"), "utf8"));
+if (harnessCodexMarketplace.plugins?.[0]?.source?.path !== "./plugins/cadre") {
+  throw new Error("Harness Codex marketplace has wrong plugin path");
+}
+const harnessClaudeMarketplace = JSON.parse(fs.readFileSync(path.join(root, ".claude-plugin/marketplace.json"), "utf8"));
+if (harnessClaudeMarketplace.plugins?.[0]?.source !== "./plugins/cadre-claude") {
+  throw new Error("Harness Claude marketplace has wrong plugin path");
+}
+const repoRoot = path.resolve(root, "..");
+const rootCodexMarketplace = JSON.parse(fs.readFileSync(path.join(repoRoot, ".agents/plugins/marketplace.json"), "utf8"));
+if (rootCodexMarketplace.plugins?.[0]?.source?.path !== "./harness/plugins/cadre") {
+  throw new Error("Root Codex marketplace has wrong plugin path");
+}
+const rootClaudeMarketplace = JSON.parse(fs.readFileSync(path.join(repoRoot, ".claude-plugin/marketplace.json"), "utf8"));
+if (rootClaudeMarketplace.plugins?.[0]?.source !== "./harness/plugins/cadre-claude") {
+  throw new Error("Root Claude marketplace has wrong plugin path");
+}
+
+for (const rel of [
+  "plugins/cadre/skills/cadre/SKILL.md",
+  "plugins/cadre/scripts/mcp/cadre-server.js",
+  "plugins/cadre-claude/skills/cadre/SKILL.md",
+  "plugins/cadre-claude/scripts/mcp/cadre-server.js",
+  "plugins/cadre-claude/agents/cadre-worker.md",
+]) {
+  if (!fs.existsSync(path.join(root, rel))) throw new Error(`missing ${rel}`);
+}
+NODE
 }
 
 write_marketplaces() {
@@ -460,6 +558,61 @@ JSON
 JSON
 }
 
+write_root_marketplaces() {
+  mkdir -p "$(dirname "$(out_root_path "$ROOT_CODEX_PLUGIN_MARKETPLACE")")"
+  cat > "$(out_root_path "$ROOT_CODEX_PLUGIN_MARKETPLACE")" <<'JSON'
+{
+  "name": "cadre",
+  "interface": {
+    "displayName": "Cadre"
+  },
+  "plugins": [
+    {
+      "name": "cadre",
+      "source": {
+        "source": "local",
+        "path": "./harness/plugins/cadre"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
+JSON
+
+  mkdir -p "$(dirname "$(out_root_path "$ROOT_CLAUDE_PLUGIN_MARKETPLACE")")"
+  cat > "$(out_root_path "$ROOT_CLAUDE_PLUGIN_MARKETPLACE")" <<'JSON'
+{
+  "name": "cadre",
+  "owner": {
+    "name": "Vishal Barnwal"
+  },
+  "description": "Cadre skill-first workflows for Claude Code.",
+  "plugins": [
+    {
+      "name": "cadre",
+      "source": "./harness/plugins/cadre-claude",
+      "description": "Skill-first Cadre workflows with bundled MCP tooling for context-driven development.",
+      "version": "2.0.0",
+      "author": {
+        "name": "Vishal Barnwal"
+      },
+      "category": "productivity",
+      "tags": [
+        "cadre",
+        "skills",
+        "mcp",
+        "context-driven-development"
+      ]
+    }
+  ]
+}
+JSON
+}
+
 generate_plugins() {
   rm -rf "$(out_path "$CODEX_PLUGIN_DIR")" "$(out_path "$CLAUDE_PLUGIN_DIR")"
 
@@ -472,9 +625,14 @@ generate_plugins() {
   write_codex_mcp_config
   write_claude_plugin_manifest
   write_claude_mcp_config
+  write_claude_worker_agent
   write_plugin_readme "$CODEX_PLUGIN_DIR" "Codex"
   write_plugin_readme "$CLAUDE_PLUGIN_DIR" "Claude Code"
   write_marketplaces
+  write_root_marketplaces
+  if [[ -z "$GEN_ROOT" ]]; then
+    validate_generated_plugins
+  fi
 }
 
 main() {
@@ -536,6 +694,14 @@ main() {
         stale=true
       fi
     }
+    check_generated_root_file() {
+      local path="$1"
+      if ! diff -q "$GEN_ROOT/root/$path" "$ROOT_REPO/$path" >/dev/null 2>&1; then
+        echo "stale: ../$path" >&2
+        diff -q "$GEN_ROOT/root/$path" "$ROOT_REPO/$path" >&2 || true
+        stale=true
+      fi
+    }
     for d in "$CLAUDE_PROTOCOL_DIR" "$CODEX_PROTOCOL_DIR" "$CLAUDE_SKILL_DIR/templates" "$CODEX_SKILL_DIR/templates" "$CLAUDE_PLUGIN_DIR" "$CODEX_PLUGIN_DIR"; do
       check_generated_dir "$d"
     done
@@ -556,6 +722,8 @@ main() {
     done
     check_generated_file "$CODEX_PLUGIN_MARKETPLACE"
     check_generated_file "$CLAUDE_PLUGIN_MARKETPLACE"
+    check_generated_root_file "$ROOT_CODEX_PLUGIN_MARKETPLACE"
+    check_generated_root_file "$ROOT_CLAUDE_PLUGIN_MARKETPLACE"
 
     if ! $stale; then
       echo "✓ Generated plugin bundles are up to date."

@@ -40,19 +40,39 @@ export function resourceList(): JsonObject {
 export function resourceTemplatesList(): JsonObject {
   const listed = resourceList();
   const resources = Array.isArray(listed.resources) ? listed.resources : [];
+  const contracts: Record<string, JsonObject> = {
+    "cadre://team-board": { required: ["root"] },
+    "cadre://fleet-board": { required: ["root"] },
+    "cadre://beads-summary": { required: ["root"] },
+    "cadre://track-context": { required: ["root", "trackId"] },
+    "cadre://review-evidence": { required: ["root", "trackId"] },
+    "cadre://collisions": { required: ["root"] },
+    "cadre://repo-map": { required: ["root"] },
+    "cadre://workspace-diagnostics": { required: ["root"] },
+    "cadre://lsp-status": { required: ["root"] },
+    "cadre://repo-topology": { required: ["root"] },
+    "cadre://provider-actions": { required: ["root", "trackId", "workflow"] },
+    "cadre://ship-plan": { required: ["root", "trackId"] },
+    "cadre://land-plan": { required: ["root", "trackId"] },
+    "cadre://release-plan": { required: ["root"] },
+    "cadre://my-next-actions": { required: ["root"] },
+    "cadre://review-queue": { required: ["root"] },
+    "cadre://handoff-inbox": { required: ["root"] },
+    "cadre://parallel-state": { required: ["root", "trackId"] },
+    "cadre://quality-gate": { required: ["root", "trackId"] },
+    "cadre://test-impact": { required: ["root"], requiredAny: [["files"], ["base", "head"]] },
+    "cadre://track-plan": { required: ["root", "trackId"] },
+    "cadre://job-result": { required: ["root", "jobId"] },
+  };
   const templates = resources.map((resource) => {
     const uri = asString(asJsonObject(resource).uri);
-    const required = uri.includes("track") || uri.includes("quality") || uri.includes("parallel") || uri.includes("review-evidence")
-      ? ["root", "trackId"]
-      : uri.includes("job-result")
-        ? ["root", "jobId"]
-        : ["root"];
+    const contract = contracts[uri] || { required: ["root"] };
     return {
-      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,jobId}`,
+      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,base,head,jobId}`,
       name: asJsonObject(resource).name,
       description: asJsonObject(resource).description,
       mimeType: "application/json",
-      required,
+      ...contract,
     };
   });
   return { resourceTemplates: templates };
@@ -69,6 +89,8 @@ function parseResourceUri(uri: string): ResourceQuery {
     symbol: params.get("symbol"),
     workflow: params.get("workflow"),
     jobId: params.get("jobId"),
+    baseRef: params.get("base"),
+    headRef: params.get("head"),
     files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean),
   };
 }
@@ -123,7 +145,11 @@ export function resourceRead(uri: string, jobs: Pick<JobManager, "loadPersisted"
       collisions: core.collisionScan(root),
     };
   }
-  else if (resource.base === "cadre://test-impact") value = core.testImpact(root, { files: resource.files });
+  else if (resource.base === "cadre://test-impact") value = core.testImpact(root, {
+    files: resource.files,
+    base: resource.baseRef || undefined,
+    head: resource.headRef || undefined,
+  });
   else if (resource.base === "cadre://track-plan") {
     const context = core.trackContext(root, resource.trackId);
     const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);

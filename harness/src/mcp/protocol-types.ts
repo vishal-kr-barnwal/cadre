@@ -47,5 +47,7 @@ export interface ResourceQuery extends JsonObject {
   symbol: string | null;
   workflow: string | null;
   jobId: string | null;
+  baseRef: string | null;
+  headRef: string | null;
   files: string[];
 }

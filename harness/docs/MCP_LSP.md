@@ -21,10 +21,12 @@ node scripts/mcp/cadre-server.js
 ```
 
 It implements the finalized MCP `2025-11-25` initialize lifecycle over stdio and
-offers these tools:
+returns server `instructions` covering per-call roots, compact defaults,
+packet-owned state, and resource preference. It offers these tools:
 
 | Tool | Purpose |
 |------|---------|
+| `cadre_workflow` | Packet coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows. |
 | `cadre_project` with `action: "ping"` | Verify that the required Cadre MCP runtime is available. |
 | `cadre_project` with `action: "doctor"` | Diagnose runtime wiring, project markers, Beads, LSP, provider mode/MCP evidence requirements, merge-driver state, and generated-bundle check availability. |
 | `cadre_project` with `action: "root"` | Resolve a caller-provided path to the Cadre project root. |
@@ -46,6 +48,8 @@ offers these tools:
 | `cadre_track` with `action: "create_beads_tree"` | Create or dry-run the Beads epic/phase/task/dependency tree for one track and patch metadata with Beads IDs. |
 | `cadre_mutate` with `action: "record_task_result"` | Record task marker/SHA/coverage results in `plan.md` and `metadata.json`. |
 | `cadre_complete_task` | Run coverage/tests, enforce the threshold, then record plan/metadata/Beads completion as one transaction. |
+| `cadre_parallel` with `action: "plan"`, `"next_wave"`, or `"setup_workers"` | Compute ready waves and return dispatch-ready worker prompts, owned files, worktrees, result schema, and evidence requirements. |
+| `cadre_parallel` with `action: "record_finish"`, `"merge_back"`, or `"cleanup"` | Record worker completion, plan/execute merge-back, and clean packet-owned worker worktrees. |
 | `cadre_mutate` with `action: "record_worker"` | Coordinator-owned parallel worker status/evidence update; can complete a task after clean merge. |
 | `cadre_mutate` with `action: "record_review"` | Write the structured review verdict with reviewer-race guard and immediate gate evaluation. |
 | `cadre_review` with `action: "assist"` | Assemble review evidence: repo-aware diff surface, unfinished plan tasks, TODO/stub scan, coverage, machine gate, and LSP findings. |
@@ -60,6 +64,9 @@ offers these tools:
 | `cadre_job` with `action: "start", type: "coverage"` | Run configured tests/coverage, parse measured coverage, and optionally record it on a track/task. |
 | `cadre_review` with `action: "pr_ci_status"` | Validate caller-supplied GitHub/GitLab MCP PR/MR/CI evidence, or return exact provider MCP evidence requirements; local mode skips provider evidence. |
 | `cadre_intel` with `action: "repo_map"` | Return a compact semantic repository map or references for one symbol. |
+| `cadre_intel` with `action: "workspace_diagnostics"` | Detect build/test/lint adapters and project gate candidates. |
+| `cadre_intel` with `action: "test_impact"` | Map changed files or base/head diffs to likely tests and manifests. |
+| `cadre_intel` with `action: "dependency_graph"` | Return repo-qualified dependency edges and manifests for mono/polyrepo projects. |
 | `cadre_beads` | Perform structured Beads writes (`update`, `note`, `close`, labels, deps, create) without ad hoc shell snippets. |
 | `cadre_review` with `action: "gate"` | Evaluate whether `metadata.review` clears ship/land; optional `headSha`/`headShas` enforce reviewed commit pins. |
 | `cadre_project` with `action: "polyrepo_preflight"` | Run local polyrepo manifest/submodule checks. |
@@ -69,15 +76,27 @@ It also exposes resources:
 | Resource | Purpose |
 |----------|---------|
 | `cadre://team-board?root=/path/to/project` | Rich team board data with WIP, handoffs, reviews, blockers, and Beads evidence. |
+| `cadre://fleet-board?root=/path/to/project` | Mono/polyrepo fleet status across configured repos. |
+| `cadre://beads-summary?root=/path/to/project` | Ready/WIP/review Beads summary. |
 | `cadre://collisions?root=/path/to/project` | Cross-track collision data. |
 | `cadre://track-context?root=/path/to/project&trackId=<id>` | Bounded context for one track. |
+| `cadre://review-evidence?root=/path/to/project&trackId=<id>` | Persisted review evidence and provider entries for one track. |
 | `cadre://repo-map?root=/path/to/project` | Compact semantic map; add `&symbol=<name>` for references. |
+| `cadre://workspace-diagnostics?root=/path/to/project` | Detected build/test adapters and project gate commands. |
 | `cadre://lsp-status?root=/path/to/project` | Configured LSP servers plus setup recommendations. |
 | `cadre://repo-topology?root=/path/to/project` | Mono/polyrepo topology and configured product repos. |
 | `cadre://provider-actions?root=/path/to/project&trackId=<id>&workflow=ship|land` | Hosted provider action queue from a ship or land packet. |
 | `cadre://ship-plan?root=/path/to/project&trackId=<id>` | Compact ship dry-run plan. |
 | `cadre://land-plan?root=/path/to/project&trackId=<id>` | Compact land dry-run plan. |
 | `cadre://release-plan?root=/path/to/project` | Compact release dry-run plan. |
+| `cadre://my-next-actions?root=/path/to/project` | Personal queue: WIP, handoffs, review work, available work, and reclaimable work. |
+| `cadre://review-queue?root=/path/to/project` | Bounded review queue for team-scale triage. |
+| `cadre://handoff-inbox?root=/path/to/project` | Incoming handoffs for the current identity. |
+| `cadre://parallel-state?root=/path/to/project&trackId=<id>` | Parallel worker wave/state summary. |
+| `cadre://quality-gate?root=/path/to/project&trackId=<id>` | Plan integrity, review gate, and collision summary. |
+| `cadre://test-impact?root=/path/to/project&files=a,b` | Impacted tests/manifests for explicit files. Also supports `base` plus `head`. |
+| `cadre://track-plan?root=/path/to/project&trackId=<id>` | Parsed track plan. |
+| `cadre://job-result?root=/path/to/project&jobId=<id>` | Persisted async job result. |
 
 Cadre workflows require MCP. At the start of a Cadre workflow, callers should
 verify MCP availability with `cadre_project` with `action: "ping"`. If Cadre MCP
@@ -122,6 +141,7 @@ Workflow routing:
 | Key-scoped metadata updates | `cadre_mutate` with `action: "metadata_patch"` |
 | Per-task result write | `cadre_mutate` with `action: "record_task_result"` |
 | Safe task completion | `cadre_complete_task` |
+| Parallel wave planning, worker dispatch payloads, merge-back, and cleanup | `cadre_parallel` |
 | Parallel worker audit/status | `cadre_mutate` with `action: "record_worker"` |
 | Track status mutation | `cadre_mutate` with `action: "set_status"` |
 | Derived `tracks.md` rebuilds | `cadre_mutate` with `action: "regen_index"` |
@@ -130,6 +150,8 @@ Workflow routing:
 | Shared-mode pre/post sync | `cadre_project` with `action: "sync_control_plane"` |
 | LSP configuration | `cadre_intel` with `action: "lsp_setup"` |
 | Code-intelligence review | `cadre_intel` with `action: "lsp_warm_review"` preferred; `cadre_intel` with `action: "lsp_review"` fallback |
+| Workspace adapters and repo diagnostics | `cadre_intel` with `action: "workspace_diagnostics"` |
+| Test impact and dependency graph | `cadre_intel` with `action: "test_impact"` or `action: "dependency_graph"` |
 | Review machine gate | `cadre_review` with `action: "machine_gate"` |
 | Coverage measurement and recording | `cadre_job` with `action: "start", type: "coverage"` |
 | Ship/land provider actions | `cadre_workflow` with `workflow: "ship"` or `"land"` returns provider action specs; provider MCP executes them; call the workflow packet back with `providerEvidence` |
@@ -198,8 +220,8 @@ The generated Claude Code and Codex plugins both bundle this MCP server:
 
 | Platform | Plugin path | MCP config |
 |----------|-------------|------------|
-| Claude Code | `plugins/cadre-claude/` | `mcp-config.json` |
-| OpenAI Codex | `plugins/cadre/` | `.mcp.json` |
+| Claude Code | repo root `harness/plugins/cadre-claude/`; harness dev `plugins/cadre-claude/` | `mcp-config.json` |
+| OpenAI Codex | repo root `harness/plugins/cadre/`; harness dev `plugins/cadre/` | `.mcp.json` |
 
 The server code and `cadre-core.js` are built from TypeScript sources in `src/`
 and copied into each plugin's `scripts/` directory so installed plugin cache

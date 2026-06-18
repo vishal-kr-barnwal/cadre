@@ -42,7 +42,7 @@ Claude Code:
 OpenAI Codex:
 
 ```bash
-codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse plugins/cadre
+codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
 codex plugin add cadre@cadre
 ```
 

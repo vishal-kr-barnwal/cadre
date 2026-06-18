@@ -4,6 +4,8 @@
 Cadre MCP is the runtime for workflow coordination. Every project-scoped packet
 must receive an explicit `root` argument. Setup-assist may run before `cadre/`
 exists; all other project calls resolve upward to an initialized Cadre project.
+The MCP initialize response includes server instructions; obey those first when
+they conflict with stale local notes.
 
 ## Primary Packets
 
@@ -38,10 +40,13 @@ evidence, long command outputs, or full style-guide content.
 Use MCP resources for bounded dashboards:
 
 - `cadre://team-board?root=...`
+- `cadre://fleet-board?root=...`
+- `cadre://beads-summary?root=...`
 - `cadre://my-next-actions?root=...`
 - `cadre://review-queue?root=...`
 - `cadre://handoff-inbox?root=...`
 - `cadre://track-context?root=...&trackId=...`
+- `cadre://review-evidence?root=...&trackId=...`
 - `cadre://track-plan?root=...&trackId=...`
 - `cadre://parallel-state?root=...&trackId=...`
 - `cadre://quality-gate?root=...&trackId=...`
@@ -51,6 +56,9 @@ Use MCP resources for bounded dashboards:
 - `cadre://lsp-status?root=...`
 - `cadre://repo-topology?root=...`
 - `cadre://provider-actions?root=...&trackId=...&workflow=ship|land`
+- `cadre://ship-plan?root=...&trackId=...`
+- `cadre://land-plan?root=...&trackId=...`
+- `cadre://release-plan?root=...`
 - `cadre://job-result?root=...&jobId=...`
 
 Resource templates are discoverable through MCP, so clients should prefer

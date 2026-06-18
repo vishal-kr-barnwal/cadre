@@ -13,6 +13,12 @@ function write(file, content) {
   fs.writeFileSync(file, content);
 }
 
+function git(root, args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result;
+}
+
 function writeTrack(root, id, plan, metadata = {}) {
   write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
   const dir = path.join(root, "cadre", "tracks", id);
@@ -188,7 +194,10 @@ test("MCP root resolution rejects harness skill directories without project stat
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-test-"));
   const { server, request } = startServer();
   try {
-    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    const initialized = await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    assert.match(initialized.instructions, /root/);
+    assert.match(initialized.instructions, /compact/);
+    assert.match(initialized.instructions, /packet-owned/);
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
     for (const name of [
@@ -222,9 +231,13 @@ test("MCP root resolution rejects harness skill directories without project stat
     const parallelActions = parallelTool.inputSchema.properties.action.enum;
     assert.ok(parallelActions.includes("next_wave"));
     assert.ok(parallelActions.includes("setup_workers"));
+    assert.ok(parallelTool.inputSchema.required.includes("root"));
+    assert.ok(parallelTool.inputSchema.required.includes("action"));
+    assert.ok(parallelTool.inputSchema.anyOf.some((entry) => entry.required.includes("trackId")));
     const reviewTool = tools.tools.find((tool) => tool.name === "cadre_review");
     const reviewActions = reviewTool.inputSchema.properties.action.enum;
     assert.ok(reviewActions.includes("provider_evidence"));
+    assert.ok(reviewTool.inputSchema.allOf.some((entry) => entry.then && entry.then.anyOf));
     const intelTool = tools.tools.find((tool) => tool.name === "cadre_intel");
     const intelActions = intelTool.inputSchema.properties.action.enum;
     assert.ok(intelActions.includes("lsp_setup"));
@@ -254,6 +267,13 @@ test("MCP root resolution rejects harness skill directories without project stat
     const templates = await request("resources/templates/list", {});
     const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
     assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
+    const templateByUri = new Map(templates.resourceTemplates.map((template) => [template.uriTemplate.split("{")[0], template]));
+    assert.deepEqual(templateByUri.get("cadre://provider-actions").required, ["root", "trackId", "workflow"]);
+    assert.deepEqual(templateByUri.get("cadre://ship-plan").required, ["root", "trackId"]);
+    assert.deepEqual(templateByUri.get("cadre://land-plan").required, ["root", "trackId"]);
+    assert.deepEqual(templateByUri.get("cadre://job-result").required, ["root", "jobId"]);
+    assert.deepEqual(templateByUri.get("cadre://test-impact").required, ["root"]);
+    assert.deepEqual(templateByUri.get("cadre://test-impact").requiredAny, [["files"], ["base", "head"]]);
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
@@ -306,6 +326,90 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(JSON.parse(jobResource.contents[0].text).data.status, "succeeded");
   } finally {
     server.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP warm LSP review qualifies polyrepo findings with repo context", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-lsp-test-"));
+  const appRoot = path.join(root, "products", "app");
+  const { server, request } = startServer();
+  try {
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "app",
+      repos: [
+        { name: "app", submodule_path: "products/app", default_branch: "main" },
+      ],
+    }, null, 2));
+    write(path.join(root, "cadre", "lsp.json"), JSON.stringify({
+      servers: [
+        {
+          id: "javascript",
+          command: "cadre-missing-js-language-server",
+          args: ["--stdio"],
+          extensions: [".js"],
+        },
+      ],
+    }, null, 2));
+    writeTrack(root, "poly_lsp", `# Plan: poly_lsp
+
+## Phase 1: App
+
+- [ ] Task 1: Update app
+  <!-- repo: app -->
+  <!-- files: src/app.js -->
+`, {
+      repos: {
+        app: {
+          submodule_path: "products/app",
+          base_branch: "main",
+          git_branch: "track/poly_lsp",
+        },
+      },
+    });
+
+    fs.mkdirSync(appRoot, { recursive: true });
+    git(appRoot, ["init"]);
+    git(appRoot, ["config", "user.email", "reviewer@example.com"]);
+    git(appRoot, ["config", "user.name", "Reviewer"]);
+    write(path.join(appRoot, "src", "app.js"), "export function app() { return true; }\n");
+    git(appRoot, ["add", "."]);
+    git(appRoot, ["commit", "-m", "initial app"]);
+    git(appRoot, ["branch", "-M", "main"]);
+    git(appRoot, ["checkout", "-b", "track/poly_lsp"]);
+    write(path.join(appRoot, "src", "app.js"), "export function app() { return 'changed'; }\n");
+    git(appRoot, ["add", "."]);
+    git(appRoot, ["commit", "-m", "change app"]);
+
+    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    const review = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: {
+        root,
+        action: "lsp_warm_review",
+        trackId: "poly_lsp",
+        timeoutMs: 10000,
+      },
+    }));
+    assert.equal(review.data.polyrepo, true);
+    const appResult = review.data.repos.find((repo) => repo.repo === "app");
+    assert.equal(appResult.path, "products/app");
+    assert.equal(appResult.cwd, appRoot);
+    assert.ok(review.data.findings.length > 0);
+    for (const finding of review.data.findings) {
+      assert.equal(finding.repo, "app");
+      assert.equal(typeof finding.path, "string");
+      assert.equal(finding.cwd, appRoot);
+    }
+
+    await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { action: "lsp_daemon_shutdown" },
+    });
+  } finally {
+    server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

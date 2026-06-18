@@ -114,6 +114,74 @@ test("Generated Codex and Claude skill bundles only differ in platform-sliced re
   assert.deepEqual(failures, []);
 });
 
+test("Generated plugin manifests and marketplace shims point at expected paths", () => {
+  const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+  const codexManifest = readJson(path.join(root, "plugins", "cadre", ".codex-plugin", "plugin.json"));
+  assert.equal(codexManifest.skills, "./skills/");
+  assert.equal(codexManifest.mcpServers, "./.mcp.json");
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", ".mcp.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "mcp", "cadre-server.js")), true);
+
+  const claudeManifest = readJson(path.join(root, "plugins", "cadre-claude", ".claude-plugin", "plugin.json"));
+  assert.equal(claudeManifest.skills, "./skills/");
+  assert.equal(claudeManifest.agents, "./agents/");
+  assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "mcp-config.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
+
+  const harnessCodexMarketplace = readJson(path.join(root, ".agents", "plugins", "marketplace.json"));
+  assert.equal(harnessCodexMarketplace.plugins[0].source.path, "./plugins/cadre");
+  const harnessClaudeMarketplace = readJson(path.join(root, ".claude-plugin", "marketplace.json"));
+  assert.equal(harnessClaudeMarketplace.plugins[0].source, "./plugins/cadre-claude");
+
+  const repoRoot = path.resolve(root, "..");
+  const rootCodexMarketplace = readJson(path.join(repoRoot, ".agents", "plugins", "marketplace.json"));
+  assert.equal(rootCodexMarketplace.plugins[0].source.path, "./harness/plugins/cadre");
+  const rootClaudeMarketplace = readJson(path.join(repoRoot, ".claude-plugin", "marketplace.json"));
+  assert.equal(rootClaudeMarketplace.plugins[0].source, "./harness/plugins/cadre-claude");
+});
+
+test("Install docs use the repo-root Codex sparse plugin path", () => {
+  for (const file of [path.join(root, "README.md"), path.join(root, "docs", "INSTALL.md")]) {
+    const text = fs.readFileSync(file, "utf8");
+    assert.match(text, /--sparse harness\/plugins\/cadre/);
+    assert.doesNotMatch(text, /--sparse plugins\/cadre(?!-)/);
+  }
+});
+
+test("Target-project CI templates do not bundle harness-only checks", () => {
+  const targetTemplates = [
+    path.join(root, "templates", "ci", "cadre-monorepo-check.github.yml"),
+    path.join(root, "templates", "ci", "cadre-monorepo-check.gitlab.yml"),
+  ];
+  const forbiddenTargetText = /pnpm check|scripts\/generate-skills|templates\/scripts|cadre-regen-index/;
+  for (const file of targetTemplates) {
+    assert.doesNotMatch(fs.readFileSync(file, "utf8"), forbiddenTargetText, path.relative(root, file));
+  }
+
+  const harnessTemplates = [
+    path.join(root, "templates", "ci", "cadre-harness-check.github.yml"),
+    path.join(root, "templates", "ci", "cadre-harness-check.gitlab.yml"),
+  ];
+  for (const file of harnessTemplates) {
+    const text = fs.readFileSync(file, "utf8");
+    assert.match(text, /pnpm check/);
+    assert.doesNotMatch(text, /templates\/scripts|cadre-regen-index/);
+  }
+});
+
+test("Hidden local skill discovery dirs contain only Cadre output", () => {
+  for (const dir of [path.join(root, ".agents", "skills"), path.join(root, ".claude", "skills")]) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual(entries, ["cadre"], path.relative(root, dir));
+  }
+});
+
 test("User-facing workflow docs stay packet-owned", () => {
   const docs = [
     path.join(root, "README.md"),
