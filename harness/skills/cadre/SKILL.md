@@ -136,22 +136,29 @@ Preferred packet checkpoints:
 
 Cadre MCP remains the authoritative orchestration layer: track status,
 ownership, review gates, Beads IDs, and index regeneration live in `cadre/` and
-`.beads/`. GitHub/GitLab MCP servers may be used as **evidence providers** for
-PRs, reviews, CI, Actions/job logs, issues, and discussion context, but their
-data must be folded back into Cadre through `cadre_review` with `action: "assist"`,
-`cadre_review` with `action: "pr_ci_status"`, `cadre_mutate` with `action: "record_review"`, Beads notes, or track learnings.
+`.beads/`. GitHub/GitLab MCP servers are the **only** provider integrations for
+hosted PR/MR, review, CI, Actions/job-log, issue, and discussion context. Cadre
+does not invoke `gh` or `glab` during workflows. Provider data must be folded
+back into Cadre through `cadre_review` with `action: "provider_evidence"`,
+`cadre_review` with `action: "pr_ci_status"` and supplied MCP evidence,
+`cadre_mutate` with `action: "record_review"`, Beads notes, or track learnings.
 Never treat a provider label, issue state, or PR review as the source of truth
 for Cadre track status unless a Cadre MCP write records the corresponding
 decision.
 
-When available, prefer official provider MCPs for deep PR/CI evidence:
+Setup records `cadre/config.json.provider_mode` as `local`, `github`, or
+`gitlab`. In `local` mode no provider MCP is required. In `github` or `gitlab`
+mode, if the matching provider MCP is unavailable, provider-dependent packets
+fail closed and return `required_provider_mcp` plus `required_evidence`.
+
+Use official provider MCPs for deep PR/CI evidence:
 - GitHub MCP for repository, issue, pull request, review, check, and Actions log
   evidence.
 - GitLab MCP for merge request, pipeline, job log, issue, and approval evidence.
 
-If provider evidence is unavailable, use the Cadre review/ship/land packet result
-as the source of truth, record the limitation in Cadre evidence when the packet
-supports it, and halt when the workflow packet requires that provider evidence.
+If required provider MCP evidence is unavailable, halt on the packet result and
+ask the user to enable the matching provider MCP or switch the project to
+`provider_mode: "local"` through the setup/refresh packet.
 
 ## Beads Integration
 

@@ -87,6 +87,20 @@ const packetSchema = (description: ToolDescription, actionEnum: string[] | null 
       machineCommand: { type: "string" },
       timeoutMs: { type: "number" },
       provider: { type: "string" },
+      providerMode: { type: "string", enum: ["local", "github", "gitlab"] },
+      provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },
+      providerMcpAvailable: { type: "boolean" },
+      provider_mcp_available: { type: "boolean" },
+      githubMcpAvailable: { type: "boolean" },
+      gitlabMcpAvailable: { type: "boolean" },
+      providerEvidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+      provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+      remoteHost: { type: "string" },
+      remote_host: { type: "string" },
+      responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
+      response_mode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
+      detail: { type: "boolean" },
+      compact: { type: "boolean" },
       symbol: { type: "string" },
       symbols: { type: "array", items: { type: "string" } },
       files: { type: "array", items: { type: "string" } },
@@ -481,7 +495,7 @@ function jobEnvelope(type: string | null, root: string, args: RuntimeArgs): Runt
   return envelope({ ok: true, job: jobs.start(type, root, args) });
 }
 
-function workflowPacket(args: RuntimeArgs): RuntimeEnvelope {
+async function workflowPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const setupWorkflows = new Set(["setup", "setup_assist", "setup_scaffold"]);
   if (setupWorkflows.has(workflow)) {
@@ -489,6 +503,14 @@ function workflowPacket(args: RuntimeArgs): RuntimeEnvelope {
     return envelope(core.workflowPacket(info ? info.root : process.cwd(), { ...args, workflow }));
   }
   const root = requireCadreRoot(args);
+  if ((workflow === "review" || workflow === "revise") && args.includeLsp !== false) {
+    const lspResult = await lspDaemon.request(
+      "review",
+      { ...args, root, base: args.base || "main", head: args.head || "HEAD" },
+      Number(args.timeoutMs || 120000)
+    ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] }));
+    return envelope(core.workflowPacket(root, { ...args, workflow, lspResult: asJsonObject(lspResult) }));
+  }
   return envelope(core.workflowPacket(root, { ...args, workflow }));
 }
 
@@ -656,7 +678,7 @@ function jobPacket(args: RuntimeArgs): RuntimeEnvelope {
 }
 
 async function toolCall(name: string, args: RuntimeArgs = {}): Promise<TextJsonResult> {
-  if (name === "cadre_workflow") return asTextJson(workflowPacket(args));
+  if (name === "cadre_workflow") return asTextJson(await workflowPacket(args));
   if (name === "cadre_project") return asTextJson(await projectPacket(args));
   if (name === "cadre_status") return asTextJson(statusPacket(args));
   if (name === "cadre_track") return asTextJson(trackPacket(args));

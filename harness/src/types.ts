@@ -173,6 +173,14 @@ export interface RuntimeArgs extends JsonObject {
   machineCommand?: string | undefined;
   timeoutMs?: number | undefined;
   provider?: string;
+  providerMode?: string;
+  provider_mode?: string;
+  providerMcpAvailable?: boolean;
+  provider_mcp_available?: boolean;
+  githubMcpAvailable?: boolean;
+  gitlabMcpAvailable?: boolean;
+  remoteHost?: string;
+  remote_host?: string;
   symbol?: string | undefined;
   symbols?: string[];
   files?: string[];
@@ -247,6 +255,13 @@ export interface RuntimeArgs extends JsonObject {
   allowNoCommit?: boolean;
   now?: string;
   evidence?: JsonObject | string;
+  providerEvidence?: JsonObject | string;
+  provider_evidence?: JsonObject | string;
+  fetch?: boolean;
+  responseMode?: string;
+  response_mode?: string;
+  detail?: boolean;
+  compact?: boolean;
   hasCadreProject?: boolean;
   parent?: string;
   label?: string;

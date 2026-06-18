@@ -1,7 +1,7 @@
 # Cadre cross-repo merge train (GitHub Actions).
 #
 # Scaffolded into the CONTROL repo at .github/workflows/cadre-merge-train.yml
-# by /cadre-setup when pr_provider == "github" and merge_train.enabled.
+# by /cadre-setup when provider_mode == "github" and merge_train.enabled.
 #
 # What it does: when every PR in a track group (label `cadre-track:<id>`,
 # spread across the control repo + product submodule repos) is APPROVED and

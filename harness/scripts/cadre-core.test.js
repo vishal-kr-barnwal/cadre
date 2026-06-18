@@ -692,7 +692,8 @@ test("fleetStatus and beadsSummary degrade cleanly", () => {
     assert.equal(fleet.topology, "polyrepo");
     assert.ok(fleet.repos.some((repo) => repo.name === "." && repo.role === "control"));
     assert.ok(fleet.repos.some((repo) => repo.name === "missing" && repo.exists === false));
-    assert.equal(typeof fleet.providers.gh, "boolean");
+    assert.equal(fleet.provider.provider_mode, "local");
+    assert.equal(fleet.provider.available, true);
 
     const beads = core.beadsSummary(root);
     assert.equal(beads.ok, true);
@@ -742,6 +743,131 @@ test("workflow setup writes detected and requested style guides from templates",
     const beads = JSON.parse(fs.readFileSync(path.join(root, "cadre", "beads.json"), "utf8"));
     assert.equal(beads.mode, "normal");
     assert.equal(beads.packet_only, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup records provider mode from remotes or local intent", () => {
+  const githubRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-github-provider-test-"));
+  const gitlabRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-gitlab-provider-test-"));
+  const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-local-provider-test-"));
+  try {
+    git(githubRoot, ["init"]);
+    git(githubRoot, ["remote", "add", "origin", "git@github.com:org/app.git"]);
+    const githubSetup = core.workflowPacket(githubRoot, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(githubSetup.ok, true);
+    assert.equal(githubSetup.provider.provider_mode, "github");
+    const githubConfig = JSON.parse(fs.readFileSync(path.join(githubRoot, "cadre", "config.json"), "utf8"));
+    assert.equal(githubConfig.provider_mode, "github");
+    assert.equal(githubConfig.provider_mcp_required, true);
+    assert.equal(githubConfig.remote_host, "github.com");
+
+    git(gitlabRoot, ["init"]);
+    git(gitlabRoot, ["remote", "add", "origin", "https://gitlab.com/org/app.git"]);
+    const gitlabSetup = core.workflowPacket(gitlabRoot, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["Go"] },
+    });
+    assert.equal(gitlabSetup.ok, true);
+    assert.equal(gitlabSetup.provider.provider_mode, "gitlab");
+    const gitlabConfig = JSON.parse(fs.readFileSync(path.join(gitlabRoot, "cadre", "config.json"), "utf8"));
+    assert.equal(gitlabConfig.provider_mode, "gitlab");
+    assert.equal(gitlabConfig.provider_mcp_required, true);
+
+    git(localRoot, ["init"]);
+    const localSetup = core.workflowPacket(localRoot, {
+      workflow: "setup",
+      execute: true,
+      providerMode: "local",
+      productText: "# Product\n",
+      techStack: { languages: ["Python"] },
+    });
+    assert.equal(localSetup.ok, true);
+    assert.equal(localSetup.provider.provider_mode, "local");
+    const localConfig = JSON.parse(fs.readFileSync(path.join(localRoot, "cadre", "config.json"), "utf8"));
+    assert.equal(localConfig.provider_mode, "local");
+    assert.equal(localConfig.provider_mcp_required, false);
+  } finally {
+    fs.rmSync(githubRoot, { recursive: true, force: true });
+    fs.rmSync(gitlabRoot, { recursive: true, force: true });
+    fs.rmSync(localRoot, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup asks for provider mode when remotes are ambiguous", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-ambiguous-provider-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["remote", "add", "origin", "git@github.com:org/app.git"]);
+    git(root, ["remote", "add", "mirror", "git@gitlab.com:org/app.git"]);
+
+    const dryRun = core.workflowPacket(root, {
+      workflow: "setup",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(dryRun.ok, true);
+    assert.equal(dryRun.provider.requires_confirmation, true);
+    assert.ok(dryRun.next_actions.some((action) => action.includes("providerMode")));
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(blocked.ok, false);
+    assert.ok(blocked.missing_payload.includes("providerMode"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
+
+    const local = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      providerMode: "local",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(local.ok, true);
+    const config = JSON.parse(fs.readFileSync(path.join(root, "cadre", "config.json"), "utf8"));
+    assert.equal(config.provider_mode, "local");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup asks for provider mode when hosted remote is unknown", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-unknown-provider-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["remote", "add", "origin", "git@example.internal:org/app.git"]);
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(blocked.ok, false);
+    assert.ok(blocked.missing_payload.includes("providerMode"));
+    assert.equal(blocked.provider.detected.source, "unknown_remote");
+
+    const local = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      providerMode: "local",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(local.ok, true);
+    assert.equal(local.provider.provider_mode, "local");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1038,6 +1164,99 @@ test("providerEvidence persists structured review evidence and metadata pointer"
     const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "evidence_20260617", "metadata.json"), "utf8"));
     assert.equal(metadata.review_evidence.path, "cadre/tracks/evidence_20260617/review-evidence.json");
     assert.equal(metadata.review_evidence.blocking_count, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provider status is provider-MCP-only and local mode skips provider evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-provider-contract-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ provider_mode: "github", provider_mcp_required: true }, null, 2));
+    writeTrack(root, "provider_20260618", samplePlan("provider_20260618"), {
+      owner: "owner@example.com",
+      review: {
+        verdict: "approved",
+        blocking_count: 0,
+        reviewed_sha: "abc1234",
+      },
+    });
+
+    const required = core.prCiStatus(root, {
+      trackId: "provider_20260618",
+      prNumber: 42,
+    });
+    assert.equal(required.ok, false);
+    assert.equal(required.provider, "github");
+    assert.equal(required.required_provider_mcp.provider, "github");
+    assert.equal(required.required_evidence.kind, "github_pull_request_status");
+    assert.match(required.reason, /CLI fallback is disabled/);
+    assert.match(required.unsupported_reason, /provider_mode github requires github MCP evidence/);
+
+    const review = core.workflowPacket(root, {
+      workflow: "review",
+      trackId: "provider_20260618",
+      includeLsp: false,
+      includeMachine: false,
+      responseMode: "detail",
+      prNumber: 42,
+    });
+    assert.equal(review.ok, false);
+    assert.equal(review.response_mode, "detail");
+    assert.equal(review.required_provider_mcp.provider, "github");
+    assert.match(review.unsupported_reason, /provider_mode github requires github MCP evidence/);
+
+    const supplied = core.prCiStatus(root, {
+      trackId: "provider_20260618",
+      providerEvidence: { url: "https://github.com/org/app/pull/42", state: "OPEN", status_checks: "SUCCESS" },
+    });
+    assert.equal(supplied.ok, true);
+    assert.equal(supplied.evidence_source, "github_mcp");
+
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ provider_mode: "local", provider_mcp_required: false }, null, 2));
+    const local = core.prCiStatus(root, {
+      trackId: "provider_20260618",
+      prNumber: 42,
+    });
+    assert.equal(local.ok, true);
+    assert.equal(local.skipped, true);
+    assert.equal(local.provider_mode, "local");
+    assert.match(local.reason, /no provider MCP evidence required/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provider evidence write-back requires caller-supplied MCP evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-provider-writeback-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ provider_mode: "gitlab", provider_mcp_required: true }, null, 2));
+    writeTrack(root, "writeback_20260618", samplePlan("writeback_20260618"), {
+      owner: "owner@example.com",
+    });
+
+    const blocked = core.providerEvidence(root, {
+      trackId: "writeback_20260618",
+      provider: "gitlab",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "provider_mcp_evidence_required");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "writeback_20260618", "review-evidence.json")), false);
+
+    const recorded = core.providerEvidence(root, {
+      trackId: "writeback_20260618",
+      provider: "gitlab",
+      evidence: { url: "https://gitlab.com/org/app/-/merge_requests/7", pipeline_status: "success", approvals: "approved" },
+    });
+    assert.equal(recorded.ok, true);
+    assert.equal(recorded.entry.provider, "gitlab");
+    assert.deepEqual(recorded.entry.evidence, {
+      url: "https://gitlab.com/org/app/-/merge_requests/7",
+      pipeline_status: "success",
+      approvals: "approved",
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

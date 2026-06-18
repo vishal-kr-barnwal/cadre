@@ -133,7 +133,7 @@ top of polyrepo control-repo support.
   - **Topology selection at `/cadre-setup`** — single-repo (default) or
     control-repo with product repos registered as **git submodules**.
   - New manifests `cadre/repos.json` (submodule map + `default_repo`) and
-    `cadre/config.json` (`sync_mode`, `pr_provider`, `merge_train`).
+    `cadre/config.json` (`sync_mode`, `provider_mode`, `merge_train`).
   - **Per-repo work:** tasks carry a `<!-- repo: <name> -->` annotation;
     branches, commits, worktrees, parallel workers, and reverts are per-repo
     (`metadata.json.repos` map; worktrees under `.worktrees/<id>/<repo>/`).
@@ -141,9 +141,9 @@ top of polyrepo control-repo support.
     touched repo plus the control-repo PR, links them by label
     `cadre-track:<id>`, and a generated CI **merge train** (GitHub or GitLab,
     chosen at setup) lands them **product-repos-first, control-repo-last**.
-  - **GitHub/GitLab detection** — `pr_provider` chosen at setup (auto-detected
-    from a product remote) drives `gh`/`glab` usage and which merge-train CI is
-    scaffolded.
+  - **GitHub/GitLab detection** — `provider_mode` is chosen at setup
+    (auto-detected from remotes when possible, otherwise explicit) and controls
+    provider MCP evidence requirements plus which merge-train CI is scaffolded.
   - **Shared sync mode** — control plane (`cadre/` + Beads Dolt graph) is
     pushed/pulled for team collaboration; product code stays local until landed.
   - New references `polyrepo-git.md`, `cadre-sync.md`; CI templates under

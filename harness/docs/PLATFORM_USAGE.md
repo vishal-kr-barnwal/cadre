@@ -628,6 +628,7 @@ For 10-20 people, use these defaults:
 | Parallelism | Use for independent tasks with clear file ownership. |
 | CI | Install monorepo drift gate or polyrepo merge train templates. |
 | MCP | Required through the Cadre plugin for deterministic status checks. |
+| Provider MCP | Use `provider_mode: "github"` or `"gitlab"` only when the matching provider MCP can supply PR/MR/CI evidence; use `"local"` for local-only repos. |
 | LSP | Enable for repos with shared APIs or heavy refactors. |
 
 Daily team loop:
@@ -719,7 +720,7 @@ Check:
 - `.gitmodules`
 - submodule initialization
 - track branch existence per repo
-- `gh` or `glab` auth
+- `cadre/config.json` `provider_mode` and matching provider MCP availability
 - `CADRE_TRAIN_TOKEN`
 - branch protection and merge-commit settings
 

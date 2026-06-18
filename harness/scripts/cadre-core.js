@@ -137,6 +137,8 @@ var STATUS_MARKERS = {
 var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
 var STALE_LEASE_MS = 30 * 60 * 1e3;
 var LOCK_STALE_MS = STALE_LEASE_MS;
+var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
+var commandExistsCache = /* @__PURE__ */ new Map();
 function readJson(file, fallback) {
   try {
     return JSON.parse(import_node_fs.default.readFileSync(file, "utf8"));
@@ -448,11 +450,15 @@ function controlPlaneSyncSafety(root, mode, remote, branch) {
   return safety;
 }
 function commandExists(command, cwd) {
+  const key = `${process.env.PATH || ""}\0${cwd}\0${command}`;
+  if (commandExistsCache.has(key)) return commandExistsCache.get(key) === true;
   const result = (0, import_node_child_process.spawnSync)("sh", ["-lc", `command -v '${String(command).replace(/'/g, "'\\''")}'`], {
     cwd,
     encoding: "utf8"
   });
-  return result.status === 0;
+  const exists = result.status === 0;
+  commandExistsCache.set(key, exists);
+  return exists;
 }
 function loadTopology(root) {
   const reposPath = import_node_path.default.join(root, "cadre", "repos.json");
@@ -469,6 +475,91 @@ function loadTopology(root) {
 }
 function loadPackageJson(root) {
   return readJson(import_node_path.default.join(root, "package.json"), null);
+}
+function normalizeProviderMode(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return null;
+  if (["none", "no", "off", "local-only", "local_only"].includes(raw)) return "local";
+  return PROVIDER_MODES.has(raw) ? raw : null;
+}
+function gitRemoteUrls(root) {
+  const result = runCommand("git", ["remote", "-v"], { cwd: root });
+  if (!result.ok) return [];
+  return Array.from(new Set(result.stdout.split(/\r?\n/).map((line) => line.trim().split(/\s+/)[1] || "").filter(Boolean))).sort();
+}
+function remoteHost(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    const ssh = url.match(/^[^@]+@([^:/]+)[:/]/);
+    if (ssh?.[1]) return ssh[1].toLowerCase();
+    const schemeLess = url.match(/^([^:/]+)[:/]/);
+    return schemeLess?.[1] ? schemeLess[1].toLowerCase() : null;
+  }
+}
+function providerModeForHost(host) {
+  if (!host) return null;
+  if (host.includes("github")) return "github";
+  if (host.includes("gitlab")) return "gitlab";
+  return null;
+}
+function detectedProviderFromRemotes(root) {
+  const remotes = gitRemoteUrls(root).map((url) => {
+    const host = remoteHost(url);
+    return { url, host, provider_mode: providerModeForHost(host) };
+  });
+  const providerModes = Array.from(new Set(remotes.map((remote) => remote.provider_mode).filter(Boolean))).sort();
+  const hosts = Array.from(new Set(remotes.map((remote) => remote.host).filter(Boolean))).sort();
+  const hasRemotes = remotes.length > 0;
+  const ambiguous = providerModes.length > 1 || hasRemotes && providerModes.length === 0;
+  const providerMode = providerModes.length === 1 ? providerModes[0] : !hasRemotes ? "local" : null;
+  return {
+    ok: true,
+    provider_mode: providerMode,
+    remote_host: hosts.length === 1 ? hosts[0] : null,
+    remote_hosts: hosts,
+    remotes,
+    ambiguous,
+    source: !hasRemotes ? "no_remote" : providerModes.length === 0 ? "unknown_remote" : "git_remote"
+  };
+}
+function configuredProvider(root, args = {}) {
+  const config = loadTopology(root).config || {};
+  const detected = detectedProviderFromRemotes(root);
+  const explicit = normalizeProviderMode(args.providerMode || args.provider_mode || args.provider);
+  const configured = normalizeProviderMode(config.provider_mode) || normalizeProviderMode(config.pr_provider);
+  const providerMode = explicit || configured || (detected.ambiguous ? null : normalizeProviderMode(detected.provider_mode));
+  const remoteHostValue = args.remoteHost || args.remote_host || config.remote_host || detected.remote_host || null;
+  const mode = providerMode || null;
+  return {
+    ok: Boolean(mode),
+    provider_mode: mode,
+    provider_mcp_required: mode === "github" || mode === "gitlab",
+    remote_host: remoteHostValue,
+    detected,
+    source: explicit ? "argument" : configured ? "config" : "detected",
+    requires_confirmation: !mode && detected.ambiguous === true
+  };
+}
+function providerMcpAvailability(root, args = {}) {
+  const provider = configuredProvider(root, args);
+  const mode = asOptionalString(provider.provider_mode) || "local";
+  if (mode === "local") {
+    return { ...provider, available: true, skipped: true, reason: "provider_mode is local" };
+  }
+  const explicit = args.provider_mcp_available ?? args.providerMcpAvailable;
+  const modeSpecific = mode === "github" ? args.githubMcpAvailable : args.gitlabMcpAvailable;
+  const available = typeof modeSpecific === "boolean" ? modeSpecific : typeof explicit === "boolean" ? explicit : null;
+  return {
+    ...provider,
+    available,
+    availability_source: available == null ? "not_verifiable_by_cadre_runtime" : "caller",
+    required_provider_mcp: {
+      provider: mode,
+      server: mode,
+      purpose: "Fetch PR/MR metadata, reviews, CI/check status, and discussion evidence."
+    }
+  };
 }
 function configuredCoverageCommand(root, args = {}, workingRoot = root) {
   if (args.command) return String(args.command);
@@ -1302,10 +1393,7 @@ function fleetStatus(root, args = {}) {
     root,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     repos,
-    providers: {
-      gh: commandExists("gh", root),
-      glab: commandExists("glab", root)
-    },
+    provider: providerMcpAvailability(root, args),
     beads_available: commandExists("bd", root),
     collisions: args.includeCollisions === false ? null : collisionScan(root)
   };
@@ -1393,6 +1481,11 @@ function activeTrackId(root, identity = gitIdentity(root)) {
 function selectedTrackId(root, args = {}) {
   return args.trackId || args.track_id || activeTrackId(root);
 }
+function workflowResponseMode(args = {}) {
+  const raw = asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null) || (args.compact === true ? "compact" : null))?.trim().toLowerCase();
+  if (raw && ["detail", "detailed", "full", "verbose"].includes(raw)) return "detail";
+  return "compact";
+}
 function workflowSummary(root, workflow, args = {}) {
   const identity = gitIdentity(root);
   return {
@@ -1400,6 +1493,8 @@ function workflowSummary(root, workflow, args = {}) {
     workflow,
     packet_only: true,
     execute: args.execute === true,
+    response_mode: workflowResponseMode(args),
+    detail_available: true,
     identity,
     generated_at: utcNow()
   };
@@ -1659,6 +1754,8 @@ function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
   const rawArgs = args;
   const styleGuides = setupStyleGuides(root, args);
+  const provider = configuredProvider(root, args);
+  const providerMode = asOptionalString(provider.provider_mode);
   const result = {
     ...summary,
     ok: styleGuides.ok,
@@ -1666,12 +1763,15 @@ function workflowSetup(root, args = {}) {
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),
     lsp: lspConfigStatus(root),
+    provider,
     styleGuides,
     techStackSummary: techStackSummary(root, args),
-    required_payload: args.execute === true ? ["productText", "techStack"] : [],
+    required_payload: args.execute === true ? ["productText", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []) : [],
+    next_actions: provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed document text to this packet.",
-      "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves."
+      "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves.",
+      "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none."
     ]
   };
   if (styleGuides.ok === false) {
@@ -1686,7 +1786,8 @@ function workflowSetup(root, args = {}) {
   const force = asBoolean(rawArgs.force, false);
   const missingPayload = [
     ...!asOptionalString(rawArgs.productText)?.trim() ? ["productText"] : [],
-    ...!techStackFromArgs(args) ? ["techStack"] : []
+    ...!techStackFromArgs(args) ? ["techStack"] : [],
+    ...provider.requires_confirmation === true || !providerMode ? ["providerMode"] : []
   ];
   if (missingPayload.length > 0) {
     return {
@@ -1748,6 +1849,9 @@ function workflowSetup(root, args = {}) {
   writeSetupJson("config.json", {
     sync_mode: "local",
     packet_only: true,
+    provider_mode: providerMode || "local",
+    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
+    ...asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {},
     ...asJsonObject(rawArgs.config)
   });
   writeSetupJson("beads.json", {
@@ -1886,7 +1990,19 @@ function workflowReview(root, args = {}) {
   const context = trackContext(root, trackId);
   const review = reviewAssist(root, { ...args, trackId });
   const gate = reviewGate(root, trackId, args);
-  return { ...summary, ok: review.ok !== false, track_context: context, review_assist: review, gate };
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  return {
+    ...summary,
+    ok: review.ok !== false && (!provider || provider.ok !== false),
+    track_context: context,
+    review_assist: review,
+    gate,
+    provider,
+    required_provider_mcp: provider && provider.ok === false ? provider.required_provider_mcp || null : null,
+    required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
+    unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
+    next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : []
+  };
 }
 function workflowValidate(root, args = {}) {
   const summary = workflowSummary(root, "validate", args);
@@ -1963,11 +2079,17 @@ function workflowShip(root, args = {}) {
   const summary = workflowSummary(root, "ship", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   const gate = reviewGate(root, trackId, args);
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
   return {
     ...summary,
-    ok: gate.ok !== false,
+    ok: gate.ok !== false && (!provider || provider.ok !== false),
     gate,
-    pr_ci_status: args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId })
+    provider,
+    pr_ci_status: provider,
+    required_provider_mcp: provider && provider.ok === false ? provider.required_provider_mcp || null : null,
+    required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
+    unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
+    next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : []
   };
 }
 function workflowLand(root, args = {}) {
@@ -1977,12 +2099,18 @@ function workflowLand(root, args = {}) {
   const topology = loadTopology(root);
   const preflight = polyrepoPreflight(root);
   const gate = reviewGate(root, trackId, args);
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
   return {
     ...summary,
-    ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false,
+    ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false && (!provider || provider.ok !== false),
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     preflight,
     gate,
+    provider,
+    required_provider_mcp: provider && provider.ok === false ? provider.required_provider_mcp || null : null,
+    required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
+    unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
+    next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : [],
     fleet: fleetStatus(root, { includeCollisions: false })
   };
 }
@@ -3760,7 +3888,16 @@ function providerEvidenceUnlocked(root, track, args = {}) {
   ).length;
   const provider = args.provider || providerFromConfig(root, args);
   const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
-  const providerStatus = fetched ? asJsonObject(fetched) : args.fetch === false ? null : asJsonObject(prCiStatus(root, args));
+  const providerStatus = fetched ? asJsonObject(fetched) : null;
+  if (!providerStatus && args.fetch !== false) {
+    return {
+      ok: false,
+      track_id: track.track_id,
+      stage: "provider_mcp_evidence_required",
+      provider,
+      requirement: providerEvidenceRequirement(root, { ...args, trackId: track.track_id })
+    };
+  }
   const entry = {
     id: `review-${entries.length + 1}`,
     recorded_at: utcNow(),
@@ -4005,81 +4142,75 @@ function reviewMachineGate(root, args = {}) {
   };
 }
 function providerFromConfig(root, args = {}) {
-  if (args.provider) return args.provider;
-  const config = loadTopology(root).config || {};
-  const configured = asOptionalString(config.pr_provider);
-  if (configured) return configured;
-  const remote = runCommand("git", ["remote", "get-url", "origin"], { cwd: root });
-  const url = `${remote.stdout}
-${remote.stderr}`.toLowerCase();
-  if (url.includes("gitlab")) return "gitlab";
-  return "github";
+  return asOptionalString(configuredProvider(root, args).provider_mode) || "local";
+}
+function providerEvidenceRequirement(root, args = {}) {
+  const providerInfo = configuredProvider(root, args);
+  const provider = asOptionalString(providerInfo.provider_mode) || "local";
+  const track = args.trackId ? findTrack(root, args.trackId) : null;
+  const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
+  const target = args.pr || args.prNumber || args.mr || branch || null;
+  const kind = provider === "gitlab" ? "gitlab_merge_request_status" : "github_pull_request_status";
+  const minimumFields = provider === "gitlab" ? ["url", "state", "source_branch", "target_branch", "head_sha", "approvals", "pipeline_status", "discussions"] : ["url", "state", "head_ref", "base_ref", "head_sha", "review_decision", "status_checks", "workflow_runs", "comments"];
+  return {
+    ok: false,
+    available: false,
+    provider,
+    target,
+    branch,
+    provider_mode: provider,
+    required_provider_mcp: provider === "local" ? null : {
+      provider,
+      server: provider,
+      purpose: "Fetch provider evidence through the installed provider MCP. CLI fallback is intentionally disabled."
+    },
+    required_evidence: provider === "local" ? null : {
+      kind,
+      provider,
+      target,
+      branch,
+      minimum_fields: minimumFields,
+      write_back: {
+        tool: "cadre_review",
+        action: "provider_evidence",
+        trackId: args.trackId || args.track_id || null
+      }
+    },
+    next_actions: provider === "local" ? [] : [
+      `Use the installed ${provider} MCP to fetch PR/MR metadata, reviews, checks or pipeline status, and discussion evidence for the target.`,
+      "Call cadre_review with action provider_evidence and the fetched evidence before recording review or shipping."
+    ],
+    reason: provider === "local" ? "provider_mode is local; provider evidence is not required" : `${provider} provider evidence must come from the ${provider} MCP; CLI fallback is disabled`,
+    unsupported_reason: provider === "local" ? null : `provider_mode ${provider} requires ${provider} MCP evidence; Cadre workflow packets do not use provider CLI fallback`
+  };
 }
 function prCiStatus(root, args = {}) {
   const provider = providerFromConfig(root, args);
-  const track = args.trackId ? findTrack(root, args.trackId) : null;
-  const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
-  if (provider === "github") {
-    if (!commandExists("gh", root)) {
-      return { ok: false, available: false, provider, reason: "GitHub CLI (gh) is not installed or not on PATH" };
-    }
-    const target = args.pr || args.prNumber || branch;
-    if (!target) return { ok: false, available: true, provider, reason: "No PR number or branch supplied" };
-    const fields = [
-      "number",
-      "url",
-      "state",
-      "title",
-      "headRefName",
-      "headRefOid",
-      "baseRefName",
-      "reviewDecision",
-      "mergeStateStatus",
-      "statusCheckRollup"
-    ].join(",");
-    const result = runCommand("gh", ["pr", "view", String(target), "--json", fields], { cwd: root });
-    let data = null;
-    try {
-      data = JSON.parse(result.stdout || "{}");
-    } catch {
-    }
+  const evidence = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  if (provider === "local") {
     return {
-      ok: result.ok,
-      available: true,
+      ok: true,
+      available: false,
+      skipped: true,
       provider,
-      target,
-      branch,
-      status: result.status,
-      pr: data,
-      stdout_tail: result.stdout.slice(-2e3),
-      stderr_tail: result.stderr.slice(-2e3)
+      provider_mode: "local",
+      reason: "provider_mode is local; no provider MCP evidence required"
     };
   }
-  if (provider === "gitlab") {
-    if (!commandExists("glab", root)) {
-      return { ok: false, available: false, provider, reason: "GitLab CLI (glab) is not installed or not on PATH" };
-    }
-    const target = args.pr || args.mr || args.prNumber || branch;
-    if (!target) return { ok: false, available: true, provider, reason: "No MR number or branch supplied" };
-    const result = runCommand("glab", ["mr", "view", String(target), "--output", "json"], { cwd: root });
-    let data = null;
-    try {
-      data = JSON.parse(result.stdout || "{}");
-    } catch {
-    }
+  if (provider !== "github" && provider !== "gitlab") {
+    return { ok: false, available: false, provider, reason: `Unsupported provider_mode: ${provider}` };
+  }
+  if (evidence) {
     return {
-      ok: result.ok,
+      ok: true,
       available: true,
       provider,
-      target,
-      branch,
-      status: result.status,
-      mr: data,
-      stdout_tail: result.stdout.slice(-2e3),
-      stderr_tail: result.stderr.slice(-2e3)
+      provider_mode: provider,
+      evidence_source: `${provider}_mcp`,
+      evidence: asJsonObject(evidence)
     };
   }
-  return { ok: false, available: false, provider, reason: `Unsupported provider: ${provider}` };
+  return providerEvidenceRequirement(root, args);
 }
 function diffSurface(root, base, head) {
   const range = `${base}...${head}`;
@@ -4512,10 +4643,7 @@ function doctor(root, options = {}) {
       config_present: fileExists(import_node_path.default.join(candidateRoot, "cadre", "beads.json"))
     },
     lsp: lspStatus,
-    providers: {
-      gh: commandExists("gh", candidateRoot),
-      glab: commandExists("glab", candidateRoot)
-    },
+    provider: providerMcpAvailability(candidateRoot, options),
     generated_bundles: {
       check_available: fileExists(generatedCheck),
       command: fileExists(generatedCheck) ? "bash scripts/generate-skills.sh --check" : null

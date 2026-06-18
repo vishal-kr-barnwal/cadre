@@ -26,7 +26,7 @@ offers these tools:
 | Tool | Purpose |
 |------|---------|
 | `cadre_project` with `action: "ping"` | Verify that the required Cadre MCP runtime is available. |
-| `cadre_project` with `action: "doctor"` | Diagnose runtime wiring, project markers, Beads, LSP, provider CLIs, merge-driver state, and generated-bundle check availability. |
+| `cadre_project` with `action: "doctor"` | Diagnose runtime wiring, project markers, Beads, LSP, provider mode/MCP evidence requirements, merge-driver state, and generated-bundle check availability. |
 | `cadre_project` with `action: "root"` | Resolve a caller-provided path to the Cadre project root. |
 | `cadre_mutate` with `action: "regen_index"` | Rebuild `cadre/tracks.md` from `metadata.json.status`. |
 | `cadre_track` with `action: "parse_plan"` | Parse phases, tasks, annotations, task keys, and recorded commit SHAs from `plan.md`. |
@@ -57,7 +57,7 @@ offers these tools:
 | `cadre_intel` with `action: "lsp_daemon_shutdown"` | Stop the daemon and all warm language servers. |
 | `cadre_intel` with `action: "lsp_impact"` | Return symbol references, file symbols, and optional LSP diff findings for planning/revision impact checks. |
 | `cadre_job` with `action: "start", type: "coverage"` | Run configured tests/coverage, parse measured coverage, and optionally record it on a track/task. |
-| `cadre_review` with `action: "pr_ci_status"` | Read GitHub/GitLab PR/MR metadata and CI status for a track branch or explicit PR/MR. |
+| `cadre_review` with `action: "pr_ci_status"` | Validate caller-supplied GitHub/GitLab MCP PR/MR/CI evidence, or return exact provider MCP evidence requirements; local mode skips provider evidence. |
 | `cadre_intel` with `action: "repo_map"` | Return a compact semantic repository map or references for one symbol. |
 | `cadre_beads` | Perform structured Beads writes (`update`, `note`, `close`, labels, deps, create) without ad hoc shell snippets. |
 | `cadre_review` with `action: "gate"` | Evaluate whether `metadata.review` clears ship/land; optional `headSha`/`headShas` enforce reviewed commit pins. |
@@ -124,7 +124,7 @@ Workflow routing:
 | Code-intelligence review | `cadre_intel` with `action: "lsp_warm_review"` preferred; `cadre_intel` with `action: "lsp_review"` fallback |
 | Review machine gate | `cadre_review` with `action: "machine_gate"` |
 | Coverage measurement and recording | `cadre_job` with `action: "start", type: "coverage"` |
-| PR/MR and CI status | `cadre_review` with `action: "pr_ci_status"` |
+| PR/MR and CI status | Provider MCP query followed by `cadre_review` with `action: "provider_evidence"` or `action: "pr_ci_status"` with supplied evidence |
 | Low-token repo/symbol orientation | `cadre_intel` with `action: "repo_map"` or `cadre://repo-map` |
 | Beads task writes | `cadre_beads` |
 | Beads tree initialization | `cadre_track` with `action: "create_beads_tree"` |
@@ -142,6 +142,10 @@ for rather than recreated with scattered shell probes:
 - `cadre_review` with `action: "assist"`: first review evidence packet before `/code-review`.
 - `cadre_intel` with `action: "lsp_impact"`: new-track planning and revise impact checks.
 
+Workflow packets include `response_mode` in their result. The default is
+`compact`; pass `responseMode: "detail"` or `detail: true` when a caller needs
+full packet context for handoff, review, or debugging.
+
 ## External Provider MCPs
 
 Cadre's own MCP server is the source of truth for orchestration state. External
@@ -153,14 +157,31 @@ Recommended provider MCP usage:
 
 | Provider MCP | Use as evidence for | Cadre write-back |
 |--------------|---------------------|------------------|
-| GitHub MCP | PR metadata, reviews, checks, Actions logs, issue context, discussion links | `cadre_review` with `action: "assist"`, `cadre_mutate` with `action: "record_review"`, `cadre_review` with `action: "pr_ci_status"`, Beads notes |
-| GitLab MCP | MR metadata, approvals, pipelines, job logs, issue context | `cadre_review` with `action: "assist"`, `cadre_mutate` with `action: "record_review"`, `cadre_review` with `action: "pr_ci_status"`, Beads notes |
+| GitHub MCP | PR metadata, reviews, checks, Actions logs, issue context, discussion links | `cadre_review` with `action: "provider_evidence"`, `cadre_review` with `action: "pr_ci_status"` and supplied evidence, `cadre_mutate` with `action: "record_review"`, Beads notes |
+| GitLab MCP | MR metadata, approvals, pipelines, job logs, issue context | `cadre_review` with `action: "provider_evidence"`, `cadre_review` with `action: "pr_ci_status"` and supplied evidence, `cadre_mutate` with `action: "record_review"`, Beads notes |
 
-Operational rule: a green provider check or approved PR is supporting evidence;
-the track is cleared only when `cadre_mutate` with `action: "record_review"` and `cadre_review` with `action: "gate"`
-record/verify the Cadre verdict. If provider MCP tools are not installed, use
-the existing `gh`/`glab` CLI fallback through `cadre_review` with `action: "pr_ci_status"` and note the
-reduced evidence surface in the review or ship report.
+Setup records one provider mode in `cadre/config.json`:
+
+```json
+{
+  "provider_mode": "local",
+  "provider_mcp_required": false,
+  "remote_host": ""
+}
+```
+
+`provider_mode` is `local`, `github`, or `gitlab`. Setup detects GitHub/GitLab
+remotes when possible, asks the caller to choose when remotes are ambiguous, and
+allows explicit local-only mode. Local mode requires no provider MCP evidence.
+
+Operational rule: a green provider check or approved PR/MR is supporting
+evidence; the track is cleared only when `cadre_mutate` with
+`action: "record_review"` and `cadre_review` with `action: "gate"`
+record/verify the Cadre verdict. In `github` or `gitlab` mode, provider
+evidence must come from the matching provider MCP and be written back through a
+Cadre packet. There is no `gh`/`glab` fallback in workflow packets. If the
+matching provider MCP is unavailable, provider-dependent packets fail closed
+with `required_provider_mcp`, `required_evidence`, and `next_actions`.
 
 ### Plugin packaging
 
@@ -304,10 +325,12 @@ completion note/close, and only then records the plan row and metadata result.
 `cadre_job` with `action: "start", type: "coverage"` remains useful for diagnostic and preflight checks where no
 plan mutation should happen.
 
-`cadre_review` with `action: "pr_ci_status"` uses local provider CLIs rather than embedding provider
-tokens in Cadre: GitHub uses `gh pr view ... --json`; GitLab uses
-`glab mr view ... --output json`. The tool resolves a track branch from
-metadata when `trackId` is supplied.
+`cadre_review` with `action: "pr_ci_status"` is provider-MCP-only. In
+`provider_mode: "github"` or `provider_mode: "gitlab"`, it either validates
+caller-supplied MCP evidence or returns the exact `required_provider_mcp` and
+`required_evidence` contract needed before review/ship/land can proceed. In
+`provider_mode: "local"`, it returns a skipped success because no provider
+evidence is required.
 
 `cadre_beads` is the preferred write surface for routine task operations:
 `ready`, `show`, `update`, `note`, `close`, `label_add`, `label_remove`,

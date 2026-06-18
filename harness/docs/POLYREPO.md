@@ -21,7 +21,7 @@ Everything is **additive and opt-in.** Polyrepo behavior activates only when
 platform-control/                 # the control repo (you run cadre here)
 ├── cadre/
 │   ├── repos.json                # submodule manifest + mode:"polyrepo" + default_repo
-│   ├── config.json               # sync_mode + pr_provider + merge_train
+│   ├── config.json               # sync_mode + provider_mode + merge_train
 │   ├── tracks.md, patterns.md, …
 │   └── tracks/<id>/metadata.json # carries a per-repo `repos` map
 ├── .beads/                       # ONE shared Dolt task graph for ALL repos
@@ -65,15 +65,22 @@ annotation routes there.
   "control_remote": "origin",
   "control_branch": "main",
   "pull_on_command_start": true,
-  "pr_provider": "github",
+  "provider_mode": "github",
+  "provider_mcp_required": true,
+  "remote_host": "github.com",
   "auto_open": false,
   "merge_train": { "enabled": true, "auto_fire": true, "group_label_prefix": "cadre-track" }
 }
 ```
 
-`auto_open` (default `false`) controls whether `cadre-ship` opens the PR for
-you or only prepares + prints the create-PR command; `cadre-land` always
-opens the cross-repo group.
+`provider_mode` is `local`, `github`, or `gitlab`. In hosted modes,
+GitHub/GitLab PR or MR status evidence must come from the matching provider MCP
+and be written back through Cadre packets. In `local` mode, provider MCP
+evidence is skipped.
+
+`auto_open` (default `false`) controls whether hosted workflows are expected to
+open provider PRs/MRs for you or only prepare the local Cadre/git state for your
+team's process; provider evidence still follows the provider-MCP contract above.
 
 Absent `config.json` → `local` → today's behavior (nothing auto-pushed).
 
@@ -87,7 +94,9 @@ prompt. Setup then:
 1. Registers product repos as submodules (`git submodule add <url> repos/<name>`),
    or reads existing `.gitmodules`.
 2. Asks for the `default_repo` and writes `cadre/repos.json`.
-3. Initializes Beads at the control-repo root only.
+3. Detects GitHub/GitLab remotes when possible, asks for `provider_mode` when
+   ambiguous, and allows explicit local-only mode.
+4. Initializes Beads at the control-repo root only.
 4. Asks for **sync mode** (shared vs local) and **PR provider** (GitHub vs
    GitLab — auto-detected from a product remote, then confirmed), plus merge-train
    options, and writes `cadre/config.json`.

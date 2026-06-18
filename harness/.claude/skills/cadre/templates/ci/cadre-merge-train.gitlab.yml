@@ -1,6 +1,6 @@
 # Cadre cross-repo merge train (GitLab CI).
 #
-# Scaffolded into the CONTROL repo by /cadre-setup when pr_provider == "gitlab"
+# Scaffolded into the CONTROL repo by /cadre-setup when provider_mode == "gitlab"
 # and merge_train.enabled. Either commit this as `.gitlab-ci.yml` or `include:` it
 # from an existing pipeline.
 #

@@ -335,7 +335,7 @@ your-project/
 │   ├── beads.json           # Beads integration config
 │   ├── .gitignore           # Ignores agent-local state (setup/refresh/implement state)
 │   ├── repos.json           # Polyrepo only: control-repo topology + submodule map
-│   ├── config.json          # Polyrepo only: PR provider, sync mode, auto_open
+│   ├── config.json          # Provider mode/MCP requirement, sync mode, auto_open
 │   └── tracks/
 │       └── <track_id>/
 │           ├── spec.md      # Requirements

@@ -66,6 +66,7 @@ var STATUS_MARKERS = {
 var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
 var STALE_LEASE_MS = 30 * 60 * 1e3;
 var LOCK_STALE_MS = STALE_LEASE_MS;
+var commandExistsCache = /* @__PURE__ */ new Map();
 function readJson(file, fallback) {
   try {
     return JSON.parse(import_node_fs.default.readFileSync(file, "utf8"));
@@ -287,11 +288,15 @@ function runCommand(command, args, options = {}) {
   return commandResult;
 }
 function commandExists(command, cwd) {
+  const key = `${process.env.PATH || ""}\0${cwd}\0${command}`;
+  if (commandExistsCache.has(key)) return commandExistsCache.get(key) === true;
   const result = (0, import_node_child_process.spawnSync)("sh", ["-lc", `command -v '${String(command).replace(/'/g, "'\\''")}'`], {
     cwd,
     encoding: "utf8"
   });
-  return result.status === 0;
+  const exists = result.status === 0;
+  commandExistsCache.set(key, exists);
+  return exists;
 }
 function loadTopology(root) {
   const reposPath = import_node_path.default.join(root, "cadre", "repos.json");

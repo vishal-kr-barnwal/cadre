@@ -851,8 +851,10 @@ Step 3: Sync + push
 Step 4: PR guidance
    - config.json "auto_open": false (default) → prepare only: print the
      create-PR command for your team's process
-   - config.json "auto_open": true → open the PR with the host CLI
-     (gh / glab; falls back to printing the command if the CLI is unauthenticated)
+   - config.json "provider_mode": "local" → skip provider PR/CI evidence
+   - config.json "provider_mode": "github" or "gitlab" → require matching
+     provider MCP evidence and write it back through Cadre packets; no CLI
+     fallback is used by workflow packets
 ```
 
 **Review gate:** `cadre-ship` refuses to rebase or push when the track's
@@ -989,7 +991,7 @@ cadre-implement <track_id>
 |------|---------|----------|
 | `setup_state.json` | Setup progress | `cadre/` |
 | `beads.json` | Beads integration config | `cadre/` |
-| `config.json` | Sync mode, PR provider, `auto_open`, merge train (polyrepo/shared) | `cadre/` |
+| `config.json` | Sync mode, provider mode/MCP requirement, `auto_open`, merge train (polyrepo/shared) | `cadre/` |
 | `repos.json` | Submodule manifest + `mode: "polyrepo"` (polyrepo only) | `cadre/` |
 | `refresh_state.json` | Refresh progress | `cadre/` |
 | `tracks.md` | **Derived** track index — rebuilt by `cadre-status --regen-index`; never hand-edit | `cadre/` |
