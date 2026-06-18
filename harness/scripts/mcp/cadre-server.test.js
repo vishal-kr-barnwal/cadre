@@ -13,6 +13,23 @@ function write(file, content) {
   fs.writeFileSync(file, content);
 }
 
+function writeTrack(root, id, plan, metadata = {}) {
+  write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+  const dir = path.join(root, "cadre", "tracks", id);
+  write(path.join(dir, "metadata.json"), JSON.stringify({
+    track_id: id,
+    type: "feature",
+    status: "new",
+    priority: "medium",
+    description: id,
+    git_branch: `track/${id}`,
+    depends_on: [],
+    ...metadata,
+  }, null, 2));
+  write(path.join(dir, "plan.md"), plan);
+  write(path.join(dir, "spec.md"), `# Spec: ${id}\n`);
+}
+
 function startServer() {
   const server = spawn(process.execPath, [path.join(__dirname, "cadre-server.js")], {
     cwd: path.resolve(__dirname, "..", ".."),
@@ -252,6 +269,85 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(completed.data.result.coverage, 91);
   } finally {
     server.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP team-scale workflow packets compose on one track", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-packets-test-"));
+  const { server, request } = startServer();
+  try {
+    spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["config", "user.email", "reviewer@example.com"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["config", "user.name", "Reviewer"], { cwd: root, encoding: "utf8" });
+    write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
+    write(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    write(path.join(root, "src", "app.ts"), "export const app = true;\n");
+    write(path.join(root, "src", "app.test.ts"), "test('app', () => {});\n");
+    writeTrack(root, "packets_20260618", `# Plan: packets_20260618
+
+## Phase 1: Packet Flow
+<!-- execution: parallel -->
+
+- [ ] Task 1: Update app
+  <!-- files: src/app.ts -->
+
+- [ ] Task 2: Update test
+  <!-- files: src/app.test.ts -->
+`);
+
+    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+
+    const planAssist = parseTextJson(await request("tools/call", {
+      name: "cadre_track",
+      arguments: { root, action: "plan_assist", trackId: "packets_20260618" },
+    }));
+    assert.equal(planAssist.data.ok, true);
+    assert.ok(planAssist.data.likely_tests.includes("src/app.test.ts"));
+
+    const wave = parseTextJson(await request("tools/call", {
+      name: "cadre_parallel",
+      arguments: { root, action: "next_wave", trackId: "packets_20260618" },
+    }));
+    assert.equal(wave.data.ok, true);
+    assert.equal(wave.data.workers.length, 2);
+
+    const fleet = parseTextJson(await request("tools/call", {
+      name: "cadre_status",
+      arguments: { root, action: "fleet", includeCollisions: false },
+    }));
+    assert.equal(fleet.data.ok, true);
+    assert.ok(fleet.data.repos.some((repo) => repo.name === "."));
+
+    const diagnostics = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { root, action: "workspace_diagnostics" },
+    }));
+    assert.equal(diagnostics.data.ok, true);
+    assert.ok(diagnostics.data.adapters.some((adapter) => adapter.id === "node"));
+
+    const evidence = parseTextJson(await request("tools/call", {
+      name: "cadre_review",
+      arguments: {
+        root,
+        action: "provider_evidence",
+        trackId: "packets_20260618",
+        provider: "github",
+        fetch: false,
+        evidence: { pr: 7 },
+        findings: [{ severity: "blocking", message: "example" }],
+      },
+    }));
+    assert.equal(evidence.data.ok, true);
+    assert.equal(evidence.data.entry.blocking_count, 1);
+
+    const resource = await request("resources/read", {
+      uri: `cadre://review-evidence?root=${encodeURIComponent(root)}&trackId=packets_20260618`,
+    });
+    const parsedResource = JSON.parse(resource.contents[0].text);
+    assert.equal(parsedResource.data.evidence.entries.length, 1);
+  } finally {
+    server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
