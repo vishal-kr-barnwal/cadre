@@ -1630,6 +1630,506 @@ function availableWork(root: string): CoreResult {
   return { root, available, reclaimable };
 }
 
+function activeTrackId(root: string, identity: string | null = gitIdentity(root)): string | null {
+  const tracks = listTracks(root);
+  const topology = loadTopology(root);
+  const active = tracks.filter((track) => (track.metadata.status || "new") === "in_progress");
+  if (topology.config.sync_mode === "shared" && identity) {
+    const mine = active.find((track) => track.metadata.owner === identity);
+    if (mine) return mine.track_id;
+  }
+  return active[0]?.track_id || null;
+}
+
+function selectedTrackId(root: string, args: RuntimeArgs = {}): string | null {
+  return args.trackId || args.track_id || activeTrackId(root);
+}
+
+function workflowSummary(root: string, workflow: string, args: RuntimeArgs = {}): CoreResult {
+  const identity = gitIdentity(root);
+  return {
+    root,
+    workflow,
+    packet_only: true,
+    execute: args.execute === true,
+    identity,
+    generated_at: utcNow(),
+  };
+}
+
+function templateText(relativePath: string, fallback: string): string {
+  const candidates = [
+    path.join(__dirname, "..", "templates", relativePath),
+    path.join(__dirname, "..", "..", "templates", relativePath),
+    path.join(__dirname, "templates", relativePath),
+  ];
+  for (const candidate of candidates) {
+    if (fileExists(candidate)) return fs.readFileSync(candidate, "utf8");
+  }
+  return fallback;
+}
+
+function packetText(value: unknown, fallback: string): string {
+  const text = asOptionalString(value);
+  return (text && text.trim() ? text : fallback).replace(/\n*$/, "\n");
+}
+
+function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "setup", args);
+  const rawArgs = args as UnknownRecord;
+  const result: CoreResult = {
+    ...summary,
+    ok: true,
+    doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
+    workspace: workspaceDiagnostics(root, { execute: false }),
+    dependency_graph: dependencyGraph(root),
+    lsp: lspConfigStatus(root),
+    required_payload: args.execute === true
+      ? ["productText", "techStackText"]
+      : [],
+    packet_notes: [
+      "cadre-setup is packet-only: agents gather user intent, then pass confirmed document text to this packet.",
+      "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves.",
+    ],
+  };
+  if (args.execute !== true) return result;
+
+  const cadreDir = path.join(root, "cadre");
+  const force = asBoolean(rawArgs.force, false);
+  const missingPayload = ["productText", "techStackText"].filter((key) => !asOptionalString(rawArgs[key])?.trim());
+  if (missingPayload.length > 0) {
+    return {
+      ...result,
+      ok: false,
+      error: `Missing setup payload: ${missingPayload.join(", ")}`,
+      missing_payload: missingPayload,
+    };
+  }
+  const written: string[] = [];
+  const skipped: string[] = [];
+  const writeText = (relativePath: string, text: string): void => {
+    const file = path.join(cadreDir, relativePath);
+    if (fileExists(file) && !force) {
+      skipped.push(path.relative(root, file));
+      return;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    written.push(path.relative(root, file));
+  };
+  const writeSetupJson = (relativePath: string, value: JsonObject): void => {
+    const file = path.join(cadreDir, relativePath);
+    if (fileExists(file) && !force) {
+      skipped.push(path.relative(root, file));
+      return;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    writeJson(file, value);
+    written.push(path.relative(root, file));
+  };
+
+  fs.mkdirSync(path.join(cadreDir, "tracks"), { recursive: true });
+  fs.mkdirSync(path.join(cadreDir, "archive"), { recursive: true });
+  writeText(
+    "product.md",
+    packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n")
+  );
+  writeText(
+    "tech-stack.md",
+    packetText(rawArgs.techStackText, "# Tech Stack\n\nRecord the languages, frameworks, tools, services, and conventions in use.\n")
+  );
+  writeText(
+    "workflow.md",
+    packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n"))
+  );
+  writeText("tracks.md", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+  writeText("learnings.md", "# Project Learnings\n\n");
+  writeText("patterns.md", "# Project Patterns\n\n");
+  writeSetupJson("setup_state.json", {
+    version: 1,
+    packet_only: true,
+    initialized_at: utcNow(),
+    updated_at: utcNow(),
+  });
+  writeSetupJson("config.json", {
+    sync_mode: "local",
+    packet_only: true,
+    ...asJsonObject(rawArgs.config),
+  });
+  writeSetupJson("beads.json", {
+    enabled: true,
+    packet_only: true,
+    ...asJsonObject(rawArgs.beadsConfig),
+  });
+  if (isRecord(rawArgs.repos)) {
+    writeSetupJson("repos.json", asJsonObject(rawArgs.repos));
+  }
+  return {
+    ...result,
+    ok: true,
+    scaffolded: true,
+    written,
+    skipped,
+    force,
+    doctor_after: doctor(root, { hasCadreProject: true }),
+  };
+}
+
+function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = args.trackId || args.track_id;
+  const planText = asOptionalString(args.planText);
+  const specText = asOptionalString(args.specText);
+  if (!trackId) return { ...workflowSummary(root, "newtrack", args), ok: false, error: "trackId is required" };
+  if (!planText) return { ...workflowSummary(root, "newtrack", args), ok: false, error: "planText is required" };
+  const metadata: TrackMetadata = {
+    track_id: trackId,
+    type: "feature",
+    status: "new",
+    priority: "medium",
+    depends_on: [],
+    description: asOptionalString(args.description) || trackId,
+    owner: gitIdentity(root) || null,
+    reviewer: null,
+    git_branch: `track/${trackId}`,
+    worktree_path: `.worktrees/${trackId}`,
+    ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
+  };
+  const dryRun = args.execute !== true;
+  const assist = planAssist(root, { ...args, planText, trackId });
+  const beads = createBeadsTree(root, {
+    ...args,
+    dryRun: true,
+    trackId,
+    planText,
+    specText: specText || "",
+    metadata,
+  });
+  if (dryRun) {
+    return {
+      ...workflowSummary(root, "newtrack", args),
+      ok: assist.ok !== false && beads.ok !== false,
+      dry_run: true,
+      track_id: trackId,
+      metadata,
+      plan_assist: assist,
+      beads_tree: beads,
+    };
+  }
+  if (findTrack(root, trackId)) {
+    return { ...workflowSummary(root, "newtrack", args), ok: false, track_id: trackId, error: "Track already exists" };
+  }
+  if (!commandExists("bd", root)) {
+    return {
+      ...workflowSummary(root, "newtrack", args),
+      ok: false,
+      track_id: trackId,
+      error: "Beads CLI (bd) is required for live track creation",
+    };
+  }
+  const dir = path.join(root, "cadre", "tracks", safeName(trackId));
+  fs.mkdirSync(dir, { recursive: true });
+  writeJson(path.join(dir, "metadata.json"), metadata);
+  fs.writeFileSync(path.join(dir, "spec.md"), specText || `# Spec: ${trackId}\n`);
+  fs.writeFileSync(path.join(dir, "plan.md"), planText.endsWith("\n") ? planText : `${planText}\n`);
+  fs.writeFileSync(path.join(dir, "learnings.md"), `# Track Learnings: ${trackId}\n\n`);
+  const liveBeads = createBeadsTree(root, { ...args, trackId, dryRun: false });
+  if (!liveBeads.ok) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return {
+      ...workflowSummary(root, "newtrack", args),
+      ok: false,
+      track_id: trackId,
+      stage: "create_beads_tree",
+      beads_tree: liveBeads,
+    };
+  }
+  const regen = regenIndex(root);
+  return {
+    ...workflowSummary(root, "newtrack", args),
+    ok: regen.ok !== false,
+    dry_run: false,
+    track_id: trackId,
+    metadata_path: path.relative(root, path.join(dir, "metadata.json")),
+    beads_tree: liveBeads,
+    regen,
+    worktree_plan: worktreePlan(root, { trackId }),
+  };
+}
+
+function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
+  const prep = implementationPrep(root, {
+    ...args,
+    claim: args.claim === true || args.execute === true,
+  });
+  const trackId = asOptionalString(prep.selected_track) || args.trackId || args.track_id || null;
+  return {
+    ...workflowSummary(root, "implement", args),
+    ok: prep.ok !== false,
+    prepare_implementation: prep,
+    phase_schedule: trackId ? phaseSchedule(root, { ...args, trackId }) : null,
+  };
+}
+
+function workflowStatus(root: string, args: RuntimeArgs = {}): CoreResult {
+  const mode = args.mode || args.view || args.status || "live";
+  const summary = workflowSummary(root, "status", args);
+  if (mode === "team" || args.mine === true) return { ...summary, ok: true, status: teamBoard(root, { ...args, mine: args.mine === true }) };
+  if (mode === "fleet" || mode === "repos") return { ...summary, ok: true, status: fleetStatus(root, args) };
+  if (mode === "available") return { ...summary, ok: true, status: availableWork(root) };
+  if (mode === "collisions") return { ...summary, ok: true, status: collisionScan(root) };
+  if (mode === "beads") return { ...summary, ok: true, status: beadsSummary(root) };
+  if (mode === "doctor") return { ...summary, ok: true, status: doctor(root, { hasCadreProject: true }) };
+  return { ...summary, ok: true, status: liveStatus(root) };
+}
+
+function workflowReview(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "review", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  const review = reviewAssist(root, { ...args, trackId });
+  const gate = reviewGate(root, trackId, args);
+  return { ...summary, ok: review.ok !== false, track_context: context, review_assist: review, gate };
+}
+
+function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "validate", args);
+  return {
+    ...summary,
+    ok: true,
+    doctor: doctor(root, { hasCadreProject: true }),
+    team: teamStatus(root),
+    integrity: planIntegrity(root, args.trackId || args.track_id || null),
+    collisions: collisionScan(root),
+    fleet: fleetStatus(root, { includeCollisions: false }),
+    beads: beadsSummary(root),
+  };
+}
+
+function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "archive", args);
+  const tracks = listTracks(root).filter((track) =>
+    args.trackId || args.track_id
+      ? track.track_id === (args.trackId || args.track_id)
+      : (track.metadata.status || "new") === "completed"
+  );
+  if (tracks.length === 0) return { ...summary, ok: false, error: "No completed or selected track found" };
+  if (args.execute !== true) {
+    return {
+      ...summary,
+      ok: true,
+      dry_run: true,
+      tracks: tracks.map((track) => metadataTrackSummary(track)),
+    };
+  }
+  const archived: CoreResult[] = [];
+  const archiveRoot = path.join(root, "cadre", "archive");
+  fs.mkdirSync(archiveRoot, { recursive: true });
+  for (const track of tracks) {
+    const target = path.join(archiveRoot, track.track_id);
+    if (fileExists(target)) {
+      archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
+      continue;
+    }
+    fs.renameSync(track.dir, target);
+    archived.push({ track_id: track.track_id, ok: true, path: path.relative(root, target) });
+  }
+  const regen = regenIndex(root);
+  return { ...summary, ok: archived.every((item) => item.ok !== false) && regen.ok !== false, dry_run: false, archived, regen };
+}
+
+function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "handoff", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  if (context.ok === false) return { ...summary, ok: false, track_context: context };
+  const text = asOptionalString(args.handoffText)
+    || [
+      `# Handoff: ${trackId}`,
+      "",
+      `Updated: ${utcNow()}`,
+      "",
+      "Resume from the packet context returned by Cadre MCP.",
+    ].join("\n");
+  if (args.execute === true) {
+    const track = findTrack(root, trackId);
+    if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
+    fs.writeFileSync(path.join(track.dir, "HANDOFF.md"), `${text.replace(/\n*$/, "")}\n`);
+  }
+  return {
+    ...summary,
+    ok: true,
+    dry_run: args.execute !== true,
+    track_context: context,
+    beads: beadsSummary(root),
+    handoff_path: `cadre/tracks/${trackId}/HANDOFF.md`,
+  };
+}
+
+function workflowShip(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "ship", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const gate = reviewGate(root, trackId, args);
+  return {
+    ...summary,
+    ok: gate.ok !== false,
+    gate,
+    pr_ci_status: args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId }),
+  };
+}
+
+function workflowLand(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "land", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const topology = loadTopology(root);
+  const preflight = polyrepoPreflight(root);
+  const gate = reviewGate(root, trackId, args);
+  return {
+    ...summary,
+    ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false,
+    topology: topology.polyrepo ? "polyrepo" : "monorepo",
+    preflight,
+    gate,
+    fleet: fleetStatus(root, { includeCollisions: false }),
+  };
+}
+
+function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "release", args);
+  const completed = listTracks(root)
+    .filter((track) => (track.metadata.status || "new") === "completed")
+    .map((track) => metadataTrackSummary(track));
+  return {
+    ...summary,
+    ok: true,
+    dry_run: args.execute !== true,
+    bump: args.bump || args.mode || "patch",
+    completed_tracks: completed,
+  };
+}
+
+function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "revise", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  return {
+    ...summary,
+    ok: true,
+    track_context: trackContext(root, trackId),
+    impact: lspImpact(root, args),
+  };
+}
+
+function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
+  const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
+  switch (workflow) {
+    case "setup":
+    case "setup_assist":
+    case "setup_scaffold":
+      return workflowSetup(root, args);
+    case "newtrack":
+    case "new_track":
+      return workflowNewTrack(root, args);
+    case "implement":
+      return workflowImplement(root, args);
+    case "status":
+      return workflowStatus(root, args);
+    case "review":
+      return workflowReview(root, args);
+    case "validate":
+      return workflowValidate(root, args);
+    case "archive":
+      return workflowArchive(root, args);
+    case "handoff":
+      return workflowHandoff(root, args);
+    case "ship":
+      return workflowShip(root, args);
+    case "land":
+      return workflowLand(root, args);
+    case "release":
+      return workflowRelease(root, args);
+    case "revise":
+      return workflowRevise(root, args);
+    case "refresh":
+      return {
+        ...workflowSummary(root, "refresh", args),
+        ok: true,
+        doctor: doctor(root, { hasCadreProject: true }),
+        workspace: workspaceDiagnostics(root, { execute: false }),
+        dependency_graph: dependencyGraph(root),
+        lsp: lspConfigStatus(root),
+      };
+    case "flag":
+      {
+        const trackId = selectedTrackId(root, args);
+        const summary = workflowSummary(root, "flag", args);
+        if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+        const status = asOptionalString(args.status) || "blocked";
+        const reason = asOptionalString(args.reason) || asOptionalString(args.note) || null;
+        const context = trackContext(root, trackId);
+        if (args.execute !== true) {
+          return {
+            ...summary,
+            ok: context.ok !== false,
+            dry_run: true,
+            track_context: context,
+            proposed_status: status,
+            reason,
+          };
+        }
+        const statusResult = setTrackStatus(root, trackId, status);
+        if (statusResult.ok === false) return { ...summary, ok: false, track_context: context, status_result: statusResult };
+        const patch = metadataPatch(root, {
+          trackId,
+          patch: {
+            last_status_reason: reason,
+            last_status_at: utcNow(),
+          },
+        });
+        const latestTrack = findTrack(root, trackId);
+        const epic = latestTrack?.metadata.beads_epic;
+        const beads = epic && reason
+          ? beadsTaskWrite(root, {
+            operation: "note",
+            id: epic,
+            note: `Cadre ${status}: ${reason}`,
+            dedupKey: `cadre-flag-${trackId}-${status}-${textHash(reason).slice(0, 12)}`,
+          })
+          : null;
+        return {
+          ...summary,
+          ok: patch.ok !== false && (!beads || beads.ok !== false),
+          dry_run: false,
+          track_context: context,
+          status_result: statusResult,
+          metadata_patch: patch,
+          beads,
+        };
+      }
+    case "revert":
+      return {
+        ...workflowSummary(root, "revert", args),
+        ok: true,
+        track_context: selectedTrackId(root, args) ? trackContext(root, selectedTrackId(root, args)) : null,
+      };
+    case "formula":
+      return {
+        ...workflowSummary(root, "formula", args),
+        ok: true,
+        formulas: commandExists("bd", root) ? beadsTaskWrite(root, { operation: "formula_list" }) : { ok: false, available: false },
+      };
+    default:
+      return {
+        ...workflowSummary(root, workflow, args),
+        ok: false,
+        error: `Unknown Cadre workflow packet: ${workflow}`,
+      };
+  }
+}
+
 function findTrack(root: string, trackId: string | null | undefined): CadreTrack | null {
   return listTracks(root).find((item) => item.track_id === trackId) || null;
 }
@@ -1979,7 +2479,7 @@ function likelyTestCandidatesForFile(root: string, file: string): string[] {
 function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
   const trackId = args.trackId || args.track_id || null;
   const track = trackId ? findTrack(root, trackId) : null;
-  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
+  if (trackId && !track && !args.planText) return { ok: false, error: `Track not found: ${trackId}` };
   const topology = loadTopology(root);
   const plan = args.planText
     ? parsePlanText(args.planText)
@@ -4551,6 +5051,7 @@ export {
   trackContext,
   testImpact,
   worktreePlan,
+  workflowPacket,
   workspaceDiagnostics,
   withLock,
   withTrackLock,

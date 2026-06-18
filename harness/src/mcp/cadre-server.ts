@@ -66,6 +66,8 @@ const packetSchema = (description: ToolDescription, actionEnum: string[] | null 
     properties: {
       root: { type: "string" },
       action: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
+      workflow: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
+      execute: { type: "boolean" },
       async: { type: "boolean" },
       trackId: { type: "string" },
       track_id: { type: "string" },
@@ -91,12 +93,44 @@ const packetSchema = (description: ToolDescription, actionEnum: string[] | null 
       args: { type: "object" },
       type: { type: "string" },
       jobId: { type: "string" },
+      view: { type: "string" },
+      description: { type: "string" },
+      handoffText: { type: "string" },
+      bump: { type: "string" },
+      includeProvider: { type: "boolean" },
     },
     additionalProperties: true,
   },
 });
 
 const TOOLS = [
+  packetSchema(
+    {
+      name: "cadre_workflow",
+      text: "Packet-only Cadre workflow coordinator for setup, new track, implementation, status, review, validation, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows.",
+    },
+    [
+      "setup",
+      "setup_assist",
+      "setup_scaffold",
+      "newtrack",
+      "new_track",
+      "implement",
+      "status",
+      "review",
+      "validate",
+      "archive",
+      "handoff",
+      "ship",
+      "land",
+      "release",
+      "revise",
+      "refresh",
+      "flag",
+      "revert",
+      "formula",
+    ]
+  ),
   packetSchema(
     { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, sync, and polyrepo preflight." },
     ["ping", "doctor", "root", "topology", "sync_control_plane", "polyrepo_preflight"]
@@ -444,6 +478,17 @@ function jobEnvelope(type: string | null, root: string, args: RuntimeArgs): Runt
   return envelope({ ok: true, job: jobs.start(type, root, args) });
 }
 
+function workflowPacket(args: RuntimeArgs): RuntimeEnvelope {
+  const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
+  const setupWorkflows = new Set(["setup", "setup_assist", "setup_scaffold"]);
+  if (setupWorkflows.has(workflow)) {
+    const info = rootFromCandidate(args.root || process.cwd());
+    return envelope(core.workflowPacket(info ? info.root : process.cwd(), { ...args, workflow }));
+  }
+  const root = requireCadreRoot(args);
+  return envelope(core.workflowPacket(root, { ...args, workflow }));
+}
+
 async function projectPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
   const action = args.action || "ping";
   if (action === "ping") {
@@ -607,6 +652,7 @@ function jobPacket(args: RuntimeArgs): RuntimeEnvelope {
 }
 
 async function toolCall(name: string, args: RuntimeArgs = {}): Promise<TextJsonResult> {
+  if (name === "cadre_workflow") return asTextJson(workflowPacket(args));
   if (name === "cadre_project") return asTextJson(await projectPacket(args));
   if (name === "cadre_status") return asTextJson(statusPacket(args));
   if (name === "cadre_track") return asTextJson(trackPacket(args));

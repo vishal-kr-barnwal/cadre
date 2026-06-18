@@ -90,6 +90,24 @@ function buildFixture(root) {
   }
 }
 
+function buildPolyrepoFixture(root) {
+  buildFixture(root);
+  write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+    mode: "polyrepo",
+    default_repo: "app",
+    repos: [
+      { name: "app", submodule_path: "repos/app" },
+      { name: "api", submodule_path: "repos/api" },
+    ],
+  }, null, 2));
+  for (const repo of ["app", "api"]) {
+    const repoRoot = path.join(root, "repos", repo);
+    fs.mkdirSync(repoRoot, { recursive: true });
+    spawnSync("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
+    write(path.join(repoRoot, "README.md"), `# ${repo}\n`);
+  }
+}
+
 function runWorker(root, trackId, index) {
   const code = `
 const core = require(${JSON.stringify(path.resolve(__dirname, "cadre-core.js"))});
@@ -141,24 +159,60 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function assertWorkflow(result, workflow) {
+  assert(result && result.packet_only === true, `${workflow} did not report packet_only`);
+  assert(result.workflow === workflow, `${workflow} returned workflow=${result && result.workflow}`);
+  assert(!String(result.error || "").includes("Unknown Cadre workflow packet"), `${workflow} was not routed`);
+}
+
 async function main() {
   const keep = process.argv.includes("--keep");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-scale-"));
+  const polyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-scale-poly-"));
   buildFixture(root);
+  buildPolyrepoFixture(polyRoot);
 
   const regen = core.regenIndex(root);
   assert(regen.ok === true, regen.stderr || regen.error || "regen-index failed");
+  const polyRegen = core.regenIndex(polyRoot);
+  assert(polyRegen.ok === true, polyRegen.stderr || polyRegen.error || "polyrepo regen-index failed");
 
   const status = core.teamStatus(root);
   const collisions = core.collisionScan(root);
   const available = core.availableWork(root);
   const gate = core.reviewGate(root, "team_scale_19_20260617");
+  const workflowStatus = core.workflowPacket(root, { workflow: "status", mode: "team" });
+  const workflowValidate = core.workflowPacket(root, { workflow: "validate" });
+  const workflowImplement = core.workflowPacket(root, { workflow: "implement", trackId: "team_scale_13_20260617" });
+  const workflowArchive = core.workflowPacket(root, { workflow: "archive", trackId: "team_scale_19_20260617" });
+  const workflowReview = core.workflowPacket(root, { workflow: "review", trackId: "team_scale_19_20260617", includeLsp: false });
+  const polyFleet = core.workflowPacket(polyRoot, { workflow: "status", mode: "fleet" });
+  const polyValidate = core.workflowPacket(polyRoot, { workflow: "validate" });
+  const polyLand = core.workflowPacket(polyRoot, { workflow: "land", trackId: "team_scale_19_20260617" });
 
   assert(status.total_tracks === 20, `expected 20 tracks, got ${status.total_tracks}`);
   assert(status.by_status.in_progress === 12, "expected 12 in-progress tracks");
   assert(collisions.collisions.length >= 1, "expected at least one cross-track collision");
   assert(available.available.length === 4, `expected 4 available tracks, got ${available.available.length}`);
   assert(gate.ok === true, `expected completed reviewed track to pass gate: ${gate.reasons.join(", ")}`);
+  for (const [workflow, result] of [
+    ["status", workflowStatus],
+    ["validate", workflowValidate],
+    ["implement", workflowImplement],
+    ["archive", workflowArchive],
+    ["review", workflowReview],
+    ["status", polyFleet],
+    ["validate", polyValidate],
+    ["land", polyLand],
+  ]) {
+    assertWorkflow(result, workflow);
+  }
+  assert(workflowStatus.status.summary.by_status.in_progress === 12, "expected packet status to expose 12 WIP tracks");
+  assert(workflowValidate.integrity.ok === true, "expected packet validation integrity to pass");
+  assert(workflowArchive.ok === true && workflowArchive.dry_run === true, "expected archive packet dry run");
+  assert(polyFleet.status.topology === "polyrepo", "expected polyrepo fleet packet");
+  assert(polyValidate.fleet.topology === "polyrepo", "expected polyrepo validation packet");
+  assert(polyLand.ok === true, `expected polyrepo land packet to pass: ${JSON.stringify(polyLand.gate && polyLand.gate.reasons)}`);
 
   const trackIds = core.listTracks(root).map((track) => track.track_id);
   const workers = await Promise.all(trackIds.map((trackId, index) => runWorker(root, trackId, index + 1)));
@@ -173,16 +227,19 @@ async function main() {
   const result = {
     ok: true,
     fixture: root,
+    polyrepoFixture: polyRoot,
     totalTracks: status.total_tracks,
     owners: Object.keys(status.by_owner).length,
     collisions: collisions.collisions.length,
     available: available.available.length,
+    packet_workflows: 8,
     concurrent_workers: workers.length,
   };
   console.log(JSON.stringify(result, null, 2));
 
   if (!keep) {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(polyRoot, { recursive: true, force: true });
   }
 }
 

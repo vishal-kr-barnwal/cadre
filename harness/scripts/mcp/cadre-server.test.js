@@ -192,6 +192,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
     for (const name of [
+      "cadre_workflow",
       "cadre_project",
       "cadre_status",
       "cadre_track",
@@ -204,6 +205,11 @@ test("MCP root resolution rejects harness skill directories without project stat
       "cadre_intel",
     ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);
+    }
+    const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
+    const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
+    for (const action of ["setup", "newtrack", "implement", "status", "review", "validate", "ship", "land", "archive", "handoff"]) {
+      assert.ok(workflowActions.includes(action), `expected ${action} workflow`);
     }
     const trackTool = tools.tools.find((tool) => tool.name === "cadre_track");
     const trackActions = trackTool.inputSchema.properties.action.enum;
@@ -253,6 +259,15 @@ test("MCP root resolution rejects harness skill directories without project stat
       arguments: { action: "doctor", root: path.join(root, "harness", "skills", "cadre") },
     });
     assert.equal(parseTextJson(doctor).data.checks.cadre_project.ok, false);
+
+    const setupAssist = await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { workflow: "setup", root: path.join(root, "uninitialized") },
+    });
+    const parsedSetupAssist = parseTextJson(setupAssist);
+    assert.equal(parsedSetupAssist.data.ok, true);
+    assert.equal(parsedSetupAssist.data.packet_only, true);
+    assert.equal(parsedSetupAssist.data.workflow, "setup");
 
     const job = await request("tools/call", {
       name: "cadre_job",
@@ -318,6 +333,22 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     }));
     assert.equal(fleet.data.ok, true);
     assert.ok(fleet.data.repos.some((repo) => repo.name === "."));
+
+    const workflowStatus = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { root, workflow: "status", mode: "fleet", includeCollisions: false },
+    }));
+    assert.equal(workflowStatus.data.ok, true);
+    assert.equal(workflowStatus.data.packet_only, true);
+    assert.equal(workflowStatus.data.status.ok, true);
+
+    const workflowValidate = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { root, workflow: "validate", trackId: "packets_20260618" },
+    }));
+    assert.equal(workflowValidate.data.ok, true);
+    assert.equal(workflowValidate.data.packet_only, true);
+    assert.equal(workflowValidate.data.integrity.ok, true);
 
     const diagnostics = parseTextJson(await request("tools/call", {
       name: "cadre_intel",

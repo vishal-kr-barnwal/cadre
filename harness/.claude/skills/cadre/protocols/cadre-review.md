@@ -5,248 +5,30 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
-> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin.
 
 # Cadre Review
 
-Review the work on the track named in the workflow arguments before it ships.
+This workflow is packet-only for Cadre orchestration. Cadre MCP is mandatory. If
+a required packet returns `ok:false`, halt and report the packet error. Do not
+recreate Cadre control-plane, Beads, index, worktree, or provider state with
+shell commands.
 
-This is the **quality gate** between `cadre-implement` and `cadre-ship`.
-It reviews the track's full diff against `main`, records findings, and either clears
-the track to ship or routes issues back into the plan.
+Review the work on a track before it ships.
 
-## 0. Mode
+## Packet Flow
 
-- **`--request [@reviewer]`** → **assign a reviewer; do not review.** Record who
-  should review this track and surface it in the team's review queue, then stop (no
-  diff, no verdict). Set `metadata.json.reviewer` to the requested person
-  (key-scoped jq), and if Beads is available add the label `review:requested` to the
-  epic, **adding it BEFORE clearing any stale verdict labels** so a crash never
-  strips the track to no review label:
-  ```bash
-  bd label add <epic_id> review:requested --json
-  bd label remove <epic_id> review:ready --json
-  bd label remove <epic_id> review:changes --json
-  ```
-  `cadre-status --team` lists tracks `awaiting review` with their assigned reviewer,
-  so review load can be distributed deliberately instead of landing on whoever
-  volunteers. Bracket this with MCP `cadre_project` with `action: "sync_control_plane"` (`mode: "pre"`
-  before the assignment, `mode: "post"` after committing) so the assignment
-  reaches the reviewer's clone in shared mode and no-ops in local mode.
-- **No flag** (default) → run the full review (sections 1-8) and record the verdict.
+1. Resolve the project root with `cadre_project` using `action: "root"`.
+2. Call `cadre_workflow` with `workflow: "review"` and the requested `trackId`.
+3. Use the returned track context, review assistance, machine gate, review gate,
+   and packet warnings as the review basis.
+4. When provider evidence is required, call `cadre_review` with
+   `action: "provider_evidence"` and include the returned evidence in the review
+   summary.
+5. To record a verdict, call `cadre_mutate` with `action: "record_review"` and the
+   packet-derived verdict fields.
+6. Summarize findings first, then gate state, evidence, and next packet.
 
-## 1. Verify Setup
-
-Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
-argument. Use the returned root for all MCP calls in this workflow.
-
-If `cadre/tracks.md` doesn't exist, tell the user to run `cadre-setup` first.
-
-**Sync preamble (shared mode).** Call MCP `cadre_project` with `action: "sync_control_plane"` with
-`mode: "pre"` before reviewing. It no-ops in local mode and pulls the shared
-control plane plus Beads graph when `sync_mode == "shared"`, so the verdict lands
-on current spec/plan state.
-
-## 2. Select Track
-
-- If a `track_id` is provided, use it.
-- Otherwise pick the active (`[~]`) track, or — if none is in progress — list
-  completed (`[x]`) tracks not yet archived and ask the user to choose.
-- Use `cadre_status` with `action: "team"` with `root` for active/completed track selection. Use
-  `tracks.md` markers only as human-readable fallback labels.
-- Call `cadre_track` with `action: "context"` for the selected track. Use its `track.git_branch`,
-  parsed `plan`, task commit SHAs, `task_counts`, `review`, `last_coverage`, and
-  Beads IDs. Read `spec.md` only for acceptance criteria prose.
-
-## 3. Compute the Diff
-
-Determine the review surface:
-```bash
-git diff main...<git_branch>          # changes the track introduces vs main
-git diff main...<git_branch> --stat   # summary for the report
-```
-If the branch is absent (work was done directly on the current branch), fall back to
-the track's commit range from the `cadre_track` with `action: "parse_plan"` task SHA data, or
-`git diff main...HEAD`.
-
-**POLYREPO (`metadata.json` has a `repos` map):** the track spans several repos.
-Compute the diff **per repo** in submodule context and review them together:
-```bash
-# for each repo in metadata.json.repos:
-git -C <submodule_path> diff <base_branch>...track/<track_id> --stat
-git -C <submodule_path> diff <base_branch>...track/<track_id>
-```
-Plus the control-repo diff for the `cadre/` state changes. Report findings
-grouped by repo so the reviewer sees each repo's surface distinctly.
-
-If there are no changes, report that and stop.
-
-## 4. Run the Review
-
-**Start with the structured review evidence packet.** Call MCP
-`cadre_review` with `action: "assist"` with `root`, `trackId`, `base`, and `head`. It returns the
-repo-aware diff surface (`repo_diffs[]` in polyrepo), unfinished plan tasks,
-TODO/FIXME/stub scan, recorded coverage, machine-gate evidence, and LSP findings
-when configured. Treat its `blocking_reasons[]` as the initial blocking-finding
-set, and use the packet to scope any subsequent diff reads.
-
-**Delegate the actual review to the `/code-review` skill** when it is available
-so findings match the project's review conventions. Invoke `/code-review`
-(default effort) scoped to the track diff from step 3 plus the
-`cadre_review` with `action: "assist"` evidence. Also check the track-specific concerns:
-- Does the diff satisfy the acceptance criteria in `spec.md`?
-- Are all plan tasks marked `[x]` actually implemented (no stubs/TODOs)?
-- Tests present and passing for new behavior (per `workflow.md`'s coverage bar)?
-
-If `/code-review` is not available in the current client, continue with
-`cadre_review` with `action: "assist"` plus focused human inspection of the changed files. Do not
-fall back to an unstructured full-diff read unless the packet identifies a file
-that needs manual review.
-
-**Machine gate (complements `/code-review`, which by design refuses to compile or
-look outside the diff).** Run two automated passes and fold their results into the
-verdict — they catch regressions a diff-scoped reviewer cannot:
-
-1. **Typecheck / compile / build.** First call MCP `cadre_intel` with
-   `action: "workspace_diagnostics"` to get detected build/test adapters and
-   command plans. Then use the `machine_gate` returned by
-   `cadre_review` with `action: "assist"`; if it was skipped or needs a different command, call MCP
-   `cadre_review` with `action: "machine_gate"` with `root`, `trackId`, and optional
-   `machineCommand`. In **polyrepo**, the tool runs per touched repo/worktree. Each
-   unresolved type/compile/build error is a **blocking** finding; add the count to
-   `blocking_count` (computed in §5) and list the relevant stderr/stdout tail in the
-   findings. **Degrade gracefully:** if no machine-gate command is declared or
-   discovered, note that no machine gate was available (do not fabricate a green
-   result).
-
-2. **Cross-track regression via code intelligence.** Call MCP
-   `cadre_intel` with `action: "lsp_warm_review"` with `root`, `base`, and `head` (`<git_branch>`). It
-   routes through the persistent LSP daemon so repeated reviews reuse warm
-   language servers. If the daemon path is unavailable, fall back to
-   `cadre_intel` with `action: "lsp_review"`. Both return structured findings for changed, renamed, and
-   removed symbols where possible. If the result has `available: false`, note that
-   code intelligence was unavailable and continue. Treat live external callers of
-   removed/renamed symbols as blocking findings; other external references are
-   warnings unless the semantic change clearly breaks callers.
-
-3. **Provider evidence (GitHub/GitLab MCP when available).** If official
-   GitHub/GitLab MCP tools are installed in the client, use them to fetch PR/MR
-   review state, CI/check conclusions, Actions/job log failures, linked issues, and
-   discussion context for the track branch or PR. Treat this as evidence only:
-   summarize it in the review report, then persist the bounded summary through
-   MCP `cadre_review` with `action: "provider_evidence"` (`root`, `trackId`,
-   `provider`, `findings`, and `evidence`). The Cadre verdict is still written only by
-   `cadre_mutate` with `action: "record_review"`, and `cadre_review` with `action: "gate"` remains the authority for ship
-   readiness. If provider MCP tools are unavailable, fall back to
-   `cadre_review` with `action: "pr_ci_status"` (`gh`/`glab`), then call
-   `provider_evidence` with the degraded payload so the limitation is durable.
-
-## 5. Record Findings
-
-Append a review entry to `cadre/tracks/<track_id>/learnings.md`:
-```markdown
-## Review — <YYYY-MM-DD>
-- **Scope:** <files / commit range>
-- **Verdict:** Ready to ship | Changes requested
-- **Findings:**
-  - [severity] <finding> (file:line)
-- **Follow-ups:** <linked tasks or revisions, if any>
-```
-
-Then **record the structured verdict through MCP** so `cadre-ship` and
-`cadre-land` can enforce the review gate. Compute the reviewer identity
-`<git-identity>` = `git config user.email` (fallback `git config user.name`,
-else null). Count `blocking_count` = the number of blocking-severity findings.
-Call `cadre_mutate` with `action: "record_review"` with `root`, `trackId`, `verdict`, `blockingCount`,
-`reviewer`, and `coverage` (from `cadre_track` with `action: "context"` under `track.last_coverage` or
-the latest measured value). The tool writes `metadata.review`, increments
-`review_seq`, detects self-review, refuses to silently override another
-reviewer's open `changes_requested`, captures `reviewed_sha` plus
-`reviewed_shas` per repo in polyrepo, and immediately
-returns the `cadre_review` with `action: "gate"` result.
-
-If `cadre_mutate` with `action: "record_review"` returns `requires_override`, ask the user to confirm the
-override. On confirmation, append the superseded verdict to `learnings.md` and
-retry with `allowOverride: true`; otherwise halt without writing a new verdict.
-If the returned gate is not `ok` for an intended approval, fix the review data or
-route changes before publishing.
-- `verdict` is `"approved"` for **Ready to ship** (which requires `blocking_count` = 0),
-  or `"changes_requested"` for **Changes requested**.
-- `reviewed_sha` is the track branch's HEAD commit SHA captured here, at review time.
-  In polyrepo, `reviewed_shas` pins each reviewed product repo. These pins tie the
-  verdict to specific commits: in `cadre-ship` / `cadre-land` the
-  pre-push re-read compares the branch's **pre-rebase** tip against it, and if the
-  branch advanced past the reviewed pin the gate demands a re-review (the approval
-  no longer describes the code being shipped). In **polyrepo**, `headShas` are
-  compared against `reviewed_shas` per product repo.
-- `coverage` carries the measured number from `cadre-implement`'s coverage gate so
-  the recorded verdict reflects a real measurement, not a self-asserted "tests pass".
-  If a track was reviewed with `coverage: null`, note that coverage was never
-  measured.
-- `review_seq` is a monotonic counter (previous `review_seq` + 1, starting at 1). It
-  is **not** a lock — review intentionally runs **no owner ownership-guard** (a
-  reviewer is deliberately not the track owner). The sequence plus the anti-downgrade
-  guard above are what make concurrent reviews safe: every verdict gets a distinct,
-  increasing id for audit, and an `approved` cannot silently erase another reviewer's
-  open `changes_requested` without an explicit, logged override.
-- **Self-review (warn, or hard-block when configured):** if `metadata.json.owner`
-  equals the reviewer `<git-identity>`, the operator is reviewing their own track.
-  Read `cadre/config.json` `require_second_reviewer` (default **false**):
-  - **false** (default) → warn only ("⚠️ You are the track owner — consider a second
-    reviewer"), record the verdict, and proceed (unchanged behavior).
-  - **true** → an `approved` self-review is **not** sufficient: record the verdict but
-    set `review.self_reviewed: true`; `cadre-ship` and `cadre-land` will refuse to
-    ship until a different reviewer approves. Tell the user a second reviewer is
-    required.
-
-## 6. Route the Outcome
-
-- **Ready to ship:** announce the track is cleared and suggest `cadre-ship`.
-- **Changes requested:**
-  - If the issue is a spec/plan gap → suggest `cadre-revise`.
-  - If the issue is an unfinished/blocked task → suggest `cadre-flag` or reopen the task.
-  - Do **not** advance to ship until findings are resolved (re-run `cadre-review`).
-
-## 7. Beads Sync
-
-**PROTOCOL: Record the review against the track epic.**
-
-1. **Availability Check:** run the standard Beads availability check
-   (see `references/beads-error-handler.md`); if `BEADS_AVAILABLE=false`, HALT.
-2. If the track has `beads_epic` in metadata:
-   ```bash
-   bd note <epic_id> "REVIEW <date>: <verdict>. <n> findings (<n> blocking)." --json
-   ```
-   - If a `bd` command fails: follow the Beads Error Handler Protocol.
-3. **Set the review label on the epic** so downstream tooling (and other agents)
-   can see the gate state. The two states are mutually exclusive, but **add the
-   winning label BEFORE removing the losing one(s)** — that ordering means a crash
-   between the two `bd` calls leaves the track with the correct label set rather
-   than with *neither* (which would read as "review never happened"). Worst case is
-   a transient overlap of both labels, which the next flip cleans up.
-   - **Approved / clean** (`verdict == "approved"`, `blocking_count == 0`):
-     ```bash
-     bd label add <epic_id> review:ready --json
-     bd label remove <epic_id> review:changes --json
-     bd label remove <epic_id> review:requested --json
-     ```
-   - **Changes requested** (`verdict == "changes_requested"` or `blocking_count > 0`):
-     ```bash
-     bd label add <epic_id> review:changes --json
-     bd label remove <epic_id> review:ready --json
-     bd label remove <epic_id> review:requested --json
-     ```
-   - If a `bd` command fails: follow the Beads Error Handler Protocol.
-
-## 8. Publish the Verdict (shared mode)
-
-The verdict in `metadata.json` and the Beads label only help the shipper if they
-reach the shipper's clone. Commit the `cadre/` changes, then call MCP
-`cadre_project` with `action: "sync_control_plane"` with `mode: "post"`. The tool no-ops in local mode and
-publishes the shared control plane when configured; use `references/cadre-sync.md`
-only for bounded manual repair if the structured sync reports a failure.
-
-This is the same orchestration-state publish every mutating workflow performs; it
-pushes **only the control plane** — product code is never auto-pushed (it goes up at
-`cadre-ship` / `cadre-land`). In `local` mode (or when `config.json` is absent),
-skip this section — the verdict stays local, matching today's behavior.
+LSP, provider checks, review labels, review metadata, and Beads review state are
+packet-owned. Product test commands may run only to verify the product behavior
+under review.

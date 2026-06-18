@@ -162,7 +162,7 @@ generate_protocols() {
 	      printf '<!-- %s -->\n\n' "$desc"
 	      printf '> When this protocol references `references/...`, resolve it against the parent skill directory.\n\n'
 	      printf '> Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.\n\n'
-	      printf '> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.\n\n'
+	      printf '> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin.\n\n'
 	      printf '%s\n' "$body"
 	    } | write_file "$(out_path "$dest_dir/$name.md")"
   done

@@ -152,6 +152,8 @@ export interface Topology {
 export interface RuntimeArgs extends JsonObject {
   root?: string | undefined;
   action?: string | undefined;
+  workflow?: string | undefined;
+  execute?: boolean | undefined;
   async?: boolean;
   trackId?: string | undefined;
   track_id?: string | undefined;

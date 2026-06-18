@@ -678,6 +678,78 @@ test("fleetStatus and beadsSummary degrade cleanly", () => {
   }
 });
 
+test("workflowPacket exposes packet-only routes for primary workflows", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-test-"));
+  const setupRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-setup-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "workflow@example.com"]);
+    git(root, ["config", "user.name", "Workflow Test"]);
+    write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
+    writeTrack(root, "workflow_20260618", samplePlan("workflow_20260618"), {
+      status: "in_progress",
+      owner: "workflow@example.com",
+    });
+    writeTrack(root, "done_20260618", samplePlan("done_20260618"), {
+      status: "completed",
+    });
+
+    const setup = core.workflowPacket(setupRoot, { workflow: "setup", execute: true, productText: "# Product\n", techStackText: "# Stack\n" });
+    assert.equal(setup.ok, true);
+    assert.equal(setup.packet_only, true);
+    assert.ok(setup.written.includes("cadre/setup_state.json"));
+    assert.equal(fs.existsSync(path.join(setupRoot, "cadre", "workflow.md")), true);
+
+    const draft = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: "draft_20260618",
+      specText: "# Spec\n",
+      planText: samplePlan("draft_20260618"),
+    });
+    assert.equal(draft.ok, true);
+    assert.equal(draft.dry_run, true);
+    assert.equal(draft.packet_only, true);
+
+    for (const [workflow, args] of [
+      ["implement", { trackId: "workflow_20260618" }],
+      ["status", { mode: "fleet" }],
+      ["review", { trackId: "workflow_20260618", includeLsp: false }],
+      ["validate", { trackId: "workflow_20260618" }],
+      ["archive", { trackId: "done_20260618" }],
+      ["handoff", { trackId: "workflow_20260618" }],
+      ["ship", { trackId: "workflow_20260618" }],
+      ["land", { trackId: "workflow_20260618" }],
+      ["release", {}],
+      ["revise", { trackId: "workflow_20260618" }],
+      ["refresh", {}],
+      ["flag", { trackId: "workflow_20260618", status: "blocked", reason: "waiting for credentials" }],
+      ["revert", { trackId: "workflow_20260618" }],
+      ["formula", {}],
+    ]) {
+      const result = core.workflowPacket(root, { workflow, ...args });
+      assert.equal(result.packet_only, true, `expected ${workflow} to be packet-only`);
+      assert.equal(result.workflow, workflow);
+      assert.equal(/Unknown Cadre workflow packet/.test(String(result.error || "")), false);
+    }
+
+    const flag = core.workflowPacket(root, {
+      workflow: "flag",
+      trackId: "workflow_20260618",
+      status: "blocked",
+      reason: "waiting for credentials",
+      execute: true,
+    });
+    assert.equal(flag.ok, true);
+    assert.equal(flag.dry_run, false);
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
+    assert.equal(metadata.status, "blocked");
+    assert.equal(metadata.last_status_reason, "waiting for credentials");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(setupRoot, { recursive: true, force: true });
+  }
+});
+
 test("reviewAssist and lspImpact provide fallback review context", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-review-assist-test-"));
   try {

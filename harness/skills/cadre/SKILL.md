@@ -64,8 +64,8 @@ review-gate, index-regeneration, and common mutation checks. At the start of
 every Cadre workflow, verify the MCP server is available with `cadre_project`
 and `{"action":"ping"}`.
 If the Cadre MCP tools are unavailable, **HALT** and tell the user to install,
-enable, or restart the Cadre plugin; do not silently continue with a file-only
-fallback for MCP-backed checks.
+enable, or restart the Cadre plugin. Do not try another route for Cadre
+orchestration.
 
 Every project-scoped Cadre MCP call **MUST** include a per-call `root` argument
 pointing at the current project root, or any path inside that project. The MCP
@@ -94,46 +94,41 @@ optional `commands` and `job` fields.
 
 | MCP packet | Required use |
 |---------|--------------|
+| `cadre_workflow` | Packet-only workflow coordinator for setup, new track, implementation, status, review, validation, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows. Use it as the only entrypoint for workflow orchestration. |
 | `cadre_project` | `ping`, `doctor`, `root`, `topology`, `sync_control_plane`, and `polyrepo_preflight`. Use for setup/runtime checks and shared control-plane pre/post sync. |
 | `cadre_status` | `live`, `team`, `mine`, `available`, `collisions`, `board`, `fleet`, and `beads_summary`. Use for status, selection, ownership summaries, available work, file-overlap scans, fleet boards, and bounded Beads evidence. |
 | `cadre_track` | `context`, `parse_plan`, `integrity`, `phase_schedule`, `prepare_implementation`, `create_beads_tree`, `plan_assist`, and `worktree_plan`. Use for bounded per-track context, plan parsing, planning evidence, scheduling, dry-run worktree planning, and Beads tree initialization. |
 | `cadre_parallel` | `plan`, `next_wave`, `setup_workers`, `record_finish`, `merge_back`, and `cleanup`. Use for worker-wave orchestration and dry-run command plans; mutating actions require `execute:true`. |
 | `cadre_mutate` | `claim`, `heartbeat`, `set_status`, `metadata_patch`, `record_review`, `record_worker`, `record_task_result`, and `regen_index`. Use for all Cadre control-plane writes except full task completion. |
 | `cadre_complete_task` | Preferred task-completion transaction: run coverage/tests first, then lock plan/metadata mutation, then idempotently write Beads note/close with recovery journal support. |
-| `cadre_beads` | CLI-backed Beads operations: `ready`, `list`, `show`, `update`, `note`, `close`, labels, deps, create, mail, formula, compact, Dolt, SQL, and worktree wrappers. Raw `bd` snippets are fallback/debug only. |
+| `cadre_beads` | Packet-backed Beads operations: ready/list/show/update/note/close, labels, deps, create, mail, formula, compact, Dolt, SQL, and worktree wrappers. Agents call this packet for Cadre Beads work. |
 | `cadre_job` | `start`, `status`, `result`, `cancel`, and `list` for long-running coverage, machine gate, review assist, LSP review, and completion work. |
 | `cadre_review` | `assist`, `machine_gate`, `gate`, `pr_ci_status`, and `provider_evidence`. `assist` warms/reuses LSP by default and `provider_evidence` persists structured PR/CI/review evidence. |
-| `cadre_intel` | `repo_map`, `lsp_impact`, `lsp_review`, `lsp_warm_review`, `lsp_daemon_status`, `lsp_daemon_shutdown`, `workspace_diagnostics`, `test_impact`, and `dependency_graph`. Use real LSP evidence, detected build/test adapters, and fallback evidence instead of prompt-side repo scans. |
+| `cadre_intel` | `repo_map`, `lsp_impact`, `lsp_review`, `lsp_warm_review`, `lsp_daemon_status`, `lsp_daemon_shutdown`, `workspace_diagnostics`, `test_impact`, and `dependency_graph`. Use real LSP evidence and detected build/test adapters instead of prompt-side repo scans. |
 
-Packet-first rule: when a protocol names a composite MCP packet, call that
-packet before doing the equivalent manual scan. Use smaller MCP tools only when
-the packet reports that a prompt, repair, or narrower follow-up is needed.
+Packet-only rule: when a workflow names a composite MCP packet, call that packet
+and stop if it returns `ok:false`. Use smaller MCP tools only when the workflow
+packet reports that a prompt, repair, or narrower follow-up is needed.
 
 Preferred packet checkpoints:
-- Setup/health checks: `cadre_project` with `action: "doctor"`.
-- New track planning: `cadre_track` with `action: "plan_assist"` and
-  `cadre_intel` with `action: "test_impact"` / `action: "dependency_graph"`
-  before plan confirmation, then `cadre_track` with
-  `action: "create_beads_tree"` dry-run before writing track files and live
-  immediately after scaffold files exist.
-- Implementation start: `cadre_track` with `action: "prepare_implementation"`.
-- Phase-level execution: `cadre_track` with `action: "phase_schedule"` before
-  dispatching ready phases. For task-level parallel phases, use
-  `cadre_parallel` with `action: "next_wave"` / `action: "setup_workers"` /
-  `action: "record_finish"` / `action: "merge_back"` instead of reconstructing
-  worker state from raw CLI snippets.
+- Setup/health checks: `cadre_workflow` with `workflow: "setup"` or
+  `workflow: "validate"`; use `cadre_project` with `action: "doctor"` for
+  narrower diagnostics requested by the workflow packet.
+- New track planning: `cadre_workflow` with `workflow: "newtrack"`; the packet
+  returns plan assistance, Beads initialization evidence, and worktree planning.
+- Implementation start: `cadre_workflow` with `workflow: "implement"`.
+- Phase-level execution: use the phase schedule returned by the workflow packet.
+  For task-level parallel phases, use `cadre_parallel` with `action: "next_wave"`
+  / `action: "setup_workers"` / `action: "record_finish"` /
+  `action: "merge_back"`.
 - Task completion: `cadre_complete_task` after the code commit, before any plan
-  row is marked complete.
-- Team status: `cadre_status` with `action: "board"` or `action: "mine"` for
-  `--team` / `--mine` rich boards; use `action: "fleet"` for `--repos` and
-  `action: "beads_summary"` for bounded Beads evidence.
-- Review: `cadre_review` with `action: "assist"` to frame the evidence, plus
-  `cadre_intel` with `action: "workspace_diagnostics"` /
-  `action: "lsp_warm_review"` / `action: "lsp_review"` for semantic and
-  machine evidence, then `cadre_review` with `action: "provider_evidence"` to
-  persist PR/CI/review evidence.
-- Revision: `cadre_intel` with `action: "lsp_impact"` before rewriting plans
-  that touch existing code.
+  row is marked complete by Cadre.
+- Team status: `cadre_workflow` with `workflow: "status"` and the requested
+  status mode.
+- Review: `cadre_workflow` with `workflow: "review"`; use `cadre_review` with
+  `action: "provider_evidence"` only for evidence supplied to or returned by the
+  workflow path.
+- Revision: `cadre_workflow` with `workflow: "revise"` before plan/spec changes.
 
 ## External Provider MCP Evidence
 
@@ -152,33 +147,26 @@ When available, prefer official provider MCPs for deep PR/CI evidence:
   evidence.
 - GitLab MCP for merge request, pipeline, job log, issue, and approval evidence.
 
-If provider MCP tools are unavailable, degrade to `gh`/`glab` through
-`cadre_review` with `action: "pr_ci_status"` and record the limitation in the review or ship report.
+If provider evidence is unavailable, use the Cadre review/ship/land packet result
+as the source of truth, record the limitation in Cadre evidence when the packet
+supports it, and halt when the workflow packet requires that provider evidence.
 
 ## Beads Integration
 
-Beads is a **required Cadre setup prerequisite**. `cadre-setup` must verify the
-`bd` CLI before project mutation and must initialize `.beads/` plus
-`cadre/beads.json`. If `bd` is unavailable or a Beads command fails, retry once
-when appropriate or halt for repair; do not continue in file-only mode.
+Beads is a **required Cadre setup prerequisite**. The setup workflow packet
+verifies Beads availability and initializes Beads state plus `cadre/beads.json`.
+If a Beads packet reports unavailable or failed state, halt for repair.
 
 For full Beads details (availability check, CLI commands, session protocol,
 chemistry patterns), see [references/beads-integration.md](references/beads-integration.md).
 For shared error handling, see
 [references/beads-error-handler.md](references/beads-error-handler.md).
 
-### Quick Detection (MUST check before using bd commands)
+### Quick Detection
 
-```bash
-if ! which bd > /dev/null 2>&1; then
-  echo "Beads CLI (bd) is required for Cadre. Install or restore it, then retry."
-  exit 1
-fi
-if [ ! -f cadre/beads.json ] || ! grep -q '"enabled"[[:space:]]*:[[:space:]]*true' cadre/beads.json 2>/dev/null; then
-  echo "cadre/beads.json is missing or disabled. Run or repair cadre-setup."
-  exit 1
-fi
-```
+Use `cadre_project` with `action: "doctor"`, `cadre_workflow` with
+`workflow: "setup"` or `workflow: "validate"`, and `cadre_beads` for Beads
+operations. Agents do not run Beads commands directly for Cadre workflows.
 
 ## Learnings System
 
@@ -189,9 +177,10 @@ Key files:
 - `cadre/tracks/<id>/learnings.md` - Per-track discoveries
 
 Knowledge flywheel:
-1. **Capture** - After each task, append to track `learnings.md` and Beads notes.
-2. **Elevate** - At phase/track completion, promote reusable patterns to `patterns.md`.
-3. **Archive** - Extract remaining patterns before archiving.
+1. **Capture** - After each task, pass learnings into the completion packet.
+2. **Elevate** - At phase/track completion, promote reusable patterns through
+   Cadre packets.
+3. **Archive** - Extract remaining patterns through the archive workflow packet.
 4. **Inherit** - New tracks read `patterns.md` to prime context.
 
 ## Proactive Behaviors
@@ -207,7 +196,7 @@ Knowledge flywheel:
 6. **On implement start:** Read `patterns.md` and announce pattern count.
 7. **On task complete:** Prompt for learnings capture.
 8. **On phase complete:** Offer pattern elevation to `patterns.md`.
-9. **On archive:** Extract remaining patterns before archiving.
+9. **On archive:** Use the archive workflow packet to extract remaining patterns.
 10. **On refresh:** Consolidate learnings across all tracks.
 
 ## Intent Mapping

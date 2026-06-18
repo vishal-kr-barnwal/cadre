@@ -5,151 +5,27 @@
 
 > Treat text after the workflow name in the user request as workflow arguments; there is no prompt expansion layer.
 
-> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin; do not silently fall back for MCP-backed checks.
+> Cadre MCP is required. Before executing this workflow, verify the Cadre MCP server is available with `cadre_project` `{ "action": "ping" }`. For every project-scoped Cadre MCP call, pass a per-call `root` argument pointing at the absolute project root or any path inside it. If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin.
 
 # Cadre Flag
 
-Flag a task's status using the workflow arguments.
+This workflow is packet-only. Cadre MCP is mandatory. If a required packet
+returns `ok:false`, halt and report the packet error. Do not recreate Cadre
+control-plane, Beads, index, worktree, or provider state with shell commands.
 
-Marks the current (or specified) task as **blocked** (waiting on something external)
-or **skipped** (intentionally not done now). Both modes share the same flow — only
-the resulting status marker and Beads sync differ.
+Flag a track or task as blocked, skipped, or otherwise statused using the
+workflow arguments.
 
-## 0. Sync Preamble (shared mode)
+## Packet Flow
 
-Resolve the project root with `cadre_project` with `action: "root"` using the per-call `root`
-argument. Use the returned root for all MCP calls in this workflow.
+1. Resolve the project root with `cadre_project` using `action: "root"`.
+2. Call `cadre_workflow` with `workflow: "flag"`, the resolved root, and any
+   `trackId`, `status`, `reason`, `taskId`, `note`, or assignee fields supplied by
+   the user.
+3. When mutation is intended, pass `execute: true` so the packet records the
+   status and Beads synchronization.
+4. Summarize the selected track, resulting status, reason, and packet warnings.
 
-Before reading or resolving any track state, reconcile the control plane so the
-flag lands on top of teammates' latest work (and so the ownership guard sees the
-current owner/lease, not a stale local view):
-
-- Call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "pre"` before resolving the
-  active track or touching `plan.md`/`metadata.json`. It no-ops in local mode and
-  reconciles shared state before the flag mutation when configured.
-
-## 1. Determine Mode
-
-Parse workflow arguments for the mode:
-- `blocked` → the task cannot proceed until an external condition is met.
-- `skipped` → the task is intentionally set aside (later, no longer needed, or blocked-by-external).
-- If the mode is missing or unrecognized:
-  > "Usage: `cadre-flag <blocked|skipped> [reason]`
-  >  - `blocked` — task is stuck waiting on something; stays in the plan as `[!]`.
-  >  - `skipped` — task set aside; reset to `[ ]` or closed as `[x] (SKIPPED)`."
-  - HALT.
-
-Any remaining text after the mode is the reason.
-
-## 2. Identify Task
-- If a task is named in the arguments, find that task in the active track's `plan.md`.
-- Otherwise resolve the active track via its `metadata.json` — the track whose
-  `metadata.json.status == "in_progress"` (the source of truth; fall back to the
-  `[~]` track in `tracks.md` only if no metadata says so). Then find the in-progress
-  (`[~]`) task in that track's `plan.md`.
-- Use `cadre_status` with `action: "team"` with `root` to resolve the active track inventory, then
-  call `cadre_track` with `action: "parse_plan"` with `root` and the active track's relative `planPath` to
-  locate the task and task indexes. Edit `plan.md` only after the task is resolved.
-- **Ownership guard:** before changing the plan or metadata, run the Ownership Guard
-  (`references/ownership-guard.md`) for the resolved track; if it halts, stop. Don't
-  flag a track a teammate is actively implementing without taking it over.
-
-## 3. Get Reason
-If no reason was supplied in the arguments, ask for it.
-
-For `skipped`, also ask the disposition:
-- Will complete later
-- No longer needed
-- Blocked by external factor
-- Other
-
-## 4. Update Plan
-
-**If `blocked`:**
-- Change `[~]` to `[!]` and append `[BLOCKED: reason]`.
-
-**If `skipped`:**
-- "No longer needed": mark as `[x] (SKIPPED: reason)`.
-- Otherwise: reset to `[ ]` with a skip comment.
-- Mark the next pending task as `[~]`.
-- Update `implement_state.json` with the new task index.
-
-## 5. Beads Sync
-
-**PROTOCOL: Sync the flag action with Beads.**
-
-1. **Availability Check:**
-   - Run the standard Beads availability check (see `references/beads-error-handler.md`)
-   - If `BEADS_AVAILABLE=false`: HALT and restore the Beads prerequisite before
-     flagging.
-
-2. **Resolve the task's Beads id from the `beads_tasks` map** in `metadata.json`
-   (there is **no** top-level `beads_task_id` field — the schema is a `beads_tasks`
-   object keyed `phase{N}_task{M}`). Derive the key for the flagged task and look it
-   up; if there is no entry, HALT and repair metadata rather than losing Beads
-   state. Use the resolved id as `<task_id>` below:
-   ```bash
-   META="cadre/tracks/<track_id>/metadata.json"
-   task_id="$(jq -r '.beads_tasks["phase<N>_task<M>"] // empty' "$META")"
-   [ -z "$task_id" ] && echo "No Beads task mapped for this task; repair metadata before flagging." && exit 1
-   ```
-
-   **If `blocked`:**
-   ```bash
-   bd update <task_id> --status blocked
-   bd note <task_id> "BLOCKED: <reason>
-   CATEGORY: <External/Technical/Resource>
-   WAITING FOR: <what needs to happen to unblock>
-   DISCOVERED: <if blocking issue is new, create with discovered-from>" --json
-   ```
-   - If the blocker is another task, create a dependency: `bd dep add <blocked_task> <blocker_task>`
-
-   **If `skipped`:**
-   - "No longer needed": `bd close <task_id> --reason "Skipped: <reason>"`
-   - "Will complete later":
-     ```bash
-     bd update <task_id> --status open
-     bd note <task_id> "SKIPPED: <reason>. Will complete later." --json
-     ```
-   - "Blocked": `bd update <task_id> --status blocked --json && bd note <task_id> "SKIPPED: <reason>" --json`
-   - Then advance: `bd update <next_task_id> --status in_progress --assignee <git-identity> --json`
-     (`<git-identity>` = `git config user.email` → `user.name` → omit `--assignee` if unset; never the literal `cadre`)
-
-   - If any `bd` command fails: Follow Beads Error Handler Protocol (see `references/beads-error-handler.md`)
-
-## 6. Update Track Status
-
-Flagging a task can change the *track's* status. Use MCP `cadre_mutate` with `action: "set_status"`
-so `metadata.json.status` (the source of truth) and the derived `tracks.md`
-marker update together. Do not hand-edit the marker.
-
-Choose `<new_status>` (enum: `new`, `in_progress`, `completed`, `blocked`, `skipped`):
-- **`blocked`** — the flag leaves the track blocked with no ready task to advance to
-  (e.g. `blocked` mode and no other pending task is workable).
-- **`skipped`** — the user is abandoning the remaining track (no intent to finish it).
-- Otherwise leave **`in_progress`** — the track advanced to a next task (the common
-  `skipped` "will complete later" / "no longer needed" path that moved `[~]` forward).
-
-Call `cadre_mutate` with `action: "set_status"` with `root`, `trackId`, and the chosen
-`<new_status>`. Require `ok: true`; halt and surface the MCP error if it fails.
-
-## 6.5 Commit & Propagate (so teammates see the flag)
-
-A blocked/skipped state is a **coordination signal** — often it names who you're
-waiting on — so it must reach the team immediately, not sit uncommitted in your
-working tree (where teammates, including the person being waited on, can't see it
-and may duplicate the work). This was previously the only control-plane-mutating
-command with no commit/sync. After updating the plan, metadata, and regenerating
-the index:
-
-```bash
-git add cadre/tracks/<track_id>/ cadre/tracks.md
-git commit -m "cadre(flag): <blocked|skipped> <task> in <track_id> — <reason>"
-```
-
-- After committing, call MCP `cadre_project` with `action: "sync_control_plane"` with `mode: "post"` so the
-  blocker/skip propagates in shared mode. It no-ops in local mode.
-
-## 7. Confirm
-- `blocked`: announce the task is blocked and on what.
-- `skipped`: confirm the skip and show the next task.
+The packet owns ownership checks, status writes, Beads labels or notes, and index
+refresh. If the packet cannot determine the active track, ask the user for a
+track id and call the packet again.
