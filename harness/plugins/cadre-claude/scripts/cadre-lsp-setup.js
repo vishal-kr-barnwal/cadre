@@ -38,11 +38,15 @@ __export(cadre_lsp_setup_exports, {
   mergeConfig: () => mergeConfig,
   parseArgs: () => parseArgs,
   recommend: () => recommend,
+  runCli: () => runCli,
   scanFiles: () => scanFiles
 });
 module.exports = __toCommonJS(cadre_lsp_setup_exports);
+var import_node_path3 = __toESM(require("node:path"));
+
+// src/lsp/setup-recommender.ts
 var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
+var import_node_path2 = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
 
 // src/guards.ts
@@ -53,7 +57,8 @@ function asJsonObject(value) {
   return isRecord(value) ? value : {};
 }
 
-// src/cadre-lsp-setup.ts
+// src/lsp/ignore-policy.ts
+var import_node_path = __toESM(require("node:path"));
 var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
   ".hg",
@@ -101,6 +106,18 @@ var DEFAULT_IGNORE_PATHS = [
   "plugins/cadre",
   "plugins/cadre-claude"
 ];
+function normalizeRel(file) {
+  return file.split(import_node_path.default.sep).join("/");
+}
+function shouldIgnore(root, fullPath, name) {
+  if (DEFAULT_IGNORES.has(name)) return true;
+  const rel = normalizeRel(import_node_path.default.relative(root, fullPath));
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
+}
+
+// src/lsp/setup-recommender.ts
 var LANGUAGE_RULES = [
   {
     id: "typescript",
@@ -184,8 +201,8 @@ function parseArgs(argv) {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
-  const root = import_node_path.default.resolve(args.root);
-  return { ...args, root, configPath: import_node_path.default.resolve(root, args.config) };
+  const root = import_node_path2.default.resolve(args.root);
+  return { ...args, root, configPath: import_node_path2.default.resolve(root, args.config) };
 }
 function shellQuote(value) {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -207,16 +224,6 @@ function commandAvailability(command) {
     message: (result.stderr || result.stdout || "Command not found on PATH").trim()
   };
 }
-function normalizeRel(file) {
-  return file.split(import_node_path.default.sep).join("/");
-}
-function shouldIgnore(root, fullPath, name) {
-  if (DEFAULT_IGNORES.has(name)) return true;
-  const rel = normalizeRel(import_node_path.default.relative(root, fullPath));
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
-}
 function scanFiles(root) {
   const counts = /* @__PURE__ */ new Map();
   const samples = /* @__PURE__ */ new Map();
@@ -230,15 +237,15 @@ function scanFiles(root) {
       return;
     }
     for (const entry of entries) {
-      const full = import_node_path.default.join(dir, entry.name);
+      const full = import_node_path2.default.join(dir, entry.name);
       if (shouldIgnore(root, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;
       }
       if (!entry.isFile()) continue;
-      const ext = import_node_path.default.extname(entry.name).toLowerCase();
-      const rel = import_node_path.default.relative(root, full);
+      const ext = import_node_path2.default.extname(entry.name).toLowerCase();
+      const rel = import_node_path2.default.relative(root, full);
       if (ext) {
         counts.set(ext, (counts.get(ext) ?? 0) + 1);
         const extSamples = samples.get(ext) ?? [];
@@ -270,7 +277,7 @@ function loadConfig(configPath) {
   }
 }
 function saveConfig(configPath, config) {
-  import_node_fs.default.mkdirSync(import_node_path.default.dirname(configPath), { recursive: true });
+  import_node_fs.default.mkdirSync(import_node_path2.default.dirname(configPath), { recursive: true });
   import_node_fs.default.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}
 `);
 }
@@ -308,7 +315,7 @@ function serverKey(server) {
 }
 function workspaceFolders(root) {
   const folders = [{ name: ".", path: "." }];
-  const reposPath = import_node_path.default.join(root, "cadre", "repos.json");
+  const reposPath = import_node_path2.default.join(root, "cadre", "repos.json");
   let repos = {};
   try {
     repos = asJsonObject(JSON.parse(import_node_fs.default.readFileSync(reposPath, "utf8")));
@@ -366,7 +373,7 @@ function runCli() {
   }
   const result = {
     root: args.root,
-    config: import_node_path.default.relative(args.root, args.configPath),
+    config: import_node_path2.default.relative(args.root, args.configPath),
     recommended: recommendations,
     missingFromConfig: missingFromConfig.map((rec) => rec.id),
     missingCommands: missingCommands.map((rec) => ({
@@ -395,16 +402,20 @@ function runCli() {
     if (!rec.available) console.log(`  install: ${rec.install}`);
   }
   if (written) {
-    console.log(`Updated ${import_node_path.default.relative(args.root, args.configPath)}; added: ${added.join(", ") || "none"}.`);
+    console.log(`Updated ${import_node_path2.default.relative(args.root, args.configPath)}; added: ${added.join(", ") || "none"}.`);
   } else if (missingFromConfig.length > 0) {
     console.log("Run with --write to append missing server entries to cadre/lsp.json.");
   }
 }
-try {
-  runCli();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+
+// src/cadre-lsp-setup.ts
+if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path3.default.basename(process.argv[1] || ""))) {
+  try {
+    runCli();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
@@ -413,5 +424,6 @@ try {
   mergeConfig,
   parseArgs,
   recommend,
+  runCli,
   scanFiles
 });

@@ -93,6 +93,8 @@ __export(cadre_core_exports, {
   worktreePlan: () => worktreePlan
 });
 module.exports = __toCommonJS(cadre_core_exports);
+
+// src/core/application/cadre-runtime.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_crypto = __toESM(require("node:crypto"));
@@ -128,7 +130,108 @@ function errorCode(error) {
   return isRecord(error) && typeof error.code === "string" ? error.code : void 0;
 }
 
-// src/cadre-core.ts
+// src/core/domain/lease-policy.ts
+var STALE_LEASE_MS = 30 * 60 * 1e3;
+var LOCK_STALE_MS = STALE_LEASE_MS;
+
+// src/core/domain/plan-parser.ts
+function parseAnnotation(line) {
+  const match = line.match(/<!--\s*([a-zA-Z0-9_-]+)\s*:\s*([\s\S]*?)\s*-->/);
+  if (!match?.[1] || match[2] === void 0) return null;
+  return { key: match[1], value: match[2].trim() };
+}
+function extractCommitRefs(text) {
+  const value = String(text || "");
+  const commitShas = [];
+  const repoShas = {};
+  const repoPattern = /\b([A-Za-z0-9_.-]+):([0-9a-f]{7,40})\b/g;
+  let match;
+  while (match = repoPattern.exec(value)) {
+    if (!match[1] || !match[2]) continue;
+    repoShas[match[1]] = match[2];
+    commitShas.push(match[2]);
+  }
+  const shaPattern = /\b(?:commit[:\s]+|sha[:\s]+)?([0-9a-f]{7,40})\b/gi;
+  while (match = shaPattern.exec(value)) {
+    if (match[1] && !commitShas.includes(match[1])) commitShas.push(match[1]);
+  }
+  return { commit_shas: commitShas, repo_shas: repoShas };
+}
+function parsePlanText(text) {
+  const phases = [];
+  let currentPhase = null;
+  let currentTask = null;
+  const ensurePhase = () => {
+    if (!currentPhase) {
+      currentPhase = { title: "Unsectioned", annotations: {}, tasks: [], phase_index: phases.length + 1 };
+      phases.push(currentPhase);
+    }
+    return currentPhase;
+  };
+  text.split(/\r?\n/).forEach((line, index) => {
+    const phaseMatch = line.match(/^##+\s+(.+?)\s*$/);
+    if (phaseMatch?.[1]) {
+      currentPhase = {
+        title: phaseMatch[1].trim(),
+        annotations: {},
+        tasks: [],
+        line: index + 1,
+        phase_index: phases.length + 1
+      };
+      phases.push(currentPhase);
+      currentTask = null;
+      return;
+    }
+    const taskMatch = line.match(/^\s*-\s+\[([ x~!\-])\]\s+(.+?)\s*$/);
+    if (taskMatch?.[1] && taskMatch[2]) {
+      const phase = ensurePhase();
+      const taskIndex = phase.tasks.length + 1;
+      const title = taskMatch[2].trim();
+      const refs = extractCommitRefs(title);
+      currentTask = {
+        marker: taskMatch[1],
+        title,
+        annotations: {},
+        files: [],
+        depends: [],
+        repo: null,
+        line: index + 1,
+        phase_index: phase.phase_index || phases.indexOf(phase) + 1,
+        task_index: taskIndex,
+        task_key: `phase${phase.phase_index || phases.indexOf(phase) + 1}_task${taskIndex}`,
+        commit_shas: refs.commit_shas,
+        repo_shas: refs.repo_shas
+      };
+      phase.tasks.push(currentTask);
+      return;
+    }
+    const annotation = parseAnnotation(line);
+    if (!annotation) return;
+    const target = currentTask || ensurePhase();
+    target.annotations = target.annotations || {};
+    target.annotations[annotation.key] = annotation.value;
+    if (currentTask) {
+      if (annotation.key === "files") {
+        currentTask.files = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
+      } else if (annotation.key === "depends") {
+        currentTask.depends = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
+      } else if (annotation.key === "repo") {
+        currentTask.repo = annotation.value;
+      } else if (["commit", "commits", "sha", "shas"].includes(annotation.key)) {
+        const refs = extractCommitRefs(annotation.value);
+        currentTask.commit_shas = Array.from(/* @__PURE__ */ new Set([...currentTask.commit_shas ?? [], ...refs.commit_shas]));
+        currentTask.repo_shas = { ...currentTask.repo_shas, ...refs.repo_shas };
+      }
+    }
+  });
+  const tasks = phases.flatMap((phase) => phase.tasks);
+  return { ok: true, phases, tasks, warnings: [], errors: [] };
+}
+
+// src/core/domain/provider-policy.ts
+var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
+
+// src/core/domain/track-status.ts
 var STATUS_MARKERS = {
   new: "[ ]",
   in_progress: "[~]",
@@ -137,9 +240,8 @@ var STATUS_MARKERS = {
   skipped: "[-]"
 };
 var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
-var STALE_LEASE_MS = 30 * 60 * 1e3;
-var LOCK_STALE_MS = STALE_LEASE_MS;
-var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
+
+// src/core/application/cadre-runtime.ts
 var commandExistsCache = /* @__PURE__ */ new Map();
 function readJson(file, fallback) {
   try {
@@ -785,98 +887,6 @@ function listTracks(root) {
     });
   }
   return tracks;
-}
-function parseAnnotation(line) {
-  const match = line.match(/<!--\s*([a-zA-Z0-9_-]+)\s*:\s*([\s\S]*?)\s*-->/);
-  if (!match?.[1] || match[2] === void 0) return null;
-  return { key: match[1], value: match[2].trim() };
-}
-function extractCommitRefs(text) {
-  const value = String(text || "");
-  const commitShas = [];
-  const repoShas = {};
-  const repoPattern = /\b([A-Za-z0-9_.-]+):([0-9a-f]{7,40})\b/g;
-  let match;
-  while (match = repoPattern.exec(value)) {
-    if (!match[1] || !match[2]) continue;
-    repoShas[match[1]] = match[2];
-    commitShas.push(match[2]);
-  }
-  const shaPattern = /\b(?:commit[:\s]+|sha[:\s]+)?([0-9a-f]{7,40})\b/gi;
-  while (match = shaPattern.exec(value)) {
-    if (match[1] && !commitShas.includes(match[1])) commitShas.push(match[1]);
-  }
-  return { commit_shas: commitShas, repo_shas: repoShas };
-}
-function parsePlanText(text) {
-  const phases = [];
-  let currentPhase = null;
-  let currentTask = null;
-  const ensurePhase = () => {
-    if (!currentPhase) {
-      currentPhase = { title: "Unsectioned", annotations: {}, tasks: [], phase_index: phases.length + 1 };
-      phases.push(currentPhase);
-    }
-    return currentPhase;
-  };
-  text.split(/\r?\n/).forEach((line, index) => {
-    const phaseMatch = line.match(/^##+\s+(.+?)\s*$/);
-    if (phaseMatch?.[1]) {
-      currentPhase = {
-        title: phaseMatch[1].trim(),
-        annotations: {},
-        tasks: [],
-        line: index + 1,
-        phase_index: phases.length + 1
-      };
-      phases.push(currentPhase);
-      currentTask = null;
-      return;
-    }
-    const taskMatch = line.match(/^\s*-\s+\[([ x~!\-])\]\s+(.+?)\s*$/);
-    if (taskMatch?.[1] && taskMatch[2]) {
-      const phase = ensurePhase();
-      const taskIndex = phase.tasks.length + 1;
-      const title = taskMatch[2].trim();
-      const refs = extractCommitRefs(title);
-      currentTask = {
-        marker: taskMatch[1],
-        title,
-        annotations: {},
-        files: [],
-        depends: [],
-        repo: null,
-        line: index + 1,
-        phase_index: phase.phase_index || phases.indexOf(phase) + 1,
-        task_index: taskIndex,
-        task_key: `phase${phase.phase_index || phases.indexOf(phase) + 1}_task${taskIndex}`,
-        commit_shas: refs.commit_shas,
-        repo_shas: refs.repo_shas
-      };
-      phase.tasks.push(currentTask);
-      return;
-    }
-    const annotation = parseAnnotation(line);
-    if (!annotation) return;
-    const target = currentTask || ensurePhase();
-    target.annotations = target.annotations || {};
-    target.annotations[annotation.key] = annotation.value;
-    if (currentTask) {
-      if (annotation.key === "files") {
-        currentTask.files = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
-      } else if (annotation.key === "depends") {
-        currentTask.depends = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
-      } else if (annotation.key === "repo") {
-        currentTask.repo = annotation.value;
-      } else if (["commit", "commits", "sha", "shas"].includes(annotation.key)) {
-        const refs = extractCommitRefs(annotation.value);
-        currentTask.commit_shas = Array.from(/* @__PURE__ */ new Set([...currentTask.commit_shas ?? [], ...refs.commit_shas]));
-        currentTask.repo_shas = { ...currentTask.repo_shas, ...refs.repo_shas };
-      }
-    }
-  });
-  const tasks = phases.flatMap((phase) => phase.tasks);
-  return { ok: true, phases, tasks, warnings: [], errors: [] };
 }
 function parsePlanFile(file) {
   if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };

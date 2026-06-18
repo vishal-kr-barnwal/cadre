@@ -39,10 +39,7 @@ module.exports = __toCommonJS(cadre_lsp_daemon_exports);
 var import_node_readline = __toESM(require("node:readline"));
 
 // src/cadre-lsp-review.ts
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
-var import_node_child_process = require("node:child_process");
-var import_node_url = require("node:url");
+var import_node_path3 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -64,12 +61,14 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-// src/cadre-lsp-review.ts
-var DEFAULT_STARTUP_TIMEOUT_MS = 1e4;
-var DEFAULT_REQUEST_TIMEOUT_MS = 8e3;
-var DEFAULT_SHUTDOWN_TIMEOUT_MS = 2e3;
-var MAX_TEXT_REFERENCE_RESULTS = 50;
-var MAX_SCAN_FILE_BYTES = 1024 * 1024;
+// src/lsp/review-runner.ts
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+var import_node_child_process = require("node:child_process");
+var import_node_url = require("node:url");
+
+// src/lsp/ignore-policy.ts
+var import_node_path = __toESM(require("node:path"));
 var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
   ".hg",
@@ -117,6 +116,30 @@ var DEFAULT_IGNORE_PATHS = [
   "plugins/cadre",
   "plugins/cadre-claude"
 ];
+function normalizeRel(file) {
+  return file.split(import_node_path.default.sep).join("/");
+}
+function shouldIgnore(root, fullPath, name) {
+  if (DEFAULT_IGNORES.has(name)) return true;
+  const rel = normalizeRel(import_node_path.default.relative(root, fullPath));
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
+}
+function isIgnoredFile(root, file) {
+  const rel = normalizeRel(file);
+  if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
+}
+
+// src/lsp/review-runner.ts
+var DEFAULT_STARTUP_TIMEOUT_MS = 1e4;
+var DEFAULT_REQUEST_TIMEOUT_MS = 8e3;
+var DEFAULT_SHUTDOWN_TIMEOUT_MS = 2e3;
+var MAX_TEXT_REFERENCE_RESULTS = 50;
+var MAX_SCAN_FILE_BYTES = 1024 * 1024;
 function usage() {
   console.log(`Usage: node <cadre-lsp-review.js> [--base main] [--head HEAD] [--config cadre/lsp.json] [--json]
 
@@ -201,23 +224,6 @@ function commandAvailability(command) {
     message: (result.stderr || result.stdout || "Command not found on PATH").trim()
   };
 }
-function normalizeRel(file) {
-  return file.split(import_node_path.default.sep).join("/");
-}
-function shouldIgnore(root, fullPath, name) {
-  if (DEFAULT_IGNORES.has(name)) return true;
-  const rel = normalizeRel(import_node_path.default.relative(root, fullPath));
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
-}
-function isIgnoredFile(root, file) {
-  const rel = normalizeRel(file);
-  if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
-}
 function changedEntries(root, base, head) {
   return runGit(root, ["diff", "--name-status", "--find-renames", `${base}...${head}`]).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
     const parts = line.split(/\t+/);
@@ -240,7 +246,7 @@ function changedEntries(root, base, head) {
       kind,
       path: file || "",
       oldPath,
-      exists: file ? import_node_fs.default.existsSync(import_node_path.default.join(root, file)) : false
+      exists: file ? import_node_fs.default.existsSync(import_node_path2.default.join(root, file)) : false
     };
   }).filter((entry) => Boolean(entry.path) && !isIgnoredFile(root, entry.path));
 }
@@ -453,12 +459,12 @@ ${body}`);
         },
         workspace: { workspaceFolders: true }
       },
-      workspaceFolders: [{ uri: (0, import_node_url.pathToFileURL)(this.root).href, name: import_node_path.default.basename(this.root) }]
+      workspaceFolders: [{ uri: (0, import_node_url.pathToFileURL)(this.root).href, name: import_node_path2.default.basename(this.root) }]
     });
     this.notify("initialized", {});
   }
   open(file) {
-    const abs = import_node_path.default.join(this.root, file);
+    const abs = import_node_path2.default.join(this.root, file);
     const uri = (0, import_node_url.pathToFileURL)(abs).href;
     const text = import_node_fs.default.readFileSync(abs, "utf8");
     const version = (this.opened.get(file) || 0) + 1;
@@ -482,36 +488,36 @@ ${body}`);
   }
   async documentSymbols(file) {
     return this.request("textDocument/documentSymbol", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path.default.join(this.root, file)).href }
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path2.default.join(this.root, file)).href }
     });
   }
   async references(file, position) {
     return this.request("textDocument/references", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path2.default.join(this.root, file)).href },
       position,
       context: { includeDeclaration: false }
     });
   }
   async definition(file, position) {
     return this.request("textDocument/definition", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path2.default.join(this.root, file)).href },
       position
     });
   }
   async typeDefinition(file, position) {
     return this.request("textDocument/typeDefinition", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path2.default.join(this.root, file)).href },
       position
     });
   }
   async implementation(file, position) {
     return this.request("textDocument/implementation", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path2.default.join(this.root, file)).href },
       position
     });
   }
   diagnostics(file) {
-    return this.publishedDiagnostics.get((0, import_node_url.pathToFileURL)(import_node_path.default.join(this.root, file)).href) || [];
+    return this.publishedDiagnostics.get((0, import_node_url.pathToFileURL)(import_node_path2.default.join(this.root, file)).href) || [];
   }
   async shutdown() {
     try {
@@ -600,8 +606,8 @@ var DEFAULT_LANGUAGE_IDS = {
   "dockerfile": "dockerfile"
 };
 function languageId(file, server) {
-  const ext = import_node_path.default.extname(file);
-  const basename = import_node_path.default.basename(file).toLowerCase();
+  const ext = import_node_path2.default.extname(file);
+  const basename = import_node_path2.default.basename(file).toLowerCase();
   const overrides = server ? asJsonObject(server.languageIds) : {};
   return asOptionalString(overrides[ext]) || asOptionalString(overrides[basename]) || DEFAULT_LANGUAGE_IDS[ext] || DEFAULT_LANGUAGE_IDS[basename] || "plaintext";
 }
@@ -620,8 +626,8 @@ function escapeRegExp(value) {
 function serverFileMatch(file, server) {
   const extensionSet = new Set(server.extensions || []);
   const filenameSet = new Set((server.filenames || []).map((name) => name.toLowerCase()));
-  const ext = import_node_path.default.extname(file);
-  const basename = import_node_path.default.basename(file).toLowerCase();
+  const ext = import_node_path2.default.extname(file);
+  const basename = import_node_path2.default.basename(file).toLowerCase();
   return extensionSet.has(ext) || filenameSet.has(basename);
 }
 function scanTextReferences(root, symbol, changedPathSet, server) {
@@ -637,7 +643,7 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
       return;
     }
     for (const entry of entries) {
-      const full = import_node_path.default.join(dir, entry.name);
+      const full = import_node_path2.default.join(dir, entry.name);
       if (shouldIgnore(root, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
@@ -646,7 +652,7 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
       }
       if (!entry.isFile()) continue;
       if (!serverFileMatch(full, server)) continue;
-      if (changedPathSet.has(import_node_path.default.resolve(full))) continue;
+      if (changedPathSet.has(import_node_path2.default.resolve(full))) continue;
       let stat;
       try {
         stat = import_node_fs.default.statSync(full);
@@ -666,7 +672,7 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
         if (!pattern.test(line)) continue;
         results.push({
           file: full,
-          relativeFile: normalizeRel(import_node_path.default.relative(root, full)),
+          relativeFile: normalizeRel(import_node_path2.default.relative(root, full)),
           line: i + 1,
           snippet: line.trim().slice(0, 160)
         });
@@ -716,7 +722,7 @@ function lspRefToLocation(root, ref) {
     const range = location.range || location.targetSelectionRange || location.targetRange;
     return {
       file,
-      relativeFile: normalizeRel(import_node_path.default.relative(root, file)),
+      relativeFile: normalizeRel(import_node_path2.default.relative(root, file)),
       line: (range?.start ? range.start.line : 0) + 1
     };
   } catch {
@@ -766,25 +772,25 @@ function nearbyFileHints(root, files) {
     "build.gradle.kts"
   ]);
   for (const file of files || []) {
-    let dir = import_node_path.default.dirname(import_node_path.default.join(root, file));
+    let dir = import_node_path2.default.dirname(import_node_path2.default.join(root, file));
     while (dir.startsWith(root)) {
       for (const name of manifestNames) {
-        const candidate = import_node_path.default.join(dir, name);
-        if (import_node_fs.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path.default.relative(root, candidate)));
+        const candidate = import_node_path2.default.join(dir, name);
+        if (import_node_fs.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path2.default.relative(root, candidate)));
       }
       if (dir === root) break;
-      dir = import_node_path.default.dirname(dir);
+      dir = import_node_path2.default.dirname(dir);
     }
-    const parsed = import_node_path.default.parse(file);
+    const parsed = import_node_path2.default.parse(file);
     const candidates = [
-      import_node_path.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-      import_node_path.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-      import_node_path.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-      import_node_path.default.join("test", file),
-      import_node_path.default.join("tests", file)
+      import_node_path2.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+      import_node_path2.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+      import_node_path2.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+      import_node_path2.default.join("test", file),
+      import_node_path2.default.join("tests", file)
     ];
     for (const candidate of candidates) {
-      if (import_node_fs.default.existsSync(import_node_path.default.join(root, candidate))) tests.add(normalizeRel(candidate));
+      if (import_node_fs.default.existsSync(import_node_path2.default.join(root, candidate))) tests.add(normalizeRel(candidate));
     }
   }
   return {
@@ -800,7 +806,7 @@ async function runReview(options = {}) {
   };
   const root = options.root || process.cwd();
   const clientPool = options.clientPool || null;
-  const configPath = import_node_path.default.resolve(root, args.config);
+  const configPath = import_node_path2.default.resolve(root, args.config);
   if (!import_node_fs.default.existsSync(configPath)) {
     return {
       available: false,
@@ -830,8 +836,8 @@ async function runReview(options = {}) {
   const serverReports = [];
   const changedSet = /* @__PURE__ */ new Set();
   for (const entry of entries) {
-    if (entry.path) changedSet.add(import_node_path.default.resolve(root, entry.path));
-    if (entry.oldPath) changedSet.add(import_node_path.default.resolve(root, entry.oldPath));
+    if (entry.path) changedSet.add(import_node_path2.default.resolve(root, entry.path));
+    if (entry.oldPath) changedSet.add(import_node_path2.default.resolve(root, entry.oldPath));
   }
   for (const server of servers) {
     const serverEntries = entries.filter((entry) => {
@@ -951,7 +957,7 @@ async function runReview(options = {}) {
             typeDefinitions,
             implementations
           });
-          const externalRefs = refs.map((ref) => lspRefToLocation(root, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root, ref.relativeFile));
+          const externalRefs = refs.map((ref) => lspRefToLocation(root, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path2.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root, ref.relativeFile));
           if (externalRefs.length > 0) {
             findings.push(externalReferenceFinding(server, candidate, externalRefs, "lsp"));
           }
@@ -959,7 +965,7 @@ async function runReview(options = {}) {
       }
       for (const candidate of allCandidates.values()) {
         if (candidate.changeType !== "removed") continue;
-        if (candidate.changedFile && import_node_fs.default.existsSync(import_node_path.default.join(root, candidate.changedFile))) continue;
+        if (candidate.changedFile && import_node_fs.default.existsSync(import_node_path2.default.join(root, candidate.changedFile))) continue;
         const refs = scanTextReferences(root, candidate.name, changedSet, server);
         if (refs.length > 0) {
           findings.push(externalReferenceFinding(server, candidate, refs, "text"));
@@ -1007,7 +1013,9 @@ async function runCli() {
     }
   }
 }
-if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path.default.basename(process.argv[1] || ""))) {
+
+// src/cadre-lsp-review.ts
+if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path3.default.basename(process.argv[1] || ""))) {
   runCli().catch((error) => {
     console.error(errorMessage(error));
     process.exit(1);

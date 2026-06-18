@@ -25,13 +25,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// src/mcp/cadre-server.ts
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path2 = __toESM(require("node:path"));
-var import_node_child_process2 = require("node:child_process");
-var import_node_url = require("node:url");
+// src/mcp/server-runtime.ts
+var import_node_path6 = __toESM(require("node:path"));
 
-// src/cadre-core.ts
+// src/core/application/cadre-runtime.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_crypto = __toESM(require("node:crypto"));
@@ -67,7 +64,108 @@ function errorCode(error) {
   return isRecord(error) && typeof error.code === "string" ? error.code : void 0;
 }
 
-// src/cadre-core.ts
+// src/core/domain/lease-policy.ts
+var STALE_LEASE_MS = 30 * 60 * 1e3;
+var LOCK_STALE_MS = STALE_LEASE_MS;
+
+// src/core/domain/plan-parser.ts
+function parseAnnotation(line) {
+  const match = line.match(/<!--\s*([a-zA-Z0-9_-]+)\s*:\s*([\s\S]*?)\s*-->/);
+  if (!match?.[1] || match[2] === void 0) return null;
+  return { key: match[1], value: match[2].trim() };
+}
+function extractCommitRefs(text) {
+  const value = String(text || "");
+  const commitShas = [];
+  const repoShas = {};
+  const repoPattern = /\b([A-Za-z0-9_.-]+):([0-9a-f]{7,40})\b/g;
+  let match;
+  while (match = repoPattern.exec(value)) {
+    if (!match[1] || !match[2]) continue;
+    repoShas[match[1]] = match[2];
+    commitShas.push(match[2]);
+  }
+  const shaPattern = /\b(?:commit[:\s]+|sha[:\s]+)?([0-9a-f]{7,40})\b/gi;
+  while (match = shaPattern.exec(value)) {
+    if (match[1] && !commitShas.includes(match[1])) commitShas.push(match[1]);
+  }
+  return { commit_shas: commitShas, repo_shas: repoShas };
+}
+function parsePlanText(text) {
+  const phases = [];
+  let currentPhase = null;
+  let currentTask = null;
+  const ensurePhase = () => {
+    if (!currentPhase) {
+      currentPhase = { title: "Unsectioned", annotations: {}, tasks: [], phase_index: phases.length + 1 };
+      phases.push(currentPhase);
+    }
+    return currentPhase;
+  };
+  text.split(/\r?\n/).forEach((line, index) => {
+    const phaseMatch = line.match(/^##+\s+(.+?)\s*$/);
+    if (phaseMatch?.[1]) {
+      currentPhase = {
+        title: phaseMatch[1].trim(),
+        annotations: {},
+        tasks: [],
+        line: index + 1,
+        phase_index: phases.length + 1
+      };
+      phases.push(currentPhase);
+      currentTask = null;
+      return;
+    }
+    const taskMatch = line.match(/^\s*-\s+\[([ x~!\-])\]\s+(.+?)\s*$/);
+    if (taskMatch?.[1] && taskMatch[2]) {
+      const phase = ensurePhase();
+      const taskIndex = phase.tasks.length + 1;
+      const title = taskMatch[2].trim();
+      const refs = extractCommitRefs(title);
+      currentTask = {
+        marker: taskMatch[1],
+        title,
+        annotations: {},
+        files: [],
+        depends: [],
+        repo: null,
+        line: index + 1,
+        phase_index: phase.phase_index || phases.indexOf(phase) + 1,
+        task_index: taskIndex,
+        task_key: `phase${phase.phase_index || phases.indexOf(phase) + 1}_task${taskIndex}`,
+        commit_shas: refs.commit_shas,
+        repo_shas: refs.repo_shas
+      };
+      phase.tasks.push(currentTask);
+      return;
+    }
+    const annotation = parseAnnotation(line);
+    if (!annotation) return;
+    const target = currentTask || ensurePhase();
+    target.annotations = target.annotations || {};
+    target.annotations[annotation.key] = annotation.value;
+    if (currentTask) {
+      if (annotation.key === "files") {
+        currentTask.files = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
+      } else if (annotation.key === "depends") {
+        currentTask.depends = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
+      } else if (annotation.key === "repo") {
+        currentTask.repo = annotation.value;
+      } else if (["commit", "commits", "sha", "shas"].includes(annotation.key)) {
+        const refs = extractCommitRefs(annotation.value);
+        currentTask.commit_shas = Array.from(/* @__PURE__ */ new Set([...currentTask.commit_shas ?? [], ...refs.commit_shas]));
+        currentTask.repo_shas = { ...currentTask.repo_shas, ...refs.repo_shas };
+      }
+    }
+  });
+  const tasks = phases.flatMap((phase) => phase.tasks);
+  return { ok: true, phases, tasks, warnings: [], errors: [] };
+}
+
+// src/core/domain/provider-policy.ts
+var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
+
+// src/core/domain/track-status.ts
 var STATUS_MARKERS = {
   new: "[ ]",
   in_progress: "[~]",
@@ -76,9 +174,8 @@ var STATUS_MARKERS = {
   skipped: "[-]"
 };
 var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
-var STALE_LEASE_MS = 30 * 60 * 1e3;
-var LOCK_STALE_MS = STALE_LEASE_MS;
-var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
+
+// src/core/application/cadre-runtime.ts
 var commandExistsCache = /* @__PURE__ */ new Map();
 function readJson(file, fallback) {
   try {
@@ -724,98 +821,6 @@ function listTracks(root) {
     });
   }
   return tracks;
-}
-function parseAnnotation(line) {
-  const match = line.match(/<!--\s*([a-zA-Z0-9_-]+)\s*:\s*([\s\S]*?)\s*-->/);
-  if (!match?.[1] || match[2] === void 0) return null;
-  return { key: match[1], value: match[2].trim() };
-}
-function extractCommitRefs(text) {
-  const value = String(text || "");
-  const commitShas = [];
-  const repoShas = {};
-  const repoPattern = /\b([A-Za-z0-9_.-]+):([0-9a-f]{7,40})\b/g;
-  let match;
-  while (match = repoPattern.exec(value)) {
-    if (!match[1] || !match[2]) continue;
-    repoShas[match[1]] = match[2];
-    commitShas.push(match[2]);
-  }
-  const shaPattern = /\b(?:commit[:\s]+|sha[:\s]+)?([0-9a-f]{7,40})\b/gi;
-  while (match = shaPattern.exec(value)) {
-    if (match[1] && !commitShas.includes(match[1])) commitShas.push(match[1]);
-  }
-  return { commit_shas: commitShas, repo_shas: repoShas };
-}
-function parsePlanText(text) {
-  const phases = [];
-  let currentPhase = null;
-  let currentTask = null;
-  const ensurePhase = () => {
-    if (!currentPhase) {
-      currentPhase = { title: "Unsectioned", annotations: {}, tasks: [], phase_index: phases.length + 1 };
-      phases.push(currentPhase);
-    }
-    return currentPhase;
-  };
-  text.split(/\r?\n/).forEach((line, index) => {
-    const phaseMatch = line.match(/^##+\s+(.+?)\s*$/);
-    if (phaseMatch?.[1]) {
-      currentPhase = {
-        title: phaseMatch[1].trim(),
-        annotations: {},
-        tasks: [],
-        line: index + 1,
-        phase_index: phases.length + 1
-      };
-      phases.push(currentPhase);
-      currentTask = null;
-      return;
-    }
-    const taskMatch = line.match(/^\s*-\s+\[([ x~!\-])\]\s+(.+?)\s*$/);
-    if (taskMatch?.[1] && taskMatch[2]) {
-      const phase = ensurePhase();
-      const taskIndex = phase.tasks.length + 1;
-      const title = taskMatch[2].trim();
-      const refs = extractCommitRefs(title);
-      currentTask = {
-        marker: taskMatch[1],
-        title,
-        annotations: {},
-        files: [],
-        depends: [],
-        repo: null,
-        line: index + 1,
-        phase_index: phase.phase_index || phases.indexOf(phase) + 1,
-        task_index: taskIndex,
-        task_key: `phase${phase.phase_index || phases.indexOf(phase) + 1}_task${taskIndex}`,
-        commit_shas: refs.commit_shas,
-        repo_shas: refs.repo_shas
-      };
-      phase.tasks.push(currentTask);
-      return;
-    }
-    const annotation = parseAnnotation(line);
-    if (!annotation) return;
-    const target = currentTask || ensurePhase();
-    target.annotations = target.annotations || {};
-    target.annotations[annotation.key] = annotation.value;
-    if (currentTask) {
-      if (annotation.key === "files") {
-        currentTask.files = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
-      } else if (annotation.key === "depends") {
-        currentTask.depends = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
-      } else if (annotation.key === "repo") {
-        currentTask.repo = annotation.value;
-      } else if (["commit", "commits", "sha", "shas"].includes(annotation.key)) {
-        const refs = extractCommitRefs(annotation.value);
-        currentTask.commit_shas = Array.from(/* @__PURE__ */ new Set([...currentTask.commit_shas ?? [], ...refs.commit_shas]));
-        currentTask.repo_shas = { ...currentTask.repo_shas, ...refs.repo_shas };
-      }
-    }
-  });
-  const tasks = phases.flatMap((phase) => phase.tasks);
-  return { ok: true, phases, tasks, warnings: [], errors: [] };
 }
 function parsePlanFile(file) {
   if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
@@ -5713,216 +5718,7 @@ ${body}${body ? "\n" : ""}${end}
   };
 }
 
-// src/mcp/cadre-server.ts
-var PROTOCOL_VERSION = "2025-11-25";
-var packetSchema = (description, actionEnum = null) => ({
-  name: description.name,
-  description: description.text,
-  inputSchema: {
-    type: "object",
-    properties: {
-      root: { type: "string" },
-      action: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
-      workflow: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
-      execute: { type: "boolean" },
-      async: { type: "boolean" },
-      trackId: { type: "string" },
-      track_id: { type: "string" },
-      phaseIndex: { type: "number" },
-      taskIndex: { type: "number" },
-      planPath: { type: "string" },
-      status: { type: "string" },
-      patch: { type: "object" },
-      identity: { type: "string" },
-      takeover: { type: "boolean" },
-      base: { type: "string" },
-      head: { type: "string" },
-      config: { type: "string" },
-      operation: { type: "string" },
-      id: { type: "string" },
-      command: { type: "string" },
-      machineCommand: { type: "string" },
-      timeoutMs: { type: "number" },
-      provider: { type: "string" },
-      providerMode: { type: "string", enum: ["local", "github", "gitlab"] },
-      provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },
-      providerMcpAvailable: { type: "boolean" },
-      provider_mcp_available: { type: "boolean" },
-      githubMcpAvailable: { type: "boolean" },
-      gitlabMcpAvailable: { type: "boolean" },
-      providerEvidence: { oneOf: [{ type: "object" }, { type: "string" }] },
-      provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
-      remoteHost: { type: "string" },
-      remote_host: { type: "string" },
-      responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
-      response_mode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
-      detail: { type: "boolean" },
-      compact: { type: "boolean" },
-      symbol: { type: "string" },
-      symbols: { type: "array", items: { type: "string" } },
-      files: { type: "array", items: { type: "string" } },
-      repo: { type: "string" },
-      repos: { type: "array", items: { type: "string" } },
-      workerId: { type: "string" },
-      worker_id: { type: "string" },
-      commitSha: { type: "string" },
-      force: { type: "boolean" },
-      allowNoCommit: { type: "boolean" },
-      styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
-      styleGuideMaxChars: { type: "number" },
-      techStack: { type: "object" },
-      args: { type: "object" },
-      type: { type: "string" },
-      jobId: { type: "string" },
-      view: { type: "string" },
-      description: { type: "string" },
-      handoffText: { type: "string" },
-      bump: { type: "string" },
-      includeProvider: { type: "boolean" }
-    },
-    additionalProperties: true
-  }
-});
-var TOOLS = [
-  packetSchema(
-    {
-      name: "cadre_workflow",
-      text: "Packet-only Cadre workflow coordinator for setup, new track, implementation, status, review, validation, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows."
-    },
-    [
-      "setup",
-      "setup_assist",
-      "setup_scaffold",
-      "newtrack",
-      "new_track",
-      "implement",
-      "status",
-      "review",
-      "validate",
-      "archive",
-      "handoff",
-      "ship",
-      "land",
-      "release",
-      "revise",
-      "refresh",
-      "flag",
-      "revert",
-      "formula"
-    ]
-  ),
-  packetSchema(
-    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight." },
-    ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"]
-  ),
-  packetSchema(
-    { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
-    ["live", "team", "mine", "available", "collisions", "board", "fleet", "beads_summary"]
-  ),
-  packetSchema(
-    { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
-    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"]
-  ),
-  packetSchema(
-    { name: "cadre_parallel", text: "Cadre parallel packet: plan worker waves, dry-run worker setup, record finishes, merge back, and cleanup." },
-    ["plan", "next_wave", "setup_workers", "record_finish", "merge_back", "cleanup"]
-  ),
-  packetSchema(
-    { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
-    ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"]
-  ),
-  packetSchema(
-    { name: "cadre_complete_task", text: "Journaled task completion: coverage gate, locked plan/metadata writes, and idempotent Beads note/close." },
-    null
-  ),
-  packetSchema(
-    { name: "cadre_beads", text: "CLI-backed Beads packet for ready/list/show/update/note/close/labels/deps/create/mail/formula/compact/dolt/sql/worktree." },
-    null
-  ),
-  packetSchema(
-    { name: "cadre_job", text: "Cadre job packet: start, status, result, cancel, and list process-local long-running jobs." },
-    ["start", "status", "result", "cancel", "list"]
-  ),
-  packetSchema(
-    { name: "cadre_review", text: "Cadre review packet: review assist, machine gate, review gate, and PR/CI status." },
-    ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"]
-  ),
-  packetSchema(
-    { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
-    ["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
-  )
-];
-function isDirectory(file) {
-  try {
-    return import_node_fs2.default.statSync(file).isDirectory();
-  } catch {
-    return false;
-  }
-}
-function hasCadreDirectory(dir) {
-  return isDirectory(import_node_path2.default.join(dir, "cadre"));
-}
-function isCadreStateDirectory(dir) {
-  return [
-    "tracks.md",
-    "setup_state.json",
-    "product.md",
-    "tech-stack.json",
-    "workflow.md",
-    "beads.json",
-    "config.json",
-    "repos.json"
-  ].some((name) => import_node_fs2.default.existsSync(import_node_path2.default.join(dir, name))) || isDirectory(import_node_path2.default.join(dir, "tracks"));
-}
-function hasCadreProjectState(dir) {
-  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path2.default.join(dir, "cadre"));
-}
-function normalizePathCandidate(value) {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  let candidate = value.trim();
-  if (candidate.startsWith("file://")) {
-    try {
-      candidate = (0, import_node_url.fileURLToPath)(candidate);
-    } catch {
-      return null;
-    }
-  }
-  candidate = import_node_path2.default.resolve(candidate);
-  try {
-    if (import_node_fs2.default.existsSync(candidate) && !import_node_fs2.default.statSync(candidate).isDirectory()) candidate = import_node_path2.default.dirname(candidate);
-  } catch {
-    return null;
-  }
-  return candidate;
-}
-function findCadreRoot(start) {
-  let dir = normalizePathCandidate(start);
-  if (!dir) return null;
-  while (true) {
-    if (hasCadreProjectState(dir)) return dir;
-    if (import_node_path2.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path2.default.dirname(dir);
-    const parent = import_node_path2.default.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-function rootFromCandidate(candidate) {
-  const normalized = normalizePathCandidate(candidate);
-  if (!normalized) return null;
-  const cadreRoot = findCadreRoot(normalized);
-  if (cadreRoot) return { root: cadreRoot, has_cadre: true };
-  return { root: normalized, has_cadre: false };
-}
-function requireCadreRoot(args = {}) {
-  const info = rootFromCandidate(args.root);
-  if (info && info.has_cadre) return info.root;
-  throw Object.assign(
-    new Error(
-      `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`
-    ),
-    { code: -32602 }
-  );
-}
+// src/mcp/envelope.ts
 function asTextJson(value) {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
@@ -5967,85 +5763,11 @@ function syncedEnvelope(root, operation, fn) {
 function beadsOperationMutates(operation) {
   return !["ready", "list", "show", "formula_list"].includes(String(operation || ""));
 }
-var LspDaemonClient = class {
-  proc;
-  nextId;
-  pending;
-  buffer;
-  constructor() {
-    this.proc = null;
-    this.nextId = 1;
-    this.pending = /* @__PURE__ */ new Map();
-    this.buffer = "";
-  }
-  ensure() {
-    if (this.proc && !this.proc.killed) return;
-    const daemon = import_node_path2.default.resolve(__dirname, "..", "cadre-lsp-daemon.js");
-    this.proc = (0, import_node_child_process2.spawn)(process.execPath, [daemon], {
-      cwd: import_node_path2.default.resolve(__dirname, "..", ".."),
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    this.proc.stdout.on("data", (chunk) => this.read(chunk));
-    this.proc.stderr.on("data", () => {
-    });
-    this.proc.on("exit", () => {
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("LSP daemon exited"));
-      }
-      this.pending.clear();
-      this.proc = null;
-    });
-  }
-  read(chunk) {
-    this.buffer += chunk.toString("utf8");
-    let idx;
-    while ((idx = this.buffer.indexOf("\n")) >= 0) {
-      const line = this.buffer.slice(0, idx).trim();
-      this.buffer = this.buffer.slice(idx + 1);
-      if (!line) continue;
-      let message;
-      try {
-        message = asJsonObject(JSON.parse(line));
-      } catch {
-        continue;
-      }
-      const id = typeof message.id === "number" ? message.id : null;
-      if (id == null || !this.pending.has(id)) continue;
-      const pending = this.pending.get(id);
-      if (!pending) continue;
-      this.pending.delete(id);
-      clearTimeout(pending.timer);
-      const messageError = asJsonObject(message.error);
-      if (Object.keys(messageError).length > 0) pending.reject(new Error(asOptionalString(messageError.message) || "LSP daemon error"));
-      else pending.resolve(message.result);
-    }
-  }
-  request(method, params = {}, timeoutMs = 6e4) {
-    this.ensure();
-    const id = this.nextId++;
-    const payload = JSON.stringify({ id, method, params });
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`LSP daemon ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      if (!this.proc) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(new Error("LSP daemon process is not running"));
-        return;
-      }
-      this.proc.stdin.write(`${payload}
-`);
-    });
-  }
-  async shutdown() {
-    if (!this.proc) return { ok: true, stopped: 0, skipped: true };
-    return this.request("shutdown", {}, 5e3);
-  }
-};
+
+// src/mcp/job-manager.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+var import_node_child_process2 = require("node:child_process");
 var JobManager = class {
   jobs;
   nextId;
@@ -6192,6 +5914,440 @@ var JobManager = class {
     return { ok: true, jobs: Array.from(this.jobs.values()).map((job) => this.summary(job)) };
   }
 };
+
+// src/mcp/lsp-daemon-client.ts
+var import_node_path3 = __toESM(require("node:path"));
+var import_node_child_process3 = require("node:child_process");
+var LspDaemonClient = class {
+  proc;
+  nextId;
+  pending;
+  buffer;
+  constructor() {
+    this.proc = null;
+    this.nextId = 1;
+    this.pending = /* @__PURE__ */ new Map();
+    this.buffer = "";
+  }
+  ensure() {
+    if (this.proc && !this.proc.killed) return;
+    const daemon = import_node_path3.default.resolve(__dirname, "..", "cadre-lsp-daemon.js");
+    this.proc = (0, import_node_child_process3.spawn)(process.execPath, [daemon], {
+      cwd: import_node_path3.default.resolve(__dirname, "..", ".."),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    this.proc.stdout.on("data", (chunk) => this.read(chunk));
+    this.proc.stderr.on("data", () => {
+    });
+    this.proc.on("exit", () => {
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("LSP daemon exited"));
+      }
+      this.pending.clear();
+      this.proc = null;
+    });
+  }
+  read(chunk) {
+    this.buffer += chunk.toString("utf8");
+    let idx;
+    while ((idx = this.buffer.indexOf("\n")) >= 0) {
+      const line = this.buffer.slice(0, idx).trim();
+      this.buffer = this.buffer.slice(idx + 1);
+      if (!line) continue;
+      let message;
+      try {
+        message = asJsonObject(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      const id = typeof message.id === "number" ? message.id : null;
+      if (id == null || !this.pending.has(id)) continue;
+      const pending = this.pending.get(id);
+      if (!pending) continue;
+      this.pending.delete(id);
+      clearTimeout(pending.timer);
+      const messageError = asJsonObject(message.error);
+      if (Object.keys(messageError).length > 0) pending.reject(new Error(asOptionalString(messageError.message) || "LSP daemon error"));
+      else pending.resolve(message.result);
+    }
+  }
+  request(method, params = {}, timeoutMs = 6e4) {
+    this.ensure();
+    const id = this.nextId++;
+    const payload = JSON.stringify({ id, method, params });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`LSP daemon ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      if (!this.proc) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(new Error("LSP daemon process is not running"));
+        return;
+      }
+      this.proc.stdin.write(`${payload}
+`);
+    });
+  }
+  async shutdown() {
+    if (!this.proc) return { ok: true, stopped: 0, skipped: true };
+    return this.request("shutdown", {}, 5e3);
+  }
+};
+
+// src/mcp/resources.ts
+var import_node_path5 = __toESM(require("node:path"));
+
+// src/mcp/root-resolution.ts
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
+var import_node_url = require("node:url");
+function isDirectory(file) {
+  try {
+    return import_node_fs3.default.statSync(file).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function hasCadreDirectory(dir) {
+  return isDirectory(import_node_path4.default.join(dir, "cadre"));
+}
+function isCadreStateDirectory(dir) {
+  return [
+    "tracks.md",
+    "setup_state.json",
+    "product.md",
+    "tech-stack.json",
+    "workflow.md",
+    "beads.json",
+    "config.json",
+    "repos.json"
+  ].some((name) => import_node_fs3.default.existsSync(import_node_path4.default.join(dir, name))) || isDirectory(import_node_path4.default.join(dir, "tracks"));
+}
+function hasCadreProjectState(dir) {
+  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path4.default.join(dir, "cadre"));
+}
+function normalizePathCandidate(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  let candidate = value.trim();
+  if (candidate.startsWith("file://")) {
+    try {
+      candidate = (0, import_node_url.fileURLToPath)(candidate);
+    } catch {
+      return null;
+    }
+  }
+  candidate = import_node_path4.default.resolve(candidate);
+  try {
+    if (import_node_fs3.default.existsSync(candidate) && !import_node_fs3.default.statSync(candidate).isDirectory()) candidate = import_node_path4.default.dirname(candidate);
+  } catch {
+    return null;
+  }
+  return candidate;
+}
+function findCadreRoot(start) {
+  let dir = normalizePathCandidate(start);
+  if (!dir) return null;
+  while (true) {
+    if (hasCadreProjectState(dir)) return dir;
+    if (import_node_path4.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path4.default.dirname(dir);
+    const parent = import_node_path4.default.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+function rootFromCandidate(candidate) {
+  const normalized = normalizePathCandidate(candidate);
+  if (!normalized) return null;
+  const cadreRoot = findCadreRoot(normalized);
+  if (cadreRoot) return { root: cadreRoot, has_cadre: true };
+  return { root: normalized, has_cadre: false };
+}
+function requireCadreRoot(args = {}) {
+  const info = rootFromCandidate(args.root);
+  if (info && info.has_cadre) return info.root;
+  throw Object.assign(
+    new Error(
+      `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`
+    ),
+    { code: -32602 }
+  );
+}
+
+// src/mcp/resources.ts
+function resourceList() {
+  return {
+    resources: [
+      { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project.", mimeType: "application/json" },
+      { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
+      { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://lsp-status", name: "Cadre LSP status", description: "Configured LSP servers plus setup recommendations. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://repo-topology", name: "Cadre repo topology", description: "Mono/polyrepo topology. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://provider-actions", name: "Cadre provider actions", description: "Provider action queue from ship/land packets. Read with ?root=/path&trackId=<id>&workflow=ship|land.", mimeType: "application/json" },
+      { uri: "cadre://ship-plan", name: "Cadre ship plan", description: "Ship workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://land-plan", name: "Cadre land plan", description: "Land workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://release-plan", name: "Cadre release plan", description: "Release workflow dry-run plan. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://my-next-actions", name: "Cadre next actions", description: "Mine/available/action queue. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://review-queue", name: "Cadre review queue", description: "Bounded tracks needing review/ship attention. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://handoff-inbox", name: "Cadre handoff inbox", description: "Incoming handoffs from team board and Beads. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://parallel-state", name: "Cadre parallel state", description: "Track parallel worker state. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://quality-gate", name: "Cadre quality gate", description: "Review and integrity gate summary. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b.", mimeType: "application/json" },
+      { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
+      { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>.", mimeType: "application/json" }
+    ]
+  };
+}
+function resourceTemplatesList() {
+  const listed = resourceList();
+  const resources = Array.isArray(listed.resources) ? listed.resources : [];
+  const templates = resources.map((resource) => {
+    const uri = asString(asJsonObject(resource).uri);
+    const required = uri.includes("track") || uri.includes("quality") || uri.includes("parallel") || uri.includes("review-evidence") ? ["root", "trackId"] : uri.includes("job-result") ? ["root", "jobId"] : ["root"];
+    return {
+      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,jobId}`,
+      name: asJsonObject(resource).name,
+      description: asJsonObject(resource).description,
+      mimeType: "application/json",
+      required
+    };
+  });
+  return { resourceTemplates: templates };
+}
+function parseResourceUri(uri) {
+  const [rawBase, query = ""] = uri.split("?");
+  const base = rawBase || "";
+  const params = new URLSearchParams(query);
+  return {
+    base,
+    root: params.get("root"),
+    trackId: params.get("trackId"),
+    symbol: params.get("symbol"),
+    workflow: params.get("workflow"),
+    jobId: params.get("jobId"),
+    files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean)
+  };
+}
+function resourceRead(uri, jobs2) {
+  const resource = parseResourceUri(uri);
+  const root = requireCadreRoot(resource.root ? { root: resource.root } : {});
+  let value;
+  if (resource.base === "cadre://team-board") value = teamBoard(root);
+  else if (resource.base === "cadre://fleet-board") value = fleetStatus(root);
+  else if (resource.base === "cadre://beads-summary") value = beadsSummary(root);
+  else if (resource.base === "cadre://track-context") value = trackContext(root, resource.trackId);
+  else if (resource.base === "cadre://review-evidence") value = reviewEvidence(root, resource.trackId);
+  else if (resource.base === "cadre://collisions") value = collisionScan(root);
+  else if (resource.base === "cadre://repo-map") value = repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
+  else if (resource.base === "cadre://workspace-diagnostics") value = workspaceDiagnostics(root);
+  else if (resource.base === "cadre://lsp-status") value = { ok: true, status: lspConfigStatus(root), setup: lspSetup(root, { execute: false }) };
+  else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: loadTopology(root) };
+  else if (resource.base === "cadre://ship-plan") value = workflowPacket(root, { workflow: "ship", trackId: resource.trackId || void 0 });
+  else if (resource.base === "cadre://land-plan") value = workflowPacket(root, { workflow: "land", trackId: resource.trackId || void 0 });
+  else if (resource.base === "cadre://release-plan") value = workflowPacket(root, { workflow: "release" });
+  else if (resource.base === "cadre://my-next-actions") {
+    const mine = teamBoard(root, { mine: true });
+    const available = availableWork(root);
+    value = {
+      ok: mine.ok !== false && available.ok !== false,
+      mine: {
+        wip: Array.isArray(mine.wip) ? mine.wip : [],
+        incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
+        review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : []
+      },
+      available: Array.isArray(available.available) ? available.available : [],
+      reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : []
+    };
+  } else if (resource.base === "cadre://review-queue") {
+    const board = teamBoard(root);
+    value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
+  } else if (resource.base === "cadre://handoff-inbox") {
+    const board = teamBoard(root, { mine: true });
+    value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
+  } else if (resource.base === "cadre://parallel-state") value = parallelWorkflow(root, { action: "plan", trackId: resource.trackId || void 0 });
+  else if (resource.base === "cadre://quality-gate") {
+    if (!resource.trackId) value = { ok: false, error: "trackId is required" };
+    else value = {
+      ok: true,
+      track_id: resource.trackId,
+      integrity: planIntegrity(root, resource.trackId),
+      review_gate: reviewGate(root, resource.trackId, {}),
+      collisions: collisionScan(root)
+    };
+  } else if (resource.base === "cadre://test-impact") value = testImpact(root, { files: resource.files });
+  else if (resource.base === "cadre://track-plan") {
+    const context = trackContext(root, resource.trackId);
+    const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
+    value = context.ok === false || !planPath ? context : parsePlanFile(import_node_path5.default.resolve(root, planPath));
+  } else if (resource.base === "cadre://job-result") {
+    const persisted = jobs2.loadPersisted(root, resource.jobId);
+    value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
+  } else if (resource.base === "cadre://provider-actions") {
+    const workflow = resource.workflow === "land" ? "land" : "ship";
+    const plan = asJsonObject(workflowPacket(root, { workflow, trackId: resource.trackId || void 0 }));
+    value = {
+      ok: plan.ok !== false,
+      workflow,
+      track_id: resource.trackId,
+      phase_state: plan.phase_state,
+      provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
+      required_provider_mcp: plan.required_provider_mcp || null,
+      required_evidence: plan.required_evidence || null,
+      continuation_token: plan.continuation_token || null
+    };
+  } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
+  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
+}
+
+// src/mcp/tool-catalog.ts
+var PROTOCOL_VERSION = "2025-11-25";
+var packetSchema = (description, actionEnum = null) => ({
+  name: description.name,
+  description: description.text,
+  inputSchema: {
+    type: "object",
+    properties: {
+      root: { type: "string" },
+      action: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
+      workflow: actionEnum ? { type: "string", enum: actionEnum } : { type: "string" },
+      execute: { type: "boolean" },
+      async: { type: "boolean" },
+      trackId: { type: "string" },
+      track_id: { type: "string" },
+      phaseIndex: { type: "number" },
+      taskIndex: { type: "number" },
+      planPath: { type: "string" },
+      status: { type: "string" },
+      patch: { type: "object" },
+      identity: { type: "string" },
+      takeover: { type: "boolean" },
+      base: { type: "string" },
+      head: { type: "string" },
+      config: { type: "string" },
+      operation: { type: "string" },
+      id: { type: "string" },
+      command: { type: "string" },
+      machineCommand: { type: "string" },
+      timeoutMs: { type: "number" },
+      provider: { type: "string" },
+      providerMode: { type: "string", enum: ["local", "github", "gitlab"] },
+      provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },
+      providerMcpAvailable: { type: "boolean" },
+      provider_mcp_available: { type: "boolean" },
+      githubMcpAvailable: { type: "boolean" },
+      gitlabMcpAvailable: { type: "boolean" },
+      providerEvidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+      provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+      remoteHost: { type: "string" },
+      remote_host: { type: "string" },
+      responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
+      response_mode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
+      detail: { type: "boolean" },
+      compact: { type: "boolean" },
+      symbol: { type: "string" },
+      symbols: { type: "array", items: { type: "string" } },
+      files: { type: "array", items: { type: "string" } },
+      repo: { type: "string" },
+      repos: { type: "array", items: { type: "string" } },
+      workerId: { type: "string" },
+      worker_id: { type: "string" },
+      commitSha: { type: "string" },
+      force: { type: "boolean" },
+      allowNoCommit: { type: "boolean" },
+      styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
+      styleGuideMaxChars: { type: "number" },
+      techStack: { type: "object" },
+      args: { type: "object" },
+      type: { type: "string" },
+      jobId: { type: "string" },
+      view: { type: "string" },
+      description: { type: "string" },
+      handoffText: { type: "string" },
+      bump: { type: "string" },
+      includeProvider: { type: "boolean" }
+    },
+    additionalProperties: true
+  }
+});
+var TOOLS = [
+  packetSchema(
+    {
+      name: "cadre_workflow",
+      text: "Packet-only Cadre workflow coordinator for setup, new track, implementation, status, review, validation, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows."
+    },
+    [
+      "setup",
+      "setup_assist",
+      "setup_scaffold",
+      "newtrack",
+      "new_track",
+      "implement",
+      "status",
+      "review",
+      "validate",
+      "archive",
+      "handoff",
+      "ship",
+      "land",
+      "release",
+      "revise",
+      "refresh",
+      "flag",
+      "revert",
+      "formula"
+    ]
+  ),
+  packetSchema(
+    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight." },
+    ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"]
+  ),
+  packetSchema(
+    { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
+    ["live", "team", "mine", "available", "collisions", "board", "fleet", "beads_summary"]
+  ),
+  packetSchema(
+    { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
+    ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"]
+  ),
+  packetSchema(
+    { name: "cadre_parallel", text: "Cadre parallel packet: plan worker waves, dry-run worker setup, record finishes, merge back, and cleanup." },
+    ["plan", "next_wave", "setup_workers", "record_finish", "merge_back", "cleanup"]
+  ),
+  packetSchema(
+    { name: "cadre_mutate", text: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes." },
+    ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"]
+  ),
+  packetSchema(
+    { name: "cadre_complete_task", text: "Journaled task completion: coverage gate, locked plan/metadata writes, and idempotent Beads note/close." },
+    null
+  ),
+  packetSchema(
+    { name: "cadre_beads", text: "CLI-backed Beads packet for ready/list/show/update/note/close/labels/deps/create/mail/formula/compact/dolt/sql/worktree." },
+    null
+  ),
+  packetSchema(
+    { name: "cadre_job", text: "Cadre job packet: start, status, result, cancel, and list process-local long-running jobs." },
+    ["start", "status", "result", "cancel", "list"]
+  ),
+  packetSchema(
+    { name: "cadre_review", text: "Cadre review packet: review assist, machine gate, review gate, and PR/CI status." },
+    ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"]
+  ),
+  packetSchema(
+    { name: "cadre_intel", text: "Cadre code intelligence packet: repo map, LSP impact, warm/cold LSP review, daemon status, and daemon shutdown." },
+    ["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph"]
+  )
+];
+
+// src/mcp/server-runtime.ts
 var lspDaemon = new LspDaemonClient();
 var jobs = new JobManager();
 function jobTypeForPacket(name, args) {
@@ -6268,7 +6424,7 @@ function trackPacket(args) {
   if (action === "context") return envelope(trackContext(root, args.trackId || args.track_id));
   if (action === "parse_plan") {
     if (!args.planPath) return envelope({ ok: false, error: "planPath is required" });
-    return envelope(parsePlanFile(import_node_path2.default.resolve(root, args.planPath)));
+    return envelope(parsePlanFile(import_node_path6.default.resolve(root, args.planPath)));
   }
   if (action === "integrity") return envelope(planIntegrity(root, args.trackId || args.track_id || null));
   if (action === "phase_schedule") return envelope(phaseSchedule(root, args));
@@ -6411,134 +6567,6 @@ async function toolCall(name, args = {}) {
   if (name === "cadre_intel") return asTextJson(await intelPacket(args));
   throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
 }
-function resourceList() {
-  return {
-    resources: [
-      { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project.", mimeType: "application/json" },
-      { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
-      { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://lsp-status", name: "Cadre LSP status", description: "Configured LSP servers plus setup recommendations. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://repo-topology", name: "Cadre repo topology", description: "Mono/polyrepo topology. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://provider-actions", name: "Cadre provider actions", description: "Provider action queue from ship/land packets. Read with ?root=/path&trackId=<id>&workflow=ship|land.", mimeType: "application/json" },
-      { uri: "cadre://ship-plan", name: "Cadre ship plan", description: "Ship workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://land-plan", name: "Cadre land plan", description: "Land workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://release-plan", name: "Cadre release plan", description: "Release workflow dry-run plan. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://my-next-actions", name: "Cadre next actions", description: "Mine/available/action queue. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://review-queue", name: "Cadre review queue", description: "Bounded tracks needing review/ship attention. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://handoff-inbox", name: "Cadre handoff inbox", description: "Incoming handoffs from team board and Beads. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://parallel-state", name: "Cadre parallel state", description: "Track parallel worker state. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://quality-gate", name: "Cadre quality gate", description: "Review and integrity gate summary. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b.", mimeType: "application/json" },
-      { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>.", mimeType: "application/json" }
-    ]
-  };
-}
-function resourceTemplatesList() {
-  const listed = resourceList();
-  const resources = Array.isArray(listed.resources) ? listed.resources : [];
-  const templates = resources.map((resource) => {
-    const uri = asString(asJsonObject(resource).uri);
-    const required = uri.includes("track") || uri.includes("quality") || uri.includes("parallel") || uri.includes("review-evidence") ? ["root", "trackId"] : uri.includes("job-result") ? ["root", "jobId"] : ["root"];
-    return {
-      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,jobId}`,
-      name: asJsonObject(resource).name,
-      description: asJsonObject(resource).description,
-      mimeType: "application/json",
-      required
-    };
-  });
-  return { resourceTemplates: templates };
-}
-function parseResourceUri(uri) {
-  const [rawBase, query = ""] = uri.split("?");
-  const base = rawBase || "";
-  const params = new URLSearchParams(query);
-  return {
-    base,
-    root: params.get("root"),
-    trackId: params.get("trackId"),
-    symbol: params.get("symbol"),
-    workflow: params.get("workflow"),
-    jobId: params.get("jobId"),
-    files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean)
-  };
-}
-function resourceRead(uri) {
-  const resource = parseResourceUri(uri);
-  const root = requireCadreRoot(resource.root ? { root: resource.root } : {});
-  let value;
-  if (resource.base === "cadre://team-board") value = teamBoard(root);
-  else if (resource.base === "cadre://fleet-board") value = fleetStatus(root);
-  else if (resource.base === "cadre://beads-summary") value = beadsSummary(root);
-  else if (resource.base === "cadre://track-context") value = trackContext(root, resource.trackId);
-  else if (resource.base === "cadre://review-evidence") value = reviewEvidence(root, resource.trackId);
-  else if (resource.base === "cadre://collisions") value = collisionScan(root);
-  else if (resource.base === "cadre://repo-map") value = repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
-  else if (resource.base === "cadre://workspace-diagnostics") value = workspaceDiagnostics(root);
-  else if (resource.base === "cadre://lsp-status") value = { ok: true, status: lspConfigStatus(root), setup: lspSetup(root, { execute: false }) };
-  else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: loadTopology(root) };
-  else if (resource.base === "cadre://ship-plan") value = workflowPacket(root, { workflow: "ship", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://land-plan") value = workflowPacket(root, { workflow: "land", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://release-plan") value = workflowPacket(root, { workflow: "release" });
-  else if (resource.base === "cadre://my-next-actions") {
-    const mine = teamBoard(root, { mine: true });
-    const available = availableWork(root);
-    value = {
-      ok: mine.ok !== false && available.ok !== false,
-      mine: {
-        wip: Array.isArray(mine.wip) ? mine.wip : [],
-        incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
-        review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : []
-      },
-      available: Array.isArray(available.available) ? available.available : [],
-      reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : []
-    };
-  } else if (resource.base === "cadre://review-queue") {
-    const board = teamBoard(root);
-    value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
-  } else if (resource.base === "cadre://handoff-inbox") {
-    const board = teamBoard(root, { mine: true });
-    value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
-  } else if (resource.base === "cadre://parallel-state") value = parallelWorkflow(root, { action: "plan", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://quality-gate") {
-    if (!resource.trackId) value = { ok: false, error: "trackId is required" };
-    else value = {
-      ok: true,
-      track_id: resource.trackId,
-      integrity: planIntegrity(root, resource.trackId),
-      review_gate: reviewGate(root, resource.trackId, {}),
-      collisions: collisionScan(root)
-    };
-  } else if (resource.base === "cadre://test-impact") value = testImpact(root, { files: resource.files });
-  else if (resource.base === "cadre://track-plan") {
-    const context = trackContext(root, resource.trackId);
-    const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
-    value = context.ok === false || !planPath ? context : parsePlanFile(import_node_path2.default.resolve(root, planPath));
-  } else if (resource.base === "cadre://job-result") {
-    const persisted = jobs.loadPersisted(root, resource.jobId);
-    value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
-  } else if (resource.base === "cadre://provider-actions") {
-    const workflow = resource.workflow === "land" ? "land" : "ship";
-    const plan = asJsonObject(workflowPacket(root, { workflow, trackId: resource.trackId || void 0 }));
-    value = {
-      ok: plan.ok !== false,
-      workflow,
-      track_id: resource.trackId,
-      phase_state: plan.phase_state,
-      provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
-      required_provider_mcp: plan.required_provider_mcp || null,
-      required_evidence: plan.required_evidence || null,
-      continuation_token: plan.continuation_token || null
-    };
-  } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
-  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
-}
 async function handle(message) {
   const method = message.method;
   const params = asJsonObject(message.params);
@@ -6562,10 +6590,12 @@ async function handle(message) {
   if (method === "resources/read") {
     const uri = asOptionalString(params.uri);
     if (!uri) throw Object.assign(new Error("resources/read requires params.uri"), { code: -32602 });
-    return resourceRead(uri);
+    return resourceRead(uri, jobs);
   }
   throw Object.assign(new Error(`Method not found: ${method}`), { code: -32601 });
 }
+
+// src/mcp/stdio-transport.ts
 function send(payload) {
   const body = JSON.stringify(payload);
   process.stdout.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
@@ -6585,34 +6615,39 @@ function respondError(message, error) {
     error: { code: numericCode, message: errorMessage(error) }
   });
 }
-var buffer = Buffer.alloc(0);
-process.stdin.on("data", (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  while (true) {
-    const headerEnd = buffer.indexOf("\r\n\r\n");
-    if (headerEnd === -1) return;
-    const header = buffer.slice(0, headerEnd).toString("utf8");
-    const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
-    if (!lengthMatch) {
-      buffer = buffer.slice(headerEnd + 4);
-      continue;
+function startStdioTransport(handle2) {
+  let buffer = Buffer.alloc(0);
+  process.stdin.on("data", (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (true) {
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) return;
+      const header = buffer.slice(0, headerEnd).toString("utf8");
+      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
+      if (!lengthMatch) {
+        buffer = buffer.slice(headerEnd + 4);
+        continue;
+      }
+      const length = Number(lengthMatch[1]);
+      const bodyStart = headerEnd + 4;
+      const bodyEnd = bodyStart + length;
+      if (buffer.length < bodyEnd) return;
+      const raw = buffer.slice(bodyStart, bodyEnd).toString("utf8");
+      buffer = buffer.slice(bodyEnd);
+      let message = null;
+      try {
+        message = asJsonObject(JSON.parse(raw));
+        const currentMessage = message;
+        Promise.resolve(handle2(currentMessage)).then((result) => {
+          if (result !== void 0) respond(currentMessage, result);
+        }).catch((error) => respondError(currentMessage, error));
+      } catch (error) {
+        respondError(message || { id: null }, error);
+      }
     }
-    const length = Number(lengthMatch[1]);
-    const bodyStart = headerEnd + 4;
-    const bodyEnd = bodyStart + length;
-    if (buffer.length < bodyEnd) return;
-    const raw = buffer.slice(bodyStart, bodyEnd).toString("utf8");
-    buffer = buffer.slice(bodyEnd);
-    let message = null;
-    try {
-      message = asJsonObject(JSON.parse(raw));
-      const currentMessage = message;
-      Promise.resolve(handle(currentMessage)).then((result) => {
-        if (result !== void 0) respond(currentMessage, result);
-      }).catch((error) => respondError(currentMessage, error));
-    } catch (error) {
-      respondError(message || { id: null }, error);
-    }
-  }
-});
-process.stdin.resume();
+  });
+  process.stdin.resume();
+}
+
+// src/mcp/cadre-server.ts
+startStdioTransport(handle);
