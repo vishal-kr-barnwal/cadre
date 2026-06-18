@@ -103,7 +103,7 @@ const TOOLS = [
   ),
   packetSchema(
     { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
-    ["live", "team", "mine", "available", "collisions", "board"]
+    ["live", "team", "mine", "available", "collisions", "board", "fleet", "beads_summary"]
   ),
   packetSchema(
     { name: "cadre_track", text: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, and Beads tree creation." },
@@ -478,6 +478,8 @@ function statusPacket(args: RuntimeArgs): RuntimeEnvelope {
   if (action === "available") return envelope(core.availableWork(root));
   if (action === "collisions") return envelope(core.collisionScan(root));
   if (action === "board") return envelope(core.teamBoard(root, args));
+  if (action === "fleet") return envelope(core.fleetStatus(root, args));
+  if (action === "beads_summary") return envelope(core.beadsSummary(root));
   return envelope({ ok: false, error: `Unknown cadre_status action: ${action}` });
 }
 
@@ -625,6 +627,8 @@ function resourceList(): JsonObject {
   return {
     resources: [
       { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project.", mimeType: "application/json" },
+      { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path.", mimeType: "application/json" },
+      { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
       { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
       { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
@@ -644,6 +648,8 @@ function resourceRead(uri: string): JsonObject {
   const root = requireCadreRoot(resource.root ? { root: resource.root } : {});
   let value: unknown;
   if (resource.base === "cadre://team-board") value = core.teamBoard(root);
+  else if (resource.base === "cadre://fleet-board") value = core.fleetStatus(root);
+  else if (resource.base === "cadre://beads-summary") value = core.beadsSummary(root);
   else if (resource.base === "cadre://track-context") value = core.trackContext(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = core.collisionScan(root);
   else if (resource.base === "cadre://repo-map") value = core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});

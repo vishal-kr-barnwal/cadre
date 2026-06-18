@@ -36,12 +36,14 @@ __export(cadre_core_exports, {
   STATUS_MARKERS: () => STATUS_MARKERS,
   acquireLock: () => acquireLock,
   availableWork: () => availableWork,
+  beadsSummary: () => beadsSummary,
   beadsTaskWrite: () => beadsTaskWrite,
   claimTrack: () => claimTrack,
   collisionScan: () => collisionScan,
   completeTask: () => completeTask,
   createBeadsTree: () => createBeadsTree,
   doctor: () => doctor,
+  fleetStatus: () => fleetStatus,
   gitIdentity: () => gitIdentity,
   heartbeatTrack: () => heartbeatTrack,
   implementationPrep: () => implementationPrep,
@@ -1244,6 +1246,90 @@ function teamBoard(root, args = {}) {
     review_queue: Array.from(dedupReview.values()),
     blockers,
     beads
+  };
+}
+function gitSummary(root) {
+  if (!fileExists(root)) return { ok: false, exists: false };
+  const branch = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root });
+  const head = runCommand("git", ["rev-parse", "--short", "HEAD"], { cwd: root });
+  const status = runCommand("git", ["status", "--porcelain"], { cwd: root });
+  return {
+    ok: branch.ok || head.ok || status.ok,
+    exists: true,
+    branch: branch.ok ? branch.stdout.trim() : null,
+    head: head.ok ? head.stdout.trim() : null,
+    dirty_files: status.ok ? status.stdout.split(/\r?\n/).filter(Boolean).length : null,
+    errors: [branch.stderr, head.stderr, status.stderr].filter(Boolean).join("\n").trim()
+  };
+}
+function fleetStatus(root, args = {}) {
+  const topology = loadTopology(root);
+  const repos = [{
+    name: ".",
+    role: "control",
+    path: ".",
+    root,
+    ...gitSummary(root)
+  }];
+  if (topology.polyrepo) {
+    for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
+      const repo = asJsonObject(raw);
+      const name = asOptionalString(repo.name) || asOptionalString(repo.submodule_path) || "unknown";
+      const rel = asOptionalString(repo.submodule_path) || "";
+      const repoRoot = rel ? import_node_path.default.resolve(root, rel) : root;
+      repos.push({
+        name,
+        role: "product",
+        path: rel,
+        root: repoRoot,
+        enabled: repo.enabled !== false,
+        ...gitSummary(repoRoot)
+      });
+    }
+  }
+  return {
+    ok: true,
+    root,
+    topology: topology.polyrepo ? "polyrepo" : "monorepo",
+    repos,
+    providers: {
+      gh: commandExists("gh", root),
+      glab: commandExists("glab", root)
+    },
+    beads_available: commandExists("bd", root),
+    collisions: args.includeCollisions === false ? null : collisionScan(root)
+  };
+}
+function beadsSummary(root) {
+  const available = commandExists("bd", root);
+  if (!available) {
+    return {
+      ok: true,
+      available: false,
+      root,
+      reason: "Beads CLI (bd) is not installed or not on PATH",
+      ready: null,
+      in_progress: null,
+      blocked: null,
+      review: null
+    };
+  }
+  const ready = runBdJson(root, ["ready", "--json"]);
+  const inProgress = runBdJson(root, ["list", "--status", "in_progress", "--json"]);
+  const blocked = runBdJson(root, ["list", "--status", "blocked", "--json"]);
+  const review = {
+    requested: runBdJson(root, ["list", "--label", "review:requested", "--json"]),
+    ready: runBdJson(root, ["list", "--label", "review:ready", "--json"]),
+    changes: runBdJson(root, ["list", "--label", "review:changes", "--json"])
+  };
+  return {
+    ok: true,
+    available: true,
+    root,
+    ready,
+    in_progress: inProgress,
+    blocked,
+    review
   };
 }
 function availableWork(root) {
@@ -3757,12 +3843,14 @@ ${body}${body ? "\n" : ""}${end}
   STATUS_MARKERS,
   acquireLock,
   availableWork,
+  beadsSummary,
   beadsTaskWrite,
   claimTrack,
   collisionScan,
   completeTask,
   createBeadsTree,
   doctor,
+  fleetStatus,
   gitIdentity,
   heartbeatTrack,
   implementationPrep,

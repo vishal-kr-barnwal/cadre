@@ -647,6 +647,37 @@ test("teamBoard returns WIP, review queue, and blockers without Beads", () => {
   }
 });
 
+test("fleetStatus and beadsSummary degrade cleanly", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-fleet-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "app",
+      repos: [
+        { name: "app", submodule_path: "repos/app" },
+        { name: "missing", submodule_path: "repos/missing" },
+      ],
+    }, null, 2));
+    fs.mkdirSync(path.join(root, "repos", "app"), { recursive: true });
+    git(path.join(root, "repos", "app"), ["init"]);
+
+    const fleet = core.fleetStatus(root);
+    assert.equal(fleet.ok, true);
+    assert.equal(fleet.topology, "polyrepo");
+    assert.ok(fleet.repos.some((repo) => repo.name === "." && repo.role === "control"));
+    assert.ok(fleet.repos.some((repo) => repo.name === "missing" && repo.exists === false));
+    assert.equal(typeof fleet.providers.gh, "boolean");
+
+    const beads = core.beadsSummary(root);
+    assert.equal(beads.ok, true);
+    assert.equal(typeof beads.available, "boolean");
+    assert.ok(Object.prototype.hasOwnProperty.call(beads, "ready"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("reviewAssist and lspImpact provide fallback review context", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-review-assist-test-"));
   try {
