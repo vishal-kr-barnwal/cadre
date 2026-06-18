@@ -88,6 +88,31 @@ esac
   return bin;
 }
 
+function installTrackCreationFakeBd(root) {
+  const bin = path.join(root, "bin");
+  const bd = path.join(bin, "bd");
+  write(bd, `#!/bin/sh
+printf '%s\n' "$*" >> "$PWD/bd.log"
+case "$1" in
+  show)
+    exit 1
+    ;;
+  create)
+    title="$(printf '%s' "$2" | tr -c 'A-Za-z0-9' '_' | cut -c1-24)"
+    printf '{"id":"bd-%s"}\n' "$title"
+    ;;
+  note|dep)
+    printf '{"ok":true}\n'
+    ;;
+  *)
+    printf '{"ok":true}\n'
+    ;;
+esac
+`);
+  fs.chmodSync(bd, 0o755);
+  return bin;
+}
+
 test("repoMap filters generated bundles and local variable noise", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-core-test-"));
   try {
@@ -678,6 +703,155 @@ test("fleetStatus and beadsSummary degrade cleanly", () => {
   }
 });
 
+test("workflow setup writes detected and requested style guides from templates", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
+    write(path.join(root, "tsconfig.json"), "{}\n");
+    write(path.join(root, "src", "app.ts"), "export const app = true;\n");
+    write(path.join(root, "src", "app.css"), ".app { color: black; }\n");
+
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: {
+        languages: ["TypeScript"],
+        frameworks: ["React"],
+        platforms: ["web"],
+        styleGuideIds: ["html-css"],
+      },
+      styleGuideIds: ["python"],
+    });
+
+    assert.equal(setup.ok, true);
+    assert.equal(setup.styleGuides.source, "tech-stack.json");
+    assert.ok(setup.styleGuides.detected.includes("typescript"));
+    assert.ok(setup.styleGuides.detected.includes("html-css"));
+    assert.ok(setup.styleGuides.selected.includes("general"));
+    assert.ok(setup.styleGuides.selected.includes("python"));
+    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
+    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
+    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/python.md"));
+    assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /# Codebase Patterns/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.md")), false);
+    const techStack = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"));
+    assert.deepEqual(techStack.languages, ["TypeScript"]);
+    assert.match(setup.techStackSummary.summary, /languages: TypeScript/);
+    const beads = JSON.parse(fs.readFileSync(path.join(root, "cadre", "beads.json"), "utf8"));
+    assert.equal(beads.mode, "normal");
+    assert.equal(beads.packet_only, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup rejects unknown explicit style guide ids", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-missing-test-"));
+  try {
+    git(root, ["init"]);
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+      styleGuideIds: "typescript not-a-guide",
+    });
+
+    assert.equal(setup.ok, false);
+    assert.deepEqual(setup.styleGuides.missing, ["not-a-guide"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("implementationPrep returns packet-selected style guides", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-implement-style-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
+    write(path.join(root, "tsconfig.json"), "{}\n");
+    write(path.join(root, "src", "app.ts"), "export const app = true;\n");
+    write(path.join(root, "src", "app.css"), ".app { color: black; }\n");
+    write(path.join(root, "src", "worker.py"), "print('not in tech stack')\n");
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: {
+        languages: ["TypeScript"],
+        frameworks: ["React"],
+        platforms: ["web"],
+        styleGuideIds: ["html-css"],
+      },
+    });
+    assert.equal(setup.ok, true);
+    writeTrack(root, "style_20260618", `# Plan: style_20260618
+
+## Phase 1: Build
+
+- [ ] Task 1: Update app
+  <!-- files: src/app.ts, src/app.css -->
+`);
+
+    const prep = core.implementationPrep(root, {
+      trackId: "style_20260618",
+      identity: "dev@example.com",
+      styleGuideMaxChars: 1200,
+    });
+
+    assert.equal(prep.ok, true);
+    assert.equal(prep.styleGuides.available, true);
+    assert.ok(prep.styleGuides.selected.includes("general"));
+    assert.ok(prep.styleGuides.selected.includes("typescript"));
+    assert.ok(prep.styleGuides.selected.includes("html-css"));
+    assert.equal(prep.styleGuides.selected.includes("python"), false);
+    assert.ok(prep.styleGuides.tech_stack_ids.includes("typescript"));
+    assert.ok(prep.styleGuides.tech_stack_ids.includes("html-css"));
+    assert.ok(prep.styleGuides.task_file_ids.includes("typescript"));
+    const typeGuide = prep.styleGuides.guides.find((guide) => guide.id === "typescript");
+    assert.ok(typeGuide);
+    assert.equal(typeGuide.path, "cadre/code_styleguides/typescript.md");
+    assert.ok(typeGuide.content.includes("TypeScript"));
+    assert.ok(typeGuide.content.length <= 1200);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack writes template-backed track learnings", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-template-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(setup.ok, true);
+
+    const created = core.workflowPacket(root, {
+      workflow: "newtrack",
+      execute: true,
+      trackId: "tmpl_20260618",
+      specText: "# Spec\n",
+      planText: samplePlan("tmpl_20260618"),
+    });
+
+    assert.equal(created.ok, true);
+    const learnings = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "learnings.md"), "utf8");
+    assert.match(learnings, /# Track Learnings: tmpl_20260618/);
+    assert.equal(learnings.includes("{{track_id}}"), false);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflowPacket exposes packet-only routes for primary workflows", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-test-"));
   const setupRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-setup-test-"));
@@ -694,7 +868,12 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       status: "completed",
     });
 
-    const setup = core.workflowPacket(setupRoot, { workflow: "setup", execute: true, productText: "# Product\n", techStackText: "# Stack\n" });
+    const setup = core.workflowPacket(setupRoot, {
+      workflow: "setup",
+      execute: true,
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    });
     assert.equal(setup.ok, true);
     assert.equal(setup.packet_only, true);
     assert.ok(setup.written.includes("cadre/setup_state.json"));

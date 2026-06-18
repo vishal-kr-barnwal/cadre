@@ -42,7 +42,9 @@ be a fixed tax on simple commands.
 
 **Minimal activation set** (read only when useful for the requested workflow):
 1. `cadre/product.md` - Product vision and goals
-2. `cadre/tech-stack.md` - Technology constraints
+2. `cadre/tech-stack.json` - Structured technology constraints. Use
+   `cadre_project` with `action: "tech_stack_summary"` when a human-readable
+   summary is needed.
 3. `cadre/workflow.md` - Development methodology (TDD, commits)
 
 **Load on demand** (only from workflows that use them):
@@ -97,7 +99,7 @@ optional `commands` and `job` fields.
 | MCP packet | Required use |
 |---------|--------------|
 | `cadre_workflow` | Packet-only workflow coordinator for setup, new track, implementation, status, review, validation, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows. Use it as the only entrypoint for workflow orchestration. |
-| `cadre_project` | `ping`, `doctor`, `root`, `topology`, `sync_control_plane`, and `polyrepo_preflight`. Use for setup/runtime checks and shared control-plane pre/post sync. |
+| `cadre_project` | `ping`, `doctor`, `root`, `topology`, `tech_stack_summary`, `sync_control_plane`, and `polyrepo_preflight`. Use for setup/runtime checks, human-readable tech stack summaries, and shared control-plane pre/post sync. |
 | `cadre_status` | `live`, `team`, `mine`, `available`, `collisions`, `board`, `fleet`, and `beads_summary`. Use for status, selection, ownership summaries, available work, file-overlap scans, fleet boards, and bounded Beads evidence. |
 | `cadre_track` | `context`, `parse_plan`, `integrity`, `phase_schedule`, `prepare_implementation`, `create_beads_tree`, `plan_assist`, and `worktree_plan`. Use for bounded per-track context, plan parsing, planning evidence, scheduling, dry-run worktree planning, and Beads tree initialization. |
 | `cadre_parallel` | `plan`, `next_wave`, `setup_workers`, `record_finish`, `merge_back`, and `cleanup`. Use for worker-wave orchestration and dry-run command plans; mutating actions require `execute:true`. |

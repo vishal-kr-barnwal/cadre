@@ -273,7 +273,7 @@ function isCadreProjectRoot(root) {
     "tracks.md",
     "setup_state.json",
     "product.md",
-    "tech-stack.md",
+    "tech-stack.json",
     "workflow.md",
     "beads.json",
     "config.json",
@@ -1345,41 +1345,290 @@ function workflowSummary(root, workflow, args = {}) {
     generated_at: utcNow()
   };
 }
-function templateText(relativePath, fallback) {
+function templatePath(relativePath) {
   const candidates = [
     import_node_path.default.join(__dirname, "..", "templates", relativePath),
     import_node_path.default.join(__dirname, "..", "..", "templates", relativePath),
     import_node_path.default.join(__dirname, "templates", relativePath)
   ];
   for (const candidate of candidates) {
-    if (fileExists(candidate)) return import_node_fs.default.readFileSync(candidate, "utf8");
+    if (fileExists(candidate)) return candidate;
   }
+  return null;
+}
+function templateText(relativePath, fallback) {
+  const found = templatePath(relativePath);
+  if (found) return import_node_fs.default.readFileSync(found, "utf8");
   return fallback;
 }
 function packetText(value, fallback) {
   const text = asOptionalString(value);
   return (text && text.trim() ? text : fallback).replace(/\n*$/, "\n");
 }
+function templateJson(relativePath, fallback) {
+  return readJson(templatePath(relativePath) || "", fallback);
+}
+function availableStyleGuideIds() {
+  const dir = templatePath("code_styleguides/general.md");
+  if (!dir) return [];
+  const styleDir = import_node_path.default.dirname(dir);
+  try {
+    return import_node_fs.default.readdirSync(styleDir).filter((file) => file.endsWith(".md")).map((file) => import_node_path.default.basename(file, ".md")).sort();
+  } catch {
+    return [];
+  }
+}
+function normalizeStyleGuideId(value) {
+  return value.trim().replace(/\\/g, "/").replace(/^.*code_styleguides\//, "").replace(/\.md$/i, "").toLowerCase();
+}
+function requestedStyleGuideIds(value) {
+  const raw = typeof value === "string" ? value.split(/[,\s]+/) : asStringArray(value);
+  return Array.from(new Set(raw.map(normalizeStyleGuideId).filter(Boolean))).sort();
+}
+function collectTechStackTokens(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectTechStackTokens);
+  if (!isRecord(value)) return [];
+  return Object.entries(value).flatMap(([key, entry]) => [key, ...collectTechStackTokens(entry)]);
+}
+function techStackStyleGuideOverrides(techStack) {
+  return requestedStyleGuideIds(
+    techStack.styleGuideIds || techStack.style_guides || techStack.codeStyleGuides || techStack.code_style_guides
+  );
+}
+function styleGuideIdsForTechStack(techStack) {
+  const tokens = collectTechStackTokens(techStack).map((item) => item.toLowerCase().replace(/[^a-z0-9+#.-]+/g, " ").trim()).filter(Boolean);
+  const tokenText = ` ${tokens.join(" ")} `;
+  const detected = /* @__PURE__ */ new Set();
+  const add = (id) => {
+    detected.add(id);
+  };
+  const has = (pattern) => pattern.test(tokenText);
+  if (has(/\b(?:typescript|tsx|ts)\b/)) add("typescript");
+  if (!detected.has("typescript") && has(/\b(?:javascript|node\.?js|js|jsx)\b/)) add("javascript");
+  if (has(/\b(?:html|css|scss|sass|less|tailwind|frontend|web)\b/)) add("html-css");
+  if (has(/\b(?:python|pytest|django|flask|fastapi)\b/)) add("python");
+  if (has(/\b(?:go|golang)\b/)) add("go");
+  if (has(/\b(?:rust|cargo)\b/)) add("rust");
+  if (has(/\b(?:dart|flutter)\b/)) {
+    add("dart");
+    if (has(/\bflutter\b/)) add("flutter");
+  }
+  if (has(/\b(?:kotlin|gradle|jvm)\b/)) add("kotlin");
+  if (has(/\b(?:android|jetpack compose)\b/)) add("android");
+  if (has(/\b(?:compose multiplatform|kotlin multiplatform|kmp)\b/)) {
+    add("compose-multiplatform");
+    add("kotlin");
+  }
+  if (has(/\b(?:swift|swiftui|ios|macos)\b/)) {
+    add("swift");
+    if (has(/\bswiftui\b/)) add("swiftui");
+  }
+  return Array.from(/* @__PURE__ */ new Set([...detected, ...techStackStyleGuideOverrides(techStack)])).sort();
+}
+function techStackFromArgs(args = {}) {
+  return isRecord(args.techStack) ? asJsonObject(args.techStack) : null;
+}
+function loadTechStack(root) {
+  return readJson(import_node_path.default.join(root, "cadre", "tech-stack.json"), null);
+}
+function techStackForPacket(root, args = {}) {
+  return techStackFromArgs(args) || loadTechStack(root);
+}
+function summarizeList(label, value) {
+  const values = collectTechStackTokens(value).filter((item) => item !== label).slice(0, 12);
+  return values.length > 0 ? `${label}: ${values.join(", ")}` : null;
+}
+function techStackSummary(root, args = {}) {
+  const techStack = techStackForPacket(root, args);
+  if (!techStack) {
+    return {
+      ok: false,
+      root,
+      path: import_node_path.default.relative(root, import_node_path.default.join(root, "cadre", "tech-stack.json")),
+      error: "Missing structured tech stack: cadre/tech-stack.json"
+    };
+  }
+  const lines = [
+    summarizeList("languages", techStack.languages),
+    summarizeList("frameworks", techStack.frameworks),
+    summarizeList("runtimes", techStack.runtimes),
+    summarizeList("platforms", techStack.platforms),
+    summarizeList("packageManagers", techStack.packageManagers || techStack.package_managers),
+    summarizeList("build", techStack.build),
+    summarizeList("test", techStack.test),
+    summarizeList("datastores", techStack.datastores),
+    summarizeList("services", techStack.services),
+    summarizeList("styleGuideIds", techStackStyleGuideOverrides(techStack))
+  ].filter((line) => Boolean(line));
+  return {
+    ok: true,
+    root,
+    path: import_node_path.default.relative(root, import_node_path.default.join(root, "cadre", "tech-stack.json")),
+    techStack,
+    styleGuideIds: styleGuideIdsForTechStack(techStack),
+    summary: lines.length > 0 ? lines.join("\n") : "No tech stack details recorded."
+  };
+}
+function setupStyleGuides(root, args = {}) {
+  const available = new Set(availableStyleGuideIds());
+  const techStack = techStackForPacket(root, args) || {};
+  const detected = styleGuideIdsForTechStack(techStack).filter((id) => available.has(id));
+  const requested = requestedStyleGuideIds(args.styleGuideIds);
+  const missing = requested.filter((id) => !available.has(id));
+  const selected = Array.from(/* @__PURE__ */ new Set([
+    ...available.has("general") ? ["general"] : [],
+    ...detected,
+    ...requested.filter((id) => available.has(id))
+  ])).sort();
+  return {
+    ok: missing.length === 0,
+    detected,
+    requested,
+    selected,
+    written: [],
+    skipped: [],
+    missing,
+    source: "tech-stack.json"
+  };
+}
+function trackLearningsText(trackId) {
+  return templateText("learnings.md", "# Track Learnings: {{track_id}}\n\n").replace(/\{\{track_id\}\}/g, trackId).replace(/\n*$/, "\n");
+}
+function installedStyleGuideIds(root) {
+  const dir = import_node_path.default.join(root, "cadre", "code_styleguides");
+  if (!fileExists(dir)) return [];
+  try {
+    return import_node_fs.default.readdirSync(dir).filter((file) => file.endsWith(".md")).map((file) => import_node_path.default.basename(file, ".md")).sort();
+  } catch {
+    return [];
+  }
+}
+function styleGuideIdsForFiles(files) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const rawFile of files) {
+    const file = normalizeClaimPath(rawFile);
+    const ext = import_node_path.default.extname(file).toLowerCase();
+    const base = import_node_path.default.basename(file).toLowerCase();
+    if ([".ts", ".tsx"].includes(ext)) ids.add("typescript");
+    if ([".js", ".jsx", ".mjs", ".cjs"].includes(ext)) ids.add("javascript");
+    if ([".html", ".css", ".scss", ".sass", ".less", ".vue", ".svelte"].includes(ext)) ids.add("html-css");
+    if (ext === ".py") ids.add("python");
+    if (ext === ".go") ids.add("go");
+    if (ext === ".rs") ids.add("rust");
+    if ([".kt", ".kts"].includes(ext)) ids.add("kotlin");
+    if (ext === ".swift") ids.add("swift");
+    if (ext === ".dart") ids.add("dart");
+    if (base === "androidmanifest.xml" || file.includes("/android/")) ids.add("android");
+    if (file.includes("compose")) ids.add("compose-multiplatform");
+    if (file.includes("swiftui")) ids.add("swiftui");
+    if (ext === ".dart" && (file.startsWith("lib/") || file.includes("/flutter/"))) ids.add("flutter");
+  }
+  return Array.from(ids).sort();
+}
+function implementationStyleGuides(root, trackId, args = {}) {
+  const installed = installedStyleGuideIds(root);
+  if (installed.length === 0) {
+    return {
+      ok: true,
+      available: false,
+      source: "cadre/code_styleguides",
+      installed: [],
+      selected: [],
+      guides: [],
+      warning: "No installed Cadre code style guides found"
+    };
+  }
+  const installedSet = new Set(installed);
+  const track = findTrack(root, trackId);
+  const plan = track ? parsePlanFile(track.plan_path) : { tasks: [] };
+  const taskFiles = asArray(plan.tasks).flatMap((task) => asStringArray(asJsonObject(task).files)).map(normalizeClaimPath).filter(Boolean);
+  const taskFileIds = styleGuideIdsForFiles(taskFiles).filter((id) => installedSet.has(id));
+  const techStack = techStackForPacket(root, args);
+  if (!techStack) {
+    return {
+      ok: false,
+      available: false,
+      source: "cadre/tech-stack.json",
+      installed,
+      selected: [],
+      guides: [],
+      error: "Missing structured tech stack: cadre/tech-stack.json"
+    };
+  }
+  const techStackIds = styleGuideIdsForTechStack(techStack).filter((id) => installedSet.has(id));
+  const requested = requestedStyleGuideIds(args.styleGuideIds);
+  const missing = requested.filter((id) => !installedSet.has(id));
+  const selected = Array.from(/* @__PURE__ */ new Set([
+    ...installedSet.has("general") ? ["general"] : [],
+    ...techStackIds,
+    ...requested.filter((id) => installedSet.has(id))
+  ])).sort();
+  const maxChars = Math.max(1e3, Math.min(Number(args.styleGuideMaxChars || 6e3), 2e4));
+  const guides = selected.map((id) => {
+    const file = import_node_path.default.join(root, "cadre", "code_styleguides", `${id}.md`);
+    const text = fileExists(file) ? import_node_fs.default.readFileSync(file, "utf8") : "";
+    return {
+      id,
+      path: import_node_path.default.relative(root, file),
+      content: text.slice(0, maxChars),
+      truncated: text.length > maxChars,
+      bytes: Buffer.byteLength(text, "utf8"),
+      reasons: [
+        id === "general" ? "general" : null,
+        techStackIds.includes(id) ? "tech_stack" : null,
+        requested.includes(id) ? "explicit" : null
+      ].filter(Boolean)
+    };
+  });
+  return {
+    ok: missing.length === 0,
+    available: true,
+    source: "cadre/code_styleguides",
+    tech_stack_source: "cadre/tech-stack.json",
+    installed,
+    selected,
+    tech_stack_ids: techStackIds,
+    task_file_ids: taskFileIds,
+    task_files: taskFiles,
+    missing,
+    max_chars_per_guide: maxChars,
+    guides
+  };
+}
 function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
   const rawArgs = args;
+  const styleGuides = setupStyleGuides(root, args);
   const result = {
     ...summary,
-    ok: true,
+    ok: styleGuides.ok,
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),
     lsp: lspConfigStatus(root),
-    required_payload: args.execute === true ? ["productText", "techStackText"] : [],
+    styleGuides,
+    techStackSummary: techStackSummary(root, args),
+    required_payload: args.execute === true ? ["productText", "techStack"] : [],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed document text to this packet.",
       "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves."
     ]
   };
+  if (styleGuides.ok === false) {
+    return {
+      ...result,
+      ok: false,
+      error: `Unknown setup style guide id: ${asStringArray(styleGuides.missing).join(", ")}`
+    };
+  }
   if (args.execute !== true) return result;
   const cadreDir = import_node_path.default.join(root, "cadre");
   const force = asBoolean(rawArgs.force, false);
-  const missingPayload = ["productText", "techStackText"].filter((key) => !asOptionalString(rawArgs[key])?.trim());
+  const missingPayload = [
+    ...!asOptionalString(rawArgs.productText)?.trim() ? ["productText"] : [],
+    ...!techStackFromArgs(args) ? ["techStack"] : []
+  ];
   if (missingPayload.length > 0) {
     return {
       ...result,
@@ -1416,17 +1665,21 @@ function workflowSetup(root, args = {}) {
     "product.md",
     packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n")
   );
-  writeText(
-    "tech-stack.md",
-    packetText(rawArgs.techStackText, "# Tech Stack\n\nRecord the languages, frameworks, tools, services, and conventions in use.\n")
-  );
-  writeText(
-    "workflow.md",
-    packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n"))
-  );
+  writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
+  writeText("workflow.md", packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n")));
   writeText("tracks.md", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
   writeText("learnings.md", "# Project Learnings\n\n");
-  writeText("patterns.md", "# Project Patterns\n\n");
+  writeText("patterns.md", templateText("patterns.md", "# Project Patterns\n\n"));
+  const beforeStyleWritten = written.length;
+  const beforeStyleSkipped = skipped.length;
+  for (const guideId of asStringArray(styleGuides.selected)) {
+    writeText(
+      `code_styleguides/${guideId}.md`,
+      templateText(`code_styleguides/${guideId}.md`, `# ${guideId}
+
+`)
+    );
+  }
   writeSetupJson("setup_state.json", {
     version: 1,
     packet_only: true,
@@ -1439,7 +1692,7 @@ function workflowSetup(root, args = {}) {
     ...asJsonObject(rawArgs.config)
   });
   writeSetupJson("beads.json", {
-    enabled: true,
+    ...templateJson("beads.json", { enabled: true, mode: "normal" }),
     packet_only: true,
     ...asJsonObject(rawArgs.beadsConfig)
   });
@@ -1452,6 +1705,11 @@ function workflowSetup(root, args = {}) {
     scaffolded: true,
     written,
     skipped,
+    styleGuides: {
+      ...styleGuides,
+      written: written.slice(beforeStyleWritten),
+      skipped: skipped.slice(beforeStyleSkipped)
+    },
     force,
     doctor_after: doctor(root, { hasCadreProject: true })
   };
@@ -1514,9 +1772,7 @@ function workflowNewTrack(root, args = {}) {
 `);
   import_node_fs.default.writeFileSync(import_node_path.default.join(dir, "plan.md"), planText.endsWith("\n") ? planText : `${planText}
 `);
-  import_node_fs.default.writeFileSync(import_node_path.default.join(dir, "learnings.md"), `# Track Learnings: ${trackId}
-
-`);
+  import_node_fs.default.writeFileSync(import_node_path.default.join(dir, "learnings.md"), trackLearningsText(trackId));
   const liveBeads = createBeadsTree(root, { ...args, trackId, dryRun: false });
   if (!liveBeads.ok) {
     import_node_fs.default.rmSync(dir, { recursive: true, force: true });
@@ -2062,6 +2318,7 @@ function implementationPrep(root, args = {}) {
     }
   }
   const context = trackContext(root, trackId);
+  const styleGuides = implementationStyleGuides(root, trackId, args);
   const collisions = collisionScan(root);
   const selectedCollisions = asArray(collisions.collisions).filter(
     (collision) => asStringArray(collision.track_ids).includes(trackId)
@@ -2084,6 +2341,7 @@ function implementationPrep(root, args = {}) {
     selected_track: trackId,
     claim,
     context,
+    styleGuides,
     team_summary: {
       total_tracks: team.total_tracks,
       by_status: team.by_status,
@@ -4417,6 +4675,9 @@ var packetSchema = (description, actionEnum = null) => ({
       symbol: { type: "string" },
       symbols: { type: "array", items: { type: "string" } },
       files: { type: "array", items: { type: "string" } },
+      styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
+      styleGuideMaxChars: { type: "number" },
+      techStack: { type: "object" },
       args: { type: "object" },
       type: { type: "string" },
       jobId: { type: "string" },
@@ -4458,8 +4719,8 @@ var TOOLS = [
     ]
   ),
   packetSchema(
-    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, sync, and polyrepo preflight." },
-    ["ping", "doctor", "root", "topology", "sync_control_plane", "polyrepo_preflight"]
+    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight." },
+    ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"]
   ),
   packetSchema(
     { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
@@ -4513,7 +4774,7 @@ function isCadreStateDirectory(dir) {
     "tracks.md",
     "setup_state.json",
     "product.md",
-    "tech-stack.md",
+    "tech-stack.json",
     "workflow.md",
     "beads.json",
     "config.json",
@@ -4807,6 +5068,7 @@ async function projectPacket(args) {
   }
   const root = requireCadreRoot(args);
   if (action === "topology") return envelope({ ok: true, root, topology: loadTopology(root) });
+  if (action === "tech_stack_summary") return envelope(techStackSummary(root, args));
   if (action === "sync_control_plane") return envelope(syncControlPlane(root, args));
   if (action === "polyrepo_preflight") return envelope(polyrepoPreflight(root));
   return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });

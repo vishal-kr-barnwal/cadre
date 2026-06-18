@@ -25,5 +25,5 @@ Create a new track from the workflow arguments.
 6. Summarize the created track id, Beads mapping, worktree plan, and next
    implementation packet.
 
-The packet owns all track files, Beads initialization, index refresh, and
-worktree orchestration metadata.
+The packet owns all track files, template-backed learnings, Beads
+initialization, index refresh, and worktree orchestration metadata.

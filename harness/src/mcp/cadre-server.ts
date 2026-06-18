@@ -90,6 +90,9 @@ const packetSchema = (description: ToolDescription, actionEnum: string[] | null 
       symbol: { type: "string" },
       symbols: { type: "array", items: { type: "string" } },
       files: { type: "array", items: { type: "string" } },
+      styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
+      styleGuideMaxChars: { type: "number" },
+      techStack: { type: "object" },
       args: { type: "object" },
       type: { type: "string" },
       jobId: { type: "string" },
@@ -132,8 +135,8 @@ const TOOLS = [
     ]
   ),
   packetSchema(
-    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, sync, and polyrepo preflight." },
-    ["ping", "doctor", "root", "topology", "sync_control_plane", "polyrepo_preflight"]
+    { name: "cadre_project", text: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight." },
+    ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"]
   ),
   packetSchema(
     { name: "cadre_status", text: "Cadre status packet: live, team, mine, available, collisions, and team board." },
@@ -190,7 +193,7 @@ function isCadreStateDirectory(dir: string): boolean {
     "tracks.md",
     "setup_state.json",
     "product.md",
-    "tech-stack.md",
+    "tech-stack.json",
     "workflow.md",
     "beads.json",
     "config.json",
@@ -509,6 +512,7 @@ async function projectPacket(args: RuntimeArgs): Promise<RuntimeEnvelope> {
   }
   const root = requireCadreRoot(args);
   if (action === "topology") return envelope({ ok: true, root, topology: core.loadTopology(root) });
+  if (action === "tech_stack_summary") return envelope(core.techStackSummary(root, args));
   if (action === "sync_control_plane") return envelope(core.syncControlPlane(root, args));
   if (action === "polyrepo_preflight") return envelope(core.polyrepoPreflight(root));
   return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });

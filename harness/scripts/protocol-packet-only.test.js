@@ -14,12 +14,24 @@ const protocolDirs = [
   path.join(root, "plugins", "cadre", "skills", "cadre", "protocols"),
   path.join(root, "plugins", "cadre-claude", "skills", "cadre", "protocols"),
 ];
-const files = [
-  ...protocolDirs.flatMap((protocolDir) =>
-    fs.readdirSync(protocolDir)
-      .filter((file) => file.endsWith(".md"))
-      .map((file) => path.join(protocolDir, file))
-  ),
+const referenceDirs = [
+  path.join(root, "scripts", "agent-refs"),
+  path.join(root, ".agents", "skills", "cadre", "references"),
+  path.join(root, ".claude", "skills", "cadre", "references"),
+  path.join(root, "plugins", "cadre", "skills", "cadre", "references"),
+  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "references"),
+];
+
+function markdownFiles(dir) {
+  return fs.readdirSync(dir)
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => path.join(dir, file));
+}
+
+const files = Array.from(new Set([
+  ...protocolDirs.flatMap(markdownFiles),
+  ...referenceDirs.flatMap(markdownFiles),
+  path.join(root, "docs", "BEADS_INTEGRATION.md"),
   path.join(root, "skills", "cadre", "SKILL.md"),
   path.join(root, ".agents", "skills", "cadre", "SKILL.md"),
   path.join(root, ".claude", "skills", "cadre", "SKILL.md"),
@@ -30,7 +42,7 @@ const files = [
   path.join(root, ".claude", "skills", "cadre", "templates", "workflow.md"),
   path.join(root, "plugins", "cadre", "skills", "cadre", "templates", "workflow.md"),
   path.join(root, "plugins", "cadre-claude", "skills", "cadre", "templates", "workflow.md"),
-];
+]));
 
 const forbidden = [
   {

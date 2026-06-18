@@ -116,7 +116,7 @@ Setup will:
 
 1. Scaffold the `cadre/` directory:
    - `product.md` — product vision and goals
-   - `tech-stack.md` — technology choices
+   - `tech-stack.json` — structured technology choices
    - `workflow.md` — development standards (TDD, commits)
    - `tracks.md` — derived track index (a cache rebuilt from each track's `metadata.json` via `cadre-status --regen-index`; `metadata.json.status` is the source of truth, so never hand-edit the markers)
 2. **Initialize Beads in full mode** for you (runs `bd init --non-interactive --role maintainer`, creates `.beads/`, writes `cadre/beads.json`, and configures `.gitattributes` so PR merges never conflict on the Beads database).
@@ -328,7 +328,7 @@ When you run Cadre on a project:
 your-project/
 ├── cadre/
 │   ├── product.md           # Product vision
-│   ├── tech-stack.md        # Technology choices
+│   ├── tech-stack.json      # Structured technology choices
 │   ├── workflow.md          # Development standards
 │   ├── tracks.md            # Derived track index (cache; rebuilt from metadata.json via --regen-index)
 │   ├── patterns.md          # Consolidated learnings (Ralph-style)

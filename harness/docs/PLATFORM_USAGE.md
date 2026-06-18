@@ -41,7 +41,7 @@ should happen:
 |------|---------|
 | `cadre/product.md` | What the product is and who it serves. |
 | `cadre/product-guidelines.md` | Product behavior, UX, brand, or domain rules. |
-| `cadre/tech-stack.md` | Languages, frameworks, build/test commands, deployment assumptions. |
+| `cadre/tech-stack.json` | Structured languages, frameworks, build/test commands, deployment assumptions. |
 | `cadre/workflow.md` | TDD workflow, commit rules, verification, coverage threshold. |
 | `cadre/patterns.md` | Reusable learnings promoted from completed tracks. |
 | `cadre/tracks.md` | Human-readable track index, derived from each track's metadata. |
@@ -292,7 +292,7 @@ Cadre does not push product code during implementation.
 ### Coverage
 
 The workflow's coverage threshold must be measured, not asserted. Configure the
-coverage command in `cadre/workflow.md` or `cadre/tech-stack.md`. Cadre records
+coverage command in `cadre/workflow.md` or `cadre/tech-stack.json`. Cadre records
 the measured value in `metadata.last_coverage`, and review copies it into
 `metadata.review.coverage`.
 

@@ -187,6 +187,9 @@ export interface RuntimeArgs extends JsonObject {
   dryRun?: boolean;
   planText?: string;
   specText?: string;
+  techStack?: JsonObject;
+  styleGuideIds?: string[] | string;
+  styleGuideMaxChars?: number;
   metadata?: TrackMetadata;
   lock?: boolean;
   lockName?: string;

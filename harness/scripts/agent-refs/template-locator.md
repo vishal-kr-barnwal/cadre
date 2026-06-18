@@ -1,41 +1,34 @@
-# Locating the Cadre Templates Directory
+# Cadre Template Assets
 
-Cadre ships starter templates — `workflow.md`, `patterns.md`, `learnings.md`,
-`beads.json`, and `code_styleguides/` — bundled with the active Cadre skill.
-`cadre-setup` and `cadre-newtrack` copy from them. The same bundle also carries
-**helper scripts** under `<TEMPLATES_DIR>/scripts/` that workflow protocols run **in place**
-(they are not copied into `cadre/`) — currently the optional LSP setup/review
-helpers. `tracks.md` regeneration is owned by MCP `cadre_mutate` with `action: "regen_index"`; do not
-route workflows to a template shell script for that operation.
+Cadre ships starter templates for workflow policy, project patterns, track
+learnings, Beads configuration, and language style guides. These assets are
+consumed by Cadre MCP packets. Agents should not locate template directories or
+copy template files by hand during workflows.
 
-## Resolve `<TEMPLATES_DIR>`
+## Packet Ownership
 
-Probe with `ls` and use the **FIRST** of these paths that exists. Start with
-the path relative to this reference file so plugin-installed skills work from
-Claude/Codex plugin cache directories without knowing the cache root.
+- `cadre_workflow` with `workflow: "setup"` reports available setup evidence,
+  detected style guides, and missing payload.
+- `cadre_workflow` with `workflow: "setup_scaffold"` and `execute:true` writes
+  the setup scaffold from bundled templates and confirmed setup payload.
+- `cadre_workflow` with `workflow: "newtrack"` writes per-track files, including
+  template-backed track learnings.
+- `cadre_intel` owns LSP setup, warm review, cold review, and daemon status
+  checks.
+- `cadre_mutate` owns derived index refreshes and other Cadre state mutations.
 
-<!-- AGENT:claude -->
-1. `../templates/` relative to this `references/template-locator.md` file — active plugin skill bundle
-2. `templates/` — running inside a Cadre clone during development
-<!-- /AGENT:claude -->
-<!-- AGENT:codex -->
-1. `../templates/` relative to this `references/template-locator.md` file — active plugin skill bundle
-2. `templates/` — running inside a Cadre clone during development
-<!-- /AGENT:codex -->
+## Style Guides
 
-If none exist, tell the user the templates bundle is missing (point them to the
-Install & Version Guide, `docs/INSTALL.md`) and ask whether to continue with
-sensible built-in defaults instead of copying files.
+Setup always selects the general style guide when available, adds guides derived
+from structured `techStack` JSON, and unions any explicit `styleGuideIds` passed
+to the packet.
+The setup packet returns `styleGuides.detected`, `styleGuides.selected`,
+`styleGuides.written`, `styleGuides.skipped`, and `styleGuides.missing`.
 
-## What each template produces
+If `styleGuides.missing` is non-empty or the packet returns `ok:false`, halt and
+surface the packet error. Do not replace the packet with manual copying.
 
-| Template | Copy to | Notes |
-|----------|---------|-------|
-| `workflow.md` | `cadre/workflow.md` | then customize per setup answers |
-| `patterns.md` | `cadre/patterns.md` | project-level institutional knowledge |
-| `learnings.md` | `cadre/tracks/<track_id>/learnings.md` | replace `{{track_id}}` with the track id |
-| `code_styleguides/<lang>.md` | `cadre/code_styleguides/` | only the selected guides |
-| `beads.json` | `cadre/beads.json` | setup copies full-mode Beads config (`mode: "normal"`) |
-| `scripts/cadre-lsp-setup.js` | *(run in place)* | `node <TEMPLATES_DIR>/scripts/cadre-lsp-setup.js --json` — recommend/write `cadre/lsp.json` |
-| `scripts/cadre-lsp-review.js` | *(run in place through MCP when possible)* | `cadre_intel` with `action: "lsp_warm_review"` preferred, `cadre_intel` with `action: "lsp_review"` fallback / `node <TEMPLATES_DIR>/scripts/cadre-lsp-review.js --json` — code-intelligence review |
-| `scripts/cadre-lsp-daemon.js` | *(managed by MCP)* | persistent LSP daemon used by `cadre_intel` with `action: "lsp_warm_review"` |
+## Agent Use
+
+Use template references only to understand what the packet-created files mean.
+All setup, new-track, LSP, style-guide, Beads, and index writes are packet-owned.

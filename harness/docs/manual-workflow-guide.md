@@ -136,7 +136,7 @@ Step 2: Answer project type questions
 Step 3: Complete each section (max 5 questions each)
    a) Product Guide → creates product.md
    b) Product Guidelines → creates product-guidelines.md
-   c) Tech Stack → creates tech-stack.md
+   c) Tech Stack → creates tech-stack.json
    d) Code Styleguides → copies to code_styleguides/
    e) Workflow → creates workflow.md
 
@@ -154,7 +154,7 @@ Step 6: Verify artifacts
    ├── setup_state.json
    ├── product.md
    ├── product-guidelines.md
-   ├── tech-stack.md
+   ├── tech-stack.json
    ├── workflow.md
    ├── tracks.md
    ├── beads.json          # If Beads enabled
@@ -288,7 +288,7 @@ Step 7: Phase completion
 
 Step 8: Track completion
    - Update tracks.md: [~] → [x]
-   - Sync documentation (optional updates to product.md, tech-stack.md)
+   - Sync documentation (optional updates to product.md, tech-stack.json)
    - Archive/delete/skip option
 ```
 
@@ -600,7 +600,7 @@ Step 2: Codebase analysis
 
 Step 3: Review proposed updates
    - product.md changes
-   - tech-stack.md changes
+   - tech-stack.json changes
    - workflow.md changes
 
 Step 4: Approve changes
