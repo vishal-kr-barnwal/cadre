@@ -317,19 +317,24 @@ write_codex_plugin_manifest() {
 JSON
 }
 
-write_codex_mcp_config() {
-  cat > "$(out_path "$CODEX_PLUGIN_DIR/.mcp.json")" <<'JSON'
+write_plugin_mcp_config() {
+  local target="$1"
+  cat > "$(out_path "$target")" <<'JSON'
 {
   "mcpServers": {
     "cadre": {
       "command": "node",
       "args": [
-        "${PLUGIN_ROOT}/scripts/mcp/cadre-server.js"
+        "./scripts/mcp/cadre-server.js"
       ]
     }
   }
 }
 JSON
+}
+
+write_codex_mcp_config() {
+  write_plugin_mcp_config "$CODEX_PLUGIN_DIR/.mcp.json"
 }
 
 write_claude_plugin_manifest() {
@@ -362,18 +367,7 @@ JSON
 }
 
 write_claude_mcp_config() {
-  cat > "$(out_path "$CLAUDE_PLUGIN_DIR/mcp-config.json")" <<'JSON'
-{
-  "mcpServers": {
-    "cadre": {
-      "command": "node",
-      "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/mcp/cadre-server.js"
-      ]
-    }
-  }
-}
-JSON
+  write_plugin_mcp_config "$CLAUDE_PLUGIN_DIR/mcp-config.json"
 }
 
 write_plugin_readme() {
@@ -457,10 +451,23 @@ for (const [rel, keys] of checks) {
 const codexManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre/.codex-plugin/plugin.json"), "utf8"));
 if (codexManifest.skills !== "./skills/") throw new Error("Codex plugin manifest has wrong skills path");
 if (codexManifest.mcpServers !== "./.mcp.json") throw new Error("Codex plugin manifest has wrong MCP path");
+const codexMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre/.mcp.json"), "utf8"));
+if (codexMcp.mcpServers?.cadre?.args?.[0] !== "./scripts/mcp/cadre-server.js") {
+  throw new Error("Codex MCP config has wrong runtime path");
+}
 const claudeManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-claude/.claude-plugin/plugin.json"), "utf8"));
 if (claudeManifest.skills !== "./skills/") throw new Error("Claude plugin manifest has wrong skills path");
 if (claudeManifest.agents !== "./agents/") throw new Error("Claude plugin manifest has wrong agents path");
 if (claudeManifest.mcpServers !== "./mcp-config.json") throw new Error("Claude plugin manifest has wrong MCP path");
+const claudeMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-claude/mcp-config.json"), "utf8"));
+if (claudeMcp.mcpServers?.cadre?.args?.[0] !== "./scripts/mcp/cadre-server.js") {
+  throw new Error("Claude MCP config has wrong runtime path");
+}
+for (const text of [JSON.stringify(codexMcp), JSON.stringify(claudeMcp)]) {
+  if (text.includes("${PLUGIN_ROOT}") || text.includes("${CLAUDE_PLUGIN_ROOT}")) {
+    throw new Error("Generated MCP config still contains placeholder paths");
+  }
+}
 
 const harnessCodexMarketplace = JSON.parse(fs.readFileSync(path.join(root, ".agents/plugins/marketplace.json"), "utf8"));
 if (harnessCodexMarketplace.plugins?.[0]?.source?.path !== "./plugins/cadre") {
@@ -605,10 +612,14 @@ JSON
 generate_plugins() {
   rm -rf "$(out_path "$CODEX_PLUGIN_DIR")" "$(out_path "$CLAUDE_PLUGIN_DIR")"
 
-  copy_skill_tree "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR/skills/cadre"
-  copy_skill_tree "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR/skills/cadre"
-  copy_plugin_scripts "$CODEX_PLUGIN_DIR"
-  copy_plugin_scripts "$CLAUDE_PLUGIN_DIR"
+  generate_plugin_bundle() {
+    local skill_dir="$1" plugin_dir="$2"
+    copy_skill_tree "$skill_dir" "$plugin_dir/skills/cadre"
+    copy_plugin_scripts "$plugin_dir"
+  }
+
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR"
+  generate_plugin_bundle "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR"
 
   write_codex_plugin_manifest
   write_codex_mcp_config

@@ -3,7 +3,7 @@
     "cadre": {
       "command": "node",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/mcp/cadre-server.js"
+        "./scripts/mcp/cadre-server.js"
       ]
     }
   }

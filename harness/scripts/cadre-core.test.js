@@ -160,6 +160,52 @@ test("repoMap filters generated bundles and local variable noise", () => {
   }
 });
 
+test("polyrepo workspace intelligence spans TS, Python, and Rust roots", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-core-test-"));
+  try {
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "app",
+      repos: [
+        { name: "app", submodule_path: "apps/app", default_branch: "main" },
+        { name: "py", submodule_path: "services/py", default_branch: "main" },
+        { name: "rust", submodule_path: "libs/rust", default_branch: "main" },
+      ],
+    }, null, 2));
+    write(path.join(root, "apps", "app", "src", "app.ts"), "export function appFn() { return true; }\n");
+    write(path.join(root, "services", "py", "app.py"), "def py_fn():\n    return True\n");
+    write(path.join(root, "libs", "rust", "src", "lib.rs"), "pub fn rust_fn() -> bool { true }\n");
+
+    const setup = core.lspSetup(root, { execute: false });
+    assert.equal(setup.ok, true);
+    assert.ok(Array.isArray(setup.recommended));
+    for (const id of ["typescript", "python", "rust"]) {
+      assert.ok(setup.recommended.some((entry) => entry.id === id), `expected ${id} recommendation`);
+    }
+    assert.equal(setup.workspaceFolders.length, 4);
+
+    const map = core.repoMap(root, { limit: 50 });
+    assert.equal(map.ok, true);
+    assert.equal(map.repos.length, 4);
+    assert.ok(map.by_language.typescript >= 1);
+    assert.ok(map.by_language.python >= 1);
+    assert.ok(map.by_language.rust >= 1);
+
+    const appRepo = map.repos.find((entry) => entry.repo === "app");
+    const pyRepo = map.repos.find((entry) => entry.repo === "py");
+    const rustRepo = map.repos.find((entry) => entry.repo === "rust");
+    assert.ok(appRepo);
+    assert.ok(pyRepo);
+    assert.ok(rustRepo);
+    assert.ok(appRepo.symbols.some((symbol) => symbol.name === "appFn"));
+    assert.ok(pyRepo.symbols.some((symbol) => symbol.name === "py_fn"));
+    assert.ok(rustRepo.symbols.some((symbol) => symbol.name === "rust_fn"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("isCadreProjectRoot requires real Cadre state markers", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-root-test-"));
   try {
@@ -1225,6 +1271,7 @@ test("workflowPacket compact responses trim heavy plan detail and expose resourc
       includeMachine: false,
     });
     assert.equal(compact.response_mode, "compact");
+    assert.ok(compact.resource_uris.some((uri) => uri.includes("workspace-health")));
     assert.ok(compact.resource_uris.some((uri) => uri.includes("quality-gate")));
     assert.equal(typeof compact.track_context.plan.phases, "number");
 

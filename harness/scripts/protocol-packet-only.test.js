@@ -30,6 +30,20 @@ function markdownFiles(dir) {
     .map((file) => path.join(dir, file));
 }
 
+function collectFiles(dir, relativeDir = "") {
+  const files = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = path.join(relativeDir, entry.name).split(path.sep).join("/");
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectFiles(full, rel));
+    } else {
+      files.push(rel);
+    }
+  }
+  return files;
+}
+
 const files = Array.from(new Set([
   ...protocolDirs.flatMap(markdownFiles),
   ...referenceDirs.flatMap(markdownFiles),
@@ -112,6 +126,62 @@ test("Generated Codex and Claude skill bundles only differ in platform-sliced re
   }
 
   visit();
+  assert.deepEqual(failures, []);
+});
+
+test("Generated Codex and Claude plugin bundles only differ in intentional overlays", () => {
+  const codexPlugin = path.join(root, "plugins", "cadre");
+  const claudePlugin = path.join(root, "plugins", "cadre-claude");
+  const intentionalDifferences = new Set([
+    "README.md",
+    ".mcp.json",
+    "mcp-config.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    "agents/cadre-worker.md",
+    "skills/cadre/references/parallel-execution.md",
+  ]);
+
+  const codexFiles = new Set(collectFiles(codexPlugin));
+  const claudeFiles = new Set(collectFiles(claudePlugin));
+  const allFiles = Array.from(new Set([...codexFiles, ...claudeFiles])).sort();
+  const failures = [];
+
+  for (const rel of allFiles) {
+    if (intentionalDifferences.has(rel)) continue;
+    if (!codexFiles.has(rel)) {
+      failures.push(`missing from Codex bundle: ${rel}`);
+      continue;
+    }
+    if (!claudeFiles.has(rel)) {
+      failures.push(`missing from Claude bundle: ${rel}`);
+      continue;
+    }
+    const codexText = fs.readFileSync(path.join(codexPlugin, rel), "utf8");
+    const claudeText = fs.readFileSync(path.join(claudePlugin, rel), "utf8");
+    if (codexText !== claudeText) failures.push(`unexpected plugin diff: ${rel}`);
+  }
+
+  assert.equal(fs.existsSync(path.join(codexPlugin, "agents", "cadre-worker.md")), false);
+  assert.equal(fs.existsSync(path.join(claudePlugin, "agents", "cadre-worker.md")), true);
+  assert.notEqual(
+    fs.readFileSync(path.join(codexPlugin, "README.md"), "utf8"),
+    fs.readFileSync(path.join(claudePlugin, "README.md"), "utf8")
+  );
+  assert.notEqual(
+    fs.readFileSync(path.join(codexPlugin, "skills", "cadre", "references", "parallel-execution.md"), "utf8"),
+    fs.readFileSync(path.join(claudePlugin, "skills", "cadre", "references", "parallel-execution.md"), "utf8")
+  );
+
+  const codexManifest = JSON.parse(fs.readFileSync(path.join(codexPlugin, ".codex-plugin", "plugin.json"), "utf8"));
+  const claudeManifest = JSON.parse(fs.readFileSync(path.join(claudePlugin, ".claude-plugin", "plugin.json"), "utf8"));
+  const codexMcp = JSON.parse(fs.readFileSync(path.join(codexPlugin, ".mcp.json"), "utf8"));
+  const claudeMcp = JSON.parse(fs.readFileSync(path.join(claudePlugin, "mcp-config.json"), "utf8"));
+  assert.equal(codexManifest.mcpServers, "./.mcp.json");
+  assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
+  assert.equal(codexMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
+  assert.equal(claudeMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
+
   assert.deepEqual(failures, []);
 });
 

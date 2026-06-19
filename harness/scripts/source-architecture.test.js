@@ -37,27 +37,33 @@ function isInside(candidate, dir) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-test("source architecture keeps domain pure and MCP away from core infrastructure", () => {
+function assertLayerImports(files, fileRoot, forbiddenRoots, { forbidNode = false } = {}) {
+  for (const file of files.filter((candidate) => isInside(candidate, fileRoot))) {
+    for (const specifier of importsFor(file)) {
+      const resolved = resolveImport(file, specifier);
+      if (forbidNode) {
+        assert.equal(specifier.startsWith("node:"), false, `${path.relative(root, file)} imports Node API ${specifier}`);
+      }
+      for (const forbiddenRoot of forbiddenRoots) {
+        assert.equal(isInside(resolved, forbiddenRoot), false, `${path.relative(root, file)} imports ${path.relative(root, forbiddenRoot)} ${specifier}`);
+      }
+    }
+  }
+}
+
+test("source architecture keeps domain pure and MCP layered", () => {
   const files = walk(srcRoot);
   const domainRoot = path.join(srcRoot, "core", "domain");
   const infrastructureRoot = path.join(srcRoot, "core", "infrastructure");
-  const mcpRoot = path.join(srcRoot, "mcp");
+  const mcpDomainRoot = path.join(srcRoot, "mcp", "domain");
+  const mcpApplicationRoot = path.join(srcRoot, "mcp", "application");
+  const mcpInfrastructureRoot = path.join(srcRoot, "mcp", "infrastructure");
+  const mcpPresentationRoot = path.join(srcRoot, "mcp", "presentation");
 
-  for (const file of files.filter((candidate) => isInside(candidate, domainRoot))) {
-    for (const specifier of importsFor(file)) {
-      const resolved = resolveImport(file, specifier);
-      assert.equal(specifier.startsWith("node:"), false, `${path.relative(root, file)} imports Node API ${specifier}`);
-      assert.equal(isInside(resolved, infrastructureRoot), false, `${path.relative(root, file)} imports infrastructure ${specifier}`);
-      assert.equal(isInside(resolved, mcpRoot), false, `${path.relative(root, file)} imports MCP ${specifier}`);
-    }
-  }
-
-  for (const file of files.filter((candidate) => isInside(candidate, mcpRoot))) {
-    for (const specifier of importsFor(file)) {
-      const resolved = resolveImport(file, specifier);
-      assert.equal(isInside(resolved, infrastructureRoot), false, `${path.relative(root, file)} imports core infrastructure ${specifier}`);
-    }
-  }
+  assertLayerImports(files, domainRoot, [infrastructureRoot, path.join(srcRoot, "mcp")], { forbidNode: true });
+  assertLayerImports(files, mcpDomainRoot, [mcpApplicationRoot, mcpInfrastructureRoot, mcpPresentationRoot], { forbidNode: true });
+  assertLayerImports(files, mcpApplicationRoot, [mcpInfrastructureRoot, mcpPresentationRoot]);
+  assertLayerImports(files, mcpInfrastructureRoot, [mcpApplicationRoot, mcpPresentationRoot]);
 });
 
 test("generated cadre-core bundle preserves the public runtime API", () => {

@@ -252,6 +252,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const uris = resources.resources.map((resource) => resource.uri);
     assert.ok(uris.includes("cadre://fleet-board"));
     assert.ok(uris.includes("cadre://beads-summary"));
+    assert.ok(uris.includes("cadre://workspace-health"));
     assert.ok(uris.includes("cadre://review-evidence"));
     assert.ok(uris.includes("cadre://workspace-diagnostics"));
     assert.ok(uris.includes("cadre://lsp-status"));
@@ -326,6 +327,90 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(JSON.parse(jobResource.contents[0].text).data.status, "succeeded");
   } finally {
     server.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP async jobs survive restarts and persist list/result snapshots", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-job-restart-test-"));
+  const projectRoot = path.join(root, "project");
+  const first = startServer();
+  try {
+    write(path.join(projectRoot, "cadre", "setup_state.json"), "{}\n");
+    write(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "project",
+      private: true,
+      type: "module",
+    }, null, 2));
+    write(path.join(projectRoot, "src", "index.ts"), "export const value = 1;\n");
+
+    await first.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    const started = parseTextJson(await first.request("tools/call", {
+      name: "cadre_job",
+      arguments: {
+        action: "start",
+        type: "coverage",
+        root: projectRoot,
+        args: { command: "printf 'Statements : 91%%\\n'", coverageThreshold: 80 },
+      },
+    }));
+    const jobId = started.job.id;
+    assert.match(jobId, /^job_[0-9a-f-]{36}$/i);
+    const completed = await waitForJob(first.request, jobId);
+    assert.equal(completed.data.result.coverage, 91);
+
+    const health = JSON.parse((await first.request("resources/read", {
+      uri: `cadre://workspace-health?root=${encodeURIComponent(projectRoot)}`,
+    })).contents[0].text);
+    assert.equal(health.data.ok, true);
+    assert.equal(health.data.root, projectRoot);
+    assert.ok(Array.isArray(health.data.languages.detected));
+    assert.ok(Array.isArray(health.data.workspace.adapters));
+    assert.equal(typeof health.data.parallel.available_count, "number");
+
+    await new Promise((resolve) => {
+      first.server.once("exit", resolve);
+      first.server.kill("SIGTERM");
+    });
+
+    const second = startServer();
+    try {
+      await second.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+      const listed = parseTextJson(await second.request("tools/call", {
+        name: "cadre_job",
+        arguments: { action: "list", root: projectRoot },
+      }));
+      const persisted = listed.data.jobs.find((job) => job.id === jobId);
+      assert.equal(Boolean(persisted), true);
+      assert.equal(persisted.persisted, true);
+      assert.equal(persisted.stale, false);
+
+      const result = parseTextJson(await second.request("tools/call", {
+        name: "cadre_job",
+        arguments: { action: "result", root: projectRoot, jobId },
+      }));
+      assert.equal(result.data.job.id, jobId);
+      assert.equal(result.data.result.coverage, 91);
+
+      const restarted = parseTextJson(await second.request("tools/call", {
+        name: "cadre_job",
+        arguments: {
+          action: "start",
+          type: "coverage",
+          root: projectRoot,
+          args: { command: "printf 'Statements : 88%%\\n'", coverageThreshold: 80 },
+        },
+      }));
+      assert.notEqual(restarted.job.id, jobId);
+      await waitForJob(second.request, restarted.job.id);
+    } finally {
+      await new Promise((resolve) => {
+        second.server.once("exit", resolve);
+        second.server.kill("SIGTERM");
+      });
+    }
+  } finally {
+    first.server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

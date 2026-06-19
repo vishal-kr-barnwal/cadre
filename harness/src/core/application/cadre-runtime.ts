@@ -9,6 +9,7 @@ import { LOCK_STALE_MS, STALE_LEASE_MS } from "../domain/lease-policy";
 import { parsePlanText } from "../domain/plan-parser";
 import { PROVIDER_MODES } from "../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../domain/track-status";
+import { languageForFile, listWorkspaceFiles } from "../../lsp/language-registry";
 
 const commandExistsCache = new Map<string, boolean>();
 
@@ -1799,6 +1800,7 @@ function workflowResourceUris(root: string, workflow: string, result: CoreResult
     || asOptionalString(asJsonObject(result.track || {}).track_id)
     || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
   const uris = [
+    `cadre://workspace-health?root=${encodedRoot}`,
     `cadre://team-board?root=${encodedRoot}`,
     `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
   ];
@@ -5674,16 +5676,6 @@ function isIgnoredRepoMapFile(file: unknown): boolean {
     .some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part));
 }
 
-function gitTrackedFiles(root: string): string[] {
-  const result = runCommand("git", ["ls-files"], { cwd: root });
-  if (!result.ok) return [];
-  return result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((file) => !isIgnoredRepoMapFile(file));
-}
-
 function selectedRepoNames(args: RuntimeArgs = {}): Set<string> | null {
   const values = [
     asOptionalString(args.repo),
@@ -5730,73 +5722,32 @@ function combineLanguageCounts(entries: CoreResult[]): JsonObject {
   return Object.fromEntries(Object.entries(counts).sort());
 }
 
-function languageForFile(file: string): string | null {
-  const base = path.basename(file);
-  if (base === "Dockerfile" || base === "Containerfile") return "dockerfile";
-  return {
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".py": "python",
-    ".go": "go",
-    ".rs": "rust",
-    ".java": "java",
-    ".kt": "kotlin",
-    ".swift": "swift",
-    ".rb": "ruby",
-    ".php": "php",
-    ".dart": "dart",
-    ".html": "html",
-    ".htm": "html",
-    ".css": "css",
-    ".scss": "css",
-    ".sass": "css",
-    ".less": "css",
-    ".json": "json",
-    ".jsonc": "json",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".md": "markdown",
-    ".mdx": "markdown",
-    ".toml": "toml",
-    ".lua": "lua",
-    ".sh": "shell",
-    ".bash": "shell",
-    ".zsh": "shell",
-    ".tf": "terraform",
-    ".tfvars": "terraform",
-    ".hcl": "terraform",
-    ".ex": "elixir",
-    ".exs": "elixir",
-    ".scala": "scala",
-    ".sc": "scala",
-    ".clj": "clojure",
-    ".cljs": "clojure",
-    ".cljc": "clojure",
-    ".hs": "haskell",
-    ".lhs": "haskell",
-    ".ml": "ocaml",
-    ".mli": "ocaml",
-    ".zig": "zig",
-    ".nix": "nix",
-    ".elm": "elm",
-    ".vue": "vue",
-    ".svelte": "svelte",
-    ".xml": "xml",
-    ".xsd": "xml",
-    ".graphql": "graphql",
-    ".gql": "graphql",
-    ".prisma": "prisma",
-    ".proto": "protobuf",
-    ".c": "c-cpp",
-    ".h": "c-cpp",
-    ".cc": "c-cpp",
-    ".cpp": "c-cpp",
-    ".cxx": "c-cpp",
-    ".hpp": "c-cpp",
-    ".cs": "csharp",
-  }[path.extname(file)] || null;
+const GENERIC_SYMBOL_PATTERNS = [
+  /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
+  /\b(?:export\s+)?(?:class|interface|type|enum|struct|record|trait)\s+([A-Za-z_$][\w$]*)\b/g,
+  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g,
+];
+
+const LANGUAGE_SYMBOL_PATTERNS: Record<string, RegExp[]> = {
+  python: [/^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\b/gm, /^\s*class\s+([A-Za-z_][\w]*)\b/gm],
+  go: [/^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm, /^\s*type\s+([A-Za-z_][\w]*)\s+/gm],
+  rust: [/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:pub\s+)?(?:struct|enum|trait|type)\s+([A-Za-z_][\w]*)\b/gm],
+  java: [/^\s*(?:public|private|protected|static|final|abstract|sealed|non-sealed|\s)*(?:class|interface|enum|record)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|static|final|abstract|synchronized|native|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
+  kotlin: [/^\s*(?:public|private|protected|internal|open|final|abstract|data|sealed|\s)*(?:class|interface|object|enum|typealias)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|suspend|inline|tailrec|operator|infix|fun|\s)*fun\s+([A-Za-z_][\w]*)\b/gm],
+  swift: [/^\s*(?:public|private|internal|open|fileprivate|static|final|mutating|nonmutating|\s)*(?:func|class|struct|enum|protocol)\s+([A-Za-z_][\w]*)\b/gm],
+  csharp: [/^\s*(?:public|private|protected|internal|static|partial|sealed|abstract|virtual|override|\s)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|static|async|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
+  ruby: [/^\s*(?:class|module|def)\s+([A-Za-z_][\w!?=]*)\b/gm],
+  elixir: [/^\s*(?:defmodule|defp?|defmacro)\s+([A-Za-z_][\w!?]*)\b/gm],
+  lua: [/^\s*(?:local\s+)?function\s+([A-Za-z_][\w.]*)\b/gm],
+  terraform: [/^\s*(?:resource|module|variable|output|data)\s+"?([A-Za-z0-9_.-]+)"?/gim],
+  sql: [/^\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE)\s+([A-Za-z_][\w."]*)\b/gim],
+  shell: [/^\s*function\s+([A-Za-z_][\w-]*)\b/gm, /^\s*(?:local\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{/gm],
+};
+
+function symbolPatternsForLanguage(language: string): RegExp[] {
+  return [...GENERIC_SYMBOL_PATTERNS, ...(LANGUAGE_SYMBOL_PATTERNS[language] || [])].map(
+    (pattern) => new RegExp(pattern.source, pattern.flags)
+  );
 }
 
 function extractRepoSymbols(root: string, file: string, limitPerFile = 40): RepoSymbol[] {
@@ -5812,14 +5763,7 @@ function extractRepoSymbols(root: string, file: string, limitPerFile = 40): Repo
   const language = languageForFile(file);
   if (!language) return [];
   const text = fs.readFileSync(abs, "utf8");
-  const patterns = [
-    /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
-    /\b(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][\w$]*)\b/g,
-    /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g,
-    /^\s*def\s+([A-Za-z_][\w]*)\b/gm,
-    /^\s*class\s+([A-Za-z_][\w]*)\b/gm,
-    /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm,
-  ];
+  const patterns = symbolPatternsForLanguage(language);
   const symbols: RepoSymbol[] = [];
   for (const pattern of patterns) {
     let match;
@@ -5855,7 +5799,7 @@ function repoMap(root: string, args: RuntimeArgs = {}): CoreResult {
     return { ok: repoResults.some((entry) => entry.ok) || matches.length > 0, root, symbol, matches, repos: repoResults, truncated: matches.length >= limit };
   }
   const repoResults = repos.map((entry) => {
-    const files = gitTrackedFiles(entry.root);
+    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
     const byLanguage: Record<string, number> = {};
     const symbols: RepoSymbol[] = [];
     for (const file of files) {
@@ -6097,7 +6041,7 @@ function dependencyGraph(root: string, args: RuntimeArgs = {}): CoreResult {
     "nx.json",
   ]);
   const repoGraphs = repoEntries.map((entry) => {
-    const files = gitTrackedFiles(entry.root);
+    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
     const manifests = files
       .filter((file) => manifestPatterns.has(path.basename(file)))
       .map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(path.dirname(file)), kind: path.basename(file) }));

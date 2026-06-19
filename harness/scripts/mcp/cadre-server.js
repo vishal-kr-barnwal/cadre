@@ -8,6 +8,10 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -25,16 +29,75 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// src/mcp/server-runtime.ts
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path6 = __toESM(require("node:path"));
+// src/cadre-core.ts
+var cadre_core_exports = {};
+__export(cadre_core_exports, {
+  STATUS_MARKERS: () => STATUS_MARKERS,
+  acquireLock: () => acquireLock,
+  availableWork: () => availableWork,
+  beadsSummary: () => beadsSummary,
+  beadsTaskWrite: () => beadsTaskWrite,
+  claimTrack: () => claimTrack,
+  collisionScan: () => collisionScan,
+  completeTask: () => completeTask,
+  createBeadsTree: () => createBeadsTree,
+  dependencyGraph: () => dependencyGraph,
+  doctor: () => doctor,
+  fleetStatus: () => fleetStatus,
+  gitIdentity: () => gitIdentity,
+  heartbeatTrack: () => heartbeatTrack,
+  implementationPrep: () => implementationPrep,
+  isCadreProjectRoot: () => isCadreProjectRoot,
+  isIgnoredRepoMapFile: () => isIgnoredRepoMapFile,
+  listTracks: () => listTracks,
+  liveStatus: () => liveStatus,
+  loadTopology: () => loadTopology,
+  lspConfigStatus: () => lspConfigStatus,
+  lspImpact: () => lspImpact,
+  lspReview: () => lspReview,
+  lspSetup: () => lspSetup,
+  metadataPatch: () => metadataPatch,
+  parallelWorkflow: () => parallelWorkflow,
+  parsePlanFile: () => parsePlanFile,
+  parsePlanText: () => parsePlanText,
+  phaseSchedule: () => phaseSchedule,
+  planAssist: () => planAssist,
+  planClaims: () => planClaims,
+  planIntegrity: () => planIntegrity,
+  polyrepoPreflight: () => polyrepoPreflight,
+  prCiStatus: () => prCiStatus,
+  providerEvidence: () => providerEvidence,
+  recordParallelWorker: () => recordParallelWorker,
+  recordReview: () => recordReview,
+  recordTaskResult: () => recordTaskResult,
+  regenIndex: () => regenIndex,
+  releaseLock: () => releaseLock,
+  repoMap: () => repoMap,
+  reviewAssist: () => reviewAssist,
+  reviewEvidence: () => reviewEvidence,
+  reviewGate: () => reviewGate,
+  reviewMachineGate: () => reviewMachineGate,
+  setTrackStatus: () => setTrackStatus,
+  syncControlPlane: () => syncControlPlane,
+  teamBoard: () => teamBoard,
+  teamStatus: () => teamStatus,
+  techStackSummary: () => techStackSummary,
+  testCoverage: () => testCoverage,
+  testImpact: () => testImpact,
+  trackContext: () => trackContext,
+  withLock: () => withLock,
+  withTrackLock: () => withTrackLock,
+  workflowPacket: () => workflowPacket,
+  workspaceDiagnostics: () => workspaceDiagnostics,
+  worktreePlan: () => worktreePlan
+});
 
 // src/core/application/cadre-runtime.ts
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path3 = __toESM(require("node:path"));
 var import_node_crypto = __toESM(require("node:crypto"));
 var import_node_os = __toESM(require("node:os"));
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 
 // src/guards.ts
 function isRecord(value) {
@@ -176,26 +239,215 @@ var STATUS_MARKERS = {
 };
 var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
 
+// src/lsp/language-registry.ts
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+var import_node_child_process = require("node:child_process");
+
+// src/lsp/ignore-policy.ts
+var import_node_path = __toESM(require("node:path"));
+var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  ".beads",
+  ".worktrees",
+  ".agents",
+  ".claude",
+  ".cache",
+  ".codex",
+  ".dart_tool",
+  ".gradle",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".serverless",
+  "node_modules",
+  "vendor",
+  "dist",
+  "build",
+  "coverage",
+  "out",
+  "target",
+  ".next",
+  ".nuxt",
+  ".parcel-cache",
+  ".svelte-kit",
+  ".turbo",
+  ".vite",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "__generated__",
+  "generated",
+  "gen",
+  "tmp",
+  "temp",
+  "logs",
+  "Pods",
+  "DerivedData",
+  ".idea",
+  ".vscode"
+]);
+var DEFAULT_IGNORE_PATHS = [
+  "plugins/cadre",
+  "plugins/cadre-claude"
+];
+function normalizeRel(file) {
+  return file.split(import_node_path.default.sep).join("/");
+}
+function shouldIgnore(root, fullPath, name) {
+  if (DEFAULT_IGNORES.has(name)) return true;
+  const rel = normalizeRel(import_node_path.default.relative(root, fullPath));
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
+}
+
+// src/lsp/language-registry.ts
+var EXTENSION_LANGUAGE_IDS = {
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".py": "python",
+  ".go": "go",
+  ".rs": "rust",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".swift": "swift",
+  ".rb": "ruby",
+  ".php": "php",
+  ".dart": "dart",
+  ".html": "html",
+  ".htm": "html",
+  ".css": "css",
+  ".scss": "css",
+  ".sass": "css",
+  ".less": "css",
+  ".json": "json",
+  ".jsonc": "json",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".md": "markdown",
+  ".mdx": "markdown",
+  ".toml": "toml",
+  ".lua": "lua",
+  ".sh": "shell",
+  ".bash": "shell",
+  ".zsh": "shell",
+  ".ksh": "shell",
+  ".tf": "terraform",
+  ".tfvars": "terraform",
+  ".hcl": "terraform",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".scala": "scala",
+  ".sc": "scala",
+  ".clj": "clojure",
+  ".cljs": "clojure",
+  ".cljc": "clojure",
+  ".hs": "haskell",
+  ".lhs": "haskell",
+  ".ml": "ocaml",
+  ".mli": "ocaml",
+  ".zig": "zig",
+  ".nix": "nix",
+  ".elm": "elm",
+  ".vue": "vue",
+  ".svelte": "svelte",
+  ".xml": "xml",
+  ".xsd": "xml",
+  ".xsl": "xml",
+  ".xslt": "xml",
+  ".graphql": "graphql",
+  ".gql": "graphql",
+  ".prisma": "prisma",
+  ".proto": "protobuf",
+  ".c": "c-cpp",
+  ".h": "c-cpp",
+  ".cc": "c-cpp",
+  ".cpp": "c-cpp",
+  ".cxx": "c-cpp",
+  ".hpp": "c-cpp",
+  ".m": "c-cpp",
+  ".mm": "c-cpp",
+  ".cs": "csharp"
+};
+var FILE_LANGUAGE_IDS = {
+  Dockerfile: "dockerfile",
+  Containerfile: "dockerfile"
+};
+function fileLanguageId(file) {
+  return FILE_LANGUAGE_IDS[import_node_path2.default.basename(file)] || EXTENSION_LANGUAGE_IDS[import_node_path2.default.extname(file).toLowerCase()] || null;
+}
+function languageForFile(file) {
+  return fileLanguageId(file);
+}
+function normalizeWorkspaceFile(root, rel) {
+  const normalized = rel.replace(/\r/g, "").trim();
+  if (!normalized) return null;
+  const full = import_node_path2.default.join(root, normalized);
+  if (shouldIgnore(root, full, import_node_path2.default.basename(normalized))) return null;
+  return normalized;
+}
+function gitWorkspaceFiles(root) {
+  const result = (0, import_node_child_process.spawnSync)("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
+    cwd: root,
+    encoding: "buffer",
+    maxBuffer: 30 * 1024 * 1024
+  });
+  if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return [];
+  return result.stdout.toString("utf8").split("\0").map((item) => normalizeWorkspaceFile(root, item)).filter((item) => Boolean(item)).sort();
+}
+function walkWorkspaceFiles(root) {
+  const files = [];
+  const visit = (dir) => {
+    let entries;
+    try {
+      entries = import_node_fs.default.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = import_node_path2.default.join(dir, entry.name);
+      if (shouldIgnore(root, full, entry.name)) continue;
+      if (entry.isDirectory()) {
+        visit(full);
+        continue;
+      }
+      if (entry.isFile()) files.push(import_node_path2.default.relative(root, full).split(import_node_path2.default.sep).join("/"));
+    }
+  };
+  visit(root);
+  return files.sort();
+}
+function listWorkspaceFiles(root) {
+  const gitFiles = gitWorkspaceFiles(root);
+  return gitFiles.length > 0 ? gitFiles : walkWorkspaceFiles(root);
+}
+
 // src/core/application/cadre-runtime.ts
 var commandExistsCache = /* @__PURE__ */ new Map();
 function readJson(file, fallback) {
   try {
-    return JSON.parse(import_node_fs.default.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs2.default.readFileSync(file, "utf8"));
   } catch {
     return fallback;
   }
 }
 function writeJson(file, value) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  import_node_fs.default.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+  import_node_fs2.default.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
 `);
-  import_node_fs.default.renameSync(tmp, file);
+  import_node_fs2.default.renameSync(tmp, file);
 }
 function safeName(value) {
   return String(value || "lock").replace(/[^A-Za-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 160) || "lock";
 }
 function lockRoot(root) {
-  return import_node_path.default.join(root, "cadre", ".locks");
+  return import_node_path3.default.join(root, "cadre", ".locks");
 }
 function processAlive(pid) {
   const numeric = Number(pid);
@@ -208,7 +460,7 @@ function processAlive(pid) {
   }
 }
 function readLockInfo(lockDir) {
-  return readJson(import_node_path.default.join(lockDir, "owner.json"), null) ?? {};
+  return readJson(import_node_path3.default.join(lockDir, "owner.json"), null) ?? {};
 }
 function lockIsStale(info, nowMs = Date.now()) {
   const stamp = Date.parse(info.updated_at || info.acquired_at || "");
@@ -218,11 +470,11 @@ function lockIsStale(info, nowMs = Date.now()) {
 }
 function acquireLock(root, name, options = {}) {
   const now = utcNow();
-  const dir = import_node_path.default.join(lockRoot(root), `${safeName(name)}.lock`);
-  import_node_fs.default.mkdirSync(import_node_path.default.dirname(dir), { recursive: true });
+  const dir = import_node_path3.default.join(lockRoot(root), `${safeName(name)}.lock`);
+  import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(dir), { recursive: true });
   for (let attempt = 1; attempt <= Number(options.retries || 3); attempt += 1) {
     try {
-      import_node_fs.default.mkdirSync(dir);
+      import_node_fs2.default.mkdirSync(dir);
       const info = {
         name,
         pid: process.pid,
@@ -231,7 +483,7 @@ function acquireLock(root, name, options = {}) {
         updated_at: now,
         hostname: import_node_os.default.hostname()
       };
-      writeJson(import_node_path.default.join(dir, "owner.json"), info);
+      writeJson(import_node_path3.default.join(dir, "owner.json"), info);
       return { ok: true, dir, info, attempts: attempt };
     } catch (error) {
       if (errorCode(error) !== "EEXIST") {
@@ -240,7 +492,7 @@ function acquireLock(root, name, options = {}) {
       const current = readLockInfo(dir);
       if (lockIsStale(current)) {
         try {
-          import_node_fs.default.rmSync(dir, { recursive: true, force: true });
+          import_node_fs2.default.rmSync(dir, { recursive: true, force: true });
           continue;
         } catch (removeError) {
           return {
@@ -270,7 +522,7 @@ function acquireLock(root, name, options = {}) {
 function releaseLock(lock) {
   if (!lock || !lock.ok || !lock.dir) return { ok: true, skipped: true };
   try {
-    import_node_fs.default.rmSync(lock.dir, { recursive: true, force: true });
+    import_node_fs2.default.rmSync(lock.dir, { recursive: true, force: true });
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
@@ -305,7 +557,7 @@ function patchJsonFileUnlocked(file, patcher, options = {}) {
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     let beforeText;
     try {
-      beforeText = import_node_fs.default.readFileSync(file, "utf8");
+      beforeText = import_node_fs2.default.readFileSync(file, "utf8");
     } catch (error) {
       return { ok: false, file, error: `Unable to read JSON file: ${errorMessage(error)}` };
     }
@@ -327,7 +579,7 @@ function patchJsonFileUnlocked(file, patcher, options = {}) {
     }
     let latestText;
     try {
-      latestText = import_node_fs.default.readFileSync(file, "utf8");
+      latestText = import_node_fs2.default.readFileSync(file, "utf8");
     } catch (error) {
       return { ok: false, file, error: `Unable to re-read JSON file: ${errorMessage(error)}` };
     }
@@ -361,13 +613,13 @@ function utcNow() {
 }
 function fileExists(file) {
   try {
-    return import_node_fs.default.existsSync(file);
+    return import_node_fs2.default.existsSync(file);
   } catch {
     return false;
   }
 }
 function isCadreProjectRoot(root) {
-  const cadreDir = import_node_path.default.join(root, "cadre");
+  const cadreDir = import_node_path3.default.join(root, "cadre");
   if (!fileExists(cadreDir)) return false;
   return [
     "tracks.md",
@@ -378,11 +630,11 @@ function isCadreProjectRoot(root) {
     "beads.json",
     "config.json",
     "repos.json"
-  ].some((name) => fileExists(import_node_path.default.join(cadreDir, name))) || fileExists(import_node_path.default.join(cadreDir, "tracks"));
+  ].some((name) => fileExists(import_node_path3.default.join(cadreDir, name))) || fileExists(import_node_path3.default.join(cadreDir, "tracks"));
 }
 function gitIdentity(root) {
   for (const key of ["user.email", "user.name"]) {
-    const result = (0, import_node_child_process.spawnSync)("git", ["config", key], {
+    const result = (0, import_node_child_process2.spawnSync)("git", ["config", key], {
       cwd: root,
       encoding: "utf8"
     });
@@ -393,7 +645,7 @@ function gitIdentity(root) {
   return null;
 }
 function runCommand(command, args, options = {}) {
-  const result = (0, import_node_child_process.spawnSync)(command, args, {
+  const result = (0, import_node_child_process2.spawnSync)(command, args, {
     cwd: options.cwd,
     encoding: "utf8",
     shell: options.shell === true,
@@ -519,7 +771,7 @@ function controlPlaneSyncSafety(root, mode, remote, branch) {
 function commandExists(command, cwd) {
   const key = `${process.env.PATH || ""}\0${cwd}\0${command}`;
   if (commandExistsCache.has(key)) return commandExistsCache.get(key) === true;
-  const result = (0, import_node_child_process.spawnSync)("sh", ["-lc", `command -v '${String(command).replace(/'/g, "'\\''")}'`], {
+  const result = (0, import_node_child_process2.spawnSync)("sh", ["-lc", `command -v '${String(command).replace(/'/g, "'\\''")}'`], {
     cwd,
     encoding: "utf8"
   });
@@ -528,8 +780,8 @@ function commandExists(command, cwd) {
   return exists;
 }
 function loadTopology(root) {
-  const reposPath = import_node_path.default.join(root, "cadre", "repos.json");
-  const configPath = import_node_path.default.join(root, "cadre", "config.json");
+  const reposPath = import_node_path3.default.join(root, "cadre", "repos.json");
+  const configPath = import_node_path3.default.join(root, "cadre", "config.json");
   const repos = readJson(reposPath, null);
   const config = readJson(configPath, {});
   const polyrepo = Boolean(repos && repos.mode === "polyrepo");
@@ -541,7 +793,7 @@ function loadTopology(root) {
   };
 }
 function loadPackageJson(root) {
-  return readJson(import_node_path.default.join(root, "package.json"), null);
+  return readJson(import_node_path3.default.join(root, "package.json"), null);
 }
 function normalizeProviderMode(value) {
   const raw = String(value || "").trim().toLowerCase();
@@ -641,16 +893,16 @@ function configuredCoverageCommand(root, args = {}, workingRoot = root) {
   if (scripts) {
     for (const name of ["coverage", "test:coverage", "test:cov", "test"]) {
       if (scripts[name]) {
-        if (fileExists(import_node_path.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
-        if (fileExists(import_node_path.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
+        if (fileExists(import_node_path3.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(import_node_path3.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
         return `npm run ${name}`;
       }
     }
   }
-  if (fileExists(import_node_path.default.join(workingRoot, "pyproject.toml")) || fileExists(import_node_path.default.join(workingRoot, "pytest.ini"))) {
+  if (fileExists(import_node_path3.default.join(workingRoot, "pyproject.toml")) || fileExists(import_node_path3.default.join(workingRoot, "pytest.ini"))) {
     return "pytest --cov --cov-report=term";
   }
-  if (fileExists(import_node_path.default.join(workingRoot, "go.mod"))) return "go test ./...";
+  if (fileExists(import_node_path3.default.join(workingRoot, "go.mod"))) return "go test ./...";
   return null;
 }
 function parseCoveragePercent(text) {
@@ -670,12 +922,12 @@ function parseCoveragePercent(text) {
 }
 function parseLcovCoverage(root) {
   const candidates = [
-    import_node_path.default.join(root, "coverage", "lcov.info"),
-    import_node_path.default.join(root, "lcov.info")
+    import_node_path3.default.join(root, "coverage", "lcov.info"),
+    import_node_path3.default.join(root, "lcov.info")
   ];
   for (const file of candidates) {
     if (!fileExists(file)) continue;
-    const text = import_node_fs.default.readFileSync(file, "utf8");
+    const text = import_node_fs2.default.readFileSync(file, "utf8");
     let found = 0;
     let hit = 0;
     for (const line of text.split(/\r?\n/)) {
@@ -693,9 +945,9 @@ function coverageThreshold(root) {
     const value = Number(config[key]);
     if (Number.isFinite(value) && value >= 0) return value;
   }
-  const workflowPath = import_node_path.default.join(root, "cadre", "workflow.md");
+  const workflowPath = import_node_path3.default.join(root, "cadre", "workflow.md");
   if (fileExists(workflowPath)) {
-    const text = import_node_fs.default.readFileSync(workflowPath, "utf8");
+    const text = import_node_fs2.default.readFileSync(workflowPath, "utf8");
     const match = text.match(/(?:coverage|test coverage)[^\n%]{0,80}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
     if (match?.[1]) return Number(match[1]);
   }
@@ -759,7 +1011,7 @@ function staleInfo(value, now = Date.now()) {
   };
 }
 function workStateForTrack(track) {
-  const statePath = import_node_path.default.join(track.dir, "implement_state.json");
+  const statePath = import_node_path3.default.join(track.dir, "implement_state.json");
   return readJson(statePath, null);
 }
 function holdInfo(track, now = Date.now()) {
@@ -801,23 +1053,23 @@ function taskCounts(plan) {
   return counts;
 }
 function listTrackDirs(root) {
-  const tracksDir = import_node_path.default.join(root, "cadre", "tracks");
+  const tracksDir = import_node_path3.default.join(root, "cadre", "tracks");
   if (!fileExists(tracksDir)) return [];
-  return import_node_fs.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path.default.join(tracksDir, entry.name)).sort();
+  return import_node_fs2.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path3.default.join(tracksDir, entry.name)).sort();
 }
 function listTracks(root) {
   const tracks = [];
   for (const dir of listTrackDirs(root)) {
-    const metadataPath = import_node_path.default.join(dir, "metadata.json");
+    const metadataPath = import_node_path3.default.join(dir, "metadata.json");
     const metadata = readJson(metadataPath, null);
     if (!metadata) continue;
-    const trackId = metadata.track_id || import_node_path.default.basename(dir);
+    const trackId = metadata.track_id || import_node_path3.default.basename(dir);
     tracks.push({
       track_id: trackId,
       dir,
       metadata_path: metadataPath,
-      plan_path: import_node_path.default.join(dir, "plan.md"),
-      spec_path: import_node_path.default.join(dir, "spec.md"),
+      plan_path: import_node_path3.default.join(dir, "plan.md"),
+      spec_path: import_node_path3.default.join(dir, "spec.md"),
       metadata
     });
   }
@@ -825,7 +1077,7 @@ function listTracks(root) {
 }
 function parsePlanFile(file) {
   if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
-  return parsePlanText(import_node_fs.default.readFileSync(file, "utf8"));
+  return parsePlanText(import_node_fs2.default.readFileSync(file, "utf8"));
 }
 function planClaims(root, track, topology = loadTopology(root)) {
   const plan = parsePlanFile(track.plan_path);
@@ -1352,7 +1604,7 @@ function fleetStatus(root, args = {}) {
       const repo = asJsonObject(raw);
       const name = asOptionalString(repo.name) || asOptionalString(repo.submodule_path) || "unknown";
       const rel = asOptionalString(repo.submodule_path) || "";
-      const repoRoot = rel ? import_node_path.default.resolve(root, rel) : root;
+      const repoRoot = rel ? import_node_path3.default.resolve(root, rel) : root;
       repos.push({
         name,
         role: "product",
@@ -1554,6 +1806,7 @@ function workflowResourceUris(root, workflow, result) {
   const encodedRoot = encodeURIComponent(root);
   const trackId = asOptionalString(result.track_id) || asOptionalString(asJsonObject(result.track || {}).track_id) || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
   const uris = [
+    `cadre://workspace-health?root=${encodedRoot}`,
     `cadre://team-board?root=${encodedRoot}`,
     `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`
   ];
@@ -1579,9 +1832,9 @@ function shapeWorkflowResponse(root, workflow, args, result) {
 }
 function templatePath(relativePath) {
   const candidates = [
-    import_node_path.default.join(__dirname, "..", "templates", relativePath),
-    import_node_path.default.join(__dirname, "..", "..", "templates", relativePath),
-    import_node_path.default.join(__dirname, "templates", relativePath)
+    import_node_path3.default.join(__dirname, "..", "templates", relativePath),
+    import_node_path3.default.join(__dirname, "..", "..", "templates", relativePath),
+    import_node_path3.default.join(__dirname, "templates", relativePath)
   ];
   for (const candidate of candidates) {
     if (fileExists(candidate)) return candidate;
@@ -1590,7 +1843,7 @@ function templatePath(relativePath) {
 }
 function templateText(relativePath, fallback) {
   const found = templatePath(relativePath);
-  if (found) return import_node_fs.default.readFileSync(found, "utf8");
+  if (found) return import_node_fs2.default.readFileSync(found, "utf8");
   return fallback;
 }
 function packetText(value, fallback) {
@@ -1610,7 +1863,7 @@ function configuredCiProvider(root, args = {}) {
 }
 function setupBeads(root, args = {}) {
   const available = commandExists("bd", root);
-  const stateDir = import_node_path.default.join(root, ".beads");
+  const stateDir = import_node_path3.default.join(root, ".beads");
   const initialized = fileExists(stateDir);
   const command = ["bd", "init", "--non-interactive", "--role", "maintainer"];
   if (args.execute !== true) {
@@ -1653,12 +1906,12 @@ function setupBeads(root, args = {}) {
   };
 }
 function setupGitattributes(root) {
-  const file = import_node_path.default.join(root, ".gitattributes");
+  const file = import_node_path3.default.join(root, ".gitattributes");
   const required = [
     ".beads/** merge=ours",
     "cadre/tracks/**/parallel_state.json merge=ours"
   ];
-  const existing = fileExists(file) ? import_node_fs.default.readFileSync(file, "utf8") : "";
+  const existing = fileExists(file) ? import_node_fs2.default.readFileSync(file, "utf8") : "";
   const lines = existing.split(/\r?\n/).filter(Boolean);
   let changed = false;
   for (const line of required) {
@@ -1668,13 +1921,13 @@ function setupGitattributes(root) {
     }
   }
   if (changed || !fileExists(file)) {
-    import_node_fs.default.writeFileSync(file, `${lines.join("\n")}
+    import_node_fs2.default.writeFileSync(file, `${lines.join("\n")}
 `);
   }
   const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root });
   return {
     ok: mergeDriver.ok,
-    path: import_node_path.default.relative(root, file),
+    path: import_node_path3.default.relative(root, file),
     changed,
     merge_driver: mergeDriver
   };
@@ -1689,13 +1942,13 @@ function setupCiTemplates(root, provider, args = {}) {
   const template = polyrepo ? provider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml" : provider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml";
   const source = templatePath(template);
   if (!source) return { ok: false, error: `Missing CI template ${template}` };
-  const target = provider === "github" ? import_node_path.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path.default.join(root, ".gitlab-ci.yml");
+  const target = provider === "github" ? import_node_path3.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path3.default.join(root, ".gitlab-ci.yml");
   if (fileExists(target) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source: import_node_path.default.relative(root, source), path: import_node_path.default.relative(root, target) };
+    return { ok: true, skipped: true, provider, source: import_node_path3.default.relative(root, source), path: import_node_path3.default.relative(root, target) };
   }
-  import_node_fs.default.mkdirSync(import_node_path.default.dirname(target), { recursive: true });
-  import_node_fs.default.copyFileSync(source, target);
-  return { ok: true, provider, source: import_node_path.default.relative(root, source), path: import_node_path.default.relative(root, target), written: true };
+  import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(target), { recursive: true });
+  import_node_fs2.default.copyFileSync(source, target);
+  return { ok: true, provider, source: import_node_path3.default.relative(root, source), path: import_node_path3.default.relative(root, target), written: true };
 }
 function setupSubmodulePlan(root, repos, args = {}) {
   const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
@@ -1705,7 +1958,7 @@ function setupSubmodulePlan(root, repos, args = {}) {
     const url = asOptionalString(repo.url);
     const submodulePath = asOptionalString(repo.submodule_path);
     if (!name || !url || !submodulePath || repo.enabled === false) continue;
-    if (fileExists(import_node_path.default.join(root, submodulePath))) continue;
+    if (fileExists(import_node_path3.default.join(root, submodulePath))) continue;
     commands.push(plannedGitAction(
       `submodule-${safeName(name)}`,
       "submodule_add",
@@ -1727,10 +1980,10 @@ function setupSubmodulePlan(root, repos, args = {}) {
 }
 function lspSetupHelperCandidates(root) {
   return [
-    import_node_path.default.join(__dirname, "cadre-lsp-setup.js"),
-    import_node_path.default.join(__dirname, "..", "cadre-lsp-setup.js"),
-    import_node_path.default.join(__dirname, "..", "..", "scripts", "cadre-lsp-setup.js"),
-    import_node_path.default.join(root, "cadre", "scripts", "cadre-lsp-setup.js")
+    import_node_path3.default.join(__dirname, "cadre-lsp-setup.js"),
+    import_node_path3.default.join(__dirname, "..", "cadre-lsp-setup.js"),
+    import_node_path3.default.join(__dirname, "..", "..", "scripts", "cadre-lsp-setup.js"),
+    import_node_path3.default.join(root, "cadre", "scripts", "cadre-lsp-setup.js")
   ];
 }
 function lspSetup(root, args = {}) {
@@ -1766,9 +2019,9 @@ function lspSetup(root, args = {}) {
 function availableStyleGuideIds() {
   const dir = templatePath("code_styleguides/general.md");
   if (!dir) return [];
-  const styleDir = import_node_path.default.dirname(dir);
+  const styleDir = import_node_path3.default.dirname(dir);
   try {
-    return import_node_fs.default.readdirSync(styleDir).filter((file) => file.endsWith(".md")).map((file) => import_node_path.default.basename(file, ".md")).sort();
+    return import_node_fs2.default.readdirSync(styleDir).filter((file) => file.endsWith(".md")).map((file) => import_node_path3.default.basename(file, ".md")).sort();
   } catch {
     return [];
   }
@@ -1825,7 +2078,7 @@ function techStackFromArgs(args = {}) {
   return isRecord(args.techStack) ? asJsonObject(args.techStack) : null;
 }
 function loadTechStack(root) {
-  return readJson(import_node_path.default.join(root, "cadre", "tech-stack.json"), null);
+  return readJson(import_node_path3.default.join(root, "cadre", "tech-stack.json"), null);
 }
 function techStackForPacket(root, args = {}) {
   return techStackFromArgs(args) || loadTechStack(root);
@@ -1840,7 +2093,7 @@ function techStackSummary(root, args = {}) {
     return {
       ok: false,
       root,
-      path: import_node_path.default.relative(root, import_node_path.default.join(root, "cadre", "tech-stack.json")),
+      path: import_node_path3.default.relative(root, import_node_path3.default.join(root, "cadre", "tech-stack.json")),
       error: "Missing structured tech stack: cadre/tech-stack.json"
     };
   }
@@ -1859,7 +2112,7 @@ function techStackSummary(root, args = {}) {
   return {
     ok: true,
     root,
-    path: import_node_path.default.relative(root, import_node_path.default.join(root, "cadre", "tech-stack.json")),
+    path: import_node_path3.default.relative(root, import_node_path3.default.join(root, "cadre", "tech-stack.json")),
     techStack,
     styleGuideIds: styleGuideIdsForTechStack(techStack),
     summary: lines.length > 0 ? lines.join("\n") : "No tech stack details recorded."
@@ -1891,10 +2144,10 @@ function trackLearningsText(trackId) {
   return templateText("learnings.md", "# Track Learnings: {{track_id}}\n\n").replace(/\{\{track_id\}\}/g, trackId).replace(/\n*$/, "\n");
 }
 function installedStyleGuideIds(root) {
-  const dir = import_node_path.default.join(root, "cadre", "code_styleguides");
+  const dir = import_node_path3.default.join(root, "cadre", "code_styleguides");
   if (!fileExists(dir)) return [];
   try {
-    return import_node_fs.default.readdirSync(dir).filter((file) => file.endsWith(".md")).map((file) => import_node_path.default.basename(file, ".md")).sort();
+    return import_node_fs2.default.readdirSync(dir).filter((file) => file.endsWith(".md")).map((file) => import_node_path3.default.basename(file, ".md")).sort();
   } catch {
     return [];
   }
@@ -1903,8 +2156,8 @@ function styleGuideIdsForFiles(files) {
   const ids = /* @__PURE__ */ new Set();
   for (const rawFile of files) {
     const file = normalizeClaimPath(rawFile);
-    const ext = import_node_path.default.extname(file).toLowerCase();
-    const base = import_node_path.default.basename(file).toLowerCase();
+    const ext = import_node_path3.default.extname(file).toLowerCase();
+    const base = import_node_path3.default.basename(file).toLowerCase();
     if ([".ts", ".tsx"].includes(ext)) ids.add("typescript");
     if ([".js", ".jsx", ".mjs", ".cjs"].includes(ext)) ids.add("javascript");
     if ([".html", ".css", ".scss", ".sass", ".less", ".vue", ".svelte"].includes(ext)) ids.add("html-css");
@@ -1961,11 +2214,11 @@ function implementationStyleGuides(root, trackId, args = {}) {
   ])).sort();
   const maxChars = Math.max(1e3, Math.min(Number(args.styleGuideMaxChars || 6e3), 2e4));
   const guides = selected.map((id) => {
-    const file = import_node_path.default.join(root, "cadre", "code_styleguides", `${id}.md`);
-    const text = fileExists(file) ? import_node_fs.default.readFileSync(file, "utf8") : "";
+    const file = import_node_path3.default.join(root, "cadre", "code_styleguides", `${id}.md`);
+    const text = fileExists(file) ? import_node_fs2.default.readFileSync(file, "utf8") : "";
     return {
       id,
-      path: import_node_path.default.relative(root, file),
+      path: import_node_path3.default.relative(root, file),
       content: text.slice(0, maxChars),
       truncated: text.length > maxChars,
       bytes: Buffer.byteLength(text, "utf8"),
@@ -2037,7 +2290,7 @@ function workflowSetup(root, args = {}) {
     };
   }
   if (args.execute !== true) return result;
-  const cadreDir = import_node_path.default.join(root, "cadre");
+  const cadreDir = import_node_path3.default.join(root, "cadre");
   const force = asBoolean(rawArgs.force, false);
   const missingPayload = [
     ...!asOptionalString(rawArgs.productText)?.trim() ? ["productText"] : [],
@@ -2067,27 +2320,27 @@ function workflowSetup(root, args = {}) {
   const written = [];
   const skipped = [];
   const writeText = (relativePath, text) => {
-    const file = import_node_path.default.join(cadreDir, relativePath);
+    const file = import_node_path3.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path.default.relative(root, file));
+      skipped.push(import_node_path3.default.relative(root, file));
       return;
     }
-    import_node_fs.default.mkdirSync(import_node_path.default.dirname(file), { recursive: true });
-    import_node_fs.default.writeFileSync(file, text);
-    written.push(import_node_path.default.relative(root, file));
+    import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(file), { recursive: true });
+    import_node_fs2.default.writeFileSync(file, text);
+    written.push(import_node_path3.default.relative(root, file));
   };
   const writeSetupJson = (relativePath, value) => {
-    const file = import_node_path.default.join(cadreDir, relativePath);
+    const file = import_node_path3.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path.default.relative(root, file));
+      skipped.push(import_node_path3.default.relative(root, file));
       return;
     }
-    import_node_fs.default.mkdirSync(import_node_path.default.dirname(file), { recursive: true });
+    import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(file), { recursive: true });
     writeJson(file, value);
-    written.push(import_node_path.default.relative(root, file));
+    written.push(import_node_path3.default.relative(root, file));
   };
-  import_node_fs.default.mkdirSync(import_node_path.default.join(cadreDir, "tracks"), { recursive: true });
-  import_node_fs.default.mkdirSync(import_node_path.default.join(cadreDir, "archive"), { recursive: true });
+  import_node_fs2.default.mkdirSync(import_node_path3.default.join(cadreDir, "tracks"), { recursive: true });
+  import_node_fs2.default.mkdirSync(import_node_path3.default.join(cadreDir, "archive"), { recursive: true });
   writeText(
     "product.md",
     packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n")
@@ -2221,17 +2474,17 @@ function workflowNewTrack(root, args = {}) {
       error: "Beads CLI (bd) is required for live track creation"
     };
   }
-  const dir = import_node_path.default.join(root, "cadre", "tracks", safeName(trackId));
-  import_node_fs.default.mkdirSync(dir, { recursive: true });
-  writeJson(import_node_path.default.join(dir, "metadata.json"), metadata);
-  import_node_fs.default.writeFileSync(import_node_path.default.join(dir, "spec.md"), specText || `# Spec: ${trackId}
+  const dir = import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId));
+  import_node_fs2.default.mkdirSync(dir, { recursive: true });
+  writeJson(import_node_path3.default.join(dir, "metadata.json"), metadata);
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "spec.md"), specText || `# Spec: ${trackId}
 `);
-  import_node_fs.default.writeFileSync(import_node_path.default.join(dir, "plan.md"), planText.endsWith("\n") ? planText : `${planText}
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "plan.md"), planText.endsWith("\n") ? planText : `${planText}
 `);
-  import_node_fs.default.writeFileSync(import_node_path.default.join(dir, "learnings.md"), trackLearningsText(trackId));
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "learnings.md"), trackLearningsText(trackId));
   const liveBeads = createBeadsTree(root, { ...args, trackId, dryRun: false });
   if (!liveBeads.ok) {
-    import_node_fs.default.rmSync(dir, { recursive: true, force: true });
+    import_node_fs2.default.rmSync(dir, { recursive: true, force: true });
     return {
       ...workflowSummary(root, "newtrack", args),
       ok: false,
@@ -2246,7 +2499,7 @@ function workflowNewTrack(root, args = {}) {
     ok: regen.ok !== false,
     dry_run: false,
     track_id: trackId,
-    metadata_path: import_node_path.default.relative(root, import_node_path.default.join(dir, "metadata.json")),
+    metadata_path: import_node_path3.default.relative(root, import_node_path3.default.join(dir, "metadata.json")),
     beads_tree: liveBeads,
     regen,
     worktree_plan: worktreePlan(root, { trackId })
@@ -2329,16 +2582,16 @@ function workflowArchive(root, args = {}) {
   const syncPre = syncControlPlane(root, { mode: "pre" });
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
   const archived = [];
-  const archiveRoot = import_node_path.default.join(root, "cadre", "archive");
-  import_node_fs.default.mkdirSync(archiveRoot, { recursive: true });
+  const archiveRoot = import_node_path3.default.join(root, "cadre", "archive");
+  import_node_fs2.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target = import_node_path.default.join(archiveRoot, track.track_id);
+    const target = import_node_path3.default.join(archiveRoot, track.track_id);
     if (fileExists(target)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs.default.renameSync(track.dir, target);
-    archived.push({ track_id: track.track_id, ok: true, path: import_node_path.default.relative(root, target) });
+    import_node_fs2.default.renameSync(track.dir, target);
+    archived.push({ track_id: track.track_id, ok: true, path: import_node_path3.default.relative(root, target) });
   }
   const regen = regenIndex(root);
   const syncPost = syncControlPlane(root, { mode: "post" });
@@ -2369,7 +2622,7 @@ function workflowHandoff(root, args = {}) {
   if (args.execute === true) {
     const track = findTrack(root, trackId);
     if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
-    import_node_fs.default.writeFileSync(import_node_path.default.join(track.dir, "HANDOFF.md"), `${text.replace(/\n*$/, "")}
+    import_node_fs2.default.writeFileSync(import_node_path3.default.join(track.dir, "HANDOFF.md"), `${text.replace(/\n*$/, "")}
 `);
   }
   return {
@@ -2539,10 +2792,10 @@ function workflowRelease(root, args = {}) {
   const summary = workflowSummary(root, "release", args);
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => metadataTrackSummary(track));
   const version = args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`;
-  const releaseDir = import_node_path.default.join(root, "cadre", "releases");
+  const releaseDir = import_node_path3.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
-  const releaseMd = import_node_path.default.join(releaseDir, `${releaseSlug}.md`);
-  const releaseJson = import_node_path.default.join(releaseDir, `${releaseSlug}.json`);
+  const releaseMd = import_node_path3.default.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = import_node_path3.default.join(releaseDir, `${releaseSlug}.json`);
   const notes = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release ${version}`,
     "",
@@ -2563,12 +2816,12 @@ function workflowRelease(root, args = {}) {
       dry_run: true,
       release_version: version,
       completed_tracks: completed,
-      release_artifacts: [import_node_path.default.relative(root, releaseMd), import_node_path.default.relative(root, releaseJson)],
+      release_artifacts: [import_node_path3.default.relative(root, releaseMd), import_node_path3.default.relative(root, releaseJson)],
       git_actions: gitActions
     };
   }
-  import_node_fs.default.mkdirSync(releaseDir, { recursive: true });
-  import_node_fs.default.writeFileSync(releaseMd, notes.endsWith("\n") ? notes : `${notes}
+  import_node_fs2.default.mkdirSync(releaseDir, { recursive: true });
+  import_node_fs2.default.writeFileSync(releaseMd, notes.endsWith("\n") ? notes : `${notes}
 `);
   writeJson(releaseJson, {
     version: String(version),
@@ -2584,11 +2837,11 @@ function workflowRelease(root, args = {}) {
       review: track.review
     }))
   });
-  const indexPatch = patchJsonFile(import_node_path.default.join(root, "cadre", "setup_state.json"), (current) => {
+  const indexPatch = patchJsonFile(import_node_path3.default.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: String(version),
-      path: import_node_path.default.relative(root, releaseMd),
-      metadata: import_node_path.default.relative(root, releaseJson),
+      path: import_node_path3.default.relative(root, releaseMd),
+      metadata: import_node_path3.default.relative(root, releaseJson),
       completed_tracks: completed.length,
       released_at: utcNow()
     };
@@ -2605,7 +2858,7 @@ function workflowRelease(root, args = {}) {
     bump: args.bump || args.mode || "patch",
     release_version: version,
     completed_tracks: completed,
-    release_artifacts: [import_node_path.default.relative(root, releaseMd), import_node_path.default.relative(root, releaseJson)],
+    release_artifacts: [import_node_path3.default.relative(root, releaseMd), import_node_path3.default.relative(root, releaseJson)],
     setup_state: indexPatch,
     git_actions: gitActions,
     git_results: gitResults
@@ -2689,15 +2942,15 @@ function workflowRefresh(root, args = {}) {
   const lspRequested = args.execute === true && (rawArgs.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true);
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
   const regen = args.execute === true ? regenIndex(root) : null;
-  const patternsPath = import_node_path.default.join(root, "cadre", "patterns.md");
+  const patternsPath = import_node_path3.default.join(root, "cadre", "patterns.md");
   let patterns = null;
   if (args.execute === true && fileExists(patternsPath)) {
-    const text = import_node_fs.default.readFileSync(patternsPath, "utf8");
+    const text = import_node_fs2.default.readFileSync(patternsPath, "utf8");
     const stamp = `Last refreshed: ${utcNow().slice(0, 10)}`;
     const next = /Last refreshed:\s*.*/.test(text) ? text.replace(/Last refreshed:\s*.*/, stamp) : `${text.replace(/\n*$/, "\n\n")}${stamp}
 `;
-    import_node_fs.default.writeFileSync(patternsPath, next);
-    patterns = { ok: true, path: import_node_path.default.relative(root, patternsPath), refreshed_at: stamp };
+    import_node_fs2.default.writeFileSync(patternsPath, next);
+    patterns = { ok: true, path: import_node_path3.default.relative(root, patternsPath), refreshed_at: stamp };
   }
   return {
     ...summary,
@@ -2846,7 +3099,7 @@ function trackContext(root, trackId) {
   const hold = holdInfo(track);
   const worktrees = [];
   if (track.metadata.worktree_path) {
-    const abs = import_node_path.default.resolve(root, track.metadata.worktree_path);
+    const abs = import_node_path3.default.resolve(root, track.metadata.worktree_path);
     worktrees.push({
       repo: ".",
       path: track.metadata.worktree_path,
@@ -2864,7 +3117,7 @@ function trackContext(root, trackId) {
         repo,
         submodule_path: submodulePath,
         path: worktreePath,
-        exists: worktreePath ? fileExists(import_node_path.default.resolve(root, worktreePath)) : false,
+        exists: worktreePath ? fileExists(import_node_path3.default.resolve(root, worktreePath)) : false,
         git_branch: info.git_branch || `track/${track.track_id}`,
         base_branch: info.base_branch || "main"
       });
@@ -2886,9 +3139,9 @@ function trackContext(root, trackId) {
       owner: track.metadata.owner || null,
       reviewer: track.metadata.reviewer || null,
       git_branch: track.metadata.git_branch || `track/${track.track_id}`,
-      metadata_path: import_node_path.default.relative(root, track.metadata_path || import_node_path.default.join(track.dir, "metadata.json")),
-      plan_path: import_node_path.default.relative(root, track.plan_path),
-      spec_path: import_node_path.default.relative(root, track.spec_path),
+      metadata_path: import_node_path3.default.relative(root, track.metadata_path || import_node_path3.default.join(track.dir, "metadata.json")),
+      plan_path: import_node_path3.default.relative(root, track.plan_path),
+      spec_path: import_node_path3.default.relative(root, track.spec_path),
       beads_epic: track.metadata.beads_epic || null,
       beads_tasks: track.metadata.beads_tasks || {},
       review: track.metadata.review || null,
@@ -2985,7 +3238,7 @@ function repoEntriesError(root, track, args = {}) {
 }
 function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
   if (args.workingRoot) {
-    const candidate = import_node_path.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path.default.resolve(root, args.workingRoot);
+    const candidate = import_node_path3.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path3.default.resolve(root, args.workingRoot);
     return { repo: args.repo || task?.repo || ".", path: candidate, source: "argument.workingRoot" };
   }
   const topology = loadTopology(root);
@@ -2996,14 +3249,14 @@ function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         repo,
-        path: rel ? import_node_path.default.resolve(root, rel) : root,
+        path: rel ? import_node_path3.default.resolve(root, rel) : root,
         source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path"
       };
     }
     return unresolvedWorkingRoot(root, track, String(repo || ""), task);
   }
   if (track.metadata.worktree_path) {
-    const candidate = import_node_path.default.resolve(root, track.metadata.worktree_path);
+    const candidate = import_node_path3.default.resolve(root, track.metadata.worktree_path);
     if (fileExists(candidate)) {
       return { repo: ".", path: candidate, source: "metadata.worktree_path" };
     }
@@ -3019,7 +3272,7 @@ function repoEntriesForTrack(root, track, args = {}) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         repo,
-        root: rel ? import_node_path.default.resolve(root, rel) : root,
+        root: rel ? import_node_path3.default.resolve(root, rel) : root,
         path: rel,
         base: args.base || info.base_branch || "main",
         head: args.head || info.git_branch || track.metadata.git_branch || `track/${track.track_id}`,
@@ -3029,7 +3282,7 @@ function repoEntriesForTrack(root, track, args = {}) {
   }
   return [{
     repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path.default.resolve(root, args.workingRoot) : root,
+    root: args.workingRoot ? import_node_path3.default.resolve(root, args.workingRoot) : root,
     path: args.workingRoot || ".",
     base: args.base || "main",
     head: args.head || track.metadata.git_branch || `track/${track.track_id}`,
@@ -3130,15 +3383,15 @@ function implementationPrep(root, args = {}) {
 function likelyTestCandidatesForFile(root, file) {
   const normalized = normalizeClaimPath(file);
   if (!normalized) return [];
-  const parsed = import_node_path.default.parse(normalized);
+  const parsed = import_node_path3.default.parse(normalized);
   const candidates = [
-    import_node_path.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-    import_node_path.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-    import_node_path.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-    import_node_path.default.join("test", normalized),
-    import_node_path.default.join("tests", normalized)
+    import_node_path3.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+    import_node_path3.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+    import_node_path3.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+    import_node_path3.default.join("test", normalized),
+    import_node_path3.default.join("tests", normalized)
   ].map((candidate) => normalizeClaimPath(candidate));
-  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path.default.join(root, candidate)))));
+  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path3.default.join(root, candidate)))));
 }
 function planAssist(root, args = {}) {
   const trackId = args.trackId || args.track_id || null;
@@ -3230,7 +3483,7 @@ function worktreePlan(root, args = {}) {
     const repoBranch = args.branch || entry.head || branch;
     const base = args.base || entry.base || "main";
     const relWorktree = topology.polyrepo ? `.worktrees/${track.track_id}/${safeName(repo)}` : asOptionalString(track.metadata.worktree_path) || `.worktrees/${track.track_id}`;
-    const absWorktree = import_node_path.default.resolve(root, relWorktree);
+    const absWorktree = import_node_path3.default.resolve(root, relWorktree);
     return {
       repo,
       source_root: entry.root,
@@ -3359,7 +3612,7 @@ function specContextFromText(text) {
   return { overview, acceptance };
 }
 function trackSpecContext(track, fallbackText = "") {
-  const text = track.spec_path && fileExists(track.spec_path) ? import_node_fs.default.readFileSync(track.spec_path, "utf8") : fallbackText;
+  const text = track.spec_path && fileExists(track.spec_path) ? import_node_fs2.default.readFileSync(track.spec_path, "utf8") : fallbackText;
   return specContextFromText(text);
 }
 function taskDesignText(track, phase, task, specContext) {
@@ -3405,10 +3658,10 @@ function createBeadsTree(root, args = {}) {
   };
   const track = diskTrack || {
     track_id: trackId,
-    dir: import_node_path.default.join(root, "cadre", "tracks", safeName(trackId)),
-    metadata_path: import_node_path.default.join(root, "cadre", "tracks", safeName(trackId), "metadata.json"),
-    plan_path: import_node_path.default.join(root, "cadre", "tracks", safeName(trackId), "plan.md"),
-    spec_path: import_node_path.default.join(root, "cadre", "tracks", safeName(trackId), "spec.md"),
+    dir: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId)),
+    metadata_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "metadata.json"),
+    plan_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "plan.md"),
+    spec_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "spec.md"),
     metadata: draftMetadata
   };
   if (!dryRun && !commandExists("bd", root)) {
@@ -3660,7 +3913,7 @@ function metadataPatch(root, args = {}) {
   return {
     ok: result.ok,
     track_id: track.track_id,
-    metadata_path: import_node_path.default.relative(root, track.metadata_path),
+    metadata_path: import_node_path3.default.relative(root, track.metadata_path),
     patch_keys: Object.keys(patch).sort(),
     result
   };
@@ -3688,7 +3941,7 @@ function heartbeatTrackUnlocked(root, track, args = {}) {
     metadata.updated_at = now;
     return metadata;
   }, { lock: false });
-  const statePath = import_node_path.default.join(track.dir, "implement_state.json");
+  const statePath = import_node_path3.default.join(track.dir, "implement_state.json");
   let stateResult = null;
   if (fileExists(statePath)) {
     stateResult = patchJsonFile(statePath, (state) => ({
@@ -3778,7 +4031,7 @@ function claimTrackUnlocked(root, track, options = {}) {
     return metadata;
   }, { lock: false });
   if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult, commands };
-  const statePath = import_node_path.default.join(track.dir, "implement_state.json");
+  const statePath = import_node_path3.default.join(track.dir, "implement_state.json");
   writeJson(statePath, {
     status: "starting",
     owner: identity,
@@ -3846,7 +4099,7 @@ function recordTaskResultUnlocked(root, args = {}) {
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
   const marker = markerForStatus(args.status || "completed");
-  const lines = import_node_fs.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
+  const lines = import_node_fs2.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
   const idx = task.line - 1;
   const line = lines[idx];
   if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
@@ -3877,7 +4130,7 @@ function recordTaskResultUnlocked(root, args = {}) {
   }
   lines[idx] = nextLine;
   try {
-    import_node_fs.default.writeFileSync(track.plan_path, `${lines.join("\n").replace(/\n+$/, "")}
+    import_node_fs2.default.writeFileSync(track.plan_path, `${lines.join("\n").replace(/\n+$/, "")}
 `);
   } catch (error) {
     return { ok: false, track_id: track.track_id, stage: "plan_write", error: errorMessage(error), metadata };
@@ -3902,7 +4155,7 @@ function recordTaskResult(root, args = {}) {
   return withTrackLock(root, track.track_id, () => recordTaskResultUnlocked(root, { ...args, lock: false }));
 }
 function completionJournalPath(track) {
-  return import_node_path.default.join(track.dir, "completion_journal.json");
+  return import_node_path3.default.join(track.dir, "completion_journal.json");
 }
 function readCompletionJournal(track) {
   const value = readJson(completionJournalPath(track), { entries: {} });
@@ -4060,7 +4313,7 @@ function completeTaskInner(root, args = {}) {
       commitSha: args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path.default.relative(root, workingRoot.path) || ".",
+      workingRoot: import_node_path3.default.relative(root, workingRoot.path) || ".",
       lastTestRun
     });
     if (!taskResult.ok) {
@@ -4174,7 +4427,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
     return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };
   }
-  const statePath = import_node_path.default.join(track.dir, "parallel_state.json");
+  const statePath = import_node_path3.default.join(track.dir, "parallel_state.json");
   const existing = readJson(statePath, {
     track_id: track.track_id,
     execution_mode: "parallel",
@@ -4242,7 +4495,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   return {
     ok: true,
     track_id: track.track_id,
-    state_path: import_node_path.default.relative(root, statePath),
+    state_path: import_node_path3.default.relative(root, statePath),
     worker: nextWorker,
     completion,
     summary: {
@@ -4254,7 +4507,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   };
 }
 function parallelStatePath(track) {
-  return import_node_path.default.join(track.dir, "parallel_state.json");
+  return import_node_path3.default.join(track.dir, "parallel_state.json");
 }
 function readParallelState(track) {
   const existing = readJson(parallelStatePath(track), {
@@ -4424,7 +4677,7 @@ function parallelSetupWorkers(root, track, args = {}) {
     const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
-    const worktree = import_node_path.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    const worktree = import_node_path3.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
     const sourceRoot = asString(entry.root || root);
     commands.push(plannedCommand(
       "git",
@@ -4632,7 +4885,7 @@ function recordReviewUnlocked(root, track, args = {}) {
   return { ok: true, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate };
 }
 function reviewEvidencePath(track) {
-  return import_node_path.default.join(track.dir, "review-evidence.json");
+  return import_node_path3.default.join(track.dir, "review-evidence.json");
 }
 function reviewEvidence(root, trackId) {
   const track = findTrack(root, trackId);
@@ -4645,7 +4898,7 @@ function reviewEvidence(root, trackId) {
   return {
     ok: true,
     track_id: track.track_id,
-    path: import_node_path.default.relative(root, evidencePath),
+    path: import_node_path3.default.relative(root, evidencePath),
     evidence
   };
 }
@@ -4698,7 +4951,7 @@ function providerEvidenceUnlocked(root, track, args = {}) {
   writeJson(evidencePath, next);
   const metadata = patchJsonFile(track.metadata_path, (current) => {
     current.review_evidence = {
-      path: import_node_path.default.relative(root, evidencePath),
+      path: import_node_path3.default.relative(root, evidencePath),
       entries: asArray(next.entries).length || entries.length + 1,
       latest_id: entry.id,
       latest_recorded_at: entry.recorded_at,
@@ -4711,7 +4964,7 @@ function providerEvidenceUnlocked(root, track, args = {}) {
   return {
     ok: true,
     track_id: track.track_id,
-    path: import_node_path.default.relative(root, evidencePath),
+    path: import_node_path3.default.relative(root, evidencePath),
     entry,
     metadata
   };
@@ -4741,6 +4994,93 @@ function syncControlPlane(root, args = {}) {
   }
   return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, safety, commands };
 }
+function testCoverage(root, args = {}) {
+  let track = null;
+  let task = null;
+  let workingRoot = {
+    repo: args.repo || ".",
+    path: args.workingRoot ? import_node_path3.default.resolve(root, args.workingRoot) : root,
+    source: args.workingRoot ? "argument.workingRoot" : "project-root"
+  };
+  if (args.trackId) {
+    track = findTrack(root, args.trackId);
+    if (!track) {
+      return { ok: false, available: false, error: `Track not found: ${args.trackId}` };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      const plan = parsePlanFile(track.plan_path);
+      const phase = (plan.phases || []).find((item) => item.phase_index === Number(args.phaseIndex));
+      task = phase?.tasks.find((item) => item.task_index === Number(args.taskIndex)) || null;
+    }
+    workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+    if (isWorkingRootError(workingRoot)) {
+      return {
+        ok: false,
+        available: false,
+        stage: "polyrepo_repo_resolution",
+        working_root: workingRoot,
+        reason: workingRoot.error
+      };
+    }
+  }
+  const coverageRun = runCoverage(root, args, workingRoot.path);
+  if (!coverageRun.available) return coverageRun;
+  const { command, coverage } = coverageRun;
+  let task_result = null;
+  let metadata = null;
+  if (track) {
+    const writeCoverage = () => {
+      metadata = patchJsonFile(track.metadata_path, (current) => {
+        current.last_test_run = {
+          command,
+          cwd: coverageRun.cwd || workingRoot.path,
+          ok: coverageRun.ok,
+          status: coverageRun.status,
+          signal: coverageRun.signal,
+          coverage,
+          measured_at: utcNow()
+        };
+        if (typeof coverage === "number") current.last_coverage = coverage;
+        return current;
+      }, { lock: false });
+      return metadata;
+    };
+    const metadataWrite = withTrackLock(root, track.track_id, writeCoverage);
+    if (!metadataWrite.ok) return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_lock", metadata: metadataWrite };
+    const metadataResult = metadata ?? metadataWrite;
+    if (!metadataResult.ok) {
+      return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata: metadataResult };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      task_result = recordTaskResult(root, {
+        trackId: args.trackId,
+        phaseIndex: args.phaseIndex,
+        taskIndex: args.taskIndex,
+        status: args.status || (coverageRun.ok ? "completed" : "blocked"),
+        commitSha: args.commitSha,
+        coverage,
+        repo: workingRoot.repo,
+        workingRoot: import_node_path3.default.relative(root, workingRoot.path) || "."
+      });
+    }
+  }
+  return {
+    ok: coverageRun.ok,
+    available: true,
+    command,
+    cwd: coverageRun.cwd,
+    status: coverageRun.status,
+    signal: coverageRun.signal,
+    coverage,
+    coverage_source: coverageRun.coverage_source,
+    timed_out: coverageRun.signal === "SIGTERM" || coverageRun.signal === "SIGKILL",
+    stdout_tail: coverageRun.stdout_tail,
+    stderr_tail: coverageRun.stderr_tail,
+    working_root: workingRoot,
+    metadata,
+    task_result
+  };
+}
 function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
   const explicit = args.machineCommand || args.machine_command || args.command;
   if (explicit) return String(explicit);
@@ -4760,8 +5100,8 @@ function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
   if (Object.keys(scripts).length > 0) {
     for (const name of ["typecheck", "check", "build", "lint"]) {
       if (scripts[name]) {
-        if (fileExists(import_node_path.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
-        if (fileExists(import_node_path.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
+        if (fileExists(import_node_path3.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(import_node_path3.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
         return `npm run ${name}`;
       }
     }
@@ -4811,7 +5151,7 @@ function reviewMachineGate(root, args = {}) {
   }
   const entries = track ? repoEntriesForTrack(root, track, args) : [{
     repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path.default.resolve(root, args.workingRoot) : root,
+    root: args.workingRoot ? import_node_path3.default.resolve(root, args.workingRoot) : root,
     path: args.workingRoot || ".",
     source: args.workingRoot ? "argument.workingRoot" : "project-root"
   }];
@@ -4927,16 +5267,16 @@ function scanReviewTodos(root, files, limit = 100) {
   ];
   for (const file of files || []) {
     if (isIgnoredRepoMapFile(file)) continue;
-    const abs = import_node_path.default.join(root, file);
+    const abs = import_node_path3.default.join(root, file);
     if (!fileExists(abs)) continue;
     let stat;
     try {
-      stat = import_node_fs.default.statSync(abs);
+      stat = import_node_fs2.default.statSync(abs);
     } catch {
       continue;
     }
     if (stat.size > 1024 * 1024) continue;
-    const lines = import_node_fs.default.readFileSync(abs, "utf8").split(/\r?\n/);
+    const lines = import_node_fs2.default.readFileSync(abs, "utf8").split(/\r?\n/);
     for (let index = 0; index < lines.length && findings.length < limit; index += 1) {
       const line = lines[index] || "";
       if (patterns.some((pattern) => pattern.test(line))) {
@@ -5035,11 +5375,6 @@ function isIgnoredRepoMapFile(file) {
   if (normalized.startsWith("plugins/cadre-claude/")) return true;
   return normalized.split("/").some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part));
 }
-function gitTrackedFiles(root) {
-  const result = runCommand("git", ["ls-files"], { cwd: root });
-  if (!result.ok) return [];
-  return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).filter((file) => !isIgnoredRepoMapFile(file));
-}
 function selectedRepoNames(args = {}) {
   const values = [
     asOptionalString(args.repo),
@@ -5066,7 +5401,7 @@ function intelRepoRoots(root, args = {}) {
     if (!name || !rel) continue;
     entries.push({
       repo: name,
-      root: import_node_path.default.resolve(root, rel),
+      root: import_node_path3.default.resolve(root, rel),
       path: rel,
       source: "repos.json"
     });
@@ -5083,95 +5418,45 @@ function combineLanguageCounts(entries) {
   }
   return Object.fromEntries(Object.entries(counts).sort());
 }
-function languageForFile(file) {
-  const base = import_node_path.default.basename(file);
-  if (base === "Dockerfile" || base === "Containerfile") return "dockerfile";
-  return {
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".py": "python",
-    ".go": "go",
-    ".rs": "rust",
-    ".java": "java",
-    ".kt": "kotlin",
-    ".swift": "swift",
-    ".rb": "ruby",
-    ".php": "php",
-    ".dart": "dart",
-    ".html": "html",
-    ".htm": "html",
-    ".css": "css",
-    ".scss": "css",
-    ".sass": "css",
-    ".less": "css",
-    ".json": "json",
-    ".jsonc": "json",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".md": "markdown",
-    ".mdx": "markdown",
-    ".toml": "toml",
-    ".lua": "lua",
-    ".sh": "shell",
-    ".bash": "shell",
-    ".zsh": "shell",
-    ".tf": "terraform",
-    ".tfvars": "terraform",
-    ".hcl": "terraform",
-    ".ex": "elixir",
-    ".exs": "elixir",
-    ".scala": "scala",
-    ".sc": "scala",
-    ".clj": "clojure",
-    ".cljs": "clojure",
-    ".cljc": "clojure",
-    ".hs": "haskell",
-    ".lhs": "haskell",
-    ".ml": "ocaml",
-    ".mli": "ocaml",
-    ".zig": "zig",
-    ".nix": "nix",
-    ".elm": "elm",
-    ".vue": "vue",
-    ".svelte": "svelte",
-    ".xml": "xml",
-    ".xsd": "xml",
-    ".graphql": "graphql",
-    ".gql": "graphql",
-    ".prisma": "prisma",
-    ".proto": "protobuf",
-    ".c": "c-cpp",
-    ".h": "c-cpp",
-    ".cc": "c-cpp",
-    ".cpp": "c-cpp",
-    ".cxx": "c-cpp",
-    ".hpp": "c-cpp",
-    ".cs": "csharp"
-  }[import_node_path.default.extname(file)] || null;
+var GENERIC_SYMBOL_PATTERNS = [
+  /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
+  /\b(?:export\s+)?(?:class|interface|type|enum|struct|record|trait)\s+([A-Za-z_$][\w$]*)\b/g,
+  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g
+];
+var LANGUAGE_SYMBOL_PATTERNS = {
+  python: [/^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\b/gm, /^\s*class\s+([A-Za-z_][\w]*)\b/gm],
+  go: [/^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm, /^\s*type\s+([A-Za-z_][\w]*)\s+/gm],
+  rust: [/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:pub\s+)?(?:struct|enum|trait|type)\s+([A-Za-z_][\w]*)\b/gm],
+  java: [/^\s*(?:public|private|protected|static|final|abstract|sealed|non-sealed|\s)*(?:class|interface|enum|record)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|static|final|abstract|synchronized|native|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
+  kotlin: [/^\s*(?:public|private|protected|internal|open|final|abstract|data|sealed|\s)*(?:class|interface|object|enum|typealias)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|suspend|inline|tailrec|operator|infix|fun|\s)*fun\s+([A-Za-z_][\w]*)\b/gm],
+  swift: [/^\s*(?:public|private|internal|open|fileprivate|static|final|mutating|nonmutating|\s)*(?:func|class|struct|enum|protocol)\s+([A-Za-z_][\w]*)\b/gm],
+  csharp: [/^\s*(?:public|private|protected|internal|static|partial|sealed|abstract|virtual|override|\s)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|static|async|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
+  ruby: [/^\s*(?:class|module|def)\s+([A-Za-z_][\w!?=]*)\b/gm],
+  elixir: [/^\s*(?:defmodule|defp?|defmacro)\s+([A-Za-z_][\w!?]*)\b/gm],
+  lua: [/^\s*(?:local\s+)?function\s+([A-Za-z_][\w.]*)\b/gm],
+  terraform: [/^\s*(?:resource|module|variable|output|data)\s+"?([A-Za-z0-9_.-]+)"?/gim],
+  sql: [/^\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE)\s+([A-Za-z_][\w."]*)\b/gim],
+  shell: [/^\s*function\s+([A-Za-z_][\w-]*)\b/gm, /^\s*(?:local\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{/gm]
+};
+function symbolPatternsForLanguage(language) {
+  return [...GENERIC_SYMBOL_PATTERNS, ...LANGUAGE_SYMBOL_PATTERNS[language] || []].map(
+    (pattern) => new RegExp(pattern.source, pattern.flags)
+  );
 }
 function extractRepoSymbols(root, file, limitPerFile = 40) {
-  const abs = import_node_path.default.join(root, file);
+  const abs = import_node_path3.default.join(root, file);
   if (!fileExists(abs)) return [];
   let stat;
   try {
-    stat = import_node_fs.default.statSync(abs);
+    stat = import_node_fs2.default.statSync(abs);
   } catch {
     return [];
   }
   if (stat.size > 1024 * 1024) return [];
   const language = languageForFile(file);
   if (!language) return [];
-  const text = import_node_fs.default.readFileSync(abs, "utf8");
-  const patterns = [
-    /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
-    /\b(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][\w$]*)\b/g,
-    /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g,
-    /^\s*def\s+([A-Za-z_][\w]*)\b/gm,
-    /^\s*class\s+([A-Za-z_][\w]*)\b/gm,
-    /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm
-  ];
+  const text = import_node_fs2.default.readFileSync(abs, "utf8");
+  const patterns = symbolPatternsForLanguage(language);
   const symbols = [];
   for (const pattern of patterns) {
     let match;
@@ -5201,7 +5486,7 @@ function repoMap(root, args = {}) {
     return { ok: repoResults2.some((entry) => entry.ok) || matches.length > 0, root, symbol, matches, repos: repoResults2, truncated: matches.length >= limit };
   }
   const repoResults = repos.map((entry) => {
-    const files2 = gitTrackedFiles(entry.root);
+    const files2 = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
     const byLanguage = {};
     const symbols2 = [];
     for (const file of files2) {
@@ -5281,7 +5566,7 @@ function detectWorkspaceAdapters(root) {
   const pkg = loadPackageJson(root);
   if (pkg) {
     const scripts = asJsonObject(pkg.scripts);
-    const runner = fileExists(import_node_path.default.join(root, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path.default.join(root, "yarn.lock")) ? "yarn" : "npm run";
+    const runner = fileExists(import_node_path3.default.join(root, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path3.default.join(root, "yarn.lock")) ? "yarn" : "npm run";
     const scriptCommands = ["typecheck", "check", "test", "build", "lint"].filter((script) => scripts[script]).map((script) => runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`);
     adapters.push({
       id: "node",
@@ -5290,34 +5575,34 @@ function detectWorkspaceAdapters(root) {
       available: commandExists(runner.split(" ")[0] || "npm", root),
       commands: scriptCommands
     });
-    if (fileExists(import_node_path.default.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
+    if (fileExists(import_node_path3.default.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
       adapters.push({
         id: "nx",
         ecosystem: "javascript",
-        manifest: fileExists(import_node_path.default.join(root, "nx.json")) ? "nx.json" : "package.json",
+        manifest: fileExists(import_node_path3.default.join(root, "nx.json")) ? "nx.json" : "package.json",
         available: commandExists("nx", root) || commandExists("pnpm", root) || commandExists("npx", root),
         commands: ["nx affected -t test", "nx affected -t build"]
       });
     }
   }
-  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path.default.join(root, file)))) {
+  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path3.default.join(root, file)))) {
     adapters.push({ id: "pytest", ecosystem: "python", manifest: "pyproject.toml", available: commandExists("pytest", root), commands: ["pytest"] });
   }
-  if (fileExists(import_node_path.default.join(root, "go.mod"))) {
+  if (fileExists(import_node_path3.default.join(root, "go.mod"))) {
     adapters.push({ id: "go", ecosystem: "go", manifest: "go.mod", available: commandExists("go", root), commands: ["go test ./..."] });
   }
-  if (fileExists(import_node_path.default.join(root, "Cargo.toml"))) {
+  if (fileExists(import_node_path3.default.join(root, "Cargo.toml"))) {
     adapters.push({ id: "cargo", ecosystem: "rust", manifest: "Cargo.toml", available: commandExists("cargo", root), commands: ["cargo test"] });
   }
-  if (fileExists(import_node_path.default.join(root, "pom.xml"))) {
+  if (fileExists(import_node_path3.default.join(root, "pom.xml"))) {
     adapters.push({ id: "maven", ecosystem: "java", manifest: "pom.xml", available: commandExists("mvn", root), commands: ["mvn test"] });
   }
-  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path.default.join(root, file)));
+  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path3.default.join(root, file)));
   if (gradleManifest) {
-    const gradlew = fileExists(import_node_path.default.join(root, "gradlew")) ? "./gradlew" : "gradle";
+    const gradlew = fileExists(import_node_path3.default.join(root, "gradlew")) ? "./gradlew" : "gradle";
     adapters.push({ id: "gradle", ecosystem: "jvm", manifest: gradleManifest, available: gradlew === "./gradlew" || commandExists("gradle", root), commands: [`${gradlew} test`] });
   }
-  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path.default.join(root, file)))) {
+  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path3.default.join(root, file)))) {
     adapters.push({ id: "bazel", ecosystem: "polyglot", manifest: "MODULE.bazel", available: commandExists("bazel", root), commands: ["bazel test //..."] });
   }
   return adapters;
@@ -5376,14 +5661,14 @@ function testImpact(root, args = {}) {
     const likelyTests = Object.fromEntries(files2.map((file) => [file, likelyTestCandidatesForFile(entry.root, file)]));
     const manifests = /* @__PURE__ */ new Set();
     for (const file of files2) {
-      let dir = import_node_path.default.dirname(import_node_path.default.join(entry.root, file));
+      let dir = import_node_path3.default.dirname(import_node_path3.default.join(entry.root, file));
       while (dir.startsWith(entry.root)) {
         for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
-          const candidate = import_node_path.default.join(dir, manifest);
-          if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path.default.relative(entry.root, candidate)));
+          const candidate = import_node_path3.default.join(dir, manifest);
+          if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path3.default.relative(entry.root, candidate)));
         }
         if (dir === entry.root) break;
-        dir = import_node_path.default.dirname(dir);
+        dir = import_node_path3.default.dirname(dir);
       }
     }
     return {
@@ -5424,8 +5709,8 @@ function dependencyGraph(root, args = {}) {
     "nx.json"
   ]);
   const repoGraphs = repoEntries.map((entry) => {
-    const files = gitTrackedFiles(entry.root);
-    const manifests2 = files.filter((file) => manifestPatterns.has(import_node_path.default.basename(file))).map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(import_node_path.default.dirname(file)), kind: import_node_path.default.basename(file) }));
+    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
+    const manifests2 = files.filter((file) => manifestPatterns.has(import_node_path3.default.basename(file))).map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(import_node_path3.default.dirname(file)), kind: import_node_path3.default.basename(file) }));
     return {
       repo: entry.repo,
       root: entry.root,
@@ -5452,12 +5737,12 @@ function dependencyGraph(root, args = {}) {
   };
 }
 function lspConfigStatus(root) {
-  const configPath = import_node_path.default.join(root, "cadre", "lsp.json");
+  const configPath = import_node_path3.default.join(root, "cadre", "lsp.json");
   const config = readJson(configPath, null);
   if (!config) {
     return {
       configured: false,
-      path: import_node_path.default.relative(root, configPath),
+      path: import_node_path3.default.relative(root, configPath),
       servers: [],
       missing: []
     };
@@ -5466,7 +5751,7 @@ function lspConfigStatus(root) {
   const servers = Array.isArray(configObject.servers) ? configObject.servers.map((server) => asJsonObject(server)) : [];
   return {
     configured: true,
-    path: import_node_path.default.relative(root, configPath),
+    path: import_node_path3.default.relative(root, configPath),
     servers: servers.map((server) => {
       const command = asOptionalString(server.command);
       return {
@@ -5489,8 +5774,8 @@ function mergeDriverStatus(root) {
   };
 }
 function doctor(root, options = {}) {
-  const candidateRoot = import_node_path.default.resolve(root || process.cwd());
-  const generatedCheck = import_node_path.default.join(candidateRoot, "scripts", "generate-skills.sh");
+  const candidateRoot = import_node_path3.default.resolve(root || process.cwd());
+  const generatedCheck = import_node_path3.default.join(candidateRoot, "scripts", "generate-skills.sh");
   const lspStatus = lspConfigStatus(candidateRoot);
   const lspMissing = asStringArray(lspStatus.missing);
   const checks = {
@@ -5505,7 +5790,7 @@ function doctor(root, options = {}) {
         "cadre/config.json",
         "cadre/beads.json",
         "cadre/lsp.json"
-      ].filter((name) => fileExists(import_node_path.default.join(candidateRoot, name)))
+      ].filter((name) => fileExists(import_node_path3.default.join(candidateRoot, name)))
     },
     git: {
       available: commandExists("git", candidateRoot),
@@ -5514,7 +5799,7 @@ function doctor(root, options = {}) {
     },
     beads: {
       available: commandExists("bd", candidateRoot),
-      config_present: fileExists(import_node_path.default.join(candidateRoot, "cadre", "beads.json"))
+      config_present: fileExists(import_node_path3.default.join(candidateRoot, "cadre", "beads.json"))
     },
     lsp: lspStatus,
     provider: providerMcpAvailability(candidateRoot, options),
@@ -5691,11 +5976,11 @@ ${last.stderr}`.match(/(?:rows?\s+affected|affected\s+rows?)\D+(\d+)/i) : null;
 }
 function lspReview(root, args = {}) {
   const candidates = [
-    import_node_path.default.join(__dirname, "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "scripts", "cadre-lsp-review.js"),
-    import_node_path.default.join(__dirname, "..", "..", "scripts", "cadre-lsp-review.js"),
-    import_node_path.default.join(root, "cadre", "scripts", "cadre-lsp-review.js")
+    import_node_path3.default.join(__dirname, "cadre-lsp-review.js"),
+    import_node_path3.default.join(__dirname, "..", "cadre-lsp-review.js"),
+    import_node_path3.default.join(__dirname, "..", "scripts", "cadre-lsp-review.js"),
+    import_node_path3.default.join(__dirname, "..", "..", "scripts", "cadre-lsp-review.js"),
+    import_node_path3.default.join(root, "cadre", "scripts", "cadre-lsp-review.js")
   ];
   const helper = candidates.find(fileExists);
   if (!helper) return { available: false, reason: "No cadre-lsp-review.js helper found", checked: candidates };
@@ -5718,17 +6003,17 @@ function polyrepoPreflight(root) {
   }
   const checks = [];
   const errors = [];
-  const gitmodules = import_node_path.default.join(root, ".gitmodules");
+  const gitmodules = import_node_path3.default.join(root, ".gitmodules");
   for (const repo of topology.repos.repos || []) {
     if (repo.enabled === false) continue;
-    const repoPath = import_node_path.default.join(root, repo.submodule_path || "");
+    const repoPath = import_node_path3.default.join(root, repo.submodule_path || "");
     if (!repo.name) errors.push("repo entry missing name");
     if (!repo.submodule_path) errors.push(`repo ${repo.name || "?"} missing submodule_path`);
     if (repo.submodule_path && !fileExists(repoPath)) {
       errors.push(`repo ${repo.name} path is missing: ${repo.submodule_path}`);
     }
     if (fileExists(gitmodules) && repo.name) {
-      const result = (0, import_node_child_process.spawnSync)(
+      const result = (0, import_node_child_process2.spawnSync)(
         "git",
         ["config", "-f", ".gitmodules", "--get", `submodule.${repo.name}.path`],
         { cwd: root, encoding: "utf8" }
@@ -5747,7 +6032,7 @@ function regenIndex(root, options = {}) {
   if (options.lock !== false) {
     return withLock(root, "tracks-index", () => regenIndex(root, { ...options, lock: false }));
   }
-  const tracksFile = import_node_path.default.join(root, "cadre", "tracks.md");
+  const tracksFile = import_node_path3.default.join(root, "cadre", "tracks.md");
   const start = "<!-- cadre:index:start -->";
   const end = "<!-- cadre:index:end -->";
   const tracks = listTracks(root).sort((a, b) => a.track_id.localeCompare(b.track_id));
@@ -5757,7 +6042,7 @@ function regenIndex(root, options = {}) {
     const name = track.metadata.name || track.metadata.track_id || track.track_id;
     return `## ${marker} Track: ${name}`;
   }).join("\n");
-  const existing = fileExists(tracksFile) ? import_node_fs.default.readFileSync(tracksFile, "utf8") : "";
+  const existing = fileExists(tracksFile) ? import_node_fs2.default.readFileSync(tracksFile, "utf8") : "";
   let next;
   const startIndex = existing.indexOf(start);
   const endIndex = existing.indexOf(end);
@@ -5773,10 +6058,10 @@ ${body}${body ? "\n" : ""}${after.replace(/^\n*/, "")}`;
 ${body}${body ? "\n" : ""}${end}
 `;
   }
-  import_node_fs.default.mkdirSync(import_node_path.default.dirname(tracksFile), { recursive: true });
+  import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(tracksFile), { recursive: true });
   const tmp = `${tracksFile}.${process.pid}.${Date.now()}.tmp`;
-  import_node_fs.default.writeFileSync(tmp, next);
-  import_node_fs.default.renameSync(tmp, tracksFile);
+  import_node_fs2.default.writeFileSync(tmp, next);
+  import_node_fs2.default.renameSync(tmp, tracksFile);
   return {
     ok: true,
     tracks_file: tracksFile,
@@ -5787,7 +6072,7 @@ ${body}${body ? "\n" : ""}${end}
   };
 }
 
-// src/mcp/envelope.ts
+// src/mcp/application/envelope.ts
 function asTextJson(value) {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
@@ -5833,382 +6118,70 @@ function beadsOperationMutates(operation) {
   return !["ready", "list", "show", "formula_list"].includes(String(operation || ""));
 }
 
-// src/mcp/job-manager.ts
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path2 = __toESM(require("node:path"));
-var import_node_child_process2 = require("node:child_process");
-var JobManager = class {
-  jobs;
-  nextId;
-  ttlMs;
-  constructor() {
-    this.jobs = /* @__PURE__ */ new Map();
-    this.nextId = 1;
-    this.ttlMs = 60 * 60 * 1e3;
-  }
-  jobDir(root) {
-    return import_node_path2.default.join(root, "cadre", "jobs");
-  }
-  jobPath(root, id) {
-    return import_node_path2.default.join(this.jobDir(root), `${id}.json`);
-  }
-  serialize(job) {
-    return {
-      id: job.id,
-      type: job.type,
-      root: job.root,
-      args: job.args,
-      status: job.status,
-      started_at: job.started_at,
-      finished_at: job.finished_at,
-      stdout_tail: job.stdout.slice(-8e3),
-      stderr_tail: job.stderr.slice(-8e3),
-      result: asJsonObject(job.result),
-      exit_code: job.exit_code,
-      signal: job.signal,
-      artifact_path: job.artifact_path || import_node_path2.default.relative(job.root, this.jobPath(job.root, job.id))
-    };
-  }
-  persist(job) {
-    try {
-      import_node_fs2.default.mkdirSync(this.jobDir(job.root), { recursive: true });
-      const artifactPath = this.jobPath(job.root, job.id);
-      job.artifact_path = import_node_path2.default.relative(job.root, artifactPath);
-      import_node_fs2.default.writeFileSync(artifactPath, `${JSON.stringify(this.serialize(job), null, 2)}
-`);
-    } catch {
-    }
-  }
-  loadPersisted(root, id) {
-    if (!id) return null;
-    const file = this.jobPath(root, id);
-    try {
-      return asJsonObject(JSON.parse(import_node_fs2.default.readFileSync(file, "utf8")));
-    } catch {
-      return null;
-    }
-  }
-  cleanup() {
-    const now = Date.now();
-    for (const [id, job] of this.jobs.entries()) {
-      const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
-      if (finished && now - Date.parse(job.finished_at || job.started_at) > this.ttlMs) this.jobs.delete(id);
-    }
-  }
-  start(type, root, args = {}) {
-    this.cleanup();
-    const id = `job_${this.nextId++}`;
-    const runner = import_node_path2.default.resolve(__dirname, "..", "cadre-job-runner.js");
-    const proc = (0, import_node_child_process2.spawn)(process.execPath, [runner], {
-      cwd: import_node_path2.default.resolve(__dirname, "..", ".."),
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    const job = {
-      id,
-      type,
-      root,
-      args,
-      status: "running",
-      started_at: (/* @__PURE__ */ new Date()).toISOString(),
-      finished_at: null,
-      stdout: "",
-      stderr: "",
-      result: null,
-      exit_code: null,
-      signal: null,
-      proc
-    };
-    this.jobs.set(id, job);
-    this.persist(job);
-    proc.stdout.on("data", (chunk) => {
-      job.stdout += chunk.toString("utf8");
-    });
-    proc.stderr.on("data", (chunk) => {
-      job.stderr += chunk.toString("utf8");
-    });
-    proc.on("close", (code, signal) => {
-      job.exit_code = code;
-      job.signal = signal || null;
-      job.finished_at = (/* @__PURE__ */ new Date()).toISOString();
-      try {
-        job.result = JSON.parse(job.stdout || "{}");
-      } catch {
-        job.result = { ok: false, error: "Job returned invalid JSON", stdout_tail: job.stdout.slice(-4e3) };
-      }
-      const resultObject = asJsonObject(job.result);
-      if (job.status !== "cancelled") job.status = code === 0 && resultObject.ok !== false ? "succeeded" : "failed";
-      job.proc = null;
-      this.persist(job);
-    });
-    proc.stdin.end(JSON.stringify({ type, root, args }));
-    return this.summary(job);
-  }
-  summary(job) {
-    return {
-      id: job.id,
-      type: job.type,
-      status: job.status,
-      started_at: job.started_at,
-      finished_at: job.finished_at,
-      exit_code: job.exit_code,
-      signal: job.signal,
-      stdout_tail: job.stdout.slice(-4e3),
-      stderr_tail: job.stderr.slice(-4e3),
-      artifact_path: job.artifact_path || import_node_path2.default.relative(job.root, this.jobPath(job.root, job.id))
-    };
-  }
-  get(id) {
-    this.cleanup();
-    if (!id) return null;
-    return this.jobs.get(id) || null;
-  }
-  cancel(id) {
-    const job = this.get(id);
-    if (!job) return { ok: false, error: `Job not found: ${id}` };
-    if (job.proc && job.status === "running") {
-      job.status = "cancelled";
-      job.proc.kill("SIGTERM");
-      job.finished_at = (/* @__PURE__ */ new Date()).toISOString();
-      this.persist(job);
-    }
-    return { ok: true, job: this.summary(job) };
-  }
-  result(id) {
-    const job = this.get(id);
-    if (!job) return { ok: false, error: `Job not found: ${id}` };
-    return { ok: job.status === "succeeded", job: this.summary(job), result: asJsonObject(job.result) };
-  }
-  list() {
-    this.cleanup();
-    return { ok: true, jobs: Array.from(this.jobs.values()).map((job) => this.summary(job)) };
-  }
+// src/mcp/domain/resource-catalog.ts
+var RESOURCE_DEFINITIONS = [
+  { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project." },
+  { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path." },
+  { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path." },
+  { uri: "cadre://workspace-health", name: "Cadre workspace health", description: "Compact topology, tech stack, LSP, and dependency health snapshot. Read with ?root=/path." },
+  { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path." },
+  { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>." },
+  { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path." },
+  { uri: "cadre://lsp-status", name: "Cadre LSP status", description: "Configured LSP servers plus setup recommendations. Read with ?root=/path." },
+  { uri: "cadre://repo-topology", name: "Cadre repo topology", description: "Mono/polyrepo topology. Read with ?root=/path." },
+  { uri: "cadre://provider-actions", name: "Cadre provider actions", description: "Provider action queue from ship/land packets. Read with ?root=/path&trackId=<id>&workflow=ship|land." },
+  { uri: "cadre://ship-plan", name: "Cadre ship plan", description: "Ship workflow dry-run plan. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://land-plan", name: "Cadre land plan", description: "Land workflow dry-run plan. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://release-plan", name: "Cadre release plan", description: "Release workflow dry-run plan. Read with ?root=/path." },
+  { uri: "cadre://my-next-actions", name: "Cadre next actions", description: "Mine/available/action queue. Read with ?root=/path." },
+  { uri: "cadre://review-queue", name: "Cadre review queue", description: "Bounded tracks needing review/ship attention. Read with ?root=/path." },
+  { uri: "cadre://handoff-inbox", name: "Cadre handoff inbox", description: "Incoming handoffs from team board and Beads. Read with ?root=/path." },
+  { uri: "cadre://parallel-state", name: "Cadre parallel state", description: "Track parallel worker state. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://quality-gate", name: "Cadre quality gate", description: "Review and integrity gate summary. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b." },
+  { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>." }
+];
+var RESOURCE_CONTRACTS = {
+  "cadre://team-board": { required: ["root"] },
+  "cadre://fleet-board": { required: ["root"] },
+  "cadre://beads-summary": { required: ["root"] },
+  "cadre://workspace-health": { required: ["root"] },
+  "cadre://track-context": { required: ["root", "trackId"] },
+  "cadre://review-evidence": { required: ["root", "trackId"] },
+  "cadre://collisions": { required: ["root"] },
+  "cadre://repo-map": { required: ["root"] },
+  "cadre://workspace-diagnostics": { required: ["root"] },
+  "cadre://lsp-status": { required: ["root"] },
+  "cadre://repo-topology": { required: ["root"] },
+  "cadre://provider-actions": { required: ["root", "trackId", "workflow"] },
+  "cadre://ship-plan": { required: ["root", "trackId"] },
+  "cadre://land-plan": { required: ["root", "trackId"] },
+  "cadre://release-plan": { required: ["root"] },
+  "cadre://my-next-actions": { required: ["root"] },
+  "cadre://review-queue": { required: ["root"] },
+  "cadre://handoff-inbox": { required: ["root"] },
+  "cadre://parallel-state": { required: ["root", "trackId"] },
+  "cadre://quality-gate": { required: ["root", "trackId"] },
+  "cadre://test-impact": { required: ["root"], requiredAny: [["files"], ["base", "head"]] },
+  "cadre://track-plan": { required: ["root", "trackId"] },
+  "cadre://job-result": { required: ["root", "jobId"] }
 };
-
-// src/mcp/lsp-daemon-client.ts
-var import_node_path3 = __toESM(require("node:path"));
-var import_node_child_process3 = require("node:child_process");
-var LspDaemonClient = class {
-  proc;
-  nextId;
-  pending;
-  buffer;
-  constructor() {
-    this.proc = null;
-    this.nextId = 1;
-    this.pending = /* @__PURE__ */ new Map();
-    this.buffer = "";
-  }
-  ensure() {
-    if (this.proc && !this.proc.killed) return;
-    const daemon = import_node_path3.default.resolve(__dirname, "..", "cadre-lsp-daemon.js");
-    this.proc = (0, import_node_child_process3.spawn)(process.execPath, [daemon], {
-      cwd: import_node_path3.default.resolve(__dirname, "..", ".."),
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    this.proc.stdout.on("data", (chunk) => this.read(chunk));
-    this.proc.stderr.on("data", () => {
-    });
-    this.proc.on("exit", () => {
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("LSP daemon exited"));
-      }
-      this.pending.clear();
-      this.proc = null;
-    });
-  }
-  read(chunk) {
-    this.buffer += chunk.toString("utf8");
-    let idx;
-    while ((idx = this.buffer.indexOf("\n")) >= 0) {
-      const line = this.buffer.slice(0, idx).trim();
-      this.buffer = this.buffer.slice(idx + 1);
-      if (!line) continue;
-      let message;
-      try {
-        message = asJsonObject(JSON.parse(line));
-      } catch {
-        continue;
-      }
-      const id = typeof message.id === "number" ? message.id : null;
-      if (id == null || !this.pending.has(id)) continue;
-      const pending = this.pending.get(id);
-      if (!pending) continue;
-      this.pending.delete(id);
-      clearTimeout(pending.timer);
-      const messageError = asJsonObject(message.error);
-      if (Object.keys(messageError).length > 0) pending.reject(new Error(asOptionalString(messageError.message) || "LSP daemon error"));
-      else pending.resolve(message.result);
-    }
-  }
-  request(method, params = {}, timeoutMs = 6e4) {
-    this.ensure();
-    const id = this.nextId++;
-    const payload = JSON.stringify({ id, method, params });
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`LSP daemon ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      if (!this.proc) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(new Error("LSP daemon process is not running"));
-        return;
-      }
-      this.proc.stdin.write(`${payload}
-`);
-    });
-  }
-  async shutdown() {
-    if (!this.proc) return { ok: true, stopped: 0, skipped: true };
-    return this.request("shutdown", {}, 5e3);
-  }
-};
-
-// src/mcp/resources.ts
-var import_node_path5 = __toESM(require("node:path"));
-
-// src/mcp/root-resolution.ts
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
-var import_node_url = require("node:url");
-function isDirectory(file) {
-  try {
-    return import_node_fs3.default.statSync(file).isDirectory();
-  } catch {
-    return false;
-  }
-}
-function hasCadreDirectory(dir) {
-  return isDirectory(import_node_path4.default.join(dir, "cadre"));
-}
-function isCadreStateDirectory(dir) {
-  return [
-    "tracks.md",
-    "setup_state.json",
-    "product.md",
-    "tech-stack.json",
-    "workflow.md",
-    "beads.json",
-    "config.json",
-    "repos.json"
-  ].some((name) => import_node_fs3.default.existsSync(import_node_path4.default.join(dir, name))) || isDirectory(import_node_path4.default.join(dir, "tracks"));
-}
-function hasCadreProjectState(dir) {
-  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path4.default.join(dir, "cadre"));
-}
-function normalizePathCandidate(value) {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  let candidate = value.trim();
-  if (candidate.startsWith("file://")) {
-    try {
-      candidate = (0, import_node_url.fileURLToPath)(candidate);
-    } catch {
-      return null;
-    }
-  }
-  candidate = import_node_path4.default.resolve(candidate);
-  try {
-    if (import_node_fs3.default.existsSync(candidate) && !import_node_fs3.default.statSync(candidate).isDirectory()) candidate = import_node_path4.default.dirname(candidate);
-  } catch {
-    return null;
-  }
-  return candidate;
-}
-function findCadreRoot(start) {
-  let dir = normalizePathCandidate(start);
-  if (!dir) return null;
-  while (true) {
-    if (hasCadreProjectState(dir)) return dir;
-    if (import_node_path4.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path4.default.dirname(dir);
-    const parent = import_node_path4.default.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-function rootFromCandidate(candidate) {
-  const normalized = normalizePathCandidate(candidate);
-  if (!normalized) return null;
-  const cadreRoot = findCadreRoot(normalized);
-  if (cadreRoot) return { root: cadreRoot, has_cadre: true };
-  return { root: normalized, has_cadre: false };
-}
-function requireCadreRoot(args = {}) {
-  const info = rootFromCandidate(args.root);
-  if (info && info.has_cadre) return info.root;
-  throw Object.assign(
-    new Error(
-      `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`
-    ),
-    { code: -32602 }
-  );
-}
-
-// src/mcp/resources.ts
 function resourceList() {
   return {
-    resources: [
-      { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project.", mimeType: "application/json" },
-      { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://repo-map", name: "Cadre repo map", description: "Symbol map. Read with ?root=/path and optional &symbol=<name>.", mimeType: "application/json" },
-      { uri: "cadre://workspace-diagnostics", name: "Cadre workspace diagnostics", description: "Detected build/test adapters. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://lsp-status", name: "Cadre LSP status", description: "Configured LSP servers plus setup recommendations. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://repo-topology", name: "Cadre repo topology", description: "Mono/polyrepo topology. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://provider-actions", name: "Cadre provider actions", description: "Provider action queue from ship/land packets. Read with ?root=/path&trackId=<id>&workflow=ship|land.", mimeType: "application/json" },
-      { uri: "cadre://ship-plan", name: "Cadre ship plan", description: "Ship workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://land-plan", name: "Cadre land plan", description: "Land workflow dry-run plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://release-plan", name: "Cadre release plan", description: "Release workflow dry-run plan. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://my-next-actions", name: "Cadre next actions", description: "Mine/available/action queue. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://review-queue", name: "Cadre review queue", description: "Bounded tracks needing review/ship attention. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://handoff-inbox", name: "Cadre handoff inbox", description: "Incoming handoffs from team board and Beads. Read with ?root=/path.", mimeType: "application/json" },
-      { uri: "cadre://parallel-state", name: "Cadre parallel state", description: "Track parallel worker state. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://quality-gate", name: "Cadre quality gate", description: "Review and integrity gate summary. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b.", mimeType: "application/json" },
-      { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>.", mimeType: "application/json" },
-      { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>.", mimeType: "application/json" }
-    ]
+    resources: RESOURCE_DEFINITIONS.map((resource) => ({ ...resource, mimeType: "application/json" }))
   };
 }
 function resourceTemplatesList() {
-  const listed = resourceList();
-  const resources = Array.isArray(listed.resources) ? listed.resources : [];
-  const contracts = {
-    "cadre://team-board": { required: ["root"] },
-    "cadre://fleet-board": { required: ["root"] },
-    "cadre://beads-summary": { required: ["root"] },
-    "cadre://track-context": { required: ["root", "trackId"] },
-    "cadre://review-evidence": { required: ["root", "trackId"] },
-    "cadre://collisions": { required: ["root"] },
-    "cadre://repo-map": { required: ["root"] },
-    "cadre://workspace-diagnostics": { required: ["root"] },
-    "cadre://lsp-status": { required: ["root"] },
-    "cadre://repo-topology": { required: ["root"] },
-    "cadre://provider-actions": { required: ["root", "trackId", "workflow"] },
-    "cadre://ship-plan": { required: ["root", "trackId"] },
-    "cadre://land-plan": { required: ["root", "trackId"] },
-    "cadre://release-plan": { required: ["root"] },
-    "cadre://my-next-actions": { required: ["root"] },
-    "cadre://review-queue": { required: ["root"] },
-    "cadre://handoff-inbox": { required: ["root"] },
-    "cadre://parallel-state": { required: ["root", "trackId"] },
-    "cadre://quality-gate": { required: ["root", "trackId"] },
-    "cadre://test-impact": { required: ["root"], requiredAny: [["files"], ["base", "head"]] },
-    "cadre://track-plan": { required: ["root", "trackId"] },
-    "cadre://job-result": { required: ["root", "jobId"] }
-  };
+  const resources = RESOURCE_DEFINITIONS;
   const templates = resources.map((resource) => {
-    const uri = asString(asJsonObject(resource).uri);
-    const contract = contracts[uri] || { required: ["root"] };
+    const contract = RESOURCE_CONTRACTS[resource.uri] || { required: ["root"] };
     return {
-      uriTemplate: `${uri}{?root,trackId,symbol,workflow,files,base,head,jobId}`,
-      name: asJsonObject(resource).name,
-      description: asJsonObject(resource).description,
+      uriTemplate: `${resource.uri}{?root,trackId,symbol,workflow,files,base,head,jobId}`,
+      name: resource.name,
+      description: resource.description,
       mimeType: "application/json",
       ...contract
     };
@@ -6231,86 +6204,12 @@ function parseResourceUri(uri) {
     files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean)
   };
 }
-function resourceRead(uri, jobs2) {
-  const resource = parseResourceUri(uri);
-  const root = requireCadreRoot(resource.root ? { root: resource.root } : {});
-  let value;
-  if (resource.base === "cadre://team-board") value = teamBoard(root);
-  else if (resource.base === "cadre://fleet-board") value = fleetStatus(root);
-  else if (resource.base === "cadre://beads-summary") value = beadsSummary(root);
-  else if (resource.base === "cadre://track-context") value = trackContext(root, resource.trackId);
-  else if (resource.base === "cadre://review-evidence") value = reviewEvidence(root, resource.trackId);
-  else if (resource.base === "cadre://collisions") value = collisionScan(root);
-  else if (resource.base === "cadre://repo-map") value = repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
-  else if (resource.base === "cadre://workspace-diagnostics") value = workspaceDiagnostics(root);
-  else if (resource.base === "cadre://lsp-status") value = { ok: true, status: lspConfigStatus(root), setup: lspSetup(root, { execute: false }) };
-  else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: loadTopology(root) };
-  else if (resource.base === "cadre://ship-plan") value = workflowPacket(root, { workflow: "ship", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://land-plan") value = workflowPacket(root, { workflow: "land", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://release-plan") value = workflowPacket(root, { workflow: "release" });
-  else if (resource.base === "cadre://my-next-actions") {
-    const mine = teamBoard(root, { mine: true });
-    const available = availableWork(root);
-    value = {
-      ok: mine.ok !== false && available.ok !== false,
-      mine: {
-        wip: Array.isArray(mine.wip) ? mine.wip : [],
-        incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
-        review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : []
-      },
-      available: Array.isArray(available.available) ? available.available : [],
-      reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : []
-    };
-  } else if (resource.base === "cadre://review-queue") {
-    const board = teamBoard(root);
-    value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
-  } else if (resource.base === "cadre://handoff-inbox") {
-    const board = teamBoard(root, { mine: true });
-    value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
-  } else if (resource.base === "cadre://parallel-state") value = parallelWorkflow(root, { action: "plan", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://quality-gate") {
-    if (!resource.trackId) value = { ok: false, error: "trackId is required" };
-    else value = {
-      ok: true,
-      track_id: resource.trackId,
-      integrity: planIntegrity(root, resource.trackId),
-      review_gate: reviewGate(root, resource.trackId, {}),
-      collisions: collisionScan(root)
-    };
-  } else if (resource.base === "cadre://test-impact") value = testImpact(root, {
-    files: resource.files,
-    base: resource.baseRef || void 0,
-    head: resource.headRef || void 0
-  });
-  else if (resource.base === "cadre://track-plan") {
-    const context = trackContext(root, resource.trackId);
-    const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
-    value = context.ok === false || !planPath ? context : parsePlanFile(import_node_path5.default.resolve(root, planPath));
-  } else if (resource.base === "cadre://job-result") {
-    const persisted = jobs2.loadPersisted(root, resource.jobId);
-    value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
-  } else if (resource.base === "cadre://provider-actions") {
-    const workflow = resource.workflow === "land" ? "land" : "ship";
-    const plan = asJsonObject(workflowPacket(root, { workflow, trackId: resource.trackId || void 0 }));
-    value = {
-      ok: plan.ok !== false,
-      workflow,
-      track_id: resource.trackId,
-      phase_state: plan.phase_state,
-      provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
-      required_provider_mcp: plan.required_provider_mcp || null,
-      required_evidence: plan.required_evidence || null,
-      continuation_token: plan.continuation_token || null
-    };
-  } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
-  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
-}
 
-// src/mcp/tool-catalog.ts
+// src/mcp/domain/tool-catalog.ts
 var PROTOCOL_VERSION = "2025-11-25";
 var SERVER_INSTRUCTIONS = [
   "Cadre MCP is the packet-owned runtime for Cadre workflows. Pass an explicit root on every project-scoped call; setup packets may use a root candidate before cadre/ exists.",
-  "Prefer compact responses and Cadre resources for dashboards, review queues, quality gates, repo maps, job results, and status views.",
+  "Prefer compact responses and Cadre resources for dashboards, review queues, quality gates, workspace health, repo maps, job results, and status views.",
   "Do not mutate cadre/, Beads, provider state, indexes, worker state, or merge/cleanup state outside Cadre packets."
 ].join(" ");
 var PROPS = {
@@ -6505,7 +6404,7 @@ var TOOLS = [
   }),
   packetSchema({
     name: "cadre_job",
-    description: "Cadre job packet: start, status, result, cancel, and list process-local long-running jobs.",
+    description: "Cadre job packet: start, status, result, cancel, and list process-local or persisted long-running jobs.",
     actionEnum: ["start", "status", "result", "cancel", "list"],
     fields: ["action", "type", "jobId", "id", "args", "timeoutMs"],
     required: ["action"],
@@ -6532,9 +6431,191 @@ var TOOLS = [
   })
 ];
 
-// src/mcp/server-runtime.ts
-var lspDaemon = new LspDaemonClient();
-var jobs = new JobManager();
+// src/mcp/application/resources-service.ts
+var import_node_path4 = __toESM(require("node:path"));
+function summarizeRecords(records, limit = 8) {
+  if (!Array.isArray(records)) return [];
+  return records.slice(0, limit).map((record) => asJsonObject(record));
+}
+function summarizeAdapters(adapters) {
+  return summarizeRecords(adapters, 10).map((adapter) => ({
+    id: adapter.id || null,
+    repo: adapter.repo || null,
+    path: adapter.path || null,
+    available: adapter.available,
+    manifest: adapter.manifest || null,
+    ecosystem: adapter.ecosystem || null,
+    commands: Array.isArray(adapter.commands) ? adapter.commands.slice(0, 3) : []
+  }));
+}
+function summarizeCommands(commands) {
+  return summarizeRecords(commands, 10).map((command) => ({
+    adapter: command.adapter || null,
+    command: command.command || null,
+    cwd: command.cwd || null,
+    repo: command.repo || null,
+    path: command.path || null
+  }));
+}
+function summarizeRecs(recommended) {
+  return summarizeRecords(recommended, 10).map((rec) => ({
+    id: rec.id || null,
+    label: rec.label || null,
+    command: rec.command || null,
+    files: rec.files || 0,
+    available: rec.available,
+    samples: Array.isArray(rec.samples) ? rec.samples.slice(0, 3) : []
+  }));
+}
+function workspaceHealth(root) {
+  const topology = asJsonObject(loadTopology(root));
+  const topologyRepos = asJsonObject(topology.repos);
+  const topologyConfig = asJsonObject(topology.config);
+  const workspace = workspaceDiagnostics(root);
+  const dependencyGraph2 = dependencyGraph(root);
+  const techStack = techStackSummary(root);
+  const lspStatus = lspConfigStatus(root);
+  const lspSetup2 = lspSetup(root, { execute: false });
+  const availableWork2 = availableWork(root);
+  const lspStatusObject = asJsonObject(lspStatus);
+  return {
+    ok: true,
+    root,
+    languages: {
+      detected: summarizeRecs(lspSetup2.ok === false ? [] : lspSetup2.recommended).map((rec) => rec.id).filter(Boolean),
+      configured: Array.isArray(lspStatusObject.servers) ? lspStatusObject.servers.map((server) => asJsonObject(server).id || null).filter((id) => typeof id === "string" && id.length > 0) : []
+    },
+    topology: {
+      polyrepo: Boolean(topology.polyrepo),
+      default_repo: topology.defaultRepo || null,
+      sync_mode: typeof topologyConfig.sync_mode === "string" ? topologyConfig.sync_mode : "local",
+      repos: Array.isArray(topologyRepos.repos) ? topologyRepos.repos.slice(0, 10).map((repo) => {
+        const entry = asJsonObject(repo);
+        return {
+          name: entry.name || null,
+          submodule_path: entry.submodule_path || null,
+          worktree_path: entry.worktree_path || null,
+          enabled: entry.enabled !== false
+        };
+      }) : []
+    },
+    tech_stack: techStack.ok === false ? { ok: false, error: techStack.error || "Missing tech stack" } : {
+      ok: true,
+      path: techStack.path,
+      summary: techStack.summary,
+      styleGuideIds: techStack.styleGuideIds
+    },
+    workspace: {
+      adapters: summarizeAdapters(workspace.adapters),
+      commands: summarizeCommands(workspace.commands),
+      repo_count: Array.isArray(workspace.repos) ? workspace.repos.length : 0
+    },
+    dependency_graph: {
+      manifest_count: Array.isArray(dependencyGraph2.manifests) ? dependencyGraph2.manifests.length : 0,
+      edge_count: Array.isArray(dependencyGraph2.edges) ? dependencyGraph2.edges.length : 0,
+      repo_count: Array.isArray(dependencyGraph2.repos) ? dependencyGraph2.repos.length : 0,
+      manifests: summarizeRecords(dependencyGraph2.manifests, 10)
+    },
+    parallel: availableWork2.ok === false ? { ok: false, error: availableWork2.error || "Available work unavailable" } : {
+      ok: true,
+      available_count: Array.isArray(availableWork2.available) ? availableWork2.available.length : 0,
+      reclaimable_count: Array.isArray(availableWork2.reclaimable) ? availableWork2.reclaimable.length : 0,
+      available: summarizeRecords(availableWork2.available, 5),
+      reclaimable: summarizeRecords(availableWork2.reclaimable, 5)
+    },
+    lsp: {
+      status: lspStatus,
+      setup: lspSetup2.ok === false ? { ok: false, error: lspSetup2.error || "LSP setup unavailable" } : {
+        ok: true,
+        config: lspSetup2.config,
+        missingFromConfig: Array.isArray(lspSetup2.missingFromConfig) ? lspSetup2.missingFromConfig : [],
+        missingCommands: Array.isArray(lspSetup2.missingCommands) ? lspSetup2.missingCommands.slice(0, 10) : [],
+        recommended: summarizeRecs(lspSetup2.recommended),
+        workspaceFolders: Array.isArray(lspSetup2.workspaceFolders) ? lspSetup2.workspaceFolders.slice(0, 10) : [],
+        added: Array.isArray(lspSetup2.added) ? lspSetup2.added : []
+      }
+    }
+  };
+}
+function resourceRead(uri, deps) {
+  const resource = parseResourceUri(uri);
+  const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
+  let value;
+  if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
+  else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
+  else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
+  else if (resource.base === "cadre://workspace-health") value = workspaceHealth(root);
+  else if (resource.base === "cadre://track-context") value = deps.core.trackContext(root, resource.trackId);
+  else if (resource.base === "cadre://review-evidence") value = deps.core.reviewEvidence(root, resource.trackId);
+  else if (resource.base === "cadre://collisions") value = deps.core.collisionScan(root);
+  else if (resource.base === "cadre://repo-map") value = deps.core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
+  else if (resource.base === "cadre://workspace-diagnostics") value = deps.core.workspaceDiagnostics(root);
+  else if (resource.base === "cadre://lsp-status") value = { ok: true, status: deps.core.lspConfigStatus(root), setup: deps.core.lspSetup(root, { execute: false }) };
+  else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: deps.core.loadTopology(root) };
+  else if (resource.base === "cadre://ship-plan") value = deps.core.workflowPacket(root, { workflow: "ship", trackId: resource.trackId || void 0 });
+  else if (resource.base === "cadre://land-plan") value = deps.core.workflowPacket(root, { workflow: "land", trackId: resource.trackId || void 0 });
+  else if (resource.base === "cadre://release-plan") value = deps.core.workflowPacket(root, { workflow: "release" });
+  else if (resource.base === "cadre://my-next-actions") {
+    const mine = deps.core.teamBoard(root, { mine: true });
+    const available = deps.core.availableWork(root);
+    value = {
+      ok: mine.ok !== false && available.ok !== false,
+      mine: {
+        wip: Array.isArray(mine.wip) ? mine.wip : [],
+        incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
+        review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : []
+      },
+      available: Array.isArray(available.available) ? available.available : [],
+      reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : []
+    };
+  } else if (resource.base === "cadre://review-queue") {
+    const board = deps.core.teamBoard(root);
+    value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
+  } else if (resource.base === "cadre://handoff-inbox") {
+    const board = deps.core.teamBoard(root, { mine: true });
+    value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
+  } else if (resource.base === "cadre://parallel-state") value = deps.core.parallelWorkflow(root, { action: "plan", trackId: resource.trackId || void 0 });
+  else if (resource.base === "cadre://quality-gate") {
+    if (!resource.trackId) value = { ok: false, error: "trackId is required" };
+    else value = {
+      ok: true,
+      track_id: resource.trackId,
+      integrity: deps.core.planIntegrity(root, resource.trackId),
+      review_gate: deps.core.reviewGate(root, resource.trackId, {}),
+      collisions: deps.core.collisionScan(root)
+    };
+  } else if (resource.base === "cadre://test-impact") value = deps.core.testImpact(root, {
+    files: resource.files,
+    base: resource.baseRef || void 0,
+    head: resource.headRef || void 0
+  });
+  else if (resource.base === "cadre://track-plan") {
+    const context = deps.core.trackContext(root, resource.trackId);
+    const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
+    value = context.ok === false || !planPath ? context : deps.core.parsePlanFile(import_node_path4.default.resolve(root, planPath));
+  } else if (resource.base === "cadre://job-result") {
+    const persisted = deps.jobs.loadPersisted(root, resource.jobId);
+    value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
+  } else if (resource.base === "cadre://provider-actions") {
+    const workflow = resource.workflow === "land" ? "land" : "ship";
+    const plan = asJsonObject(deps.core.workflowPacket(root, { workflow, trackId: resource.trackId || void 0 }));
+    value = {
+      ok: plan.ok !== false,
+      workflow,
+      track_id: resource.trackId,
+      phase_state: plan.phase_state,
+      provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
+      required_provider_mcp: plan.required_provider_mcp || null,
+      required_evidence: plan.required_evidence || null,
+      continuation_token: plan.continuation_token || null
+    };
+  } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
+  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
+}
+
+// src/mcp/application/review-support.ts
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
 function selectedRepos(args) {
   const values = [
     asOptionalString(args.repo),
@@ -6542,18 +6623,18 @@ function selectedRepos(args) {
   ].filter((item) => Boolean(item));
   return values.length > 0 ? new Set(values) : null;
 }
-function repoReviewTargets(root, args) {
+function repoReviewTargets(deps, root, args) {
   const trackId = asOptionalString(args.trackId) || asOptionalString(args.track_id);
   const selected = selectedRepos(args);
   if (!trackId) return [{ repo: ".", path: ".", cwd: root, base: args.base || "main", head: args.head || "HEAD", source: "project-root" }];
-  const context = asJsonObject(trackContext(root, trackId));
+  const context = asJsonObject(deps.core.trackContext(root, trackId));
   const topology = asJsonObject(context.topology);
   if (topology.polyrepo !== true) {
     return [{ repo: ".", path: ".", cwd: root, base: args.base || "main", head: args.head || "HEAD", source: "project-root" }];
   }
   const track = asJsonObject(context.track);
   const fromContext = Array.isArray(context.worktrees) ? context.worktrees.map((entry) => asJsonObject(entry)) : [];
-  const topologyInfo = asJsonObject(loadTopology(root));
+  const topologyInfo = asJsonObject(deps.core.loadTopology(root));
   const topologyRepos = asJsonObject(topologyInfo.repos);
   const fromTopology = Array.isArray(topologyRepos.repos) ? topologyRepos.repos.map((entry) => asJsonObject(entry)) : [];
   const rawTargets = fromContext.length > 0 ? fromContext : fromTopology;
@@ -6568,7 +6649,7 @@ function repoReviewTargets(root, args) {
     return {
       repo,
       path: rel,
-      cwd: import_node_path6.default.isAbsolute(rel) ? rel : import_node_path6.default.resolve(root, rel),
+      cwd: import_node_path5.default.isAbsolute(rel) ? rel : import_node_path5.default.resolve(root, rel),
       base: args.base || asOptionalString(entry.base_branch) || asOptionalString(entry.default_branch) || "main",
       head: args.head || asOptionalString(entry.git_branch) || asOptionalString(track.git_branch) || `track/${trackId}`,
       source: asOptionalString(entry.source) || (entry.worktree_path ? "metadata.repos.worktree_path" : "repos.json")
@@ -6587,13 +6668,13 @@ function annotateRepoFindings(result, target) {
     repo_path: repoPath
   }));
 }
-async function warmLspReview(root, args) {
-  const targets = repoReviewTargets(root, args);
+async function warmLspReview(deps, root, args) {
+  const targets = repoReviewTargets(deps, root, args);
   const timeoutMs = Number(args.timeoutMs || 12e4);
-  const rawConfig = asOptionalString(args.config) || import_node_path6.default.join(root, "cadre", "lsp.json");
-  const config = import_node_path6.default.isAbsolute(rawConfig) ? rawConfig : import_node_path6.default.resolve(root, rawConfig);
+  const rawConfig = asOptionalString(args.config) || import_node_path5.default.join(root, "cadre", "lsp.json");
+  const config = import_node_path5.default.isAbsolute(rawConfig) ? rawConfig : import_node_path5.default.resolve(root, rawConfig);
   if (targets.length <= 1 && targets[0]?.repo === ".") {
-    return asJsonObject(await lspDaemon.request(
+    return asJsonObject(await deps.lspDaemon.request(
       "review",
       { ...args, root, base: args.base || "main", head: args.head || "HEAD", config },
       timeoutMs
@@ -6602,7 +6683,7 @@ async function warmLspReview(root, args) {
   const repos = await Promise.all(targets.map(async (target) => {
     const cwd = asOptionalString(target.cwd) || root;
     const repo = asOptionalString(target.repo) || ".";
-    if (!import_node_fs4.default.existsSync(cwd)) {
+    if (!import_node_fs3.default.existsSync(cwd)) {
       const result2 = {
         available: false,
         reason: `Repo working root is missing: ${cwd}`,
@@ -6610,7 +6691,7 @@ async function warmLspReview(root, args) {
       };
       return { ...target, result: result2, findings: [] };
     }
-    const result = asJsonObject(await lspDaemon.request(
+    const result = asJsonObject(await deps.lspDaemon.request(
       "review",
       {
         ...args,
@@ -6638,33 +6719,25 @@ async function warmLspReview(root, args) {
     findings
   };
 }
-function jobTypeForPacket(name, args) {
-  if (name === "cadre_complete_task") return "complete_task";
-  if (name === "cadre_review" && args.action === "assist") return "review_assist";
-  if (name === "cadre_review" && args.action === "machine_gate") return "machine_gate";
-  if (name === "cadre_intel" && args.action === "lsp_review") return "lsp_review";
-  if (name === "cadre_intel" && args.action === "lsp_impact") return "lsp_impact";
-  return args.type || null;
-}
-function jobEnvelope(type, root, args) {
-  if (!type) return envelope({ ok: false, error: "job type is required" });
-  return envelope({ ok: true, job: jobs.start(type, root, args) });
-}
-async function workflowPacket2(args) {
-  const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
+
+// src/mcp/application/packets/workflow.ts
+async function workflowPacket2(deps, args) {
+  const workflow = args.workflow || args.action || "status";
   const setupWorkflows = /* @__PURE__ */ new Set(["setup", "setup_assist", "setup_scaffold"]);
   if (setupWorkflows.has(workflow)) {
-    const info = rootFromCandidate(args.root || process.cwd());
-    return envelope(workflowPacket(info ? info.root : process.cwd(), { ...args, workflow }));
+    const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
+    return envelope(deps.core.workflowPacket(info ? info.root : process.cwd(), { ...args, workflow }));
   }
-  const root = requireCadreRoot(args);
+  const root = deps.rootResolver.requireCadreRoot(args);
   if ((workflow === "review" || workflow === "revise") && args.includeLsp !== false) {
-    const lspResult = await warmLspReview(root, args);
-    return envelope(workflowPacket(root, { ...args, workflow, lspResult }));
+    const lspResult = await warmLspReview(deps, root, args);
+    return envelope(deps.core.workflowPacket(root, { ...args, workflow, lspResult }));
   }
-  return envelope(workflowPacket(root, { ...args, workflow }));
+  return envelope(deps.core.workflowPacket(root, { ...args, workflow }));
 }
-async function projectPacket(args) {
+
+// src/mcp/application/packets/project.ts
+async function projectPacket(deps, args) {
   const action = args.action || "ping";
   if (action === "ping") {
     return envelope({
@@ -6675,204 +6748,597 @@ async function projectPacket(args) {
     });
   }
   if (action === "doctor") {
-    const info = rootFromCandidate(args.root || process.cwd());
-    return envelope(doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
+    const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
+    return envelope(deps.core.doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
   }
   if (action === "root") {
-    const root2 = requireCadreRoot(args);
+    const root2 = deps.rootResolver.requireCadreRoot(args);
     return envelope({ ok: true, root: root2, source: "argument.root" });
   }
-  const root = requireCadreRoot(args);
-  if (action === "topology") return envelope({ ok: true, root, topology: loadTopology(root) });
-  if (action === "tech_stack_summary") return envelope(techStackSummary(root, args));
-  if (action === "sync_control_plane") return envelope(syncControlPlane(root, args));
-  if (action === "polyrepo_preflight") return envelope(polyrepoPreflight(root));
+  const root = deps.rootResolver.requireCadreRoot(args);
+  if (action === "topology") return envelope({ ok: true, root, topology: deps.core.loadTopology(root) });
+  if (action === "tech_stack_summary") return envelope(deps.core.techStackSummary(root, args));
+  if (action === "sync_control_plane") return envelope(deps.core.syncControlPlane(root, args));
+  if (action === "polyrepo_preflight") return envelope(deps.core.polyrepoPreflight(root));
   return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });
 }
-function statusPacket(args) {
-  const root = requireCadreRoot(args);
+
+// src/mcp/application/packets/status.ts
+function statusPacket(deps, args) {
+  const root = deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "live";
-  if (action === "live") return envelope(liveStatus(root));
-  if (action === "team") return envelope(teamStatus(root));
-  if (action === "mine") return envelope(teamBoard(root, { ...args, mine: true }));
-  if (action === "available") return envelope(availableWork(root));
-  if (action === "collisions") return envelope(collisionScan(root));
-  if (action === "board") return envelope(teamBoard(root, args));
-  if (action === "fleet") return envelope(fleetStatus(root, args));
-  if (action === "beads_summary") return envelope(beadsSummary(root));
+  if (action === "live") return envelope(deps.core.liveStatus(root));
+  if (action === "team") return envelope(deps.core.teamStatus(root));
+  if (action === "mine") return envelope(deps.core.teamBoard(root, { mine: true }));
+  if (action === "available") return envelope(deps.core.availableWork(root));
+  if (action === "collisions") return envelope(deps.core.collisionScan(root));
+  if (action === "board") return envelope(deps.core.teamBoard(root, args));
+  if (action === "fleet") return envelope(deps.core.fleetStatus(root, args));
+  if (action === "beads_summary") return envelope(deps.core.beadsSummary(root));
   return envelope({ ok: false, error: `Unknown cadre_status action: ${action}` });
 }
-function trackPacket(args) {
-  const root = requireCadreRoot(args);
+
+// src/mcp/application/packets/track.ts
+var import_node_path6 = __toESM(require("node:path"));
+function trackPacket(deps, args) {
+  const root = deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "context";
-  if (action === "context") return envelope(trackContext(root, args.trackId || args.track_id));
+  if (action === "context") return envelope(deps.core.trackContext(root, args.trackId || args.track_id));
   if (action === "parse_plan") {
     if (!args.planPath) return envelope({ ok: false, error: "planPath is required" });
-    return envelope(parsePlanFile(import_node_path6.default.resolve(root, args.planPath)));
+    return envelope(deps.core.parsePlanFile(import_node_path6.default.resolve(root, args.planPath)));
   }
-  if (action === "integrity") return envelope(planIntegrity(root, args.trackId || args.track_id || null));
-  if (action === "phase_schedule") return envelope(phaseSchedule(root, args));
-  if (action === "prepare_implementation") return envelope(implementationPrep(root, args));
-  if (action === "create_beads_tree") return envelope(createBeadsTree(root, args));
-  if (action === "plan_assist") return envelope(planAssist(root, args));
-  if (action === "worktree_plan") return envelope(worktreePlan(root, args));
+  if (action === "integrity") return envelope(deps.core.planIntegrity(root, args.trackId || args.track_id || null));
+  if (action === "phase_schedule") return envelope(deps.core.phaseSchedule(root, args));
+  if (action === "prepare_implementation") return envelope(deps.core.implementationPrep(root, args));
+  if (action === "create_beads_tree") return envelope(deps.core.createBeadsTree(root, args));
+  if (action === "plan_assist") return envelope(deps.core.planAssist(root, args));
+  if (action === "worktree_plan") return envelope(deps.core.worktreePlan(root, args));
   return envelope({ ok: false, error: `Unknown cadre_track action: ${action}` });
 }
-function mutatePacket(args) {
-  const root = requireCadreRoot(args);
+
+// src/mcp/application/packets/mutate.ts
+function mutatePacket(deps, args) {
+  const root = deps.rootResolver.requireCadreRoot(args);
   const action = args.action;
   if (action === "claim") {
     const trackId = args.trackId || args.track_id;
     if (!trackId) return envelope({ ok: false, error: "trackId is required" });
-    return syncedEnvelope(root, "mutate:claim", () => claimTrack(root, trackId, args));
+    return syncedEnvelope(root, "mutate:claim", () => deps.core.claimTrack(root, trackId, args));
   }
-  if (action === "heartbeat") return syncedEnvelope(root, "mutate:heartbeat", () => heartbeatTrack(root, args));
+  if (action === "heartbeat") return syncedEnvelope(root, "mutate:heartbeat", () => deps.core.heartbeatTrack(root, args));
   if (action === "set_status") {
     const trackId = args.trackId || args.track_id;
     if (!trackId || !args.status) return envelope({ ok: false, error: "trackId and status are required" });
-    return syncedEnvelope(root, "mutate:set_status", () => setTrackStatus(root, String(trackId), String(args.status)));
+    return syncedEnvelope(root, "mutate:set_status", () => deps.core.setTrackStatus(root, String(trackId), String(args.status)));
   }
-  if (action === "metadata_patch") return syncedEnvelope(root, "mutate:metadata_patch", () => metadataPatch(root, args));
-  if (action === "record_review") return syncedEnvelope(root, "mutate:record_review", () => recordReview(root, args));
-  if (action === "record_worker") return syncedEnvelope(root, "mutate:record_worker", () => recordParallelWorker(root, { ...args, execute: false }));
-  if (action === "record_task_result") return syncedEnvelope(root, "mutate:record_task_result", () => recordTaskResult(root, args));
-  if (action === "regen_index") return syncedEnvelope(root, "mutate:regen_index", () => regenIndex(root));
+  if (action === "metadata_patch") return syncedEnvelope(root, "mutate:metadata_patch", () => deps.core.metadataPatch(root, args));
+  if (action === "record_review") return syncedEnvelope(root, "mutate:record_review", () => deps.core.recordReview(root, args));
+  if (action === "record_worker") return syncedEnvelope(root, "mutate:record_worker", () => deps.core.recordParallelWorker(root, { ...args, execute: false }));
+  if (action === "record_task_result") return syncedEnvelope(root, "mutate:record_task_result", () => deps.core.recordTaskResult(root, args));
+  if (action === "regen_index") return syncedEnvelope(root, "mutate:regen_index", () => deps.core.regenIndex(root));
   return envelope({ ok: false, error: `Unknown cadre_mutate action: ${action}` });
 }
-function parallelPacket(args) {
-  const root = requireCadreRoot(args);
-  return envelope(parallelWorkflow(root, args));
+
+// src/mcp/application/packets/parallel.ts
+function parallelPacket(deps, args) {
+  const root = deps.rootResolver.requireCadreRoot(args);
+  return envelope(deps.core.parallelWorkflow(root, args));
 }
-async function reviewPacket(args) {
-  const root = requireCadreRoot(args);
+
+// src/mcp/application/job-support.ts
+function jobTypeForPacket(name, args) {
+  if (name === "cadre_complete_task") return "complete_task";
+  if (name === "cadre_review" && args.action === "assist") return "review_assist";
+  if (name === "cadre_review" && args.action === "machine_gate") return "machine_gate";
+  if (name === "cadre_intel" && args.action === "lsp_review") return "lsp_review";
+  if (name === "cadre_intel" && args.action === "lsp_impact") return "lsp_impact";
+  return args.type || null;
+}
+function jobEnvelope(type, root, args, deps) {
+  if (!type) return envelope({ ok: false, error: "job type is required" });
+  return envelope({ ok: true, job: deps.jobs.start(type, root, args) });
+}
+
+// src/mcp/application/packets/review.ts
+async function reviewPacket(deps, args) {
+  const root = deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "assist";
-  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_review", args), root, args);
+  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_review", args), root, args, deps);
   if (action === "assist") {
     let lspResult = null;
     if (args.includeLsp !== false) {
-      lspResult = await warmLspReview(root, args);
+      lspResult = await warmLspReview(deps, root, args);
     }
     const reviewArgs = { ...args };
     if (lspResult) reviewArgs.lspResult = lspResult;
-    return envelope(reviewAssist(root, reviewArgs));
+    return envelope(deps.core.reviewAssist(root, reviewArgs));
   }
-  if (action === "machine_gate") return envelope(reviewMachineGate(root, args));
+  if (action === "machine_gate") return envelope(deps.core.reviewMachineGate(root, args));
   if (action === "gate") {
     const trackId = args.trackId || args.track_id;
     if (!trackId) return envelope({ ok: false, error: "trackId is required" });
-    return envelope(reviewGate(root, trackId, args));
+    return envelope(deps.core.reviewGate(root, trackId, args));
   }
-  if (action === "pr_ci_status") return envelope(prCiStatus(root, args));
-  if (action === "provider_evidence") return syncedEnvelope(root, "review:provider_evidence", () => providerEvidence(root, args));
+  if (action === "pr_ci_status") return envelope(deps.core.prCiStatus(root, args));
+  if (action === "provider_evidence") return syncedEnvelope(root, "review:provider_evidence", () => deps.core.providerEvidence(root, args));
   return envelope({ ok: false, error: `Unknown cadre_review action: ${action}` });
 }
-async function intelPacket(args) {
-  const daemonRoot = args.root ? rootFromCandidate(args.root) : null;
-  const root = args.action && args.action.startsWith("lsp_daemon") ? daemonRoot ? daemonRoot.root : process.cwd() : requireCadreRoot(args);
+
+// src/mcp/application/packets/intel.ts
+async function intelPacket(deps, args) {
+  const daemonRoot = args.root ? deps.rootResolver.rootFromCandidate(args.root) : null;
+  const root = args.action && args.action.startsWith("lsp_daemon") ? daemonRoot ? daemonRoot.root : process.cwd() : deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "repo_map";
-  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args);
-  if (action === "repo_map") return envelope(repoMap(root, args));
-  if (action === "lsp_setup") return envelope(lspSetup(root, args));
-  if (action === "workspace_diagnostics") return envelope(workspaceDiagnostics(root, args));
-  if (action === "test_impact") return envelope(testImpact(root, args));
-  if (action === "dependency_graph") return envelope(dependencyGraph(root, args));
+  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args, deps);
+  if (action === "repo_map") return envelope(deps.core.repoMap(root, args));
+  if (action === "lsp_setup") return envelope(deps.core.lspSetup(root, args));
+  if (action === "workspace_diagnostics") return envelope(deps.core.workspaceDiagnostics(root));
+  if (action === "test_impact") return envelope(deps.core.testImpact(root, args));
+  if (action === "dependency_graph") return envelope(deps.core.dependencyGraph(root));
   if (action === "lsp_impact") {
     let lspResult = null;
     if ((args.base || args.head) && args.includeLsp !== false) {
-      lspResult = await warmLspReview(root, args);
+      lspResult = await warmLspReview(deps, root, args);
     }
     const impactArgs = { ...args };
     if (lspResult) impactArgs.lspResult = lspResult;
-    return envelope(lspImpact(root, impactArgs));
+    return envelope(deps.core.lspImpact(root, impactArgs));
   }
-  if (action === "lsp_review") return envelope(lspReview(root, args));
+  if (action === "lsp_review") return envelope(deps.core.lspReview(root, args));
   if (action === "lsp_warm_review") {
-    return envelope(await warmLspReview(root, args));
+    return envelope(await warmLspReview(deps, root, args));
   }
-  if (action === "lsp_daemon_status") return envelope(await lspDaemon.request("status", {}, 5e3));
-  if (action === "lsp_daemon_shutdown") return envelope(await lspDaemon.shutdown());
+  if (action === "lsp_daemon_status") return envelope(await deps.lspDaemon.request("status", {}, 5e3));
+  if (action === "lsp_daemon_shutdown") return envelope(await deps.lspDaemon.shutdown());
   return envelope({ ok: false, error: `Unknown cadre_intel action: ${action}` });
 }
-function jobPacket(args) {
+
+// src/mcp/application/packets/job.ts
+function jobPacket(deps, args) {
   const action = args.action || "status";
   if (action === "start") {
-    const root = requireCadreRoot(args);
+    const root = deps.rootResolver.requireCadreRoot(args);
     const type = args.type;
     if (!type) return envelope({ ok: false, error: "type is required for cadre_job start" });
-    return jobEnvelope(type, root, args.args || args);
+    return jobEnvelope(type, root, args.args || args, deps);
   }
   if (action === "status") {
-    const job = jobs.get(args.jobId || args.id);
-    if (job) return envelope({ ok: true, job: jobs.summary(job) });
-    const info = args.root ? rootFromCandidate(args.root) : null;
-    const persisted = info ? jobs.loadPersisted(info.root, args.jobId || args.id) : null;
+    const job = deps.jobs.get(args.jobId || args.id);
+    if (job) return envelope({ ok: true, job: deps.jobs.summary(job) });
+    const info = args.root ? deps.rootResolver.rootFromCandidate(args.root) : null;
+    const persisted = info ? deps.jobs.loadPersisted(info.root, args.jobId || args.id) : null;
     return envelope(persisted ? { ok: true, job: persisted } : { ok: false, error: `Job not found: ${args.jobId || args.id}` });
   }
   if (action === "result") {
-    const live = jobs.result(args.jobId || args.id);
+    const live = deps.jobs.result(args.jobId || args.id);
     if (live.ok !== false) return envelope(live);
-    const info = args.root ? rootFromCandidate(args.root) : null;
-    const persisted = info ? jobs.loadPersisted(info.root, args.jobId || args.id) : null;
+    const info = args.root ? deps.rootResolver.rootFromCandidate(args.root) : null;
+    const persisted = info ? deps.jobs.loadPersisted(info.root, args.jobId || args.id) : null;
     return envelope(persisted ? { ok: persisted.status === "succeeded", job: persisted, result: asJsonObject(persisted.result) } : live);
   }
-  if (action === "cancel") return envelope(jobs.cancel(args.jobId || args.id));
-  if (action === "list") return envelope(jobs.list());
+  if (action === "cancel") return envelope(deps.jobs.cancel(args.jobId || args.id));
+  if (action === "list") {
+    const info = args.root ? deps.rootResolver.rootFromCandidate(args.root) : null;
+    return envelope(deps.jobs.list(info ? info.root : null));
+  }
   return envelope({ ok: false, error: `Unknown cadre_job action: ${action}` });
 }
-async function toolCall(name, args = {}) {
-  if (name === "cadre_workflow") return asTextJson(await workflowPacket2(args));
-  if (name === "cadre_project") return asTextJson(await projectPacket(args));
-  if (name === "cadre_status") return asTextJson(statusPacket(args));
-  if (name === "cadre_track") return asTextJson(trackPacket(args));
-  if (name === "cadre_parallel") return asTextJson(parallelPacket(args));
-  if (name === "cadre_mutate") return asTextJson(mutatePacket(args));
-  if (name === "cadre_complete_task") {
-    const root = requireCadreRoot(args);
-    if (args.async === true) return asTextJson(jobEnvelope("complete_task", root, args));
-    return asTextJson(syncedEnvelope(root, "complete_task", () => completeTask(root, { ...args, execute: false })));
-  }
-  if (name === "cadre_beads") {
-    const root = requireCadreRoot(args);
-    if (beadsOperationMutates(args.operation)) {
-      return asTextJson(syncedEnvelope(root, `beads:${args.operation || "unknown"}`, () => beadsTaskWrite(root, args)));
+
+// src/mcp/application/router.ts
+function createToolCall(deps) {
+  return async function toolCall(name, args = {}) {
+    if (name === "cadre_workflow") return asTextJson(await workflowPacket2(deps, args));
+    if (name === "cadre_project") return asTextJson(await projectPacket(deps, args));
+    if (name === "cadre_status") return asTextJson(statusPacket(deps, args));
+    if (name === "cadre_track") return asTextJson(trackPacket(deps, args));
+    if (name === "cadre_parallel") return asTextJson(parallelPacket(deps, args));
+    if (name === "cadre_mutate") return asTextJson(mutatePacket(deps, args));
+    if (name === "cadre_complete_task") {
+      const root = deps.rootResolver.requireCadreRoot(args);
+      if (args.async === true) return asTextJson(envelope({ ok: true, job: deps.jobs.start("complete_task", root, args) }));
+      return asTextJson(syncedEnvelope(root, "complete_task", () => deps.core.completeTask(root, { ...args, execute: false })));
     }
-    return asTextJson(envelope(beadsTaskWrite(root, args)));
-  }
-  if (name === "cadre_job") return asTextJson(jobPacket(args));
-  if (name === "cadre_review") return asTextJson(await reviewPacket(args));
-  if (name === "cadre_intel") return asTextJson(await intelPacket(args));
-  throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
+    if (name === "cadre_beads") {
+      const root = deps.rootResolver.requireCadreRoot(args);
+      if (beadsOperationMutates(args.operation)) {
+        return asTextJson(syncedEnvelope(root, `beads:${args.operation || "unknown"}`, () => deps.core.beadsTaskWrite(root, args)));
+      }
+      return asTextJson(envelope(deps.core.beadsTaskWrite(root, args)));
+    }
+    if (name === "cadre_job") return asTextJson(jobPacket(deps, args));
+    if (name === "cadre_review") return asTextJson(await reviewPacket(deps, args));
+    if (name === "cadre_intel") return asTextJson(await intelPacket(deps, args));
+    throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
+  };
 }
-async function handle(message) {
-  const method = message.method;
-  const params = asJsonObject(message.params);
-  if (method === "initialize") {
-    return {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: { resources: { listChanged: false }, tools: { listChanged: false } },
-      serverInfo: { name: "cadre", version: "2.0.0" },
-      instructions: SERVER_INSTRUCTIONS
-    };
+function createMcpRuntime(deps) {
+  const toolCall = createToolCall(deps);
+  async function handle2(message) {
+    const method = message.method;
+    const params = asJsonObject(message.params);
+    if (method === "initialize") {
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: { resources: { listChanged: false }, tools: { listChanged: false } },
+        serverInfo: { name: "cadre", version: "2.0.0" },
+        instructions: SERVER_INSTRUCTIONS
+      };
+    }
+    if (method === "notifications/initialized") return void 0;
+    if (method === "ping") return {};
+    if (method === "tools/list") return { tools: TOOLS };
+    if (method === "tools/call") {
+      const name = asOptionalString(params.name);
+      if (!name) throw Object.assign(new Error("tools/call requires params.name"), { code: -32602 });
+      return toolCall(name, asJsonObject(params.arguments));
+    }
+    if (method === "resources/list") return resourceList();
+    if (method === "resources/templates/list") return resourceTemplatesList();
+    if (method === "resources/read") {
+      const uri = asOptionalString(params.uri);
+      if (!uri) throw Object.assign(new Error("resources/read requires params.uri"), { code: -32602 });
+      return resourceRead(uri, deps);
+    }
+    throw Object.assign(new Error(`Method not found: ${method}`), { code: -32601 });
   }
-  if (method === "notifications/initialized") return void 0;
-  if (method === "ping") return {};
-  if (method === "tools/list") return { tools: TOOLS };
-  if (method === "tools/call") {
-    const name = asOptionalString(params.name);
-    if (!name) throw Object.assign(new Error("tools/call requires params.name"), { code: -32602 });
-    return toolCall(name, asJsonObject(params.arguments));
-  }
-  if (method === "resources/list") return resourceList();
-  if (method === "resources/templates/list") return resourceTemplatesList();
-  if (method === "resources/read") {
-    const uri = asOptionalString(params.uri);
-    if (!uri) throw Object.assign(new Error("resources/read requires params.uri"), { code: -32602 });
-    return resourceRead(uri, jobs);
-  }
-  throw Object.assign(new Error(`Method not found: ${method}`), { code: -32601 });
+  return { handle: handle2 };
 }
 
-// src/mcp/stdio-transport.ts
+// src/mcp/infrastructure/job-manager.ts
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path7 = __toESM(require("node:path"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_child_process3 = require("node:child_process");
+var JobManager = class {
+  jobs;
+  ttlMs;
+  constructor() {
+    this.jobs = /* @__PURE__ */ new Map();
+    this.ttlMs = 60 * 60 * 1e3;
+  }
+  jobDir(root) {
+    return import_node_path7.default.join(root, "cadre", "jobs");
+  }
+  jobPath(root, id) {
+    return import_node_path7.default.join(this.jobDir(root), `${id}.json`);
+  }
+  serialize(job) {
+    return {
+      id: job.id,
+      type: job.type,
+      root: job.root,
+      args: job.args,
+      status: job.status,
+      started_at: job.started_at,
+      finished_at: job.finished_at,
+      stdout_tail: job.stdout.slice(-8e3),
+      stderr_tail: job.stderr.slice(-8e3),
+      result: asJsonObject(job.result),
+      exit_code: job.exit_code,
+      signal: job.signal,
+      artifact_path: job.artifact_path || import_node_path7.default.relative(job.root, this.jobPath(job.root, job.id))
+    };
+  }
+  persist(job) {
+    try {
+      import_node_fs4.default.mkdirSync(this.jobDir(job.root), { recursive: true });
+      const artifactPath = this.jobPath(job.root, job.id);
+      job.artifact_path = import_node_path7.default.relative(job.root, artifactPath);
+      import_node_fs4.default.writeFileSync(artifactPath, `${JSON.stringify(this.serialize(job), null, 2)}
+`);
+    } catch {
+    }
+  }
+  loadPersisted(root, id) {
+    if (!id) return null;
+    const file = this.jobPath(root, id);
+    try {
+      const parsed = asJsonObject(JSON.parse(import_node_fs4.default.readFileSync(file, "utf8")));
+      return {
+        ...parsed,
+        persisted: true,
+        stale: parsed.status === "running"
+      };
+    } catch {
+      return null;
+    }
+  }
+  cleanup() {
+    const now = Date.now();
+    for (const [id, job] of this.jobs.entries()) {
+      const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
+      if (finished && now - Date.parse(job.finished_at || job.started_at) > this.ttlMs) this.jobs.delete(id);
+    }
+  }
+  summaryFromState(job, persisted = false) {
+    const stdout = typeof job.stdout === "string" ? job.stdout : typeof job.stdout_tail === "string" ? job.stdout_tail : "";
+    const stderr = typeof job.stderr === "string" ? job.stderr : typeof job.stderr_tail === "string" ? job.stderr_tail : "";
+    const root = typeof job.root === "string" ? job.root : "";
+    const id = typeof job.id === "string" ? job.id : "";
+    return {
+      id,
+      type: typeof job.type === "string" ? job.type : "",
+      root,
+      status: typeof job.status === "string" ? job.status : "running",
+      started_at: typeof job.started_at === "string" ? job.started_at : null,
+      finished_at: typeof job.finished_at === "string" ? job.finished_at : null,
+      exit_code: typeof job.exit_code === "number" ? job.exit_code : null,
+      signal: typeof job.signal === "string" ? job.signal : null,
+      stdout_tail: stdout.slice(-4e3),
+      stderr_tail: stderr.slice(-4e3),
+      artifact_path: typeof job.artifact_path === "string" ? job.artifact_path : root && id ? import_node_path7.default.relative(root, this.jobPath(root, id)) : null,
+      persisted,
+      stale: persisted && typeof job.status === "string" && job.status === "running"
+    };
+  }
+  persistedJobIds(root) {
+    try {
+      return import_node_fs4.default.readdirSync(this.jobDir(root)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5));
+    } catch {
+      return [];
+    }
+  }
+  getManaged(id) {
+    this.cleanup();
+    if (!id) return null;
+    return this.jobs.get(id) || null;
+  }
+  start(type, root, args = {}) {
+    this.cleanup();
+    const id = `job_${import_node_crypto2.default.randomUUID()}`;
+    const runner = import_node_path7.default.resolve(__dirname, "..", "..", "scripts", "cadre-job-runner.js");
+    const proc = (0, import_node_child_process3.spawn)(process.execPath, [runner], {
+      cwd: import_node_path7.default.resolve(__dirname, "..", ".."),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const job = {
+      id,
+      type,
+      root,
+      args,
+      status: "running",
+      started_at: (/* @__PURE__ */ new Date()).toISOString(),
+      finished_at: null,
+      stdout: "",
+      stderr: "",
+      result: null,
+      exit_code: null,
+      signal: null,
+      proc
+    };
+    this.jobs.set(id, job);
+    this.persist(job);
+    proc.stdout.on("data", (chunk) => {
+      job.stdout += chunk.toString("utf8");
+    });
+    proc.stderr.on("data", (chunk) => {
+      job.stderr += chunk.toString("utf8");
+    });
+    proc.on("close", (code, signal) => {
+      job.exit_code = code;
+      job.signal = signal || null;
+      job.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+      try {
+        job.result = JSON.parse(job.stdout || "{}");
+      } catch {
+        job.result = { ok: false, error: "Job returned invalid JSON", stdout_tail: job.stdout.slice(-4e3) };
+      }
+      const resultObject = asJsonObject(job.result);
+      if (job.status !== "cancelled") job.status = code === 0 && resultObject.ok !== false ? "succeeded" : "failed";
+      job.proc = null;
+      this.persist(job);
+    });
+    proc.stdin.end(JSON.stringify({ type, root, args }));
+    return this.summary(job);
+  }
+  summary(job) {
+    return this.summaryFromState(asJsonObject(job), false);
+  }
+  get(id) {
+    return this.getManaged(id);
+  }
+  cancel(id) {
+    const job = this.getManaged(id);
+    if (!job) return { ok: false, error: `Job not found: ${id}` };
+    if (job.proc && job.status === "running") {
+      job.status = "cancelled";
+      job.proc.kill("SIGTERM");
+      job.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+      this.persist(job);
+    }
+    return { ok: true, job: this.summary(job) };
+  }
+  result(id) {
+    const job = this.getManaged(id);
+    if (!job) return { ok: false, error: `Job not found: ${id}` };
+    return { ok: job.status === "succeeded", job: this.summary(job), result: asJsonObject(job.result) };
+  }
+  list(root = null) {
+    this.cleanup();
+    const live = Array.from(this.jobs.values()).map((job) => this.summaryFromState(asJsonObject(job), false));
+    const persisted = root ? this.persistedJobIds(root).filter((id) => !this.jobs.has(id)).map((id) => this.loadPersisted(root, id)).filter((job) => job !== null).map((job) => this.summaryFromState(job, true)) : [];
+    const jobs = [...live, ...persisted].sort((a, b) => {
+      const left = Date.parse(String(a.started_at || a.finished_at || 0));
+      const right = Date.parse(String(b.started_at || b.finished_at || 0));
+      return Number.isFinite(right) && Number.isFinite(left) ? right - left : 0;
+    });
+    return { ok: true, jobs };
+  }
+};
+
+// src/mcp/infrastructure/lsp-daemon-client.ts
+var import_node_path8 = __toESM(require("node:path"));
+var import_node_child_process4 = require("node:child_process");
+var LspDaemonClient = class {
+  proc;
+  nextId;
+  pending;
+  buffer;
+  constructor() {
+    this.proc = null;
+    this.nextId = 1;
+    this.pending = /* @__PURE__ */ new Map();
+    this.buffer = "";
+  }
+  ensure() {
+    if (this.proc && !this.proc.killed) return;
+    const daemon = import_node_path8.default.resolve(__dirname, "..", "..", "scripts", "cadre-lsp-daemon.js");
+    this.proc = (0, import_node_child_process4.spawn)(process.execPath, [daemon], {
+      cwd: import_node_path8.default.resolve(__dirname, "..", ".."),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    this.proc.stdout.on("data", (chunk) => this.read(chunk));
+    this.proc.stderr.on("data", () => {
+    });
+    this.proc.on("exit", () => {
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("LSP daemon exited"));
+      }
+      this.pending.clear();
+      this.proc = null;
+    });
+  }
+  read(chunk) {
+    this.buffer += chunk.toString("utf8");
+    while (this.buffer.includes("\n")) {
+      const index = this.buffer.indexOf("\n");
+      const line = this.buffer.slice(0, index).trim();
+      this.buffer = this.buffer.slice(index + 1);
+      if (!line) continue;
+      let message;
+      try {
+        message = asJsonObject(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      const id = Number(message.id);
+      if (!Number.isFinite(id)) continue;
+      const pending = this.pending.get(id);
+      if (!pending) continue;
+      this.pending.delete(id);
+      clearTimeout(pending.timer);
+      if (message.error) {
+        pending.reject(new Error(String(asOptionalString(message.error?.message) || "LSP daemon error")));
+      } else {
+        pending.resolve(message.result);
+      }
+    }
+  }
+  request(method, params = {}, timeoutMs = 12e4) {
+    this.ensure();
+    const id = this.nextId++;
+    const body = JSON.stringify({ id, method, params });
+    const promise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`LSP daemon request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+    });
+    this.proc?.stdin.write(`${body}
+`);
+    return promise;
+  }
+  shutdown() {
+    if (!this.proc || this.proc.killed) {
+      return Promise.resolve({ ok: true, alreadyStopped: true });
+    }
+    const proc = this.proc;
+    return new Promise((resolve) => {
+      proc.once("exit", () => resolve({ ok: true }));
+      proc.kill("SIGTERM");
+    });
+  }
+};
+
+// src/mcp/infrastructure/root-resolution.ts
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path9 = __toESM(require("node:path"));
+var import_node_url = require("node:url");
+function isDirectory(file) {
+  try {
+    return import_node_fs5.default.statSync(file).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function hasCadreDirectory(dir) {
+  return isDirectory(import_node_path9.default.join(dir, "cadre"));
+}
+function isCadreStateDirectory(dir) {
+  return [
+    "tracks.md",
+    "setup_state.json",
+    "product.md",
+    "tech-stack.json",
+    "workflow.md",
+    "beads.json",
+    "config.json",
+    "repos.json"
+  ].some((name) => import_node_fs5.default.existsSync(import_node_path9.default.join(dir, name))) || isDirectory(import_node_path9.default.join(dir, "tracks"));
+}
+function hasCadreProjectState(dir) {
+  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path9.default.join(dir, "cadre"));
+}
+function normalizePathCandidate(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  let candidate = value.trim();
+  if (candidate.startsWith("file://")) {
+    try {
+      candidate = (0, import_node_url.fileURLToPath)(candidate);
+    } catch {
+      return null;
+    }
+  }
+  candidate = import_node_path9.default.resolve(candidate);
+  try {
+    if (import_node_fs5.default.existsSync(candidate) && !import_node_fs5.default.statSync(candidate).isDirectory()) candidate = import_node_path9.default.dirname(candidate);
+  } catch {
+    return null;
+  }
+  return candidate;
+}
+function findCadreRoot(start) {
+  let dir = normalizePathCandidate(start);
+  if (!dir) return null;
+  while (true) {
+    if (hasCadreProjectState(dir)) return dir;
+    if (import_node_path9.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path9.default.dirname(dir);
+    const parent = import_node_path9.default.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+function rootFromCandidate(candidate) {
+  const normalized = normalizePathCandidate(candidate);
+  if (!normalized) return null;
+  const cadreRoot = findCadreRoot(normalized);
+  if (cadreRoot) return { root: cadreRoot, has_cadre: true };
+  return { root: normalized, has_cadre: false };
+}
+function requireCadreRoot(args = {}) {
+  const info = rootFromCandidate(args.root);
+  if (info && info.has_cadre) return info.root;
+  throw Object.assign(
+    new Error(
+      `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`
+    ),
+    { code: -32602 }
+  );
+}
+
+// src/mcp/presentation/server-runtime.ts
+var runtime = createMcpRuntime({
+  core: cadre_core_exports,
+  jobs: new JobManager(),
+  lspDaemon: new LspDaemonClient(),
+  rootResolver: { requireCadreRoot, rootFromCandidate }
+});
+var handle = runtime.handle;
+
+// src/mcp/presentation/stdio-transport.ts
 function send(payload) {
   const body = JSON.stringify(payload);
   process.stdout.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
@@ -6909,21 +7375,18 @@ function startStdioTransport(handle2) {
       const bodyStart = headerEnd + 4;
       const bodyEnd = bodyStart + length;
       if (buffer.length < bodyEnd) return;
-      const raw = buffer.slice(bodyStart, bodyEnd).toString("utf8");
+      const body = buffer.slice(bodyStart, bodyEnd).toString("utf8");
       buffer = buffer.slice(bodyEnd);
-      let message = null;
+      let message;
       try {
-        message = asJsonObject(JSON.parse(raw));
-        const currentMessage = message;
-        Promise.resolve(handle2(currentMessage)).then((result) => {
-          if (result !== void 0) respond(currentMessage, result);
-        }).catch((error) => respondError(currentMessage, error));
+        message = asJsonObject(JSON.parse(body));
       } catch (error) {
-        respondError(message || { id: null }, error);
+        respondError({}, error);
+        continue;
       }
+      Promise.resolve(handle2(message)).then((result) => respond(message, result)).catch((error) => respondError(message, error));
     }
   });
-  process.stdin.resume();
 }
 
 // src/mcp/cadre-server.ts
