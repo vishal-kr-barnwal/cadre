@@ -1,28 +1,24 @@
-# Cadre monorepo drift gate (GitHub Actions).
+# Cadre harness drift gate (GitHub Actions).
 #
-# Scaffolded into the repo at .github/workflows/cadre-monorepo-check.yml.
+# Scaffolded into the harness repo at .github/workflows/cadre-monorepo-check.yml.
 # This is the OPTIONAL drift-gate half of the PR-open / CI hook: it guards the
-# "edit canonical -> regenerate -> commit" contract for the generated skill
-# and plugin bundles.
+# "edit canonical -> regenerate -> commit" contract for the generated skill and
+# plugin bundles.
 #
-# What it does: on every pull_request it checks out the repo and runs
-#   1. `pnpm check` — builds runtime JS from TypeScript, verifies generated
-#      Claude/Codex skill/plugin bundles in a scratch dir, and runs tests. It
-#      fails if committed output is STALE. The fix is always: edit the master
-#      workflow protocols/source, re-run `pnpm generate`, and commit the
-#      regenerated trees.
-#   2. `bash -n scripts/*.sh` — a shell syntax check (parse-only, runs nothing) of
-#      every script under scripts/, so a broken generator/helper can't merge.
-#   3. agent context parity — when `scripts/check-agent-context.sh` exists, asserts
-#      AGENTS.md and CLAUDE.md both carry the team-scale safety rules.
-#   4. .gitattributes guard (shared mode only) — asserts the required `merge=ours`
-#      lines exist so the control-plane merge contract isn't silently dropped.
-#   5. review gate (track PRs only) — asserts the track's metadata.review cleared:
-#      verdict approved, no blocking findings, no disallowed self-review, and
-#      reviewed_sha is present. (SHA-equality against the PR head is only a
-#      non-blocking WARNING — ship/land rebase rewrites the tip, so CI cannot match
-#      the ephemeral pre-rebase tip; the hard out-of-band-push guard runs at push
-#      time in /cadre-ship and /cadre-land.)
+# What it does: on every pull_request it checks out the repo and fans out the
+# expensive validation into independent jobs:
+#   1. `pnpm check:typecheck`
+#   2. `pnpm check:runtime`
+#   3. `pnpm check:generated`
+#   4. `pnpm check:test`
+#   5. policy gate — shell syntax, agent-context parity, and .gitattributes
+#      merge contract checks
+#   6. review gate (track PRs only) — asserts the track's metadata.review
+#      cleared: verdict approved, no blocking findings, no disallowed
+#      self-review, and reviewed_sha is present. (SHA-equality against the PR
+#      head is only a non-blocking WARNING — ship/land rebase rewrites the tip,
+#      so CI cannot match the ephemeral pre-rebase tip; the hard out-of-band
+#      push guard runs at push time in /cadre-ship and /cadre-land.)
 #
 # Keep this minimal: no Beads, no `bd` — the task graph is not part of CI. The
 # only tools needed are bash + jq + git, all present on ubuntu-latest.
@@ -32,32 +28,19 @@ name: cadre-monorepo-check
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: cadre-monorepo-check-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  drift-gate:
+  policy-gate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install PNPM dependencies
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-
-      - name: Check generated skill bundles are not stale
-        # Fails if skill protocol sources changed without regenerating the
-        # per-platform skill bundles. Fix: re-run pnpm generate and commit.
-        run: pnpm check
 
       - name: Shell syntax check
         # Parse-only (-n) — validates every script without executing it.
@@ -101,6 +84,89 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
           echo ".gitattributes contains the required merge=ours lines."
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install PNPM dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm check:typecheck
+
+  runtime-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install PNPM dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build runtime bundles
+        # Builds the generated runtime artifacts from TypeScript.
+        run: pnpm check:runtime
+
+  generated-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install PNPM dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Check generated outputs
+        # Fails if skill protocol sources changed without regenerating the
+        # per-platform skill bundles. Fix: re-run pnpm generate and commit.
+        run: pnpm check:generated
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install PNPM dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Run harness tests
+        run: pnpm check:test
 
   review-gate:
     # Track PRs must clear review before they can merge. A "track PR" is one whose

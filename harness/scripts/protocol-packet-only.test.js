@@ -243,6 +243,38 @@ test("Target-project CI templates do not bundle harness-only checks", () => {
   }
 });
 
+test("Harness CI templates fan out the heavy checks", () => {
+  const harnessTemplates = [
+    path.join(root, "templates", "ci", "cadre-harness-check.github.yml"),
+    path.join(root, "templates", "ci", "cadre-harness-check.gitlab.yml"),
+  ];
+  const requiredJobs = [
+    /policy-gate:/,
+    /typecheck:/,
+    /runtime-build:/,
+    /generated-check:/,
+    /review-gate:/,
+    /test:/,
+  ];
+  const requiredScripts = [
+    /pnpm check:typecheck/,
+    /pnpm check:runtime/,
+    /pnpm check:generated/,
+    /pnpm check:test/,
+  ];
+
+  for (const file of harnessTemplates) {
+    const text = fs.readFileSync(file, "utf8");
+    for (const pattern of requiredJobs) {
+      assert.match(text, pattern, `${path.relative(root, file)} is missing ${pattern}`);
+    }
+    for (const pattern of requiredScripts) {
+      assert.match(text, pattern, `${path.relative(root, file)} is missing ${pattern}`);
+    }
+    assert.doesNotMatch(text, /\bpnpm check(?:\s|$)/, path.relative(root, file));
+  }
+});
+
 test("Hidden local skill discovery dirs contain only Cadre output", () => {
   for (const dir of [path.join(root, ".agents", "skills"), path.join(root, ".claude", "skills")]) {
     const entries = fs.readdirSync(dir, { withFileTypes: true })
