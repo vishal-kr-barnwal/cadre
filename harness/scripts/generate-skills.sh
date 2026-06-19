@@ -398,7 +398,8 @@ write_plugin_mcp_config() {
       "command": "node",
       "args": [
         "./scripts/mcp/cadre-server.js"
-      ]
+      ],
+      "cwd": "."
     }
   }
 }

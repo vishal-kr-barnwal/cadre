@@ -4,7 +4,8 @@
       "command": "node",
       "args": [
         "./scripts/mcp/cadre-server.js"
-      ]
+      ],
+      "cwd": "."
     }
   }
 }

@@ -180,7 +180,9 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
   assert.equal(codexMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
+  assert.equal(codexMcp.mcpServers.cadre.cwd, ".");
   assert.equal(claudeMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
+  assert.equal(claudeMcp.mcpServers.cadre.cwd, ".");
 
   assert.deepEqual(failures, []);
 });
@@ -201,6 +203,10 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "mcp-config.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
+  const codexMcp = readJson(path.join(root, "plugins", "cadre", ".mcp.json"));
+  const claudeMcp = readJson(path.join(root, "plugins", "cadre-claude", "mcp-config.json"));
+  assert.equal(codexMcp.mcpServers.cadre.cwd, ".");
+  assert.equal(claudeMcp.mcpServers.cadre.cwd, ".");
 
   const harnessCodexMarketplace = readJson(path.join(root, ".agents", "plugins", "marketplace.json"));
   assert.equal(harnessCodexMarketplace.plugins[0].source.path, "./plugins/cadre");
