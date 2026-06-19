@@ -189,6 +189,30 @@ async function main() {
   const polyFleet = core.workflowPacket(polyRoot, { workflow: "status", mode: "fleet" });
   const polyValidate = core.workflowPacket(polyRoot, { workflow: "validate" });
   const polyLand = core.workflowPacket(polyRoot, { workflow: "land", trackId: "team_scale_19_20260617" });
+  const setupCompact = core.workflowPacket(root, {
+    workflow: "setup",
+    execute: false,
+    teamSize: 20,
+    syncMode: "shared",
+    providerMode: "local",
+  });
+  const setupDetail = core.workflowPacket(root, {
+    workflow: "setup",
+    execute: false,
+    teamSize: 20,
+    syncMode: "shared",
+    providerMode: "local",
+    responseMode: "detail",
+  });
+  const workspaceCompact = core.workspaceHealth(root);
+  const workspaceDetail = core.workspaceHealth(root, { responseMode: "detail" });
+  const setupCompactBytes = Buffer.byteLength(JSON.stringify(setupCompact), "utf8");
+  const setupDetailBytes = Buffer.byteLength(JSON.stringify(setupDetail), "utf8");
+  const workspaceCompactBytes = Buffer.byteLength(JSON.stringify(workspaceCompact), "utf8");
+  const workspaceDetailBytes = Buffer.byteLength(JSON.stringify(workspaceDetail), "utf8");
+
+  assert(setupCompactBytes < setupDetailBytes, `expected compact setup payload to be smaller than detail (${setupCompactBytes} < ${setupDetailBytes})`);
+  assert(workspaceCompactBytes < workspaceDetailBytes, `expected compact workspace payload to be smaller than detail (${workspaceCompactBytes} < ${workspaceDetailBytes})`);
 
   assert(status.total_tracks === 20, `expected 20 tracks, got ${status.total_tracks}`);
   assert(status.by_status.in_progress === 12, "expected 12 in-progress tracks");
@@ -234,6 +258,12 @@ async function main() {
     available: available.available.length,
     packet_workflows: 8,
     concurrent_workers: workers.length,
+    setup_compact_bytes: setupCompactBytes,
+    setup_detail_bytes: setupDetailBytes,
+    workspace_compact_bytes: workspaceCompactBytes,
+    workspace_detail_bytes: workspaceDetailBytes,
+    setup_compact_reduction_pct: Math.round((1 - setupCompactBytes / setupDetailBytes) * 100),
+    workspace_compact_reduction_pct: Math.round((1 - workspaceCompactBytes / workspaceDetailBytes) * 100),
   };
   console.log(JSON.stringify(result, null, 2));
 
