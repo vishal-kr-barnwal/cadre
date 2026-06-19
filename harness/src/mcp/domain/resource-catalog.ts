@@ -38,6 +38,12 @@ const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
   { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b." },
   { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>." },
+  { uri: "cadre://artifact-catalog", name: "Cadre artifact catalog", description: "Canonical/projection artifact catalog. Read with ?root=/path." },
+  { uri: "cadre://artifact-schema", name: "Cadre artifact schema", description: "Artifact JSON schema. Read with ?root=/path&artifact=spec|plan|styleguide." },
+  { uri: "cadre://artifact-preview", name: "Cadre artifact preview", description: "Rendered artifact projection preview. Read with ?root=/path&artifact=<id>." },
+  { uri: "cadre://artifact-sync-plan", name: "Cadre artifact sync plan", description: "Dry-run artifact sync plan. Read with ?root=/path&scope=<scope>." },
+  { uri: "cadre://track-spec", name: "Cadre track spec", description: "Canonical track spec and projection preview. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://styleguide-selection", name: "Cadre styleguide selection", description: "Selected style guidance for a track or file list. Read with ?root=/path&trackId=<id>&files=a,b." },
 ];
 
 const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
@@ -65,6 +71,12 @@ const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
   "cadre://test-impact": { required: ["root"], requiredAny: [["files"], ["base", "head"]] },
   "cadre://track-plan": { required: ["root", "trackId"] },
   "cadre://job-result": { required: ["root", "jobId"] },
+  "cadre://artifact-catalog": { required: ["root"], optional: ["scope", "artifact", "includeArchive"] },
+  "cadre://artifact-schema": { required: ["root", "artifact"] },
+  "cadre://artifact-preview": { required: ["root", "artifact"], optional: ["scope"] },
+  "cadre://artifact-sync-plan": { required: ["root"], optional: ["scope", "artifact", "includeArchive"] },
+  "cadre://track-spec": { required: ["root", "trackId"] },
+  "cadre://styleguide-selection": { required: ["root"], optional: ["trackId", "files"] },
 };
 
 function contractQueryParams(contract: ResourceContract): string[] {
@@ -107,6 +119,8 @@ export function parseResourceUri(uri: string): ResourceQuery {
     trackId: params.get("trackId"),
     symbol: params.get("symbol"),
     workflow: params.get("workflow"),
+    artifact: params.get("artifact"),
+    scope: params.get("scope"),
     jobId: params.get("jobId"),
     baseRef: params.get("base"),
     headRef: params.get("head"),
@@ -115,5 +129,6 @@ export function parseResourceUri(uri: string): ResourceQuery {
     response_mode: params.get("response_mode"),
     detail: params.has("detail") ? params.get("detail") !== "false" : null,
     compact: params.has("compact") ? params.get("compact") !== "false" : null,
+    includeArchive: params.has("includeArchive") ? params.get("includeArchive") !== "false" : null,
   };
 }

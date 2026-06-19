@@ -43,6 +43,8 @@ export interface ResourceQuery extends JsonObject {
   trackId: string | null;
   symbol: string | null;
   workflow: string | null;
+  artifact: string | null;
+  scope: string | null;
   jobId: string | null;
   baseRef: string | null;
   headRef: string | null;
@@ -51,4 +53,5 @@ export interface ResourceQuery extends JsonObject {
   response_mode: string | null;
   detail: boolean | null;
   compact: boolean | null;
+  includeArchive: boolean | null;
 }

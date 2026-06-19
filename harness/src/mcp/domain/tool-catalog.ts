@@ -82,6 +82,14 @@ const PROPS: Record<string, JsonObject> = {
   args: { type: "object" },
   type: { type: "string" },
   jobId: { type: "string" },
+  artifact: { type: "string" },
+  scope: { type: "string" },
+  artifactAction: { type: "string" },
+  artifact_action: { type: "string" },
+  includeArchive: { type: "boolean" },
+  include_archive: { type: "boolean" },
+  importLegacy: { type: "boolean" },
+  import_legacy: { type: "boolean" },
   view: { type: "string" },
   description: { type: "string" },
   handoffText: { type: "string" },
@@ -153,15 +161,17 @@ const WORKFLOWS = [
   "flag",
   "revert",
   "formula",
+  "artifacts",
+  "artifact_sync",
 ];
 
 export const TOOLS = [
   packetSchema({
     name: "cadre_workflow",
-    description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows.",
+    description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: WORKFLOWS,
-    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "productText", "productGuidelinesText", "workflowText", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "specText", "planText", "description"],
+    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "productText", "productGuidelinesText", "workflowText", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "specText", "planText", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive", "importLegacy", "import_legacy"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -250,5 +260,12 @@ export const TOOLS = [
     fields: ["action", "trackId", "track_id", "base", "head", "config", "files", "symbol", "symbols", "repo", "repos", "execute", "async", "timeoutMs", "responseMode", "response_mode", "detail", "compact"],
     required: ["action"],
     allOf: [requireRootForActions(["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "workspace_diagnostics", "test_impact", "dependency_graph"])],
+  }),
+  packetSchema({
+    name: "cadre_artifact",
+    description: "Cadre artifact packet: catalog, schema, import legacy Markdown, validate canonicals, render projections, diff, and sync generated artifacts.",
+    actionEnum: ["catalog", "schema", "import", "validate", "render", "diff", "sync"],
+    fields: ["action", "artifact", "id", "scope", "trackId", "track_id", "execute", "humanConfirmed", "human_confirmed", "force", "includeArchive", "include_archive", "importLegacy", "import_legacy", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir"],
+    required: ["root", "action"],
   }),
 ];

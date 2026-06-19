@@ -13,6 +13,7 @@ import { parallelPacket } from "./packets/parallel";
 import { reviewPacket } from "./packets/review";
 import { intelPacket } from "./packets/intel";
 import { jobPacket } from "./packets/job";
+import { artifactPacket } from "./packets/artifact";
 import type { McpMessage, RuntimeEnvelope } from "../domain/protocol-types";
 import type { RuntimeDependencies } from "./ports";
 
@@ -39,6 +40,7 @@ function createToolCall(deps: RuntimeDependencies) {
     if (name === "cadre_job") return asTextJson(jobPacket(deps, args));
     if (name === "cadre_review") return asTextJson(await reviewPacket(deps, args));
     if (name === "cadre_intel") return asTextJson(await intelPacket(deps, args));
+    if (name === "cadre_artifact") return asTextJson(artifactPacket(deps, args));
     throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
   };
 }

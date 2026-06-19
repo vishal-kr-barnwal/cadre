@@ -71,6 +71,12 @@ test("generated cadre-core bundle preserves the public runtime API", () => {
   const expected = [
     "STATUS_MARKERS",
     "acquireLock",
+    "artifactCatalog",
+    "artifactPacket",
+    "artifactRender",
+    "artifactSchema",
+    "artifactSync",
+    "artifactValidate",
     "availableWork",
     "beadsSummary",
     "beadsTaskWrite",

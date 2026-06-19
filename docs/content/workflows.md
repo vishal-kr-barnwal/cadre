@@ -23,7 +23,7 @@ setup -> newtrack -> implement -> review -> ship/land -> archive -> release
 Support workflows can happen along the way:
 
 ```text
-status, validate, handoff, refresh, revise, revert, flag, formula
+status, validate, handoff, refresh, revise, revert, flag, formula, artifacts
 ```
 
 ## `cadre-setup`
@@ -42,17 +42,17 @@ What setup gathers:
 
 What setup writes:
 
-- `cadre/product.md`
-- `cadre/product_guidelines.md`
+- `cadre/product.json` and generated `cadre/product.md`
+- `cadre/product_guidelines.json` and generated `cadre/product_guidelines.md`
 - `cadre/tech-stack.json`
-- `cadre/workflow.md`
-- `cadre/patterns.md`
+- `cadre/workflow.json` and generated `cadre/workflow.md`
+- `cadre/patterns.jsonl` and generated `cadre/patterns.md`
 - `cadre/tracks.md`
 - `cadre/config.json`
 - `cadre/beads.json`
 - optional `cadre/repos.json`
 - optional `cadre/lsp.json`
-- selected `cadre/code_styleguides/`
+- selected `cadre/styleguides/*.json` and generated `cadre/code_styleguides/*.md`
 
 Setup requires Beads. If `bd` is missing or not usable, setup stops.
 
@@ -63,8 +63,11 @@ Creates a spec-first unit of work.
 The new-track packet previews or creates:
 
 - Track id and directory.
-- `spec.md` with goal, constraints, acceptance criteria, and non-goals.
-- `plan.md` with phases, tasks, file claims, dependencies, and repo annotations.
+- Canonical `spec.json` plus generated `spec.md` with goal, constraints,
+  acceptance criteria, and non-goals.
+- Canonical `plan.json` plus generated `plan.md` with phases, tasks, file
+  claims, dependencies, and repo annotations.
+- Append-only `learnings.jsonl` plus generated `learnings.md`.
 - Beads epic/phase/task tree.
 - Worktree plan.
 - Planning evidence such as likely tests, semantic impact, and parallel
@@ -207,6 +210,33 @@ Revise should preserve track history and reason about:
 
 Revised specs and plans are reviewed from packet-generated bundle files before
 the confirmed write.
+
+## `cadre-artifacts`
+
+Synchronizes canonical JSON/JSONL artifacts with deterministic human
+projections.
+
+Artifact sync can:
+
+- Catalog known project, style guide, track, release, and external artifacts.
+- Return JSON schemas for spec, plan, style guide, release, journal, and
+  evidence artifacts.
+- Import legacy Markdown into canonical JSON where no canonical file exists.
+- Validate canonicals and preview generated projections.
+- Return diffs and a review bundle before any confirmed mutation.
+
+Common scopes:
+
+- `all`: validate/import/render every known artifact.
+- `track:<id>`: spec, plan, learnings, handoff, and index projection for one
+  track.
+- `styleguides`: style guide catalog and selected guide projections.
+- `project`: product context, product guidelines, workflow policy, patterns,
+  and project-level projections.
+
+Confirmed sync requires the dry-run review bundle first, then `execute:true`
+and `humanConfirmed:true`. Unmarked legacy Markdown is skipped unless the user
+explicitly approves `force:true`.
 
 ## `cadre-revert`
 

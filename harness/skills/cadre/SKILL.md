@@ -7,7 +7,7 @@ description: |
   - Files like `cadre/tracks.md`, `cadre/product.md`, `cadre/workflow.md` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
-  - User asks for a `cadre-*` workflow (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula)
+  - User asks for a `cadre-*` workflow (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula, artifacts)
   - User mentions documentation is outdated or wants to sync context with codebase changes
   - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
 
@@ -43,6 +43,8 @@ requested workflow needs:
 
 - `cadre/product.md`, `cadre/tech-stack.json`, and `cadre/workflow.md` for setup,
   planning, implementation, and review context.
+- `cadre/product.json`, track `spec.json`/`plan.json`, and style guide JSON when
+  canonical artifact truth is needed; Markdown projections are for human review.
 - `cadre/patterns.md` before implementation or new-track planning.
 - Active track files only after a track is selected.
 - Compact MCP resources for team dashboards, review queues, integrations, LSP
@@ -76,6 +78,7 @@ workflow arguments, read the matching protocol, then call the workflow packet.
 | Refresh stale context | [protocols/cadre-refresh.md](protocols/cadre-refresh.md) |
 | Revert tracked commits | [protocols/cadre-revert.md](protocols/cadre-revert.md) |
 | Formula/template operations | [protocols/cadre-formula.md](protocols/cadre-formula.md) |
+| Sync canonical artifacts | [protocols/cadre-artifacts.md](protocols/cadre-artifacts.md) |
 
 ## Required References
 

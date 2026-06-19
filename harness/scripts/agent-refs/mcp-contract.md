@@ -26,6 +26,8 @@ they conflict with stale local notes.
   provider-evidence writes, and PR/MR/CI status normalization.
 - `cadre_intel` owns repo maps, LSP setup/review/impact, workspace diagnostics,
   test impact, dependency graphs, and daemon lifecycle.
+- `cadre_artifact` owns canonical artifact catalog/schema/import/validation,
+  deterministic projection rendering, diffing, and sync review bundles.
 - `cadre_project action: integrations` and `cadre://integrations` report
   configured optional MCPs plus LSP coverage in one bounded view.
 - `cadre_job` starts, lists, cancels, and reads async job artifacts.
@@ -49,6 +51,7 @@ Use MCP resources for bounded dashboards:
 - `cadre://track-context?root=...&trackId=...`
 - `cadre://review-evidence?root=...&trackId=...`
 - `cadre://track-plan?root=...&trackId=...`
+- `cadre://track-spec?root=...&trackId=...`
 - `cadre://parallel-state?root=...&trackId=...`
 - `cadre://quality-gate?root=...&trackId=...`
 - `cadre://repo-map?root=...`
@@ -63,6 +66,11 @@ Use MCP resources for bounded dashboards:
 - `cadre://land-plan?root=...&trackId=...`
 - `cadre://release-plan?root=...`
 - `cadre://job-result?root=...&jobId=...`
+- `cadre://artifact-catalog?root=...`
+- `cadre://artifact-schema?root=...&artifact=...`
+- `cadre://artifact-preview?root=...&artifact=...`
+- `cadre://artifact-sync-plan?root=...&scope=...`
+- `cadre://styleguide-selection?root=...&trackId=...`
 
 Resource templates are discoverable through MCP, so clients should prefer
 template discovery when available.

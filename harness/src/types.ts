@@ -87,6 +87,10 @@ export interface CadreTrack {
   metadata: TrackMetadata;
   plan_path: string;
   spec_path: string;
+  plan_json_path?: string;
+  spec_json_path?: string;
+  learnings_jsonl_path?: string;
+  handoff_json_path?: string;
   learnings_path?: string;
 }
 

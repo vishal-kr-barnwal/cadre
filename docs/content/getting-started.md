@@ -95,20 +95,26 @@ Successful setup creates:
 
 | File | Purpose |
 |------|---------|
-| `cadre/product.md` | Product goals, users, workflows, constraints, and domain notes. |
-| `cadre/product_guidelines.md` | Product principles, trust boundaries, non-goals, decision rules, and review checklist. |
+| `cadre/product.json` and `cadre/product.md` | Canonical product context plus generated human projection. |
+| `cadre/product_guidelines.json` and `cadre/product_guidelines.md` | Canonical product principles, trust boundaries, non-goals, decision rules, and review checklist. |
 | `cadre/tech-stack.json` | Languages, frameworks, package managers, platforms, and test commands. |
-| `cadre/workflow.md` | Development, verification, review, and commit expectations. |
-| `cadre/patterns.md` | Reusable implementation patterns promoted from completed work. |
+| `cadre/workflow.json` and `cadre/workflow.md` | Canonical development, verification, review, and commit expectations plus projection. |
+| `cadre/patterns.jsonl` and `cadre/patterns.md` | Append-only pattern events plus generated pattern summary. |
 | `cadre/tracks.md` | Derived human index rebuilt from track metadata. |
 | `cadre/config.json` | Sync mode, provider mode, review, and quality settings. |
 | `cadre/beads.json` | Beads integration settings. |
 | `cadre/repos.json` | Polyrepo topology when enabled. |
 | `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
+| `cadre/styleguides/*.json` and `cadre/code_styleguides/*.md` | Canonical style guidance plus generated guide projections. |
 
 Track directories later live under `cadre/tracks/<track_id>/` and contain
-`metadata.json`, `spec.md`, `plan.md`, `learnings.md`, and optional handoff or
-revision artifacts.
+`metadata.json`, canonical `spec.json` and `plan.json`, generated `spec.md` and
+`plan.md`, append-only `learnings.jsonl`, generated `learnings.md`, and optional
+handoff or revision artifacts.
+
+Use `cadre-artifacts sync` when legacy Markdown needs import, generated
+projections need refreshing, or you want a review bundle showing canonical
+artifact drift before applying changes.
 
 ## Verify The Runtime
 

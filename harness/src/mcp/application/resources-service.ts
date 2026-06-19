@@ -54,6 +54,8 @@ function normalizeResourceArgs(resource: ReturnType<typeof parseResourceUri>): R
   if (resource.trackId != null) args.trackId = resource.trackId;
   if (resource.symbol != null) args.symbol = resource.symbol;
   if (resource.workflow != null) args.workflow = resource.workflow;
+  if (resource.artifact != null) args.artifact = resource.artifact;
+  if (resource.scope != null) args.scope = resource.scope;
   if (resource.jobId != null) args.jobId = resource.jobId;
   if (resource.baseRef != null) args.baseRef = resource.baseRef;
   if (resource.headRef != null) args.headRef = resource.headRef;
@@ -64,6 +66,7 @@ function normalizeResourceArgs(resource: ReturnType<typeof parseResourceUri>): R
   }
   if (resource.detail != null) args.detail = resource.detail;
   if (resource.compact != null) args.compact = resource.compact;
+  if (resource.includeArchive != null) args.includeArchive = resource.includeArchive;
   return args;
 }
 
@@ -140,6 +143,11 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
       ? context
       : deps.core.parsePlanFile(path.resolve(root, planPath));
   }
+  else if (resource.base === "cadre://track-spec") {
+    value = resource.trackId
+      ? deps.core.artifactRender(root, { artifact: `track:${resource.trackId}:spec` })
+      : { ok: false, error: "trackId is required" };
+  }
   else if (resource.base === "cadre://job-result") {
     const persisted = deps.jobs.loadPersisted(root, resource.jobId);
     value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
@@ -156,6 +164,28 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
       required_provider_mcp: plan.required_provider_mcp || null,
       required_evidence: plan.required_evidence || null,
       continuation_token: plan.continuation_token || null,
+    };
+  }
+  else if (resource.base === "cadre://artifact-catalog") {
+    value = deps.core.artifactCatalog(root, normalizedResource);
+  }
+  else if (resource.base === "cadre://artifact-schema") {
+    value = deps.core.artifactSchema(resource.artifact || normalizedResource.artifact || "catalog");
+  }
+  else if (resource.base === "cadre://artifact-preview") {
+    value = resource.artifact
+      ? deps.core.artifactRender(root, normalizedResource)
+      : { ok: false, error: "artifact is required" };
+  }
+  else if (resource.base === "cadre://artifact-sync-plan") {
+    value = deps.core.artifactSync(root, { ...normalizedResource, execute: false });
+  }
+  else if (resource.base === "cadre://styleguide-selection") {
+    value = {
+      ok: true,
+      track_id: resource.trackId,
+      files: resource.files,
+      catalog: deps.core.artifactCatalog(root, { ...normalizedResource, scope: "styleguides" }),
     };
   }
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });

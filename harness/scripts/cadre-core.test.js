@@ -847,13 +847,21 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/python.md"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "index.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "general.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), true);
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("typescript"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
     assert.ok(setup.written.includes("cadre/product_guidelines.md"));
     assert.ok(setup.written.includes("cadre/product.md"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "workflow.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "patterns.jsonl")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.md")), true);
     const product = fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8");
+    assert.match(product, /cadre:generated from="cadre\/product\.json"/);
     assert.match(product, /## Product Summary/);
     assert.match(product, /## Core Workflows/);
     assert.match(product, /## Product Invariants/);
@@ -863,6 +871,7 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.match(guidelines, /## Domain And Workflow Rules/);
     assert.match(guidelines, /## Review Checklist/);
     const patterns = fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8");
+    assert.match(patterns, /cadre:generated from="cadre\/patterns\.jsonl"/);
     assert.match(patterns, /# Codebase Patterns/);
     assert.match(patterns, /## Code Conventions/);
     assert.match(patterns, /## Architecture/);
@@ -1374,11 +1383,83 @@ test("workflow newtrack writes template-backed track learnings", () => {
     });
 
     assert.equal(created.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "learnings.jsonl")), true);
+    const specJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.json"), "utf8"));
+    const planJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.json"), "utf8"));
+    assert.equal(specJson.track_id, "tmpl_20260618");
+    assert.equal(planJson.track_id, "tmpl_20260618");
+    assert.equal(planJson.phases.length, 2);
+    assert.equal(planJson.phases[0].tasks.length, 2);
+    const spec = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.md"), "utf8");
+    assert.match(spec, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/spec\.json"/);
+    const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.md"), "utf8");
+    assert.match(plan, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/plan\.json"/);
     const learnings = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "learnings.md"), "utf8");
+    assert.match(learnings, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/learnings\.jsonl"/);
     assert.match(learnings, /# Track Learnings: tmpl_20260618/);
     assert.equal(learnings.includes("{{track_id}}"), false);
   } finally {
     process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("artifact sync imports legacy markdown canonicals and regenerates projections", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-artifact-sync-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "legacy_20260618", samplePlan("legacy_20260618"));
+
+    const preview = core.artifactPacket(root, {
+      action: "sync",
+      scope: "track:legacy_20260618",
+      reviewBundleDir: ".artifact-review",
+    });
+    assert.equal(preview.ok, true);
+    assert.equal(preview.dry_run, true);
+    assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:spec" && artifact.legacy_import_available === true));
+    assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:plan" && artifact.legacy_import_available === true));
+    assert.equal(preview.review_bundle.content_in_response, false);
+    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "spec.json")), true);
+    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), false);
+
+    const blocked = core.artifactPacket(root, {
+      action: "sync",
+      scope: "track:legacy_20260618",
+      execute: true,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "human_review");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), false);
+
+    const written = core.artifactPacket(root, {
+      action: "sync",
+      scope: "track:legacy_20260618",
+      execute: true,
+      humanConfirmed: true,
+      force: true,
+    });
+    assert.equal(written.ok, true);
+    assert.equal(written.phase_state, "executed");
+    assert.ok(written.written.includes("cadre/tracks/legacy_20260618/spec.json"));
+    assert.ok(written.written.includes("cadre/tracks/legacy_20260618/plan.json"));
+    assert.ok(written.written.includes("cadre/tracks/legacy_20260618/spec.md"));
+    assert.ok(written.written.includes("cadre/tracks/legacy_20260618/plan.md"));
+
+    const planJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json"), "utf8"));
+    assert.equal(planJson.track_id, "legacy_20260618");
+    assert.equal(planJson.phases.length, 2);
+    const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.md"), "utf8");
+    assert.match(plan, /cadre:generated from="cadre\/tracks\/legacy_20260618\/plan\.json"/);
+    assert.match(plan, /Task 1: Implement core/);
+
+    const render = core.artifactPacket(root, { action: "render", artifact: "track:legacy_20260618:plan" });
+    assert.equal(render.ok, true);
+    assert.equal(render.changed, false);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1483,6 +1564,8 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       ["flag", { trackId: "workflow_20260618", status: "blocked", reason: "waiting for credentials" }],
       ["revert", { trackId: "workflow_20260618" }],
       ["formula", {}],
+      ["artifacts", { scope: "track:workflow_20260618" }],
+      ["artifact_sync", { scope: "track:workflow_20260618" }],
     ]) {
       const result = core.workflowPacket(root, { workflow, ...args });
       assert.equal(result.packet_only, true, `expected ${workflow} to be packet-only`);

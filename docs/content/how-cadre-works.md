@@ -42,7 +42,7 @@ include:
 
 | Surface | What it owns |
 |---------|--------------|
-| `cadre_workflow` | High-level setup, newtrack, implement, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, and formula flows. |
+| `cadre_workflow` | High-level setup, newtrack, implement, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, and artifact-sync aliases. |
 | `cadre_project` | Runtime ping, doctor output, root resolution, integrations inventory, shared sync, and polyrepo preflight. |
 | `cadre_track` | Track context, plan parsing, phase scheduling, integrity, Beads tree creation, and worktree planning. |
 | `cadre_mutate` | Controlled state updates such as claim, heartbeat, metadata patch, review record, task result, worker state, status, and index regeneration. |
@@ -50,11 +50,14 @@ include:
 | `cadre_parallel` | Worker waves, setup, finish records, merge-back, and cleanup. |
 | `cadre_review` | Review assist, machine gate, provider evidence, PR/CI status, and final gate evaluation. |
 | `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, and warm review. |
+| `cadre_artifact` | Canonical artifact catalog, schema, legacy import, validation, projection rendering, diff, and sync. |
 | `cadre_beads` | Structured low-level Beads operations used by packets. |
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
 `cadre://review-queue`, `cadre://handoff-inbox`, `cadre://quality-gate`,
-`cadre://parallel-state`, `cadre://repo-map`, `cadre://repo-topology`,
+`cadre://parallel-state`, `cadre://track-spec`, `cadre://artifact-catalog`,
+`cadre://artifact-preview`, `cadre://artifact-sync-plan`,
+`cadre://styleguide-selection`, `cadre://repo-map`, `cadre://repo-topology`,
 `cadre://workspace-health`, and `cadre://integrations`.
 
 `cadre://workspace-health` is compact by default. Use
@@ -86,10 +89,10 @@ A Cadre track is the durable unit of work. Each track has:
 | File | Role |
 |------|------|
 | `metadata.json` | Source of truth for track id, status, owner, reviewer, review state, Beads ids, worktree paths, and repo routing. |
-| `spec.md` | Goal, user-facing behavior, constraints, acceptance criteria, and non-goals. |
-| `plan.md` | Phases, tasks, dependencies, file claims, repo annotations, and task completion markers. |
-| `learnings.md` | Track-level observations that can later be promoted to project patterns. |
-| `HANDOFF.md` | Optional per-track handoff context for another session or teammate. |
+| `spec.json` and `spec.md` | Canonical spec plus generated projection for goal, user-facing behavior, constraints, acceptance criteria, and non-goals. |
+| `plan.json` and `plan.md` | Canonical plan plus generated projection for phases, tasks, dependencies, file claims, repo annotations, and task completion markers. |
+| `learnings.jsonl` and `learnings.md` | Append-only observations plus generated projection for later pattern promotion. |
+| `handoff.json` and `HANDOFF.md` | Optional canonical handoff plus generated context for another session or teammate. |
 
 `cadre/tracks.md` is only a derived human index. Cadre rebuilds it from track
 metadata. Agents should use packets and metadata for live status.

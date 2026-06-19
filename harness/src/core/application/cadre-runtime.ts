@@ -35,6 +35,28 @@ interface ReviewFile {
   missing?: boolean;
 }
 
+interface ArtifactDefinition {
+  id: string;
+  title: string;
+  canonical: string;
+  projection?: string;
+  schema: string;
+  scope: "project" | "track" | "styleguide" | "release" | "external";
+  sourceFormat: "json" | "jsonl";
+  projectionFormat?: "markdown" | "yaml" | "none";
+}
+
+interface ArtifactRenderResult extends JsonObject {
+  ok: boolean;
+  artifact_id: string;
+  canonical_path: string;
+  projection_path?: string | undefined;
+  content?: string | undefined;
+  changed?: boolean | undefined;
+  missing_canonical?: boolean | undefined;
+  legacy_import_available?: boolean | undefined;
+}
+
 interface PatchJsonOptions extends RuntimeArgs {
   root?: string;
   lockName?: string;
@@ -261,6 +283,313 @@ function fileExists(file: string): boolean {
   } catch {
     return false;
   }
+}
+
+function ensureParent(file: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+}
+
+function writeJsonEnsured(file: string, value: JsonObject): void {
+  ensureParent(file);
+  writeJson(file, value);
+}
+
+function appendJsonl(file: string, value: JsonObject): void {
+  ensureParent(file);
+  fs.appendFileSync(file, `${JSON.stringify(value)}\n`);
+}
+
+function normalizedText(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\n*$/, "\n");
+}
+
+function generatedMarker(source: string, schema: string, body: string): string {
+  return `<!-- cadre:generated from="${source}" schema="${schema}" hash="${textHash(body).slice(0, 16)}" -->`;
+}
+
+function withGeneratedMarker(source: string, schema: string, body: string): string {
+  const normalized = normalizedText(body);
+  return `${generatedMarker(source, schema, normalized)}\n${normalized}`;
+}
+
+function hasGeneratedMarker(text: string): boolean {
+  return /<!--\s*cadre:generated\b/.test(text);
+}
+
+function splitMarkdownSections(text: string): { title: string; body: string; sections: JsonObject[] } {
+  const lines = normalizedText(text).split("\n");
+  const firstHeadingIndex = lines.findIndex((line) => /^#\s+/.test(line));
+  const title = firstHeadingIndex >= 0
+    ? lines[firstHeadingIndex]?.replace(/^#\s+/, "").trim() || "Untitled"
+    : "Untitled";
+  const bodyStart = firstHeadingIndex >= 0 ? firstHeadingIndex + 1 : 0;
+  const bodyLines: string[] = [];
+  const sections: JsonObject[] = [];
+  let current: JsonObject | null = null;
+  for (const line of lines.slice(bodyStart)) {
+    const section = line.match(/^##+\s+(.+?)\s*$/);
+    if (section?.[1]) {
+      if (current) sections.push(current);
+      current = { heading: section[1].trim(), body: "" };
+      continue;
+    }
+    if (current) {
+      current.body = `${asOptionalString(current.body) || ""}${line}\n`;
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  if (current) sections.push(current);
+  return {
+    title,
+    body: normalizedText(bodyLines.join("\n")).trim(),
+    sections: sections.map((section) => ({
+      heading: asOptionalString(section.heading) || "",
+      body: normalizedText(asOptionalString(section.body) || "").trim(),
+    })),
+  };
+}
+
+function markdownDocJson(kind: string, markdown: string, extras: JsonObject = {}): JsonObject {
+  const parsed = splitMarkdownSections(markdown);
+  return {
+    version: 1,
+    schema: `cadre.${kind}.v1`,
+    kind,
+    title: parsed.title,
+    summary: parsed.body,
+    sections: parsed.sections,
+    updated_at: utcNow(),
+    ...extras,
+  };
+}
+
+function renderMarkdownDoc(value: JsonObject, fallbackTitle: string): string {
+  const title = asOptionalString(value.title) || fallbackTitle;
+  const parts: string[] = [`# ${title}`, ""];
+  const summary = asOptionalString(value.summary);
+  if (summary) parts.push(summary, "");
+  for (const rawSection of asArray(value.sections)) {
+    const section = asJsonObject(rawSection);
+    const heading = asOptionalString(section.heading);
+    if (!heading) continue;
+    parts.push(`## ${heading}`, "");
+    const body = asOptionalString(section.body);
+    if (body) parts.push(body, "");
+  }
+  return normalizedText(parts.join("\n"));
+}
+
+function markerForPlanStatus(status: unknown): string {
+  const normalized = String(status || "pending");
+  if (normalized === "completed") return "x";
+  if (normalized === "in_progress") return "~";
+  if (normalized === "blocked") return "!";
+  if (normalized === "skipped") return "-";
+  return " ";
+}
+
+function statusForPlanMarker(marker: unknown): string {
+  if (marker === "x") return "completed";
+  if (marker === "~") return "in_progress";
+  if (marker === "!") return "blocked";
+  if (marker === "-") return "skipped";
+  return "pending";
+}
+
+function trackPlanJsonPath(track: CadreTrack): string {
+  return track.plan_json_path || path.join(track.dir, "plan.json");
+}
+
+function trackSpecJsonPath(track: CadreTrack): string {
+  return track.spec_json_path || path.join(track.dir, "spec.json");
+}
+
+function trackLearningsJsonlPath(track: CadreTrack): string {
+  return track.learnings_jsonl_path || path.join(track.dir, "learnings.jsonl");
+}
+
+function trackHandoffJsonPath(track: CadreTrack): string {
+  return track.handoff_json_path || path.join(track.dir, "handoff.json");
+}
+
+function planJsonPathForPlanPath(file: string): string {
+  return path.join(path.dirname(file), "plan.json");
+}
+
+function planJsonFromText(trackId: string, text: string): JsonObject {
+  const parsed = parsePlanText(text);
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: trackId,
+    title: `Plan: ${trackId}`,
+    source: "markdown_import",
+    updated_at: utcNow(),
+    phases: parsed.phases.map((phase) => ({
+      phase_index: phase.phase_index,
+      title: phase.title,
+      execution_mode: asOptionalString(phase.annotations.execution) || "sequential",
+      depends_on: asOptionalString(phase.annotations.depends)
+        ? asString(phase.annotations.depends).split(",").map((item) => item.trim()).filter(Boolean)
+        : [],
+      annotations: phase.annotations,
+      tasks: phase.tasks.map((task) => ({
+        task_index: task.task_index,
+        task_key: task.task_key,
+        title: task.title,
+        status: statusForPlanMarker(task.marker),
+        files: task.files || [],
+        depends_on: task.depends || [],
+        repo: task.repo || null,
+        annotations: task.annotations,
+        commit_shas: task.commit_shas || [],
+        repo_shas: task.repo_shas || {},
+      })),
+    })),
+  };
+}
+
+function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
+  const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
+    const phase = asJsonObject(rawPhase);
+    const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
+    const annotations = {
+      ...asJsonObject(phase.annotations),
+      ...(asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {}),
+      ...(asArray(phase.depends_on).length > 0 ? { depends: asStringArray(phase.depends_on).join(",") } : {}),
+    };
+    const tasks: PlanTask[] = asArray(phase.tasks).map((rawTask, taskOffset) => {
+      const task = asJsonObject(rawTask);
+      const taskIndex = Number(task.task_index || task.index || taskOffset + 1);
+      const taskKey = asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskIndex}`;
+      const files = asStringArray(task.files);
+      const depends = asStringArray(task.depends_on || task.depends);
+      const taskAnnotations = {
+        ...asJsonObject(task.annotations),
+        ...(files.length > 0 ? { files: files.join(", ") } : {}),
+        ...(depends.length > 0 ? { depends: depends.join(",") } : {}),
+        ...(asOptionalString(task.repo) ? { repo: asOptionalString(task.repo) } : {}),
+      };
+      return {
+        task_index: taskIndex,
+        task_key: taskKey,
+        title: asOptionalString(task.title) || `Task ${taskIndex}`,
+        marker: markerForPlanStatus(task.status),
+        annotations: taskAnnotations,
+        files,
+        depends,
+        repo: asOptionalString(task.repo) || null,
+        line: Number(task.line || phaseIndex * 100 + taskIndex),
+        phase_index: phaseIndex,
+        commit_shas: asStringArray(task.commit_shas),
+        repo_shas: asJsonObject(task.repo_shas),
+      };
+    });
+    return {
+      phase_index: phaseIndex,
+      title: asOptionalString(phase.title) || `Phase ${phaseIndex}`,
+      annotations,
+      tasks,
+      line: Number(phase.line || phaseIndex * 100),
+    } as PlanPhase;
+  });
+  return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
+}
+
+function renderPlanMarkdown(raw: JsonObject): string {
+  const trackId = asOptionalString(raw.track_id) || "track";
+  const parts: string[] = [`# Plan: ${trackId}`, ""];
+  const parsed = planJsonToParsedPlan(raw);
+  for (const phase of parsed.phases) {
+    parts.push(`## Phase ${phase.phase_index}: ${phase.title.replace(/^Phase\s+\d+:\s*/i, "")}`);
+    if (phase.annotations.execution) parts.push(`<!-- execution: ${phase.annotations.execution} -->`);
+    if (phase.annotations.depends) parts.push(`<!-- depends: ${phase.annotations.depends} -->`);
+    parts.push("");
+    for (const task of phase.tasks) {
+      const commit = task.commit_shas && task.commit_shas.length > 0 ? ` (${task.commit_shas[task.commit_shas.length - 1]})` : "";
+      parts.push(`- [${task.marker}] Task ${task.task_index}: ${task.title.replace(/^Task\s+\d+:\s*/i, "")}${commit}`);
+      if (task.repo) parts.push(`  <!-- repo: ${task.repo} -->`);
+      if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
+      if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
+      if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
+      parts.push("");
+    }
+  }
+  return normalizedText(parts.join("\n"));
+}
+
+function specJsonFromText(trackId: string, text: string): JsonObject {
+  const doc = markdownDocJson("spec", text || `# Spec: ${trackId}\n`);
+  return {
+    ...doc,
+    schema: "cadre.spec.v1",
+    track_id: trackId,
+    goals: [],
+    non_goals: [],
+    constraints: [],
+    acceptance_criteria: [],
+    risks: [],
+    open_questions: [],
+    references: [],
+  };
+}
+
+function renderSpecMarkdown(raw: JsonObject): string {
+  const title = asOptionalString(raw.title) || `Spec: ${asOptionalString(raw.track_id) || "track"}`;
+  return renderMarkdownDoc({ ...raw, title }, title);
+}
+
+function styleGuideJsonFromMarkdown(id: string, text: string, source = "markdown_import"): JsonObject {
+  const doc = markdownDocJson("styleguide", text, { id, source });
+  const ruleLines = normalizedText(text)
+    .split("\n")
+    .filter((line) => /^\s*-\s+/.test(line))
+    .slice(0, 80);
+  return {
+    ...doc,
+    schema: "cadre.styleguide.v1",
+    id,
+    title: doc.title || id,
+    languages: id === "general" ? [] : [id],
+    frameworks: [],
+    file_patterns: [],
+    applies_to: ["planning", "implementation", "review", "tests"],
+    rules: ruleLines.map((line, index) => ({
+      id: `${id}-rule-${index + 1}`,
+      severity: "guidance",
+      summary: line.replace(/^\s*-\s+/, "").trim(),
+    })),
+    version: 1,
+  };
+}
+
+function renderStyleGuideMarkdown(raw: JsonObject): string {
+  const id = asOptionalString(raw.id) || "styleguide";
+  const title = asOptionalString(raw.title) || id;
+  const parts = [`# ${title}`, ""];
+  const summary = asOptionalString(raw.summary);
+  if (summary) parts.push(summary, "");
+  const rules = asArray(raw.rules);
+  if (rules.length > 0) {
+    parts.push("## Rules", "");
+    for (const rawRule of rules) {
+      const rule = asJsonObject(rawRule);
+      const severity = asOptionalString(rule.severity);
+      const suffix = severity ? ` (${severity})` : "";
+      parts.push(`- ${asOptionalString(rule.summary) || asOptionalString(rule.id) || "Rule"}${suffix}`);
+      const rationale = asOptionalString(rule.rationale);
+      if (rationale) parts.push(`  Rationale: ${rationale}`);
+    }
+    parts.push("");
+  }
+  for (const rawSection of asArray(raw.sections)) {
+    const section = asJsonObject(rawSection);
+    const heading = asOptionalString(section.heading);
+    const body = asOptionalString(section.body);
+    if (heading && body) parts.push(`## ${heading}`, "", body, "");
+  }
+  return normalizedText(parts.join("\n"));
 }
 
 function isCadreProjectRoot(root: string): boolean {
@@ -991,6 +1320,10 @@ function listTracks(root: string): CadreTrack[] {
         metadata_path: metadataPath,
         plan_path: path.join(dir, "plan.md"),
         spec_path: path.join(dir, "spec.md"),
+        plan_json_path: path.join(dir, "plan.json"),
+        spec_json_path: path.join(dir, "spec.json"),
+        learnings_jsonl_path: path.join(dir, "learnings.jsonl"),
+        handoff_json_path: path.join(dir, "handoff.json"),
         metadata,
       });
   }
@@ -998,6 +1331,11 @@ function listTracks(root: string): CadreTrack[] {
 }
 
 function parsePlanFile(file: string): ParsedPlan {
+  const planJsonPath = planJsonPathForPlanPath(file);
+  if (fileExists(planJsonPath)) {
+    const raw = readJson<JsonObject | null>(planJsonPath, null);
+    if (raw) return planJsonToParsedPlan(raw);
+  }
   if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
   return parsePlanText(fs.readFileSync(file, "utf8"));
 }
@@ -1820,6 +2158,16 @@ function workflowResourceUris(root: string, workflow: string, result: CoreResult
   if (workflow === "ship" && trackId) uris.push(`cadre://ship-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
   if (workflow === "land" && trackId) uris.push(`cadre://land-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
   if (workflow === "release") uris.push(`cadre://release-plan?root=${encodedRoot}`);
+  if (workflow === "artifacts" || workflow === "artifact_sync") {
+    const scope = asOptionalString(result.scope || result.artifact_scope) || "all";
+    uris.push(`cadre://artifact-catalog?root=${encodedRoot}`);
+    uris.push(`cadre://artifact-sync-plan?root=${encodedRoot}&scope=${encodeURIComponent(scope)}`);
+    if (scope.startsWith("track:")) {
+      const scopedTrackId = scope.slice("track:".length);
+      uris.push(`cadre://track-spec?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
+      uris.push(`cadre://track-plan?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
+    }
+  }
   return Array.from(new Set(uris));
 }
 
@@ -2348,6 +2696,16 @@ function textReviewFile(relativePath: string, title: string, source: string, tex
   };
 }
 
+function plainReviewFile(relativePath: string, title: string, source: string, text: string): ReviewFile {
+  return {
+    path: relativePath,
+    title,
+    kind: "text",
+    source,
+    content: text.replace(/\n*$/, "\n"),
+  };
+}
+
 function jsonReviewFile(relativePath: string, title: string, source: string, value: JsonObject | null): ReviewFile {
   const text = value ? `${JSON.stringify(value, null, 2)}\n` : "";
   return {
@@ -2391,20 +2749,47 @@ function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResu
   const workflowText = setupWorkflowText(rawArgs.workflowText);
   const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
   const techStack = techStackForPacket(root, args);
+  const productJson = markdownDocJson("product", productText);
+  const productGuidelinesJson = markdownDocJson("product_guidelines", productGuidelinesText);
+  const workflowJson = markdownDocJson("workflow", workflowText);
+  const patternsEntry: JsonObject = {
+    id: "initial",
+    kind: "patterns_seed",
+    recorded_at: utcNow(),
+    text: patternsText,
+  };
+  const selectedStyleGuides = asStringArray(styleGuides.selected);
+  const styleGuideIndex: JsonObject = {
+    version: 1,
+    schema: "cadre.styleguide_index.v1",
+    selected: selectedStyleGuides,
+    generated_at: utcNow(),
+  };
   const files: ReviewFile[] = [
-    textReviewFile("cadre/product.md", "Product context", "productText", productText),
-    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "productGuidelinesText", productGuidelinesText),
+    jsonReviewFile("cadre/product.json", "Product context canonical", "productText", productJson),
+    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context"))),
+    jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelinesText", productGuidelinesJson),
+    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines"))),
     jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-    textReviewFile("cadre/workflow.md", "Workflow policy", "workflowText", workflowText),
-    textReviewFile("cadre/patterns.md", "Project patterns", "template:patterns.md", patternsText),
-    ...asStringArray(styleGuides.selected).map((guideId) =>
-      textReviewFile(
-        `cadre/code_styleguides/${guideId}.md`,
-        `Code style guide: ${guideId}`,
-        "tech-stack.json/styleGuideIds",
-        templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`)
-      )
-    ),
+    jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowText", workflowJson),
+    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow"))),
+    plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns.md", `${JSON.stringify(patternsEntry)}\n`),
+    textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText)),
+    jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),
+    textReviewFile("cadre/code_styleguides/README.md", "Style guide catalog", "cadre/styleguides/index.json", withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))),
+    ...selectedStyleGuides.flatMap((guideId) => {
+      const guideText = templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`);
+      const guideJson = styleGuideJsonFromMarkdown(guideId, guideText, "bundled_template");
+      return [
+        jsonReviewFile(`cadre/styleguides/${guideId}.json`, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guideJson),
+        textReviewFile(
+          `cadre/code_styleguides/${guideId}.md`,
+          `Code style guide: ${guideId}`,
+          `cadre/styleguides/${guideId}.json`,
+          withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson))
+        ),
+      ];
+    }),
   ];
   if (polyrepoRequested) {
     files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
@@ -2809,29 +3194,64 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     writeJson(file, value);
     written.push(path.relative(root, file));
   };
+  const writeSetupJsonlEntry = (relativePath: string, value: JsonObject): void => {
+    const file = path.join(cadreDir, relativePath);
+    if (fileExists(file) && !force) {
+      skipped.push(path.relative(root, file));
+      return;
+    }
+    appendJsonl(file, value);
+    written.push(path.relative(root, file));
+  };
+  const writeProjectDoc = (relativePath: string, kind: string, text: string, title: string): void => {
+    const jsonPath = relativePath.replace(/\.md$/, ".json");
+    const value = markdownDocJson(kind, text);
+    writeSetupJson(jsonPath, value);
+    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
+  };
 
   fs.mkdirSync(path.join(cadreDir, "tracks"), { recursive: true });
   fs.mkdirSync(path.join(cadreDir, "archive"), { recursive: true });
-  writeText(
-    "product.md",
-    setupProductText(rawArgs.productText)
-  );
-  writeText(
+  writeProjectDoc("product.md", "product", setupProductText(rawArgs.productText), "Product Context");
+  writeProjectDoc(
     "product_guidelines.md",
-    setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text)
+    "product_guidelines",
+    setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text),
+    "Product Guidelines"
   );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
-  writeText("workflow.md", setupWorkflowText(rawArgs.workflowText));
-  writeText("tracks.md", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
-  writeText("patterns.md", templateText("patterns.md", "# Project Patterns\n\n"));
+  writeProjectDoc("workflow.md", "workflow", setupWorkflowText(rawArgs.workflowText), "Project Workflow");
+  writeText("tracks.md", withGeneratedMarker("cadre/tracks/*/metadata.json", "cadre.tracks_index.v1", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n"));
+  const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
+  writeSetupJsonlEntry("patterns.jsonl", {
+    id: "initial",
+    kind: "patterns_seed",
+    recorded_at: utcNow(),
+    text: patternsText,
+  });
+  writeText("patterns.md", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText));
   const beforeStyleWritten = written.length;
   const beforeStyleSkipped = skipped.length;
   for (const guideId of asStringArray(styleGuides.selected)) {
+    const guideText = templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`);
+    const guideJson = styleGuideJsonFromMarkdown(guideId, guideText, "bundled_template");
+    writeSetupJson(`styleguides/${guideId}.json`, guideJson);
     writeText(
       `code_styleguides/${guideId}.md`,
-      templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`)
+      withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson))
     );
   }
+  const styleGuideIndex: JsonObject = {
+    version: 1,
+    schema: "cadre.styleguide_index.v1",
+    selected: asStringArray(styleGuides.selected),
+    generated_at: utcNow(),
+  };
+  writeSetupJson("styleguides/index.json", styleGuideIndex);
+  writeText(
+    "code_styleguides/README.md",
+    withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))
+  );
   writeSetupJson("setup_state.json", {
     version: 1,
     packet_only: true,
@@ -2903,18 +3323,39 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
 
 function newTrackReviewFiles(trackId: string, specText: string | undefined, planText: string, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
+  const specJson = specJsonFromText(trackId, specText || `# Spec: ${trackId}\n`);
+  const planJson = planJsonFromText(trackId, planText);
+  const learningsEntry: JsonObject = {
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: trackId,
+    recorded_at: utcNow(),
+    text: trackLearningsText(trackId),
+  };
   return [
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/spec.json`,
+      "Track spec canonical",
+      "specText",
+      specJson
+    ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/spec.md`,
       "Track spec",
-      "specText",
-      specText || `# Spec: ${trackId}\n`
+      "spec.json",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson))
+    ),
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/plan.json`,
+      "Track plan canonical",
+      "planText",
+      planJson
     ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/plan.md`,
       "Track plan",
-      "planText",
-      planText.endsWith("\n") ? planText : `${planText}\n`
+      "plan.json",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson))
     ),
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/metadata.json`,
@@ -2922,11 +3363,17 @@ function newTrackReviewFiles(trackId: string, specText: string | undefined, plan
       "metadata",
       metadata
     ),
+    plainReviewFile(
+      `cadre/tracks/${safeTrack}/learnings.jsonl`,
+      "Track learnings canonical",
+      "template:learnings.md",
+      `${JSON.stringify(learningsEntry)}\n`
+    ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/learnings.md`,
       "Track learnings",
-      "template:learnings.md",
-      trackLearningsText(trackId)
+      "learnings.jsonl",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId))
     ),
   ];
 }
@@ -3010,11 +3457,23 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   }
   const dir = path.join(root, "cadre", "tracks", safeName(trackId));
+  const specJson = specJsonFromText(String(trackId), specText || `# Spec: ${trackId}\n`);
+  const planJson = planJsonFromText(String(trackId), planText);
+  const learningsEntry: JsonObject = {
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: String(trackId),
+    recorded_at: utcNow(),
+    text: trackLearningsText(String(trackId)),
+  };
   fs.mkdirSync(dir, { recursive: true });
   writeJson(path.join(dir, "metadata.json"), metadata);
-  fs.writeFileSync(path.join(dir, "spec.md"), specText || `# Spec: ${trackId}\n`);
-  fs.writeFileSync(path.join(dir, "plan.md"), planText.endsWith("\n") ? planText : `${planText}\n`);
-  fs.writeFileSync(path.join(dir, "learnings.md"), trackLearningsText(trackId));
+  writeJson(path.join(dir, "spec.json"), specJson);
+  writeJson(path.join(dir, "plan.json"), planJson);
+  fs.writeFileSync(path.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
+  fs.writeFileSync(path.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
+  fs.writeFileSync(path.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}\n`);
+  fs.writeFileSync(path.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const liveBeads = createBeadsTree(root, { ...args, trackId, dryRun: false });
   if (!liveBeads.ok) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -3187,8 +3646,16 @@ function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
       "Resume from the packet context returned by Cadre MCP.",
     ].join("\n");
   const handoffPath = path.join(track.dir, "HANDOFF.md");
+  const handoffJsonPath = trackHandoffJsonPath(track);
+  const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
   const reviewFiles = [
-    textReviewFile(path.relative(root, handoffPath), "Track handoff", "handoffText", `${text.replace(/\n*$/, "")}\n`),
+    jsonReviewFile(path.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    textReviewFile(
+      path.relative(root, handoffPath),
+      "Track handoff",
+      "handoff.json",
+      withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+    ),
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
@@ -3224,7 +3691,8 @@ function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   }
   if (args.execute === true) {
-    fs.writeFileSync(handoffPath, `${text.replace(/\n*$/, "")}\n`);
+    writeJsonEnsured(handoffJsonPath, handoffJson);
+    fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
   }
   return {
     ...base,
@@ -3562,10 +4030,24 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   }
   if (track && revisedSpec !== undefined) {
-    reviewFiles.push(textReviewFile(path.relative(root, track.spec_path), "Revised track spec", "specText", revisedSpec));
+    const specJson = specJsonFromText(track.track_id, revisedSpec);
+    reviewFiles.push(jsonReviewFile(path.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "specText", specJson));
+    reviewFiles.push(textReviewFile(
+      path.relative(root, track.spec_path),
+      "Revised track spec",
+      "spec.json",
+      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(specJson))
+    ));
   }
   if (track && revisedPlan !== undefined) {
-    reviewFiles.push(textReviewFile(path.relative(root, track.plan_path), "Revised track plan", "planText", revisedPlan));
+    const planJson = planJsonFromText(track.track_id, revisedPlan);
+    reviewFiles.push(jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "planText", planJson));
+    reviewFiles.push(textReviewFile(
+      path.relative(root, track.plan_path),
+      "Revised track plan",
+      "plan.json",
+      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson))
+    ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
@@ -3619,11 +4101,17 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
   const writeResult = withTrackLock(root, track.track_id, () => {
     const written: string[] = [];
     if (revisedSpec !== undefined) {
-      fs.writeFileSync(track.spec_path, revisedSpec.replace(/\n*$/, "\n"));
+      const specJson = specJsonFromText(track.track_id, revisedSpec);
+      writeJsonEnsured(trackSpecJsonPath(track), specJson);
+      fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(specJson)));
+      written.push(path.relative(root, trackSpecJsonPath(track)));
       written.push(path.relative(root, track.spec_path));
     }
     if (revisedPlan !== undefined) {
-      fs.writeFileSync(track.plan_path, revisedPlan.replace(/\n*$/, "\n"));
+      const planJson = planJsonFromText(track.track_id, revisedPlan);
+      writeJsonEnsured(trackPlanJsonPath(track), planJson);
+      fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson)));
+      written.push(path.relative(root, trackPlanJsonPath(track)));
       written.push(path.relative(root, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
@@ -3810,6 +4298,488 @@ function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function safeReadDir(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir).sort();
+  } catch {
+    return [];
+  }
+}
+
+function artifactSchema(artifact: unknown): JsonObject {
+  const id = String(artifact || "catalog").toLowerCase();
+  const objectSchema = (required: string[], properties: JsonObject): JsonObject => ({
+    type: "object",
+    required,
+    additionalProperties: true,
+    properties,
+  });
+  const schemas: Record<string, JsonObject> = {
+    spec: objectSchema(["track_id", "title"], {
+      track_id: { type: "string" },
+      title: { type: "string" },
+      summary: { type: "string" },
+      goals: { type: "array", items: { type: "string" } },
+      non_goals: { type: "array", items: { type: "string" } },
+      constraints: { type: "array", items: { type: "string" } },
+      acceptance_criteria: { type: "array", items: { type: "string" } },
+      risks: { type: "array", items: { type: "string" } },
+      open_questions: { type: "array", items: { type: "string" } },
+      references: { type: "array", items: { type: "string" } },
+    }),
+    plan: objectSchema(["track_id", "phases"], {
+      track_id: { type: "string" },
+      phases: { type: "array" },
+      tasks: { type: "array" },
+      execution_mode: { type: "string" },
+      dependencies: { type: "array" },
+      files: { type: "array" },
+      repo: { type: "string" },
+      status: { type: "string" },
+      commit_shas: { type: "array", items: { type: "string" } },
+      test_expectations: { type: "array" },
+      completion_evidence: { type: "object" },
+    }),
+    styleguide: objectSchema(["id", "title", "rules"], {
+      id: { type: "string" },
+      title: { type: "string" },
+      languages: { type: "array", items: { type: "string" } },
+      frameworks: { type: "array", items: { type: "string" } },
+      file_patterns: { type: "array", items: { type: "string" } },
+      applies_to: { type: "array", items: { type: "string" } },
+      rules: { type: "array" },
+      examples: { type: "array" },
+      anti_examples: { type: "array" },
+      severity: { type: "string" },
+      source: { type: "string" },
+      version: { type: "number" },
+    }),
+    metadata: objectSchema(["track_id"], {
+      track_id: { type: "string" },
+      status: { type: "string" },
+      owner: { type: "string" },
+      reviewer: { type: "string" },
+      review: { type: "object" },
+      beads_tasks: { type: "object" },
+      worktree_path: { type: "string" },
+    }),
+    release: objectSchema(["version", "completed_tracks"], {
+      version: { type: "string" },
+      generated_at: { type: "string" },
+      completed_tracks: { type: "array" },
+      notes: { type: "array" },
+    }),
+    journal: objectSchema(["track_id", "events"], {
+      track_id: { type: "string" },
+      events: { type: "array" },
+      event: { type: "string" },
+      recorded_at: { type: "string" },
+    }),
+    evidence: objectSchema(["entries"], {
+      entries: { type: "array" },
+      provider: { type: "string" },
+      findings: { type: "array" },
+      blocking_count: { type: "number" },
+      recorded_at: { type: "string" },
+    }),
+    project_doc: objectSchema(["title", "sections"], {
+      title: { type: "string" },
+      summary: { type: "string" },
+      sections: { type: "array" },
+    }),
+    artifact_sync_result: objectSchema(["ok", "dry_run", "artifacts"], {
+      ok: { type: "boolean" },
+      dry_run: { type: "boolean" },
+      artifacts: { type: "array" },
+      review_bundle: { type: "object" },
+      written: { type: "array", items: { type: "string" } },
+      skipped: { type: "array", items: { type: "string" } },
+      warnings: { type: "array", items: { type: "string" } },
+      errors: { type: "array", items: { type: "string" } },
+    }),
+  };
+  return {
+    ok: true,
+    artifact: id,
+    schema: schemas[id]
+      || (["review-evidence", "review_evidence", "provider-evidence", "provider_evidence"].includes(id) ? schemas.evidence : undefined)
+      || (["completion-journal", "completion_journal"].includes(id) ? schemas.journal : undefined)
+      || schemas.project_doc,
+    dialect: "https://json-schema.org/draft/2020-12/schema",
+  };
+}
+
+function artifactDefinitions(root: string, args: RuntimeArgs = {}): ArtifactDefinition[] {
+  const defs: ArtifactDefinition[] = [
+    { id: "product", title: "Product context", canonical: "cadre/product.json", projection: "cadre/product.md", schema: "cadre.product.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "product-guidelines", title: "Product guidelines", canonical: "cadre/product_guidelines.json", projection: "cadre/product_guidelines.md", schema: "cadre.product_guidelines.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "workflow", title: "Workflow policy", canonical: "cadre/workflow.json", projection: "cadre/workflow.md", schema: "cadre.workflow.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "patterns", title: "Project patterns", canonical: "cadre/patterns.jsonl", projection: "cadre/patterns.md", schema: "cadre.patterns.v1", scope: "project", sourceFormat: "jsonl", projectionFormat: "markdown" },
+    { id: "tracks-index", title: "Track index", canonical: "cadre/tracks", projection: "cadre/tracks.md", schema: "cadre.tracks_index.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    { id: "beads-config", title: "Beads config", canonical: "cadre/beads.json", schema: "cadre.beads.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    { id: "setup-state", title: "Setup state", canonical: "cadre/setup_state.json", schema: "cadre.setup_state.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+  ];
+  if (fileExists(path.join(root, "cadre", "repos.json")) || fileExists(path.join(root, "cadre", "repos.md"))) {
+    defs.push({ id: "repos", title: "Repository topology", canonical: "cadre/repos.json", projection: "cadre/repos.md", schema: "cadre.repos.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  if (fileExists(path.join(root, "cadre", "lsp.json"))) {
+    defs.push({ id: "lsp-config", title: "LSP config", canonical: "cadre/lsp.json", schema: "cadre.lsp.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" });
+  }
+  const styleJsonDir = path.join(root, "cadre", "styleguides");
+  const styleMdDir = path.join(root, "cadre", "code_styleguides");
+  const styleIds = new Set<string>();
+  for (const file of safeReadDir(styleJsonDir)) {
+    if (file.endsWith(".json") && file !== "index.json") styleIds.add(path.basename(file, ".json"));
+  }
+  for (const file of safeReadDir(styleMdDir)) {
+    if (file.endsWith(".md") && file !== "README.md") styleIds.add(path.basename(file, ".md"));
+  }
+  if (styleIds.size > 0) {
+    defs.push({ id: "styleguides-index", title: "Style guide catalog", canonical: "cadre/styleguides/index.json", projection: "cadre/code_styleguides/README.md", schema: "cadre.styleguide_index.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  for (const id of Array.from(styleIds).sort()) {
+    defs.push({ id: `styleguide:${id}`, title: `Style guide: ${id}`, canonical: `cadre/styleguides/${id}.json`, projection: `cadre/code_styleguides/${id}.md`, schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  for (const track of listTracks(root)) {
+    defs.push(
+      { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: path.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
+      { id: `track:${track.track_id}:spec`, title: `Spec: ${track.track_id}`, canonical: path.relative(root, trackSpecJsonPath(track)), projection: path.relative(root, track.spec_path), schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:plan`, title: `Plan: ${track.track_id}`, canonical: path.relative(root, trackPlanJsonPath(track)), projection: path.relative(root, track.plan_path), schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:learnings`, title: `Learnings: ${track.track_id}`, canonical: path.relative(root, trackLearningsJsonlPath(track)), projection: path.relative(root, track.learnings_path || path.join(track.dir, "learnings.md")), schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:handoff`, title: `Handoff: ${track.track_id}`, canonical: path.relative(root, trackHandoffJsonPath(track)), projection: path.relative(root, path.join(track.dir, "HANDOFF.md")), schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+    );
+    const reviewEvidenceJsonl = path.join(track.dir, "review-evidence.jsonl");
+    const reviewEvidenceJson = path.join(track.dir, "review-evidence.json");
+    const completionJournal = path.join(track.dir, "completion_journal.jsonl");
+    const parallelState = path.join(track.dir, "parallel_state.json");
+    const implementState = path.join(track.dir, "implement_state.json");
+    if (fileExists(reviewEvidenceJsonl)) {
+      defs.push({ id: `track:${track.track_id}:review-evidence`, title: `Review evidence: ${track.track_id}`, canonical: path.relative(root, reviewEvidenceJsonl), schema: "cadre.review_evidence.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+    }
+    if (fileExists(reviewEvidenceJson)) {
+      defs.push({ id: `track:${track.track_id}:review-evidence-summary`, title: `Review evidence summary: ${track.track_id}`, canonical: path.relative(root, reviewEvidenceJson), schema: "cadre.review_evidence_summary.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+    }
+    if (fileExists(completionJournal)) {
+      defs.push({ id: `track:${track.track_id}:completion-journal`, title: `Completion journal: ${track.track_id}`, canonical: path.relative(root, completionJournal), schema: "cadre.completion_journal.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+    }
+    if (fileExists(parallelState)) {
+      defs.push({ id: `track:${track.track_id}:parallel-state`, title: `Parallel state: ${track.track_id}`, canonical: path.relative(root, parallelState), schema: "cadre.parallel_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+    }
+    if (fileExists(implementState)) {
+      defs.push({ id: `track:${track.track_id}:implement-state`, title: `Implementation state: ${track.track_id}`, canonical: path.relative(root, implementState), schema: "cadre.implement_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+    }
+  }
+  const releasesDir = path.join(root, "cadre", "releases");
+  for (const file of safeReadDir(releasesDir)) {
+    if (!file.endsWith(".json")) continue;
+    const version = path.basename(file, ".json");
+    defs.push({ id: `release:${version}`, title: `Release ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  const jobsDir = path.join(root, "cadre", "jobs");
+  for (const file of safeReadDir(jobsDir)) {
+    if (!file.endsWith(".json")) continue;
+    const jobId = path.basename(file, ".json");
+    defs.push({ id: `job:${jobId}`, title: `Job ${jobId}`, canonical: `cadre/jobs/${file}`, schema: "cadre.job.v1", scope: "external", sourceFormat: "json", projectionFormat: "none" });
+  }
+  if (args.includeArchive === true || args.include_archive === true) {
+    const archiveDir = path.join(root, "cadre", "archive");
+    for (const trackId of safeReadDir(archiveDir)) {
+      const dir = path.join(archiveDir, trackId);
+      if (!fileExists(path.join(dir, "metadata.json"))) continue;
+      defs.push(
+        { id: `archive:${trackId}:spec`, title: `Archived spec: ${trackId}`, canonical: `cadre/archive/${trackId}/spec.json`, projection: `cadre/archive/${trackId}/spec.md`, schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+        { id: `archive:${trackId}:plan`, title: `Archived plan: ${trackId}`, canonical: `cadre/archive/${trackId}/plan.json`, projection: `cadre/archive/${trackId}/plan.md`, schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+      );
+    }
+  }
+  return defs;
+}
+
+function artifactMatches(def: ArtifactDefinition, args: RuntimeArgs = {}): boolean {
+  const artifact = asOptionalString(args.artifact || args.id);
+  if (artifact && def.id !== artifact && !def.id.endsWith(`:${artifact}`)) return false;
+  const scope = asOptionalString(args.scope || args.view || "all") || "all";
+  if (scope === "all") return true;
+  if (scope === "project") return def.scope === "project";
+  if (scope === "tracks") return def.scope === "track" || def.id === "tracks-index";
+  if (scope === "styleguides" || scope === "styleguide") return def.scope === "styleguide";
+  if (scope === "release") return def.scope === "release";
+  if (scope === "spec") return def.id.endsWith(":spec");
+  if (scope === "plan") return def.id.endsWith(":plan");
+  if (scope.startsWith("track:")) return def.id.startsWith(`${scope}:`) || def.id === "tracks-index";
+  return def.id === scope || def.scope === scope;
+}
+
+function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
+  const artifacts = artifactDefinitions(root, args)
+    .filter((def) => artifactMatches(def, args))
+    .map((def) => ({
+      ...def,
+      canonical_exists: def.canonical === "cadre/tracks" ? fileExists(path.join(root, "cadre", "tracks")) : fileExists(path.join(root, def.canonical)),
+      projection_exists: def.projection ? fileExists(path.join(root, def.projection)) : false,
+    }));
+  return { ok: true, root, artifacts };
+}
+
+function renderJsonCodeblock(title: string, value: JsonObject): string {
+  return normalizedText(`# ${title}\n\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\`\n`);
+}
+
+function readJsonl(file: string): JsonObject[] {
+  if (!fileExists(file)) return [];
+  return fs.readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return asJsonObject(JSON.parse(line));
+      } catch {
+        return { text: line };
+      }
+    });
+}
+
+function renderJsonlMarkdown(title: string, entries: JsonObject[]): string {
+  if (entries.length === 1) {
+    const text = asOptionalString(entries[0]?.text || entries[0]?.summary || entries[0]?.body);
+    if (text && /^#\s+/m.test(text.trimStart())) return normalizedText(text);
+  }
+  const parts = [`# ${title}`, ""];
+  for (const entry of entries) {
+    const heading = asOptionalString(entry.title || entry.kind || entry.id);
+    if (heading) parts.push(`## ${heading}`, "");
+    const text = asOptionalString(entry.text || entry.summary || entry.body);
+    if (text) parts.push(text, "");
+  }
+  return normalizedText(parts.join("\n"));
+}
+
+function legacyImportForArtifact(root: string, def: ArtifactDefinition): JsonObject | null {
+  if (!def.projection) return null;
+  const projection = path.join(root, def.projection);
+  if (!fileExists(projection)) return null;
+  const text = fs.readFileSync(projection, "utf8");
+  if (def.id === "product") return markdownDocJson("product", text);
+  if (def.id === "product-guidelines") return markdownDocJson("product_guidelines", text);
+  if (def.id === "workflow") return markdownDocJson("workflow", text);
+  if (def.id.startsWith("styleguide:")) return styleGuideJsonFromMarkdown(def.id.split(":").pop() || "styleguide", text);
+  if (def.id.endsWith(":spec")) {
+    const trackId = def.id.split(":").slice(-2, -1)[0] || path.basename(path.dirname(projection));
+    return specJsonFromText(trackId, text);
+  }
+  if (def.id.endsWith(":plan")) {
+    const trackId = def.id.split(":").slice(-2, -1)[0] || path.basename(path.dirname(projection));
+    return planJsonFromText(trackId, text);
+  }
+  if (def.id.endsWith(":handoff")) return markdownDocJson("handoff", text);
+  return null;
+}
+
+function renderArtifact(root: string, def: ArtifactDefinition, args: RuntimeArgs = {}): ArtifactRenderResult {
+  const canonicalPath = path.join(root, def.canonical);
+  const projectionPath = def.projection ? path.join(root, def.projection) : undefined;
+  let raw: JsonObject | null = null;
+  let body = "";
+  let missingCanonical = false;
+  if (def.id === "tracks-index") {
+    const tracks = listTracks(root).sort((a, b) => a.track_id.localeCompare(b.track_id));
+    body = normalizedText(`# Tracks\n\n<!-- cadre:index:start -->\n${tracks.map((track) => {
+      const status = asOptionalString(track.metadata.status) || "new";
+      const marker = Object.prototype.hasOwnProperty.call(STATUS_MARKERS, status)
+        ? STATUS_MARKERS[status as keyof typeof STATUS_MARKERS]
+        : STATUS_MARKERS.new;
+      const name = track.metadata.name || track.metadata.track_id || track.track_id;
+      return `## ${marker} Track: ${name}`;
+    }).join("\n")}${tracks.length ? "\n" : ""}<!-- cadre:index:end -->\n`);
+  } else if (def.sourceFormat === "jsonl") {
+    const entries = readJsonl(canonicalPath);
+    if (entries.length === 0) missingCanonical = true;
+    const title = def.title;
+    body = renderJsonlMarkdown(title, entries);
+  } else if (fileExists(canonicalPath)) {
+    raw = readJson<JsonObject | null>(canonicalPath, null);
+    if (!raw) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, error: "Invalid canonical JSON" };
+    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
+    else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
+    else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
+    else if (def.schema === "cadre.styleguide_index.v1") body = renderJsonCodeblock(def.title, raw);
+    else if (def.schema === "cadre.release.v1") body = releaseMarkdownFromMetadata(raw);
+    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title);
+    else body = renderJsonCodeblock(def.title, raw);
+  } else {
+    missingCanonical = true;
+    raw = legacyImportForArtifact(root, def);
+    if (raw) {
+      if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
+      else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
+      else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
+      else body = renderMarkdownDoc(raw, def.title);
+    }
+  }
+  if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
+  const content = withGeneratedMarker(def.canonical, def.schema, body);
+  const existing = projectionPath && fileExists(projectionPath) ? fs.readFileSync(projectionPath, "utf8") : "";
+  return {
+    ok: true,
+    artifact_id: def.id,
+    canonical_path: def.canonical,
+    projection_path: def.projection,
+    content,
+    changed: projectionPath ? normalizedText(existing) !== normalizedText(content) : false,
+    missing_canonical: missingCanonical,
+    legacy_import_available: Boolean(raw && missingCanonical),
+  };
+}
+
+function releaseMarkdownFromMetadata(metadata: JsonObject): string {
+  const version = asOptionalString(metadata.version) || "release";
+  const parts = [`# Release ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
+  for (const rawTrack of asArray(metadata.completed_tracks)) {
+    const track = asJsonObject(rawTrack);
+    parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
+  }
+  parts.push("");
+  return normalizedText(parts.join("\n"));
+}
+
+function artifactRender(root: string, args: RuntimeArgs = {}): CoreResult {
+  const artifact = asOptionalString(args.artifact || args.id);
+  if (!artifact) return { ok: false, error: "artifact is required" };
+  const def = artifactDefinitions(root, args).find((item) => item.id === artifact || item.id.endsWith(`:${artifact}`));
+  if (!def) return { ok: false, error: `Unknown artifact: ${artifact}` };
+  return renderArtifact(root, def, args);
+}
+
+function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResult {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const results = artifacts.map((def) => {
+    const file = path.join(root, def.canonical);
+    if (def.id === "tracks-index") return { artifact_id: def.id, ok: fileExists(path.join(root, "cadre", "tracks")) };
+    if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
+    if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
+    const value = readJson<JsonObject | null>(file, null);
+    return { artifact_id: def.id, ok: Boolean(value), canonical_path: def.canonical };
+  });
+  return { ok: results.every((result) => result.ok !== false), root, results };
+}
+
+function artifactDiff(root: string, args: RuntimeArgs = {}): CoreResult {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const diffs = artifacts.map((def) => {
+    const rendered = renderArtifact(root, def, args);
+    return {
+      artifact_id: def.id,
+      projection_path: def.projection,
+      changed: rendered.changed === true,
+      missing_canonical: rendered.missing_canonical === true,
+      legacy_import_available: rendered.legacy_import_available === true,
+    };
+  });
+  return { ok: true, root, diffs, changed: diffs.filter((diff) => diff.changed).length };
+}
+
+function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
+  const execute = args.execute === true;
+  const force = args.force === true;
+  const importLegacy = args.importLegacy !== false && args.import_legacy !== false;
+  const defs = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const reviewFiles: ReviewFile[] = [];
+  const artifacts: JsonObject[] = [];
+  const written: string[] = [];
+  const skipped: string[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  for (const def of defs) {
+    const rendered = renderArtifact(root, def, args);
+    artifacts.push({
+      artifact_id: def.id,
+      canonical_path: def.canonical,
+      projection_path: def.projection || null,
+      changed: rendered.changed === true,
+      missing_canonical: rendered.missing_canonical === true,
+      legacy_import_available: rendered.legacy_import_available === true,
+    });
+    if (rendered.ok === false || !rendered.content || !def.projection) {
+      if (rendered.missing_canonical) warnings.push(`Missing canonical for ${def.id}`);
+      continue;
+    }
+    const canonicalFile = path.join(root, def.canonical);
+    if (rendered.missing_canonical && rendered.legacy_import_available && importLegacy) {
+      const imported = legacyImportForArtifact(root, def);
+      if (imported) {
+        reviewFiles.push(jsonReviewFile(def.canonical, `${def.title} canonical import`, "legacy_markdown", imported));
+        if (execute && humanReviewConfirmed(args)) {
+          writeJsonEnsured(canonicalFile, imported);
+          written.push(def.canonical);
+        }
+      }
+    }
+    reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
+    if (!execute) continue;
+    if (!humanReviewConfirmed(args)) continue;
+    const projectionFile = path.join(root, def.projection);
+    const existing = fileExists(projectionFile) ? fs.readFileSync(projectionFile, "utf8") : "";
+    if (existing && !hasGeneratedMarker(existing) && !force) {
+      skipped.push(def.projection);
+      warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
+      continue;
+    }
+    ensureParent(projectionFile);
+    fs.writeFileSync(projectionFile, rendered.content);
+    written.push(def.projection);
+  }
+  const reviewBundle = workflowReviewBundle(root, "artifacts", args, reviewFiles, {
+    scope: args.scope || "all",
+    artifact: args.artifact || null,
+  });
+  const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
+  if (execute && !humanReviewConfirmed(args)) {
+    return {
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      artifacts,
+      human_review: humanReview,
+      review_bundle: reviewBundle,
+      warnings,
+      errors: ["Human confirmation is required before syncing artifacts"],
+      error: "Human confirmation is required before syncing artifacts",
+    };
+  }
+  return {
+    ok: errors.length === 0,
+    dry_run: !execute,
+    phase_state: execute ? "executed" : "dry_run",
+    artifacts,
+    review_bundle: reviewBundle,
+    human_review: humanReview,
+    written,
+    skipped,
+    warnings,
+    errors,
+  };
+}
+
+function artifactImport(root: string, args: RuntimeArgs = {}): CoreResult {
+  return artifactSync(root, { ...args, importLegacy: true, scope: args.scope || "all" });
+}
+
+function artifactPacket(root: string, args: RuntimeArgs = {}): CoreResult {
+  const action = asOptionalString(args.action) || "catalog";
+  if (action === "catalog") return artifactCatalog(root, args);
+  if (action === "schema") return artifactSchema(args.artifact || args.id || args.scope);
+  if (action === "validate") return artifactValidate(root, args);
+  if (action === "render") return artifactRender(root, args);
+  if (action === "diff") return artifactDiff(root, args);
+  if (action === "sync") return artifactSync(root, args);
+  if (action === "import") return artifactImport(root, args);
+  return { ok: false, error: `Unknown artifact action: ${action}` };
+}
+
 function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const mutating = args.execute === true && [
@@ -3821,6 +4791,8 @@ function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
     "refresh",
     "flag",
     "revert",
+    "artifacts",
+    "artifact_sync",
   ].includes(workflow);
   if (mutating && (args as UnknownRecord).skipSync !== true) {
     const result = withSharedControlPlaneSync(root, args, `workflow:${workflow}`, () =>
@@ -3859,6 +4831,17 @@ function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
       return workflowRevise(root, args);
     case "refresh":
       return workflowRefresh(root, args);
+    case "artifacts":
+    case "artifact_sync":
+      {
+        const artifactAction = asOptionalString(args.artifactAction || args.artifact_action) || asOptionalString(args.mode) || "sync";
+        return {
+          ...workflowSummary(root, workflow, args),
+          artifact_action: artifactAction,
+          artifact_scope: asOptionalString(args.scope || args.view) || "all",
+          ...artifactPacket(root, { ...args, action: artifactAction }),
+        };
+      }
     case "flag":
       {
         const trackId = selectedTrackId(root, args);
@@ -4601,6 +5584,10 @@ function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
     metadata_path: path.join(root, "cadre", "tracks", safeName(trackId), "metadata.json"),
     plan_path: path.join(root, "cadre", "tracks", safeName(trackId), "plan.md"),
     spec_path: path.join(root, "cadre", "tracks", safeName(trackId), "spec.md"),
+    plan_json_path: path.join(root, "cadre", "tracks", safeName(trackId), "plan.json"),
+    spec_json_path: path.join(root, "cadre", "tracks", safeName(trackId), "spec.json"),
+    learnings_jsonl_path: path.join(root, "cadre", "tracks", safeName(trackId), "learnings.jsonl"),
+    handoff_json_path: path.join(root, "cadre", "tracks", safeName(trackId), "handoff.json"),
     metadata: draftMetadata,
   };
   if (!dryRun && !commandExists("bd", root)) {
@@ -5065,16 +6052,9 @@ function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreRes
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
 
+  const planJsonPath = trackPlanJsonPath(track);
   const marker = markerForStatus(args.status || "completed");
-  const lines = fs.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
-  const idx = task.line - 1;
-  const line = lines[idx];
-  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
-  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
   const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
-  if (commitSha && !nextLine.includes(commitSha)) {
-    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
-  }
   const recordedAt = utcNow();
   const lastTaskResult = {
     phase_index: phaseIndex,
@@ -5094,6 +6074,68 @@ function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreRes
   });
   if (!metadata.ok) {
     return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  }
+  if (fileExists(planJsonPath)) {
+    const planPatch = patchJsonFile(planJsonPath, (current) => {
+      const phases = asArray(current.phases).map((rawPhase) => {
+        const currentPhase = asJsonObject(rawPhase);
+        if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
+        return {
+          ...currentPhase,
+          tasks: asArray(currentPhase.tasks).map((rawTask) => {
+            const currentTask = asJsonObject(rawTask);
+            if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
+            const commitShas = Array.from(new Set([
+              ...asStringArray(currentTask.commit_shas),
+              ...(commitSha ? [commitSha.slice(0, 12)] : []),
+            ]));
+            return {
+              ...currentTask,
+              status: args.status || "completed",
+              commit_shas: commitShas,
+              completion_evidence: {
+                ...asJsonObject(currentTask.completion_evidence),
+                commit_sha: commitSha || null,
+                repo: args.repo || task.repo || null,
+                working_root: args.workingRoot || null,
+                coverage: typeof args.coverage === "number" ? args.coverage : null,
+                recorded_at: recordedAt,
+              },
+            };
+          }),
+        };
+      });
+      return { ...current, phases, updated_at: recordedAt };
+    });
+    if (!planPatch.ok) {
+      return { ok: false, track_id: track.track_id, stage: "plan_json_patch", metadata, plan_json: planPatch };
+    }
+    const nextPlan = asJsonObject(planPatch.value);
+    fs.writeFileSync(
+      track.plan_path,
+      withGeneratedMarker(path.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+    );
+    const metadataValue = asJsonObject(metadata.value);
+    const beadsTasks = asJsonObject(metadataValue.beads_tasks);
+    return {
+      ok: true,
+      track_id: track.track_id,
+      task_key: task.task_key,
+      line: task.line,
+      status: args.status || "completed",
+      commit_sha: commitSha || null,
+      beads_task_id: asOptionalString(beadsTasks[task.task_key]) || null,
+      metadata,
+      plan_json: planPatch,
+    };
+  }
+  const lines = fs.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
+  const idx = task.line - 1;
+  const line = lines[idx];
+  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
+  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
+  if (commitSha && !nextLine.includes(commitSha)) {
+    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
   }
   lines[idx] = nextLine;
   try {
@@ -5150,6 +6192,11 @@ function patchCompletionJournal(
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
+  appendJsonl(path.join(track.dir, "completion_journal.jsonl"), {
+    key,
+    recorded_at: journal.updated_at,
+    entry: journal.entries[key],
+  });
   return journal.entries[key];
 }
 
@@ -5986,6 +7033,7 @@ function providerEvidenceUnlocked(root: string, track: CadreTrack, args: Runtime
     updated_at: entry.recorded_at,
   };
   writeJson(evidencePath, next);
+  appendJsonl(path.join(track.dir, "review-evidence.jsonl"), entry);
   const metadata = patchJsonFile(track.metadata_path, (current) => {
     current.review_evidence = {
       path: path.relative(root, evidencePath),
@@ -7523,6 +8571,12 @@ export {
   techStackSummary,
   testCoverage,
   heartbeatTrack,
+  artifactCatalog,
+  artifactPacket,
+  artifactRender,
+  artifactSchema,
+  artifactSync,
+  artifactValidate,
   trackContext,
   testImpact,
   integrationInventory,

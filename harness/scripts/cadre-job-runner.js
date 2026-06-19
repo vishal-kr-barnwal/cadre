@@ -545,6 +545,106 @@ function fileExists(file) {
     return false;
   }
 }
+function ensureParent(file) {
+  import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(file), { recursive: true });
+}
+function appendJsonl(file, value) {
+  ensureParent(file);
+  import_node_fs2.default.appendFileSync(file, `${JSON.stringify(value)}
+`);
+}
+function normalizedText(text) {
+  return text.replace(/\r\n/g, "\n").replace(/\n*$/, "\n");
+}
+function generatedMarker(source, schema, body) {
+  return `<!-- cadre:generated from="${source}" schema="${schema}" hash="${textHash(body).slice(0, 16)}" -->`;
+}
+function withGeneratedMarker(source, schema, body) {
+  const normalized = normalizedText(body);
+  return `${generatedMarker(source, schema, normalized)}
+${normalized}`;
+}
+function markerForPlanStatus(status) {
+  const normalized = String(status || "pending");
+  if (normalized === "completed") return "x";
+  if (normalized === "in_progress") return "~";
+  if (normalized === "blocked") return "!";
+  if (normalized === "skipped") return "-";
+  return " ";
+}
+function trackPlanJsonPath(track) {
+  return track.plan_json_path || import_node_path3.default.join(track.dir, "plan.json");
+}
+function planJsonPathForPlanPath(file) {
+  return import_node_path3.default.join(import_node_path3.default.dirname(file), "plan.json");
+}
+function planJsonToParsedPlan(raw) {
+  const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
+    const phase = asJsonObject(rawPhase);
+    const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
+    const annotations = {
+      ...asJsonObject(phase.annotations),
+      ...asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {},
+      ...asArray(phase.depends_on).length > 0 ? { depends: asStringArray(phase.depends_on).join(",") } : {}
+    };
+    const tasks = asArray(phase.tasks).map((rawTask, taskOffset) => {
+      const task = asJsonObject(rawTask);
+      const taskIndex = Number(task.task_index || task.index || taskOffset + 1);
+      const taskKey = asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskIndex}`;
+      const files = asStringArray(task.files);
+      const depends = asStringArray(task.depends_on || task.depends);
+      const taskAnnotations = {
+        ...asJsonObject(task.annotations),
+        ...files.length > 0 ? { files: files.join(", ") } : {},
+        ...depends.length > 0 ? { depends: depends.join(",") } : {},
+        ...asOptionalString(task.repo) ? { repo: asOptionalString(task.repo) } : {}
+      };
+      return {
+        task_index: taskIndex,
+        task_key: taskKey,
+        title: asOptionalString(task.title) || `Task ${taskIndex}`,
+        marker: markerForPlanStatus(task.status),
+        annotations: taskAnnotations,
+        files,
+        depends,
+        repo: asOptionalString(task.repo) || null,
+        line: Number(task.line || phaseIndex * 100 + taskIndex),
+        phase_index: phaseIndex,
+        commit_shas: asStringArray(task.commit_shas),
+        repo_shas: asJsonObject(task.repo_shas)
+      };
+    });
+    return {
+      phase_index: phaseIndex,
+      title: asOptionalString(phase.title) || `Phase ${phaseIndex}`,
+      annotations,
+      tasks,
+      line: Number(phase.line || phaseIndex * 100)
+    };
+  });
+  return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
+}
+function renderPlanMarkdown(raw) {
+  const trackId = asOptionalString(raw.track_id) || "track";
+  const parts = [`# Plan: ${trackId}`, ""];
+  const parsed = planJsonToParsedPlan(raw);
+  for (const phase of parsed.phases) {
+    parts.push(`## Phase ${phase.phase_index}: ${phase.title.replace(/^Phase\s+\d+:\s*/i, "")}`);
+    if (phase.annotations.execution) parts.push(`<!-- execution: ${phase.annotations.execution} -->`);
+    if (phase.annotations.depends) parts.push(`<!-- depends: ${phase.annotations.depends} -->`);
+    parts.push("");
+    for (const task of phase.tasks) {
+      const commit = task.commit_shas && task.commit_shas.length > 0 ? ` (${task.commit_shas[task.commit_shas.length - 1]})` : "";
+      parts.push(`- [${task.marker}] Task ${task.task_index}: ${task.title.replace(/^Task\s+\d+:\s*/i, "")}${commit}`);
+      if (task.repo) parts.push(`  <!-- repo: ${task.repo} -->`);
+      if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
+      if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
+      if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
+      parts.push("");
+    }
+  }
+  return normalizedText(parts.join("\n"));
+}
 function gitIdentity(root) {
   for (const key of ["user.email", "user.name"]) {
     const result = (0, import_node_child_process2.spawnSync)("git", ["config", key], {
@@ -870,12 +970,21 @@ function listTracks(root) {
       metadata_path: metadataPath,
       plan_path: import_node_path3.default.join(dir, "plan.md"),
       spec_path: import_node_path3.default.join(dir, "spec.md"),
+      plan_json_path: import_node_path3.default.join(dir, "plan.json"),
+      spec_json_path: import_node_path3.default.join(dir, "spec.json"),
+      learnings_jsonl_path: import_node_path3.default.join(dir, "learnings.jsonl"),
+      handoff_json_path: import_node_path3.default.join(dir, "handoff.json"),
       metadata
     });
   }
   return tracks;
 }
 function parsePlanFile(file) {
+  const planJsonPath = planJsonPathForPlanPath(file);
+  if (fileExists(planJsonPath)) {
+    const raw = readJson(planJsonPath, null);
+    if (raw) return planJsonToParsedPlan(raw);
+  }
   if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
   return parsePlanText(import_node_fs2.default.readFileSync(file, "utf8"));
 }
@@ -1149,16 +1258,9 @@ function recordTaskResultUnlocked(root, args = {}) {
   const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
+  const planJsonPath = trackPlanJsonPath(track);
   const marker = markerForStatus(args.status || "completed");
-  const lines = import_node_fs2.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
-  const idx = task.line - 1;
-  const line = lines[idx];
-  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
-  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
   const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
-  if (commitSha && !nextLine.includes(commitSha)) {
-    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
-  }
   const recordedAt = utcNow();
   const lastTaskResult = {
     phase_index: phaseIndex,
@@ -1178,6 +1280,68 @@ function recordTaskResultUnlocked(root, args = {}) {
   });
   if (!metadata.ok) {
     return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  }
+  if (fileExists(planJsonPath)) {
+    const planPatch = patchJsonFile(planJsonPath, (current) => {
+      const phases = asArray(current.phases).map((rawPhase) => {
+        const currentPhase = asJsonObject(rawPhase);
+        if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
+        return {
+          ...currentPhase,
+          tasks: asArray(currentPhase.tasks).map((rawTask) => {
+            const currentTask = asJsonObject(rawTask);
+            if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
+            const commitShas = Array.from(/* @__PURE__ */ new Set([
+              ...asStringArray(currentTask.commit_shas),
+              ...commitSha ? [commitSha.slice(0, 12)] : []
+            ]));
+            return {
+              ...currentTask,
+              status: args.status || "completed",
+              commit_shas: commitShas,
+              completion_evidence: {
+                ...asJsonObject(currentTask.completion_evidence),
+                commit_sha: commitSha || null,
+                repo: args.repo || task.repo || null,
+                working_root: args.workingRoot || null,
+                coverage: typeof args.coverage === "number" ? args.coverage : null,
+                recorded_at: recordedAt
+              }
+            };
+          })
+        };
+      });
+      return { ...current, phases, updated_at: recordedAt };
+    });
+    if (!planPatch.ok) {
+      return { ok: false, track_id: track.track_id, stage: "plan_json_patch", metadata, plan_json: planPatch };
+    }
+    const nextPlan = asJsonObject(planPatch.value);
+    import_node_fs2.default.writeFileSync(
+      track.plan_path,
+      withGeneratedMarker(import_node_path3.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+    );
+    const metadataValue2 = asJsonObject(metadata.value);
+    const beadsTasks2 = asJsonObject(metadataValue2.beads_tasks);
+    return {
+      ok: true,
+      track_id: track.track_id,
+      task_key: task.task_key,
+      line: task.line,
+      status: args.status || "completed",
+      commit_sha: commitSha || null,
+      beads_task_id: asOptionalString(beadsTasks2[task.task_key]) || null,
+      metadata,
+      plan_json: planPatch
+    };
+  }
+  const lines = import_node_fs2.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
+  const idx = task.line - 1;
+  const line = lines[idx];
+  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
+  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
+  if (commitSha && !nextLine.includes(commitSha)) {
+    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
   }
   lines[idx] = nextLine;
   try {
@@ -1226,6 +1390,11 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
+  appendJsonl(import_node_path3.default.join(track.dir, "completion_journal.jsonl"), {
+    key,
+    recorded_at: journal.updated_at,
+    entry: journal.entries[key]
+  });
   return journal.entries[key];
 }
 function completeTask(root, args = {}) {

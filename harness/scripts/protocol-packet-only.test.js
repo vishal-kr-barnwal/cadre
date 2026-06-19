@@ -122,6 +122,7 @@ test("Artifact workflow protocols require token-safe review bundles", () => {
     ["cadre-refresh.md", "refresh"],
     ["cadre-release.md", "release"],
     ["cadre-handoff.md", "handoff"],
+    ["cadre-artifacts.md", "artifacts"],
   ]);
   const failures = [];
   for (const dir of protocolDirs) {

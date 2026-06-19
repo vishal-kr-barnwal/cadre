@@ -34,6 +34,12 @@ var cadre_core_exports = {};
 __export(cadre_core_exports, {
   STATUS_MARKERS: () => STATUS_MARKERS,
   acquireLock: () => acquireLock,
+  artifactCatalog: () => artifactCatalog,
+  artifactPacket: () => artifactPacket,
+  artifactRender: () => artifactRender,
+  artifactSchema: () => artifactSchema,
+  artifactSync: () => artifactSync,
+  artifactValidate: () => artifactValidate,
   availableWork: () => availableWork,
   beadsSummary: () => beadsSummary,
   beadsTaskWrite: () => beadsTaskWrite,
@@ -623,6 +629,286 @@ function fileExists(file) {
     return false;
   }
 }
+function ensureParent(file) {
+  import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(file), { recursive: true });
+}
+function writeJsonEnsured(file, value) {
+  ensureParent(file);
+  writeJson(file, value);
+}
+function appendJsonl(file, value) {
+  ensureParent(file);
+  import_node_fs2.default.appendFileSync(file, `${JSON.stringify(value)}
+`);
+}
+function normalizedText(text) {
+  return text.replace(/\r\n/g, "\n").replace(/\n*$/, "\n");
+}
+function generatedMarker(source, schema, body) {
+  return `<!-- cadre:generated from="${source}" schema="${schema}" hash="${textHash(body).slice(0, 16)}" -->`;
+}
+function withGeneratedMarker(source, schema, body) {
+  const normalized = normalizedText(body);
+  return `${generatedMarker(source, schema, normalized)}
+${normalized}`;
+}
+function hasGeneratedMarker(text) {
+  return /<!--\s*cadre:generated\b/.test(text);
+}
+function splitMarkdownSections(text) {
+  const lines = normalizedText(text).split("\n");
+  const firstHeadingIndex = lines.findIndex((line) => /^#\s+/.test(line));
+  const title = firstHeadingIndex >= 0 ? lines[firstHeadingIndex]?.replace(/^#\s+/, "").trim() || "Untitled" : "Untitled";
+  const bodyStart = firstHeadingIndex >= 0 ? firstHeadingIndex + 1 : 0;
+  const bodyLines = [];
+  const sections = [];
+  let current = null;
+  for (const line of lines.slice(bodyStart)) {
+    const section = line.match(/^##+\s+(.+?)\s*$/);
+    if (section?.[1]) {
+      if (current) sections.push(current);
+      current = { heading: section[1].trim(), body: "" };
+      continue;
+    }
+    if (current) {
+      current.body = `${asOptionalString(current.body) || ""}${line}
+`;
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  if (current) sections.push(current);
+  return {
+    title,
+    body: normalizedText(bodyLines.join("\n")).trim(),
+    sections: sections.map((section) => ({
+      heading: asOptionalString(section.heading) || "",
+      body: normalizedText(asOptionalString(section.body) || "").trim()
+    }))
+  };
+}
+function markdownDocJson(kind, markdown, extras = {}) {
+  const parsed = splitMarkdownSections(markdown);
+  return {
+    version: 1,
+    schema: `cadre.${kind}.v1`,
+    kind,
+    title: parsed.title,
+    summary: parsed.body,
+    sections: parsed.sections,
+    updated_at: utcNow(),
+    ...extras
+  };
+}
+function renderMarkdownDoc(value, fallbackTitle) {
+  const title = asOptionalString(value.title) || fallbackTitle;
+  const parts = [`# ${title}`, ""];
+  const summary = asOptionalString(value.summary);
+  if (summary) parts.push(summary, "");
+  for (const rawSection of asArray(value.sections)) {
+    const section = asJsonObject(rawSection);
+    const heading = asOptionalString(section.heading);
+    if (!heading) continue;
+    parts.push(`## ${heading}`, "");
+    const body = asOptionalString(section.body);
+    if (body) parts.push(body, "");
+  }
+  return normalizedText(parts.join("\n"));
+}
+function markerForPlanStatus(status) {
+  const normalized = String(status || "pending");
+  if (normalized === "completed") return "x";
+  if (normalized === "in_progress") return "~";
+  if (normalized === "blocked") return "!";
+  if (normalized === "skipped") return "-";
+  return " ";
+}
+function statusForPlanMarker(marker) {
+  if (marker === "x") return "completed";
+  if (marker === "~") return "in_progress";
+  if (marker === "!") return "blocked";
+  if (marker === "-") return "skipped";
+  return "pending";
+}
+function trackPlanJsonPath(track) {
+  return track.plan_json_path || import_node_path3.default.join(track.dir, "plan.json");
+}
+function trackSpecJsonPath(track) {
+  return track.spec_json_path || import_node_path3.default.join(track.dir, "spec.json");
+}
+function trackLearningsJsonlPath(track) {
+  return track.learnings_jsonl_path || import_node_path3.default.join(track.dir, "learnings.jsonl");
+}
+function trackHandoffJsonPath(track) {
+  return track.handoff_json_path || import_node_path3.default.join(track.dir, "handoff.json");
+}
+function planJsonPathForPlanPath(file) {
+  return import_node_path3.default.join(import_node_path3.default.dirname(file), "plan.json");
+}
+function planJsonFromText(trackId, text) {
+  const parsed = parsePlanText(text);
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: trackId,
+    title: `Plan: ${trackId}`,
+    source: "markdown_import",
+    updated_at: utcNow(),
+    phases: parsed.phases.map((phase) => ({
+      phase_index: phase.phase_index,
+      title: phase.title,
+      execution_mode: asOptionalString(phase.annotations.execution) || "sequential",
+      depends_on: asOptionalString(phase.annotations.depends) ? asString(phase.annotations.depends).split(",").map((item) => item.trim()).filter(Boolean) : [],
+      annotations: phase.annotations,
+      tasks: phase.tasks.map((task) => ({
+        task_index: task.task_index,
+        task_key: task.task_key,
+        title: task.title,
+        status: statusForPlanMarker(task.marker),
+        files: task.files || [],
+        depends_on: task.depends || [],
+        repo: task.repo || null,
+        annotations: task.annotations,
+        commit_shas: task.commit_shas || [],
+        repo_shas: task.repo_shas || {}
+      }))
+    }))
+  };
+}
+function planJsonToParsedPlan(raw) {
+  const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
+    const phase = asJsonObject(rawPhase);
+    const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
+    const annotations = {
+      ...asJsonObject(phase.annotations),
+      ...asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {},
+      ...asArray(phase.depends_on).length > 0 ? { depends: asStringArray(phase.depends_on).join(",") } : {}
+    };
+    const tasks = asArray(phase.tasks).map((rawTask, taskOffset) => {
+      const task = asJsonObject(rawTask);
+      const taskIndex = Number(task.task_index || task.index || taskOffset + 1);
+      const taskKey = asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskIndex}`;
+      const files = asStringArray(task.files);
+      const depends = asStringArray(task.depends_on || task.depends);
+      const taskAnnotations = {
+        ...asJsonObject(task.annotations),
+        ...files.length > 0 ? { files: files.join(", ") } : {},
+        ...depends.length > 0 ? { depends: depends.join(",") } : {},
+        ...asOptionalString(task.repo) ? { repo: asOptionalString(task.repo) } : {}
+      };
+      return {
+        task_index: taskIndex,
+        task_key: taskKey,
+        title: asOptionalString(task.title) || `Task ${taskIndex}`,
+        marker: markerForPlanStatus(task.status),
+        annotations: taskAnnotations,
+        files,
+        depends,
+        repo: asOptionalString(task.repo) || null,
+        line: Number(task.line || phaseIndex * 100 + taskIndex),
+        phase_index: phaseIndex,
+        commit_shas: asStringArray(task.commit_shas),
+        repo_shas: asJsonObject(task.repo_shas)
+      };
+    });
+    return {
+      phase_index: phaseIndex,
+      title: asOptionalString(phase.title) || `Phase ${phaseIndex}`,
+      annotations,
+      tasks,
+      line: Number(phase.line || phaseIndex * 100)
+    };
+  });
+  return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
+}
+function renderPlanMarkdown(raw) {
+  const trackId = asOptionalString(raw.track_id) || "track";
+  const parts = [`# Plan: ${trackId}`, ""];
+  const parsed = planJsonToParsedPlan(raw);
+  for (const phase of parsed.phases) {
+    parts.push(`## Phase ${phase.phase_index}: ${phase.title.replace(/^Phase\s+\d+:\s*/i, "")}`);
+    if (phase.annotations.execution) parts.push(`<!-- execution: ${phase.annotations.execution} -->`);
+    if (phase.annotations.depends) parts.push(`<!-- depends: ${phase.annotations.depends} -->`);
+    parts.push("");
+    for (const task of phase.tasks) {
+      const commit = task.commit_shas && task.commit_shas.length > 0 ? ` (${task.commit_shas[task.commit_shas.length - 1]})` : "";
+      parts.push(`- [${task.marker}] Task ${task.task_index}: ${task.title.replace(/^Task\s+\d+:\s*/i, "")}${commit}`);
+      if (task.repo) parts.push(`  <!-- repo: ${task.repo} -->`);
+      if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
+      if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
+      if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
+      parts.push("");
+    }
+  }
+  return normalizedText(parts.join("\n"));
+}
+function specJsonFromText(trackId, text) {
+  const doc = markdownDocJson("spec", text || `# Spec: ${trackId}
+`);
+  return {
+    ...doc,
+    schema: "cadre.spec.v1",
+    track_id: trackId,
+    goals: [],
+    non_goals: [],
+    constraints: [],
+    acceptance_criteria: [],
+    risks: [],
+    open_questions: [],
+    references: []
+  };
+}
+function renderSpecMarkdown(raw) {
+  const title = asOptionalString(raw.title) || `Spec: ${asOptionalString(raw.track_id) || "track"}`;
+  return renderMarkdownDoc({ ...raw, title }, title);
+}
+function styleGuideJsonFromMarkdown(id, text, source = "markdown_import") {
+  const doc = markdownDocJson("styleguide", text, { id, source });
+  const ruleLines = normalizedText(text).split("\n").filter((line) => /^\s*-\s+/.test(line)).slice(0, 80);
+  return {
+    ...doc,
+    schema: "cadre.styleguide.v1",
+    id,
+    title: doc.title || id,
+    languages: id === "general" ? [] : [id],
+    frameworks: [],
+    file_patterns: [],
+    applies_to: ["planning", "implementation", "review", "tests"],
+    rules: ruleLines.map((line, index) => ({
+      id: `${id}-rule-${index + 1}`,
+      severity: "guidance",
+      summary: line.replace(/^\s*-\s+/, "").trim()
+    })),
+    version: 1
+  };
+}
+function renderStyleGuideMarkdown(raw) {
+  const id = asOptionalString(raw.id) || "styleguide";
+  const title = asOptionalString(raw.title) || id;
+  const parts = [`# ${title}`, ""];
+  const summary = asOptionalString(raw.summary);
+  if (summary) parts.push(summary, "");
+  const rules = asArray(raw.rules);
+  if (rules.length > 0) {
+    parts.push("## Rules", "");
+    for (const rawRule of rules) {
+      const rule = asJsonObject(rawRule);
+      const severity = asOptionalString(rule.severity);
+      const suffix = severity ? ` (${severity})` : "";
+      parts.push(`- ${asOptionalString(rule.summary) || asOptionalString(rule.id) || "Rule"}${suffix}`);
+      const rationale = asOptionalString(rule.rationale);
+      if (rationale) parts.push(`  Rationale: ${rationale}`);
+    }
+    parts.push("");
+  }
+  for (const rawSection of asArray(raw.sections)) {
+    const section = asJsonObject(rawSection);
+    const heading = asOptionalString(section.heading);
+    const body = asOptionalString(section.body);
+    if (heading && body) parts.push(`## ${heading}`, "", body, "");
+  }
+  return normalizedText(parts.join("\n"));
+}
 function isCadreProjectRoot(root) {
   const cadreDir = import_node_path3.default.join(root, "cadre");
   if (!fileExists(cadreDir)) return false;
@@ -1075,12 +1361,21 @@ function listTracks(root) {
       metadata_path: metadataPath,
       plan_path: import_node_path3.default.join(dir, "plan.md"),
       spec_path: import_node_path3.default.join(dir, "spec.md"),
+      plan_json_path: import_node_path3.default.join(dir, "plan.json"),
+      spec_json_path: import_node_path3.default.join(dir, "spec.json"),
+      learnings_jsonl_path: import_node_path3.default.join(dir, "learnings.jsonl"),
+      handoff_json_path: import_node_path3.default.join(dir, "handoff.json"),
       metadata
     });
   }
   return tracks;
 }
 function parsePlanFile(file) {
+  const planJsonPath = planJsonPathForPlanPath(file);
+  if (fileExists(planJsonPath)) {
+    const raw = readJson(planJsonPath, null);
+    if (raw) return planJsonToParsedPlan(raw);
+  }
   if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
   return parsePlanText(import_node_fs2.default.readFileSync(file, "utf8"));
 }
@@ -1822,6 +2117,16 @@ function workflowResourceUris(root, workflow, result) {
   if (workflow === "ship" && trackId) uris.push(`cadre://ship-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
   if (workflow === "land" && trackId) uris.push(`cadre://land-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
   if (workflow === "release") uris.push(`cadre://release-plan?root=${encodedRoot}`);
+  if (workflow === "artifacts" || workflow === "artifact_sync") {
+    const scope = asOptionalString(result.scope || result.artifact_scope) || "all";
+    uris.push(`cadre://artifact-catalog?root=${encodedRoot}`);
+    uris.push(`cadre://artifact-sync-plan?root=${encodedRoot}&scope=${encodeURIComponent(scope)}`);
+    if (scope.startsWith("track:")) {
+      const scopedTrackId = scope.slice("track:".length);
+      uris.push(`cadre://track-spec?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
+      uris.push(`cadre://track-plan?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
+    }
+  }
   return Array.from(new Set(uris));
 }
 function shapeWorkflowResponse(root, workflow, args, result) {
@@ -2273,6 +2578,15 @@ function textReviewFile(relativePath, title, source, text) {
     content: text.replace(/\n*$/, "\n")
   };
 }
+function plainReviewFile(relativePath, title, source, text) {
+  return {
+    path: relativePath,
+    title,
+    kind: "text",
+    source,
+    content: text.replace(/\n*$/, "\n")
+  };
+}
 function jsonReviewFile(relativePath, title, source, value) {
   const text = value ? `${JSON.stringify(value, null, 2)}
 ` : "";
@@ -2305,22 +2619,50 @@ function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
   const workflowText = setupWorkflowText(rawArgs.workflowText);
   const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
   const techStack = techStackForPacket(root, args);
+  const productJson = markdownDocJson("product", productText);
+  const productGuidelinesJson = markdownDocJson("product_guidelines", productGuidelinesText);
+  const workflowJson = markdownDocJson("workflow", workflowText);
+  const patternsEntry = {
+    id: "initial",
+    kind: "patterns_seed",
+    recorded_at: utcNow(),
+    text: patternsText
+  };
+  const selectedStyleGuides = asStringArray(styleGuides.selected);
+  const styleGuideIndex = {
+    version: 1,
+    schema: "cadre.styleguide_index.v1",
+    selected: selectedStyleGuides,
+    generated_at: utcNow()
+  };
   const files = [
-    textReviewFile("cadre/product.md", "Product context", "productText", productText),
-    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "productGuidelinesText", productGuidelinesText),
+    jsonReviewFile("cadre/product.json", "Product context canonical", "productText", productJson),
+    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context"))),
+    jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelinesText", productGuidelinesJson),
+    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines"))),
     jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-    textReviewFile("cadre/workflow.md", "Workflow policy", "workflowText", workflowText),
-    textReviewFile("cadre/patterns.md", "Project patterns", "template:patterns.md", patternsText),
-    ...asStringArray(styleGuides.selected).map(
-      (guideId) => textReviewFile(
-        `cadre/code_styleguides/${guideId}.md`,
-        `Code style guide: ${guideId}`,
-        "tech-stack.json/styleGuideIds",
-        templateText(`code_styleguides/${guideId}.md`, `# ${guideId}
+    jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowText", workflowJson),
+    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow"))),
+    plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns.md", `${JSON.stringify(patternsEntry)}
+`),
+    textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText)),
+    jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),
+    textReviewFile("cadre/code_styleguides/README.md", "Style guide catalog", "cadre/styleguides/index.json", withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))),
+    ...selectedStyleGuides.flatMap((guideId) => {
+      const guideText = templateText(`code_styleguides/${guideId}.md`, `# ${guideId}
 
-`)
-      )
-    )
+`);
+      const guideJson = styleGuideJsonFromMarkdown(guideId, guideText, "bundled_template");
+      return [
+        jsonReviewFile(`cadre/styleguides/${guideId}.json`, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guideJson),
+        textReviewFile(
+          `cadre/code_styleguides/${guideId}.md`,
+          `Code style guide: ${guideId}`,
+          `cadre/styleguides/${guideId}.json`,
+          withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson))
+        )
+      ];
+    })
   ];
   if (polyrepoRequested) {
     files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
@@ -2686,30 +3028,65 @@ function workflowSetup(root, args = {}) {
     writeJson(file, value);
     written.push(import_node_path3.default.relative(root, file));
   };
+  const writeSetupJsonlEntry = (relativePath, value) => {
+    const file = import_node_path3.default.join(cadreDir, relativePath);
+    if (fileExists(file) && !force) {
+      skipped.push(import_node_path3.default.relative(root, file));
+      return;
+    }
+    appendJsonl(file, value);
+    written.push(import_node_path3.default.relative(root, file));
+  };
+  const writeProjectDoc = (relativePath, kind, text, title) => {
+    const jsonPath = relativePath.replace(/\.md$/, ".json");
+    const value = markdownDocJson(kind, text);
+    writeSetupJson(jsonPath, value);
+    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
+  };
   import_node_fs2.default.mkdirSync(import_node_path3.default.join(cadreDir, "tracks"), { recursive: true });
   import_node_fs2.default.mkdirSync(import_node_path3.default.join(cadreDir, "archive"), { recursive: true });
-  writeText(
-    "product.md",
-    setupProductText(rawArgs.productText)
-  );
-  writeText(
+  writeProjectDoc("product.md", "product", setupProductText(rawArgs.productText), "Product Context");
+  writeProjectDoc(
     "product_guidelines.md",
-    setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text)
+    "product_guidelines",
+    setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text),
+    "Product Guidelines"
   );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
-  writeText("workflow.md", setupWorkflowText(rawArgs.workflowText));
-  writeText("tracks.md", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
-  writeText("patterns.md", templateText("patterns.md", "# Project Patterns\n\n"));
+  writeProjectDoc("workflow.md", "workflow", setupWorkflowText(rawArgs.workflowText), "Project Workflow");
+  writeText("tracks.md", withGeneratedMarker("cadre/tracks/*/metadata.json", "cadre.tracks_index.v1", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n"));
+  const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
+  writeSetupJsonlEntry("patterns.jsonl", {
+    id: "initial",
+    kind: "patterns_seed",
+    recorded_at: utcNow(),
+    text: patternsText
+  });
+  writeText("patterns.md", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText));
   const beforeStyleWritten = written.length;
   const beforeStyleSkipped = skipped.length;
   for (const guideId of asStringArray(styleGuides.selected)) {
+    const guideText = templateText(`code_styleguides/${guideId}.md`, `# ${guideId}
+
+`);
+    const guideJson = styleGuideJsonFromMarkdown(guideId, guideText, "bundled_template");
+    writeSetupJson(`styleguides/${guideId}.json`, guideJson);
     writeText(
       `code_styleguides/${guideId}.md`,
-      templateText(`code_styleguides/${guideId}.md`, `# ${guideId}
-
-`)
+      withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson))
     );
   }
+  const styleGuideIndex = {
+    version: 1,
+    schema: "cadre.styleguide_index.v1",
+    selected: asStringArray(styleGuides.selected),
+    generated_at: utcNow()
+  };
+  writeSetupJson("styleguides/index.json", styleGuideIndex);
+  writeText(
+    "code_styleguides/README.md",
+    withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))
+  );
   writeSetupJson("setup_state.json", {
     version: 1,
     packet_only: true,
@@ -2775,20 +3152,40 @@ function workflowSetup(root, args = {}) {
 }
 function newTrackReviewFiles(trackId, specText, planText, metadata) {
   const safeTrack = safeName(trackId);
+  const specJson = specJsonFromText(trackId, specText || `# Spec: ${trackId}
+`);
+  const planJson = planJsonFromText(trackId, planText);
+  const learningsEntry = {
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: trackId,
+    recorded_at: utcNow(),
+    text: trackLearningsText(trackId)
+  };
   return [
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/spec.json`,
+      "Track spec canonical",
+      "specText",
+      specJson
+    ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/spec.md`,
       "Track spec",
-      "specText",
-      specText || `# Spec: ${trackId}
-`
+      "spec.json",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson))
+    ),
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/plan.json`,
+      "Track plan canonical",
+      "planText",
+      planJson
     ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/plan.md`,
       "Track plan",
-      "planText",
-      planText.endsWith("\n") ? planText : `${planText}
-`
+      "plan.json",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson))
     ),
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/metadata.json`,
@@ -2796,11 +3193,18 @@ function newTrackReviewFiles(trackId, specText, planText, metadata) {
       "metadata",
       metadata
     ),
+    plainReviewFile(
+      `cadre/tracks/${safeTrack}/learnings.jsonl`,
+      "Track learnings canonical",
+      "template:learnings.md",
+      `${JSON.stringify(learningsEntry)}
+`
+    ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/learnings.md`,
       "Track learnings",
-      "template:learnings.md",
-      trackLearningsText(trackId)
+      "learnings.jsonl",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId))
     )
   ];
 }
@@ -2883,13 +3287,25 @@ function workflowNewTrack(root, args = {}) {
     };
   }
   const dir = import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId));
+  const specJson = specJsonFromText(String(trackId), specText || `# Spec: ${trackId}
+`);
+  const planJson = planJsonFromText(String(trackId), planText);
+  const learningsEntry = {
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: String(trackId),
+    recorded_at: utcNow(),
+    text: trackLearningsText(String(trackId))
+  };
   import_node_fs2.default.mkdirSync(dir, { recursive: true });
   writeJson(import_node_path3.default.join(dir, "metadata.json"), metadata);
-  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "spec.md"), specText || `# Spec: ${trackId}
+  writeJson(import_node_path3.default.join(dir, "spec.json"), specJson);
+  writeJson(import_node_path3.default.join(dir, "plan.json"), planJson);
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
 `);
-  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "plan.md"), planText.endsWith("\n") ? planText : `${planText}
-`);
-  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "learnings.md"), trackLearningsText(trackId));
+  import_node_fs2.default.writeFileSync(import_node_path3.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const liveBeads = createBeadsTree(root, { ...args, trackId, dryRun: false });
   if (!liveBeads.ok) {
     import_node_fs2.default.rmSync(dir, { recursive: true, force: true });
@@ -3053,9 +3469,16 @@ function workflowHandoff(root, args = {}) {
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
   const handoffPath = import_node_path3.default.join(track.dir, "HANDOFF.md");
+  const handoffJsonPath = trackHandoffJsonPath(track);
+  const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
   const reviewFiles = [
-    textReviewFile(import_node_path3.default.relative(root, handoffPath), "Track handoff", "handoffText", `${text.replace(/\n*$/, "")}
-`)
+    jsonReviewFile(import_node_path3.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    textReviewFile(
+      import_node_path3.default.relative(root, handoffPath),
+      "Track handoff",
+      "handoff.json",
+      withGeneratedMarker(import_node_path3.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+    )
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
@@ -3091,8 +3514,8 @@ function workflowHandoff(root, args = {}) {
     };
   }
   if (args.execute === true) {
-    import_node_fs2.default.writeFileSync(handoffPath, `${text.replace(/\n*$/, "")}
-`);
+    writeJsonEnsured(handoffJsonPath, handoffJson);
+    import_node_fs2.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path3.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
   }
   return {
     ...base,
@@ -3398,10 +3821,24 @@ function workflowRevise(root, args = {}) {
     };
   }
   if (track && revisedSpec !== void 0) {
-    reviewFiles.push(textReviewFile(import_node_path3.default.relative(root, track.spec_path), "Revised track spec", "specText", revisedSpec));
+    const specJson = specJsonFromText(track.track_id, revisedSpec);
+    reviewFiles.push(jsonReviewFile(import_node_path3.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "specText", specJson));
+    reviewFiles.push(textReviewFile(
+      import_node_path3.default.relative(root, track.spec_path),
+      "Revised track spec",
+      "spec.json",
+      withGeneratedMarker(import_node_path3.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(specJson))
+    ));
   }
   if (track && revisedPlan !== void 0) {
-    reviewFiles.push(textReviewFile(import_node_path3.default.relative(root, track.plan_path), "Revised track plan", "planText", revisedPlan));
+    const planJson = planJsonFromText(track.track_id, revisedPlan);
+    reviewFiles.push(jsonReviewFile(import_node_path3.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "planText", planJson));
+    reviewFiles.push(textReviewFile(
+      import_node_path3.default.relative(root, track.plan_path),
+      "Revised track plan",
+      "plan.json",
+      withGeneratedMarker(import_node_path3.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson))
+    ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
@@ -3455,11 +3892,17 @@ function workflowRevise(root, args = {}) {
   const writeResult = withTrackLock(root, track.track_id, () => {
     const written = [];
     if (revisedSpec !== void 0) {
-      import_node_fs2.default.writeFileSync(track.spec_path, revisedSpec.replace(/\n*$/, "\n"));
+      const specJson = specJsonFromText(track.track_id, revisedSpec);
+      writeJsonEnsured(trackSpecJsonPath(track), specJson);
+      import_node_fs2.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path3.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(specJson)));
+      written.push(import_node_path3.default.relative(root, trackSpecJsonPath(track)));
       written.push(import_node_path3.default.relative(root, track.spec_path));
     }
     if (revisedPlan !== void 0) {
-      import_node_fs2.default.writeFileSync(track.plan_path, revisedPlan.replace(/\n*$/, "\n"));
+      const planJson = planJsonFromText(track.track_id, revisedPlan);
+      writeJsonEnsured(trackPlanJsonPath(track), planJson);
+      import_node_fs2.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path3.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson)));
+      written.push(import_node_path3.default.relative(root, trackPlanJsonPath(track)));
       written.push(import_node_path3.default.relative(root, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
@@ -3635,6 +4078,469 @@ function workflowRefresh(root, args = {}) {
     warnings
   };
 }
+function safeReadDir(dir) {
+  try {
+    return import_node_fs2.default.readdirSync(dir).sort();
+  } catch {
+    return [];
+  }
+}
+function artifactSchema(artifact) {
+  const id = String(artifact || "catalog").toLowerCase();
+  const objectSchema = (required, properties) => ({
+    type: "object",
+    required,
+    additionalProperties: true,
+    properties
+  });
+  const schemas = {
+    spec: objectSchema(["track_id", "title"], {
+      track_id: { type: "string" },
+      title: { type: "string" },
+      summary: { type: "string" },
+      goals: { type: "array", items: { type: "string" } },
+      non_goals: { type: "array", items: { type: "string" } },
+      constraints: { type: "array", items: { type: "string" } },
+      acceptance_criteria: { type: "array", items: { type: "string" } },
+      risks: { type: "array", items: { type: "string" } },
+      open_questions: { type: "array", items: { type: "string" } },
+      references: { type: "array", items: { type: "string" } }
+    }),
+    plan: objectSchema(["track_id", "phases"], {
+      track_id: { type: "string" },
+      phases: { type: "array" },
+      tasks: { type: "array" },
+      execution_mode: { type: "string" },
+      dependencies: { type: "array" },
+      files: { type: "array" },
+      repo: { type: "string" },
+      status: { type: "string" },
+      commit_shas: { type: "array", items: { type: "string" } },
+      test_expectations: { type: "array" },
+      completion_evidence: { type: "object" }
+    }),
+    styleguide: objectSchema(["id", "title", "rules"], {
+      id: { type: "string" },
+      title: { type: "string" },
+      languages: { type: "array", items: { type: "string" } },
+      frameworks: { type: "array", items: { type: "string" } },
+      file_patterns: { type: "array", items: { type: "string" } },
+      applies_to: { type: "array", items: { type: "string" } },
+      rules: { type: "array" },
+      examples: { type: "array" },
+      anti_examples: { type: "array" },
+      severity: { type: "string" },
+      source: { type: "string" },
+      version: { type: "number" }
+    }),
+    metadata: objectSchema(["track_id"], {
+      track_id: { type: "string" },
+      status: { type: "string" },
+      owner: { type: "string" },
+      reviewer: { type: "string" },
+      review: { type: "object" },
+      beads_tasks: { type: "object" },
+      worktree_path: { type: "string" }
+    }),
+    release: objectSchema(["version", "completed_tracks"], {
+      version: { type: "string" },
+      generated_at: { type: "string" },
+      completed_tracks: { type: "array" },
+      notes: { type: "array" }
+    }),
+    journal: objectSchema(["track_id", "events"], {
+      track_id: { type: "string" },
+      events: { type: "array" },
+      event: { type: "string" },
+      recorded_at: { type: "string" }
+    }),
+    evidence: objectSchema(["entries"], {
+      entries: { type: "array" },
+      provider: { type: "string" },
+      findings: { type: "array" },
+      blocking_count: { type: "number" },
+      recorded_at: { type: "string" }
+    }),
+    project_doc: objectSchema(["title", "sections"], {
+      title: { type: "string" },
+      summary: { type: "string" },
+      sections: { type: "array" }
+    }),
+    artifact_sync_result: objectSchema(["ok", "dry_run", "artifacts"], {
+      ok: { type: "boolean" },
+      dry_run: { type: "boolean" },
+      artifacts: { type: "array" },
+      review_bundle: { type: "object" },
+      written: { type: "array", items: { type: "string" } },
+      skipped: { type: "array", items: { type: "string" } },
+      warnings: { type: "array", items: { type: "string" } },
+      errors: { type: "array", items: { type: "string" } }
+    })
+  };
+  return {
+    ok: true,
+    artifact: id,
+    schema: schemas[id] || (["review-evidence", "review_evidence", "provider-evidence", "provider_evidence"].includes(id) ? schemas.evidence : void 0) || (["completion-journal", "completion_journal"].includes(id) ? schemas.journal : void 0) || schemas.project_doc,
+    dialect: "https://json-schema.org/draft/2020-12/schema"
+  };
+}
+function artifactDefinitions(root, args = {}) {
+  const defs = [
+    { id: "product", title: "Product context", canonical: "cadre/product.json", projection: "cadre/product.md", schema: "cadre.product.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "product-guidelines", title: "Product guidelines", canonical: "cadre/product_guidelines.json", projection: "cadre/product_guidelines.md", schema: "cadre.product_guidelines.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "workflow", title: "Workflow policy", canonical: "cadre/workflow.json", projection: "cadre/workflow.md", schema: "cadre.workflow.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "patterns", title: "Project patterns", canonical: "cadre/patterns.jsonl", projection: "cadre/patterns.md", schema: "cadre.patterns.v1", scope: "project", sourceFormat: "jsonl", projectionFormat: "markdown" },
+    { id: "tracks-index", title: "Track index", canonical: "cadre/tracks", projection: "cadre/tracks.md", schema: "cadre.tracks_index.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    { id: "beads-config", title: "Beads config", canonical: "cadre/beads.json", schema: "cadre.beads.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    { id: "setup-state", title: "Setup state", canonical: "cadre/setup_state.json", schema: "cadre.setup_state.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" }
+  ];
+  if (fileExists(import_node_path3.default.join(root, "cadre", "repos.json")) || fileExists(import_node_path3.default.join(root, "cadre", "repos.md"))) {
+    defs.push({ id: "repos", title: "Repository topology", canonical: "cadre/repos.json", projection: "cadre/repos.md", schema: "cadre.repos.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  if (fileExists(import_node_path3.default.join(root, "cadre", "lsp.json"))) {
+    defs.push({ id: "lsp-config", title: "LSP config", canonical: "cadre/lsp.json", schema: "cadre.lsp.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" });
+  }
+  const styleJsonDir = import_node_path3.default.join(root, "cadre", "styleguides");
+  const styleMdDir = import_node_path3.default.join(root, "cadre", "code_styleguides");
+  const styleIds = /* @__PURE__ */ new Set();
+  for (const file of safeReadDir(styleJsonDir)) {
+    if (file.endsWith(".json") && file !== "index.json") styleIds.add(import_node_path3.default.basename(file, ".json"));
+  }
+  for (const file of safeReadDir(styleMdDir)) {
+    if (file.endsWith(".md") && file !== "README.md") styleIds.add(import_node_path3.default.basename(file, ".md"));
+  }
+  if (styleIds.size > 0) {
+    defs.push({ id: "styleguides-index", title: "Style guide catalog", canonical: "cadre/styleguides/index.json", projection: "cadre/code_styleguides/README.md", schema: "cadre.styleguide_index.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  for (const id of Array.from(styleIds).sort()) {
+    defs.push({ id: `styleguide:${id}`, title: `Style guide: ${id}`, canonical: `cadre/styleguides/${id}.json`, projection: `cadre/code_styleguides/${id}.md`, schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  for (const track of listTracks(root)) {
+    defs.push(
+      { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: import_node_path3.default.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
+      { id: `track:${track.track_id}:spec`, title: `Spec: ${track.track_id}`, canonical: import_node_path3.default.relative(root, trackSpecJsonPath(track)), projection: import_node_path3.default.relative(root, track.spec_path), schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:plan`, title: `Plan: ${track.track_id}`, canonical: import_node_path3.default.relative(root, trackPlanJsonPath(track)), projection: import_node_path3.default.relative(root, track.plan_path), schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:learnings`, title: `Learnings: ${track.track_id}`, canonical: import_node_path3.default.relative(root, trackLearningsJsonlPath(track)), projection: import_node_path3.default.relative(root, track.learnings_path || import_node_path3.default.join(track.dir, "learnings.md")), schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:handoff`, title: `Handoff: ${track.track_id}`, canonical: import_node_path3.default.relative(root, trackHandoffJsonPath(track)), projection: import_node_path3.default.relative(root, import_node_path3.default.join(track.dir, "HANDOFF.md")), schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+    );
+    const reviewEvidenceJsonl = import_node_path3.default.join(track.dir, "review-evidence.jsonl");
+    const reviewEvidenceJson = import_node_path3.default.join(track.dir, "review-evidence.json");
+    const completionJournal = import_node_path3.default.join(track.dir, "completion_journal.jsonl");
+    const parallelState = import_node_path3.default.join(track.dir, "parallel_state.json");
+    const implementState = import_node_path3.default.join(track.dir, "implement_state.json");
+    if (fileExists(reviewEvidenceJsonl)) {
+      defs.push({ id: `track:${track.track_id}:review-evidence`, title: `Review evidence: ${track.track_id}`, canonical: import_node_path3.default.relative(root, reviewEvidenceJsonl), schema: "cadre.review_evidence.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+    }
+    if (fileExists(reviewEvidenceJson)) {
+      defs.push({ id: `track:${track.track_id}:review-evidence-summary`, title: `Review evidence summary: ${track.track_id}`, canonical: import_node_path3.default.relative(root, reviewEvidenceJson), schema: "cadre.review_evidence_summary.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+    }
+    if (fileExists(completionJournal)) {
+      defs.push({ id: `track:${track.track_id}:completion-journal`, title: `Completion journal: ${track.track_id}`, canonical: import_node_path3.default.relative(root, completionJournal), schema: "cadre.completion_journal.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+    }
+    if (fileExists(parallelState)) {
+      defs.push({ id: `track:${track.track_id}:parallel-state`, title: `Parallel state: ${track.track_id}`, canonical: import_node_path3.default.relative(root, parallelState), schema: "cadre.parallel_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+    }
+    if (fileExists(implementState)) {
+      defs.push({ id: `track:${track.track_id}:implement-state`, title: `Implementation state: ${track.track_id}`, canonical: import_node_path3.default.relative(root, implementState), schema: "cadre.implement_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+    }
+  }
+  const releasesDir = import_node_path3.default.join(root, "cadre", "releases");
+  for (const file of safeReadDir(releasesDir)) {
+    if (!file.endsWith(".json")) continue;
+    const version = import_node_path3.default.basename(file, ".json");
+    defs.push({ id: `release:${version}`, title: `Release ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
+  }
+  const jobsDir = import_node_path3.default.join(root, "cadre", "jobs");
+  for (const file of safeReadDir(jobsDir)) {
+    if (!file.endsWith(".json")) continue;
+    const jobId = import_node_path3.default.basename(file, ".json");
+    defs.push({ id: `job:${jobId}`, title: `Job ${jobId}`, canonical: `cadre/jobs/${file}`, schema: "cadre.job.v1", scope: "external", sourceFormat: "json", projectionFormat: "none" });
+  }
+  if (args.includeArchive === true || args.include_archive === true) {
+    const archiveDir = import_node_path3.default.join(root, "cadre", "archive");
+    for (const trackId of safeReadDir(archiveDir)) {
+      const dir = import_node_path3.default.join(archiveDir, trackId);
+      if (!fileExists(import_node_path3.default.join(dir, "metadata.json"))) continue;
+      defs.push(
+        { id: `archive:${trackId}:spec`, title: `Archived spec: ${trackId}`, canonical: `cadre/archive/${trackId}/spec.json`, projection: `cadre/archive/${trackId}/spec.md`, schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+        { id: `archive:${trackId}:plan`, title: `Archived plan: ${trackId}`, canonical: `cadre/archive/${trackId}/plan.json`, projection: `cadre/archive/${trackId}/plan.md`, schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+      );
+    }
+  }
+  return defs;
+}
+function artifactMatches(def, args = {}) {
+  const artifact = asOptionalString(args.artifact || args.id);
+  if (artifact && def.id !== artifact && !def.id.endsWith(`:${artifact}`)) return false;
+  const scope = asOptionalString(args.scope || args.view || "all") || "all";
+  if (scope === "all") return true;
+  if (scope === "project") return def.scope === "project";
+  if (scope === "tracks") return def.scope === "track" || def.id === "tracks-index";
+  if (scope === "styleguides" || scope === "styleguide") return def.scope === "styleguide";
+  if (scope === "release") return def.scope === "release";
+  if (scope === "spec") return def.id.endsWith(":spec");
+  if (scope === "plan") return def.id.endsWith(":plan");
+  if (scope.startsWith("track:")) return def.id.startsWith(`${scope}:`) || def.id === "tracks-index";
+  return def.id === scope || def.scope === scope;
+}
+function artifactCatalog(root, args = {}) {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args)).map((def) => ({
+    ...def,
+    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path3.default.join(root, "cadre", "tracks")) : fileExists(import_node_path3.default.join(root, def.canonical)),
+    projection_exists: def.projection ? fileExists(import_node_path3.default.join(root, def.projection)) : false
+  }));
+  return { ok: true, root, artifacts };
+}
+function renderJsonCodeblock(title, value) {
+  return normalizedText(`# ${title}
+
+\`\`\`json
+${JSON.stringify(value, null, 2)}
+\`\`\`
+`);
+}
+function readJsonl(file) {
+  if (!fileExists(file)) return [];
+  return import_node_fs2.default.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    try {
+      return asJsonObject(JSON.parse(line));
+    } catch {
+      return { text: line };
+    }
+  });
+}
+function renderJsonlMarkdown(title, entries) {
+  if (entries.length === 1) {
+    const text = asOptionalString(entries[0]?.text || entries[0]?.summary || entries[0]?.body);
+    if (text && /^#\s+/m.test(text.trimStart())) return normalizedText(text);
+  }
+  const parts = [`# ${title}`, ""];
+  for (const entry of entries) {
+    const heading = asOptionalString(entry.title || entry.kind || entry.id);
+    if (heading) parts.push(`## ${heading}`, "");
+    const text = asOptionalString(entry.text || entry.summary || entry.body);
+    if (text) parts.push(text, "");
+  }
+  return normalizedText(parts.join("\n"));
+}
+function legacyImportForArtifact(root, def) {
+  if (!def.projection) return null;
+  const projection = import_node_path3.default.join(root, def.projection);
+  if (!fileExists(projection)) return null;
+  const text = import_node_fs2.default.readFileSync(projection, "utf8");
+  if (def.id === "product") return markdownDocJson("product", text);
+  if (def.id === "product-guidelines") return markdownDocJson("product_guidelines", text);
+  if (def.id === "workflow") return markdownDocJson("workflow", text);
+  if (def.id.startsWith("styleguide:")) return styleGuideJsonFromMarkdown(def.id.split(":").pop() || "styleguide", text);
+  if (def.id.endsWith(":spec")) {
+    const trackId = def.id.split(":").slice(-2, -1)[0] || import_node_path3.default.basename(import_node_path3.default.dirname(projection));
+    return specJsonFromText(trackId, text);
+  }
+  if (def.id.endsWith(":plan")) {
+    const trackId = def.id.split(":").slice(-2, -1)[0] || import_node_path3.default.basename(import_node_path3.default.dirname(projection));
+    return planJsonFromText(trackId, text);
+  }
+  if (def.id.endsWith(":handoff")) return markdownDocJson("handoff", text);
+  return null;
+}
+function renderArtifact(root, def, args = {}) {
+  const canonicalPath = import_node_path3.default.join(root, def.canonical);
+  const projectionPath = def.projection ? import_node_path3.default.join(root, def.projection) : void 0;
+  let raw = null;
+  let body = "";
+  let missingCanonical = false;
+  if (def.id === "tracks-index") {
+    const tracks = listTracks(root).sort((a, b) => a.track_id.localeCompare(b.track_id));
+    body = normalizedText(`# Tracks
+
+<!-- cadre:index:start -->
+${tracks.map((track) => {
+      const status = asOptionalString(track.metadata.status) || "new";
+      const marker = Object.prototype.hasOwnProperty.call(STATUS_MARKERS, status) ? STATUS_MARKERS[status] : STATUS_MARKERS.new;
+      const name = track.metadata.name || track.metadata.track_id || track.track_id;
+      return `## ${marker} Track: ${name}`;
+    }).join("\n")}${tracks.length ? "\n" : ""}<!-- cadre:index:end -->
+`);
+  } else if (def.sourceFormat === "jsonl") {
+    const entries = readJsonl(canonicalPath);
+    if (entries.length === 0) missingCanonical = true;
+    const title = def.title;
+    body = renderJsonlMarkdown(title, entries);
+  } else if (fileExists(canonicalPath)) {
+    raw = readJson(canonicalPath, null);
+    if (!raw) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, error: "Invalid canonical JSON" };
+    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
+    else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
+    else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
+    else if (def.schema === "cadre.styleguide_index.v1") body = renderJsonCodeblock(def.title, raw);
+    else if (def.schema === "cadre.release.v1") body = releaseMarkdownFromMetadata(raw);
+    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title);
+    else body = renderJsonCodeblock(def.title, raw);
+  } else {
+    missingCanonical = true;
+    raw = legacyImportForArtifact(root, def);
+    if (raw) {
+      if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
+      else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
+      else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
+      else body = renderMarkdownDoc(raw, def.title);
+    }
+  }
+  if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
+  const content = withGeneratedMarker(def.canonical, def.schema, body);
+  const existing = projectionPath && fileExists(projectionPath) ? import_node_fs2.default.readFileSync(projectionPath, "utf8") : "";
+  return {
+    ok: true,
+    artifact_id: def.id,
+    canonical_path: def.canonical,
+    projection_path: def.projection,
+    content,
+    changed: projectionPath ? normalizedText(existing) !== normalizedText(content) : false,
+    missing_canonical: missingCanonical,
+    legacy_import_available: Boolean(raw && missingCanonical)
+  };
+}
+function releaseMarkdownFromMetadata(metadata) {
+  const version = asOptionalString(metadata.version) || "release";
+  const parts = [`# Release ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
+  for (const rawTrack of asArray(metadata.completed_tracks)) {
+    const track = asJsonObject(rawTrack);
+    parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
+  }
+  parts.push("");
+  return normalizedText(parts.join("\n"));
+}
+function artifactRender(root, args = {}) {
+  const artifact = asOptionalString(args.artifact || args.id);
+  if (!artifact) return { ok: false, error: "artifact is required" };
+  const def = artifactDefinitions(root, args).find((item) => item.id === artifact || item.id.endsWith(`:${artifact}`));
+  if (!def) return { ok: false, error: `Unknown artifact: ${artifact}` };
+  return renderArtifact(root, def, args);
+}
+function artifactValidate(root, args = {}) {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const results = artifacts.map((def) => {
+    const file = import_node_path3.default.join(root, def.canonical);
+    if (def.id === "tracks-index") return { artifact_id: def.id, ok: fileExists(import_node_path3.default.join(root, "cadre", "tracks")) };
+    if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
+    if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
+    const value = readJson(file, null);
+    return { artifact_id: def.id, ok: Boolean(value), canonical_path: def.canonical };
+  });
+  return { ok: results.every((result) => result.ok !== false), root, results };
+}
+function artifactDiff(root, args = {}) {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const diffs = artifacts.map((def) => {
+    const rendered = renderArtifact(root, def, args);
+    return {
+      artifact_id: def.id,
+      projection_path: def.projection,
+      changed: rendered.changed === true,
+      missing_canonical: rendered.missing_canonical === true,
+      legacy_import_available: rendered.legacy_import_available === true
+    };
+  });
+  return { ok: true, root, diffs, changed: diffs.filter((diff) => diff.changed).length };
+}
+function artifactSync(root, args = {}) {
+  const execute = args.execute === true;
+  const force = args.force === true;
+  const importLegacy = args.importLegacy !== false && args.import_legacy !== false;
+  const defs = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const reviewFiles = [];
+  const artifacts = [];
+  const written = [];
+  const skipped = [];
+  const warnings = [];
+  const errors = [];
+  for (const def of defs) {
+    const rendered = renderArtifact(root, def, args);
+    artifacts.push({
+      artifact_id: def.id,
+      canonical_path: def.canonical,
+      projection_path: def.projection || null,
+      changed: rendered.changed === true,
+      missing_canonical: rendered.missing_canonical === true,
+      legacy_import_available: rendered.legacy_import_available === true
+    });
+    if (rendered.ok === false || !rendered.content || !def.projection) {
+      if (rendered.missing_canonical) warnings.push(`Missing canonical for ${def.id}`);
+      continue;
+    }
+    const canonicalFile = import_node_path3.default.join(root, def.canonical);
+    if (rendered.missing_canonical && rendered.legacy_import_available && importLegacy) {
+      const imported = legacyImportForArtifact(root, def);
+      if (imported) {
+        reviewFiles.push(jsonReviewFile(def.canonical, `${def.title} canonical import`, "legacy_markdown", imported));
+        if (execute && humanReviewConfirmed(args)) {
+          writeJsonEnsured(canonicalFile, imported);
+          written.push(def.canonical);
+        }
+      }
+    }
+    reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
+    if (!execute) continue;
+    if (!humanReviewConfirmed(args)) continue;
+    const projectionFile = import_node_path3.default.join(root, def.projection);
+    const existing = fileExists(projectionFile) ? import_node_fs2.default.readFileSync(projectionFile, "utf8") : "";
+    if (existing && !hasGeneratedMarker(existing) && !force) {
+      skipped.push(def.projection);
+      warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
+      continue;
+    }
+    ensureParent(projectionFile);
+    import_node_fs2.default.writeFileSync(projectionFile, rendered.content);
+    written.push(def.projection);
+  }
+  const reviewBundle = workflowReviewBundle(root, "artifacts", args, reviewFiles, {
+    scope: args.scope || "all",
+    artifact: args.artifact || null
+  });
+  const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
+  if (execute && !humanReviewConfirmed(args)) {
+    return {
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      artifacts,
+      human_review: humanReview,
+      review_bundle: reviewBundle,
+      warnings,
+      errors: ["Human confirmation is required before syncing artifacts"],
+      error: "Human confirmation is required before syncing artifacts"
+    };
+  }
+  return {
+    ok: errors.length === 0,
+    dry_run: !execute,
+    phase_state: execute ? "executed" : "dry_run",
+    artifacts,
+    review_bundle: reviewBundle,
+    human_review: humanReview,
+    written,
+    skipped,
+    warnings,
+    errors
+  };
+}
+function artifactImport(root, args = {}) {
+  return artifactSync(root, { ...args, importLegacy: true, scope: args.scope || "all" });
+}
+function artifactPacket(root, args = {}) {
+  const action = asOptionalString(args.action) || "catalog";
+  if (action === "catalog") return artifactCatalog(root, args);
+  if (action === "schema") return artifactSchema(args.artifact || args.id || args.scope);
+  if (action === "validate") return artifactValidate(root, args);
+  if (action === "render") return artifactRender(root, args);
+  if (action === "diff") return artifactDiff(root, args);
+  if (action === "sync") return artifactSync(root, args);
+  if (action === "import") return artifactImport(root, args);
+  return { ok: false, error: `Unknown artifact action: ${action}` };
+}
 function workflowPacket(root, args = {}) {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const mutating = args.execute === true && [
@@ -3645,7 +4551,9 @@ function workflowPacket(root, args = {}) {
     "revise",
     "refresh",
     "flag",
-    "revert"
+    "revert",
+    "artifacts",
+    "artifact_sync"
   ].includes(workflow);
   if (mutating && args.skipSync !== true) {
     const result2 = withSharedControlPlaneSync(
@@ -3687,6 +4595,16 @@ function workflowPacket(root, args = {}) {
         return workflowRevise(root, args);
       case "refresh":
         return workflowRefresh(root, args);
+      case "artifacts":
+      case "artifact_sync": {
+        const artifactAction = asOptionalString(args.artifactAction || args.artifact_action) || asOptionalString(args.mode) || "sync";
+        return {
+          ...workflowSummary(root, workflow, args),
+          artifact_action: artifactAction,
+          artifact_scope: asOptionalString(args.scope || args.view) || "all",
+          ...artifactPacket(root, { ...args, action: artifactAction })
+        };
+      }
       case "flag": {
         const trackId = selectedTrackId(root, args);
         const summary = workflowSummary(root, "flag", args);
@@ -4359,6 +5277,10 @@ function createBeadsTree(root, args = {}) {
     metadata_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "metadata.json"),
     plan_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "plan.md"),
     spec_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "spec.md"),
+    plan_json_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "plan.json"),
+    spec_json_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "spec.json"),
+    learnings_jsonl_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "learnings.jsonl"),
+    handoff_json_path: import_node_path3.default.join(root, "cadre", "tracks", safeName(trackId), "handoff.json"),
     metadata: draftMetadata
   };
   if (!dryRun && !commandExists("bd", root)) {
@@ -4795,16 +5717,9 @@ function recordTaskResultUnlocked(root, args = {}) {
   const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
+  const planJsonPath = trackPlanJsonPath(track);
   const marker = markerForStatus(args.status || "completed");
-  const lines = import_node_fs2.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
-  const idx = task.line - 1;
-  const line = lines[idx];
-  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
-  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
   const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
-  if (commitSha && !nextLine.includes(commitSha)) {
-    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
-  }
   const recordedAt = utcNow();
   const lastTaskResult = {
     phase_index: phaseIndex,
@@ -4824,6 +5739,68 @@ function recordTaskResultUnlocked(root, args = {}) {
   });
   if (!metadata.ok) {
     return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  }
+  if (fileExists(planJsonPath)) {
+    const planPatch = patchJsonFile(planJsonPath, (current) => {
+      const phases = asArray(current.phases).map((rawPhase) => {
+        const currentPhase = asJsonObject(rawPhase);
+        if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
+        return {
+          ...currentPhase,
+          tasks: asArray(currentPhase.tasks).map((rawTask) => {
+            const currentTask = asJsonObject(rawTask);
+            if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
+            const commitShas = Array.from(/* @__PURE__ */ new Set([
+              ...asStringArray(currentTask.commit_shas),
+              ...commitSha ? [commitSha.slice(0, 12)] : []
+            ]));
+            return {
+              ...currentTask,
+              status: args.status || "completed",
+              commit_shas: commitShas,
+              completion_evidence: {
+                ...asJsonObject(currentTask.completion_evidence),
+                commit_sha: commitSha || null,
+                repo: args.repo || task.repo || null,
+                working_root: args.workingRoot || null,
+                coverage: typeof args.coverage === "number" ? args.coverage : null,
+                recorded_at: recordedAt
+              }
+            };
+          })
+        };
+      });
+      return { ...current, phases, updated_at: recordedAt };
+    });
+    if (!planPatch.ok) {
+      return { ok: false, track_id: track.track_id, stage: "plan_json_patch", metadata, plan_json: planPatch };
+    }
+    const nextPlan = asJsonObject(planPatch.value);
+    import_node_fs2.default.writeFileSync(
+      track.plan_path,
+      withGeneratedMarker(import_node_path3.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+    );
+    const metadataValue2 = asJsonObject(metadata.value);
+    const beadsTasks2 = asJsonObject(metadataValue2.beads_tasks);
+    return {
+      ok: true,
+      track_id: track.track_id,
+      task_key: task.task_key,
+      line: task.line,
+      status: args.status || "completed",
+      commit_sha: commitSha || null,
+      beads_task_id: asOptionalString(beadsTasks2[task.task_key]) || null,
+      metadata,
+      plan_json: planPatch
+    };
+  }
+  const lines = import_node_fs2.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
+  const idx = task.line - 1;
+  const line = lines[idx];
+  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
+  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
+  if (commitSha && !nextLine.includes(commitSha)) {
+    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
   }
   lines[idx] = nextLine;
   try {
@@ -4872,6 +5849,11 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
+  appendJsonl(import_node_path3.default.join(track.dir, "completion_journal.jsonl"), {
+    key,
+    recorded_at: journal.updated_at,
+    entry: journal.entries[key]
+  });
   return journal.entries[key];
 }
 function completeTask(root, args = {}) {
@@ -5646,6 +6628,7 @@ function providerEvidenceUnlocked(root, track, args = {}) {
     updated_at: entry.recorded_at
   };
   writeJson(evidencePath, next);
+  appendJsonl(import_node_path3.default.join(track.dir, "review-evidence.jsonl"), entry);
   const metadata = patchJsonFile(track.metadata_path, (current) => {
     current.review_evidence = {
       path: import_node_path3.default.relative(root, evidencePath),
@@ -7123,7 +8106,13 @@ var RESOURCE_DEFINITIONS = [
   { uri: "cadre://quality-gate", name: "Cadre quality gate", description: "Review and integrity gate summary. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://test-impact", name: "Cadre test impact", description: "Impacted tests/manifests. Read with ?root=/path&files=a,b." },
   { uri: "cadre://track-plan", name: "Cadre track plan", description: "Parsed track plan. Read with ?root=/path&trackId=<id>." },
-  { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>." }
+  { uri: "cadre://job-result", name: "Cadre job result", description: "Persisted async job result. Read with ?root=/path&jobId=<id>." },
+  { uri: "cadre://artifact-catalog", name: "Cadre artifact catalog", description: "Canonical/projection artifact catalog. Read with ?root=/path." },
+  { uri: "cadre://artifact-schema", name: "Cadre artifact schema", description: "Artifact JSON schema. Read with ?root=/path&artifact=spec|plan|styleguide." },
+  { uri: "cadre://artifact-preview", name: "Cadre artifact preview", description: "Rendered artifact projection preview. Read with ?root=/path&artifact=<id>." },
+  { uri: "cadre://artifact-sync-plan", name: "Cadre artifact sync plan", description: "Dry-run artifact sync plan. Read with ?root=/path&scope=<scope>." },
+  { uri: "cadre://track-spec", name: "Cadre track spec", description: "Canonical track spec and projection preview. Read with ?root=/path&trackId=<id>." },
+  { uri: "cadre://styleguide-selection", name: "Cadre styleguide selection", description: "Selected style guidance for a track or file list. Read with ?root=/path&trackId=<id>&files=a,b." }
 ];
 var RESOURCE_CONTRACTS = {
   "cadre://team-board": { required: ["root"] },
@@ -7149,7 +8138,13 @@ var RESOURCE_CONTRACTS = {
   "cadre://quality-gate": { required: ["root", "trackId"] },
   "cadre://test-impact": { required: ["root"], requiredAny: [["files"], ["base", "head"]] },
   "cadre://track-plan": { required: ["root", "trackId"] },
-  "cadre://job-result": { required: ["root", "jobId"] }
+  "cadre://job-result": { required: ["root", "jobId"] },
+  "cadre://artifact-catalog": { required: ["root"], optional: ["scope", "artifact", "includeArchive"] },
+  "cadre://artifact-schema": { required: ["root", "artifact"] },
+  "cadre://artifact-preview": { required: ["root", "artifact"], optional: ["scope"] },
+  "cadre://artifact-sync-plan": { required: ["root"], optional: ["scope", "artifact", "includeArchive"] },
+  "cadre://track-spec": { required: ["root", "trackId"] },
+  "cadre://styleguide-selection": { required: ["root"], optional: ["trackId", "files"] }
 };
 function contractQueryParams(contract) {
   return Array.from(/* @__PURE__ */ new Set([
@@ -7188,6 +8183,8 @@ function parseResourceUri(uri) {
     trackId: params.get("trackId"),
     symbol: params.get("symbol"),
     workflow: params.get("workflow"),
+    artifact: params.get("artifact"),
+    scope: params.get("scope"),
     jobId: params.get("jobId"),
     baseRef: params.get("base"),
     headRef: params.get("head"),
@@ -7195,7 +8192,8 @@ function parseResourceUri(uri) {
     responseMode: params.get("responseMode"),
     response_mode: params.get("response_mode"),
     detail: params.has("detail") ? params.get("detail") !== "false" : null,
-    compact: params.has("compact") ? params.get("compact") !== "false" : null
+    compact: params.has("compact") ? params.get("compact") !== "false" : null,
+    includeArchive: params.has("includeArchive") ? params.get("includeArchive") !== "false" : null
   };
 }
 
@@ -7269,6 +8267,14 @@ var PROPS = {
   args: { type: "object" },
   type: { type: "string" },
   jobId: { type: "string" },
+  artifact: { type: "string" },
+  scope: { type: "string" },
+  artifactAction: { type: "string" },
+  artifact_action: { type: "string" },
+  includeArchive: { type: "boolean" },
+  include_archive: { type: "boolean" },
+  importLegacy: { type: "boolean" },
+  import_legacy: { type: "boolean" },
   view: { type: "string" },
   description: { type: "string" },
   handoffText: { type: "string" },
@@ -7333,15 +8339,17 @@ var WORKFLOWS = [
   "refresh",
   "flag",
   "revert",
-  "formula"
+  "formula",
+  "artifacts",
+  "artifact_sync"
 ];
 var TOOLS = [
   packetSchema({
     name: "cadre_workflow",
-    description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, and formula flows.",
+    description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: WORKFLOWS,
-    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "productText", "productGuidelinesText", "workflowText", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "specText", "planText", "description"],
+    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "productText", "productGuidelinesText", "workflowText", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "specText", "planText", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive", "importLegacy", "import_legacy"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -7430,6 +8438,13 @@ var TOOLS = [
     fields: ["action", "trackId", "track_id", "base", "head", "config", "files", "symbol", "symbols", "repo", "repos", "execute", "async", "timeoutMs", "responseMode", "response_mode", "detail", "compact"],
     required: ["action"],
     allOf: [requireRootForActions(["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "workspace_diagnostics", "test_impact", "dependency_graph"])]
+  }),
+  packetSchema({
+    name: "cadre_artifact",
+    description: "Cadre artifact packet: catalog, schema, import legacy Markdown, validate canonicals, render projections, diff, and sync generated artifacts.",
+    actionEnum: ["catalog", "schema", "import", "validate", "render", "diff", "sync"],
+    fields: ["action", "artifact", "id", "scope", "trackId", "track_id", "execute", "humanConfirmed", "human_confirmed", "force", "includeArchive", "include_archive", "importLegacy", "import_legacy", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir"],
+    required: ["root", "action"]
   })
 ];
 
@@ -7444,6 +8459,8 @@ function normalizeResourceArgs(resource) {
   if (resource.trackId != null) args.trackId = resource.trackId;
   if (resource.symbol != null) args.symbol = resource.symbol;
   if (resource.workflow != null) args.workflow = resource.workflow;
+  if (resource.artifact != null) args.artifact = resource.artifact;
+  if (resource.scope != null) args.scope = resource.scope;
   if (resource.jobId != null) args.jobId = resource.jobId;
   if (resource.baseRef != null) args.baseRef = resource.baseRef;
   if (resource.headRef != null) args.headRef = resource.headRef;
@@ -7454,6 +8471,7 @@ function normalizeResourceArgs(resource) {
   }
   if (resource.detail != null) args.detail = resource.detail;
   if (resource.compact != null) args.compact = resource.compact;
+  if (resource.includeArchive != null) args.includeArchive = resource.includeArchive;
   return args;
 }
 function workspaceHealth2(root, args = {}) {
@@ -7520,6 +8538,8 @@ function resourceRead(uri, deps) {
     const context = deps.core.trackContext(root, resource.trackId);
     const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
     value = context.ok === false || !planPath ? context : deps.core.parsePlanFile(import_node_path4.default.resolve(root, planPath));
+  } else if (resource.base === "cadre://track-spec") {
+    value = resource.trackId ? deps.core.artifactRender(root, { artifact: `track:${resource.trackId}:spec` }) : { ok: false, error: "trackId is required" };
   } else if (resource.base === "cadre://job-result") {
     const persisted = deps.jobs.loadPersisted(root, resource.jobId);
     value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
@@ -7535,6 +8555,21 @@ function resourceRead(uri, deps) {
       required_provider_mcp: plan.required_provider_mcp || null,
       required_evidence: plan.required_evidence || null,
       continuation_token: plan.continuation_token || null
+    };
+  } else if (resource.base === "cadre://artifact-catalog") {
+    value = deps.core.artifactCatalog(root, normalizedResource);
+  } else if (resource.base === "cadre://artifact-schema") {
+    value = deps.core.artifactSchema(resource.artifact || normalizedResource.artifact || "catalog");
+  } else if (resource.base === "cadre://artifact-preview") {
+    value = resource.artifact ? deps.core.artifactRender(root, normalizedResource) : { ok: false, error: "artifact is required" };
+  } else if (resource.base === "cadre://artifact-sync-plan") {
+    value = deps.core.artifactSync(root, { ...normalizedResource, execute: false });
+  } else if (resource.base === "cadre://styleguide-selection") {
+    value = {
+      ok: true,
+      track_id: resource.trackId,
+      files: resource.files,
+      catalog: deps.core.artifactCatalog(root, { ...normalizedResource, scope: "styleguides" })
     };
   } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
@@ -7853,6 +8888,16 @@ function jobPacket(deps, args) {
   return envelope({ ok: false, error: `Unknown cadre_job action: ${action}` });
 }
 
+// src/mcp/application/packets/artifact.ts
+function artifactPacket2(deps, args) {
+  const action = args.action || "catalog";
+  const root = deps.rootResolver.requireCadreRoot(args);
+  if (["import", "sync"].includes(String(action)) && args.execute === true) {
+    return syncedEnvelope(root, `artifact:${action}`, () => deps.core.artifactPacket(root, args));
+  }
+  return envelope(deps.core.artifactPacket(root, args));
+}
+
 // src/mcp/application/router.ts
 function createToolCall(deps) {
   return async function toolCall(name, args = {}) {
@@ -7877,6 +8922,7 @@ function createToolCall(deps) {
     if (name === "cadre_job") return asTextJson(jobPacket(deps, args));
     if (name === "cadre_review") return asTextJson(await reviewPacket(deps, args));
     if (name === "cadre_intel") return asTextJson(await intelPacket(deps, args));
+    if (name === "cadre_artifact") return asTextJson(artifactPacket2(deps, args));
     throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
   };
 }

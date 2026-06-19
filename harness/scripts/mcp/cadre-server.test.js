@@ -204,13 +204,19 @@ test("MCP root resolution rejects harness skill directories without project stat
       "cadre_job",
       "cadre_review",
       "cadre_intel",
+      "cadre_artifact",
     ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);
     }
     const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
     const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
-    for (const action of ["setup", "newtrack", "implement", "status", "review", "validate", "ship", "land", "archive", "handoff"]) {
+    for (const action of ["setup", "newtrack", "implement", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
       assert.ok(workflowActions.includes(action), `expected ${action} workflow`);
+    }
+    const artifactTool = tools.tools.find((tool) => tool.name === "cadre_artifact");
+    const artifactActions = artifactTool.inputSchema.properties.action.enum;
+    for (const action of ["catalog", "schema", "import", "validate", "render", "diff", "sync"]) {
+      assert.ok(artifactActions.includes(action), `expected ${action} artifact action`);
     }
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
@@ -259,6 +265,12 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://review-queue"));
     assert.ok(uris.includes("cadre://parallel-state"));
     assert.ok(uris.includes("cadre://quality-gate"));
+    assert.ok(uris.includes("cadre://artifact-catalog"));
+    assert.ok(uris.includes("cadre://artifact-schema"));
+    assert.ok(uris.includes("cadre://artifact-preview"));
+    assert.ok(uris.includes("cadre://artifact-sync-plan"));
+    assert.ok(uris.includes("cadre://track-spec"));
+    assert.ok(uris.includes("cadre://styleguide-selection"));
     const templates = await request("resources/templates/list", {});
     const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
     assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
@@ -273,6 +285,9 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://job-result").required, ["root", "jobId"]);
     assert.deepEqual(templateByUri.get("cadre://test-impact").required, ["root"]);
     assert.deepEqual(templateByUri.get("cadre://test-impact").requiredAny, [["files"], ["base", "head"]]);
+    assert.deepEqual(templateByUri.get("cadre://artifact-preview").required, ["root", "artifact"]);
+    assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
+    assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
@@ -566,6 +581,21 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     assert.equal(workflowValidate.data.packet_only, true);
     assert.equal(workflowValidate.data.integrity.ok, true);
 
+    const artifactCatalog = parseTextJson(await request("tools/call", {
+      name: "cadre_artifact",
+      arguments: { root, action: "catalog", scope: "track:packets_20260618" },
+    }));
+    assert.equal(artifactCatalog.data.ok, true);
+    assert.ok(artifactCatalog.data.artifacts.some((artifact) => artifact.id === "track:packets_20260618:plan"));
+
+    const artifactSync = parseTextJson(await request("tools/call", {
+      name: "cadre_artifact",
+      arguments: { root, action: "sync", scope: "track:packets_20260618" },
+    }));
+    assert.equal(artifactSync.data.ok, true);
+    assert.equal(artifactSync.data.dry_run, true);
+    assert.ok(artifactSync.data.artifacts.some((artifact) => artifact.artifact_id === "track:packets_20260618:plan"));
+
     const diagnostics = parseTextJson(await request("tools/call", {
       name: "cadre_intel",
       arguments: { root, action: "workspace_diagnostics" },
@@ -601,6 +631,21 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     });
     const parsedResource = JSON.parse(resource.contents[0].text);
     assert.equal(parsedResource.data.evidence.entries.length, 1);
+
+    const trackSpecResource = await request("resources/read", {
+      uri: `cadre://track-spec?root=${encodeURIComponent(root)}&trackId=packets_20260618`,
+    });
+    assert.equal(JSON.parse(trackSpecResource.contents[0].text).data.ok, true);
+
+    const artifactPreviewResource = await request("resources/read", {
+      uri: `cadre://artifact-preview?root=${encodeURIComponent(root)}&artifact=${encodeURIComponent("track:packets_20260618:plan")}`,
+    });
+    assert.equal(JSON.parse(artifactPreviewResource.contents[0].text).data.ok, true);
+
+    const artifactSyncResource = await request("resources/read", {
+      uri: `cadre://artifact-sync-plan?root=${encodeURIComponent(root)}&scope=${encodeURIComponent("track:packets_20260618")}`,
+    });
+    assert.equal(JSON.parse(artifactSyncResource.contents[0].text).data.dry_run, true);
 
     const topologyResource = await request("resources/read", {
       uri: `cadre://repo-topology?root=${encodeURIComponent(root)}`,

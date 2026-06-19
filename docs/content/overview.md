@@ -28,8 +28,8 @@ the same files when a team works in parallel. Cadre makes the workflow durable:
 
 | Need | Cadre answer |
 |------|--------------|
-| Project context | `cadre/product.md`, `cadre/tech-stack.json`, workflow policy, patterns, and style guides. |
-| Work planning | Track specs and plans with testable acceptance criteria and file annotations. |
+| Project context | Canonical product, workflow, pattern, tech-stack, and style-guide artifacts with generated human projections. |
+| Work planning | Canonical track specs and plans with testable acceptance criteria, file annotations, and generated review projections. |
 | Durable memory | Beads stores the task graph, dependencies, notes, blockers, and handoffs. |
 | Team safety | Owners, advisory leases, collision scans, review queues, and shared sync. |
 | Code intelligence | Repo maps, dependency graph, test impact, diagnostics, and optional LSP review. |
