@@ -20,9 +20,12 @@ Create or refresh a track handoff using the workflow arguments.
 1. Resolve the project root with `cadre_project` using `action: "root"`.
 2. Call `cadre_workflow` with `workflow: "handoff"` and any `trackId`, recipient,
    mode, or `handoffText` supplied by the user.
-3. Review the returned `track_context`, Beads summary, and handoff path.
-4. To write the handoff, call `cadre_workflow` again with `workflow: "handoff"`
-   and `execute: true`.
+3. Review the returned `track_context`, Beads summary, handoff path, warnings,
+   and `review_bundle` when present. The bundle contains the full proposed
+   `HANDOFF.md` on disk; show the manifest/path list instead of pasting the
+   complete handoff into model context.
+4. To write the handoff, call `cadre_workflow` again with
+   `workflow: "handoff"`, `execute: true`, and `humanConfirmed: true`.
 5. Summarize the handoff path, recipient or audience, open risks, and next
    recommended packet.
 

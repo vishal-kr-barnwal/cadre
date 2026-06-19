@@ -14,7 +14,8 @@ do not inspect installed runtime scripts to locate templates.
 
 - `cadre_workflow` with reviewable dry-runs reports review artifacts and a
   token-safe `review_bundle` with full proposed files on disk. Setup, new-track,
-  revise, and refresh document updates use this pattern.
+  revise, refresh document updates, release artifacts, and handoff artifacts use
+  this pattern.
 - `cadre_workflow` with `workflow: "setup_scaffold"` and `execute:true` writes
   the setup scaffold from bundled templates and confirmed setup payload.
 - `cadre_workflow` with `workflow: "newtrack"` writes per-track files, including

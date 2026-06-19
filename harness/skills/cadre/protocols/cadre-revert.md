@@ -15,10 +15,12 @@ Prepare or execute a revert of Cadre-tracked work using the workflow arguments.
 1. Resolve the project root with `cadre_project` using `action: "root"`.
 2. Call `cadre_workflow` with `workflow: "revert"` and the requested `trackId`,
    phase, task, or commit evidence.
-3. Present the packet's revert scope, affected files, state changes, and risk
-   summary for explicit user confirmation when changes would be destructive.
+3. Present the packet's dry-run revert scope, planned git actions, affected
+   files, state changes, packet warnings, and risk summary for explicit user
+   confirmation. Do not inspect or edit Cadre state manually to prepare the
+   revert.
 4. To execute an approved revert, call `cadre_workflow` again with
-   `workflow: "revert"` and `execute: true`.
+   `workflow: "revert"`, `execute: true`, and `humanConfirmed: true`.
 5. Summarize reverted scope, tests requested or run, packet warnings, and any
    unresolved risks.
 

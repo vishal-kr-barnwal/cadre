@@ -2456,6 +2456,15 @@ function humanReviewState(workflow, args, artifacts, reviewBundle = null) {
     review_bundle: reviewBundle
   };
 }
+function packetReviewArtifact(title, source, fields = {}) {
+  return {
+    title,
+    kind: "packet",
+    source,
+    content_in_response: false,
+    ...fields
+  };
+}
 function trackLearningsText(trackId) {
   return templateText("learnings.md", "# Track Learnings: {{track_id}}\n\n").replace(/\{\{track_id\}\}/g, trackId).replace(/\n*$/, "\n");
 }
@@ -2973,12 +2982,34 @@ function workflowArchive(root, args = {}) {
     (track) => args.trackId || args.track_id ? track.track_id === (args.trackId || args.track_id) : (track.metadata.status || "new") === "completed"
   );
   if (tracks.length === 0) return { ...summary, ok: false, error: "No completed or selected track found" };
+  const reviewArtifacts = [
+    packetReviewArtifact("Archive scope", "workflow:archive", {
+      track_count: tracks.length,
+      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track)))
+    })
+  ];
+  const humanReview = humanReviewState("archive", args, reviewArtifacts);
   if (args.execute !== true) {
     return {
       ...summary,
       ok: true,
       dry_run: true,
-      tracks: tracks.map((track) => metadataTrackSummary(track))
+      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      error: "Human confirmation is required before archiving tracks"
     };
   }
   const syncPre = syncControlPlane(root, { mode: "pre" });
@@ -3014,6 +3045,8 @@ function workflowHandoff(root, args = {}) {
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   const context = trackContext(root, trackId);
   if (context.ok === false) return { ...summary, ok: false, track_context: context };
+  const track = findTrack(root, trackId);
+  if (!track) return { ...summary, ok: false, track_context: context, error: `Track not found: ${trackId}` };
   const text = asOptionalString(args.handoffText) || [
     `# Handoff: ${trackId}`,
     "",
@@ -3021,19 +3054,53 @@ function workflowHandoff(root, args = {}) {
     "",
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
+  const handoffPath = import_node_path3.default.join(track.dir, "HANDOFF.md");
+  const reviewFiles = [
+    textReviewFile(import_node_path3.default.relative(root, handoffPath), "Track handoff", "handoffText", `${text.replace(/\n*$/, "")}
+`)
+  ];
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
+  const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const base = {
+    ...summary,
+    track_id: trackId,
+    track_context: context,
+    beads: beadsSummary(root),
+    handoff_path: import_node_path3.default.relative(root, handoffPath),
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts,
+    review_bundle: reviewBundle,
+    warnings
+  };
+  if (args.execute !== true) {
+    return {
+      ...base,
+      ok: true,
+      dry_run: true,
+      phase_state: "dry_run"
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      error: "Human confirmation is required before writing handoff artifacts"
+    };
+  }
   if (args.execute === true) {
-    const track = findTrack(root, trackId);
-    if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
-    import_node_fs2.default.writeFileSync(import_node_path3.default.join(track.dir, "HANDOFF.md"), `${text.replace(/\n*$/, "")}
+    import_node_fs2.default.writeFileSync(handoffPath, `${text.replace(/\n*$/, "")}
 `);
   }
   return {
-    ...summary,
+    ...base,
     ok: true,
     dry_run: args.execute !== true,
-    track_context: context,
-    beads: beadsSummary(root),
-    handoff_path: `cadre/tracks/${trackId}/HANDOFF.md`
+    phase_state: "executed"
   };
 }
 function providerActionKind(workflow, provider) {
@@ -3190,10 +3257,11 @@ function workflowLand(root, args = {}) {
     fleet: fleetStatus(root, { includeCollisions: false })
   };
 }
-function workflowRelease(root, args = {}) {
-  const summary = workflowSummary(root, "release", args);
-  const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => metadataTrackSummary(track));
-  const version = args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`;
+function releaseArtifactPlan(root, args = {}) {
+  const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
+  const rawArgs = args;
+  const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
+  const generatedAt = asOptionalString(rawArgs.generatedAt || rawArgs.generated_at) || utcNow();
   const releaseDir = import_node_path3.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
   const releaseMd = import_node_path3.default.join(releaseDir, `${releaseSlug}.md`);
@@ -3201,33 +3269,16 @@ function workflowRelease(root, args = {}) {
   const notes = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release ${version}`,
     "",
-    `Generated: ${utcNow()}`,
+    `Generated: ${generatedAt}`,
     "",
     "## Completed Tracks",
     "",
     ...completed.map((track) => `- ${track.track_id}: ${track.name}`),
     ""
   ].join("\n");
-  const rawArgs = args;
-  const gitActions = rawArgs.createTag === true || rawArgs.create_tag === true || rawArgs.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", String(version), "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
-  if (args.execute !== true) {
-    return {
-      ...summary,
-      ok: true,
-      phase_state: "dry_run",
-      dry_run: true,
-      release_version: version,
-      completed_tracks: completed,
-      release_artifacts: [import_node_path3.default.relative(root, releaseMd), import_node_path3.default.relative(root, releaseJson)],
-      git_actions: gitActions
-    };
-  }
-  import_node_fs2.default.mkdirSync(releaseDir, { recursive: true });
-  import_node_fs2.default.writeFileSync(releaseMd, notes.endsWith("\n") ? notes : `${notes}
-`);
-  writeJson(releaseJson, {
-    version: String(version),
-    generated_at: utcNow(),
+  const metadata = {
+    version,
+    generated_at: generatedAt,
     completed_tracks: completed.map((track) => ({
       track_id: track.track_id,
       name: track.name,
@@ -3238,31 +3289,93 @@ function workflowRelease(root, args = {}) {
       beads_epic: track.beads_epic,
       review: track.review
     }))
-  });
+  };
+  const gitActions = rawArgs.createTag === true || rawArgs.create_tag === true || rawArgs.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
+  return { version, generatedAt, completed, releaseDir, releaseMd, releaseJson, notes, metadata, gitActions };
+}
+function releaseReviewFiles(root, plan) {
+  return [
+    textReviewFile(
+      import_node_path3.default.relative(root, plan.releaseMd),
+      "Release notes",
+      "releaseNotes",
+      plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+`
+    ),
+    jsonReviewFile(
+      import_node_path3.default.relative(root, plan.releaseJson),
+      "Release metadata",
+      "releaseMetadata",
+      plan.metadata
+    )
+  ];
+}
+function workflowRelease(root, args = {}) {
+  const summary = workflowSummary(root, "release", args);
+  const plan = releaseArtifactPlan(root, args);
+  const reviewFiles = releaseReviewFiles(root, plan);
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  if (plan.gitActions.length > 0) {
+    reviewArtifacts.push(packetReviewArtifact("Release git actions", "workflow:release", {
+      git_actions: plan.gitActions
+    }));
+  }
+  const reviewBundle = workflowReviewBundle(root, "release", args, reviewFiles, { release_version: plan.version });
+  const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const base = {
+    ...summary,
+    release_version: plan.version,
+    completed_tracks: plan.completed,
+    release_artifacts: [import_node_path3.default.relative(root, plan.releaseMd), import_node_path3.default.relative(root, plan.releaseJson)],
+    git_actions: plan.gitActions,
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts,
+    review_bundle: reviewBundle,
+    warnings
+  };
+  if (args.execute !== true) {
+    return {
+      ...base,
+      ok: true,
+      phase_state: "dry_run",
+      dry_run: true
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...base,
+      ok: false,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      dry_run: true,
+      error: "Human confirmation is required before writing release artifacts"
+    };
+  }
+  import_node_fs2.default.mkdirSync(plan.releaseDir, { recursive: true });
+  import_node_fs2.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+`);
+  writeJson(plan.releaseJson, plan.metadata);
   const indexPatch = patchJsonFile(import_node_path3.default.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
-      version: String(version),
-      path: import_node_path3.default.relative(root, releaseMd),
-      metadata: import_node_path3.default.relative(root, releaseJson),
-      completed_tracks: completed.length,
-      released_at: utcNow()
+      version: plan.version,
+      path: import_node_path3.default.relative(root, plan.releaseMd),
+      metadata: import_node_path3.default.relative(root, plan.releaseJson),
+      completed_tracks: plan.completed.length,
+      released_at: plan.generatedAt
     };
     current.updated_at = utcNow();
     return current;
   }, { lock: false });
-  const gitResults = runPlannedGitActions(gitActions);
+  const gitResults = runPlannedGitActions(plan.gitActions);
   const gitOk = actionResultsOk(gitResults);
   return {
-    ...summary,
+    ...base,
     ok: indexPatch.ok !== false && gitOk,
     phase_state: gitOk ? "executed" : "recovery_required",
     dry_run: args.execute !== true,
     bump: args.bump || args.mode || "patch",
-    release_version: version,
-    completed_tracks: completed,
-    release_artifacts: [import_node_path3.default.relative(root, releaseMd), import_node_path3.default.relative(root, releaseJson)],
     setup_state: indexPatch,
-    git_actions: gitActions,
     git_results: gitResults
   };
 }
@@ -3420,6 +3533,28 @@ function workflowRevert(root, args = {}) {
       git_actions: gitActions
     };
   }
+  const reviewArtifacts = [
+    packetReviewArtifact("Revert scope", "workflow:revert", {
+      track_id: trackId,
+      git_actions: gitActions,
+      reason: args.reason || null
+    })
+  ];
+  const humanReview = humanReviewState("revert", args, reviewArtifacts);
+  if (args.execute === true && !humanReviewConfirmed(args)) {
+    return {
+      ...summary,
+      ok: false,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      dry_run: true,
+      track_context: trackContext(root, trackId),
+      git_actions: gitActions,
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      error: "Human confirmation is required before reverting tracked commits"
+    };
+  }
   const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
   const gitOk = actionResultsOk(gitResults);
   const statusResult = args.execute === true && gitOk ? metadataPatch(root, {
@@ -3441,7 +3576,9 @@ function workflowRevert(root, args = {}) {
     track_context: trackContext(root, trackId),
     git_actions: gitActions,
     git_results: gitResults,
-    metadata_patch: statusResult
+    metadata_patch: statusResult,
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts
   };
 }
 function workflowRefresh(root, args = {}) {
@@ -3559,6 +3696,14 @@ function workflowPacket(root, args = {}) {
         const status = asOptionalString(args.status) || "blocked";
         const reason = asOptionalString(args.reason) || asOptionalString(args.note) || null;
         const context = trackContext(root, trackId);
+        const reviewArtifacts = [
+          packetReviewArtifact("Flag status change", "workflow:flag", {
+            track_id: trackId,
+            proposed_status: status,
+            reason
+          })
+        ];
+        const humanReview = humanReviewState("flag", args, reviewArtifacts);
         if (args.execute !== true) {
           return {
             ...summary,
@@ -3566,7 +3711,24 @@ function workflowPacket(root, args = {}) {
             dry_run: true,
             track_context: context,
             proposed_status: status,
-            reason
+            reason,
+            human_review: humanReview,
+            review_artifacts: reviewArtifacts
+          };
+        }
+        if (!humanReviewConfirmed(args)) {
+          return {
+            ...summary,
+            ok: false,
+            dry_run: true,
+            phase_state: "awaiting_human_review",
+            stage: "human_review",
+            track_context: context,
+            proposed_status: status,
+            reason,
+            human_review: humanReview,
+            review_artifacts: reviewArtifacts,
+            error: "Human confirmation is required before flagging track status"
           };
         }
         const statusResult = setTrackStatus(root, trackId, status);
@@ -3593,7 +3755,9 @@ function workflowPacket(root, args = {}) {
           track_context: context,
           status_result: statusResult,
           metadata_patch: patch,
-          beads
+          beads,
+          human_review: humanReview,
+          review_artifacts: reviewArtifacts
         };
       }
       case "revert":

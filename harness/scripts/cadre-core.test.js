@@ -1490,16 +1490,74 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       assert.equal(/Unknown Cadre workflow packet/.test(String(result.error || "")), false);
     }
 
-    const flag = core.workflowPacket(root, {
+    const handoffBlocked = core.workflowPacket(root, {
+      workflow: "handoff",
+      trackId: "workflow_20260618",
+      handoffText: "# Handoff\n\nContinue with the next task.\n",
+      execute: true,
+      reviewBundleDir: ".handoff-review",
+    });
+    assert.equal(handoffBlocked.ok, false);
+    assert.equal(handoffBlocked.stage, "human_review");
+    const handoffArtifact = handoffBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/workflow_20260618/HANDOFF.md");
+    assert.ok(handoffArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(handoffArtifact, "content"), false);
+    assert.equal(handoffBlocked.review_bundle.content_in_response, false);
+    assert.ok(fs.existsSync(path.join(handoffBlocked.review_bundle.directory, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")), false);
+
+    const handoff = core.workflowPacket(root, {
+      workflow: "handoff",
+      trackId: "workflow_20260618",
+      handoffText: "# Handoff\n\nContinue with the next task.\n",
+      execute: true,
+      humanConfirmed: true,
+    });
+    assert.equal(handoff.ok, true);
+    assert.equal(handoff.phase_state, "executed");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md"), "utf8"), /Continue with the next task/);
+
+    const archiveBlocked = core.workflowPacket(root, {
+      workflow: "archive",
+      trackId: "done_20260618",
+      execute: true,
+    });
+    assert.equal(archiveBlocked.ok, false);
+    assert.equal(archiveBlocked.stage, "human_review");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "done_20260618")), true);
+
+    const archived = core.workflowPacket(root, {
+      workflow: "archive",
+      trackId: "done_20260618",
+      execute: true,
+      humanConfirmed: true,
+    });
+    assert.equal(archived.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "archive", "done_20260618")), true);
+
+    const flagBlocked = core.workflowPacket(root, {
       workflow: "flag",
       trackId: "workflow_20260618",
       status: "blocked",
       reason: "waiting for credentials",
       execute: true,
     });
+    assert.equal(flagBlocked.ok, false);
+    assert.equal(flagBlocked.stage, "human_review");
+    let metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
+    assert.equal(metadata.status, "in_progress");
+
+    const flag = core.workflowPacket(root, {
+      workflow: "flag",
+      trackId: "workflow_20260618",
+      status: "blocked",
+      reason: "waiting for credentials",
+      execute: true,
+      humanConfirmed: true,
+    });
     assert.equal(flag.ok, true);
     assert.equal(flag.dry_run, false);
-    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
+    metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
     assert.equal(metadata.status, "blocked");
     assert.equal(metadata.last_status_reason, "waiting for credentials");
   } finally {
@@ -2059,27 +2117,61 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       },
     });
 
+    const revertBlocked = core.workflowPacket(root, {
+      workflow: "revert",
+      execute: true,
+      trackId: "execute_20260618",
+      reason: "test revert",
+    });
+    assert.equal(revertBlocked.ok, false);
+    assert.equal(revertBlocked.stage, "human_review");
+    assert.equal(revertBlocked.git_results, undefined);
+    let metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
+    assert.equal(metadata.status, "completed");
+
     const revert = core.workflowPacket(root, {
       workflow: "revert",
       execute: true,
+      humanConfirmed: true,
       trackId: "execute_20260618",
       reason: "test revert",
     });
     assert.equal(revert.ok, true);
     assert.equal(revert.phase_state, "executed");
     assert.equal(revert.git_results[0].ok, true);
-    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
+    metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
     assert.equal(metadata.status, "in_progress");
     assert.equal(metadata.last_revert.reason, "test revert");
+
+    const releaseBlocked = core.workflowPacket(root, {
+      workflow: "release",
+      execute: true,
+      createTag: true,
+      releaseVersion: "v1.2.3",
+      reviewBundleDir: ".release-review",
+    });
+    assert.equal(releaseBlocked.ok, false);
+    assert.equal(releaseBlocked.stage, "human_review");
+    const releaseArtifact = releaseBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/releases/v1.2.3.md");
+    assert.ok(releaseArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(releaseArtifact, "content"), false);
+    assert.equal(releaseBlocked.review_bundle.content_in_response, false);
+    assert.ok(fs.existsSync(path.join(releaseBlocked.review_bundle.directory, "cadre", "releases", "v1.2.3.md")));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.md")), false);
+    assert.equal(git(root, ["tag", "-l", "v1.2.3"]).stdout.trim(), "");
 
     const release = core.workflowPacket(root, {
       workflow: "release",
       execute: true,
+      humanConfirmed: true,
+      createTag: true,
       releaseVersion: "v1.2.3",
     });
     assert.equal(release.ok, true);
     assert.equal(release.phase_state, "executed");
     assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.md")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.json")), true);
+    assert.equal(git(root, ["tag", "-l", "v1.2.3"]).stdout.trim(), "v1.2.3");
     const setupState = JSON.parse(fs.readFileSync(path.join(root, "cadre", "setup_state.json"), "utf8"));
     assert.equal(setupState.last_release.version, "v1.2.3");
 

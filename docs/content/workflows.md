@@ -70,6 +70,10 @@ The new-track packet previews or creates:
 - Planning evidence such as likely tests, semantic impact, and parallel
   candidates.
 
+Dry runs expose full proposed files through a review bundle on disk, so agents
+can show the manifest and file paths without pasting generated specs or plans
+into chat.
+
 Good tracks have testable acceptance criteria, explicit dependencies, clear file
 annotations, and a plan that can be resumed by another session.
 
@@ -168,6 +172,9 @@ Handoff can include:
 Handoff artifacts are per-track, so two tracks do not clobber each other's
 handoff context.
 
+Writing a handoff requires reviewing the packet-generated `HANDOFF.md` bundle
+and confirming the packet write.
+
 ## `cadre-refresh`
 
 Refreshes derived context and setup recommendations.
@@ -182,6 +189,9 @@ Refresh can update:
 Refresh is useful after toolchain changes, repo topology changes, or stale
 project context.
 
+Document refreshes use review bundles for proposed context files and require
+confirmation before writing.
+
 ## `cadre-revise`
 
 Changes an existing spec or plan after gathering impact evidence.
@@ -195,6 +205,9 @@ Revise should preserve track history and reason about:
 - Beads dependency updates.
 - Review or implementation state that may be invalidated.
 
+Revised specs and plans are reviewed from packet-generated bundle files before
+the confirmed write.
+
 ## `cadre-revert`
 
 Plans and executes tracked reverts through Cadre packets.
@@ -202,6 +215,9 @@ Plans and executes tracked reverts through Cadre packets.
 In monorepo mode, reverts apply to the track's recorded commits. In polyrepo
 mode, SHAs are grouped per repo and reverted in reverse order inside each repo.
 Cadre halts on conflicts and reports recovery steps.
+
+Reverts require reviewing the packet-planned git actions before confirmed
+execution.
 
 ## `cadre-archive`
 
@@ -211,6 +227,9 @@ Archive can clean up completed track worktrees and preserve safety-net branches
 or evidence according to workflow policy. It should only archive work that is
 complete and no longer active.
 
+Archive mutations require reviewing the packet dry-run scope before confirmed
+execution.
+
 ## `cadre-release`
 
 Creates release artifacts from completed track metadata.
@@ -218,6 +237,9 @@ Creates release artifacts from completed track metadata.
 Release summarizes shipped or landed tracks, review state, version notes, and
 changelog-ready entries. It does not replace project-specific release policy;
 it provides structured Cadre evidence for it.
+
+Release notes and metadata are reviewed from bundle files before the confirmed
+write or optional tag action.
 
 ## `cadre-validate`
 
@@ -243,6 +265,9 @@ Records blocked or skipped work through packets.
 
 Flagged work remains visible to status boards and Beads memory. In shared mode,
 the control plane sync makes blockers visible to teammates.
+
+Status changes require reviewing the packet dry-run status proposal before
+confirmed mutation.
 
 ## `cadre-formula`
 

@@ -20,8 +20,9 @@ Revise a track's spec or plan when implementation reveals new information.
 4. When packet-supported mutation is requested, call the workflow packet again
    with the revised `specText` or `planText` payload as a dry run first. Review
    `review_bundle` when present so the full revised files stay on disk instead
-   of in model context. After approval, call the workflow packet again with the
-   confirmed payload, `execute: true`, and `humanConfirmed: true`.
+   of in model context; show the manifest/path list and packet warnings rather
+   than pasting full files into chat. After approval, call the workflow packet
+   again with the confirmed payload, `execute: true`, and `humanConfirmed: true`.
 5. Summarize the changed requirement, affected tasks, tests to update, and packet
    warnings.
 

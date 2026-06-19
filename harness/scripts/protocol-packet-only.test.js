@@ -114,6 +114,48 @@ test("Workflow templates include task-level commit evidence guidance", () => {
   assert.deepEqual(failures, []);
 });
 
+test("Artifact workflow protocols require token-safe review bundles", () => {
+  const required = new Map([
+    ["cadre-setup.md", "setup"],
+    ["cadre-newtrack.md", "newtrack"],
+    ["cadre-revise.md", "revise"],
+    ["cadre-refresh.md", "refresh"],
+    ["cadre-release.md", "release"],
+    ["cadre-handoff.md", "handoff"],
+  ]);
+  const failures = [];
+  for (const dir of protocolDirs) {
+    for (const [fileName, workflow] of required.entries()) {
+      const file = path.join(dir, fileName);
+      const text = fs.readFileSync(file, "utf8");
+      if (!/`review_bundle`/.test(text)) failures.push(`${path.relative(root, file)}: missing review_bundle for ${workflow}`);
+      if (!/manifest\/path list/.test(text)) failures.push(`${path.relative(root, file)}: missing manifest/path list guidance for ${workflow}`);
+      if (!/model\s+context/.test(text)) failures.push(`${path.relative(root, file)}: missing model-context avoidance for ${workflow}`);
+      if (!/humanConfirmed:\s*true/.test(text)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("Action workflow protocols require packet dry-run confirmation", () => {
+  const required = new Map([
+    ["cadre-archive.md", "archive"],
+    ["cadre-revert.md", "revert"],
+    ["cadre-flag.md", "flag"],
+  ]);
+  const failures = [];
+  for (const dir of protocolDirs) {
+    for (const [fileName, workflow] of required.entries()) {
+      const file = path.join(dir, fileName);
+      const text = fs.readFileSync(file, "utf8");
+      if (!/dry-run|dry run/.test(text)) failures.push(`${path.relative(root, file)}: missing dry-run review for ${workflow}`);
+      if (!/humanConfirmed:\s*true/.test(text)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
+      if (!/manually/.test(text)) failures.push(`${path.relative(root, file)}: missing no-manual-mutation guidance for ${workflow}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 test("Generated Codex and Claude skill bundles only differ in platform-sliced references", () => {
   const codexSkill = path.join(root, "plugins", "cadre", "skills", "cadre");
   const claudeSkill = path.join(root, "plugins", "cadre-claude", "skills", "cadre");

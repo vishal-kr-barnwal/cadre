@@ -15,9 +15,10 @@ Archive completed or selected tracks using the workflow arguments.
 1. Resolve the project root with `cadre_project` using `action: "root"`.
 2. Call `cadre_workflow` with `workflow: "archive"` and the resolved root. Pass
    `trackId` when archiving one track; omit it to archive completed tracks.
-3. Present the dry-run `tracks` list to the user when confirmation is needed.
+3. Present the dry-run `tracks` list, packet warnings, and any cleanup scope
+   returned by the packet; do not inspect or move Cadre track files manually.
 4. To archive, call `cadre_workflow` again with `workflow: "archive"` and
-   `execute: true`.
+   `execute: true` plus `humanConfirmed: true` after explicit approval.
 5. Summarize archived track ids, packet warnings, and any packet errors.
 
 All archive movement, index repair, and shared-control synchronization belongs to

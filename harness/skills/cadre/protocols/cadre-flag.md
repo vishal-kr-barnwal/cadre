@@ -17,9 +17,12 @@ workflow arguments.
 2. Call `cadre_workflow` with `workflow: "flag"`, the resolved root, and any
    `trackId`, `status`, `reason`, `taskId`, `note`, or assignee fields supplied by
    the user.
-3. When mutation is intended, pass `execute: true` so the packet records the
-   status and Beads synchronization.
-4. Summarize the selected track, resulting status, reason, and packet warnings.
+3. Present the dry-run status change, selected track, reason, and packet
+   warnings for explicit confirmation; do not edit metadata, Beads, or indexes
+   manually.
+4. When mutation is intended, pass `execute: true` and `humanConfirmed: true` so
+   the packet records the status and Beads synchronization.
+5. Summarize the selected track, resulting status, reason, and packet warnings.
 
 The packet owns ownership checks, status writes, Beads labels or notes, and index
 refresh. If the packet cannot determine the active track, ask the user for a

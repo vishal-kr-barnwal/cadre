@@ -26,9 +26,9 @@ Create a new track from the workflow arguments.
 4. Review the returned spec, plan, metadata, learnings starter, plan assistance,
    Beads tree preview, worktree plan, and warnings with the user using
    `review_bundle` when present. The bundle contains full dry-run files on disk;
-   use the manifest/path list for review instead of pasting complete generated
-   files into model context. Ask for corrections and wait for explicit approval
-   before creating files or Beads tasks.
+   show the manifest/path list and packet warnings for review instead of pasting
+   complete generated files into model context. Ask for corrections and wait for
+   explicit approval before creating files or Beads tasks.
 5. To create the track after approval, call `cadre_workflow` again with
    `workflow: "newtrack"`, the confirmed `trackId`, `specText`, `planText`, and
    metadata, plus `execute: true` and `humanConfirmed: true`.

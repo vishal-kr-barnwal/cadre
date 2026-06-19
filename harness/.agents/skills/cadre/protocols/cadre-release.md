@@ -20,10 +20,13 @@ Prepare release evidence from completed Cadre work using the workflow arguments.
 1. Resolve the project root with `cadre_project` using `action: "root"`.
 2. Call `cadre_workflow` with `workflow: "release"` and any requested version bump
    or release scope.
-3. Review the returned completed tracks, release evidence, warnings, and proposed
-   release artifacts.
+3. Review the returned completed tracks, release evidence, warnings, proposed
+   git actions, and `review_bundle` when present. The bundle contains full
+   release notes and metadata files on disk; show the manifest/path list and
+   packet warnings instead of pasting complete release artifacts into model
+   context.
 4. To write release artifacts, call `cadre_workflow` again with
-   `workflow: "release"` and `execute: true`.
+   `workflow: "release"`, `execute: true`, and `humanConfirmed: true`.
 5. Summarize the release scope, version intent, generated artifacts, and remaining
    human publishing steps.
 
