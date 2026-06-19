@@ -8,6 +8,13 @@
       "scope": "target-project"
     },
     {
+      "id": "product-guidelines",
+      "source": "product_guidelines.md",
+      "target": "cadre/product_guidelines.md",
+      "purpose": "Product principles, user promises, non-goals, and decision rules reviewed during setup.",
+      "scope": "target-project"
+    },
+    {
       "id": "patterns",
       "source": "patterns.md",
       "target": "cadre/patterns.md",

@@ -26,13 +26,19 @@ arguments and confirmed user context.
    status, and tech-stack summary to ask only for missing product, structured
    tech-stack JSON, workflow, repo topology, Beads, LSP, CI, and provider
    decisions.
-4. When the user confirms the setup payload, call `cadre_workflow` with
+4. Present the returned setup review artifacts to the user, including generated
+   `product.md`, `product_guidelines.md`, `tech-stack.json`, `workflow.md`,
+   selected style guides, LSP recommendations, and topology/CI artifacts when
+   present. Ask for corrections and wait for explicit approval before writing.
+5. When the user confirms the setup payload and review artifacts, call
+   `cadre_workflow` with
    `workflow: "setup_scaffold"`, `productText`, structured `techStack`, and
-   `execute: true`. For polyrepo setup, include the confirmed `repos` payload
-   and topology/CI options returned or requested by the packet. For LSP setup,
-   pass `lsp: true` or use `cadre_intel` with `action: "lsp_setup"` when setup
-   recommendations need a separate review/write step.
-5. Summarize created files, selected code style guides, Beads initialization,
+   `execute: true`, and `humanConfirmed: true`. For polyrepo setup, include the
+   confirmed `repos` payload and topology/CI options returned or requested by
+   the packet. For LSP setup, pass `lsp: true` or use `cadre_intel` with
+   `action: "lsp_setup"` when setup recommendations need a separate
+   review/write step.
+6. Summarize created files, selected code style guides, Beads initialization,
    LSP/provider status, warnings, and the first recommended packet.
 
 The packet owns all setup files, generated runtime assets, Beads initialization,

@@ -179,6 +179,7 @@ test("polyrepo workspace intelligence spans TS, Python, and Rust roots", () => {
 
     const setup = core.lspSetup(root, { execute: false });
     assert.equal(setup.ok, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(setup, "helper"), false);
     assert.ok(Array.isArray(setup.recommended));
     for (const id of ["typescript", "python", "rust"]) {
       assert.ok(setup.recommended.some((entry) => entry.id === id), `expected ${id} recommendation`);
@@ -775,6 +776,32 @@ test("fleetStatus and beadsSummary degrade cleanly", () => {
   }
 });
 
+test("workflow setup requires human confirmation before writing reviewed artifacts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-human-review-test-"));
+  try {
+    git(root, ["init"]);
+    const args = {
+      workflow: "setup",
+      providerMode: "local",
+      productText: "# Product\n",
+      techStack: { languages: ["TypeScript"] },
+    };
+    const preview = core.workflowPacket(root, args);
+    assert.equal(preview.ok, true);
+    assert.equal(preview.human_review.required, true);
+    assert.equal(preview.human_review.confirmed, false);
+    assert.ok(preview.review_artifacts.some((artifact) => artifact.path === "cadre/product_guidelines.md"));
+
+    const blocked = core.workflowPacket(root, { ...args, execute: true });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "human_review");
+    assert.equal(blocked.phase_state, "awaiting_human_review");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow setup writes detected and requested style guides from templates", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-test-"));
   const oldPath = process.env.PATH;
@@ -789,6 +816,7 @@ test("workflow setup writes detected and requested style guides from templates",
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: {
         languages: ["TypeScript"],
@@ -807,9 +835,12 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.styleGuides.detected.includes("html-css"));
     assert.ok(setup.styleGuides.selected.includes("general"));
     assert.ok(setup.styleGuides.selected.includes("python"));
+    assert.equal(setup.human_review.confirmed, true);
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/python.md"));
+    assert.ok(setup.written.includes("cadre/product_guidelines.md"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.md")), true);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /# Codebase Patterns/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.md")), false);
     const techStack = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"));
@@ -877,6 +908,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     const githubSetup = core.workflowPacket(githubRoot, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
     });
@@ -892,6 +924,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     const gitlabSetup = core.workflowPacket(gitlabRoot, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: { languages: ["Go"] },
     });
@@ -905,6 +938,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     const localSetup = core.workflowPacket(localRoot, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       providerMode: "local",
       productText: "# Product\n",
       techStack: { languages: ["Python"] },
@@ -933,6 +967,7 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       topology: "polyrepo",
       providerMode: "github",
       productText: "# Product\n",
@@ -996,6 +1031,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
     const local = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       providerMode: "local",
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
@@ -1030,6 +1066,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     const local = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       providerMode: "local",
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
@@ -1081,6 +1118,7 @@ test("workflow setup execute requires Beads init before writing project state", 
     const blocked = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
       providerMode: "local",
@@ -1109,6 +1147,7 @@ test("implementationPrep returns packet-selected style guides", () => {
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: {
         languages: ["TypeScript"],
@@ -1161,14 +1200,29 @@ test("workflow newtrack writes template-backed track learnings", () => {
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(setup.ok, true);
 
+    const blocked = core.workflowPacket(root, {
+      workflow: "newtrack",
+      execute: true,
+      trackId: "blocked_20260618",
+      specText: "# Spec\n",
+      planText: samplePlan("blocked_20260618"),
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "human_review");
+    assert.equal(blocked.human_review.confirmed, false);
+    assert.ok(blocked.review_artifacts.some((artifact) => artifact.path === "cadre/tracks/blocked_20260618/plan.md"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "blocked_20260618")), false);
+
     const created = core.workflowPacket(root, {
       workflow: "newtrack",
       execute: true,
+      humanConfirmed: true,
       trackId: "tmpl_20260618",
       specText: "# Spec\n",
       planText: samplePlan("tmpl_20260618"),
@@ -1205,6 +1259,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     const setup = core.workflowPacket(setupRoot, {
       workflow: "setup",
       execute: true,
+      humanConfirmed: true,
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
     });

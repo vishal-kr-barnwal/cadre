@@ -18,10 +18,12 @@ Create a new track from the workflow arguments.
 3. Call `cadre_workflow` with `workflow: "newtrack"`, `trackId`, `specText`,
    `planText`, and metadata. Treat the first call as a dry run unless the user has
    explicitly asked to create it now.
-4. Review the returned plan assistance, Beads tree preview, worktree plan, and
-   warnings with the user when needed.
-5. To create the track, call `cadre_workflow` again with `workflow: "newtrack"`
-   and `execute: true`.
+4. Review the returned spec, plan, metadata, learnings starter, plan assistance,
+   Beads tree preview, worktree plan, and warnings with the user. Ask for
+   corrections and wait for explicit approval before creating files or Beads
+   tasks.
+5. To create the track after approval, call `cadre_workflow` again with
+   `workflow: "newtrack"`, `execute: true`, and `humanConfirmed: true`.
 6. Summarize the created track id, Beads mapping, worktree plan, and next
    implementation packet.
 

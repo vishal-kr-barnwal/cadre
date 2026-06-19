@@ -1998,14 +1998,32 @@ function lspSetupHelperCandidates(root: string): string[] {
   ];
 }
 
+function redactRuntimeHelperPaths(text: string): string {
+  return text
+    .replace(/[^\s"'`]*cadre-lsp-(?:setup|review|daemon)\.js/g, "<cadre-lsp-helper>")
+    .replace(/[^\s"'`]*cadre-server\.js/g, "<cadre-mcp-server>");
+}
+
+function summarizeRuntimeCommandResult(result: CommandResult): JsonObject {
+  return {
+    ok: result.ok,
+    status: result.status,
+    signal: result.signal || null,
+    timed_out: result.timed_out === true,
+    stdout: redactRuntimeHelperPaths(result.stdout || "").slice(0, 4000),
+    stderr: redactRuntimeHelperPaths(result.stderr || "").slice(0, 4000),
+    error: result.error ? redactRuntimeHelperPaths(result.error) : undefined,
+  };
+}
+
 function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const helper = lspSetupHelperCandidates(root).find(fileExists);
   if (!helper) {
     return {
       ok: false,
       available: false,
-      reason: "No cadre-lsp-setup.js helper found",
-      checked: lspSetupHelperCandidates(root),
+      reason: "Cadre LSP setup helper was not found",
+      checked_count: lspSetupHelperCandidates(root).length,
     };
   }
   const config = asOptionalString(args.config) || "cadre/lsp.json";
@@ -2013,19 +2031,18 @@ function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   if (args.execute === true) commandArgs.push("--write");
   const result = runCommand("node", commandArgs, { cwd: root, maxBuffer: 20 * 1024 * 1024 });
   if (!result.ok) {
-    return { ok: false, available: true, helper, result, reason: "LSP setup helper failed" };
+    return { ok: false, available: true, result: summarizeRuntimeCommandResult(result), reason: "LSP setup helper failed" };
   }
   try {
     return {
       ok: true,
       available: true,
-      helper,
       execute: args.execute === true,
       dry_run: args.execute !== true,
       ...asJsonObject(JSON.parse(result.stdout || "{}")),
     };
   } catch {
-    return { ok: false, available: true, helper, result, reason: "LSP setup helper returned invalid JSON" };
+    return { ok: false, available: true, result: summarizeRuntimeCommandResult(result), reason: "LSP setup helper returned invalid JSON" };
   }
 }
 
@@ -2182,6 +2199,105 @@ function setupStyleGuides(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function humanReviewConfirmed(args: RuntimeArgs = {}): boolean {
+  const rawArgs = args as UnknownRecord;
+  return rawArgs.humanConfirmed === true
+    || rawArgs.human_confirmed === true
+    || rawArgs.userConfirmed === true
+    || rawArgs.user_confirmed === true
+    || rawArgs.confirmed === true;
+}
+
+function reviewPreview(text: string, maxChars = 2000): JsonObject {
+  const normalized = text.replace(/\n*$/, "\n");
+  return {
+    content: normalized.slice(0, maxChars),
+    truncated: normalized.length > maxChars,
+    bytes: Buffer.byteLength(normalized, "utf8"),
+  };
+}
+
+function textReviewArtifact(relativePath: string, title: string, source: string, text: string): JsonObject {
+  return {
+    path: relativePath,
+    title,
+    kind: "markdown",
+    source,
+    ...reviewPreview(text),
+  };
+}
+
+function jsonReviewArtifact(relativePath: string, title: string, source: string, value: JsonObject | null): JsonObject {
+  const text = value ? `${JSON.stringify(value, null, 2)}\n` : "";
+  return {
+    path: relativePath,
+    title,
+    kind: "json",
+    source,
+    missing: value == null,
+    ...reviewPreview(text),
+  };
+}
+
+function setupLspWriteRequested(args: RuntimeArgs = {}): boolean {
+  const rawArgs = args as UnknownRecord;
+  return rawArgs.lsp === true
+    || args.setupLsp === true
+    || args.setup_lsp === true
+    || args.writeLsp === true
+    || args.write_lsp === true;
+}
+
+function setupReviewArtifacts(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): JsonObject[] {
+  const rawArgs = args as UnknownRecord;
+  const productText = packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n");
+  const productGuidelinesText = packetText(
+    rawArgs.productGuidelinesText || rawArgs.product_guidelines_text,
+    templateText("product_guidelines.md", "# Product Guidelines\n\nCapture product principles, user promises, non-goals, and decision rules.\n")
+  );
+  const workflowText = packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n"));
+  const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
+  const techStack = techStackForPacket(root, args);
+  const artifacts: JsonObject[] = [
+    textReviewArtifact("cadre/product.md", "Product context", "productText", productText),
+    textReviewArtifact("cadre/product_guidelines.md", "Product guidelines", "productGuidelinesText", productGuidelinesText),
+    jsonReviewArtifact("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
+    textReviewArtifact("cadre/workflow.md", "Workflow policy", "workflowText", workflowText),
+    textReviewArtifact("cadre/patterns.md", "Project patterns", "template:patterns.md", patternsText),
+    {
+      path: "cadre/code_styleguides/*.md",
+      title: "Selected code style guides",
+      kind: "selection",
+      source: "tech-stack.json/styleGuideIds",
+      selected: asStringArray(styleGuides.selected),
+      missing: asStringArray(styleGuides.missing),
+    },
+  ];
+  if (setupLspWriteRequested(args)) {
+    artifacts.push({
+      path: "cadre/lsp.json",
+      title: "LSP configuration",
+      kind: "json",
+      source: "lsp_setup",
+      write_requested: true,
+    });
+  }
+  if (polyrepoRequested) {
+    artifacts.push(jsonReviewArtifact("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
+  }
+  return artifacts;
+}
+
+function humanReviewState(workflow: string, args: RuntimeArgs, artifacts: JsonObject[]): JsonObject {
+  return {
+    required: true,
+    confirmed: humanReviewConfirmed(args),
+    workflow,
+    confirm_argument: "humanConfirmed",
+    artifacts,
+  };
+}
+
 function trackLearningsText(trackId: string): string {
   return templateText("learnings.md", "# Track Learnings: {{track_id}}\n\n")
     .replace(/\{\{track_id\}\}/g, trackId)
@@ -2313,10 +2429,13 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const beadsPlan = setupBeads(root, { ...args, execute: false });
+  const lspWriteRequested = setupLspWriteRequested(args);
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
+  const reviewArtifacts = setupReviewArtifacts(root, args, styleGuides, polyrepoRequested);
+  const humanReview = humanReviewState("setup", args, reviewArtifacts);
   const result: CoreResult = {
     ...summary,
     ok: styleGuides.ok,
@@ -2337,16 +2456,22 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     styleGuides,
     templates: templateManifest(),
     techStackSummary: techStackSummary(root, args),
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts,
     required_payload: args.execute === true
       ? ["productText", "techStack"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
         .concat(polyrepoRequested && !reposPayload ? ["repos"] : [])
       : [],
-    next_actions: provider.requires_confirmation === true
-      ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
-      : [],
+    next_actions: [
+      ...(provider.requires_confirmation === true
+        ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
+        : []),
+      "Review setup artifacts with the user; call setup_scaffold with execute:true and humanConfirmed:true only after explicit approval.",
+    ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed document text to this packet.",
+      "Setup writes are human-in-loop: mutating setup packets require humanConfirmed:true after artifact review.",
       "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves.",
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
@@ -2374,6 +2499,15 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
       ok: false,
       error: `Missing setup payload: ${missingPayload.join(", ")}`,
       missing_payload: missingPayload,
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...result,
+      ok: false,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      error: "Human confirmation is required before writing setup artifacts",
     };
   }
   const beadsInit = setupBeads(root, args);
@@ -2416,6 +2550,13 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     "product.md",
     packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n")
   );
+  writeText(
+    "product_guidelines.md",
+    packetText(
+      rawArgs.productGuidelinesText || rawArgs.product_guidelines_text,
+      templateText("product_guidelines.md", "# Product Guidelines\n\nCapture product principles, user promises, non-goals, and decision rules.\n")
+    )
+  );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
   writeText("workflow.md", packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n")));
   writeText("tracks.md", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
@@ -2457,11 +2598,6 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     repos = reposPayload;
     writeSetupJson("repos.json", reposPayload);
   }
-  const lspWriteRequested = rawArgs.lsp === true
-    || args.setupLsp === true
-    || args.setup_lsp === true
-    || args.writeLsp === true
-    || args.write_lsp === true;
   const lspSetupResult = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
   const gitattributesNeeded = polyrepoRequested
     || configPayload.sync_mode === "shared"
@@ -2503,6 +2639,36 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function newTrackReviewArtifacts(trackId: string, specText: string | undefined, planText: string, metadata: TrackMetadata): JsonObject[] {
+  const safeTrack = safeName(trackId);
+  return [
+    textReviewArtifact(
+      `cadre/tracks/${safeTrack}/spec.md`,
+      "Track spec",
+      "specText",
+      specText || `# Spec: ${trackId}\n`
+    ),
+    textReviewArtifact(
+      `cadre/tracks/${safeTrack}/plan.md`,
+      "Track plan",
+      "planText",
+      planText.endsWith("\n") ? planText : `${planText}\n`
+    ),
+    jsonReviewArtifact(
+      `cadre/tracks/${safeTrack}/metadata.json`,
+      "Track metadata",
+      "metadata",
+      metadata
+    ),
+    textReviewArtifact(
+      `cadre/tracks/${safeTrack}/learnings.md`,
+      "Track learnings",
+      "template:learnings.md",
+      trackLearningsText(trackId)
+    ),
+  ];
+}
+
 function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
   const trackId = args.trackId || args.track_id;
   const planText = asOptionalString(args.planText);
@@ -2522,6 +2688,8 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
     worktree_path: `.worktrees/${trackId}`,
     ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
   };
+  const reviewArtifacts = newTrackReviewArtifacts(String(trackId), specText, planText, metadata);
+  const humanReview = humanReviewState("newtrack", args, reviewArtifacts);
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, planText, trackId });
   const beads = createBeadsTree(root, {
@@ -2541,10 +2709,28 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
       metadata,
       plan_assist: assist,
       beads_tree: beads,
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
     };
   }
   if (findTrack(root, trackId)) {
     return { ...workflowSummary(root, "newtrack", args), ok: false, track_id: trackId, error: "Track already exists" };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...workflowSummary(root, "newtrack", args),
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      track_id: trackId,
+      metadata,
+      plan_assist: assist,
+      beads_tree: beads,
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      error: "Human confirmation is required before creating track artifacts",
+    };
   }
   if (!commandExists("bd", root)) {
     return {
@@ -2580,6 +2766,7 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
     metadata_path: path.relative(root, path.join(dir, "metadata.json")),
     beads_tree: liveBeads,
     regen,
+    human_review: humanReview,
     worktree_plan: worktreePlan(root, { trackId }),
   };
 }

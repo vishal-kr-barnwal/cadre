@@ -220,6 +220,10 @@ export interface RuntimeArgs extends JsonObject {
   planText?: string;
   specText?: string;
   techStack?: JsonObject;
+  humanConfirmed?: boolean;
+  human_confirmed?: boolean;
+  productGuidelinesText?: string;
+  product_guidelines_text?: string;
   styleGuideIds?: string[] | string;
   styleGuideMaxChars?: number;
   metadata?: TrackMetadata;
