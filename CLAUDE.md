@@ -61,6 +61,26 @@ pnpm generate
 Runtime JavaScript under `harness/scripts/` and `harness/templates/scripts/`
 is generated from TypeScript under `harness/src/`.
 
+## TypeScript Architecture Guidelines
+
+For future TypeScript work in `harness/src/`, preserve the current
+SOLID/DDD-style module boundaries:
+
+- Keep domain code pure and free of Node.js, MCP, or presentation imports.
+- Keep infrastructure concerns such as filesystem, Git, process execution,
+  locking, and generated artifact plumbing outside domain modules.
+- Keep application modules focused on one bounded capability such as workflows,
+  tracks, artifacts, review, parallel execution, status, project setup, or
+  workspace intelligence.
+- Prefer reusable helpers, ports, and typed contracts over duplicating logic
+  across workflow or MCP packet handlers.
+- Preserve strict TypeScript safety. Avoid broad `JsonObject`/`unknown` usage
+  inside business logic; normalize untrusted data at boundaries and use explicit
+  interfaces, literal unions, and exhaustiveness checks where practical.
+- Do not introduce large TypeScript source files. Keep `harness/src/**/*.ts`
+  files at or below 500 lines and split growing files into smaller cohesive
+  modules before they exceed that threshold.
+
 ## Commit Policy
 
 When the user asks for implementation commits, create small local commits with
