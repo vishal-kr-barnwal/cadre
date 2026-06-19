@@ -26,6 +26,15 @@ interface CoreResult extends UnknownRecord {
   stage?: string | undefined;
 }
 
+interface ReviewFile {
+  path: string;
+  title: string;
+  kind: "markdown" | "json" | "text";
+  source: string;
+  content: string;
+  missing?: boolean;
+}
+
 interface PatchJsonOptions extends RuntimeArgs {
   root?: string;
   lockName?: string;
@@ -2188,13 +2197,15 @@ function setupStyleGuides(root: string, args: RuntimeArgs = {}): CoreResult {
     ...requested.filter((id) => available.has(id)),
   ])).sort();
   return {
-    ok: missing.length === 0,
+    ok: true,
+    valid: missing.length === 0,
     detected,
     requested,
     selected,
     written: [],
     skipped: [],
     missing,
+    warnings: missing.length > 0 ? [`Unknown setup style guide id(s) ignored: ${missing.join(", ")}`] : [],
     source: "tech-stack.json",
   };
 }
@@ -2208,26 +2219,26 @@ function humanReviewConfirmed(args: RuntimeArgs = {}): boolean {
     || rawArgs.confirmed === true;
 }
 
-function reviewPreview(text: string, maxChars = 2000): JsonObject {
+function reviewStats(text: string): JsonObject {
   const normalized = text.replace(/\n*$/, "\n");
   return {
-    content: normalized.slice(0, maxChars),
-    truncated: normalized.length > maxChars,
     bytes: Buffer.byteLength(normalized, "utf8"),
+    lines: normalized.split("\n").length - 1,
+    sha256: crypto.createHash("sha256").update(normalized).digest("hex"),
   };
 }
 
-function textReviewArtifact(relativePath: string, title: string, source: string, text: string): JsonObject {
+function textReviewFile(relativePath: string, title: string, source: string, text: string): ReviewFile {
   return {
     path: relativePath,
     title,
     kind: "markdown",
     source,
-    ...reviewPreview(text),
+    content: text.replace(/\n*$/, "\n"),
   };
 }
 
-function jsonReviewArtifact(relativePath: string, title: string, source: string, value: JsonObject | null): JsonObject {
+function jsonReviewFile(relativePath: string, title: string, source: string, value: JsonObject | null): ReviewFile {
   const text = value ? `${JSON.stringify(value, null, 2)}\n` : "";
   return {
     path: relativePath,
@@ -2235,7 +2246,7 @@ function jsonReviewArtifact(relativePath: string, title: string, source: string,
     kind: "json",
     source,
     missing: value == null,
-    ...reviewPreview(text),
+    content: text,
   };
 }
 
@@ -2248,7 +2259,7 @@ function setupLspWriteRequested(args: RuntimeArgs = {}): boolean {
     || args.write_lsp === true;
 }
 
-function setupReviewArtifacts(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): JsonObject[] {
+function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): ReviewFile[] {
   const rawArgs = args as UnknownRecord;
   const productText = packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n");
   const productGuidelinesText = packetText(
@@ -2258,12 +2269,41 @@ function setupReviewArtifacts(root: string, args: RuntimeArgs, styleGuides: Core
   const workflowText = packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n"));
   const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
   const techStack = techStackForPacket(root, args);
+  const files: ReviewFile[] = [
+    textReviewFile("cadre/product.md", "Product context", "productText", productText),
+    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "productGuidelinesText", productGuidelinesText),
+    jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
+    textReviewFile("cadre/workflow.md", "Workflow policy", "workflowText", workflowText),
+    textReviewFile("cadre/patterns.md", "Project patterns", "template:patterns.md", patternsText),
+    ...asStringArray(styleGuides.selected).map((guideId) =>
+      textReviewFile(
+        `cadre/code_styleguides/${guideId}.md`,
+        `Code style guide: ${guideId}`,
+        "tech-stack.json/styleGuideIds",
+        templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`)
+      )
+    ),
+  ];
+  if (polyrepoRequested) {
+    files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
+  }
+  return files;
+}
+
+function reviewArtifactsFromFiles(reviewFiles: ReviewFile[]): JsonObject[] {
+  return reviewFiles.map((file) => ({
+      path: file.path,
+      title: file.title,
+      kind: file.kind,
+      source: file.source,
+      missing: file.missing === true,
+      ...reviewStats(file.content),
+    }));
+}
+
+function setupReviewArtifacts(reviewFiles: ReviewFile[], styleGuides: CoreResult): JsonObject[] {
   const artifacts: JsonObject[] = [
-    textReviewArtifact("cadre/product.md", "Product context", "productText", productText),
-    textReviewArtifact("cadre/product_guidelines.md", "Product guidelines", "productGuidelinesText", productGuidelinesText),
-    jsonReviewArtifact("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-    textReviewArtifact("cadre/workflow.md", "Workflow policy", "workflowText", workflowText),
-    textReviewArtifact("cadre/patterns.md", "Project patterns", "template:patterns.md", patternsText),
+    ...reviewArtifactsFromFiles(reviewFiles),
     {
       path: "cadre/code_styleguides/*.md",
       title: "Selected code style guides",
@@ -2271,30 +2311,123 @@ function setupReviewArtifacts(root: string, args: RuntimeArgs, styleGuides: Core
       source: "tech-stack.json/styleGuideIds",
       selected: asStringArray(styleGuides.selected),
       missing: asStringArray(styleGuides.missing),
+      warnings: asStringArray(styleGuides.warnings),
     },
   ];
-  if (setupLspWriteRequested(args)) {
-    artifacts.push({
-      path: "cadre/lsp.json",
-      title: "LSP configuration",
-      kind: "json",
-      source: "lsp_setup",
-      write_requested: true,
-    });
-  }
-  if (polyrepoRequested) {
-    artifacts.push(jsonReviewArtifact("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
-  }
   return artifacts;
 }
 
-function humanReviewState(workflow: string, args: RuntimeArgs, artifacts: JsonObject[]): JsonObject {
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function workflowReviewBundle(root: string, workflow: string, args: RuntimeArgs, reviewFiles: ReviewFile[], manifestExtras: JsonObject = {}): JsonObject | null {
+  const rawArgs = args as UnknownRecord;
+  if (reviewFiles.length === 0) return null;
+  if ((args.execute === true && humanReviewConfirmed(args)) || rawArgs.reviewBundle === false || rawArgs.reviewFiles === false) return null;
+  const explicitDir = asOptionalString(rawArgs.reviewBundleDir || rawArgs.review_bundle_dir || rawArgs.reviewDir || rawArgs.review_dir);
+  const rootHash = crypto.createHash("sha256").update(root).digest("hex").slice(0, 12);
+  const defaultDirectory = path.join(os.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(path.basename(root))}-${rootHash}`);
+  let directory = explicitDir ? path.resolve(root, explicitDir) : defaultDirectory;
+  const resolvedRoot = path.resolve(root);
+  const resolvedCadre = path.join(resolvedRoot, "cadre");
+  const relativeToCadre = path.relative(resolvedCadre, directory);
+  const insideCadre = relativeToCadre === "" || (!relativeToCadre.startsWith("..") && !path.isAbsolute(relativeToCadre));
+  const unsafeExplicitDir = Boolean(explicitDir) && (directory === resolvedRoot || insideCadre);
+  const warnings = unsafeExplicitDir
+    ? [`Ignored unsafe reviewBundleDir ${explicitDir}; using a temp review bundle outside the project control plane.`]
+    : [];
+  if (unsafeExplicitDir) directory = defaultDirectory;
+  if (!explicitDir || unsafeExplicitDir) fs.rmSync(directory, { recursive: true, force: true });
+  fs.mkdirSync(directory, { recursive: true });
+  const files: JsonObject[] = reviewFiles.map((file) => {
+    const reviewPath = path.join(directory, file.path);
+    fs.mkdirSync(path.dirname(reviewPath), { recursive: true });
+    fs.writeFileSync(reviewPath, file.content);
+    return {
+      path: file.path,
+      review_path: reviewPath,
+      title: file.title,
+      kind: file.kind,
+      source: file.source,
+      missing: file.missing === true,
+      ...reviewStats(file.content),
+    };
+  });
+  const manifestPath = path.join(directory, "manifest.json");
+  const relativeReviewPaths = files.map((file) => shellQuote(String(file.path)));
+  const openCommand = relativeReviewPaths.length > 0
+    ? `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${relativeReviewPaths.join(" ")}`
+    : `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${shellQuote("manifest.json")}`;
+  const printCommand = relativeReviewPaths.length > 0
+    ? `cd ${shellQuote(directory)} && for file in ${relativeReviewPaths.join(" ")}; do printf '\\n### %s\\n' "$file"; sed -n '1,240p' "$file"; done`
+    : `sed -n '1,240p' ${shellQuote(manifestPath)}`;
+  const commands: JsonObject = {
+    list: `find ${shellQuote(directory)} -type f | sort`,
+    open_editor: openCommand,
+    print: printCommand,
+  };
+  const manifest: JsonObject = {
+    version: 1,
+    kind: `cadre_${safeName(workflow)}_review`,
+    workflow,
+    root,
+    generated_at: utcNow(),
+    content_in_response: false,
+    warnings,
+    files,
+    ...manifestExtras,
+    commands,
+  };
+  writeJson(manifestPath, manifest);
+  return {
+    directory,
+    manifest_path: manifestPath,
+    content_in_response: false,
+    warnings,
+    files,
+    commands,
+  };
+}
+
+function setupReviewBundle(root: string, args: RuntimeArgs, reviewFiles: ReviewFile[], styleGuides: CoreResult): JsonObject | null {
+  return workflowReviewBundle(root, "setup", args, reviewFiles, {
+    styleGuides: {
+      selected: asStringArray(styleGuides.selected),
+      missing: asStringArray(styleGuides.missing),
+      warnings: asStringArray(styleGuides.warnings),
+    },
+  });
+}
+
+function setupLspReviewArtifacts(args: RuntimeArgs = {}): JsonObject[] {
+  if (setupLspWriteRequested(args)) {
+    return [
+      {
+        path: "cadre/lsp.json",
+        title: "LSP configuration",
+        kind: "json",
+        source: "lsp_setup",
+        write_requested: true,
+      },
+    ];
+  }
+  return [];
+}
+
+function appendLspReviewArtifacts(artifacts: JsonObject[], args: RuntimeArgs = {}): JsonObject[] {
+  artifacts.push(...setupLspReviewArtifacts(args));
+  return artifacts;
+}
+
+function humanReviewState(workflow: string, args: RuntimeArgs, artifacts: JsonObject[], reviewBundle: JsonObject | null = null): JsonObject {
   return {
     required: true,
     confirmed: humanReviewConfirmed(args),
     workflow,
     confirm_argument: "humanConfirmed",
     artifacts,
+    review_bundle: reviewBundle,
   };
 }
 
@@ -2434,11 +2567,17 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
-  const reviewArtifacts = setupReviewArtifacts(root, args, styleGuides, polyrepoRequested);
-  const humanReview = humanReviewState("setup", args, reviewArtifacts);
+  const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
+  const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
+  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args);
+  const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
+  const warnings = [
+    ...asStringArray(styleGuides.warnings),
+    ...asStringArray(asJsonObject(reviewBundle).warnings),
+  ];
   const result: CoreResult = {
     ...summary,
-    ok: styleGuides.ok,
+    ok: true,
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace_health: workspaceHealthResult,
     workspace: workspaceHealthResult.workspace,
@@ -2458,6 +2597,8 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     techStackSummary: techStackSummary(root, args),
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
+    review_bundle: reviewBundle,
+    warnings,
     required_payload: args.execute === true
       ? ["productText", "techStack"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
@@ -2476,13 +2617,6 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
   };
-  if (styleGuides.ok === false) {
-    return {
-      ...result,
-      ok: false,
-      error: `Unknown setup style guide id: ${asStringArray(styleGuides.missing).join(", ")}`,
-    };
-  }
   if (args.execute !== true) return result;
 
   const cadreDir = path.join(root, "cadre");
@@ -2639,28 +2773,28 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
-function newTrackReviewArtifacts(trackId: string, specText: string | undefined, planText: string, metadata: TrackMetadata): JsonObject[] {
+function newTrackReviewFiles(trackId: string, specText: string | undefined, planText: string, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
   return [
-    textReviewArtifact(
+    textReviewFile(
       `cadre/tracks/${safeTrack}/spec.md`,
       "Track spec",
       "specText",
       specText || `# Spec: ${trackId}\n`
     ),
-    textReviewArtifact(
+    textReviewFile(
       `cadre/tracks/${safeTrack}/plan.md`,
       "Track plan",
       "planText",
       planText.endsWith("\n") ? planText : `${planText}\n`
     ),
-    jsonReviewArtifact(
+    jsonReviewFile(
       `cadre/tracks/${safeTrack}/metadata.json`,
       "Track metadata",
       "metadata",
       metadata
     ),
-    textReviewArtifact(
+    textReviewFile(
       `cadre/tracks/${safeTrack}/learnings.md`,
       "Track learnings",
       "template:learnings.md",
@@ -2688,8 +2822,11 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
     worktree_path: `.worktrees/${trackId}`,
     ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
   };
-  const reviewArtifacts = newTrackReviewArtifacts(String(trackId), specText, planText, metadata);
-  const humanReview = humanReviewState("newtrack", args, reviewArtifacts);
+  const reviewFiles = newTrackReviewFiles(String(trackId), specText, planText, metadata);
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  const reviewBundle = workflowReviewBundle(root, "newtrack", args, reviewFiles, { track_id: String(trackId) });
+  const humanReview = humanReviewState("newtrack", args, reviewArtifacts, reviewBundle);
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, planText, trackId });
   const beads = createBeadsTree(root, {
@@ -2711,6 +2848,8 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
       beads_tree: beads,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
+      review_bundle: reviewBundle,
+      warnings,
     };
   }
   if (findTrack(root, trackId)) {
@@ -2729,6 +2868,8 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
       beads_tree: beads,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
+      review_bundle: reviewBundle,
+      warnings,
       error: "Human confirmation is required before creating track artifacts",
     };
   }
@@ -3160,12 +3301,121 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "revise", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  return {
+  const track = findTrack(root, trackId);
+  const context = trackContext(root, trackId);
+  const impact = lspImpact(root, args);
+  const reviewFiles: ReviewFile[] = [];
+  const revisedSpec = asOptionalString(args.specText);
+  const revisedPlan = asOptionalString(args.planText);
+  const revisionRequested = revisedSpec !== undefined || revisedPlan !== undefined;
+  if (revisionRequested && !track) {
+    return {
+      ...summary,
+      ok: false,
+      track_context: context,
+      impact,
+      error: `Track not found: ${trackId}`,
+    };
+  }
+  if (track && revisedSpec !== undefined) {
+    reviewFiles.push(textReviewFile(path.relative(root, track.spec_path), "Revised track spec", "specText", revisedSpec));
+  }
+  if (track && revisedPlan !== undefined) {
+    reviewFiles.push(textReviewFile(path.relative(root, track.plan_path), "Revised track plan", "planText", revisedPlan));
+  }
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
+  const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  if (reviewFiles.length === 0) {
+    return {
+      ...summary,
+      ok: true,
+      track_context: context,
+      impact,
+    };
+  }
+  if (!track) {
+    return {
+      ...summary,
+      ok: false,
+      track_context: context,
+      impact,
+      error: `Track not found: ${trackId}`,
+    };
+  }
+  const base = {
     ...summary,
-    ok: true,
-    track_context: trackContext(root, trackId),
-    impact: lspImpact(root, args),
+    track_id: trackId,
+    track_context: context,
+    impact,
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts,
+    review_bundle: reviewBundle,
+    warnings,
   };
+  if (args.execute !== true) {
+    return {
+      ...base,
+      ok: true,
+      dry_run: true,
+      phase_state: "dry_run",
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      error: "Human confirmation is required before revising track artifacts",
+    };
+  }
+  const writeResult = withTrackLock(root, track.track_id, () => {
+    const written: string[] = [];
+    if (revisedSpec !== undefined) {
+      fs.writeFileSync(track.spec_path, revisedSpec.replace(/\n*$/, "\n"));
+      written.push(path.relative(root, track.spec_path));
+    }
+    if (revisedPlan !== undefined) {
+      fs.writeFileSync(track.plan_path, revisedPlan.replace(/\n*$/, "\n"));
+      written.push(path.relative(root, track.plan_path));
+    }
+    return { ok: true, written, revised_at: utcNow() };
+  });
+  const regen = writeResult.ok !== false ? regenIndex(root) : null;
+  return {
+    ...base,
+    ok: writeResult.ok !== false && (!regen || regen.ok !== false),
+    dry_run: false,
+    phase_state: writeResult.ok === false || (regen && regen.ok === false) ? "recovery_required" : "executed",
+    write: writeResult,
+    regen,
+  };
+}
+
+function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
+  const stamp = `Last refreshed: ${now.slice(0, 10)}`;
+  const next = /Last refreshed:\s*.*/.test(text)
+    ? text.replace(/Last refreshed:\s*.*/, stamp)
+    : `${text.replace(/\n*$/, "\n\n")}${stamp}\n`;
+  return { text: next, stamp };
+}
+
+function refreshReviewFiles(root: string): ReviewFile[] {
+  const patternsPath = path.join(root, "cadre", "patterns.md");
+  if (!fileExists(patternsPath)) return [];
+  const current = fs.readFileSync(patternsPath, "utf8");
+  const next = refreshedPatternsText(current);
+  return [
+    textReviewFile(
+      path.relative(root, patternsPath),
+      "Refreshed project patterns",
+      "refresh:patterns",
+      next.text
+    ),
+  ];
 }
 
 function revertGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
@@ -3237,20 +3487,42 @@ function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult {
 
 function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "refresh", args);
-  const rawArgs = args as UnknownRecord;
-  const lspRequested = args.execute === true && (rawArgs.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true);
+  const reviewFiles = refreshReviewFiles(root);
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  if (setupLspWriteRequested(args)) reviewArtifacts.push(...setupLspReviewArtifacts(args));
+  const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
+  const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
+  const lspRequested = args.execute === true && !awaitingDocumentReview && setupLspWriteRequested(args);
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
+  if (awaitingDocumentReview) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      doctor: doctor(root, { hasCadreProject: true }),
+      workspace: workspaceDiagnostics(root, { execute: false }),
+      dependency_graph: dependencyGraph(root),
+      lsp: lspConfigStatus(root),
+      lsp_setup: lsp,
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      review_bundle: reviewBundle,
+      warnings,
+      error: "Human confirmation is required before refreshing Cadre context documents",
+    };
+  }
   const regen = args.execute === true ? regenIndex(root) : null;
   const patternsPath = path.join(root, "cadre", "patterns.md");
   let patterns: CoreResult | null = null;
   if (args.execute === true && fileExists(patternsPath)) {
     const text = fs.readFileSync(patternsPath, "utf8");
-    const stamp = `Last refreshed: ${utcNow().slice(0, 10)}`;
-    const next = /Last refreshed:\s*.*/.test(text)
-      ? text.replace(/Last refreshed:\s*.*/, stamp)
-      : `${text.replace(/\n*$/, "\n\n")}${stamp}\n`;
-    fs.writeFileSync(patternsPath, next);
-    patterns = { ok: true, path: path.relative(root, patternsPath), refreshed_at: stamp };
+    const next = refreshedPatternsText(text);
+    fs.writeFileSync(patternsPath, next.text);
+    patterns = { ok: true, path: path.relative(root, patternsPath), refreshed_at: next.stamp };
   }
   return {
     ...summary,
@@ -3263,6 +3535,10 @@ function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
     lsp_setup: lsp,
     regen,
     patterns,
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts,
+    review_bundle: reviewBundle,
+    warnings,
   };
 }
 

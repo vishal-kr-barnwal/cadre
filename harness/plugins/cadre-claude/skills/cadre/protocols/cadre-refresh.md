@@ -23,9 +23,12 @@ Refresh Cadre context from the current codebase using the workflow arguments.
 3. Use the returned doctor, workspace diagnostics, dependency graph, and LSP
    status/setup recommendations to decide what context needs refreshing.
 4. When packet-supported document updates are requested, call the workflow packet
-   again with `execute: true`. Pass `lsp: true` or call `cadre_intel` with
-   `action: "lsp_setup"` when `cadre/lsp.json` should be written from detected
-   language servers.
+   as a dry run first and review `review_bundle` when present. The bundle
+   contains full proposed context files on disk so agents do not paste complete
+   refreshed documents into model context. After approval, call the workflow
+   packet again with `execute: true` and `humanConfirmed: true`. Pass `lsp: true`
+   or call `cadre_intel` with `action: "lsp_setup"` when `cadre/lsp.json` should
+   be written from detected language servers.
 5. Summarize refreshed context, stale areas, diagnostics, and packet warnings.
 
 Codebase analysis may inspect product files, but Cadre context writes and

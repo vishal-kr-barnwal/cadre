@@ -785,12 +785,18 @@ test("workflow setup requires human confirmation before writing reviewed artifac
       providerMode: "local",
       productText: "# Product\n",
       techStack: { languages: ["TypeScript"] },
+      reviewBundleDir: ".cadre-review",
     };
     const preview = core.workflowPacket(root, args);
     assert.equal(preview.ok, true);
     assert.equal(preview.human_review.required, true);
     assert.equal(preview.human_review.confirmed, false);
-    assert.ok(preview.review_artifacts.some((artifact) => artifact.path === "cadre/product_guidelines.md"));
+    const guidelinesArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/product_guidelines.md");
+    assert.ok(guidelinesArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(guidelinesArtifact, "content"), false);
+    assert.equal(preview.review_bundle.content_in_response, false);
+    assert.ok(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "product_guidelines.md")));
+    assert.ok(fs.existsSync(preview.review_bundle.manifest_path));
 
     const blocked = core.workflowPacket(root, { ...args, execute: true });
     assert.equal(blocked.ok, false);
@@ -835,6 +841,7 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.styleGuides.detected.includes("html-css"));
     assert.ok(setup.styleGuides.selected.includes("general"));
     assert.ok(setup.styleGuides.selected.includes("python"));
+    assert.deepEqual(setup.styleGuides.missing, []);
     assert.equal(setup.human_review.confirmed, true);
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
@@ -1079,7 +1086,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
   }
 });
 
-test("workflow setup rejects unknown explicit style guide ids", () => {
+test("workflow setup warns on unknown explicit style guide ids without dropping valid guides", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-missing-test-"));
   try {
     git(root, ["init"]);
@@ -1090,8 +1097,10 @@ test("workflow setup rejects unknown explicit style guide ids", () => {
       styleGuideIds: "typescript not-a-guide",
     });
 
-    assert.equal(setup.ok, false);
+    assert.equal(setup.ok, true);
     assert.deepEqual(setup.styleGuides.missing, ["not-a-guide"]);
+    assert.ok(setup.styleGuides.selected.includes("typescript"));
+    assert.match(setup.warnings[0], /Unknown setup style guide id/);
     assert.equal(fs.existsSync(path.join(root, "cadre")), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1212,11 +1221,16 @@ test("workflow newtrack writes template-backed track learnings", () => {
       trackId: "blocked_20260618",
       specText: "# Spec\n",
       planText: samplePlan("blocked_20260618"),
+      reviewBundleDir: ".newtrack-review",
     });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.stage, "human_review");
     assert.equal(blocked.human_review.confirmed, false);
-    assert.ok(blocked.review_artifacts.some((artifact) => artifact.path === "cadre/tracks/blocked_20260618/plan.md"));
+    const blockedPlanArtifact = blocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/blocked_20260618/plan.md");
+    assert.ok(blockedPlanArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(blockedPlanArtifact, "content"), false);
+    assert.equal(blocked.review_bundle.content_in_response, false);
+    assert.ok(fs.existsSync(path.join(blocked.review_bundle.directory, "cadre", "tracks", "blocked_20260618", "plan.md")));
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "blocked_20260618")), false);
 
     const created = core.workflowPacket(root, {
@@ -1234,6 +1248,51 @@ test("workflow newtrack writes template-backed track learnings", () => {
     assert.equal(learnings.includes("{{track_id}}"), false);
   } finally {
     process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow revise reviews proposed track files before writing", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-revise-review-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "revise_20260618", samplePlan("revise_20260618"));
+    const revisedPlan = `${samplePlan("revise_20260618")}\n## Phase 3: Follow-up\n\n- [ ] Task 1: Recheck\n`;
+
+    const preview = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId: "revise_20260618",
+      planText: revisedPlan,
+      reviewBundleDir: ".revise-review",
+    });
+    assert.equal(preview.ok, true);
+    assert.equal(preview.dry_run, true);
+    const planArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/revise_20260618/plan.md");
+    assert.ok(planArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(planArtifact, "content"), false);
+    assert.ok(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "revise_20260618", "plan.md")));
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "revise",
+      execute: true,
+      trackId: "revise_20260618",
+      planText: revisedPlan,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "human_review");
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Phase 3/);
+
+    const written = core.workflowPacket(root, {
+      workflow: "revise",
+      execute: true,
+      humanConfirmed: true,
+      trackId: "revise_20260618",
+      planText: revisedPlan,
+    });
+    assert.equal(written.ok, true);
+    assert.equal(written.phase_state, "executed");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Phase 3/);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1893,9 +1952,24 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     const setupState = JSON.parse(fs.readFileSync(path.join(root, "cadre", "setup_state.json"), "utf8"));
     assert.equal(setupState.last_release.version, "v1.2.3");
 
+    const refreshBlocked = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      lsp: true,
+      reviewBundleDir: ".refresh-review",
+    });
+    assert.equal(refreshBlocked.ok, false);
+    assert.equal(refreshBlocked.stage, "human_review");
+    const patternsArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.md");
+    assert.ok(patternsArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(patternsArtifact, "content"), false);
+    assert.ok(fs.existsSync(path.join(refreshBlocked.review_bundle.directory, "cadre", "patterns.md")));
+    assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: YYYY-MM-DD/);
+
     const refresh = core.workflowPacket(root, {
       workflow: "refresh",
       execute: true,
+      humanConfirmed: true,
       lsp: true,
     });
     assert.equal(refresh.ok, true);

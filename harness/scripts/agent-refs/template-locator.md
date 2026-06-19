@@ -11,8 +11,9 @@ do not infer setup writes by scanning the plugin cache or harness checkout.
 
 ## Packet Ownership
 
-- `cadre_workflow` with `workflow: "setup"` reports available setup evidence,
-  detected style guides, and missing payload.
+- `cadre_workflow` with reviewable dry-runs reports review artifacts and a
+  token-safe `review_bundle` with full proposed files on disk. Setup, new-track,
+  revise, and refresh document updates use this pattern.
 - `cadre_workflow` with `workflow: "setup_scaffold"` and `execute:true` writes
   the setup scaffold from bundled templates and confirmed setup payload.
 - `cadre_workflow` with `workflow: "newtrack"` writes per-track files, including
@@ -29,8 +30,17 @@ to the packet.
 The setup packet returns `styleGuides.detected`, `styleGuides.selected`,
 `styleGuides.written`, `styleGuides.skipped`, and `styleGuides.missing`.
 
-If `styleGuides.missing` is non-empty or the packet returns `ok:false`, halt and
-surface the packet error. Do not replace the packet with manual copying.
+If `styleGuides.missing` is non-empty, surface the packet warning and keep the
+valid selected guides. Do not remove user-supplied `styleGuideIds` just to make a
+dry-run warning disappear. If the packet returns `ok:false`, halt and surface the
+packet error. Do not replace the packet with manual copying.
+
+## Workflow Review Bundles
+
+Reviewable workflow dry-runs return `review_artifacts` as metadata only and
+`review_bundle` with a manifest path, absolute review file paths, and optional
+shell commands for local rendering. Use those files for human review instead of
+pasting complete generated files into chat/model context by default.
 
 ## Agent Use
 
