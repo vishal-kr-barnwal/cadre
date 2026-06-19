@@ -1,0 +1,233 @@
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
+import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
+import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
+import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
+import { PROVIDER_MODES } from "../../domain/provider-policy";
+import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
+import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+
+import { collisionScan } from "./collision";
+import { CoreResult } from "./contracts";
+import { fileExists, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
+import { markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { trackHandoffJsonPath } from "./plan-docs";
+import { planIntegrity } from "./planning";
+import { regenIndex } from "./project-maintenance";
+import { prCiStatus, reviewAssist } from "./quality-gates";
+import { implementationPrep } from "./repo-resolution";
+import { humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
+import { syncControlPlane } from "./review-records";
+import { availableWork, beadsSummary, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
+import { humanReviewConfirmed } from "./tech-stack";
+import { findTrack, trackContext } from "./track-context";
+import { reviewGate } from "./track-mutations";
+import { listTracks, phaseSchedule } from "./track-schedule";
+import { workflowSummary } from "./workflow-response";
+import { doctor } from "./workspace-health";
+
+export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
+  const prep = implementationPrep(root, {
+    ...args,
+    claim: args.claim === true || args.execute === true,
+  });
+  const trackId = asOptionalString(prep.selected_track) || args.trackId || args.track_id || null;
+  return {
+    ...workflowSummary(root, "implement", args),
+    ok: prep.ok !== false,
+    prepare_implementation: prep,
+    phase_schedule: trackId ? phaseSchedule(root, { ...args, trackId }) : null,
+  };
+}
+
+export function workflowStatus(root: string, args: RuntimeArgs = {}): CoreResult {
+  const mode = args.mode || args.view || args.status || "live";
+  const summary = workflowSummary(root, "status", args);
+  if (mode === "team" || args.mine === true) return { ...summary, ok: true, status: teamBoard(root, { ...args, mine: args.mine === true }) };
+  if (mode === "fleet" || mode === "repos") return { ...summary, ok: true, status: fleetStatus(root, args) };
+  if (mode === "available") return { ...summary, ok: true, status: availableWork(root) };
+  if (mode === "collisions") return { ...summary, ok: true, status: collisionScan(root) };
+  if (mode === "beads") return { ...summary, ok: true, status: beadsSummary(root) };
+  if (mode === "doctor") return { ...summary, ok: true, status: doctor(root, { hasCadreProject: true }) };
+  return { ...summary, ok: true, status: liveStatus(root) };
+}
+
+export function workflowReview(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "review", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  const review = reviewAssist(root, { ...args, trackId });
+  const gate = reviewGate(root, trackId, args);
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  const pendingProvider = Boolean(provider && provider.ok === false);
+  return {
+    ...summary,
+    ok: review.ok !== false,
+    phase_state: pendingProvider ? "pending_provider" : summary.phase_state,
+    track_context: context,
+    review_assist: review,
+    gate,
+    provider,
+    required_provider_mcp: provider && provider.ok === false ? provider.required_provider_mcp || null : null,
+    required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
+    unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
+    next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : [],
+  };
+}
+
+export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "validate", args);
+  return {
+    ...summary,
+    ok: true,
+    doctor: doctor(root, { hasCadreProject: true }),
+    team: teamStatus(root),
+    integrity: planIntegrity(root, args.trackId || args.track_id || null),
+    collisions: collisionScan(root),
+    fleet: fleetStatus(root, { includeCollisions: false }),
+    beads: beadsSummary(root),
+  };
+}
+
+export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "archive", args);
+  const tracks = listTracks(root).filter((track) =>
+    args.trackId || args.track_id
+      ? track.track_id === (args.trackId || args.track_id)
+      : (track.metadata.status || "new") === "completed"
+  );
+  if (tracks.length === 0) return { ...summary, ok: false, error: "No completed or selected track found" };
+  const reviewArtifacts = [
+    packetReviewArtifact("Archive scope", "workflow:archive", {
+      track_count: tracks.length,
+      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
+    }),
+  ];
+  const humanReview = humanReviewState("archive", args, reviewArtifacts);
+  if (args.execute !== true) {
+    return {
+      ...summary,
+      ok: true,
+      dry_run: true,
+      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      error: "Human confirmation is required before archiving tracks",
+    };
+  }
+  const syncPre = syncControlPlane(root, { mode: "pre" });
+  if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
+  const archived: CoreResult[] = [];
+  const archiveRoot = path.join(root, "cadre", "archive");
+  fs.mkdirSync(archiveRoot, { recursive: true });
+  for (const track of tracks) {
+    const target = path.join(archiveRoot, track.track_id);
+    if (fileExists(target)) {
+      archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
+      continue;
+    }
+    fs.renameSync(track.dir, target);
+    archived.push({ track_id: track.track_id, ok: true, path: path.relative(root, target) });
+  }
+  const regen = regenIndex(root);
+  const syncPost = syncControlPlane(root, { mode: "post" });
+  return {
+    ...summary,
+    ok: archived.every((item) => item.ok !== false) && regen.ok !== false && syncPost.ok !== false,
+    phase_state: syncPost.ok === false ? "recovery_required" : "executed",
+    dry_run: false,
+    archived,
+    regen,
+    sync_pre: syncPre,
+    sync_post: syncPost,
+  };
+}
+
+export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "handoff", args);
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  if (context.ok === false) return { ...summary, ok: false, track_context: context };
+  const track = findTrack(root, trackId);
+  if (!track) return { ...summary, ok: false, track_context: context, error: `Track not found: ${trackId}` };
+  const text = asOptionalString(args.handoffText)
+    || [
+      `# Handoff: ${trackId}`,
+      "",
+      `Updated: ${utcNow()}`,
+      "",
+      "Resume from the packet context returned by Cadre MCP.",
+    ].join("\n");
+  const handoffPath = path.join(track.dir, "HANDOFF.md");
+  const handoffJsonPath = trackHandoffJsonPath(track);
+  const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
+  const reviewFiles = [
+    jsonReviewFile(path.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    textReviewFile(
+      path.relative(root, handoffPath),
+      "Track handoff",
+      "handoff.json",
+      withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+    ),
+  ];
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
+  const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const base = {
+    ...summary,
+    track_id: trackId,
+    track_context: context,
+    beads: beadsSummary(root),
+    handoff_path: path.relative(root, handoffPath),
+    human_review: humanReview,
+    review_artifacts: reviewArtifacts,
+    review_bundle: reviewBundle,
+    warnings,
+  };
+  if (args.execute !== true) {
+    return {
+      ...base,
+      ok: true,
+      dry_run: true,
+      phase_state: "dry_run",
+    };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      error: "Human confirmation is required before writing handoff artifacts",
+    };
+  }
+  if (args.execute === true) {
+    writeJsonEnsured(handoffJsonPath, handoffJson);
+    fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
+  }
+  return {
+    ...base,
+    ok: true,
+    dry_run: args.execute !== true,
+    phase_state: "executed",
+  };
+}

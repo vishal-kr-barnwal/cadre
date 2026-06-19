@@ -1,7 +1,7 @@
 import type { JsonObject, RuntimeArgs } from "../../types";
 import type { JobRecord } from "../domain/protocol-types";
 
-export type CoreApi = typeof import("../../cadre-core");
+export type CoreApi = typeof import("../../core/application/api");
 
 export interface JobManagerPort {
   start(type: string, root: string, args?: RuntimeArgs): JsonObject;

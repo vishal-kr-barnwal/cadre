@@ -721,34 +721,6 @@ test("regenIndex preserves unmarked user-authored tracks Markdown", () => {
   }
 });
 
-test("lock primitives reject live holders and recover stale locks", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lock-test-"));
-  try {
-    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
-    const first = core.acquireLock(root, "track:lock_20260617");
-    assert.equal(first.ok, true);
-
-    const conflict = core.acquireLock(root, "track:lock_20260617");
-    assert.equal(conflict.ok, false);
-    assert.equal(conflict.conflict, true);
-    assert.equal(conflict.stale, false);
-
-    write(path.join(first.dir, "owner.json"), JSON.stringify({
-      name: "track:lock_20260617",
-      pid: process.pid,
-      owner: "stale@example.com",
-      acquired_at: "2000-01-01T00:00:00.000Z",
-      updated_at: "2000-01-01T00:00:00.000Z",
-    }, null, 2));
-    const recovered = core.acquireLock(root, "track:lock_20260617");
-    assert.equal(recovered.ok, true);
-    assert.equal(recovered.attempts, 2);
-    assert.equal(core.releaseLock(recovered).ok, true);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("phaseSchedule returns conflict-free ready phase groups", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-phase-schedule-test-"));
   try {

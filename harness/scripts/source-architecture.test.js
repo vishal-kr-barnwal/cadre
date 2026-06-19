@@ -51,6 +51,18 @@ function assertLayerImports(files, fileRoot, forbiddenRoots, { forbidNode = fals
   }
 }
 
+test("source files stay below the large-file threshold", () => {
+  const files = walk(srcRoot);
+  const oversized = files
+    .map((file) => ({
+      file: path.relative(root, file),
+      lines: fs.readFileSync(file, "utf8").split(/\r?\n/).length,
+    }))
+    .filter((entry) => entry.lines > 500);
+
+  assert.deepEqual(oversized, []);
+});
+
 test("source architecture keeps domain pure and MCP layered", () => {
   const files = walk(srcRoot);
   const domainRoot = path.join(srcRoot, "core", "domain");
@@ -69,14 +81,11 @@ test("source architecture keeps domain pure and MCP layered", () => {
 test("generated cadre-core bundle preserves the public runtime API", () => {
   const core = require("./cadre-core");
   const expected = [
-    "STATUS_MARKERS",
-    "acquireLock",
     "artifactCatalog",
     "artifactPacket",
     "artifactRender",
     "artifactSchema",
     "artifactSync",
-    "artifactValidate",
     "availableWork",
     "beadsSummary",
     "beadsTaskWrite",
@@ -86,12 +95,10 @@ test("generated cadre-core bundle preserves the public runtime API", () => {
     "createBeadsTree",
     "doctor",
     "fleetStatus",
-    "gitIdentity",
     "implementationPrep",
     "dependencyGraph",
+    "integrationInventory",
     "isCadreProjectRoot",
-    "isIgnoredRepoMapFile",
-    "listTracks",
     "liveStatus",
     "loadTopology",
     "lspConfigStatus",
@@ -103,7 +110,6 @@ test("generated cadre-core bundle preserves the public runtime API", () => {
     "parsePlanFile",
     "parsePlanJson",
     "phaseSchedule",
-    "planClaims",
     "planAssist",
     "planIntegrity",
     "polyrepoPreflight",
@@ -118,7 +124,6 @@ test("generated cadre-core bundle preserves the public runtime API", () => {
     "reviewEvidence",
     "reviewGate",
     "reviewMachineGate",
-    "releaseLock",
     "setTrackStatus",
     "syncControlPlane",
     "teamBoard",
@@ -130,12 +135,27 @@ test("generated cadre-core bundle preserves the public runtime API", () => {
     "testImpact",
     "worktreePlan",
     "workflowPacket",
+    "workspaceHealth",
     "workspaceDiagnostics",
+  ];
+
+  const removedInternals = [
+    "STATUS_MARKERS",
+    "acquireLock",
+    "artifactValidate",
+    "gitIdentity",
+    "isIgnoredRepoMapFile",
+    "listTracks",
+    "planClaims",
+    "releaseLock",
     "withLock",
     "withTrackLock",
   ];
 
   for (const name of expected) {
     assert.equal(Object.prototype.hasOwnProperty.call(core, name), true, `missing public export ${name}`);
+  }
+  for (const name of removedInternals) {
+    assert.equal(Object.prototype.hasOwnProperty.call(core, name), false, `internal export leaked ${name}`);
   }
 });

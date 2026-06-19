@@ -238,6 +238,13 @@ function assertWorkflow(result, workflow) {
   assert(!String(result.error || "").includes("Unknown Cadre workflow packet"), `${workflow} was not routed`);
 }
 
+function fixtureTrackIds(root) {
+  return fs.readdirSync(path.join(root, "cadre", "tracks"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
 async function main() {
   const keep = process.argv.includes("--keep");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-scale-"));
@@ -311,12 +318,12 @@ async function main() {
   assert(polyValidate.fleet.topology === "polyrepo", "expected polyrepo validation packet");
   assert(polyLand.ok === true, `expected polyrepo land packet to pass: ${JSON.stringify(polyLand.gate && polyLand.gate.reasons)}`);
 
-  const trackIds = core.listTracks(root).map((track) => track.track_id);
+  const trackIds = fixtureTrackIds(root);
   const workers = await Promise.all(trackIds.map((trackId, index) => runWorker(root, trackId, index + 1)));
   const failedWorkers = workers.filter((worker) => !worker.ok);
   assert(failedWorkers.length === 0, `expected all concurrent workers to pass: ${JSON.stringify(failedWorkers.slice(0, 3), null, 2)}`);
-  const completedAfterWorkers = core.listTracks(root).filter((track) => {
-    const metadata = JSON.parse(fs.readFileSync(track.metadata_path, "utf8"));
+  const completedAfterWorkers = fixtureTrackIds(root).filter((trackId) => {
+    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "metadata.json"), "utf8"));
     return metadata.last_task_result && metadata.review && metadata.review.verdict === "approved";
   });
   assert(completedAfterWorkers.length === 20, `expected 20 claimed/reviewed/completed tracks, got ${completedAfterWorkers.length}`);

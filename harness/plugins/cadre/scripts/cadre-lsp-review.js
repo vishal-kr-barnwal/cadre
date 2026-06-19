@@ -39,7 +39,7 @@ __export(cadre_lsp_review_exports, {
   runReview: () => runReview
 });
 module.exports = __toCommonJS(cadre_lsp_review_exports);
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path7 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -61,256 +61,102 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-// src/lsp/review-runner.ts
+// src/lsp/review/client.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path2 = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
 var import_node_url = require("node:url");
 
-// src/lsp/ignore-policy.ts
-var import_node_path = __toESM(require("node:path"));
-var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
-  ".git",
-  ".hg",
-  ".svn",
-  ".beads",
-  ".worktrees",
-  ".agents",
-  ".claude",
-  ".cache",
-  ".codex",
-  ".dart_tool",
-  ".gradle",
-  ".mypy_cache",
-  ".pytest_cache",
-  ".ruff_cache",
-  ".serverless",
-  "node_modules",
-  "vendor",
-  "dist",
-  "build",
-  "coverage",
-  "out",
-  "target",
-  ".next",
-  ".nuxt",
-  ".parcel-cache",
-  ".svelte-kit",
-  ".turbo",
-  ".vite",
-  ".venv",
-  "venv",
-  "__pycache__",
-  "__generated__",
-  "generated",
-  "gen",
-  "tmp",
-  "temp",
-  "logs",
-  "Pods",
-  "DerivedData",
-  ".idea",
-  ".vscode"
-]);
-var DEFAULT_IGNORE_PATHS = [
-  "plugins/cadre",
-  "plugins/cadre-claude"
-];
-function normalizeRel(file) {
-  return file.split(import_node_path.default.sep).join("/");
-}
-function shouldIgnore(root, fullPath, name) {
-  if (DEFAULT_IGNORES.has(name)) return true;
-  const rel = normalizeRel(import_node_path.default.relative(root, fullPath));
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
-}
-function isIgnoredFile(root, file) {
-  const rel = normalizeRel(file);
-  if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
-}
-
-// src/lsp/review-runner.ts
+// src/lsp/review/constants.ts
 var DEFAULT_STARTUP_TIMEOUT_MS = 1e4;
 var DEFAULT_REQUEST_TIMEOUT_MS = 8e3;
 var DEFAULT_SHUTDOWN_TIMEOUT_MS = 2e3;
 var MAX_TEXT_REFERENCE_RESULTS = 50;
 var MAX_SCAN_FILE_BYTES = 1024 * 1024;
-function usage() {
-  console.log(`Usage: node <cadre-lsp-review.js> [--base main] [--head HEAD] [--config cadre/lsp.json] [--json]
 
-Runs a best-effort LSP reference scan for changed/removed symbols. If no
-cadre/lsp.json exists, exits successfully with available=false.
+// src/lsp/review/language-ids.ts
+var import_node_path = __toESM(require("node:path"));
+var DEFAULT_LANGUAGE_IDS = {
+  ".bash": "shellscript",
+  ".c": "c",
+  ".cc": "cpp",
+  ".clj": "clojure",
+  ".cljc": "clojure",
+  ".cljs": "clojure",
+  ".cpp": "cpp",
+  ".cs": "csharp",
+  ".css": "css",
+  ".cxx": "cpp",
+  ".dart": "dart",
+  ".edn": "clojure",
+  ".elm": "elm",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".go": "go",
+  ".gql": "graphql",
+  ".graphql": "graphql",
+  ".h": "c",
+  ".hcl": "terraform",
+  ".hpp": "cpp",
+  ".hs": "haskell",
+  ".html": "html",
+  ".htm": "html",
+  ".java": "java",
+  ".js": "javascript",
+  ".json": "json",
+  ".jsonc": "jsonc",
+  ".jsx": "javascriptreact",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".less": "less",
+  ".lhs": "haskell",
+  ".lua": "lua",
+  ".m": "objective-c",
+  ".md": "markdown",
+  ".mdx": "markdown",
+  ".ml": "ocaml",
+  ".mli": "ocaml",
+  ".mm": "objective-cpp",
+  ".nix": "nix",
+  ".php": "php",
+  ".prisma": "prisma",
+  ".proto": "proto",
+  ".py": "python",
+  ".pyi": "python",
+  ".rb": "ruby",
+  ".rs": "rust",
+  ".sass": "sass",
+  ".scala": "scala",
+  ".sc": "scala",
+  ".scss": "scss",
+  ".sh": "shellscript",
+  ".svelte": "svelte",
+  ".swift": "swift",
+  ".tf": "terraform",
+  ".tfvars": "terraform",
+  ".toml": "toml",
+  ".ts": "typescript",
+  ".tsx": "typescriptreact",
+  ".vue": "vue",
+  ".xml": "xml",
+  ".xsd": "xml",
+  ".xsl": "xml",
+  ".xslt": "xml",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".zig": "zig",
+  ".zsh": "shellscript",
+  "containerfile": "dockerfile",
+  "dockerfile": "dockerfile"
+};
+function languageId(file, server) {
+  const ext = import_node_path.default.extname(file);
+  const basename = import_node_path.default.basename(file).toLowerCase();
+  const overrides = server ? asJsonObject(server.languageIds) : {};
+  return asOptionalString(overrides[ext]) || asOptionalString(overrides[basename]) || DEFAULT_LANGUAGE_IDS[ext] || DEFAULT_LANGUAGE_IDS[basename] || "plaintext";
+}
 
-Example cadre/lsp.json:
-{
-  "servers": [
-    {
-      "id": "typescript",
-      "command": "typescript-language-server",
-      "args": ["--stdio"],
-      "extensions": [".ts", ".tsx", ".js", ".jsx"]
-    },
-    {
-      "id": "python",
-      "command": "pyright-langserver",
-      "args": ["--stdio"],
-      "extensions": [".py", ".pyi"]
-    }
-  ]
-}`);
-}
-function parseArgs(argv) {
-  const args = {
-    base: "main",
-    head: "HEAD",
-    config: "cadre/lsp.json",
-    json: false
-  };
-  for (let i = 2; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === "--help" || arg === "-h") {
-      usage();
-      process.exit(0);
-    } else if (arg === "--json") {
-      args.json = true;
-    } else if (arg === "--base" || arg === "--head" || arg === "--config") {
-      const value = argv[++i];
-      if (!value) throw new Error(`${arg} requires a value`);
-      if (arg === "--base") args.base = value;
-      else if (arg === "--head") args.head = value;
-      else args.config = value;
-    } else {
-      throw new Error(`Unknown argument: ${arg}`);
-    }
-  }
-  return args;
-}
-function runGit(root, args) {
-  const result = (0, import_node_child_process.spawnSync)("git", args, { cwd: root, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error((result.stderr || result.stdout || `git ${args.join(" ")} failed`).trim());
-  }
-  return result.stdout;
-}
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
-}
-function commandAvailability(command) {
-  if (!command || typeof command !== "string") {
-    return {
-      state: "invalid",
-      command: typeof command === "string" ? command : null,
-      message: "Server command is missing or invalid"
-    };
-  }
-  const result = (0, import_node_child_process.spawnSync)("sh", ["-lc", `command -v ${shellQuote(command)}`], {
-    encoding: "utf8"
-  });
-  if (result.status === 0) {
-    return {
-      state: "available",
-      command,
-      path: result.stdout.trim().split(/\r?\n/)[0] || command
-    };
-  }
-  return {
-    state: "missing",
-    command,
-    message: (result.stderr || result.stdout || "Command not found on PATH").trim()
-  };
-}
-function changedEntries(root, base, head) {
-  return runGit(root, ["diff", "--name-status", "--find-renames", `${base}...${head}`]).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
-    const parts = line.split(/\t+/);
-    const status = parts[0] || "M";
-    const code = status[0] || "M";
-    const oldPath = (code === "R" || code === "C" ? parts[1] : null) || null;
-    const file = code === "R" || code === "C" ? parts[2] : parts[1];
-    const kind = {
-      A: "added",
-      C: "copied",
-      D: "deleted",
-      M: "modified",
-      R: "renamed",
-      T: "type_changed",
-      U: "unmerged",
-      X: "unknown"
-    }[code] || "modified";
-    return {
-      status,
-      kind,
-      path: file || "",
-      oldPath,
-      exists: file ? import_node_fs.default.existsSync(import_node_path2.default.join(root, file)) : false
-    };
-  }).filter((entry) => Boolean(entry.path) && !isIgnoredFile(root, entry.path));
-}
-function changedSymbolCandidates(root, base, head, entry) {
-  const paths = Array.from(new Set([entry.oldPath, entry.path].filter((item) => typeof item === "string" && item.length > 0)));
-  const diff = runGit(root, [
-    "diff",
-    "--unified=0",
-    "--find-renames",
-    `${base}...${head}`,
-    "--",
-    ...paths
-  ]);
-  const byName = /* @__PURE__ */ new Map();
-  const patterns = [
-    /^[+-]\s*(?:export\s+)?(?:async\s+)?(?:function|def)\s+([A-Za-z_$][\w$]*)\b/,
-    /^[+-]\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_$][\w$]*)\b/,
-    /^[+-]\s*(?:export\s+)?(?:class|interface|type|enum|struct|module|namespace)\s+([A-Za-z_$][\w$]*)\b/,
-    /^[+-]\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/,
-    /^[+-]\s*(?:public|private|protected|internal|static|final|open|override|async|\s)*(?:fun|func)\s+([A-Za-z_$][\w$]*)\b/,
-    /^[+-]\s*(?:public|private|protected|static|async|\s)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*[:{]/,
-    /^[+-]\s*(?:local\s+)?function\s+([A-Za-z_][\w.]*)\b/,
-    /^[+-]\s*(?:defp?|defmacro)\s+([A-Za-z_][\w!?]*)\b/,
-    /^[+-]\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{?/,
-    /^[+-]\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE)\s+([A-Za-z_][\w."]*)\b/i,
-    /^[+-]\s*(?:resource|module|variable|output|data)\s+"?([A-Za-z0-9_.-]+)"?/
-  ];
-  for (const line of diff.split(/\r?\n/)) {
-    if (!/^[+-]/.test(line) || /^(\+\+\+|---)/.test(line)) continue;
-    const direction = line[0] === "-" ? "removed" : "added";
-    for (const pattern of patterns) {
-      const match = line.match(pattern);
-      if (!match) continue;
-      const name = match[1];
-      if (!name) continue;
-      if (!byName.has(name)) {
-        byName.set(name, {
-          name,
-          added: false,
-          removed: false,
-          changeType: "changed",
-          changedFile: entry.path,
-          oldPath: entry.oldPath,
-          status: entry.kind,
-          evidence: []
-        });
-      }
-      const candidate = byName.get(name);
-      if (!candidate) continue;
-      if (direction === "removed") candidate.removed = true;
-      else candidate.added = true;
-      if (candidate.evidence.length < 4) {
-        candidate.evidence.push({
-          direction,
-          text: line.slice(1).trim().slice(0, 160)
-        });
-      }
-    }
-  }
-  return Array.from(byName.values()).map((candidate) => ({
-    ...candidate,
-    changeType: candidate.removed ? candidate.added ? "changed" : "removed" : "added"
-  })).filter((candidate) => candidate.changeType !== "added").sort((a, b) => a.name.localeCompare(b.name));
-}
+// src/lsp/review/utils.ts
 function positiveInt(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
@@ -324,6 +170,8 @@ function withTimeout(promise, timeoutMs, message) {
     })
   ]).finally(() => clearTimeout(timer));
 }
+
+// src/lsp/review/client.ts
 var LspClient = class {
   root;
   server;
@@ -532,85 +380,211 @@ ${body}`);
     if (this.proc && !this.proc.killed) this.proc.kill();
   }
 };
-var DEFAULT_LANGUAGE_IDS = {
-  ".bash": "shellscript",
-  ".c": "c",
-  ".cc": "cpp",
-  ".clj": "clojure",
-  ".cljc": "clojure",
-  ".cljs": "clojure",
-  ".cpp": "cpp",
-  ".cs": "csharp",
-  ".css": "css",
-  ".cxx": "cpp",
-  ".dart": "dart",
-  ".edn": "clojure",
-  ".elm": "elm",
-  ".ex": "elixir",
-  ".exs": "elixir",
-  ".go": "go",
-  ".gql": "graphql",
-  ".graphql": "graphql",
-  ".h": "c",
-  ".hcl": "terraform",
-  ".hpp": "cpp",
-  ".hs": "haskell",
-  ".html": "html",
-  ".htm": "html",
-  ".java": "java",
-  ".js": "javascript",
-  ".json": "json",
-  ".jsonc": "jsonc",
-  ".jsx": "javascriptreact",
-  ".kt": "kotlin",
-  ".kts": "kotlin",
-  ".less": "less",
-  ".lhs": "haskell",
-  ".lua": "lua",
-  ".m": "objective-c",
-  ".md": "markdown",
-  ".mdx": "markdown",
-  ".ml": "ocaml",
-  ".mli": "ocaml",
-  ".mm": "objective-cpp",
-  ".nix": "nix",
-  ".php": "php",
-  ".prisma": "prisma",
-  ".proto": "proto",
-  ".py": "python",
-  ".pyi": "python",
-  ".rb": "ruby",
-  ".rs": "rust",
-  ".sass": "sass",
-  ".scala": "scala",
-  ".sc": "scala",
-  ".scss": "scss",
-  ".sh": "shellscript",
-  ".svelte": "svelte",
-  ".swift": "swift",
-  ".tf": "terraform",
-  ".tfvars": "terraform",
-  ".toml": "toml",
-  ".ts": "typescript",
-  ".tsx": "typescriptreact",
-  ".vue": "vue",
-  ".xml": "xml",
-  ".xsd": "xml",
-  ".xsl": "xml",
-  ".xslt": "xml",
-  ".yaml": "yaml",
-  ".yml": "yaml",
-  ".zig": "zig",
-  ".zsh": "shellscript",
-  "containerfile": "dockerfile",
-  "dockerfile": "dockerfile"
-};
-function languageId(file, server) {
-  const ext = import_node_path2.default.extname(file);
-  const basename = import_node_path2.default.basename(file).toLowerCase();
-  const overrides = server ? asJsonObject(server.languageIds) : {};
-  return asOptionalString(overrides[ext]) || asOptionalString(overrides[basename]) || DEFAULT_LANGUAGE_IDS[ext] || DEFAULT_LANGUAGE_IDS[basename] || "plaintext";
+
+// src/lsp/review/command-availability.ts
+var import_node_child_process2 = require("node:child_process");
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
+function commandAvailability(command) {
+  if (!command || typeof command !== "string") {
+    return {
+      state: "invalid",
+      command: typeof command === "string" ? command : null,
+      message: "Server command is missing or invalid"
+    };
+  }
+  const result = (0, import_node_child_process2.spawnSync)("sh", ["-lc", `command -v ${shellQuote(command)}`], {
+    encoding: "utf8"
+  });
+  if (result.status === 0) {
+    return {
+      state: "available",
+      command,
+      path: result.stdout.trim().split(/\r?\n/)[0] || command
+    };
+  }
+  return {
+    state: "missing",
+    command,
+    message: (result.stderr || result.stdout || "Command not found on PATH").trim()
+  };
+}
+
+// src/lsp/review/run-review.ts
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path6 = __toESM(require("node:path"));
+
+// src/lsp/ignore-policy.ts
+var import_node_path3 = __toESM(require("node:path"));
+var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  ".beads",
+  ".worktrees",
+  ".agents",
+  ".claude",
+  ".cache",
+  ".codex",
+  ".dart_tool",
+  ".gradle",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".serverless",
+  "node_modules",
+  "vendor",
+  "dist",
+  "build",
+  "coverage",
+  "out",
+  "target",
+  ".next",
+  ".nuxt",
+  ".parcel-cache",
+  ".svelte-kit",
+  ".turbo",
+  ".vite",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "__generated__",
+  "generated",
+  "gen",
+  "tmp",
+  "temp",
+  "logs",
+  "Pods",
+  "DerivedData",
+  ".idea",
+  ".vscode"
+]);
+var DEFAULT_IGNORE_PATHS = [
+  "plugins/cadre",
+  "plugins/cadre-claude"
+];
+function normalizeRel(file) {
+  return file.split(import_node_path3.default.sep).join("/");
+}
+function shouldIgnore(root, fullPath, name) {
+  if (DEFAULT_IGNORES.has(name)) return true;
+  const rel = normalizeRel(import_node_path3.default.relative(root, fullPath));
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
+}
+function isIgnoredFile(root, file) {
+  const rel = normalizeRel(file);
+  if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
+  return DEFAULT_IGNORE_PATHS.some(
+    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
+  );
+}
+
+// src/lsp/review/git-diff.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
+var import_node_child_process3 = require("node:child_process");
+function runGit(root, args) {
+  const result = (0, import_node_child_process3.spawnSync)("git", args, { cwd: root, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error((result.stderr || result.stdout || `git ${args.join(" ")} failed`).trim());
+  }
+  return result.stdout;
+}
+function changedEntries(root, base, head) {
+  return runGit(root, ["diff", "--name-status", "--find-renames", `${base}...${head}`]).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const parts = line.split(/\t+/);
+    const status = parts[0] || "M";
+    const code = status[0] || "M";
+    const oldPath = (code === "R" || code === "C" ? parts[1] : null) || null;
+    const file = code === "R" || code === "C" ? parts[2] : parts[1];
+    const kind = {
+      A: "added",
+      C: "copied",
+      D: "deleted",
+      M: "modified",
+      R: "renamed",
+      T: "type_changed",
+      U: "unmerged",
+      X: "unknown"
+    }[code] || "modified";
+    return {
+      status,
+      kind,
+      path: file || "",
+      oldPath,
+      exists: file ? import_node_fs2.default.existsSync(import_node_path4.default.join(root, file)) : false
+    };
+  }).filter((entry) => Boolean(entry.path) && !isIgnoredFile(root, entry.path));
+}
+function changedSymbolCandidates(root, base, head, entry) {
+  const paths = Array.from(new Set([entry.oldPath, entry.path].filter((item) => typeof item === "string" && item.length > 0)));
+  const diff = runGit(root, [
+    "diff",
+    "--unified=0",
+    "--find-renames",
+    `${base}...${head}`,
+    "--",
+    ...paths
+  ]);
+  const byName = /* @__PURE__ */ new Map();
+  const patterns = [
+    /^[+-]\s*(?:export\s+)?(?:async\s+)?(?:function|def)\s+([A-Za-z_$][\w$]*)\b/,
+    /^[+-]\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_$][\w$]*)\b/,
+    /^[+-]\s*(?:export\s+)?(?:class|interface|type|enum|struct|module|namespace)\s+([A-Za-z_$][\w$]*)\b/,
+    /^[+-]\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/,
+    /^[+-]\s*(?:public|private|protected|internal|static|final|open|override|async|\s)*(?:fun|func)\s+([A-Za-z_$][\w$]*)\b/,
+    /^[+-]\s*(?:public|private|protected|static|async|\s)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*[:{]/,
+    /^[+-]\s*(?:local\s+)?function\s+([A-Za-z_][\w.]*)\b/,
+    /^[+-]\s*(?:defp?|defmacro)\s+([A-Za-z_][\w!?]*)\b/,
+    /^[+-]\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{?/,
+    /^[+-]\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE)\s+([A-Za-z_][\w."]*)\b/i,
+    /^[+-]\s*(?:resource|module|variable|output|data)\s+"?([A-Za-z0-9_.-]+)"?/
+  ];
+  for (const line of diff.split(/\r?\n/)) {
+    if (!/^[+-]/.test(line) || /^(\+\+\+|---)/.test(line)) continue;
+    const direction = line[0] === "-" ? "removed" : "added";
+    for (const pattern of patterns) {
+      const match = line.match(pattern);
+      if (!match) continue;
+      const name = match[1];
+      if (!name) continue;
+      if (!byName.has(name)) {
+        byName.set(name, {
+          name,
+          added: false,
+          removed: false,
+          changeType: "changed",
+          changedFile: entry.path,
+          oldPath: entry.oldPath,
+          status: entry.kind,
+          evidence: []
+        });
+      }
+      const candidate = byName.get(name);
+      if (!candidate) continue;
+      if (direction === "removed") candidate.removed = true;
+      else candidate.added = true;
+      if (candidate.evidence.length < 4) {
+        candidate.evidence.push({
+          direction,
+          text: line.slice(1).trim().slice(0, 160)
+        });
+      }
+    }
+  }
+  return Array.from(byName.values()).map((candidate) => ({
+    ...candidate,
+    changeType: candidate.removed ? candidate.added ? "changed" : "removed" : "added"
+  })).filter((candidate) => candidate.changeType !== "added").sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// src/lsp/review/scanners.ts
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
+var import_node_url2 = require("node:url");
 function flattenSymbols(symbols, out = []) {
   if (!Array.isArray(symbols)) return out;
   for (const symbol of symbols) {
@@ -626,8 +600,8 @@ function escapeRegExp(value) {
 function serverFileMatch(file, server) {
   const extensionSet = new Set(server.extensions || []);
   const filenameSet = new Set((server.filenames || []).map((name) => name.toLowerCase()));
-  const ext = import_node_path2.default.extname(file);
-  const basename = import_node_path2.default.basename(file).toLowerCase();
+  const ext = import_node_path5.default.extname(file);
+  const basename = import_node_path5.default.basename(file).toLowerCase();
   return extensionSet.has(ext) || filenameSet.has(basename);
 }
 function scanTextReferences(root, symbol, changedPathSet, server) {
@@ -638,12 +612,12 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
   function visit(dir) {
     let entries;
     try {
-      entries = import_node_fs.default.readdirSync(dir, { withFileTypes: true });
+      entries = import_node_fs3.default.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
-      const full = import_node_path2.default.join(dir, entry.name);
+      const full = import_node_path5.default.join(dir, entry.name);
       if (shouldIgnore(root, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
@@ -652,17 +626,17 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
       }
       if (!entry.isFile()) continue;
       if (!serverFileMatch(full, server)) continue;
-      if (changedPathSet.has(import_node_path2.default.resolve(full))) continue;
+      if (changedPathSet.has(import_node_path5.default.resolve(full))) continue;
       let stat;
       try {
-        stat = import_node_fs.default.statSync(full);
+        stat = import_node_fs3.default.statSync(full);
       } catch {
         continue;
       }
       if (stat.size > MAX_SCAN_FILE_BYTES) continue;
       let text;
       try {
-        text = import_node_fs.default.readFileSync(full, "utf8");
+        text = import_node_fs3.default.readFileSync(full, "utf8");
       } catch {
         continue;
       }
@@ -672,7 +646,7 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
         if (!pattern.test(line)) continue;
         results.push({
           file: full,
-          relativeFile: normalizeRel(import_node_path2.default.relative(root, full)),
+          relativeFile: normalizeRel(import_node_path5.default.relative(root, full)),
           line: i + 1,
           snippet: line.trim().slice(0, 160)
         });
@@ -718,11 +692,11 @@ function lspRefToLocation(root, ref) {
   const uri = location.uri || location.targetUri;
   if (!uri) return null;
   try {
-    const file = (0, import_node_url.fileURLToPath)(uri);
+    const file = (0, import_node_url2.fileURLToPath)(uri);
     const range = location.range || location.targetSelectionRange || location.targetRange;
     return {
       file,
-      relativeFile: normalizeRel(import_node_path2.default.relative(root, file)),
+      relativeFile: normalizeRel(import_node_path5.default.relative(root, file)),
       line: (range?.start ? range.start.line : 0) + 1
     };
   } catch {
@@ -772,25 +746,25 @@ function nearbyFileHints(root, files) {
     "build.gradle.kts"
   ]);
   for (const file of files || []) {
-    let dir = import_node_path2.default.dirname(import_node_path2.default.join(root, file));
+    let dir = import_node_path5.default.dirname(import_node_path5.default.join(root, file));
     while (dir.startsWith(root)) {
       for (const name of manifestNames) {
-        const candidate = import_node_path2.default.join(dir, name);
-        if (import_node_fs.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path2.default.relative(root, candidate)));
+        const candidate = import_node_path5.default.join(dir, name);
+        if (import_node_fs3.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path5.default.relative(root, candidate)));
       }
       if (dir === root) break;
-      dir = import_node_path2.default.dirname(dir);
+      dir = import_node_path5.default.dirname(dir);
     }
-    const parsed = import_node_path2.default.parse(file);
+    const parsed = import_node_path5.default.parse(file);
     const candidates = [
-      import_node_path2.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-      import_node_path2.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-      import_node_path2.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-      import_node_path2.default.join("test", file),
-      import_node_path2.default.join("tests", file)
+      import_node_path5.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+      import_node_path5.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+      import_node_path5.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+      import_node_path5.default.join("test", file),
+      import_node_path5.default.join("tests", file)
     ];
     for (const candidate of candidates) {
-      if (import_node_fs.default.existsSync(import_node_path2.default.join(root, candidate))) tests.add(normalizeRel(candidate));
+      if (import_node_fs3.default.existsSync(import_node_path5.default.join(root, candidate))) tests.add(normalizeRel(candidate));
     }
   }
   return {
@@ -798,6 +772,8 @@ function nearbyFileHints(root, files) {
     likely_tests: Array.from(tests).slice(0, 30)
   };
 }
+
+// src/lsp/review/run-review.ts
 async function runReview(options = {}) {
   const args = {
     base: options.base || "main",
@@ -806,8 +782,8 @@ async function runReview(options = {}) {
   };
   const root = options.root || process.cwd();
   const clientPool = options.clientPool || null;
-  const configPath = import_node_path2.default.resolve(root, args.config);
-  if (!import_node_fs.default.existsSync(configPath)) {
+  const configPath = import_node_path6.default.resolve(root, args.config);
+  if (!import_node_fs4.default.existsSync(configPath)) {
     return {
       available: false,
       reason: `No LSP config found at ${args.config}`,
@@ -819,7 +795,7 @@ async function runReview(options = {}) {
   }
   const entries = changedEntries(root, args.base, args.head);
   const files = entries.map((entry) => entry.path);
-  const config = asJsonObject(JSON.parse(import_node_fs.default.readFileSync(configPath, "utf8")));
+  const config = asJsonObject(JSON.parse(import_node_fs4.default.readFileSync(configPath, "utf8")));
   const servers = Array.isArray(config.servers) ? config.servers.map((server) => asJsonObject(server)).map((server) => ({
     ...server,
     id: asOptionalString(server.id),
@@ -836,8 +812,8 @@ async function runReview(options = {}) {
   const serverReports = [];
   const changedSet = /* @__PURE__ */ new Set();
   for (const entry of entries) {
-    if (entry.path) changedSet.add(import_node_path2.default.resolve(root, entry.path));
-    if (entry.oldPath) changedSet.add(import_node_path2.default.resolve(root, entry.oldPath));
+    if (entry.path) changedSet.add(import_node_path6.default.resolve(root, entry.path));
+    if (entry.oldPath) changedSet.add(import_node_path6.default.resolve(root, entry.oldPath));
   }
   for (const server of servers) {
     const serverEntries = entries.filter((entry) => {
@@ -957,7 +933,7 @@ async function runReview(options = {}) {
             typeDefinitions,
             implementations
           });
-          const externalRefs = refs.map((ref) => lspRefToLocation(root, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path2.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root, ref.relativeFile));
+          const externalRefs = refs.map((ref) => lspRefToLocation(root, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path6.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root, ref.relativeFile));
           if (externalRefs.length > 0) {
             findings.push(externalReferenceFinding(server, candidate, externalRefs, "lsp"));
           }
@@ -965,7 +941,7 @@ async function runReview(options = {}) {
       }
       for (const candidate of allCandidates.values()) {
         if (candidate.changeType !== "removed") continue;
-        if (candidate.changedFile && import_node_fs.default.existsSync(import_node_path2.default.join(root, candidate.changedFile))) continue;
+        if (candidate.changedFile && import_node_fs4.default.existsSync(import_node_path6.default.join(root, candidate.changedFile))) continue;
         const refs = scanTextReferences(root, candidate.name, changedSet, server);
         if (refs.length > 0) {
           findings.push(externalReferenceFinding(server, candidate, refs, "text"));
@@ -998,6 +974,58 @@ async function runReview(options = {}) {
     findings
   };
 }
+
+// src/lsp/review/cli.ts
+function usage() {
+  console.log(`Usage: node <cadre-lsp-review.js> [--base main] [--head HEAD] [--config cadre/lsp.json] [--json]
+
+Runs a best-effort LSP reference scan for changed/removed symbols. If no
+cadre/lsp.json exists, exits successfully with available=false.
+
+Example cadre/lsp.json:
+{
+  "servers": [
+    {
+      "id": "typescript",
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx"]
+    },
+    {
+      "id": "python",
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "extensions": [".py", ".pyi"]
+    }
+  ]
+}`);
+}
+function parseArgs(argv) {
+  const args = {
+    base: "main",
+    head: "HEAD",
+    config: "cadre/lsp.json",
+    json: false
+  };
+  for (let i = 2; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      usage();
+      process.exit(0);
+    } else if (arg === "--json") {
+      args.json = true;
+    } else if (arg === "--base" || arg === "--head" || arg === "--config") {
+      const value = argv[++i];
+      if (!value) throw new Error(`${arg} requires a value`);
+      if (arg === "--base") args.base = value;
+      else if (arg === "--head") args.head = value;
+      else args.config = value;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return args;
+}
 async function runCli() {
   const args = parseArgs(process.argv);
   const result = await runReview({ ...args, root: process.cwd() });
@@ -1015,7 +1043,7 @@ async function runCli() {
 }
 
 // src/cadre-lsp-review.ts
-if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path3.default.basename(process.argv[1] || ""))) {
+if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path7.default.basename(process.argv[1] || ""))) {
   runCli().catch((error) => {
     console.error(errorMessage(error));
     process.exit(1);
