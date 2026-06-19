@@ -17,7 +17,6 @@ harness/
 ├── src/                   # TypeScript runtime, MCP, and LSP sources
 ├── scripts/               # Runtime bundles, tests, generators, references
 ├── templates/             # Project templates and CI templates
-├── docs/                  # Installation and usage docs
 ├── plugins/               # Generated Codex and Claude plugin bundles
 ├── .agents/               # Generated Codex skill/plugin artifacts
 └── .claude/               # Generated Claude skill artifacts
@@ -25,7 +24,8 @@ harness/
 
 Root files are intentionally thin:
 
-- `README.md` points to `harness/`.
+- `README.md` points to `harness/` and the public docs.
+- `docs/` contains the canonical public GitHub Pages Markdown docs.
 - `.agents/plugins/marketplace.json` points Codex to
   `harness/plugins/cadre`.
 - `.claude-plugin/marketplace.json` points Claude Code to
@@ -48,6 +48,7 @@ Edit master sources only:
 - `harness/scripts/agent-refs/`
 - `harness/templates/`
 - `harness/src/`
+- root `docs/` for public documentation
 
 Regenerate derived bundles with:
 

@@ -1,5 +1,7 @@
 # Cadre
 
+![Cadre logo](../docs/assets/cadre-logo.png)
+
 **Measure twice, code once.**
 
 Cadre is a context-driven development harness for AI coding agents. It combines
@@ -114,10 +116,13 @@ pnpm check
 Generated plugin bundles under `.agents/`, `.claude/`, and `plugins/` are
 rebuilt from master sources. Edit the masters, then regenerate.
 
-More detail:
+Public documentation lives in the repo-root `docs/` directory:
 
-- [Install & Version Guide](docs/INSTALL.md)
-- [Platform Usage Guide](docs/PLATFORM_USAGE.md)
-- [Polyrepo Guide](docs/POLYREPO.md)
-- [MCP/LSP Guide](docs/MCP_LSP.md)
-- [Parallel Execution Guide](docs/PARALLEL_EXECUTION.md)
+- [Documentation Home](../docs/index.md)
+- [Getting Started](../docs/getting-started.md)
+- [How Cadre Works](../docs/how-cadre-works.md)
+- [Workflows](../docs/workflows.md)
+- [Architecture](../docs/architecture.md)
+- [Team And Polyrepo](../docs/team-and-polyrepo.md)
+- [Parallel Execution](../docs/parallel-execution.md)
+- [Troubleshooting](../docs/troubleshooting.md)

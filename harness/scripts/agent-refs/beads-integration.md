@@ -69,3 +69,4 @@ sync failures, ownership conflicts, dependency gates, provider gates, and
 validation failures are surfaced through packet results. Agents may retry only
 when the packet marks the operation retryable or idempotent; otherwise they halt
 and report the packet error.
+

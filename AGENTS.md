@@ -11,6 +11,7 @@ behavior in a fixture.
 ## Repository Shape
 
 - Cadre implementation lives in `harness/`.
+- Root `docs/` contains the canonical public GitHub Pages Markdown docs.
 - Root `README.md` is a thin pointer to the harness package.
 - Root `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json`
   are plugin registration shims that point to `harness/plugins/`.
@@ -32,6 +33,7 @@ Edit master sources, not generated bundles:
 - `harness/scripts/agent-refs/`
 - `harness/templates/`
 - `harness/src/`
+- root `docs/` for public documentation
 
 Generated outputs under `harness/.agents/`, `harness/.claude/`,
 `harness/plugins/`, and harness marketplace files are rebuilt with:

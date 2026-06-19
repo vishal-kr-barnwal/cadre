@@ -23,9 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional LSP setup flow for `/cadre-setup` plus `/cadre-refresh --lsp`, backed
   by a bundled scanner that recommends language servers, writes/appends
   `cadre/lsp.json`, and reports missing install commands.
-- Detailed platform usage guide (`docs/PLATFORM_USAGE.md`) covering installation,
+- Detailed platform usage guide (`../docs/how-cadre-works.md`) covering installation,
   setup, topology choice, daily workflows, review/ship/land, team operation,
   MCP/LSP usage, CI, and troubleshooting.
+- Root GitHub Pages documentation site under `../docs/`, plus a Cadre logo
+  asset used by the docs and repository README.
 - Initial dependency-free Cadre MCP server (`scripts/mcp/cadre-server.js`) with
   tools/resources for index regeneration, plan parsing, team status, available
   work, collision scans, review-gate checks, and polyrepo local preflight.
@@ -49,9 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moved the shared Beads error-handler reference to `scripts/agent-refs/` so it
   is copied into generated plugin skill bundles from a real source file instead
   of from another generated artifact.
+- Moved the Beads integration plugin reference source to
+  `scripts/agent-refs/beads-integration.md`; generated plugin bundles no longer
+  depend on public docs.
 - Synced Codex-facing `AGENTS.md` with the newer team-scale review,
   ownership, coverage, collision, and shared-control-plane rules.
-- Added MCP/LSP rollout guidance in `docs/MCP_LSP.md`.
+- Added MCP/LSP rollout guidance in `../docs/how-cadre-works.md`.
 
 ### Removed
 - Deleted the legacy `scripts/install.sh` copy-based installer and removed
@@ -115,7 +120,7 @@ projects are unaffected).
 
 ### Fixed
 - Corrected **SQLite → Dolt** storage-engine references in
-  `docs/PARALLEL_EXECUTION.md` and `docs/BEADS_INTEGRATION.md`, and reconciled the
+  `../docs/parallel-execution.md` and `../docs/how-cadre-works.md`, and reconciled the
   "Dolt server required" vs "no server required" contradiction between the skill
   docs.
 
@@ -147,7 +152,7 @@ top of polyrepo control-repo support.
   - **Shared sync mode** — control plane (`cadre/` + Beads Dolt graph) is
     pushed/pulled for team collaboration; product code stays local until landed.
   - New references `polyrepo-git.md`, `cadre-sync.md`; CI templates under
-    `templates/ci/`; guide at `docs/POLYREPO.md`.
+    `templates/ci/`; guide at `../docs/team-and-polyrepo.md`.
 - All `cadre-*` commands updated to branch on topology; monorepo behavior is
   byte-for-byte unchanged.
 - **SDLC tail commands** — `/cadre-review` (diff quality gate), `/cadre-ship`
@@ -244,7 +249,7 @@ top of polyrepo control-repo support.
   Manager, GitHub Copilot `/fleet` (Copilot CLI) or VS Code subagents — with a
   **sequential fallback** for platforms that have no parallel primitive. The
   worker prompt itself is unchanged and platform-agnostic.
-- Updated `docs/PARALLEL_EXECUTION.md` and `docs/BEADS_INTEGRATION.md` to describe
+- Updated `../docs/parallel-execution.md` and `../docs/how-cadre-works.md` to describe
   per-platform dispatch instead of `Task()` only.
 
 ---
@@ -320,7 +325,7 @@ Antigravity.
   (`.claude/commands/`), the single source of truth. A `--check` mode fails if
   the committed output is stale (for CI).
 - **`AGENTS.md`** — shared agent context for Codex and Antigravity.
-- **[`docs/INSTALL.md`](docs/INSTALL.md)** — install & version guide with a
+- **[`../docs/getting-started.md`](../docs/getting-started.md)** — install & version guide with a
   cross-platform compatibility matrix, per-platform setup steps, and the
   versioning policy.
 

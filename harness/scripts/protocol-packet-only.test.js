@@ -7,6 +7,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
+const repoRoot = path.resolve(root, "..");
+const publicDocsRoot = path.join(repoRoot, "docs");
 const protocolDirs = [
   path.join(root, "skills", "cadre", "protocols"),
   path.join(root, ".agents", "skills", "cadre", "protocols"),
@@ -31,7 +33,6 @@ function markdownFiles(dir) {
 const files = Array.from(new Set([
   ...protocolDirs.flatMap(markdownFiles),
   ...referenceDirs.flatMap(markdownFiles),
-  path.join(root, "docs", "BEADS_INTEGRATION.md"),
   path.join(root, "skills", "cadre", "SKILL.md"),
   path.join(root, ".agents", "skills", "cadre", "SKILL.md"),
   path.join(root, ".claude", "skills", "cadre", "SKILL.md"),
@@ -144,7 +145,7 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
 });
 
 test("Install docs use the repo-root Codex sparse plugin path", () => {
-  for (const file of [path.join(root, "README.md"), path.join(root, "docs", "INSTALL.md")]) {
+  for (const file of [path.join(repoRoot, "README.md"), path.join(publicDocsRoot, "getting-started.md")]) {
     const text = fs.readFileSync(file, "utf8");
     assert.match(text, /--sparse harness\/plugins\/cadre/);
     assert.doesNotMatch(text, /--sparse plugins\/cadre(?!-)/);
@@ -184,9 +185,11 @@ test("Hidden local skill discovery dirs contain only Cadre output", () => {
 
 test("User-facing workflow docs stay packet-owned", () => {
   const docs = [
-    path.join(root, "README.md"),
-    path.join(root, "docs", "PLATFORM_USAGE.md"),
-    path.join(root, "docs", "manual-workflow-guide.md"),
+    path.join(repoRoot, "README.md"),
+    path.join(publicDocsRoot, "getting-started.md"),
+    path.join(publicDocsRoot, "how-cadre-works.md"),
+    path.join(publicDocsRoot, "workflows.md"),
+    path.join(publicDocsRoot, "troubleshooting.md"),
   ];
   const forbiddenDocs = [
     { name: "direct Beads workflow command", pattern: /\bbd\s+(?:ready|show|note|update|create|dep|label|close|mail|formula|compact|dolt|sql|worktree|init|list|admin|rules)\b/i },
@@ -208,7 +211,7 @@ test("User-facing workflow docs stay packet-owned", () => {
       const line = text.slice(0, match.index).split("\n").length;
       const lineText = text.split(/\r?\n/)[line - 1] || "";
       if (allowed.some((pattern) => pattern.test(lineText))) continue;
-      failures.push(`${path.relative(root, file)}:${line}: ${rule.name}: ${match[0]}`);
+      failures.push(`${path.relative(repoRoot, file)}:${line}: ${rule.name}: ${match[0]}`);
     }
   }
   assert.deepEqual(failures, []);
