@@ -100,7 +100,7 @@ Successful setup creates:
 | `cadre/tech-stack.json` | Languages, frameworks, package managers, platforms, and test commands. |
 | `cadre/workflow.json` and `cadre/workflow.md` | Canonical development, verification, review, and commit expectations plus projection. |
 | `cadre/patterns.jsonl` and `cadre/patterns.md` | Append-only pattern events plus generated pattern summary. |
-| `cadre/tracks.md` | Derived human index rebuilt from track metadata. |
+| `cadre/tracks.json` | Generated project-level track index rebuilt from track metadata. |
 | `cadre/config.json` | Sync mode, provider mode, review, and quality settings. |
 | `cadre/beads.json` | Beads integration settings. |
 | `cadre/repos.json` | Polyrepo topology when enabled. |

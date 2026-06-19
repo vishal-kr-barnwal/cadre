@@ -78,9 +78,9 @@ const forbidden = [
   },
   {
     name: "direct track index edits",
-    pattern: /\b(?:edit|write|rewrite|update|regenerate|rebuild)\s+`?tracks\.md`?/i,
+    pattern: /\b(?:edit|write|rewrite|update|regenerate|rebuild)\s+`?tracks\.(?:md|json)`?/i,
   },
-  { name: "track index as workflow source", pattern: /tracks\.md.{0,120}(?:authoritative|source of truth)|(?:authoritative|source of truth).{0,120}tracks\.md/i },
+  { name: "track index as workflow source", pattern: /tracks\.(?:md|json).{0,120}(?:authoritative|source of truth)|(?:authoritative|source of truth).{0,120}tracks\.(?:md|json)/i },
 ];
 
 test("Cadre protocols and workflow template stay packet-only", () => {
@@ -296,48 +296,6 @@ test("Target-project CI templates do not bundle harness-only checks", () => {
   const forbiddenTargetText = /pnpm check|scripts\/generate-skills|templates\/scripts|cadre-regen-index/;
   for (const file of targetTemplates) {
     assert.doesNotMatch(fs.readFileSync(file, "utf8"), forbiddenTargetText, path.relative(root, file));
-  }
-
-  const harnessTemplates = [
-    path.join(root, "templates", "ci", "cadre-harness-check.github.yml"),
-    path.join(root, "templates", "ci", "cadre-harness-check.gitlab.yml"),
-  ];
-  for (const file of harnessTemplates) {
-    const text = fs.readFileSync(file, "utf8");
-    assert.match(text, /pnpm check/);
-    assert.doesNotMatch(text, /templates\/scripts|cadre-regen-index/);
-  }
-});
-
-test("Harness CI templates fan out the heavy checks", () => {
-  const harnessTemplates = [
-    path.join(root, "templates", "ci", "cadre-harness-check.github.yml"),
-    path.join(root, "templates", "ci", "cadre-harness-check.gitlab.yml"),
-  ];
-  const requiredJobs = [
-    /policy-gate:/,
-    /typecheck:/,
-    /runtime-build:/,
-    /generated-check:/,
-    /review-gate:/,
-    /test:/,
-  ];
-  const requiredScripts = [
-    /pnpm check:typecheck/,
-    /pnpm check:runtime/,
-    /pnpm check:generated/,
-    /pnpm check:test/,
-  ];
-
-  for (const file of harnessTemplates) {
-    const text = fs.readFileSync(file, "utf8");
-    for (const pattern of requiredJobs) {
-      assert.match(text, pattern, `${path.relative(root, file)} is missing ${pattern}`);
-    }
-    for (const pattern of requiredScripts) {
-      assert.match(text, pattern, `${path.relative(root, file)} is missing ${pattern}`);
-    }
-    assert.doesNotMatch(text, /\bpnpm check(?:\s|$)/, path.relative(root, file));
   }
 });
 

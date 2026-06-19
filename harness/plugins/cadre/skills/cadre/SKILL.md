@@ -4,7 +4,7 @@ description: |
   Context-driven development methodology for organized, spec-first coding. Use when:
   - Project has a `cadre/` directory
   - User mentions specs, plans, tracks, or context-driven development
-  - Files like `cadre/tracks.md`, `cadre/product.md`, `cadre/workflow.md` exist
+  - Files like `cadre/tracks.json`, `cadre/product.md`, `cadre/workflow.md` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
   - User asks for a `cadre-*` workflow (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula, artifacts)
@@ -54,8 +54,9 @@ requested workflow needs:
 - Use `cadre://workspace-health` for compact repo, dependency, LSP, and
   parallel summaries, and `cadre://integrations` for optional MCP coverage.
 
-`cadre/tracks.md` is a derived human index. Resolve live status from MCP packets
-and track metadata, not by treating the index as authoritative.
+`cadre/tracks.json` is the generated project-level track index. Resolve live
+status from MCP packets and track metadata, not by treating legacy Markdown as
+authoritative.
 
 ## Workflow Routing
 

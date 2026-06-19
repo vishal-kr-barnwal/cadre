@@ -20,7 +20,7 @@ check() {
 for file in AGENTS.md CLAUDE.md; do
   [ -f "$file" ] || { echo "error: missing $file" >&2; exit 1; }
   check "$file" 'metadata\.json\.status' 'metadata status is source of truth'
-  check "$file" 'tracks\.md.*derived|derived.*tracks\.md' 'tracks.md is derived'
+  check "$file" 'tracks\.json.*generated|generated.*tracks\.json' 'tracks.json is generated'
   check "$file" 'review_seq|reviewed_sha' 'structured review gate fields'
   check "$file" 'require_second_reviewer' 'second-review enforcement'
   check "$file" '--available|--unowned' 'available work board'

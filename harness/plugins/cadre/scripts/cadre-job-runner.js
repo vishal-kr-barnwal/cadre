@@ -357,6 +357,7 @@ function listWorkspaceFiles(root) {
 
 // src/core/application/cadre-runtime.ts
 var commandExistsCache = /* @__PURE__ */ new Map();
+var MANUAL_VERIFICATION_TASK_TYPE = "user_manual_verification";
 function readJson(file, fallback) {
   try {
     return JSON.parse(import_node_fs2.default.readFileSync(file, "utf8"));
@@ -578,14 +579,34 @@ function trackPlanJsonPath(track) {
 function planJsonPathForPlanPath(file) {
   return import_node_path3.default.join(import_node_path3.default.dirname(file), "plan.json");
 }
+function manualVerificationScope(value) {
+  const task = asJsonObject(value);
+  const manual = asJsonObject(task.manual_verification);
+  const annotations = asJsonObject(task.annotations);
+  return asOptionalString(manual.scope) || asOptionalString(annotations["manual-verification-scope"]) || asOptionalString(annotations["manual-verification"]) || null;
+}
+function isManualVerificationTaskObject(value, scope) {
+  const task = asJsonObject(value);
+  const annotations = asJsonObject(task.annotations);
+  const type = asOptionalString(task.task_type) || asOptionalString(annotations["task-type"]);
+  const taskScope = manualVerificationScope(task);
+  const key = asOptionalString(task.task_key || task.key) || "";
+  const title = asOptionalString(task.title) || "";
+  const matchesManual = type === MANUAL_VERIFICATION_TASK_TYPE || title.toLowerCase().includes("user manual verification") || key.endsWith("_manual_verification") || key === "track_manual_verification";
+  if (!matchesManual) return false;
+  if (!scope) return true;
+  if (taskScope) return taskScope === scope;
+  return scope === "track" ? key === "track_manual_verification" : key !== "track_manual_verification";
+}
 function planJsonToParsedPlan(raw) {
   const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
     const phase = asJsonObject(rawPhase);
     const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
+    const phaseDepends = asStringArray(phase.depends_on);
     const annotations = {
       ...asJsonObject(phase.annotations),
       ...asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {},
-      ...asArray(phase.depends_on).length > 0 ? { depends: asStringArray(phase.depends_on).join(",") } : {}
+      ...phaseDepends.length > 0 ? { depends: phaseDepends.join(",") } : {}
     };
     const tasks = asArray(phase.tasks).map((rawTask, taskOffset) => {
       const task = asJsonObject(rawTask);
@@ -611,7 +632,10 @@ function planJsonToParsedPlan(raw) {
         line: Number(task.line || phaseIndex * 100 + taskIndex),
         phase_index: phaseIndex,
         commit_shas: asStringArray(task.commit_shas),
-        repo_shas: asJsonObject(task.repo_shas)
+        repo_shas: asJsonObject(task.repo_shas),
+        task_type: asOptionalString(task.task_type || taskAnnotations["task-type"]) || null,
+        manual_verification: isRecord(task.manual_verification) ? asJsonObject(task.manual_verification) : asOptionalString(taskAnnotations["manual-verification-scope"]) ? { scope: asOptionalString(taskAnnotations["manual-verification-scope"]) } : null,
+        completion_evidence: isRecord(task.completion_evidence) ? asJsonObject(task.completion_evidence) : null
       };
     });
     return {
@@ -640,6 +664,14 @@ function renderPlanMarkdown(raw) {
       if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
       if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
       if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
+      if (task.task_type) parts.push(`  <!-- task-type: ${task.task_type} -->`);
+      if (task.manual_verification) {
+        const manual = asJsonObject(task.manual_verification);
+        const scope = asOptionalString(manual.scope);
+        if (scope) parts.push(`  <!-- manual-verification-scope: ${scope} -->`);
+        const checks = asArray(manual.suggested_checks);
+        if (checks.length > 0) parts.push(`  <!-- manual-verification-checks: ${checks.length} suggested -->`);
+      }
       parts.push("");
     }
   }
@@ -1030,6 +1062,10 @@ function withSharedControlPlaneSync(root, args = {}, operation, fn) {
     sync_post: syncPost
   };
 }
+function humanReviewConfirmed(args = {}) {
+  const rawArgs = args;
+  return rawArgs.humanConfirmed === true || rawArgs.human_confirmed === true || rawArgs.userConfirmed === true || rawArgs.user_confirmed === true || rawArgs.confirmed === true;
+}
 function findTrack(root, trackId) {
   return listTracks(root).find((item) => item.track_id === trackId) || null;
 }
@@ -1275,6 +1311,7 @@ function recordTaskResultUnlocked(root, args = {}) {
   const metadata = patchJsonFile(track.metadata_path, (current) => {
     if (typeof args.coverage === "number") current.last_coverage = args.coverage;
     if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
+    if (isRecord(args.manualVerificationEvidence)) current.last_manual_verification_result = asJsonObject(args.manualVerificationEvidence);
     current.last_task_result = lastTaskResult;
     return current;
   });
@@ -1305,7 +1342,8 @@ function recordTaskResultUnlocked(root, args = {}) {
                 repo: args.repo || task.repo || null,
                 working_root: args.workingRoot || null,
                 coverage: typeof args.coverage === "number" ? args.coverage : null,
-                recorded_at: recordedAt
+                recorded_at: recordedAt,
+                ...isRecord(args.manualVerificationEvidence) ? { manual_verification: asJsonObject(args.manualVerificationEvidence) } : {}
               }
             };
           })
@@ -1397,6 +1435,148 @@ function patchCompletionJournal(track, key, patcher) {
   });
   return journal.entries[key];
 }
+function manualVerificationChecksFromInput(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => {
+      if (typeof entry === "string") return { id: `check-${index + 1}`, heading: entry, status: "reported" };
+      return asJsonObject(entry);
+    }).filter((entry) => Object.keys(entry).length > 0);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line, index) => ({ id: `check-${index + 1}`, heading: line, status: "reported" }));
+  }
+  const object = asJsonObject(value);
+  if (Array.isArray(object.checks)) return manualVerificationChecksFromInput(object.checks);
+  return Object.keys(object).length > 0 ? [object] : [];
+}
+function manualVerificationResultObject(value) {
+  if (typeof value === "string" && value.trim()) return { summary: value.trim() };
+  return asJsonObject(value);
+}
+function manualVerificationInputResult(args) {
+  return manualVerificationResultObject(args.manualVerificationResult || args.manual_verification_result);
+}
+function manualVerificationInputSummary(args, result) {
+  return asOptionalString(args.manualVerificationSummary || args.manual_verification_summary) || asOptionalString(result.summary) || asOptionalString(result.message) || "";
+}
+function manualVerificationInputChecks(args, result) {
+  return manualVerificationChecksFromInput(args.manualVerificationChecks || args.manual_verification_checks || result.checks);
+}
+function manualVerificationCommand(args) {
+  return asOptionalString(args.manualVerificationCommand || args.manual_verification_command) || null;
+}
+function commandResultEvidence(result) {
+  return {
+    ok: result.ok,
+    status: result.status,
+    signal: result.signal || null,
+    command: result.command,
+    cwd: result.cwd || null,
+    stdout_tail: result.stdout.slice(-4e3),
+    stderr_tail: result.stderr.slice(-4e3)
+  };
+}
+function prepareManualVerificationCompletion(root, track, task, args, workingRoot) {
+  const mode = asOptionalString(args.manualVerificationMode || args.manual_verification_mode) || (manualVerificationCommand(args) ? "autorun" : "offline");
+  const command = manualVerificationCommand(args);
+  const suggestedChecks = asArray(asJsonObject(task.manual_verification).suggested_checks).map(asJsonObject);
+  const inputResult = manualVerificationInputResult(args);
+  const confirmed = humanReviewConfirmed(args);
+  if (mode === "autorun" && !confirmed) {
+    if (!command) {
+      return {
+        ok: false,
+        blocked: true,
+        stage: "manual_verification",
+        reason: "manualVerificationCommand is required for autorun manual verification"
+      };
+    }
+    const result = runCommand(command, [], {
+      cwd: workingRoot.path,
+      shell: true,
+      timeoutMs: Number(args.timeoutMs || 10 * 60 * 1e3),
+      maxBuffer: 30 * 1024 * 1024
+    });
+    const evidence2 = {
+      mode,
+      approved: false,
+      task_key: task.task_key,
+      scope: manualVerificationScope(task),
+      summary: result.ok ? "Autorun manual verification command completed successfully." : "Autorun manual verification command failed.",
+      suggested_checks: suggestedChecks,
+      checks: manualVerificationInputChecks(args, inputResult),
+      command,
+      result: commandResultEvidence(result),
+      recorded_at: utcNow()
+    };
+    return {
+      ok: false,
+      dry_run: true,
+      blocked: true,
+      phase_state: "awaiting_human_review",
+      stage: "manual_verification_approval",
+      track_id: track.track_id,
+      task_key: task.task_key,
+      manual_verification: evidence2,
+      reason: "Human approval is required before marking manual verification complete"
+    };
+  }
+  if (!confirmed) {
+    return {
+      ok: false,
+      dry_run: true,
+      blocked: true,
+      phase_state: "awaiting_human_review",
+      stage: "manual_verification_approval",
+      track_id: track.track_id,
+      task_key: task.task_key,
+      manual_verification: {
+        mode,
+        approved: false,
+        task_key: task.task_key,
+        scope: manualVerificationScope(task),
+        suggested_checks: suggestedChecks
+      },
+      reason: "Human approval is required before marking manual verification complete"
+    };
+  }
+  let commandEvidence = isRecord(inputResult.result) ? asJsonObject(inputResult.result) : null;
+  if (mode === "autorun" && command && !commandEvidence) {
+    const result = runCommand(command, [], {
+      cwd: workingRoot.path,
+      shell: true,
+      timeoutMs: Number(args.timeoutMs || 10 * 60 * 1e3),
+      maxBuffer: 30 * 1024 * 1024
+    });
+    commandEvidence = commandResultEvidence(result);
+  }
+  const summary = manualVerificationInputSummary(args, inputResult) || (commandEvidence ? commandEvidence.ok === true ? "Approved autorun manual verification result." : "Approved autorun manual verification result with failures noted." : "");
+  if (!summary.trim()) {
+    return {
+      ok: false,
+      blocked: true,
+      stage: "manual_verification_summary",
+      track_id: track.track_id,
+      task_key: task.task_key,
+      reason: "manualVerificationSummary or manualVerificationResult.summary is required"
+    };
+  }
+  const evidence = {
+    mode,
+    approved: true,
+    approved_at: utcNow(),
+    approved_by: gitIdentity(root) || null,
+    task_key: task.task_key,
+    scope: manualVerificationScope(task),
+    summary: summary.trim(),
+    suggested_checks: suggestedChecks,
+    checks: manualVerificationInputChecks(args, inputResult),
+    ...command ? { command } : {},
+    ...commandEvidence ? { result: commandEvidence } : {},
+    recorded_at: utcNow()
+  };
+  return { ok: true, evidence };
+}
 function completeTask(root, args = {}) {
   return withSharedControlPlaneSync(root, args, "complete_task", () => completeTaskInner(root, { ...args, skipSync: true }));
 }
@@ -1419,11 +1599,21 @@ function completeTaskInner(root, args = {}) {
       reason: workingRoot.error
     };
   }
-  const coverage = runCoverage(root, args, workingRoot.path);
+  const manualVerificationTask = isManualVerificationTaskObject(task);
+  const manualVerificationCompletion = manualVerificationTask ? prepareManualVerificationCompletion(root, track, task, args, workingRoot) : null;
+  if (manualVerificationCompletion && manualVerificationCompletion.ok === false) return manualVerificationCompletion;
+  const manualVerificationEvidence = manualVerificationCompletion && isRecord(manualVerificationCompletion.evidence) ? asJsonObject(manualVerificationCompletion.evidence) : null;
+  const coverage = manualVerificationTask ? {
+    ok: true,
+    available: false,
+    command: null,
+    coverage: null,
+    reason: "Manual verification task uses structured human-approved evidence instead of coverage."
+  } : runCoverage(root, args, workingRoot.path);
   const threshold = Number(args.coverageThreshold ?? coverageThreshold(root));
   const allowMissingCoverage = args.allowMissingCoverage === true;
   const allowLowCoverage = args.allowLowCoverage === true;
-  if (!coverage.available && !allowMissingCoverage) {
+  if (!manualVerificationTask && !coverage.available && !allowMissingCoverage) {
     return {
       ok: false,
       stage: "coverage",
@@ -1433,7 +1623,7 @@ function completeTaskInner(root, args = {}) {
       reason: coverage.reason || "Coverage command unavailable"
     };
   }
-  if (coverage.available && !coverage.ok) {
+  if (!manualVerificationTask && coverage.available && !coverage.ok) {
     return {
       ok: false,
       stage: "coverage",
@@ -1443,7 +1633,7 @@ function completeTaskInner(root, args = {}) {
       reason: "Coverage/test command failed; task was not marked complete"
     };
   }
-  if (coverage.available && typeof coverage.coverage === "number" && coverage.coverage < threshold && !allowLowCoverage) {
+  if (!manualVerificationTask && coverage.available && typeof coverage.coverage === "number" && coverage.coverage < threshold && !allowLowCoverage) {
     return {
       ok: false,
       stage: "coverage",
@@ -1498,7 +1688,7 @@ function completeTaskInner(root, args = {}) {
   } else {
     beads.attempted = true;
   }
-  const lastTestRun = {
+  const lastTestRun = manualVerificationTask ? null : {
     command: coverage.command,
     cwd: coverage.cwd || workingRoot.path,
     ok: coverage.available ? coverage.ok : null,
@@ -1534,7 +1724,8 @@ function completeTaskInner(root, args = {}) {
       coverage: coverage.coverage,
       repo: workingRoot.repo,
       workingRoot: import_node_path3.default.relative(root, workingRoot.path) || ".",
-      lastTestRun
+      ...lastTestRun ? { lastTestRun } : {},
+      ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
     if (!taskResult.ok) {
       patchCompletionJournal(track, journalKey, (current) => ({

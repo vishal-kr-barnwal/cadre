@@ -14,7 +14,13 @@ Create a new track from the workflow arguments.
 
 1. Resolve the project root with `cadre_project` using `action: "root"`.
 2. Draft the spec and plan text from the user's request and current project
-   context.
+   context. Shape the spec as title, description, functional requirements,
+   non-functional requirements, acceptance criteria, and out of scope. Use
+   list-based functional requirements, non-functional requirements, acceptance
+   criteria, and out-of-scope entries; each list entry should have a short
+   heading and optional body. Cadre canonicalizes the plan by adding blocking
+   user manual verification gates at the end of each implementation phase and a
+   final track-level manual verification phase.
 3. Call `cadre_workflow` with `workflow: "newtrack"`, `trackId`, `specText`,
    `planText`, and metadata. Treat the first call as a dry run unless the user has
    explicitly asked to create it now.

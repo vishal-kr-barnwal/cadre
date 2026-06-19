@@ -47,7 +47,7 @@ What setup writes:
 - `cadre/tech-stack.json`
 - `cadre/workflow.json` and generated `cadre/workflow.md`
 - `cadre/patterns.jsonl` and generated `cadre/patterns.md`
-- `cadre/tracks.md`
+- `cadre/tracks.json`
 - `cadre/config.json`
 - `cadre/beads.json`
 - optional `cadre/repos.json`
@@ -63,8 +63,9 @@ Creates a spec-first unit of work.
 The new-track packet previews or creates:
 
 - Track id and directory.
-- Canonical `spec.json` plus generated `spec.md` with goal, constraints,
-  acceptance criteria, and non-goals.
+- Canonical `spec.json` plus generated `spec.md` with title, description,
+  functional requirements, non-functional requirements, acceptance criteria, and
+  out of scope.
 - Canonical `plan.json` plus generated `plan.md` with phases, tasks, file
   claims, dependencies, and repo annotations.
 - Append-only `learnings.jsonl` plus generated `learnings.md`.
@@ -117,8 +118,8 @@ Common status views include:
 - Collision scan.
 - Quality gate summary.
 
-Status reads packet output and compact resources. It should not treat
-`cadre/tracks.md` as the live source of truth.
+Status reads packet output and compact resources. It should not treat legacy
+Markdown indexes as the live source of truth.
 
 ## `cadre-review`
 

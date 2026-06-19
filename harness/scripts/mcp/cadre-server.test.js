@@ -14,13 +14,23 @@ function write(file, content) {
 }
 
 function git(root, args) {
-  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  const result = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  if (args[0] === "init") {
+    spawnSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["config", "tag.gpgsign", "false"], { cwd: root, encoding: "utf8" });
+  }
   return result;
 }
 
 function writeTrack(root, id, plan, metadata = {}) {
-  write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+  write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
+    version: 1,
+    schema: "cadre.tracks_index.v1",
+    generated_at: "2026-06-17T00:00:00.000Z",
+    counts: { new: 1, in_progress: 0, completed: 0, blocked: 0, skipped: 0 },
+    tracks: [],
+  }, null, 2));
   const dir = path.join(root, "cadre", "tracks", id);
   write(path.join(dir, "metadata.json"), JSON.stringify({
     track_id: id,

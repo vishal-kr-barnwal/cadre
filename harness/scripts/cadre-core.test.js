@@ -16,13 +16,23 @@ function write(file, content) {
 }
 
 function git(root, args) {
-  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  const result = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  if (args[0] === "init") {
+    spawnSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["config", "tag.gpgsign", "false"], { cwd: root, encoding: "utf8" });
+  }
   return result;
 }
 
 function writeTrack(root, id, plan, metadata = {}) {
-  write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+  write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
+    version: 1,
+    schema: "cadre.tracks_index.v1",
+    generated_at: "2026-06-17T00:00:00.000Z",
+    counts: { new: 1, in_progress: 0, completed: 0, blocked: 0, skipped: 0 },
+    tracks: [],
+  }, null, 2));
   const dir = path.join(root, "cadre", "tracks", id);
   write(path.join(dir, "metadata.json"), JSON.stringify({
     track_id: id,
@@ -58,6 +68,63 @@ function samplePlan(id) {
 - [ ] Task 1: Verify
   <!-- files: src/core.js -->
 `;
+}
+
+function manualVerificationPlanJson(id) {
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: id,
+    title: `Plan: ${id}`,
+    phases: [
+      {
+        phase_index: 1,
+        title: "Phase 1: Build",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "phase1_task1",
+            title: "Implement core",
+            status: "completed",
+            files: ["src/core.js"],
+            depends_on: [],
+          },
+          {
+            task_index: 2,
+            task_key: "phase1_manual_verification",
+            title: "User Manual Verification",
+            status: "pending",
+            task_type: "user_manual_verification",
+            files: [],
+            depends_on: ["phase1_task1"],
+            manual_verification: {
+              scope: "phase",
+              suggested_checks: [
+                {
+                  id: "phase1-check-1",
+                  heading: "Exercise changed behavior",
+                  body: "Verify the implemented core behavior works through the user-facing flow.",
+                  source: "phase",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function writeManualVerificationTrack(root, id) {
+  writeTrack(root, id, "# Plan\n");
+  const planJson = manualVerificationPlanJson(id);
+  write(path.join(root, "cadre", "tracks", id, "plan.json"), JSON.stringify(planJson, null, 2));
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
 function installFakeBd(root) {
@@ -407,7 +474,13 @@ test("createBeadsTree dryRun can preflight a track before files exist", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-draft-test-"));
   try {
     git(root, ["init"]);
-    write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+    write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
+      version: 1,
+      schema: "cadre.tracks_index.v1",
+      generated_at: "2026-06-17T00:00:00.000Z",
+      counts: { new: 0, in_progress: 0, completed: 0, blocked: 0, skipped: 0 },
+      tracks: [],
+    }, null, 2));
 
     const result = core.createBeadsTree(root, {
       trackId: "draft_20260617",
@@ -422,6 +495,8 @@ test("createBeadsTree dryRun can preflight a track before files exist", () => {
     assert.equal(result.dry_run, true);
     assert.equal(result.beads_epic, "cadre-draft_20260617");
     assert.ok(result.beads_tasks.phase1_task1);
+    assert.ok(result.beads_tasks.phase1_manual_verification);
+    assert.ok(result.beads_tasks.track_manual_verification);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "draft_20260617")), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -446,6 +521,70 @@ test("metadataPatch preserves unrelated metadata while patching selected keys", 
     const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "patch_20260617", "metadata.json"), "utf8"));
     assert.equal(metadata.owner, "new@example.com");
     assert.equal(metadata.review.verdict, "changes_requested");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("regenIndex writes JSON track index and removes generated legacy Markdown", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-regen-json-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "new_track", samplePlan("new_track"), { status: "new" });
+    writeTrack(root, "progress_track", samplePlan("progress_track"), {
+      status: "in_progress",
+      priority: "high",
+      owner: "dev@example.com",
+      reviewer: "reviewer@example.com",
+      review: { verdict: "changes_requested", blocking_count: 2 },
+    });
+    writeTrack(root, "completed_track", samplePlan("completed_track"), { status: "completed" });
+    writeTrack(root, "blocked_track", samplePlan("blocked_track"), { status: "blocked" });
+    writeTrack(root, "skipped_track", samplePlan("skipped_track"), { status: "skipped" });
+    write(path.join(root, "cadre", "tracks.md"), "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
+
+    const result = core.regenIndex(root);
+    assert.equal(result.ok, true);
+    assert.equal(result.tracks, 5);
+    assert.equal(result.removed_legacy_markdown, "cadre/tracks.md");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks.md")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks.json")), true);
+    const index = readJson(path.join(root, "cadre", "tracks.json"));
+    assert.equal(index.schema, "cadre.tracks_index.v1");
+    assert.deepEqual(index.counts, { new: 1, in_progress: 1, completed: 1, blocked: 1, skipped: 1 });
+    const progress = index.tracks.find((track) => track.track_id === "progress_track");
+    assert.equal(progress.status, "in_progress");
+    assert.equal(progress.priority, "high");
+    assert.equal(progress.owner, "dev@example.com");
+    assert.equal(progress.reviewer, "reviewer@example.com");
+    assert.equal(progress.metadata_path, "cadre/tracks/progress_track/metadata.json");
+    assert.equal(progress.spec_path, "cadre/tracks/progress_track/spec.json");
+    assert.equal(progress.plan_path, "cadre/tracks/progress_track/plan.json");
+    assert.equal(progress.review.verdict, "changes_requested");
+    const catalog = core.artifactCatalog(root, { scope: "project" });
+    const tracksIndex = catalog.artifacts.find((artifact) => artifact.id === "tracks-index");
+    assert.equal(tracksIndex.canonical, "cadre/tracks.json");
+    assert.equal(tracksIndex.projectionFormat, "none");
+    assert.equal(tracksIndex.canonical_exists, true);
+    assert.equal(tracksIndex.projection_exists, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("regenIndex preserves unmarked user-authored tracks Markdown", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-regen-preserve-md-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "preserve_track", samplePlan("preserve_track"));
+    const userMarkdown = "# Personal Track Notes\n\nDo not delete this file.\n";
+    write(path.join(root, "cadre", "tracks.md"), userMarkdown);
+
+    const result = core.regenIndex(root);
+    assert.equal(result.ok, true);
+    assert.equal(result.removed_legacy_markdown, null);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tracks.md"), "utf8"), userMarkdown);
+    assert.equal(readJson(path.join(root, "cadre", "tracks.json")).tracks.length, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -587,6 +726,127 @@ test("completeTask gates plan mutation on measured coverage", () => {
     const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "complete_20260617", "metadata.json"), "utf8"));
     assert.equal(metadata.last_coverage, 86);
     assert.equal(metadata.last_task_result.task_key, "phase1_task1");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask requires explicit approval for manual verification tasks", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-manual-approval-test-"));
+  try {
+    git(root, ["init"]);
+    writeManualVerificationTrack(root, "manual_approval_20260619");
+
+    const result = core.completeTask(root, {
+      trackId: "manual_approval_20260619",
+      phaseIndex: 1,
+      taskIndex: 2,
+      manualVerificationSummary: "User verified the changed behavior.",
+      manualVerificationChecks: [{ id: "phase1-check-1", status: "passed" }],
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.stage, "manual_verification_approval");
+    const planJson = readJson(path.join(root, "cadre", "tracks", "manual_approval_20260619", "plan.json"));
+    assert.equal(planJson.phases[0].tasks[1].status, "pending");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask records approved offline manual verification evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-manual-offline-test-"));
+  try {
+    git(root, ["init"]);
+    writeManualVerificationTrack(root, "manual_offline_20260619");
+
+    const result = core.completeTask(root, {
+      trackId: "manual_offline_20260619",
+      phaseIndex: 1,
+      taskIndex: 2,
+      humanConfirmed: true,
+      manualVerificationMode: "offline",
+      manualVerificationSummary: "Ran the checkout flow by hand and confirmed the new behavior.",
+      manualVerificationChecks: [
+        { id: "phase1-check-1", heading: "Exercise changed behavior", status: "passed" },
+      ],
+    });
+
+    assert.equal(result.ok, true);
+    const planJson = readJson(path.join(root, "cadre", "tracks", "manual_offline_20260619", "plan.json"));
+    const task = planJson.phases[0].tasks[1];
+    assert.equal(task.status, "completed");
+    assert.equal(task.completion_evidence.manual_verification.mode, "offline");
+    assert.equal(task.completion_evidence.manual_verification.summary, "Ran the checkout flow by hand and confirmed the new behavior.");
+    assert.equal(task.completion_evidence.manual_verification.checks[0].status, "passed");
+    const metadata = readJson(path.join(root, "cadre", "tracks", "manual_offline_20260619", "metadata.json"));
+    assert.equal(metadata.last_manual_verification_result.summary, "Ran the checkout flow by hand and confirmed the new behavior.");
+    assert.equal(metadata.last_test_run, undefined);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask autorun manual verification returns approval evidence without mutating plan", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-manual-autorun-preview-test-"));
+  try {
+    git(root, ["init"]);
+    writeManualVerificationTrack(root, "manual_autorun_preview_20260619");
+
+    const result = core.completeTask(root, {
+      trackId: "manual_autorun_preview_20260619",
+      phaseIndex: 1,
+      taskIndex: 2,
+      manualVerificationMode: "autorun",
+      manualVerificationCommand: "node -e \"require('fs').writeFileSync('manual-autorun.txt','ok')\"",
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.stage, "manual_verification_approval");
+    assert.equal(result.manual_verification.result.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "manual-autorun.txt")), true);
+    const planJson = readJson(path.join(root, "cadre", "tracks", "manual_autorun_preview_20260619", "plan.json"));
+    assert.equal(planJson.phases[0].tasks[1].status, "pending");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask records approved autorun manual verification evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-manual-autorun-approve-test-"));
+  try {
+    git(root, ["init"]);
+    writeManualVerificationTrack(root, "manual_autorun_approve_20260619");
+
+    const preview = core.completeTask(root, {
+      trackId: "manual_autorun_approve_20260619",
+      phaseIndex: 1,
+      taskIndex: 2,
+      manualVerificationMode: "autorun",
+      manualVerificationCommand: "printf 'manual ok\\n'",
+    });
+    assert.equal(preview.ok, false);
+
+    const result = core.completeTask(root, {
+      trackId: "manual_autorun_approve_20260619",
+      phaseIndex: 1,
+      taskIndex: 2,
+      humanConfirmed: true,
+      manualVerificationMode: "autorun",
+      manualVerificationCommand: "printf 'manual ok\\n'",
+      manualVerificationResult: preview.manual_verification,
+      manualVerificationChecks: [{ id: "phase1-check-1", status: "passed" }],
+    });
+
+    assert.equal(result.ok, true);
+    const planJson = readJson(path.join(root, "cadre", "tracks", "manual_autorun_approve_20260619", "plan.json"));
+    const evidence = planJson.phases[0].tasks[1].completion_evidence.manual_verification;
+    assert.equal(planJson.phases[0].tasks[1].status, "completed");
+    assert.equal(evidence.mode, "autorun");
+    assert.equal(evidence.result.ok, true);
+    assert.match(evidence.result.stdout_tail, /manual ok/);
+    const metadata = readJson(path.join(root, "cadre", "tracks", "manual_autorun_approve_20260619", "metadata.json"));
+    assert.equal(metadata.last_manual_verification_result.mode, "autorun");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -836,7 +1096,7 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.equal(setup.ok, true);
     assert.ok(setup.templates.templates.some((template) => template.id === "product"));
     assert.ok(setup.templates.templates.some((template) => template.id === "target-monorepo-ci"));
-    assert.ok(setup.templates.templates.some((template) => template.scope === "harness-only"));
+    assert.equal(setup.templates.templates.some((template) => template.scope === "harness-only"), false);
     assert.equal(setup.styleGuides.source, "tech-stack.json");
     assert.ok(setup.styleGuides.detected.includes("typescript"));
     assert.ok(setup.styleGuides.detected.includes("html-css"));
@@ -1371,14 +1631,47 @@ test("workflow newtrack writes template-backed track learnings", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(blockedPlanArtifact, "content"), false);
     assert.equal(blocked.review_bundle.content_in_response, false);
     assert.ok(fs.existsSync(path.join(blocked.review_bundle.directory, "cadre", "tracks", "blocked_20260618", "plan.md")));
+    const blockedPlanJson = readJson(path.join(blocked.review_bundle.directory, "cadre", "tracks", "blocked_20260618", "plan.json"));
+    assert.equal(blockedPlanJson.phases.length, 3);
+    assert.equal(blockedPlanJson.phases[0].tasks.at(-1).task_key, "phase1_manual_verification");
+    assert.equal(blockedPlanJson.phases.at(-1).tasks[0].task_key, "track_manual_verification");
+    const blockedPlanMarkdown = fs.readFileSync(path.join(blocked.review_bundle.directory, "cadre", "tracks", "blocked_20260618", "plan.md"), "utf8");
+    assert.match(blockedPlanMarkdown, /Task 3: User Manual Verification/);
+    assert.match(blockedPlanMarkdown, /manual-verification-scope: track/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "blocked_20260618")), false);
+
+    const specText = `# Login Rate Limit
+
+## Description
+
+Protect account login from repeated password guessing without blocking normal users.
+
+## Functional Requirements
+
+- **Throttle failed attempts**: Count failed login attempts per account and source.
+- **Show lockout message**: Tell users when they can retry.
+
+## Non-Functional Requirements
+
+- **No secret storage**: Do not store raw passwords or secrets in rate-limit records.
+- **Low latency**: Keep successful login latency effectively unchanged.
+
+## Acceptance Criteria
+
+- **Throttled path**: Tests cover blocked login attempts.
+- **Cooldown expiry**: Lockout state expires after the configured cooldown.
+
+## Out Of Scope
+
+- **MFA changes**: Multi-factor authentication behavior is unchanged.
+`;
 
     const created = core.workflowPacket(root, {
       workflow: "newtrack",
       execute: true,
       humanConfirmed: true,
       trackId: "tmpl_20260618",
-      specText: "# Spec\n",
+      specText,
       planText: samplePlan("tmpl_20260618"),
     });
 
@@ -1389,13 +1682,60 @@ test("workflow newtrack writes template-backed track learnings", () => {
     const specJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.json"), "utf8"));
     const planJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.json"), "utf8"));
     assert.equal(specJson.track_id, "tmpl_20260618");
+    assert.equal(specJson.title, "Login Rate Limit");
+    assert.equal(specJson.description, "Protect account login from repeated password guessing without blocking normal users.");
+    assert.deepEqual(specJson.functional_requirements[0], {
+      heading: "Throttle failed attempts",
+      body: "Count failed login attempts per account and source.",
+    });
+    assert.deepEqual(specJson.non_functional_requirements[0], {
+      heading: "No secret storage",
+      body: "Do not store raw passwords or secrets in rate-limit records.",
+    });
+    assert.deepEqual(specJson.acceptance_criteria[0], {
+      heading: "Throttled path",
+      body: "Tests cover blocked login attempts.",
+    });
+    assert.deepEqual(specJson.out_of_scope[0], {
+      heading: "MFA changes",
+      body: "Multi-factor authentication behavior is unchanged.",
+    });
+    assert.equal(Object.prototype.hasOwnProperty.call(specJson, "goals"), false);
     assert.equal(planJson.track_id, "tmpl_20260618");
-    assert.equal(planJson.phases.length, 2);
-    assert.equal(planJson.phases[0].tasks.length, 2);
+    assert.equal(planJson.phases.length, 3);
+    assert.equal(planJson.phases[0].tasks.length, 3);
+    assert.equal(planJson.phases[0].tasks[2].task_key, "phase1_manual_verification");
+    assert.equal(planJson.phases[0].tasks[2].task_type, "user_manual_verification");
+    assert.equal(planJson.phases[0].tasks[2].manual_verification.scope, "phase");
+    assert.deepEqual(planJson.phases[0].tasks[2].depends_on, ["phase1_task1", "phase1_task2"]);
+    assert.equal(planJson.phases[2].tasks[0].task_key, "track_manual_verification");
+    assert.equal(planJson.phases[2].tasks[0].task_type, "user_manual_verification");
+    assert.equal(planJson.phases[2].tasks[0].manual_verification.scope, "track");
+    assert.ok(planJson.phases[2].tasks[0].manual_verification.suggested_checks.some((check) => check.source === "acceptance_criteria"));
     const spec = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.md"), "utf8");
     assert.match(spec, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/spec\.json"/);
+    assert.match(spec, /## Functional Requirements/);
+    assert.match(spec, /- \*\*Throttle failed attempts\*\*: Count failed login attempts per account and source\./);
+    assert.match(spec, /## Non-Functional Requirements/);
+    assert.match(spec, /## Out Of Scope/);
     const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.md"), "utf8");
     assert.match(plan, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/plan\.json"/);
+    assert.match(plan, /Task 3: User Manual Verification/);
+    assert.match(plan, /manual-verification-scope: phase/);
+    assert.match(plan, /Track-Level User Manual Verification/);
+    const idempotent = core.workflowPacket(root, {
+      workflow: "revise",
+      execute: true,
+      humanConfirmed: true,
+      trackId: "tmpl_20260618",
+      planText: plan,
+    });
+    assert.equal(idempotent.ok, true);
+    const revisedPlanJson = readJson(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.json"));
+    const manualTasks = revisedPlanJson.phases.flatMap((phase) => phase.tasks).filter((task) => task.task_type === "user_manual_verification");
+    assert.equal(manualTasks.filter((task) => task.task_key === "phase1_manual_verification").length, 1);
+    assert.equal(manualTasks.filter((task) => task.task_key === "phase2_manual_verification").length, 1);
+    assert.equal(manualTasks.filter((task) => task.task_key === "track_manual_verification").length, 1);
     const learnings = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "learnings.md"), "utf8");
     assert.match(learnings, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/learnings\.jsonl"/);
     assert.match(learnings, /# Track Learnings: tmpl_20260618/);
@@ -1451,10 +1791,12 @@ test("artifact sync imports legacy markdown canonicals and regenerates projectio
 
     const planJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json"), "utf8"));
     assert.equal(planJson.track_id, "legacy_20260618");
-    assert.equal(planJson.phases.length, 2);
+    assert.equal(planJson.phases.length, 3);
+    assert.equal(planJson.phases.at(-1).tasks[0].task_key, "track_manual_verification");
     const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.md"), "utf8");
     assert.match(plan, /cadre:generated from="cadre\/tracks\/legacy_20260618\/plan\.json"/);
     assert.match(plan, /Task 1: Implement core/);
+    assert.match(plan, /Task 3: User Manual Verification/);
 
     const render = core.artifactPacket(root, { action: "render", artifact: "track:legacy_20260618:plan" });
     assert.equal(render.ok, true);

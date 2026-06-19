@@ -79,7 +79,7 @@ cadre/
 ├── product.md           # What you're building and for whom
 ├── tech-stack.md        # Technology choices and constraints
 ├── workflow.md          # Development standards (TDD, commits)
-├── tracks.md            # Master list of all work items
+├── tracks.json          # Generated track index
 ├── patterns.md          # Consolidated learnings (Ralph-style)
 └── beads.json           # Beads integration config
 ```

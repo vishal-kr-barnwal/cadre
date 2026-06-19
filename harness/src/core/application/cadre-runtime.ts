@@ -12,6 +12,8 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../lsp/language-registry";
 
 const commandExistsCache = new Map<string, boolean>();
+const MANUAL_VERIFICATION_TASK_TYPE = "user_manual_verification";
+const TRACKS_INDEX_SCHEMA = "cadre.tracks_index.v1";
 
 interface LockOptions extends RuntimeArgs {
   owner?: string | null;
@@ -417,9 +419,211 @@ function planJsonPathForPlanPath(file: string): string {
   return path.join(path.dirname(file), "plan.json");
 }
 
-function planJsonFromText(trackId: string, text: string): JsonObject {
-  const parsed = parsePlanText(text);
+function manualVerificationScope(value: unknown): string | null {
+  const task = asJsonObject(value);
+  const manual = asJsonObject(task.manual_verification);
+  const annotations = asJsonObject(task.annotations);
+  return asOptionalString(manual.scope)
+    || asOptionalString(annotations["manual-verification-scope"])
+    || asOptionalString(annotations["manual-verification"])
+    || null;
+}
+
+function isManualVerificationTaskObject(value: unknown, scope?: "phase" | "track"): boolean {
+  const task = asJsonObject(value);
+  const annotations = asJsonObject(task.annotations);
+  const type = asOptionalString(task.task_type) || asOptionalString(annotations["task-type"]);
+  const taskScope = manualVerificationScope(task);
+  const key = asOptionalString(task.task_key || task.key) || "";
+  const title = asOptionalString(task.title) || "";
+  const matchesManual = type === MANUAL_VERIFICATION_TASK_TYPE
+    || title.toLowerCase().includes("user manual verification")
+    || key.endsWith("_manual_verification")
+    || key === "track_manual_verification";
+  if (!matchesManual) return false;
+  if (!scope) return true;
+  if (taskScope) return taskScope === scope;
+  return scope === "track" ? key === "track_manual_verification" : key !== "track_manual_verification";
+}
+
+function manualVerificationCheck(id: string, heading: string, body: string, source: string): JsonObject {
+  return { id, heading, body, source };
+}
+
+function phaseManualVerificationChecks(phase: JsonObject, tasks: JsonObject[]): JsonObject[] {
+  const phaseIndex = Number(phase.phase_index || phase.index || 1);
+  const title = asOptionalString(phase.title) || `Phase ${phaseIndex}`;
+  const taskTitles = tasks
+    .map((task) => asOptionalString(task.title))
+    .filter(Boolean)
+    .map((value) => String(value).replace(/^Task\s+\d+:\s*/i, ""));
+  const files = Array.from(new Set(tasks.flatMap((task) => asStringArray(task.files))));
+  return [
+    manualVerificationCheck(
+      `phase${phaseIndex}-check-1`,
+      "Exercise changed behavior",
+      taskTitles.length > 0
+        ? `Manually exercise the behavior delivered by ${title}: ${taskTitles.join("; ")}.`
+        : `Manually exercise the behavior delivered by ${title}.`,
+      "phase"
+    ),
+    ...(files.length > 0
+      ? [manualVerificationCheck(
+          `phase${phaseIndex}-check-2`,
+          "Inspect affected surfaces",
+          `Review the user-visible behavior around affected files: ${files.slice(0, 12).join(", ")}.`,
+          "phase"
+        )]
+      : []),
+  ];
+}
+
+function trackManualVerificationChecks(specJson: JsonObject | null | undefined): JsonObject[] {
+  const spec = asJsonObject(specJson);
+  const groups = [
+    { key: "functional_requirements", label: "Functional", source: "functional_requirements" },
+    { key: "non_functional_requirements", label: "Non-functional", source: "non_functional_requirements" },
+    { key: "acceptance_criteria", label: "Acceptance", source: "acceptance_criteria" },
+    { key: "out_of_scope", label: "Out of scope guardrail", source: "out_of_scope" },
+  ];
+  const checks: JsonObject[] = [];
+  for (const group of groups) {
+    const items = specItemsFromRaw(spec[group.key]);
+    items.forEach((item, index) => {
+      const heading = asOptionalString(item.heading) || `${group.label} ${index + 1}`;
+      const body = asOptionalString(item.body) || heading;
+      checks.push(manualVerificationCheck(
+        `track-${group.source.replace(/_/g, "-")}-${index + 1}`,
+        `${group.label}: ${heading}`,
+        body,
+        group.source
+      ));
+    });
+  }
+  if (checks.length > 0) return checks;
+  return [
+    manualVerificationCheck(
+      "track-check-1",
+      "Verify delivered outcome",
+      "Manually verify that the completed track delivers the intended behavior from the spec.",
+      "track"
+    ),
+  ];
+}
+
+function normalizePlanManualVerification(plan: JsonObject, specJson?: JsonObject | null): JsonObject {
+  const rawPhases = asArray(plan.phases).map(asJsonObject);
+  const existingTrackPhase = rawPhases.find((phase) => {
+    const title = (asOptionalString(phase.title) || "").toLowerCase();
+    const tasks = asArray(phase.tasks);
+    return title.includes("user manual verification")
+      || tasks.some((task) => isManualVerificationTaskObject(task, "track"));
+  });
+  const implementationPhases = rawPhases.filter((phase) => phase !== existingTrackPhase);
+  const phaseManualKeys: string[] = [];
+  const normalizedPhases: JsonObject[] = implementationPhases.map((rawPhase, phaseOffset) => {
+    const phaseIndex = phaseOffset + 1;
+    const tasks = asArray(rawPhase.tasks).map(asJsonObject);
+    const existingManual = tasks.find((task) => isManualVerificationTaskObject(task, "phase"));
+    const implementationTasks = tasks.filter((task) => !isManualVerificationTaskObject(task, "phase") && !isManualVerificationTaskObject(task, "track"));
+    const normalizedTasks: JsonObject[] = implementationTasks.map((task, taskOffset) => ({
+      ...task,
+      task_index: taskOffset + 1,
+      task_key: asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskOffset + 1}`,
+      depends_on: asStringArray(task.depends_on || task.depends),
+      files: asStringArray(task.files),
+      commit_shas: asStringArray(task.commit_shas),
+      repo_shas: asJsonObject(task.repo_shas),
+    }));
+    const manualTaskKey = `phase${phaseIndex}_manual_verification`;
+    phaseManualKeys.push(manualTaskKey);
+    const manualTask: JsonObject = {
+      ...(existingManual || {}),
+      task_index: normalizedTasks.length + 1,
+      task_key: manualTaskKey,
+      title: "User Manual Verification",
+      status: asOptionalString(asJsonObject(existingManual).status) || "pending",
+      task_type: MANUAL_VERIFICATION_TASK_TYPE,
+      files: [],
+      depends_on: normalizedTasks
+        .map((task) => asOptionalString(task.task_key))
+        .filter((value): value is string => Boolean(value)),
+      repo: null,
+      annotations: {
+        ...asJsonObject(asJsonObject(existingManual).annotations),
+        "task-type": MANUAL_VERIFICATION_TASK_TYPE,
+        "manual-verification-scope": "phase",
+      },
+      commit_shas: asStringArray(asJsonObject(existingManual).commit_shas),
+      repo_shas: asJsonObject(asJsonObject(existingManual).repo_shas),
+      manual_verification: {
+        ...asJsonObject(asJsonObject(existingManual).manual_verification),
+        scope: "phase",
+        suggested_checks: phaseManualVerificationChecks({ ...rawPhase, phase_index: phaseIndex }, normalizedTasks),
+      },
+      completion_evidence: asJsonObject(asJsonObject(existingManual).completion_evidence),
+    };
+    return {
+      ...rawPhase,
+      phase_index: phaseIndex,
+      title: asOptionalString(rawPhase.title) || `Phase ${phaseIndex}`,
+      execution_mode: asOptionalString(rawPhase.execution_mode) || asOptionalString(asJsonObject(rawPhase.annotations).execution) || "sequential",
+      depends_on: asStringArray(rawPhase.depends_on),
+      annotations: asJsonObject(rawPhase.annotations),
+      tasks: [...normalizedTasks, manualTask],
+    };
+  });
+  const trackPhaseIndex = normalizedPhases.length + 1;
+  const existingTrackTask = asArray(asJsonObject(existingTrackPhase).tasks).map(asJsonObject)
+    .find((task) => isManualVerificationTaskObject(task, "track"));
+  const trackManualTask: JsonObject = {
+    ...(existingTrackTask || {}),
+    task_index: 1,
+    task_key: "track_manual_verification",
+    title: "Track-Level User Manual Verification",
+    status: asOptionalString(asJsonObject(existingTrackTask).status) || "pending",
+    task_type: MANUAL_VERIFICATION_TASK_TYPE,
+    files: [],
+    depends_on: phaseManualKeys,
+    repo: null,
+    annotations: {
+      ...asJsonObject(asJsonObject(existingTrackTask).annotations),
+      "task-type": MANUAL_VERIFICATION_TASK_TYPE,
+      "manual-verification-scope": "track",
+    },
+    commit_shas: asStringArray(asJsonObject(existingTrackTask).commit_shas),
+    repo_shas: asJsonObject(asJsonObject(existingTrackTask).repo_shas),
+    manual_verification: {
+      ...asJsonObject(asJsonObject(existingTrackTask).manual_verification),
+      scope: "track",
+      suggested_checks: trackManualVerificationChecks(specJson),
+    },
+    completion_evidence: asJsonObject(asJsonObject(existingTrackTask).completion_evidence),
+  };
   return {
+    ...plan,
+    phases: [
+      ...normalizedPhases,
+      {
+        ...(existingTrackPhase || {}),
+        phase_index: trackPhaseIndex,
+        title: `Phase ${trackPhaseIndex}: User Manual Verification`,
+        execution_mode: "sequential",
+        depends_on: phaseManualKeys,
+        annotations: {
+          ...asJsonObject(asJsonObject(existingTrackPhase).annotations),
+          execution: "sequential",
+          depends: phaseManualKeys.join(","),
+        },
+        tasks: [trackManualTask],
+      },
+    ],
+  };
+}
+
+function planJsonFromText(trackId: string, text: string, specJson?: JsonObject | null): JsonObject {
+  const parsed = parsePlanText(text);
+  const plan = {
     version: 1,
     schema: "cadre.plan.v1",
     track_id: trackId,
@@ -445,19 +649,25 @@ function planJsonFromText(trackId: string, text: string): JsonObject {
         annotations: task.annotations,
         commit_shas: task.commit_shas || [],
         repo_shas: task.repo_shas || {},
+        ...(asOptionalString(task.annotations["task-type"]) ? { task_type: asOptionalString(task.annotations["task-type"]) } : {}),
+        ...(asOptionalString(task.annotations["manual-verification-scope"]) || asOptionalString(task.annotations["manual-verification"])
+          ? { manual_verification: { scope: asOptionalString(task.annotations["manual-verification-scope"]) || asOptionalString(task.annotations["manual-verification"]) } }
+          : {}),
       })),
     })),
   };
+  return normalizePlanManualVerification(plan, specJson);
 }
 
 function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
   const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
     const phase = asJsonObject(rawPhase);
     const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
+    const phaseDepends = asStringArray(phase.depends_on);
     const annotations = {
       ...asJsonObject(phase.annotations),
       ...(asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {}),
-      ...(asArray(phase.depends_on).length > 0 ? { depends: asStringArray(phase.depends_on).join(",") } : {}),
+      ...(phaseDepends.length > 0 ? { depends: phaseDepends.join(",") } : {}),
     };
     const tasks: PlanTask[] = asArray(phase.tasks).map((rawTask, taskOffset) => {
       const task = asJsonObject(rawTask);
@@ -465,7 +675,7 @@ function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
       const taskKey = asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskIndex}`;
       const files = asStringArray(task.files);
       const depends = asStringArray(task.depends_on || task.depends);
-      const taskAnnotations = {
+      const taskAnnotations: JsonObject = {
         ...asJsonObject(task.annotations),
         ...(files.length > 0 ? { files: files.join(", ") } : {}),
         ...(depends.length > 0 ? { depends: depends.join(",") } : {}),
@@ -484,6 +694,11 @@ function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
         phase_index: phaseIndex,
         commit_shas: asStringArray(task.commit_shas),
         repo_shas: asJsonObject(task.repo_shas),
+        task_type: asOptionalString(task.task_type || taskAnnotations["task-type"]) || null,
+        manual_verification: isRecord(task.manual_verification)
+          ? asJsonObject(task.manual_verification)
+          : (asOptionalString(taskAnnotations["manual-verification-scope"]) ? { scope: asOptionalString(taskAnnotations["manual-verification-scope"]) } : null),
+        completion_evidence: isRecord(task.completion_evidence) ? asJsonObject(task.completion_evidence) : null,
       };
     });
     return {
@@ -513,31 +728,224 @@ function renderPlanMarkdown(raw: JsonObject): string {
       if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
       if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
       if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
+      if (task.task_type) parts.push(`  <!-- task-type: ${task.task_type} -->`);
+      if (task.manual_verification) {
+        const manual = asJsonObject(task.manual_verification);
+        const scope = asOptionalString(manual.scope);
+        if (scope) parts.push(`  <!-- manual-verification-scope: ${scope} -->`);
+        const checks = asArray(manual.suggested_checks);
+        if (checks.length > 0) parts.push(`  <!-- manual-verification-checks: ${checks.length} suggested -->`);
+      }
       parts.push("");
     }
   }
   return normalizedText(parts.join("\n"));
 }
 
+function normalizedSpecHeading(heading: string): string {
+  return heading
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function specSectionKind(heading: string): "description" | "functional_requirements" | "non_functional_requirements" | "acceptance_criteria" | "out_of_scope" | null {
+  const normalized = normalizedSpecHeading(heading);
+  if (["description", "summary", "overview", "goal", "goals", "objective", "objectives", "context", "problem"].includes(normalized)) {
+    return "description";
+  }
+  if ([
+    "functional requirements",
+    "functional requirement",
+    "fr",
+    "requirements",
+    "requirement",
+    "user facing behavior",
+    "user facing behaviours",
+    "user behavior",
+    "user behaviour",
+    "behavior",
+    "behaviour",
+  ].includes(normalized)) {
+    return "functional_requirements";
+  }
+  if ([
+    "non functional requirements",
+    "non functional requirement",
+    "nonfunctional requirements",
+    "nonfunctional requirement",
+    "nfr",
+    "constraints",
+    "constraint",
+    "quality attributes",
+    "quality attribute",
+    "performance requirements",
+    "security requirements",
+  ].includes(normalized)) {
+    return "non_functional_requirements";
+  }
+  if (["acceptance criteria", "acceptance criterion", "acceptance", "success criteria", "definition of done", "done"].includes(normalized)) {
+    return "acceptance_criteria";
+  }
+  if (["out of scope", "out scope", "out of scopes", "non goals", "non goal", "nongoals", "exclusions", "exclusion"].includes(normalized)) {
+    return "out_of_scope";
+  }
+  return null;
+}
+
+function cleanSpecItem(value: JsonObject): JsonObject | null {
+  const heading = compactLines(asOptionalString(value.heading || value.title || value.name) || "", 240);
+  const body = normalizedText(asOptionalString(value.body || value.description || value.text) || "").trim();
+  if (!heading && !body) return null;
+  return { heading: heading || "Item", body };
+}
+
+function parseSpecListItem(line: string): JsonObject {
+  const text = line.trim();
+  const bold = text.match(/^\*\*(.+?)\*\*:?\s*(.*)$/);
+  const keyed = !bold ? text.match(/^(.+?)\s*(?::|\s+-\s+|\s+--\s+|\s+—\s+)\s*(.+)$/) : null;
+  if (bold?.[1]) return { heading: bold[1].trim(), body: (bold[2] || "").trim() };
+  if (keyed?.[1]) return { heading: keyed[1].trim(), body: (keyed[2] || "").trim() };
+  return { heading: text, body: "" };
+}
+
+function parseSpecListItems(body: string, fallbackHeading: string): JsonObject[] {
+  const lines = normalizedText(body).split("\n");
+  const items: JsonObject[] = [];
+  let current: JsonObject | null = null;
+  const pushCurrent = (): void => {
+    if (!current) return;
+    const cleaned = cleanSpecItem(current);
+    if (cleaned) items.push(cleaned);
+    current = null;
+  };
+  for (const rawLine of lines) {
+    const bullet = rawLine.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+)$/);
+    if (bullet?.[1]) {
+      pushCurrent();
+      current = parseSpecListItem(bullet[1]);
+      continue;
+    }
+    const text = rawLine.trim();
+    if (!text) continue;
+    if (!current) {
+      current = { heading: fallbackHeading, body: text };
+      continue;
+    }
+    const existing = asOptionalString(current.body) || "";
+    current.body = existing ? `${existing}\n${text}` : text;
+  }
+  pushCurrent();
+  if (items.length > 0) return items;
+  const fallbackBody = normalizedText(body).trim();
+  return fallbackBody ? [{ heading: fallbackHeading, body: fallbackBody }] : [];
+}
+
+function specItemsFromRaw(value: unknown): JsonObject[] {
+  return asArray(value)
+    .map((entry) => {
+      if (typeof entry === "string") return cleanSpecItem({ heading: entry, body: "" });
+      return cleanSpecItem(asJsonObject(entry));
+    })
+    .filter((entry): entry is JsonObject => Boolean(entry));
+}
+
 function specJsonFromText(trackId: string, text: string): JsonObject {
-  const doc = markdownDocJson("spec", text || `# Spec: ${trackId}\n`);
+  const parsed = splitMarkdownSections(text || `# Spec: ${trackId}\n`);
+  const descriptionParts = [parsed.body].filter(Boolean);
+  const functionalRequirements: JsonObject[] = [];
+  const nonFunctionalRequirements: JsonObject[] = [];
+  const acceptanceCriteria: JsonObject[] = [];
+  const outOfScope: JsonObject[] = [];
+  for (const rawSection of parsed.sections) {
+    const section = asJsonObject(rawSection);
+    const heading = asOptionalString(section.heading) || "";
+    const body = asOptionalString(section.body) || "";
+    const kind = specSectionKind(heading);
+    if (kind === "description") descriptionParts.push(body);
+    else if (kind === "functional_requirements") functionalRequirements.push(...parseSpecListItems(body, heading));
+    else if (kind === "non_functional_requirements") nonFunctionalRequirements.push(...parseSpecListItems(body, heading));
+    else if (kind === "acceptance_criteria") acceptanceCriteria.push(...parseSpecListItems(body, heading));
+    else if (kind === "out_of_scope") outOfScope.push(...parseSpecListItems(body, heading));
+    else if (body) descriptionParts.push(`### ${heading}\n\n${body}`);
+  }
   return {
-    ...doc,
+    version: 1,
     schema: "cadre.spec.v1",
+    kind: "spec",
     track_id: trackId,
-    goals: [],
-    non_goals: [],
-    constraints: [],
-    acceptance_criteria: [],
-    risks: [],
-    open_questions: [],
-    references: [],
+    title: parsed.title,
+    description: descriptionParts.join("\n\n").trim(),
+    functional_requirements: functionalRequirements,
+    non_functional_requirements: nonFunctionalRequirements,
+    acceptance_criteria: acceptanceCriteria,
+    out_of_scope: outOfScope,
+    updated_at: utcNow(),
   };
 }
 
-function renderSpecMarkdown(raw: JsonObject): string {
+function normalizedSpecFromRaw(raw: JsonObject): JsonObject {
+  if (asOptionalString(raw.description)
+    || asArray(raw.functional_requirements).length > 0
+    || asArray(raw.non_functional_requirements).length > 0
+    || asArray(raw.acceptance_criteria).length > 0
+    || asArray(raw.out_of_scope).length > 0) {
+    return {
+      ...raw,
+      description: asOptionalString(raw.description || raw.summary) || "",
+      functional_requirements: specItemsFromRaw(raw.functional_requirements),
+      non_functional_requirements: specItemsFromRaw(raw.non_functional_requirements),
+      acceptance_criteria: specItemsFromRaw(raw.acceptance_criteria),
+      out_of_scope: specItemsFromRaw(raw.out_of_scope),
+    };
+  }
   const title = asOptionalString(raw.title) || `Spec: ${asOptionalString(raw.track_id) || "track"}`;
-  return renderMarkdownDoc({ ...raw, title }, title);
+  const parts = [`# ${title}`, ""];
+  const summary = asOptionalString(raw.summary);
+  if (summary) parts.push(summary, "");
+  for (const rawSection of asArray(raw.sections)) {
+    const section = asJsonObject(rawSection);
+    const heading = asOptionalString(section.heading);
+    const body = asOptionalString(section.body);
+    if (heading && body) parts.push(`## ${heading}`, "", body, "");
+  }
+  return specJsonFromText(asOptionalString(raw.track_id) || "track", parts.join("\n"));
+}
+
+function appendSpecItemSection(parts: string[], heading: string, items: JsonObject[]): void {
+  if (items.length === 0) return;
+  parts.push(`## ${heading}`, "");
+  for (const item of items) {
+    const itemHeading = asOptionalString(item.heading) || "Item";
+    const body = normalizedText(asOptionalString(item.body) || "").trim();
+    if (!body) {
+      parts.push(`- ${itemHeading}`);
+      continue;
+    }
+    if (!body.includes("\n")) {
+      parts.push(`- **${itemHeading}**: ${body}`);
+      continue;
+    }
+    parts.push(`- **${itemHeading}**`);
+    for (const line of body.split("\n")) {
+      parts.push(line.trim() ? `  ${line}` : "");
+    }
+  }
+  parts.push("");
+}
+
+function renderSpecMarkdown(raw: JsonObject): string {
+  const spec = normalizedSpecFromRaw(raw);
+  const title = asOptionalString(spec.title) || `Spec: ${asOptionalString(spec.track_id) || "track"}`;
+  const parts = [`# ${title}`, ""];
+  const description = asOptionalString(spec.description);
+  if (description) parts.push("## Description", "", description, "");
+  appendSpecItemSection(parts, "Functional Requirements", specItemsFromRaw(spec.functional_requirements));
+  appendSpecItemSection(parts, "Non-Functional Requirements", specItemsFromRaw(spec.non_functional_requirements));
+  appendSpecItemSection(parts, "Acceptance Criteria", specItemsFromRaw(spec.acceptance_criteria));
+  appendSpecItemSection(parts, "Out Of Scope", specItemsFromRaw(spec.out_of_scope));
+  return normalizedText(parts.join("\n"));
 }
 
 function styleGuideJsonFromMarkdown(id: string, text: string, source = "markdown_import"): JsonObject {
@@ -596,7 +1004,7 @@ function isCadreProjectRoot(root: string): boolean {
   const cadreDir = path.join(root, "cadre");
   if (!fileExists(cadreDir)) return false;
   return [
-    "tracks.md",
+    "tracks.json",
     "setup_state.json",
     "product.md",
     "tech-stack.json",
@@ -1773,6 +2181,36 @@ function metadataTrackSummary(track: CadreTrack): TrackSummary {
     reviewer: track.metadata.reviewer || null,
     beads_epic: track.metadata.beads_epic || null,
     review: track.metadata.review ? asJsonObject(track.metadata.review) : null,
+  };
+}
+
+function trackIndexPayload(root: string, tracks = listTracks(root)): JsonObject {
+  const counts: Record<string, number> = {
+    new: 0,
+    in_progress: 0,
+    completed: 0,
+    blocked: 0,
+    skipped: 0,
+  };
+  const entries = tracks
+    .sort((a, b) => a.track_id.localeCompare(b.track_id))
+    .map((track) => {
+      const summary = metadataTrackSummary(track);
+      const status = summary.status || "new";
+      counts[status] = (counts[status] || 0) + 1;
+      return {
+        ...summary,
+        metadata_path: path.relative(root, track.metadata_path),
+        spec_path: path.relative(root, trackSpecJsonPath(track)),
+        plan_path: path.relative(root, trackPlanJsonPath(track)),
+      };
+    });
+  return {
+    version: 1,
+    schema: TRACKS_INDEX_SCHEMA,
+    generated_at: utcNow(),
+    counts,
+    tracks: entries,
   };
 }
 
@@ -3221,7 +3659,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
   writeProjectDoc("workflow.md", "workflow", setupWorkflowText(rawArgs.workflowText), "Project Workflow");
-  writeText("tracks.md", withGeneratedMarker("cadre/tracks/*/metadata.json", "cadre.tracks_index.v1", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n"));
+  writeSetupJson("tracks.json", trackIndexPayload(root, []));
   const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
   writeSetupJsonlEntry("patterns.jsonl", {
     id: "initial",
@@ -3324,7 +3762,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
 function newTrackReviewFiles(trackId: string, specText: string | undefined, planText: string, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
   const specJson = specJsonFromText(trackId, specText || `# Spec: ${trackId}\n`);
-  const planJson = planJsonFromText(trackId, planText);
+  const planJson = planJsonFromText(trackId, planText, specJson);
   const learningsEntry: JsonObject = {
     id: "initial",
     kind: "learnings_seed",
@@ -3458,7 +3896,7 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
   }
   const dir = path.join(root, "cadre", "tracks", safeName(trackId));
   const specJson = specJsonFromText(String(trackId), specText || `# Spec: ${trackId}\n`);
-  const planJson = planJsonFromText(String(trackId), planText);
+  const planJson = planJsonFromText(String(trackId), planText, specJson);
   const learningsEntry: JsonObject = {
     id: "initial",
     kind: "learnings_seed",
@@ -4040,7 +4478,10 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
     ));
   }
   if (track && revisedPlan !== undefined) {
-    const planJson = planJsonFromText(track.track_id, revisedPlan);
+    const specJson = revisedSpec !== undefined
+      ? specJsonFromText(track.track_id, revisedSpec)
+      : readJson<JsonObject | null>(trackSpecJsonPath(track), null);
+    const planJson = planJsonFromText(track.track_id, revisedPlan, specJson);
     reviewFiles.push(jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "planText", planJson));
     reviewFiles.push(textReviewFile(
       path.relative(root, track.plan_path),
@@ -4108,7 +4549,10 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
       written.push(path.relative(root, track.spec_path));
     }
     if (revisedPlan !== undefined) {
-      const planJson = planJsonFromText(track.track_id, revisedPlan);
+      const specJson = revisedSpec !== undefined
+        ? specJsonFromText(track.track_id, revisedSpec)
+        : readJson<JsonObject | null>(trackSpecJsonPath(track), null);
+      const planJson = planJsonFromText(track.track_id, revisedPlan, specJson);
       writeJsonEnsured(trackPlanJsonPath(track), planJson);
       fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson)));
       written.push(path.relative(root, trackPlanJsonPath(track)));
@@ -4314,18 +4758,19 @@ function artifactSchema(artifact: unknown): JsonObject {
     additionalProperties: true,
     properties,
   });
+  const specListItemSchema = objectSchema(["heading"], {
+    heading: { type: "string" },
+    body: { type: "string" },
+  });
   const schemas: Record<string, JsonObject> = {
     spec: objectSchema(["track_id", "title"], {
       track_id: { type: "string" },
       title: { type: "string" },
-      summary: { type: "string" },
-      goals: { type: "array", items: { type: "string" } },
-      non_goals: { type: "array", items: { type: "string" } },
-      constraints: { type: "array", items: { type: "string" } },
-      acceptance_criteria: { type: "array", items: { type: "string" } },
-      risks: { type: "array", items: { type: "string" } },
-      open_questions: { type: "array", items: { type: "string" } },
-      references: { type: "array", items: { type: "string" } },
+      description: { type: "string" },
+      functional_requirements: { type: "array", items: specListItemSchema },
+      non_functional_requirements: { type: "array", items: specListItemSchema },
+      acceptance_criteria: { type: "array", items: specListItemSchema },
+      out_of_scope: { type: "array", items: specListItemSchema },
     }),
     plan: objectSchema(["track_id", "phases"], {
       track_id: { type: "string" },
@@ -4415,7 +4860,7 @@ function artifactDefinitions(root: string, args: RuntimeArgs = {}): ArtifactDefi
     { id: "product-guidelines", title: "Product guidelines", canonical: "cadre/product_guidelines.json", projection: "cadre/product_guidelines.md", schema: "cadre.product_guidelines.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
     { id: "workflow", title: "Workflow policy", canonical: "cadre/workflow.json", projection: "cadre/workflow.md", schema: "cadre.workflow.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
     { id: "patterns", title: "Project patterns", canonical: "cadre/patterns.jsonl", projection: "cadre/patterns.md", schema: "cadre.patterns.v1", scope: "project", sourceFormat: "jsonl", projectionFormat: "markdown" },
-    { id: "tracks-index", title: "Track index", canonical: "cadre/tracks", projection: "cadre/tracks.md", schema: "cadre.tracks_index.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
+    { id: "tracks-index", title: "Track index", canonical: "cadre/tracks.json", schema: TRACKS_INDEX_SCHEMA, scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "beads-config", title: "Beads config", canonical: "cadre/beads.json", schema: "cadre.beads.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
@@ -4584,17 +5029,7 @@ function renderArtifact(root: string, def: ArtifactDefinition, args: RuntimeArgs
   let raw: JsonObject | null = null;
   let body = "";
   let missingCanonical = false;
-  if (def.id === "tracks-index") {
-    const tracks = listTracks(root).sort((a, b) => a.track_id.localeCompare(b.track_id));
-    body = normalizedText(`# Tracks\n\n<!-- cadre:index:start -->\n${tracks.map((track) => {
-      const status = asOptionalString(track.metadata.status) || "new";
-      const marker = Object.prototype.hasOwnProperty.call(STATUS_MARKERS, status)
-        ? STATUS_MARKERS[status as keyof typeof STATUS_MARKERS]
-        : STATUS_MARKERS.new;
-      const name = track.metadata.name || track.metadata.track_id || track.track_id;
-      return `## ${marker} Track: ${name}`;
-    }).join("\n")}${tracks.length ? "\n" : ""}<!-- cadre:index:end -->\n`);
-  } else if (def.sourceFormat === "jsonl") {
+  if (def.sourceFormat === "jsonl") {
     const entries = readJsonl(canonicalPath);
     if (entries.length === 0) missingCanonical = true;
     const title = def.title;
@@ -4657,7 +5092,6 @@ function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
   const results = artifacts.map((def) => {
     const file = path.join(root, def.canonical);
-    if (def.id === "tracks-index") return { artifact_id: def.id, ok: fileExists(path.join(root, "cadre", "tracks")) };
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
     if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
     const value = readJson<JsonObject | null>(file, null);
@@ -5522,8 +5956,12 @@ function sectionText(markdown: unknown, headingPattern: RegExp): string {
 }
 
 function specContextFromText(text: string): SpecContext {
-  const overview = sectionText(text, /^#{1,4}\s+(overview|summary|technical approach|approach|requirements?)\b/i) || compactLines(text, 1400);
-  const acceptance = sectionText(text, /^#{1,4}\s+(acceptance|success criteria|done|definition of done)\b/i) || compactLines(text, 1000);
+  const overview = [
+    sectionText(text, /^#{1,4}\s+(description|overview|summary|goal|objective|technical approach|approach)\b/i),
+    sectionText(text, /^#{1,4}\s+(functional requirements?|requirements?|user-facing behavior)\b/i),
+    sectionText(text, /^#{1,4}\s+(non-functional requirements?|nonfunctional requirements?|constraints|quality attributes)\b/i),
+  ].filter(Boolean).join("\n") || compactLines(text, 1400);
+  const acceptance = sectionText(text, /^#{1,4}\s+(acceptance criteria|acceptance|success criteria|done|definition of done)\b/i) || compactLines(text, 1000);
   return { overview, acceptance };
 }
 
@@ -5595,7 +6033,13 @@ function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
   }
 
   const identity = args.identity || gitIdentity(root);
-  const plan = args.planText ? parsePlanText(args.planText) : parsePlanFile(track.plan_path);
+  const plan = args.planText
+    ? planJsonToParsedPlan(planJsonFromText(
+      String(trackId),
+      args.planText,
+      specJsonFromText(String(trackId), asOptionalString(args.specText) || `# Spec: ${trackId}\n`)
+    ))
+    : parsePlanFile(track.plan_path);
   const specContext = trackSpecContext(track, args.specText || "");
   const epicId = args.epicId || track.metadata.beads_epic || `cadre-${track.track_id}`;
   const commands: BeadsCommandPlanEntry[] = [];
@@ -5672,7 +6116,7 @@ function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
     beadsTasks[phaseKey] = phaseId;
 
     for (const task of phase.tasks) {
-      const taskKey = `phase${phase.phase_index}_task${task.task_index}`;
+      const taskKey = task.task_key || `phase${phase.phase_index}_task${task.task_index}`;
       const taskResult = runBd(addCreateContext([
         "create",
         task.title,
@@ -5706,16 +6150,21 @@ function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
 
     const execution = phase.annotations.execution || "sequential";
     for (const task of phase.tasks) {
-      const taskKey = `phase${phase.phase_index}_task${task.task_index}`;
+      const taskKey = task.task_key || `phase${phase.phase_index}_task${task.task_index}`;
       if (execution !== "parallel" && task.task_index > 1) {
         const taskId = beadsTasks[taskKey];
-        const previousTaskId = beadsTasks[`phase${phase.phase_index}_task${task.task_index - 1}`];
+        const previousTask = phase.tasks.find((candidate) => candidate.task_index === task.task_index - 1);
+        const previousTaskKey = previousTask?.task_key || `phase${phase.phase_index}_task${task.task_index - 1}`;
+        const previousTaskId = beadsTasks[previousTaskKey];
         if (taskId && previousTaskId) runBd(["dep", "add", taskId, previousTaskId, "--json"]);
       }
       if (execution === "parallel") {
         for (const dep of task.depends || []) {
           const taskDep = dep.match(/^task(\d+)$/);
-          const depKey = taskDep ? `phase${phase.phase_index}_task${taskDep[1]}` : dep;
+          const dependencyTask = taskDep
+            ? phase.tasks.find((candidate) => candidate.task_index === Number(taskDep[1]))
+            : null;
+          const depKey = dependencyTask?.task_key || (taskDep ? `phase${phase.phase_index}_task${taskDep[1]}` : dep);
           const taskId = beadsTasks[taskKey];
           const dependencyTaskId = beadsTasks[depKey];
           if (taskId && dependencyTaskId) runBd(["dep", "add", taskId, dependencyTaskId, "--json"]);
@@ -6069,6 +6518,7 @@ function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreRes
   const metadata = patchJsonFile(track.metadata_path, (current) => {
     if (typeof args.coverage === "number") current.last_coverage = args.coverage;
     if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
+    if (isRecord(args.manualVerificationEvidence)) current.last_manual_verification_result = asJsonObject(args.manualVerificationEvidence);
     current.last_task_result = lastTaskResult;
     return current;
   });
@@ -6100,6 +6550,7 @@ function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreRes
                 working_root: args.workingRoot || null,
                 coverage: typeof args.coverage === "number" ? args.coverage : null,
                 recorded_at: recordedAt,
+                ...(isRecord(args.manualVerificationEvidence) ? { manual_verification: asJsonObject(args.manualVerificationEvidence) } : {}),
               },
             };
           }),
@@ -6200,6 +6651,173 @@ function patchCompletionJournal(
   return journal.entries[key];
 }
 
+function manualVerificationChecksFromInput(value: unknown): JsonObject[] {
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => {
+      if (typeof entry === "string") return { id: `check-${index + 1}`, heading: entry, status: "reported" };
+      return asJsonObject(entry);
+    }).filter((entry) => Object.keys(entry).length > 0);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, index) => ({ id: `check-${index + 1}`, heading: line, status: "reported" }));
+  }
+  const object = asJsonObject(value);
+  if (Array.isArray(object.checks)) return manualVerificationChecksFromInput(object.checks);
+  return Object.keys(object).length > 0 ? [object] : [];
+}
+
+function manualVerificationResultObject(value: unknown): JsonObject {
+  if (typeof value === "string" && value.trim()) return { summary: value.trim() };
+  return asJsonObject(value);
+}
+
+function manualVerificationInputResult(args: RuntimeArgs): JsonObject {
+  return manualVerificationResultObject(args.manualVerificationResult || args.manual_verification_result);
+}
+
+function manualVerificationInputSummary(args: RuntimeArgs, result: JsonObject): string {
+  return asOptionalString(args.manualVerificationSummary || args.manual_verification_summary)
+    || asOptionalString(result.summary)
+    || asOptionalString(result.message)
+    || "";
+}
+
+function manualVerificationInputChecks(args: RuntimeArgs, result: JsonObject): JsonObject[] {
+  return manualVerificationChecksFromInput(args.manualVerificationChecks || args.manual_verification_checks || result.checks);
+}
+
+function manualVerificationCommand(args: RuntimeArgs): string | null {
+  return asOptionalString(args.manualVerificationCommand || args.manual_verification_command) || null;
+}
+
+function commandResultEvidence(result: CommandResult): JsonObject {
+  return {
+    ok: result.ok,
+    status: result.status,
+    signal: result.signal || null,
+    command: result.command,
+    cwd: result.cwd || null,
+    stdout_tail: result.stdout.slice(-4000),
+    stderr_tail: result.stderr.slice(-4000),
+  };
+}
+
+function prepareManualVerificationCompletion(
+  root: string,
+  track: CadreTrack,
+  task: PlanTask,
+  args: RuntimeArgs,
+  workingRoot: WorkingRoot,
+): CoreResult {
+  const mode = asOptionalString(args.manualVerificationMode || args.manual_verification_mode)
+    || (manualVerificationCommand(args) ? "autorun" : "offline");
+  const command = manualVerificationCommand(args);
+  const suggestedChecks: JsonObject[] = asArray(asJsonObject(task.manual_verification).suggested_checks).map(asJsonObject);
+  const inputResult = manualVerificationInputResult(args);
+  const confirmed = humanReviewConfirmed(args);
+  if (mode === "autorun" && !confirmed) {
+    if (!command) {
+      return {
+        ok: false,
+        blocked: true,
+        stage: "manual_verification",
+        reason: "manualVerificationCommand is required for autorun manual verification",
+      };
+    }
+    const result = runCommand(command, [], {
+      cwd: workingRoot.path,
+      shell: true,
+      timeoutMs: Number(args.timeoutMs || 10 * 60 * 1000),
+      maxBuffer: 30 * 1024 * 1024,
+    });
+    const evidence: JsonObject = {
+      mode,
+      approved: false,
+      task_key: task.task_key,
+      scope: manualVerificationScope(task),
+      summary: result.ok
+        ? "Autorun manual verification command completed successfully."
+        : "Autorun manual verification command failed.",
+      suggested_checks: suggestedChecks,
+      checks: manualVerificationInputChecks(args, inputResult),
+      command,
+      result: commandResultEvidence(result),
+      recorded_at: utcNow(),
+    };
+    return {
+      ok: false,
+      dry_run: true,
+      blocked: true,
+      phase_state: "awaiting_human_review",
+      stage: "manual_verification_approval",
+      track_id: track.track_id,
+      task_key: task.task_key,
+      manual_verification: evidence,
+      reason: "Human approval is required before marking manual verification complete",
+    };
+  }
+  if (!confirmed) {
+    return {
+      ok: false,
+      dry_run: true,
+      blocked: true,
+      phase_state: "awaiting_human_review",
+      stage: "manual_verification_approval",
+      track_id: track.track_id,
+      task_key: task.task_key,
+      manual_verification: {
+        mode,
+        approved: false,
+        task_key: task.task_key,
+        scope: manualVerificationScope(task),
+        suggested_checks: suggestedChecks,
+      },
+      reason: "Human approval is required before marking manual verification complete",
+    };
+  }
+
+  let commandEvidence: JsonObject | null = isRecord(inputResult.result) ? asJsonObject(inputResult.result) : null;
+  if (mode === "autorun" && command && !commandEvidence) {
+    const result = runCommand(command, [], {
+      cwd: workingRoot.path,
+      shell: true,
+      timeoutMs: Number(args.timeoutMs || 10 * 60 * 1000),
+      maxBuffer: 30 * 1024 * 1024,
+    });
+    commandEvidence = commandResultEvidence(result);
+  }
+  const summary = manualVerificationInputSummary(args, inputResult)
+    || (commandEvidence ? (commandEvidence.ok === true ? "Approved autorun manual verification result." : "Approved autorun manual verification result with failures noted.") : "");
+  if (!summary.trim()) {
+    return {
+      ok: false,
+      blocked: true,
+      stage: "manual_verification_summary",
+      track_id: track.track_id,
+      task_key: task.task_key,
+      reason: "manualVerificationSummary or manualVerificationResult.summary is required",
+    };
+  }
+  const evidence: JsonObject = {
+    mode,
+    approved: true,
+    approved_at: utcNow(),
+    approved_by: gitIdentity(root) || null,
+    task_key: task.task_key,
+    scope: manualVerificationScope(task),
+    summary: summary.trim(),
+    suggested_checks: suggestedChecks,
+    checks: manualVerificationInputChecks(args, inputResult),
+    ...(command ? { command } : {}),
+    ...(commandEvidence ? { result: commandEvidence } : {}),
+    recorded_at: utcNow(),
+  };
+  return { ok: true, evidence };
+}
+
 function completeTask(root: string, args: RuntimeArgs = {}): CoreResult {
   return withSharedControlPlaneSync(root, args, "complete_task", () => completeTaskInner(root, { ...args, skipSync: true }));
 }
@@ -6224,11 +6842,27 @@ function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreResult {
       reason: workingRoot.error,
     };
   }
-  const coverage = runCoverage(root, args, workingRoot.path);
+  const manualVerificationTask = isManualVerificationTaskObject(task);
+  const manualVerificationCompletion = manualVerificationTask
+    ? prepareManualVerificationCompletion(root, track, task, args, workingRoot)
+    : null;
+  if (manualVerificationCompletion && manualVerificationCompletion.ok === false) return manualVerificationCompletion;
+  const manualVerificationEvidence = manualVerificationCompletion && isRecord(manualVerificationCompletion.evidence)
+    ? asJsonObject(manualVerificationCompletion.evidence)
+    : null;
+  const coverage: CoverageResult = manualVerificationTask
+    ? {
+        ok: true,
+        available: false,
+        command: null,
+        coverage: null,
+        reason: "Manual verification task uses structured human-approved evidence instead of coverage.",
+      }
+    : runCoverage(root, args, workingRoot.path);
   const threshold = Number(args.coverageThreshold ?? coverageThreshold(root));
   const allowMissingCoverage = args.allowMissingCoverage === true;
   const allowLowCoverage = args.allowLowCoverage === true;
-  if (!coverage.available && !allowMissingCoverage) {
+  if (!manualVerificationTask && !coverage.available && !allowMissingCoverage) {
     return {
       ok: false,
       stage: "coverage",
@@ -6238,7 +6872,7 @@ function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreResult {
       reason: coverage.reason || "Coverage command unavailable",
     };
   }
-  if (coverage.available && !coverage.ok) {
+  if (!manualVerificationTask && coverage.available && !coverage.ok) {
     return {
       ok: false,
       stage: "coverage",
@@ -6248,7 +6882,7 @@ function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreResult {
       reason: "Coverage/test command failed; task was not marked complete",
     };
   }
-  if (coverage.available && typeof coverage.coverage === "number" && coverage.coverage < threshold && !allowLowCoverage) {
+  if (!manualVerificationTask && coverage.available && typeof coverage.coverage === "number" && coverage.coverage < threshold && !allowLowCoverage) {
     return {
       ok: false,
       stage: "coverage",
@@ -6307,7 +6941,7 @@ function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreResult {
     beads.attempted = true;
   }
 
-  const lastTestRun = {
+  const lastTestRun = manualVerificationTask ? null : {
     command: coverage.command,
     cwd: coverage.cwd || workingRoot.path,
     ok: coverage.available ? coverage.ok : null,
@@ -6343,7 +6977,8 @@ function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreResult {
       coverage: coverage.coverage,
       repo: workingRoot.repo,
       workingRoot: path.relative(root, workingRoot.path) || ".",
-      lastTestRun,
+      ...(lastTestRun ? { lastTestRun } : {}),
+      ...(manualVerificationEvidence ? { manualVerificationEvidence } : {}),
     });
     if (!taskResult.ok) {
       patchCompletionJournal(track, journalKey, (current) => ({
@@ -8247,7 +8882,7 @@ function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
       ok: Boolean(options.hasCadreProject || isCadreProjectRoot(candidateRoot)),
       root: candidateRoot,
       markers: [
-        "cadre/tracks.md",
+        "cadre/tracks.json",
         "cadre/setup_state.json",
         "cadre/product.md",
         "cadre/config.json",
@@ -8480,41 +9115,26 @@ function regenIndex(root: string, options: RuntimeArgs = {}): CoreResult {
   if (options.lock !== false) {
     return withLock(root, "tracks-index", () => regenIndex(root, { ...options, lock: false }));
   }
-  const tracksFile = path.join(root, "cadre", "tracks.md");
-  const start = "<!-- cadre:index:start -->";
-  const end = "<!-- cadre:index:end -->";
+  const tracksFile = path.join(root, "cadre", "tracks.json");
+  const legacyMarkdownFile = path.join(root, "cadre", "tracks.md");
   const tracks = listTracks(root).sort((a, b) => a.track_id.localeCompare(b.track_id));
-  const body = tracks
-    .map((track) => {
-      const status = asOptionalString(track.metadata.status) || "new";
-      const marker = Object.prototype.hasOwnProperty.call(STATUS_MARKERS, status)
-        ? STATUS_MARKERS[status as keyof typeof STATUS_MARKERS]
-        : STATUS_MARKERS.new;
-      const name = track.metadata.name || track.metadata.track_id || track.track_id;
-      return `## ${marker} Track: ${name}`;
-    })
-    .join("\n");
-  const existing = fileExists(tracksFile) ? fs.readFileSync(tracksFile, "utf8") : "";
-  let next;
-  const startIndex = existing.indexOf(start);
-  const endIndex = existing.indexOf(end);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const before = existing.slice(0, startIndex + start.length).replace(/[ \t]*$/g, "");
-    const after = existing.slice(endIndex);
-    next = `${before}\n${body}${body ? "\n" : ""}${after.replace(/^\n*/, "")}`;
-  } else {
-    const preamble = existing ? `${existing.replace(/\n*$/, "")}\n` : "";
-    next = `${preamble}${start}\n${body}${body ? "\n" : ""}${end}\n`;
-  }
+  const payload = trackIndexPayload(root, tracks);
   fs.mkdirSync(path.dirname(tracksFile), { recursive: true });
-  const tmp = `${tracksFile}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, next);
-  fs.renameSync(tmp, tracksFile);
+  writeJson(tracksFile, payload);
+  let removedLegacyMarkdown: string | null = null;
+  if (fileExists(legacyMarkdownFile)) {
+    const legacy = fs.readFileSync(legacyMarkdownFile, "utf8");
+    if (hasGeneratedMarker(legacy) || legacy.includes("<!-- cadre:index:start -->") || legacy.includes("<!-- cadre:index:end -->")) {
+      fs.rmSync(legacyMarkdownFile, { force: true });
+      removedLegacyMarkdown = path.relative(root, legacyMarkdownFile);
+    }
+  }
   return {
     ok: true,
     tracks_file: tracksFile,
     tracks: tracks.length,
-    stdout: `Regenerated ${tracksFile} index from ${tracks.length} tracks' metadata (preamble preserved).\n`,
+    removed_legacy_markdown: removedLegacyMarkdown,
+    stdout: `Regenerated ${tracksFile} index from ${tracks.length} tracks' metadata.\n`,
     stderr: "",
   };
 }

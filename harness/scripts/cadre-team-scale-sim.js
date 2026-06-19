@@ -56,11 +56,13 @@ function buildFixture(root) {
   spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
   spawnSync("git", ["config", "user.email", "scale@example.com"], { cwd: root, encoding: "utf8" });
   spawnSync("git", ["config", "user.name", "Scale Sim"], { cwd: root, encoding: "utf8" });
-  write(path.join(root, "cadre", "tracks.md"), `# Tracks
-
-<!-- cadre:index:start -->
-<!-- cadre:index:end -->
-`);
+  write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
+    version: 1,
+    schema: "cadre.tracks_index.v1",
+    generated_at: "2026-06-17T00:00:00.000Z",
+    counts: { new: 0, in_progress: 0, completed: 0, blocked: 0, skipped: 0 },
+    tracks: [],
+  }, null, 2));
   write(path.join(root, "cadre", "config.json"), JSON.stringify({
     sync_mode: "shared",
     require_second_reviewer: true,

@@ -26,7 +26,7 @@ The operating rule is simple:
    structured output.
 5. The agent summarizes the packet result and follows returned next actions.
 
-Agents should not update `metadata.json`, `plan.md`, `tracks.md`, Beads tasks,
+Agents should not update `metadata.json`, `plan.md`, `tracks.json`, Beads tasks,
 parallel state, review verdicts, or provider evidence by hand.
 
 ## MCP Runtime
@@ -89,13 +89,13 @@ A Cadre track is the durable unit of work. Each track has:
 | File | Role |
 |------|------|
 | `metadata.json` | Source of truth for track id, status, owner, reviewer, review state, Beads ids, worktree paths, and repo routing. |
-| `spec.json` and `spec.md` | Canonical spec plus generated projection for goal, user-facing behavior, constraints, acceptance criteria, and non-goals. |
+| `spec.json` and `spec.md` | Canonical spec plus generated projection for title, description, functional requirements, non-functional requirements, acceptance criteria, and out of scope. |
 | `plan.json` and `plan.md` | Canonical plan plus generated projection for phases, tasks, dependencies, file claims, repo annotations, and task completion markers. |
 | `learnings.jsonl` and `learnings.md` | Append-only observations plus generated projection for later pattern promotion. |
 | `handoff.json` and `HANDOFF.md` | Optional canonical handoff plus generated context for another session or teammate. |
 
-`cadre/tracks.md` is only a derived human index. Cadre rebuilds it from track
-metadata. Agents should use packets and metadata for live status.
+`cadre/tracks.json` is the generated project-level track index. Cadre rebuilds
+it from track metadata. Agents should use packets and metadata for live status.
 
 Plan annotations drive scheduling:
 

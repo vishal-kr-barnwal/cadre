@@ -17,40 +17,36 @@ cadre-monorepo-check:
     - apk add --no-cache bash jq git >/dev/null 2>&1 || true
     - |
       set -eu
-      if [ ! -f cadre/tracks.md ]; then
-        echo "No cadre/tracks.md — skipping freshness gate."
+      if [ ! -f cadre/tracks.json ]; then
+        echo "No cadre/tracks.json — skipping freshness gate."
       else
-        body="$(mktemp)"
+        entries="$(mktemp)"
         expected="$(mktemp)"
+        actual="$(mktemp)"
+        : > "$entries"
         if [ -d cadre/tracks ]; then
           find cadre/tracks -mindepth 2 -maxdepth 2 -name metadata.json -print | sort | while read -r md; do
-            jq -r '
-              {new:"[ ]", in_progress:"[~]", completed:"[x]", blocked:"[!]", skipped:"[-]"} as $m
-              | "## \($m[(.status // "new")] // "[ ]") Track: \(.name // .track_id)"
-            ' "$md"
-          done > "$body"
-        else
-          : > "$body"
+            dir="${md%metadata.json}"
+            jq \
+              --arg metadata_path "$md" \
+              --arg spec_path "${dir}spec.json" \
+              --arg plan_path "${dir}plan.json" \
+              '{track_id, name:(.name // .description // .track_id), status:(.status // "new"), priority:(.priority // "medium"), owner:(.owner // null), reviewer:(.reviewer // null), beads_epic:(.beads_epic // null), review:(.review // null), metadata_path:$metadata_path, spec_path:$spec_path, plan_path:$plan_path}' \
+              "$md" >> "$entries"
+          done
         fi
-        if grep -qF '<!-- cadre:index:start -->' cadre/tracks.md && grep -qF '<!-- cadre:index:end -->' cadre/tracks.md; then
-          awk -v s='<!-- cadre:index:start -->' -v e='<!-- cadre:index:end -->' -v bf="$body" '
-            index($0,s){print; while((getline line < bf) > 0) print line; close(bf); skip=1; next}
-            index($0,e){skip=0}
-            !skip{print}
-          ' cadre/tracks.md > "$expected"
-        else
-          {
-            cat cadre/tracks.md
-            printf '%s\n' '<!-- cadre:index:start -->'
-            cat "$body"
-            printf '%s\n' '<!-- cadre:index:end -->'
-          } > "$expected"
-        fi
-        if ! diff -u "$expected" cadre/tracks.md; then
-          echo "ERROR: cadre/tracks.md is stale. Run cadre_mutate action regen_index through Cadre MCP and commit the result."
+        jq -S 'del(.generated_at)' cadre/tracks.json > "$actual"
+        jq -S '{
+          version: 1,
+          schema: "cadre.tracks_index.v1",
+          counts: (reduce .[] as $t ({new:0,in_progress:0,completed:0,blocked:0,skipped:0}; .[$t.status] = ((.[$t.status] // 0) + 1))),
+          tracks: (sort_by(.track_id))
+        }' "$entries" > "$expected"
+        if ! diff -u "$expected" "$actual"; then
+          echo "ERROR: cadre/tracks.json is stale. Run cadre_mutate action regen_index through Cadre MCP and commit the result."
           exit 1
         fi
-        echo "cadre/tracks.md matches metadata.json.status."
+        echo "cadre/tracks.json matches track metadata."
       fi
     - |
       set -eu

@@ -18,7 +18,7 @@ function hasCadreDirectory(dir: string): boolean {
 
 function isCadreStateDirectory(dir: string): boolean {
   return [
-    "tracks.md",
+    "tracks.json",
     "setup_state.json",
     "product.md",
     "tech-stack.json",

@@ -90,20 +90,6 @@
       "target": ".gitlab-ci.yml",
       "purpose": "Cross-repo merge train for GitLab polyrepo control repositories.",
       "scope": "target-project"
-    },
-    {
-      "id": "harness-check-github",
-      "source": "ci/cadre-harness-check.github.yml",
-      "target": ".github/workflows/cadre-harness-check.yml",
-      "purpose": "Cadre harness package generated-bundle and runtime check.",
-      "scope": "harness-only"
-    },
-    {
-      "id": "harness-check-gitlab",
-      "source": "ci/cadre-harness-check.gitlab.yml",
-      "target": ".gitlab-ci.yml",
-      "purpose": "Cadre harness package generated-bundle and runtime check.",
-      "scope": "harness-only"
     }
   ]
 }

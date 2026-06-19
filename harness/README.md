@@ -73,7 +73,7 @@ maintain Cadre state by hand.
 - `cadre/product.md`
 - `cadre/tech-stack.json`
 - `cadre/workflow.md`
-- `cadre/tracks.md` as a derived human index
+- `cadre/tracks.json` as the generated track index
 - `cadre/learnings.md`
 - `cadre/patterns.md`
 - `cadre/config.json`

@@ -108,6 +108,9 @@ export interface PlanTask {
   commit?: string | null;
   commit_shas?: string[];
   repo_shas?: JsonObject;
+  task_type?: string | null;
+  manual_verification?: JsonObject | null;
+  completion_evidence?: JsonObject | null;
   line: number;
   phase_index: number;
 }
@@ -226,6 +229,17 @@ export interface RuntimeArgs extends JsonObject {
   techStack?: JsonObject;
   humanConfirmed?: boolean;
   human_confirmed?: boolean;
+  manualVerificationMode?: string;
+  manual_verification_mode?: string;
+  manualVerificationSummary?: string;
+  manual_verification_summary?: string;
+  manualVerificationChecks?: JsonValue[] | JsonObject | string;
+  manual_verification_checks?: JsonValue[] | JsonObject | string;
+  manualVerificationCommand?: string;
+  manual_verification_command?: string;
+  manualVerificationResult?: JsonObject | string;
+  manual_verification_result?: JsonObject | string;
+  manualVerificationEvidence?: JsonObject;
   productGuidelinesText?: string;
   product_guidelines_text?: string;
   styleGuideIds?: string[] | string;
