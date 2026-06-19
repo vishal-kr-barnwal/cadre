@@ -23,6 +23,45 @@ function git(root, args) {
   return result;
 }
 
+function sampleSpec(id) {
+  return {
+    version: 1,
+    schema: "cadre.spec.v1",
+    track_id: id,
+    title: `Spec: ${id}`,
+    description: `Spec for ${id}`,
+    acceptance_criteria: [{ heading: "Works", body: "The work is complete." }],
+  };
+}
+
+function planTask(phaseIndex, taskIndex, title, files = [], extra = {}) {
+  return {
+    task_index: taskIndex,
+    task_key: `phase${phaseIndex}_task${taskIndex}`,
+    title,
+    status: "pending",
+    files,
+    depends_on: [],
+    commit_shas: [],
+    repo_shas: {},
+    ...extra,
+  };
+}
+
+function renderPlanProjection(plan) {
+  const lines = [`<!-- cadre:generated from="cadre/tracks/${plan.track_id}/plan.json" schema="cadre.plan.v1" hash="test" -->`, `# Plan: ${plan.track_id}`, ""];
+  for (const phase of plan.phases || []) {
+    lines.push(`## ${phase.title}`, "");
+    for (const task of phase.tasks || []) {
+      lines.push(`- [ ] Task ${task.task_index}: ${task.title}`);
+      if (task.files?.length) lines.push(`  <!-- files: ${task.files.join(", ")} -->`);
+      if (task.repo) lines.push(`  <!-- repo: ${task.repo} -->`);
+      lines.push("");
+    }
+  }
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
 function writeTrack(root, id, plan, metadata = {}) {
   write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
     version: 1,
@@ -42,8 +81,10 @@ function writeTrack(root, id, plan, metadata = {}) {
     depends_on: [],
     ...metadata,
   }, null, 2));
-  write(path.join(dir, "plan.md"), plan);
-  write(path.join(dir, "spec.md"), `# Spec: ${id}\n`);
+  write(path.join(dir, "plan.json"), JSON.stringify(plan, null, 2));
+  write(path.join(dir, "spec.json"), JSON.stringify(sampleSpec(id), null, 2));
+  write(path.join(dir, "plan.md"), renderPlanProjection(plan));
+  write(path.join(dir, "spec.md"), `<!-- cadre:generated from="cadre/tracks/${id}/spec.json" schema="cadre.spec.v1" hash="test" -->\n# Spec: ${id}\n`);
 }
 
 function startServer() {
@@ -225,9 +266,11 @@ test("MCP root resolution rejects harness skill directories without project stat
     }
     const artifactTool = tools.tools.find((tool) => tool.name === "cadre_artifact");
     const artifactActions = artifactTool.inputSchema.properties.action.enum;
-    for (const action of ["catalog", "schema", "import", "validate", "render", "diff", "sync"]) {
+    for (const action of ["catalog", "schema", "validate", "render", "diff", "sync"]) {
       assert.ok(artifactActions.includes(action), `expected ${action} artifact action`);
     }
+    assert.equal(artifactActions.includes("import"), false);
+    assert.ok(workflowTool.inputSchema.allOf.some((entry) => entry.not?.anyOf?.some((item) => item.required?.includes("planText"))));
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
     assert.ok(projectActions.includes("tech_stack_summary"));
@@ -468,14 +511,18 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
         },
       ],
     }, null, 2));
-    writeTrack(root, "poly_lsp", `# Plan: poly_lsp
-
-## Phase 1: App
-
-- [ ] Task 1: Update app
-  <!-- repo: app -->
-  <!-- files: src/app.js -->
-`, {
+    writeTrack(root, "poly_lsp", {
+      version: 1,
+      schema: "cadre.plan.v1",
+      track_id: "poly_lsp",
+      phases: [{
+        phase_index: 1,
+        title: "Phase 1: App",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [planTask(1, 1, "Update app", ["src/app.js"], { repo: "app" })],
+      }],
+    }, {
       repos: {
         app: {
           submodule_path: "products/app",
@@ -540,17 +587,21 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     write(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
     write(path.join(root, "src", "app.test.ts"), "test('app', () => {});\n");
-    writeTrack(root, "packets_20260618", `# Plan: packets_20260618
-
-## Phase 1: Packet Flow
-<!-- execution: parallel -->
-
-- [ ] Task 1: Update app
-  <!-- files: src/app.ts -->
-
-- [ ] Task 2: Update test
-  <!-- files: src/app.test.ts -->
-`);
+    writeTrack(root, "packets_20260618", {
+      version: 1,
+      schema: "cadre.plan.v1",
+      track_id: "packets_20260618",
+      phases: [{
+        phase_index: 1,
+        title: "Phase 1: Packet Flow",
+        execution_mode: "parallel",
+        depends_on: [],
+        tasks: [
+          planTask(1, 1, "Update app", ["src/app.ts"]),
+          planTask(1, 2, "Update test", ["src/app.test.ts"]),
+        ],
+      }],
+    });
 
     await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
 

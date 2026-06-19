@@ -166,7 +166,6 @@ export interface RuntimeArgs extends JsonObject {
   track_id?: string | undefined;
   phaseIndex?: number | undefined;
   taskIndex?: number | undefined;
-  planPath?: string;
   status?: string;
   patch?: JsonObject;
   identity?: string | null;
@@ -224,8 +223,13 @@ export interface RuntimeArgs extends JsonObject {
   lspResult?: JsonObject;
   lsp_result?: JsonObject;
   dryRun?: boolean;
-  planText?: string;
-  specText?: string;
+  product?: JsonObject;
+  productGuidelines?: JsonObject;
+  product_guidelines?: JsonObject;
+  workflowPolicy?: JsonObject;
+  workflow_policy?: JsonObject;
+  plan?: JsonObject;
+  spec?: JsonObject;
   techStack?: JsonObject;
   humanConfirmed?: boolean;
   human_confirmed?: boolean;
@@ -240,8 +244,6 @@ export interface RuntimeArgs extends JsonObject {
   manualVerificationResult?: JsonObject | string;
   manual_verification_result?: JsonObject | string;
   manualVerificationEvidence?: JsonObject;
-  productGuidelinesText?: string;
-  product_guidelines_text?: string;
   styleGuideIds?: string[] | string;
   styleGuideMaxChars?: number;
   metadata?: TrackMetadata;

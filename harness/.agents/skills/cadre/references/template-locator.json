@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "template-locator",
+  "title": "Cadre Template Assets",
+  "markdownUse": "human_projection_only",
+  "rules": [
+    "`cadre_workflow` with reviewable dry-runs reports review artifacts and a",
+    "`cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes",
+    "`cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including",
+    "`cadre_intel` owns LSP setup, warm review, cold review, and daemon status",
+    "`cadre_mutate` owns derived index refreshes and other Cadre state mutations."
+  ],
+  "sections": [
+    {
+      "heading": "Packet Ownership",
+      "body": "- `cadre_workflow` with reviewable dry-runs reports review artifacts and a\n  token-safe `review_bundle` with full proposed files on disk. Setup, new-track,\n  revise, refresh document updates, release artifacts, and handoff artifacts use\n  this pattern.\n- `cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes\n  the setup scaffold from bundled templates and confirmed setup payload.\n- `cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including\n  template-backed track learnings.\n- `cadre_intel` owns LSP setup, warm review, cold review, and daemon status\n  checks.\n- `cadre_mutate` owns derived index refreshes and other Cadre state mutations."
+    },
+    {
+      "heading": "Style Guides",
+      "body": "Setup always selects the general style guide when available, adds guides derived\nfrom structured `techStack` JSON, and unions any explicit `styleGuideIds` passed\nto the packet.\nThe setup packet returns `styleGuides.detected`, `styleGuides.selected`,\n`styleGuides.written`, `styleGuides.skipped`, and `styleGuides.missing`.\n\nIf `styleGuides.missing` is non-empty, surface the packet warning and keep the\nvalid selected guides. Do not remove user-supplied `styleGuideIds` just to make a\ndry-run warning disappear. If the packet returns `ok:false`, halt and surface the\npacket error. Do not replace the packet with manual copying."
+    },
+    {
+      "heading": "Workflow Review Bundles",
+      "body": "Reviewable workflow dry-runs return `review_artifacts` as metadata only and\n`review_bundle` with a manifest path, absolute review file paths, and optional\nshell commands for local rendering. Use those files for human review instead of\npasting complete generated files into chat/model context by default."
+    },
+    {
+      "heading": "Agent Use",
+      "body": "Use template references only to understand what the packet-created files mean.\nAll setup, new-track, LSP, style-guide, Beads, and index writes are packet-owned."
+    }
+  ]
+}

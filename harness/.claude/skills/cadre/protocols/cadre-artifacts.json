@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "schema": "cadre.protocol.v1",
+  "id": "cadre-artifacts",
+  "description": "Sync canonical Cadre artifacts with generated human projections",
+  "workflow": "artifacts",
+  "markdownUse": "human_projection_only",
+  "preconditions": [
+    {
+      "tool": "cadre_project",
+      "arguments": {
+        "action": "ping"
+      },
+      "requirement": "Cadre MCP must be available"
+    },
+    {
+      "requirement": "Every project-scoped packet call includes root"
+    },
+    {
+      "requirement": "If a required packet returns ok:false, halt and report the packet error"
+    }
+  ],
+  "packetFlow": [
+    {
+      "step": 1,
+      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
+    },
+    {
+      "step": 2,
+      "instruction": "For discovery, call `cadre_artifact` with `action: \"catalog\"`, `\"schema\"`, `\"validate\"`, `\"render\"`, or `\"diff\"` and structured JSON arguments."
+    },
+    {
+      "step": 3,
+      "instruction": "For preview, call `cadre_artifact` with `action: \"sync\"`, the requested scope, and no legacy Markdown import fields."
+    },
+    {
+      "step": 4,
+      "instruction": "Review `review_bundle` when present. The bundle contains a manifest/path list for full proposed artifacts so large Markdown projections stay out of model context."
+    },
+    {
+      "step": 5,
+      "instruction": "To apply reviewed synchronization, call `cadre_artifact` again with `action: \"sync\"`, `execute: true`, and `humanConfirmed: true`."
+    },
+    {
+      "step": 6,
+      "instruction": "Summarize changed canonical JSON/JSONL artifacts, regenerated human projections, skipped unmarked projections, warnings, and next recommended packet."
+    }
+  ],
+  "confirmation": {
+    "requiredForMutation": true,
+    "dryRunFirst": true,
+    "executeArgument": "execute",
+    "humanConfirmationArgument": "humanConfirmed"
+  },
+  "forbiddenActions": [
+    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not read or write Markdown projections as canonical state",
+    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
+  ],
+  "responseSummary": [
+    "packet ok/error state",
+    "selected track or scope",
+    "warnings and blockers",
+    "changed canonical JSON/JSONL artifacts",
+    "generated human projections when relevant",
+    "next recommended packet"
+  ],
+  "references": [
+    "mcp-contract",
+    "template-locator"
+  ]
+}

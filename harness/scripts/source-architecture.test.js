@@ -101,7 +101,7 @@ test("generated cadre-core bundle preserves the public runtime API", () => {
     "metadataPatch",
     "parallelWorkflow",
     "parsePlanFile",
-    "parsePlanText",
+    "parsePlanJson",
     "phaseSchedule",
     "planClaims",
     "planAssist",

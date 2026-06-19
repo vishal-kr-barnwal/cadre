@@ -32,24 +32,90 @@ function metadata(id, status, owner, extra = {}) {
   };
 }
 
-function plan(id, index) {
+function planJson(id, index) {
   const shared = index % 5 === 0 ? "src/shared/session.ts" : `src/module_${index}/index.ts`;
-  return `# Plan: ${id}
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: id,
+    title: `Plan: ${id}`,
+    phases: [
+      {
+        phase_index: 1,
+        title: "Phase 1: Build",
+        execution_mode: "parallel",
+        depends_on: [],
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "phase1_task1",
+            title: `Implement core for ${id}`,
+            status: "pending",
+            files: [shared, `src/module_${index}/index.test.ts`],
+            depends_on: [],
+            commit_shas: [],
+            repo_shas: {},
+          },
+          {
+            task_index: 2,
+            task_key: "phase1_task2",
+            title: `Update docs for ${id}`,
+            status: "pending",
+            files: [`docs/module_${index}.md`],
+            depends_on: [],
+            commit_shas: [],
+            repo_shas: {},
+          },
+        ],
+      },
+      {
+        phase_index: 2,
+        title: "Phase 2: Verify",
+        execution_mode: "sequential",
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "phase2_task1",
+            title: "Run verification",
+            status: "pending",
+            files: [`src/module_${index}/index.ts`],
+            depends_on: [],
+            commit_shas: [],
+            repo_shas: {},
+          },
+        ],
+      },
+    ],
+  };
+}
 
-## Phase 1: Build
-<!-- execution: parallel -->
+function specJson(id) {
+  return {
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: id,
+    title: `Spec: ${id}`,
+    description: `Scale simulation spec for ${id}`,
+    acceptance_criteria: [{ heading: "Complete", body: "The simulated task completes with verification evidence." }],
+  };
+}
 
-- [ ] Task 1: Implement core for ${id}
-  <!-- files: ${shared}, src/module_${index}/index.test.ts -->
+function renderPlanProjection(plan) {
+  const lines = [`<!-- cadre:generated from="cadre/tracks/${plan.track_id}/plan.json" schema="cadre.plan.v1" hash="scale-sim" -->`, `# Plan: ${plan.track_id}`, ""];
+  for (const phase of plan.phases || []) {
+    lines.push(`## ${phase.title}`, "");
+    for (const task of phase.tasks || []) {
+      lines.push(`- [ ] Task ${task.task_index}: ${task.title}`);
+      if (task.files?.length) lines.push(`  <!-- files: ${task.files.join(", ")} -->`);
+      lines.push("");
+    }
+  }
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
 
-- [ ] Task 2: Update docs for ${id}
-  <!-- files: docs/module_${index}.md -->
-
-## Phase 2: Verify
-
-- [ ] Task 1: Run verification
-  <!-- files: src/module_${index}/index.ts -->
-`;
+function renderSpecProjection(spec) {
+  return `<!-- cadre:generated from="cadre/tracks/${spec.track_id}/spec.json" schema="cadre.spec.v1" hash="scale-sim" -->\n# ${spec.title}\n\n${spec.description}\n`;
 }
 
 function buildFixture(root) {
@@ -85,9 +151,14 @@ function buildFixture(root) {
         }
       : undefined;
     const trackDir = path.join(root, "cadre", "tracks", id);
+    const plan = planJson(id, i);
+    const spec = specJson(id);
     write(path.join(trackDir, "metadata.json"), JSON.stringify(metadata(id, status, owner, { review }), null, 2));
-    write(path.join(trackDir, "plan.md"), plan(id, i));
-    write(path.join(trackDir, "spec.md"), `# Spec: ${id}\n`);
+    write(path.join(trackDir, "plan.json"), JSON.stringify(plan, null, 2));
+    write(path.join(trackDir, "spec.json"), JSON.stringify(spec, null, 2));
+    write(path.join(trackDir, "plan.md"), renderPlanProjection(plan));
+    write(path.join(trackDir, "spec.md"), renderSpecProjection(spec));
+    write(path.join(trackDir, "learnings.jsonl"), `${JSON.stringify({ id: "initial", kind: "track_learning", text: `# Learnings: ${id}` })}\n`);
     write(path.join(trackDir, "learnings.md"), `# Learnings: ${id}\n`);
   }
 }

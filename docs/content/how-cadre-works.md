@@ -26,8 +26,9 @@ The operating rule is simple:
    structured output.
 5. The agent summarizes the packet result and follows returned next actions.
 
-Agents should not update `metadata.json`, `plan.md`, `tracks.json`, Beads tasks,
-parallel state, review verdicts, or provider evidence by hand.
+Agents should not mutate `metadata.json`, `plan.json`, `tracks.json`, generated
+projections, Beads tasks, parallel state, review verdicts, or provider evidence
+by hand.
 
 ## MCP Runtime
 
@@ -50,7 +51,7 @@ include:
 | `cadre_parallel` | Worker waves, setup, finish records, merge-back, and cleanup. |
 | `cadre_review` | Review assist, machine gate, provider evidence, PR/CI status, and final gate evaluation. |
 | `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, and warm review. |
-| `cadre_artifact` | Canonical artifact catalog, schema, legacy import, validation, projection rendering, diff, and sync. |
+| `cadre_artifact` | Canonical artifact catalog, schema, validation, projection rendering, diff, and sync. |
 | `cadre_beads` | Structured low-level Beads operations used by packets. |
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
@@ -89,30 +90,43 @@ A Cadre track is the durable unit of work. Each track has:
 | File | Role |
 |------|------|
 | `metadata.json` | Source of truth for track id, status, owner, reviewer, review state, Beads ids, worktree paths, and repo routing. |
-| `spec.json` and `spec.md` | Canonical spec plus generated projection for title, description, functional requirements, non-functional requirements, acceptance criteria, and out of scope. |
-| `plan.json` and `plan.md` | Canonical plan plus generated projection for phases, tasks, dependencies, file claims, repo annotations, and task completion markers. |
+| `spec.json` and `spec.md` | Canonical spec JSON plus generated projection for title, description, functional requirements, non-functional requirements, acceptance criteria, and out of scope. |
+| `plan.json` and `plan.md` | Canonical plan JSON plus generated projection for phases, tasks, dependencies, file claims, repo annotations, and task completion markers. |
 | `learnings.jsonl` and `learnings.md` | Append-only observations plus generated projection for later pattern promotion. |
 | `handoff.json` and `HANDOFF.md` | Optional canonical handoff plus generated context for another session or teammate. |
 
 `cadre/tracks.json` is the generated project-level track index. Cadre rebuilds
 it from track metadata. Agents should use packets and metadata for live status.
 
-Plan annotations drive scheduling:
+Plan JSON fields drive scheduling:
 
-```markdown
-## Phase 1: Core
-<!-- execution: parallel -->
-
-- [ ] Task 1: Add token parser
-  <!-- files: src/auth/token.ts, src/auth/token.test.ts -->
-
-- [ ] Task 2: Add session store
-  <!-- files: src/auth/session.ts, src/auth/session.test.ts -->
-  <!-- depends: task1 -->
+```json
+{
+  "phase_index": 1,
+  "title": "Phase 1: Core",
+  "execution_mode": "parallel",
+  "depends_on": [],
+  "tasks": [
+    {
+      "task_index": 1,
+      "task_key": "phase1_task1",
+      "title": "Add token parser",
+      "files": ["src/auth/token.ts", "src/auth/token.test.ts"]
+    },
+    {
+      "task_index": 2,
+      "task_key": "phase1_task2",
+      "title": "Add session store",
+      "files": ["src/auth/session.ts", "src/auth/session.test.ts"],
+      "depends_on": ["phase1_task1"]
+    }
+  ]
+}
 ```
 
-Cadre parses those annotations, detects file claims, checks dependencies, and
-returns ready work. The agent does not infer scheduling from Markdown alone.
+Cadre parses the canonical JSON, detects file claims, checks dependencies, and
+returns ready work. Generated Markdown projections display the same information
+for human review only.
 
 ## Review Gates
 

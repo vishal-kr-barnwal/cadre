@@ -25,6 +25,142 @@ function git(root, args) {
   return result;
 }
 
+function sampleSpec(id, overrides = {}) {
+  return {
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: id,
+    title: `Spec: ${id}`,
+    description: `Spec for ${id}`,
+    functional_requirements: [{ heading: "Deliver behavior", body: "Implement the requested behavior." }],
+    non_functional_requirements: [],
+    acceptance_criteria: [{ heading: "Works", body: "The planned work is complete and verified." }],
+    out_of_scope: [],
+    ...overrides,
+  };
+}
+
+function samplePlan(id, overrides = {}) {
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: id,
+    title: `Plan: ${id}`,
+    phases: [
+      {
+        phase_index: 1,
+        title: "Phase 1: Build",
+        execution_mode: "parallel",
+        depends_on: [],
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "phase1_task1",
+            title: "Implement core",
+            status: "pending",
+            files: ["src/core.js"],
+            depends_on: [],
+            commit_shas: [],
+            repo_shas: {},
+          },
+          {
+            task_index: 2,
+            task_key: "phase1_task2",
+            title: "Add tests",
+            status: "pending",
+            files: ["test/core.test.js"],
+            depends_on: ["phase1_task1"],
+            commit_shas: [],
+            repo_shas: {},
+          },
+        ],
+      },
+      {
+        phase_index: 2,
+        title: "Phase 2: Finish",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "phase2_task1",
+            title: "Verify",
+            status: "pending",
+            files: ["src/core.js"],
+            depends_on: [],
+            commit_shas: [],
+            repo_shas: {},
+          },
+        ],
+      },
+      {
+        phase_index: 3,
+        title: "Phase 3: User Manual Verification",
+        execution_mode: "sequential",
+        depends_on: ["phase1", "phase2"],
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "track_manual_verification",
+            title: "Track-Level User Manual Verification",
+            status: "pending",
+            task_type: "user_manual_verification",
+            files: [],
+            depends_on: ["phase1_manual_verification", "phase2_manual_verification"],
+            manual_verification: { scope: "track", suggested_checks: [] },
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function planFromPhases(id, phases) {
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: id,
+    title: `Plan: ${id}`,
+    phases,
+  };
+}
+
+function planTask(phaseIndex, taskIndex, title, files = [], extra = {}) {
+  return {
+    task_index: taskIndex,
+    task_key: `phase${phaseIndex}_task${taskIndex}`,
+    title,
+    status: "pending",
+    files,
+    depends_on: [],
+    commit_shas: [],
+    repo_shas: {},
+    ...extra,
+  };
+}
+
+function renderPlanProjection(plan) {
+  const markerFor = (status) => status === "completed" ? "x" : status === "in_progress" ? "~" : status === "blocked" ? "!" : status === "skipped" ? "-" : " ";
+  const lines = [`<!-- cadre:generated from="cadre/tracks/${plan.track_id}/plan.json" schema="cadre.plan.v1" hash="test" -->`, `# Plan: ${plan.track_id}`, ""];
+  for (const phase of plan.phases || []) {
+    lines.push(`## ${phase.title}`, "");
+    for (const task of phase.tasks || []) {
+      lines.push(`- [${markerFor(task.status)}] Task ${task.task_index}: ${task.title}`);
+      if (task.files?.length) lines.push(`  <!-- files: ${task.files.join(", ")} -->`);
+      if (task.task_type) lines.push(`  <!-- task-type: ${task.task_type} -->`);
+      if (task.manual_verification?.scope) lines.push(`  <!-- manual-verification-scope: ${task.manual_verification.scope} -->`);
+      lines.push("");
+    }
+  }
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+function renderSpecProjection(spec) {
+  return `<!-- cadre:generated from="cadre/tracks/${spec.track_id}/spec.json" schema="cadre.spec.v1" hash="test" -->\n# ${spec.title || `Spec: ${spec.track_id}`}\n\n## Description\n\n${spec.description || ""}\n`;
+}
+
 function writeTrack(root, id, plan, metadata = {}) {
   write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
     version: 1,
@@ -45,29 +181,13 @@ function writeTrack(root, id, plan, metadata = {}) {
     worktree_path: `.worktrees/${id}`,
     ...metadata,
   }, null, 2));
-  write(path.join(dir, "plan.md"), plan);
-  write(path.join(dir, "spec.md"), `# Spec: ${id}\n`);
+  const planJson = typeof plan === "string" ? samplePlan(id) : plan;
+  const specJson = sampleSpec(id);
+  write(path.join(dir, "plan.json"), JSON.stringify(planJson, null, 2));
+  write(path.join(dir, "spec.json"), JSON.stringify(specJson, null, 2));
+  write(path.join(dir, "plan.md"), renderPlanProjection(planJson));
+  write(path.join(dir, "spec.md"), renderSpecProjection(specJson));
   write(path.join(dir, "learnings.md"), `# Learnings: ${id}\n`);
-}
-
-function samplePlan(id) {
-  return `# Plan: ${id}
-
-## Phase 1: Build
-<!-- execution: parallel -->
-
-- [ ] Task 1: Implement core
-  <!-- files: src/core.js -->
-
-- [ ] Task 2: Add tests
-  <!-- files: test/core.test.js -->
-  <!-- depends: task1 -->
-
-## Phase 2: Finish
-
-- [ ] Task 1: Verify
-  <!-- files: src/core.js -->
-`;
 }
 
 function manualVerificationPlanJson(id) {
@@ -121,6 +241,7 @@ function writeManualVerificationTrack(root, id) {
   writeTrack(root, id, "# Plan\n");
   const planJson = manualVerificationPlanJson(id);
   write(path.join(root, "cadre", "tracks", id, "plan.json"), JSON.stringify(planJson, null, 2));
+  write(path.join(root, "cadre", "tracks", id, "plan.md"), renderPlanProjection(planJson));
 }
 
 function readJson(file) {
@@ -287,19 +408,29 @@ test("isCadreProjectRoot requires real Cadre state markers", () => {
   }
 });
 
-test("parsePlanText captures annotations, repo ownership, and commit refs", () => {
-  const plan = core.parsePlanText(`# Plan
-
-## Phase 1: Typed Work
-<!-- execution: parallel -->
-<!-- depends: phase0 -->
-
-- [~] Task 1: Touch runtime commit: abc1234
-  <!-- files: src/runtime.ts, tests/runtime.test.ts -->
-  <!-- repo: app -->
-  <!-- depends: task0 -->
-  <!-- shas: app:deadbeef -->
-`);
+test("parsePlanJson captures execution, repo ownership, dependencies, and commit refs", () => {
+  const plan = core.parsePlanJson({
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: "typed",
+    phases: [{
+      phase_index: 1,
+      title: "Phase 1: Typed Work",
+      execution_mode: "parallel",
+      depends_on: ["phase0"],
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_task1",
+        title: "Touch runtime",
+        status: "in_progress",
+        files: ["src/runtime.ts", "tests/runtime.test.ts"],
+        repo: "app",
+        depends_on: ["task0"],
+        commit_shas: ["abc1234"],
+        repo_shas: { app: "deadbeef" },
+      }],
+    }],
+  });
 
   assert.equal(plan.ok, true);
   assert.equal(plan.phases.length, 1);
@@ -347,7 +478,7 @@ test("implementationPrep returns bounded candidate context", () => {
     const prep = core.implementationPrep(root, { identity: "dev@example.com" });
     assert.equal(prep.ok, true);
     assert.equal(prep.selected_track, "prep_20260617");
-    assert.equal(prep.context.task_counts.total, 3);
+    assert.equal(prep.context.task_counts.total, 4);
     assert.equal(prep.integrity.ok, true);
     assert.equal(prep.team_summary.total_tracks, 1);
   } finally {
@@ -486,8 +617,8 @@ test("createBeadsTree dryRun can preflight a track before files exist", () => {
       trackId: "draft_20260617",
       identity: "dev@example.com",
       dryRun: true,
-      planText: samplePlan("draft_20260617"),
-      specText: "# Spec\n\n## Acceptance\nWorks before files exist.\n",
+      plan: samplePlan("draft_20260617"),
+      spec: sampleSpec("spec", { acceptance_criteria: [{ heading: "Works", body: "Works before files exist." }] }),
       metadata: { description: "Draft track", priority: "high" },
     });
 
@@ -622,31 +753,12 @@ test("phaseSchedule returns conflict-free ready phase groups", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-phase-schedule-test-"));
   try {
     git(root, ["init"]);
-    writeTrack(root, "phase_20260617", `# Plan: phase_20260617
-
-## Phase 1: Foundation
-
-- [x] Task 1: Done
-  <!-- files: src/foundation.js -->
-
-## Phase 2: API
-<!-- depends: -->
-
-- [ ] Task 1: Build API
-  <!-- files: src/api.js -->
-
-## Phase 3: UI
-<!-- depends: -->
-
-- [ ] Task 1: Build UI
-  <!-- files: src/ui.js -->
-
-## Phase 4: Wire
-<!-- depends: phase2, phase3 -->
-
-- [ ] Task 1: Integrate
-  <!-- files: src/app.js -->
-`);
+    writeTrack(root, "phase_20260617", planFromPhases("phase_20260617", [
+      { phase_index: 1, title: "Phase 1: Foundation", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Done", ["src/foundation.js"], { status: "completed" })] },
+      { phase_index: 2, title: "Phase 2: API", execution_mode: "sequential", depends_on: [], tasks: [planTask(2, 1, "Build API", ["src/api.js"])] },
+      { phase_index: 3, title: "Phase 3: UI", execution_mode: "sequential", depends_on: [], tasks: [planTask(3, 1, "Build UI", ["src/ui.js"])] },
+      { phase_index: 4, title: "Phase 4: Wire", execution_mode: "sequential", depends_on: ["phase2", "phase3"], tasks: [planTask(4, 1, "Integrate", ["src/app.js"])] },
+    ]));
 
     const schedule = core.phaseSchedule(root, { trackId: "phase_20260617" });
 
@@ -663,25 +775,11 @@ test("phaseSchedule splits ready phases with file ownership conflicts", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-phase-conflict-test-"));
   try {
     git(root, ["init"]);
-    writeTrack(root, "phase_conflict_20260617", `# Plan: phase_conflict_20260617
-
-## Phase 1: Foundation
-
-- [x] Task 1: Done
-  <!-- files: src/foundation.js -->
-
-## Phase 2: API
-<!-- depends: -->
-
-- [ ] Task 1: Update shared model
-  <!-- files: src/shared.js -->
-
-## Phase 3: UI
-<!-- depends: -->
-
-- [ ] Task 1: Update shared model
-  <!-- files: src/shared.js -->
-`);
+    writeTrack(root, "phase_conflict_20260617", planFromPhases("phase_conflict_20260617", [
+      { phase_index: 1, title: "Phase 1: Foundation", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Done", ["src/foundation.js"], { status: "completed" })] },
+      { phase_index: 2, title: "Phase 2: API", execution_mode: "sequential", depends_on: [], tasks: [planTask(2, 1, "Update shared model", ["src/shared.js"])] },
+      { phase_index: 3, title: "Phase 3: UI", execution_mode: "sequential", depends_on: [], tasks: [planTask(3, 1, "Update shared model", ["src/shared.js"])] },
+    ]));
 
     const schedule = core.phaseSchedule(root, { trackId: "phase_conflict_20260617" });
 
@@ -1043,7 +1141,7 @@ test("workflow setup requires human confirmation before writing reviewed artifac
     const args = {
       workflow: "setup",
       providerMode: "local",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       reviewBundleDir: ".cadre-review",
     };
@@ -1083,7 +1181,7 @@ test("workflow setup writes detected and requested style guides from templates",
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
         frameworks: ["React"],
@@ -1172,7 +1270,7 @@ test("generated plugin setup resolves skill templates and writes default LSP con
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Rust"], styleGuideIds: ["rust"] },
     });
 
@@ -1209,8 +1307,8 @@ test("workflow setup preserves baseline workflow quality gates with custom notes
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      productText: "# Product\n",
-      workflowText: "# Project Workflow\n\nRun `cargo test` before broad validation.\n",
+      product: { title: "Product", summary: "Test product" },
+      workflowPolicy: { title: "Project Workflow", summary: "Run `cargo test` before broad validation." },
       techStack: { languages: ["Rust"] },
     });
 
@@ -1243,8 +1341,8 @@ test("workflow setup preserves baseline product context with custom notes", () =
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      productText: "# Product Context\n\nA self-hosted feature flag platform for internal teams.\n",
-      productGuidelinesText: "# Product Guidelines\n\nPreserve tenant isolation and audit trails.\n",
+      product: { title: "Product Context", summary: "A self-hosted feature flag platform for internal teams." },
+      productGuidelines: { title: "Product Guidelines", summary: "Preserve tenant isolation and audit trails." },
       techStack: { languages: ["Rust"] },
     });
 
@@ -1316,7 +1414,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(githubSetup.ok, true);
@@ -1332,7 +1430,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Go"] },
     });
     assert.equal(gitlabSetup.ok, true);
@@ -1347,7 +1445,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Python"] },
     });
     assert.equal(localSetup.ok, true);
@@ -1377,7 +1475,7 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
       humanConfirmed: true,
       topology: "polyrepo",
       providerMode: "github",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       lsp: true,
       repos: {
@@ -1418,7 +1516,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
 
     const dryRun = core.workflowPacket(root, {
       workflow: "setup",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(dryRun.ok, true);
@@ -1428,7 +1526,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
     const blocked = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(blocked.ok, false);
@@ -1440,7 +1538,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(local.ok, true);
@@ -1463,7 +1561,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     const blocked = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(blocked.ok, false);
@@ -1475,7 +1573,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(local.ok, true);
@@ -1492,7 +1590,7 @@ test("workflow setup warns on unknown explicit style guide ids without dropping 
     git(root, ["init"]);
     const setup = core.workflowPacket(root, {
       workflow: "setup",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       styleGuideIds: "typescript not-a-guide",
     });
@@ -1517,7 +1615,7 @@ test("workflow setup execute requires Beads init before writing project state", 
 
     const dryRun = core.workflowPacket(root, {
       workflow: "setup",
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       providerMode: "local",
     });
@@ -1528,7 +1626,7 @@ test("workflow setup execute requires Beads init before writing project state", 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       providerMode: "local",
     });
@@ -1557,7 +1655,7 @@ test("implementationPrep returns packet-selected style guides", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
         frameworks: ["React"],
@@ -1566,13 +1664,9 @@ test("implementationPrep returns packet-selected style guides", () => {
       },
     });
     assert.equal(setup.ok, true);
-    writeTrack(root, "style_20260618", `# Plan: style_20260618
-
-## Phase 1: Build
-
-- [ ] Task 1: Update app
-  <!-- files: src/app.ts, src/app.css -->
-`);
+    writeTrack(root, "style_20260618", planFromPhases("style_20260618", [
+      { phase_index: 1, title: "Phase 1: Build", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Update app", ["src/app.ts", "src/app.css"])] },
+    ]));
 
     const prep = core.implementationPrep(root, {
       trackId: "style_20260618",
@@ -1591,7 +1685,7 @@ test("implementationPrep returns packet-selected style guides", () => {
     assert.ok(prep.styleGuides.task_file_ids.includes("typescript"));
     const typeGuide = prep.styleGuides.guides.find((guide) => guide.id === "typescript");
     assert.ok(typeGuide);
-    assert.equal(typeGuide.path, "cadre/code_styleguides/typescript.md");
+    assert.equal(typeGuide.path, "cadre/styleguides/typescript.json");
     assert.ok(typeGuide.content.includes("TypeScript"));
     assert.ok(typeGuide.content.length <= 1200);
   } finally {
@@ -1610,7 +1704,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(setup.ok, true);
@@ -1619,8 +1713,8 @@ test("workflow newtrack writes template-backed track learnings", () => {
       workflow: "newtrack",
       execute: true,
       trackId: "blocked_20260618",
-      specText: "# Spec\n",
-      planText: samplePlan("blocked_20260618"),
+      spec: sampleSpec("spec"),
+      plan: samplePlan("blocked_20260618"),
       reviewBundleDir: ".newtrack-review",
     });
     assert.equal(blocked.ok, false);
@@ -1640,39 +1734,33 @@ test("workflow newtrack writes template-backed track learnings", () => {
     assert.match(blockedPlanMarkdown, /manual-verification-scope: track/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "blocked_20260618")), false);
 
-    const specText = `# Login Rate Limit
-
-## Description
-
-Protect account login from repeated password guessing without blocking normal users.
-
-## Functional Requirements
-
-- **Throttle failed attempts**: Count failed login attempts per account and source.
-- **Show lockout message**: Tell users when they can retry.
-
-## Non-Functional Requirements
-
-- **No secret storage**: Do not store raw passwords or secrets in rate-limit records.
-- **Low latency**: Keep successful login latency effectively unchanged.
-
-## Acceptance Criteria
-
-- **Throttled path**: Tests cover blocked login attempts.
-- **Cooldown expiry**: Lockout state expires after the configured cooldown.
-
-## Out Of Scope
-
-- **MFA changes**: Multi-factor authentication behavior is unchanged.
-`;
+    const spec = sampleSpec("tmpl_20260618", {
+      title: "Login Rate Limit",
+      description: "Protect account login from repeated password guessing without blocking normal users.",
+      functional_requirements: [
+        { heading: "Throttle failed attempts", body: "Count failed login attempts per account and source." },
+        { heading: "Show lockout message", body: "Tell users when they can retry." },
+      ],
+      non_functional_requirements: [
+        { heading: "No secret storage", body: "Do not store raw passwords or secrets in rate-limit records." },
+        { heading: "Low latency", body: "Keep successful login latency effectively unchanged." },
+      ],
+      acceptance_criteria: [
+        { heading: "Throttled path", body: "Tests cover blocked login attempts." },
+        { heading: "Cooldown expiry", body: "Lockout state expires after the configured cooldown." },
+      ],
+      out_of_scope: [
+        { heading: "MFA changes", body: "Multi-factor authentication behavior is unchanged." },
+      ],
+    });
 
     const created = core.workflowPacket(root, {
       workflow: "newtrack",
       execute: true,
       humanConfirmed: true,
       trackId: "tmpl_20260618",
-      specText,
-      planText: samplePlan("tmpl_20260618"),
+      spec,
+      plan: samplePlan("tmpl_20260618"),
     });
 
     assert.equal(created.ok, true);
@@ -1712,15 +1800,15 @@ Protect account login from repeated password guessing without blocking normal us
     assert.equal(planJson.phases[2].tasks[0].task_type, "user_manual_verification");
     assert.equal(planJson.phases[2].tasks[0].manual_verification.scope, "track");
     assert.ok(planJson.phases[2].tasks[0].manual_verification.suggested_checks.some((check) => check.source === "acceptance_criteria"));
-    const spec = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.md"), "utf8");
-    assert.match(spec, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/spec\.json"/);
-    assert.match(spec, /## Functional Requirements/);
-    assert.match(spec, /- \*\*Throttle failed attempts\*\*: Count failed login attempts per account and source\./);
-    assert.match(spec, /## Non-Functional Requirements/);
-    assert.match(spec, /## Out Of Scope/);
+    const specProjection = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "spec.md"), "utf8");
+    assert.match(specProjection, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/spec\.json"/);
+    assert.match(specProjection, /## Functional Requirements/);
+    assert.match(specProjection, /- \*\*Throttle failed attempts\*\*: Count failed login attempts per account and source\./);
+    assert.match(specProjection, /## Non-Functional Requirements/);
+    assert.match(specProjection, /## Out Of Scope/);
     const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.md"), "utf8");
     assert.match(plan, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/plan\.json"/);
-    assert.match(plan, /Task 3: User Manual Verification/);
+    assert.match(plan, /Track-Level User Manual Verification/);
     assert.match(plan, /manual-verification-scope: phase/);
     assert.match(plan, /Track-Level User Manual Verification/);
     const idempotent = core.workflowPacket(root, {
@@ -1728,7 +1816,7 @@ Protect account login from repeated password guessing without blocking normal us
       execute: true,
       humanConfirmed: true,
       trackId: "tmpl_20260618",
-      planText: plan,
+      plan: planJson,
     });
     assert.equal(idempotent.ok, true);
     const revisedPlanJson = readJson(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.json"));
@@ -1746,11 +1834,18 @@ Protect account login from repeated password guessing without blocking normal us
   }
 });
 
-test("artifact sync imports legacy markdown canonicals and regenerates projections", () => {
+test("artifact sync rejects legacy import and regenerates projections from canonicals", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-artifact-sync-test-"));
   try {
     git(root, ["init"]);
     writeTrack(root, "legacy_20260618", samplePlan("legacy_20260618"));
+
+    const legacyImport = core.artifactPacket(root, {
+      action: "import",
+      scope: "track:legacy_20260618",
+    });
+    assert.equal(legacyImport.ok, false);
+    assert.match(legacyImport.error, /Legacy Markdown import is not supported/);
 
     const preview = core.artifactPacket(root, {
       action: "sync",
@@ -1759,12 +1854,12 @@ test("artifact sync imports legacy markdown canonicals and regenerates projectio
     });
     assert.equal(preview.ok, true);
     assert.equal(preview.dry_run, true);
-    assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:spec" && artifact.legacy_import_available === true));
-    assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:plan" && artifact.legacy_import_available === true));
+    assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:spec" && artifact.legacy_import_available === false));
+    assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:plan" && artifact.legacy_import_available === false));
     assert.equal(preview.review_bundle.content_in_response, false);
-    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "spec.json")), true);
-    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), false);
+    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "spec.md")), true);
+    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "plan.md")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
 
     const blocked = core.artifactPacket(root, {
       action: "sync",
@@ -1773,7 +1868,7 @@ test("artifact sync imports legacy markdown canonicals and regenerates projectio
     });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.stage, "human_review");
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
 
     const written = core.artifactPacket(root, {
       action: "sync",
@@ -1784,8 +1879,6 @@ test("artifact sync imports legacy markdown canonicals and regenerates projectio
     });
     assert.equal(written.ok, true);
     assert.equal(written.phase_state, "executed");
-    assert.ok(written.written.includes("cadre/tracks/legacy_20260618/spec.json"));
-    assert.ok(written.written.includes("cadre/tracks/legacy_20260618/plan.json"));
     assert.ok(written.written.includes("cadre/tracks/legacy_20260618/spec.md"));
     assert.ok(written.written.includes("cadre/tracks/legacy_20260618/plan.md"));
 
@@ -1796,7 +1889,7 @@ test("artifact sync imports legacy markdown canonicals and regenerates projectio
     const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.md"), "utf8");
     assert.match(plan, /cadre:generated from="cadre\/tracks\/legacy_20260618\/plan\.json"/);
     assert.match(plan, /Task 1: Implement core/);
-    assert.match(plan, /Task 3: User Manual Verification/);
+    assert.match(plan, /Track-Level User Manual Verification/);
 
     const render = core.artifactPacket(root, { action: "render", artifact: "track:legacy_20260618:plan" });
     assert.equal(render.ok, true);
@@ -1811,12 +1904,19 @@ test("workflow revise reviews proposed track files before writing", () => {
   try {
     git(root, ["init"]);
     writeTrack(root, "revise_20260618", samplePlan("revise_20260618"));
-    const revisedPlan = `${samplePlan("revise_20260618")}\n## Phase 3: Follow-up\n\n- [ ] Task 1: Recheck\n`;
+    const revisedPlan = samplePlan("revise_20260618");
+    revisedPlan.phases.splice(2, 0, {
+      phase_index: 3,
+      title: "Phase 3: Follow-up",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [planTask(3, 1, "Recheck", [])],
+    });
 
     const preview = core.workflowPacket(root, {
       workflow: "revise",
       trackId: "revise_20260618",
-      planText: revisedPlan,
+      plan: revisedPlan,
       reviewBundleDir: ".revise-review",
     });
     assert.equal(preview.ok, true);
@@ -1830,22 +1930,22 @@ test("workflow revise reviews proposed track files before writing", () => {
       workflow: "revise",
       execute: true,
       trackId: "revise_20260618",
-      planText: revisedPlan,
+      plan: revisedPlan,
     });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.stage, "human_review");
-    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Phase 3/);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
 
     const written = core.workflowPacket(root, {
       workflow: "revise",
       execute: true,
       humanConfirmed: true,
       trackId: "revise_20260618",
-      planText: revisedPlan,
+      plan: revisedPlan,
     });
     assert.equal(written.ok, true);
     assert.equal(written.phase_state, "executed");
-    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Phase 3/);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1873,7 +1973,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      productText: "# Product\n",
+      product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(setup.ok, true);
@@ -1884,8 +1984,8 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     const draft = core.workflowPacket(root, {
       workflow: "newtrack",
       trackId: "draft_20260618",
-      specText: "# Spec\n",
-      planText: samplePlan("draft_20260618"),
+      spec: sampleSpec("spec"),
+      plan: samplePlan("draft_20260618"),
     });
     assert.equal(draft.ok, true);
     assert.equal(draft.dry_run, true);
@@ -2391,14 +2491,9 @@ test("polyrepo land plans provider actions and repo-scoped git pushes", () => {
     fs.mkdirSync(path.join(root, "repos", "app"), { recursive: true });
     git(path.join(root, "repos", "app"), ["init"]);
 
-    writeTrack(root, "land_20260618", `# Plan: land_20260618
-
-## Phase 1: App
-
-- [x] Task 1: Update app
-  <!-- repo: app -->
-  <!-- files: src/app.js -->
-`, {
+    writeTrack(root, "land_20260618", planFromPhases("land_20260618", [
+      { phase_index: 1, title: "Phase 1: App", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Update app", ["src/app.js"], { status: "completed", repo: "app" })] },
+    ]), {
       owner: "owner@example.com",
       review: {
         verdict: "approved",
@@ -2440,14 +2535,20 @@ test("polyrepo workflows fail closed on unresolved task repos", () => {
     }, null, 2));
     fs.mkdirSync(path.join(root, "repos", "app"), { recursive: true });
 
-    const plan = `# Plan: missing_repo_20260617
-
-## Phase 1: App
-
-- [x] Task 1: Update ghost repo
-  <!-- repo: ghost -->
-  <!-- files: src/app.js -->
-`;
+    const plan = planFromPhases("missing_repo_20260617", [
+      {
+        phase_index: 1,
+        title: "Phase 1: App",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [
+          planTask(1, 1, "Update ghost repo", ["src/app.js"], {
+            status: "completed",
+            repo: "ghost",
+          }),
+        ],
+      },
+    ]);
     writeTrack(root, "missing_repo_20260617", plan, {
       owner: "owner@example.com",
       last_coverage: 91,
@@ -2518,7 +2619,9 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     git(root, ["config", "user.email", "owner@example.com"]);
     git(root, ["config", "user.name", "Owner"]);
     write(path.join(root, "cadre", "setup_state.json"), JSON.stringify({ version: 1 }, null, 2));
-    write(path.join(root, "cadre", "patterns.md"), "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n");
+    const patternsSeed = { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" };
+    write(path.join(root, "cadre", "patterns.jsonl"), `${JSON.stringify(patternsSeed)}\n`);
+    write(path.join(root, "cadre", "patterns.md"), "<!-- cadre:generated from=\"cadre/patterns.jsonl\" schema=\"cadre.patterns.v1\" hash=\"test\" -->\n# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n");
     write(path.join(root, "src", "app.js"), "module.exports = 1;\n");
     git(root, ["add", "src/app.js"]);
     git(root, ["commit", "-m", "initial"]);
@@ -2527,13 +2630,9 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     git(root, ["commit", "-m", "feature"]);
     const sha = git(root, ["rev-parse", "--short=12", "HEAD"]).stdout.trim();
 
-    writeTrack(root, "execute_20260618", `# Plan: execute_20260618
-
-## Phase 1: Change
-
-- [x] Task 1: Change app (${sha})
-  <!-- files: src/app.js -->
-`, {
+    writeTrack(root, "execute_20260618", planFromPhases("execute_20260618", [
+      { phase_index: 1, title: "Phase 1: Change", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Change app", ["src/app.js"], { status: "completed", commit_shas: [sha] })] },
+    ]), {
       status: "completed",
       review: {
         verdict: "approved",
@@ -2608,6 +2707,8 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     });
     assert.equal(refreshBlocked.ok, false);
     assert.equal(refreshBlocked.stage, "human_review");
+    const patternsCanonicalArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.jsonl");
+    assert.ok(patternsCanonicalArtifact);
     const patternsArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.md");
     assert.ok(patternsArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(patternsArtifact, "content"), false);
@@ -2622,6 +2723,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     });
     assert.equal(refresh.ok, true);
     assert.equal(refresh.phase_state, "executed");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.jsonl"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

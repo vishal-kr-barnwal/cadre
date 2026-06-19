@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "schema": "cadre.protocol.v1",
+  "id": "cadre-review",
+  "description": "Review a track's diff before shipping (quality gate)",
+  "workflow": "review",
+  "markdownUse": "human_projection_only",
+  "preconditions": [
+    {
+      "tool": "cadre_project",
+      "arguments": {
+        "action": "ping"
+      },
+      "requirement": "Cadre MCP must be available"
+    },
+    {
+      "requirement": "Every project-scoped packet call includes root"
+    },
+    {
+      "requirement": "If a required packet returns ok:false, halt and report the packet error"
+    }
+  ],
+  "packetFlow": [
+    {
+      "step": 1,
+      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
+    },
+    {
+      "step": 2,
+      "instruction": "Call `cadre_workflow` with `workflow: \"review\"` and the requested `trackId` as structured JSON."
+    },
+    {
+      "step": 3,
+      "instruction": "Use the returned track context, review assistance, machine gate, review gate, provider evidence state, and review_bundle manifest/path list."
+    },
+    {
+      "step": 4,
+      "instruction": "When provider evidence is required, call `cadre_review` with structured provider MCP evidence; do not fetch or mutate provider state through shell commands."
+    },
+    {
+      "step": 5,
+      "instruction": "To record a verdict, call `cadre_mutate` with `action: \"record_review\"` and the structured verdict/evidence payload."
+    },
+    {
+      "step": 6,
+      "instruction": "Summarize findings first, then gate state, evidence, changed canonical JSON artifacts, generated human projections, and next packet."
+    }
+  ],
+  "confirmation": {
+    "requiredForMutation": true,
+    "dryRunFirst": false,
+    "executeArgument": "execute",
+    "humanConfirmationArgument": "humanConfirmed"
+  },
+  "forbiddenActions": [
+    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not read or write Markdown projections as canonical state",
+    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
+  ],
+  "responseSummary": [
+    "packet ok/error state",
+    "selected track or scope",
+    "warnings and blockers",
+    "changed canonical JSON/JSONL artifacts",
+    "generated human projections when relevant",
+    "next recommended packet"
+  ],
+  "references": [
+    "mcp-contract"
+  ]
+}

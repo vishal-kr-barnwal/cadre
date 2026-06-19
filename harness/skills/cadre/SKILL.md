@@ -4,7 +4,7 @@ description: |
   Context-driven development methodology for organized, spec-first coding. Use when:
   - Project has a `cadre/` directory
   - User mentions specs, plans, tracks, or context-driven development
-  - Files like `cadre/tracks.json`, `cadre/product.md`, `cadre/workflow.md` exist
+  - Files like `cadre/tracks.json`, `cadre/product.json`, or `cadre/workflow.json` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
   - User asks for a `cadre-*` workflow (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula, artifacts)
@@ -15,93 +15,12 @@ description: |
   Integrates with Beads for persistent task memory across sessions.
 ---
 
-# Cadre: Context-Driven Development
+# Cadre Skill Shim
 
-Measure twice, code once.
+Load `skill.json` before running any Cadre workflow. The JSON file is the
+authoritative agent and runtime contract.
 
-## Activation Contract
-
-Use Cadre MCP as the workflow runtime. At the start of every Cadre workflow,
-verify the server with `cadre_project` and `{ "action": "ping" }`.
-
-Every project-scoped Cadre MCP call must include a per-call `root` argument
-pointing at the current project root or any path inside it. Do not rely on the
-MCP server cwd, remembered state, or environment variables for routing.
-
-If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or
-restart the Cadre plugin. Do not perform Cadre orchestration by manually editing
-state files or invoking lower-level task/provider tools.
-
-Use compact responses by default. Pass `responseMode: "detail"` only when the
-workflow needs full plans, full code-intelligence evidence, or long style-guide
-content.
-
-## Lazy Context
-
-Do not eagerly read the whole `cadre/` tree on activation. Load only what the
-requested workflow needs:
-
-- `cadre/product.md`, `cadre/tech-stack.json`, and `cadre/workflow.md` for setup,
-  planning, implementation, and review context.
-- `cadre/product.json`, track `spec.json`/`plan.json`, and style guide JSON when
-  canonical artifact truth is needed; Markdown projections are for human review.
-- `cadre/patterns.md` before implementation or new-track planning.
-- Active track files only after a track is selected.
-- Compact MCP resources for team dashboards, review queues, integrations, LSP
-  status, provider actions, and quality gates.
-- Use `cadre://workspace-health` for compact repo, dependency, LSP, and
-  parallel summaries, and `cadre://integrations` for optional MCP coverage.
-
-`cadre/tracks.json` is the generated project-level track index. Resolve live
-status from MCP packets and track metadata, not by treating legacy Markdown as
-authoritative.
-
-## Workflow Routing
-
-When a user asks for a `cadre-*` workflow, treat text after the workflow name as
-workflow arguments, read the matching protocol, then call the workflow packet.
-
-| Intent | Protocol |
-|--------|----------|
-| Setup project | [protocols/cadre-setup.md](protocols/cadre-setup.md) |
-| Create work | [protocols/cadre-newtrack.md](protocols/cadre-newtrack.md) |
-| Start/resume implementation | [protocols/cadre-implement.md](protocols/cadre-implement.md) |
-| Status, team board, fleet board | [protocols/cadre-status.md](protocols/cadre-status.md) |
-| Validate project state | [protocols/cadre-validate.md](protocols/cadre-validate.md) |
-| Flag blocked/skipped work | [protocols/cadre-flag.md](protocols/cadre-flag.md) |
-| Revise spec/plan | [protocols/cadre-revise.md](protocols/cadre-revise.md) |
-| Review quality gate | [protocols/cadre-review.md](protocols/cadre-review.md) |
-| Ship monorepo work | [protocols/cadre-ship.md](protocols/cadre-ship.md) |
-| Land polyrepo work | [protocols/cadre-land.md](protocols/cadre-land.md) |
-| Handoff context | [protocols/cadre-handoff.md](protocols/cadre-handoff.md) |
-| Archive completed tracks | [protocols/cadre-archive.md](protocols/cadre-archive.md) |
-| Release summary/version | [protocols/cadre-release.md](protocols/cadre-release.md) |
-| Refresh stale context | [protocols/cadre-refresh.md](protocols/cadre-refresh.md) |
-| Revert tracked commits | [protocols/cadre-revert.md](protocols/cadre-revert.md) |
-| Formula/template operations | [protocols/cadre-formula.md](protocols/cadre-formula.md) |
-| Sync canonical artifacts | [protocols/cadre-artifacts.md](protocols/cadre-artifacts.md) |
-
-## Required References
-
-Open references only when the workflow needs that detail:
-
-- MCP packet and resource contract: [references/mcp-contract.md](references/mcp-contract.md)
-- Hosted provider evidence: [references/provider-evidence.md](references/provider-evidence.md)
-- Team scale, sync, MCP, and LSP use: [references/team-ops.md](references/team-ops.md)
-- Beads integration: [references/beads-integration.md](references/beads-integration.md)
-- Beads error handling: [references/beads-error-handler.md](references/beads-error-handler.md)
-- Shared sync: [references/cadre-sync.md](references/cadre-sync.md)
-- Ownership guard: [references/ownership-guard.md](references/ownership-guard.md)
-- Parallel execution: [references/parallel-execution.md](references/parallel-execution.md)
-- Polyrepo git: [references/polyrepo-git.md](references/polyrepo-git.md)
-- Template locator: [references/template-locator.md](references/template-locator.md)
-
-## Operating Defaults
-
-- Setup requires Beads and writes `cadre/beads.json`; agents use Cadre packets
-  for Beads-backed work.
-- Shared sync is recommended for teams and is packet-owned.
-- Provider evidence for hosted PR/MR/CI state must come through official
-  provider MCPs and be written back to Cadre packets.
-- LSP/code-intelligence packets should be used for repo maps, impact checks,
-  review assistance, diagnostics, and test-impact hints.
+Markdown in this file exists only because current skill packaging requires a
+`SKILL.md` entrypoint. Markdown projections elsewhere in Cadre are for human
+review only; do not use them as workflow input, fallback state, or canonical
+truth.

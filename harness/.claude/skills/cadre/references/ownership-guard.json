@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "ownership-guard",
+  "title": "Ownership Guard",
+  "markdownUse": "human_projection_only",
+  "rules": [],
+  "sections": [
+    {
+      "heading": "Packet Flow",
+      "body": "1. Resolve the project root with `cadre_project` using `action: \"root\"`.\n2. For track context, call `cadre_track` with `action: \"context\"` and the target\n   `trackId`.\n3. To take or refresh ownership, call `cadre_mutate` with `action: \"claim\"` or\n   use the workflow packet that performs the claim for the current operation.\n4. For long-running work, call `cadre_mutate` with `action: \"heartbeat\"` when the\n   workflow packet asks for a heartbeat."
+    },
+    {
+      "heading": "Foreign Holder",
+      "body": "If a packet reports that the track is held by another operator, present the\nholder, status, and packet-provided options to the user. Continue only by calling\nthe takeover packet with the packet-prescribed argument. If the user declines or\nthe packet returns `ok:false`, halt."
+    },
+    {
+      "heading": "Handoff Exception",
+      "body": "If the packet reports a pending handoff addressed to the current operator, use\nthe pickup or claim packet path named by the result. Do not clear handoff labels\nor mirror ownership directly."
+    },
+    {
+      "heading": "Staleness",
+      "body": "The canonical stale ownership window is thirty minutes. Packets compute and\nenforce this value. Agents should report stale reclaim evidence returned by the\npacket and then continue through packetized claim or heartbeat calls only."
+    }
+  ]
+}

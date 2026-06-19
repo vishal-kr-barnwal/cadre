@@ -23,11 +23,29 @@ const referenceDirs = [
   path.join(root, "plugins", "cadre", "skills", "cadre", "references"),
   path.join(root, "plugins", "cadre-claude", "skills", "cadre", "references"),
 ];
+const skillDirs = [
+  path.join(root, "skills", "cadre"),
+  path.join(root, ".agents", "skills", "cadre"),
+  path.join(root, ".claude", "skills", "cadre"),
+  path.join(root, "plugins", "cadre", "skills", "cadre"),
+  path.join(root, "plugins", "cadre-claude", "skills", "cadre"),
+];
+const workflowJsonFiles = [
+  path.join(root, "templates", "workflow.json"),
+  path.join(root, ".agents", "skills", "cadre", "templates", "workflow.json"),
+  path.join(root, ".claude", "skills", "cadre", "templates", "workflow.json"),
+  path.join(root, "plugins", "cadre", "skills", "cadre", "templates", "workflow.json"),
+  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "templates", "workflow.json"),
+];
 
-function markdownFiles(dir) {
+function jsonFiles(dir) {
   return fs.readdirSync(dir)
-    .filter((file) => file.endsWith(".md"))
+    .filter((file) => file.endsWith(".json"))
     .map((file) => path.join(dir, file));
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
 function collectFiles(dir, relativeDir = "") {
@@ -44,19 +62,11 @@ function collectFiles(dir, relativeDir = "") {
   return files;
 }
 
-const files = Array.from(new Set([
-  ...protocolDirs.flatMap(markdownFiles),
-  ...referenceDirs.flatMap(markdownFiles),
-  path.join(root, "skills", "cadre", "SKILL.md"),
-  path.join(root, ".agents", "skills", "cadre", "SKILL.md"),
-  path.join(root, ".claude", "skills", "cadre", "SKILL.md"),
-  path.join(root, "plugins", "cadre", "skills", "cadre", "SKILL.md"),
-  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md"),
-  path.join(root, "templates", "workflow.md"),
-  path.join(root, ".agents", "skills", "cadre", "templates", "workflow.md"),
-  path.join(root, ".claude", "skills", "cadre", "templates", "workflow.md"),
-  path.join(root, "plugins", "cadre", "skills", "cadre", "templates", "workflow.md"),
-  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "templates", "workflow.md"),
+const jsonContractFiles = Array.from(new Set([
+  ...protocolDirs.flatMap(jsonFiles),
+  ...referenceDirs.flatMap(jsonFiles),
+  ...skillDirs.map((dir) => path.join(dir, "skill.json")),
+  ...workflowJsonFiles,
 ]));
 
 const forbidden = [
@@ -83,9 +93,9 @@ const forbidden = [
   { name: "track index as workflow source", pattern: /tracks\.(?:md|json).{0,120}(?:authoritative|source of truth)|(?:authoritative|source of truth).{0,120}tracks\.(?:md|json)/i },
 ];
 
-test("Cadre protocols and workflow template stay packet-only", () => {
+test("Cadre JSON contracts stay packet-only", () => {
   const failures = [];
-  for (const file of files) {
+  for (const file of jsonContractFiles) {
     const text = fs.readFileSync(file, "utf8");
     for (const rule of forbidden) {
       const match = text.match(rule.pattern);
@@ -97,42 +107,122 @@ test("Cadre protocols and workflow template stay packet-only", () => {
   assert.deepEqual(failures, []);
 });
 
-test("Workflow templates include task-level commit evidence guidance", () => {
+test("Skill shim is minimal and points at skill.json", () => {
+  for (const dir of skillDirs) {
+    const shim = path.join(dir, "SKILL.md");
+    const text = fs.readFileSync(shim, "utf8");
+    assert.match(text, /Load `skill\.json`/);
+    assert.match(text, /authoritative agent and runtime contract/);
+    assert.match(text, /human\s+review only/i);
+    assert.equal(fs.existsSync(path.join(dir, "skill.json")), true);
+    assert.ok(text.length < 1600, path.relative(root, shim));
+  }
+});
+
+test("Skill JSON is the authoritative workflow and reference router", () => {
+  for (const dir of skillDirs) {
+    const file = path.join(dir, "skill.json");
+    const skill = readJson(file);
+    assert.equal(skill.schema, "cadre.skill.v1");
+    assert.equal(skill.markdownUse, "human_projection_only");
+    assert.equal(skill.activation.requiredRuntime, "Cadre MCP");
+    assert.ok(skill.forbidden.some((rule) => /Markdown as alternate input/.test(rule)));
+    for (const workflow of Object.values(skill.workflows)) {
+      assert.match(workflow.protocol, /^protocols\/cadre-[a-z-]+\.json$/);
+    }
+    for (const reference of Object.values(skill.references)) {
+      assert.match(reference.path, /^references\/[a-z-]+\.json$/);
+    }
+  }
+});
+
+test("Protocol files are structured JSON workflow definitions", () => {
   const failures = [];
-  for (const file of [
-    path.join(root, "templates", "workflow.md"),
-    path.join(root, ".agents", "skills", "cadre", "templates", "workflow.md"),
-    path.join(root, ".claude", "skills", "cadre", "templates", "workflow.md"),
-    path.join(root, "plugins", "cadre", "skills", "cadre", "templates", "workflow.md"),
-    path.join(root, "plugins", "cadre-claude", "skills", "cadre", "templates", "workflow.md"),
-  ]) {
-    const text = fs.readFileSync(file, "utf8");
-    if (!/## Commit Discipline/.test(text)) failures.push(`${path.relative(root, file)}: missing Commit Discipline section`);
-    if (!/one product commit per completed task/.test(text)) failures.push(`${path.relative(root, file)}: missing task-level commit guidance`);
-    if (!/Cadre task-completion packet with the\s+commit SHA/.test(text)) failures.push(`${path.relative(root, file)}: missing packet-owned commit evidence guidance`);
+  for (const dir of protocolDirs) {
+    for (const file of jsonFiles(dir)) {
+      const protocol = readJson(file);
+      const rel = path.relative(root, file);
+      for (const key of [
+        "id",
+        "description",
+        "workflow",
+        "preconditions",
+        "packetFlow",
+        "confirmation",
+        "forbiddenActions",
+        "responseSummary",
+        "references",
+      ]) {
+        if (!Object.prototype.hasOwnProperty.call(protocol, key)) failures.push(`${rel}: missing ${key}`);
+      }
+      if (protocol.schema !== "cadre.protocol.v1") failures.push(`${rel}: wrong schema`);
+      if (protocol.markdownUse !== "human_projection_only") failures.push(`${rel}: wrong markdownUse`);
+      if (!Array.isArray(protocol.packetFlow) || protocol.packetFlow.length < 3) failures.push(`${rel}: short packetFlow`);
+      for (const [index, step] of (protocol.packetFlow || []).entries()) {
+        if (step.step !== index + 1) failures.push(`${rel}: bad packet step ${index + 1}`);
+        if (typeof step.instruction !== "string" || step.instruction.length < 40) failures.push(`${rel}: incomplete packet instruction ${index + 1}`);
+      }
+      if (protocol.confirmation.executeArgument !== "execute") failures.push(`${rel}: missing execute confirmation argument`);
+      if (protocol.confirmation.humanConfirmationArgument !== "humanConfirmed") failures.push(`${rel}: missing human confirmation argument`);
+      if (!protocol.forbiddenActions.some((rule) => /Markdown/.test(rule))) failures.push(`${rel}: missing Markdown prohibition`);
+      if (!protocol.responseSummary.some((item) => /canonical JSON/.test(item))) failures.push(`${rel}: missing canonical JSON response summary`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("Reference files are structured JSON and carry platform dispatch in JSON", () => {
+  for (const dir of referenceDirs) {
+    for (const file of jsonFiles(dir)) {
+      const reference = readJson(file);
+      assert.equal(reference.schema, "cadre.reference.v1", path.relative(root, file));
+      assert.equal(reference.markdownUse, "human_projection_only", path.relative(root, file));
+      assert.ok(Array.isArray(reference.rules), path.relative(root, file));
+      assert.ok(Array.isArray(reference.sections), path.relative(root, file));
+      if (reference.id === "parallel-execution") {
+        assert.equal(typeof reference.platforms.codex.dispatch, "string");
+        assert.equal(typeof reference.platforms.claude.dispatch, "string");
+      }
+    }
+  }
+});
+
+test("Workflow templates include JSON canonical and task-level commit guidance", () => {
+  const failures = [];
+  for (const file of workflowJsonFiles) {
+    const workflow = readJson(file);
+    const sections = new Map(workflow.sections.map((section) => [section.heading, section.body]));
+    const principles = sections.get("Guiding Principles") || "";
+    const commits = sections.get("Commit Discipline") || "";
+    if (!/plan\.json/.test(principles)) failures.push(`${path.relative(root, file)}: missing plan.json guidance`);
+    if (!/plan\.md/.test(principles) || !/human review only/.test(principles)) failures.push(`${path.relative(root, file)}: missing projection-only guidance`);
+    if (!/one product commit per completed task/.test(commits)) failures.push(`${path.relative(root, file)}: missing task-level commit guidance`);
+    if (!/commit SHA/.test(commits)) failures.push(`${path.relative(root, file)}: missing packet-owned commit evidence guidance`);
   }
   assert.deepEqual(failures, []);
 });
 
 test("Artifact workflow protocols require token-safe review bundles", () => {
   const required = new Map([
-    ["cadre-setup.md", "setup"],
-    ["cadre-newtrack.md", "newtrack"],
-    ["cadre-revise.md", "revise"],
-    ["cadre-refresh.md", "refresh"],
-    ["cadre-release.md", "release"],
-    ["cadre-handoff.md", "handoff"],
-    ["cadre-artifacts.md", "artifacts"],
+    ["cadre-setup.json", "setup"],
+    ["cadre-newtrack.json", "newtrack"],
+    ["cadre-revise.json", "revise"],
+    ["cadre-refresh.json", "refresh"],
+    ["cadre-release.json", "release"],
+    ["cadre-handoff.json", "handoff"],
+    ["cadre-artifacts.json", "artifacts"],
   ]);
   const failures = [];
   for (const dir of protocolDirs) {
     for (const [fileName, workflow] of required.entries()) {
       const file = path.join(dir, fileName);
-      const text = fs.readFileSync(file, "utf8");
-      if (!/`review_bundle`/.test(text)) failures.push(`${path.relative(root, file)}: missing review_bundle for ${workflow}`);
-      if (!/manifest\/path list/.test(text)) failures.push(`${path.relative(root, file)}: missing manifest/path list guidance for ${workflow}`);
-      if (!/model\s+context/.test(text)) failures.push(`${path.relative(root, file)}: missing model-context avoidance for ${workflow}`);
-      if (!/humanConfirmed:\s*true/.test(text)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
+      const protocol = readJson(file);
+      const flow = protocol.packetFlow.map((step) => step.instruction).join("\n");
+      if (!/review_bundle/.test(flow)) failures.push(`${path.relative(root, file)}: missing review_bundle for ${workflow}`);
+      if (!/manifest\/path list/.test(flow)) failures.push(`${path.relative(root, file)}: missing manifest/path list guidance for ${workflow}`);
+      if (!/model\s+context/.test(flow)) failures.push(`${path.relative(root, file)}: missing model-context avoidance for ${workflow}`);
+      if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run-first confirmation for ${workflow}`);
+      if (!/humanConfirmed: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
     }
   }
   assert.deepEqual(failures, []);
@@ -140,29 +230,27 @@ test("Artifact workflow protocols require token-safe review bundles", () => {
 
 test("Action workflow protocols require packet dry-run confirmation", () => {
   const required = new Map([
-    ["cadre-archive.md", "archive"],
-    ["cadre-revert.md", "revert"],
-    ["cadre-flag.md", "flag"],
+    ["cadre-archive.json", "archive"],
+    ["cadre-revert.json", "revert"],
+    ["cadre-flag.json", "flag"],
   ]);
   const failures = [];
   for (const dir of protocolDirs) {
     for (const [fileName, workflow] of required.entries()) {
       const file = path.join(dir, fileName);
-      const text = fs.readFileSync(file, "utf8");
-      if (!/dry-run|dry run/.test(text)) failures.push(`${path.relative(root, file)}: missing dry-run review for ${workflow}`);
-      if (!/humanConfirmed:\s*true/.test(text)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
-      if (!/manually/.test(text)) failures.push(`${path.relative(root, file)}: missing no-manual-mutation guidance for ${workflow}`);
+      const protocol = readJson(file);
+      const flow = protocol.packetFlow.map((step) => step.instruction).join("\n");
+      if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run review for ${workflow}`);
+      if (!/humanConfirmed: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
+      if (!protocol.forbiddenActions.some((rule) => /Markdown/.test(rule))) failures.push(`${path.relative(root, file)}: missing no-manual-mutation guidance for ${workflow}`);
     }
   }
   assert.deepEqual(failures, []);
 });
 
-test("Generated Codex and Claude skill bundles only differ in platform-sliced references", () => {
+test("Generated Codex and Claude skill bundles are identical JSON contracts", () => {
   const codexSkill = path.join(root, "plugins", "cadre", "skills", "cadre");
   const claudeSkill = path.join(root, "plugins", "cadre-claude", "skills", "cadre");
-  const expectedDifferent = new Set([
-    "references/parallel-execution.md",
-  ]);
   const failures = [];
 
   function visit(relativeDir = "") {
@@ -180,8 +268,7 @@ test("Generated Codex and Claude skill bundles only differ in platform-sliced re
         continue;
       }
       const same = fs.readFileSync(codexFile, "utf8") === fs.readFileSync(claudeFile, "utf8");
-      if (!same && !expectedDifferent.has(rel)) failures.push(`unexpected platform diff: ${rel}`);
-      if (same && expectedDifferent.has(rel)) failures.push(`expected platform diff was identical: ${rel}`);
+      if (!same) failures.push(`unexpected platform diff: ${rel}`);
     }
   }
 
@@ -199,7 +286,6 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
     "agents/cadre-worker.md",
-    "skills/cadre/references/parallel-execution.md",
   ]);
 
   const codexFiles = new Set(collectFiles(codexPlugin));
@@ -228,15 +314,11 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
     fs.readFileSync(path.join(codexPlugin, "README.md"), "utf8"),
     fs.readFileSync(path.join(claudePlugin, "README.md"), "utf8")
   );
-  assert.notEqual(
-    fs.readFileSync(path.join(codexPlugin, "skills", "cadre", "references", "parallel-execution.md"), "utf8"),
-    fs.readFileSync(path.join(claudePlugin, "skills", "cadre", "references", "parallel-execution.md"), "utf8")
-  );
 
-  const codexManifest = JSON.parse(fs.readFileSync(path.join(codexPlugin, ".codex-plugin", "plugin.json"), "utf8"));
-  const claudeManifest = JSON.parse(fs.readFileSync(path.join(claudePlugin, ".claude-plugin", "plugin.json"), "utf8"));
-  const codexMcp = JSON.parse(fs.readFileSync(path.join(codexPlugin, ".mcp.json"), "utf8"));
-  const claudeMcp = JSON.parse(fs.readFileSync(path.join(claudePlugin, "mcp-config.json"), "utf8"));
+  const codexManifest = readJson(path.join(codexPlugin, ".codex-plugin", "plugin.json"));
+  const claudeManifest = readJson(path.join(claudePlugin, ".claude-plugin", "plugin.json"));
+  const codexMcp = readJson(path.join(codexPlugin, ".mcp.json"));
+  const claudeMcp = readJson(path.join(claudePlugin, "mcp-config.json"));
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
   assert.equal(codexMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
@@ -248,12 +330,12 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
 });
 
 test("Generated plugin manifests and marketplace shims point at expected paths", () => {
-  const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
   const codexManifest = readJson(path.join(root, "plugins", "cadre", ".codex-plugin", "plugin.json"));
   assert.equal(codexManifest.skills, "./skills/");
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", ".mcp.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "skill.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "mcp", "cadre-server.js")), true);
 
   const claudeManifest = readJson(path.join(root, "plugins", "cadre-claude", ".claude-plugin", "plugin.json"));
@@ -262,6 +344,7 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "mcp-config.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "skill.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
   const codexMcp = readJson(path.join(root, "plugins", "cadre", ".mcp.json"));
   const claudeMcp = readJson(path.join(root, "plugins", "cadre-claude", "mcp-config.json"));
@@ -273,7 +356,6 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   const harnessClaudeMarketplace = readJson(path.join(root, ".claude-plugin", "marketplace.json"));
   assert.equal(harnessClaudeMarketplace.plugins[0].source, "./plugins/cadre-claude");
 
-  const repoRoot = path.resolve(root, "..");
   const rootCodexMarketplace = readJson(path.join(repoRoot, ".agents", "plugins", "marketplace.json"));
   assert.equal(rootCodexMarketplace.plugins[0].source.path, "./harness/plugins/cadre");
   const rootClaudeMarketplace = readJson(path.join(repoRoot, ".claude-plugin", "marketplace.json"));
@@ -309,7 +391,7 @@ test("Hidden local skill discovery dirs contain only Cadre output", () => {
   }
 });
 
-test("User-facing workflow docs stay packet-owned", () => {
+test("User-facing workflow docs stay packet-owned and JSON-first", () => {
   const docs = [
     path.join(repoRoot, "README.md"),
     path.join(publicDocsRoot, "getting-started.md"),
@@ -323,6 +405,7 @@ test("User-facing workflow docs stay packet-owned", () => {
     { name: "old index command", pattern: /cadre-status\s+--regen-index/i },
     { name: "stale product guidelines file", pattern: /product-guidelines\.md/i },
     { name: "manual plan mutation", pattern: /\b(?:edit|write|rewrite|mark|change)\s+`?plan\.md`?/i },
+    { name: "Markdown canonical state", pattern: /Markdown.{0,80}(?:authoritative|canonical)|(?:authoritative|canonical).{0,80}Markdown/i },
   ];
   const allowed = [
     /\bbd\s+--version\b/i,

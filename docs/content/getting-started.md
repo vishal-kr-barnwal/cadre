@@ -112,9 +112,9 @@ Track directories later live under `cadre/tracks/<track_id>/` and contain
 `plan.md`, append-only `learnings.jsonl`, generated `learnings.md`, and optional
 handoff or revision artifacts.
 
-Use `cadre-artifacts sync` when legacy Markdown needs import, generated
-projections need refreshing, or you want a review bundle showing canonical
-artifact drift before applying changes.
+Use `cadre-artifacts sync` when generated projections need refreshing or you
+want a review bundle showing canonical artifact drift before applying changes.
+Markdown-only projects are not supported by this migration path.
 
 ## Verify The Runtime
 

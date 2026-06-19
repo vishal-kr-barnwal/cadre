@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "schema": "cadre.styleguide.v1",
+  "kind": "styleguide",
+  "id": "general",
+  "title": "General Code Style Principles",
+  "summary": "This document outlines general coding principles that apply across all languages and frameworks used in this project.",
+  "sections": [
+    {
+      "heading": "Readability",
+      "body": "- Code should be easy to read and understand by humans.\n- Avoid overly clever or obscure constructs."
+    },
+    {
+      "heading": "Consistency",
+      "body": "- Follow existing patterns in the codebase.\n- Maintain consistent formatting, naming, and structure."
+    },
+    {
+      "heading": "Simplicity",
+      "body": "- Prefer simple solutions over complex ones.\n- Break down complex problems into smaller, manageable parts."
+    },
+    {
+      "heading": "Maintainability",
+      "body": "- Write code that is easy to modify and extend.\n- Minimize dependencies and coupling."
+    },
+    {
+      "heading": "Documentation",
+      "body": "- Document *why* something is done, not just *what*.\n- Keep documentation up-to-date with code changes."
+    }
+  ],
+  "languages": [],
+  "frameworks": [],
+  "file_patterns": [],
+  "applies_to": [
+    "planning",
+    "implementation",
+    "review",
+    "tests"
+  ],
+  "rules": [
+    {
+      "id": "general-rule-1",
+      "severity": "guidance",
+      "summary": "Code should be easy to read and understand by humans."
+    },
+    {
+      "id": "general-rule-2",
+      "severity": "guidance",
+      "summary": "Avoid overly clever or obscure constructs."
+    },
+    {
+      "id": "general-rule-3",
+      "severity": "guidance",
+      "summary": "Follow existing patterns in the codebase."
+    },
+    {
+      "id": "general-rule-4",
+      "severity": "guidance",
+      "summary": "Maintain consistent formatting, naming, and structure."
+    },
+    {
+      "id": "general-rule-5",
+      "severity": "guidance",
+      "summary": "Prefer simple solutions over complex ones."
+    },
+    {
+      "id": "general-rule-6",
+      "severity": "guidance",
+      "summary": "Break down complex problems into smaller, manageable parts."
+    },
+    {
+      "id": "general-rule-7",
+      "severity": "guidance",
+      "summary": "Write code that is easy to modify and extend."
+    },
+    {
+      "id": "general-rule-8",
+      "severity": "guidance",
+      "summary": "Minimize dependencies and coupling."
+    },
+    {
+      "id": "general-rule-9",
+      "severity": "guidance",
+      "summary": "Document *why* something is done, not just *what*."
+    },
+    {
+      "id": "general-rule-10",
+      "severity": "guidance",
+      "summary": "Keep documentation up-to-date with code changes."
+    }
+  ],
+  "source": "bundled_template"
+}

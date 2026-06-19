@@ -70,15 +70,15 @@ maintain Cadre state by hand.
 
 `cadre-setup` writes the project control plane:
 
-- `cadre/product.md`
+- `cadre/product.json` plus generated `cadre/product.md`
+- `cadre/product_guidelines.json` plus generated `cadre/product_guidelines.md`
 - `cadre/tech-stack.json`
-- `cadre/workflow.md`
+- `cadre/workflow.json` plus generated `cadre/workflow.md`
 - `cadre/tracks.json` as the generated track index
-- `cadre/learnings.md`
-- `cadre/patterns.md`
+- `cadre/patterns.jsonl` plus generated `cadre/patterns.md`
 - `cadre/config.json`
 - `cadre/beads.json`
-- `cadre/code_styleguides/`
+- `cadre/styleguides/*.json` plus generated `cadre/code_styleguides/*.md`
 - optional `cadre/repos.json` for polyrepo topology
 - optional `cadre/lsp.json` for LSP recommendations
 

@@ -62,100 +62,6 @@ function errorCode(error) {
 var STALE_LEASE_MS = 30 * 60 * 1e3;
 var LOCK_STALE_MS = STALE_LEASE_MS;
 
-// src/core/domain/plan-parser.ts
-function parseAnnotation(line) {
-  const match = line.match(/<!--\s*([a-zA-Z0-9_-]+)\s*:\s*([\s\S]*?)\s*-->/);
-  if (!match?.[1] || match[2] === void 0) return null;
-  return { key: match[1], value: match[2].trim() };
-}
-function extractCommitRefs(text) {
-  const value = String(text || "");
-  const commitShas = [];
-  const repoShas = {};
-  const repoPattern = /\b([A-Za-z0-9_.-]+):([0-9a-f]{7,40})\b/g;
-  let match;
-  while (match = repoPattern.exec(value)) {
-    if (!match[1] || !match[2]) continue;
-    repoShas[match[1]] = match[2];
-    commitShas.push(match[2]);
-  }
-  const shaPattern = /\b(?:commit[:\s]+|sha[:\s]+)?([0-9a-f]{7,40})\b/gi;
-  while (match = shaPattern.exec(value)) {
-    if (match[1] && !commitShas.includes(match[1])) commitShas.push(match[1]);
-  }
-  return { commit_shas: commitShas, repo_shas: repoShas };
-}
-function parsePlanText(text) {
-  const phases = [];
-  let currentPhase = null;
-  let currentTask = null;
-  const ensurePhase = () => {
-    if (!currentPhase) {
-      currentPhase = { title: "Unsectioned", annotations: {}, tasks: [], phase_index: phases.length + 1 };
-      phases.push(currentPhase);
-    }
-    return currentPhase;
-  };
-  text.split(/\r?\n/).forEach((line, index) => {
-    const phaseMatch = line.match(/^##+\s+(.+?)\s*$/);
-    if (phaseMatch?.[1]) {
-      currentPhase = {
-        title: phaseMatch[1].trim(),
-        annotations: {},
-        tasks: [],
-        line: index + 1,
-        phase_index: phases.length + 1
-      };
-      phases.push(currentPhase);
-      currentTask = null;
-      return;
-    }
-    const taskMatch = line.match(/^\s*-\s+\[([ x~!\-])\]\s+(.+?)\s*$/);
-    if (taskMatch?.[1] && taskMatch[2]) {
-      const phase = ensurePhase();
-      const taskIndex = phase.tasks.length + 1;
-      const title = taskMatch[2].trim();
-      const refs = extractCommitRefs(title);
-      currentTask = {
-        marker: taskMatch[1],
-        title,
-        annotations: {},
-        files: [],
-        depends: [],
-        repo: null,
-        line: index + 1,
-        phase_index: phase.phase_index || phases.indexOf(phase) + 1,
-        task_index: taskIndex,
-        task_key: `phase${phase.phase_index || phases.indexOf(phase) + 1}_task${taskIndex}`,
-        commit_shas: refs.commit_shas,
-        repo_shas: refs.repo_shas
-      };
-      phase.tasks.push(currentTask);
-      return;
-    }
-    const annotation = parseAnnotation(line);
-    if (!annotation) return;
-    const target = currentTask || ensurePhase();
-    target.annotations = target.annotations || {};
-    target.annotations[annotation.key] = annotation.value;
-    if (currentTask) {
-      if (annotation.key === "files") {
-        currentTask.files = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
-      } else if (annotation.key === "depends") {
-        currentTask.depends = annotation.value.split(",").map((item) => item.trim()).filter(Boolean);
-      } else if (annotation.key === "repo") {
-        currentTask.repo = annotation.value;
-      } else if (["commit", "commits", "sha", "shas"].includes(annotation.key)) {
-        const refs = extractCommitRefs(annotation.value);
-        currentTask.commit_shas = Array.from(/* @__PURE__ */ new Set([...currentTask.commit_shas ?? [], ...refs.commit_shas]));
-        currentTask.repo_shas = { ...currentTask.repo_shas, ...refs.repo_shas };
-      }
-    }
-  });
-  const tasks = phases.flatMap((phase) => phase.tasks);
-  return { ok: true, phases, tasks, warnings: [], errors: [] };
-}
-
 // src/core/domain/track-status.ts
 var STATUS_MARKERS = {
   new: "[ ]",
@@ -577,6 +483,7 @@ function trackPlanJsonPath(track) {
   return track.plan_json_path || import_node_path3.default.join(track.dir, "plan.json");
 }
 function planJsonPathForPlanPath(file) {
+  if (file.endsWith(".json")) return file;
   return import_node_path3.default.join(import_node_path3.default.dirname(file), "plan.json");
 }
 function manualVerificationScope(value) {
@@ -603,10 +510,11 @@ function planJsonToParsedPlan(raw) {
     const phase = asJsonObject(rawPhase);
     const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
     const phaseDepends = asStringArray(phase.depends_on);
+    const hasExplicitPhaseDepends = Object.prototype.hasOwnProperty.call(phase, "depends_on");
     const annotations = {
       ...asJsonObject(phase.annotations),
       ...asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {},
-      ...phaseDepends.length > 0 ? { depends: phaseDepends.join(",") } : {}
+      ...hasExplicitPhaseDepends ? { depends: phaseDepends.join(",") } : {}
     };
     const tasks = asArray(phase.tasks).map((rawTask, taskOffset) => {
       const task = asJsonObject(rawTask);
@@ -655,7 +563,9 @@ function renderPlanMarkdown(raw) {
   for (const phase of parsed.phases) {
     parts.push(`## Phase ${phase.phase_index}: ${phase.title.replace(/^Phase\s+\d+:\s*/i, "")}`);
     if (phase.annotations.execution) parts.push(`<!-- execution: ${phase.annotations.execution} -->`);
-    if (phase.annotations.depends) parts.push(`<!-- depends: ${phase.annotations.depends} -->`);
+    if (Object.prototype.hasOwnProperty.call(phase.annotations, "depends")) {
+      parts.push(`<!-- depends: ${phase.annotations.depends || ""} -->`);
+    }
     parts.push("");
     for (const task of phase.tasks) {
       const commit = task.commit_shas && task.commit_shas.length > 0 ? ` (${task.commit_shas[task.commit_shas.length - 1]})` : "";
@@ -877,10 +787,11 @@ function coverageThreshold(root) {
     const value = Number(config[key]);
     if (Number.isFinite(value) && value >= 0) return value;
   }
-  const workflowPath = import_node_path3.default.join(root, "cadre", "workflow.md");
-  if (fileExists(workflowPath)) {
-    const text = import_node_fs2.default.readFileSync(workflowPath, "utf8");
-    const match = text.match(/(?:coverage|test coverage)[^\n%]{0,80}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  const workflowPath = import_node_path3.default.join(root, "cadre", "workflow.json");
+  const workflow = readJson(workflowPath, null);
+  if (workflow) {
+    const text = JSON.stringify(workflow);
+    const match = text.match(/(?:coverage|test coverage)[^%]{0,120}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
     if (match?.[1]) return Number(match[1]);
   }
   return 80;
@@ -1011,14 +922,22 @@ function listTracks(root) {
   }
   return tracks;
 }
+function parsePlanJson(raw) {
+  return planJsonToParsedPlan(asJsonObject(raw));
+}
 function parsePlanFile(file) {
   const planJsonPath = planJsonPathForPlanPath(file);
   if (fileExists(planJsonPath)) {
     const raw = readJson(planJsonPath, null);
-    if (raw) return planJsonToParsedPlan(raw);
+    if (raw) return parsePlanJson(raw);
   }
-  if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
-  return parsePlanText(import_node_fs2.default.readFileSync(file, "utf8"));
+  return {
+    ok: false,
+    phases: [],
+    tasks: [],
+    warnings: [],
+    errors: [`Missing canonical plan JSON: ${planJsonPath}`]
+  };
 }
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(isRecord);
@@ -1274,17 +1193,6 @@ function parseCommandJson(result) {
     return null;
   }
 }
-function markerForStatus(status) {
-  const markers = {
-    pending: " ",
-    new: " ",
-    in_progress: "~",
-    completed: "x",
-    blocked: "!",
-    skipped: "-"
-  };
-  return markers[status] || status;
-}
 function recordTaskResultUnlocked(root, args = {}) {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
@@ -1295,7 +1203,6 @@ function recordTaskResultUnlocked(root, args = {}) {
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
   const planJsonPath = trackPlanJsonPath(track);
-  const marker = markerForStatus(args.status || "completed");
   const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
   const recordedAt = utcNow();
   const lastTaskResult = {
@@ -1359,8 +1266,8 @@ function recordTaskResultUnlocked(root, args = {}) {
       track.plan_path,
       withGeneratedMarker(import_node_path3.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
     );
-    const metadataValue2 = asJsonObject(metadata.value);
-    const beadsTasks2 = asJsonObject(metadataValue2.beads_tasks);
+    const metadataValue = asJsonObject(metadata.value);
+    const beadsTasks = asJsonObject(metadataValue.beads_tasks);
     return {
       ok: true,
       track_id: track.track_id,
@@ -1368,36 +1275,16 @@ function recordTaskResultUnlocked(root, args = {}) {
       line: task.line,
       status: args.status || "completed",
       commit_sha: commitSha || null,
-      beads_task_id: asOptionalString(beadsTasks2[task.task_key]) || null,
+      beads_task_id: asOptionalString(beadsTasks[task.task_key]) || null,
       metadata,
       plan_json: planPatch
     };
   }
-  const lines = import_node_fs2.default.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
-  const idx = task.line - 1;
-  const line = lines[idx];
-  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
-  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
-  if (commitSha && !nextLine.includes(commitSha)) {
-    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
-  }
-  lines[idx] = nextLine;
-  try {
-    import_node_fs2.default.writeFileSync(track.plan_path, `${lines.join("\n").replace(/\n+$/, "")}
-`);
-  } catch (error) {
-    return { ok: false, track_id: track.track_id, stage: "plan_write", error: errorMessage(error), metadata };
-  }
-  const metadataValue = asJsonObject(metadata.value);
-  const beadsTasks = asJsonObject(metadataValue.beads_tasks);
   return {
-    ok: true,
+    ok: false,
     track_id: track.track_id,
-    task_key: task.task_key,
-    line: task.line,
-    status: args.status || "completed",
-    commit_sha: commitSha || null,
-    beads_task_id: asOptionalString(beadsTasks[task.task_key]) || null,
+    stage: "missing_plan_json",
+    error: `Missing canonical plan JSON: ${planJsonPath}`,
     metadata
   };
 }

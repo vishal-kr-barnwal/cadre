@@ -138,7 +138,8 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
   });
   else if (resource.base === "cadre://track-plan") {
     const context = deps.core.trackContext(root, resource.trackId);
-    const planPath = asOptionalString(asJsonObject(asJsonObject(context).track).plan_path);
+    const track = asJsonObject(asJsonObject(context).track);
+    const planPath = asOptionalString(track.plan_json_path);
     value = context.ok === false || !planPath
       ? context
       : deps.core.parsePlanFile(path.resolve(root, planPath));

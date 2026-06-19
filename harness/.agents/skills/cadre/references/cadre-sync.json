@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "cadre-sync",
+  "title": "Control-Plane Sync",
+  "markdownUse": "human_projection_only",
+  "rules": [
+    "Spec, plan, repository config, provider config, and topology conflicts are",
+    "Ephemeral worker state and Beads store details are MCP-owned and regenerated or",
+    "Track-id collisions, shared-mode retries, and sync safety classification are"
+  ],
+  "sections": [
+    {
+      "heading": "Predicate",
+      "body": "`cadre_project` with `action: \"topology\"` reports whether the project uses local\nor shared control-plane sync. Shared sync applies equally to monorepo and\npolyrepo projects. Product code publication is separate and happens only through\nship or land packets."
+    },
+    {
+      "heading": "Preamble",
+      "body": "Before any workflow mutates Cadre state, call the workflow packet requested by\nthe protocol. The packet is responsible for shared-mode preflight, remote\nverification, Beads graph sync, merge-driver health, conflict detection, and\nbounded retry policy.\n\nIf the packet reports a sync conflict, halt and summarize the conflicting files\nor state categories from the packet result. Do not hand-merge Cadre files, Beads\nstate, or generated state JSON."
+    },
+    {
+      "heading": "Postamble",
+      "body": "After a workflow packet mutates Cadre state, use the next packet named by the\nresult for sync or publication. `cadre_project` with\n`action: \"sync_control_plane\"` owns shared control-plane publication and refuses\nto publish when product-code changes are mixed into the control-plane surface."
+    },
+    {
+      "heading": "Conflict Policy",
+      "body": "- Spec, plan, repository config, provider config, and topology conflicts are\n  surfaced to the user by packet results.\n- Ephemeral worker state and Beads store details are MCP-owned and regenerated or\n  repaired only through packets.\n- Track-id collisions, shared-mode retries, and sync safety classification are\n  handled by packets. Agents report the packet result and stop when it blocks."
+    }
+  ]
+}

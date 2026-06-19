@@ -20,9 +20,9 @@ function isCadreStateDirectory(dir: string): boolean {
   return [
     "tracks.json",
     "setup_state.json",
-    "product.md",
+    "product.json",
     "tech-stack.json",
-    "workflow.md",
+    "workflow.json",
     "beads.json",
     "config.json",
     "repos.json",

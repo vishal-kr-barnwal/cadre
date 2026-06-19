@@ -93,8 +93,8 @@ Owned files:
   <files>
 ```
 
-Workers follow `cadre/workflow.md`, modify only their owned files, keep commits
-local, and return evidence to the coordinator:
+Workers follow canonical `cadre/workflow.json`, modify only their owned files,
+keep commits local, and return evidence to the coordinator:
 
 ```json
 {

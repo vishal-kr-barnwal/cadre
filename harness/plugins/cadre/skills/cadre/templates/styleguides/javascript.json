@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "schema": "cadre.styleguide.v1",
+  "kind": "styleguide",
+  "id": "javascript",
+  "title": "Google JavaScript Style Guide Summary",
+  "summary": "This document summarizes key rules and best practices from the Google JavaScript Style Guide.",
+  "sections": [
+    {
+      "heading": "1. Source File Basics",
+      "body": "- **File Naming:** All lowercase, with underscores (`_`) or dashes (`-`). Extension must be `.js`.\n- **File Encoding:** UTF-8.\n- **Whitespace:** Use only ASCII horizontal spaces (0x20). Tabs are forbidden for indentation."
+    },
+    {
+      "heading": "2. Source File Structure",
+      "body": "- New files should be ES modules (`import`/`export`).\n- **Exports:** Use named exports (`export {MyClass};`). **Do not use default exports.**\n- **Imports:** Do not use line-wrapped imports. The `.js` extension in import paths is mandatory."
+    },
+    {
+      "heading": "3. Formatting",
+      "body": "- **Braces:** Required for all control structures (`if`, `for`, `while`, etc.), even single-line blocks. Use K&R style (\"Egyptian brackets\").\n- **Indentation:** +2 spaces for each new block.\n- **Semicolons:** Every statement must be terminated with a semicolon.\n- **Column Limit:** 80 characters.\n- **Line-wrapping:** Indent continuation lines at least +4 spaces.\n- **Whitespace:** Use single blank lines between methods. No trailing whitespace."
+    },
+    {
+      "heading": "4. Language Features",
+      "body": "- **Variable Declarations:** Use `const` by default, `let` if reassignment is needed. **`var` is forbidden.**\n- **Array Literals:** Use trailing commas. Do not use the `Array` constructor.\n- **Object Literals:** Use trailing commas and shorthand properties. Do not use the `Object` constructor.\n- **Classes:** Do not use JavaScript getter/setter properties (`get name()`). Provide ordinary methods instead.\n- **Functions:** Prefer arrow functions for nested functions to preserve `this` context.\n- **String Literals:** Use single quotes (`'`). Use template literals (`` ` ``) for multi-line strings or complex interpolation.\n- **Control Structures:** Prefer `for-of` loops. `for-in` loops should only be used on dict-style objects.\n- **`this`:** Only use `this` in class constructors, methods, or in arrow functions defined within them.\n- **Equality Checks:** Always use identity operators (`===` / `!==`)."
+    },
+    {
+      "heading": "5. Disallowed Features",
+      "body": "- `with` keyword.\n- `eval()` or `Function(...string)`.\n- Automatic Semicolon Insertion.\n- Modifying builtin objects (`Array.prototype.foo = ...`)."
+    },
+    {
+      "heading": "6. Naming",
+      "body": "- **Classes:** `UpperCamelCase`.\n- **Methods & Functions:** `lowerCamelCase`.\n- **Constants:** `CONSTANT_CASE` (all uppercase with underscores).\n- **Non-constant Fields & Variables:** `lowerCamelCase`."
+    },
+    {
+      "heading": "7. JSDoc",
+      "body": "- JSDoc is used on all classes, fields, and methods.\n- Use `@param`, `@return`, `@override`, `@deprecated`.\n- Type annotations are enclosed in braces (e.g., `/** @param {string} userName */`).\n\n*Source: [Google JavaScript Style Guide](https://google.github.io/styleguide/jsguide.html)*"
+    }
+  ],
+  "languages": [
+    "javascript"
+  ],
+  "frameworks": [],
+  "file_patterns": [],
+  "applies_to": [
+    "planning",
+    "implementation",
+    "review",
+    "tests"
+  ],
+  "rules": [
+    {
+      "id": "javascript-rule-1",
+      "severity": "guidance",
+      "summary": "**File Naming:** All lowercase, with underscores (`_`) or dashes (`-`). Extension must be `.js`."
+    },
+    {
+      "id": "javascript-rule-2",
+      "severity": "guidance",
+      "summary": "**File Encoding:** UTF-8."
+    },
+    {
+      "id": "javascript-rule-3",
+      "severity": "guidance",
+      "summary": "**Whitespace:** Use only ASCII horizontal spaces (0x20). Tabs are forbidden for indentation."
+    },
+    {
+      "id": "javascript-rule-4",
+      "severity": "guidance",
+      "summary": "New files should be ES modules (`import`/`export`)."
+    },
+    {
+      "id": "javascript-rule-5",
+      "severity": "guidance",
+      "summary": "**Exports:** Use named exports (`export {MyClass};`). **Do not use default exports.**"
+    },
+    {
+      "id": "javascript-rule-6",
+      "severity": "guidance",
+      "summary": "**Imports:** Do not use line-wrapped imports. The `.js` extension in import paths is mandatory."
+    },
+    {
+      "id": "javascript-rule-7",
+      "severity": "guidance",
+      "summary": "**Braces:** Required for all control structures (`if`, `for`, `while`, etc.), even single-line blocks. Use K&R style (\"Egyptian brackets\")."
+    },
+    {
+      "id": "javascript-rule-8",
+      "severity": "guidance",
+      "summary": "**Indentation:** +2 spaces for each new block."
+    },
+    {
+      "id": "javascript-rule-9",
+      "severity": "guidance",
+      "summary": "**Semicolons:** Every statement must be terminated with a semicolon."
+    },
+    {
+      "id": "javascript-rule-10",
+      "severity": "guidance",
+      "summary": "**Column Limit:** 80 characters."
+    },
+    {
+      "id": "javascript-rule-11",
+      "severity": "guidance",
+      "summary": "**Line-wrapping:** Indent continuation lines at least +4 spaces."
+    },
+    {
+      "id": "javascript-rule-12",
+      "severity": "guidance",
+      "summary": "**Whitespace:** Use single blank lines between methods. No trailing whitespace."
+    },
+    {
+      "id": "javascript-rule-13",
+      "severity": "guidance",
+      "summary": "**Variable Declarations:** Use `const` by default, `let` if reassignment is needed. **`var` is forbidden.**"
+    },
+    {
+      "id": "javascript-rule-14",
+      "severity": "guidance",
+      "summary": "**Array Literals:** Use trailing commas. Do not use the `Array` constructor."
+    },
+    {
+      "id": "javascript-rule-15",
+      "severity": "guidance",
+      "summary": "**Object Literals:** Use trailing commas and shorthand properties. Do not use the `Object` constructor."
+    },
+    {
+      "id": "javascript-rule-16",
+      "severity": "guidance",
+      "summary": "**Classes:** Do not use JavaScript getter/setter properties (`get name()`). Provide ordinary methods instead."
+    },
+    {
+      "id": "javascript-rule-17",
+      "severity": "guidance",
+      "summary": "**Functions:** Prefer arrow functions for nested functions to preserve `this` context."
+    },
+    {
+      "id": "javascript-rule-18",
+      "severity": "guidance",
+      "summary": "**String Literals:** Use single quotes (`'`). Use template literals (`` ` ``) for multi-line strings or complex interpolation."
+    },
+    {
+      "id": "javascript-rule-19",
+      "severity": "guidance",
+      "summary": "**Control Structures:** Prefer `for-of` loops. `for-in` loops should only be used on dict-style objects."
+    },
+    {
+      "id": "javascript-rule-20",
+      "severity": "guidance",
+      "summary": "**`this`:** Only use `this` in class constructors, methods, or in arrow functions defined within them."
+    },
+    {
+      "id": "javascript-rule-21",
+      "severity": "guidance",
+      "summary": "**Equality Checks:** Always use identity operators (`===` / `!==`)."
+    },
+    {
+      "id": "javascript-rule-22",
+      "severity": "guidance",
+      "summary": "`with` keyword."
+    },
+    {
+      "id": "javascript-rule-23",
+      "severity": "guidance",
+      "summary": "`eval()` or `Function(...string)`."
+    },
+    {
+      "id": "javascript-rule-24",
+      "severity": "guidance",
+      "summary": "Automatic Semicolon Insertion."
+    },
+    {
+      "id": "javascript-rule-25",
+      "severity": "guidance",
+      "summary": "Modifying builtin objects (`Array.prototype.foo = ...`)."
+    },
+    {
+      "id": "javascript-rule-26",
+      "severity": "guidance",
+      "summary": "**Classes:** `UpperCamelCase`."
+    },
+    {
+      "id": "javascript-rule-27",
+      "severity": "guidance",
+      "summary": "**Methods & Functions:** `lowerCamelCase`."
+    },
+    {
+      "id": "javascript-rule-28",
+      "severity": "guidance",
+      "summary": "**Constants:** `CONSTANT_CASE` (all uppercase with underscores)."
+    },
+    {
+      "id": "javascript-rule-29",
+      "severity": "guidance",
+      "summary": "**Non-constant Fields & Variables:** `lowerCamelCase`."
+    },
+    {
+      "id": "javascript-rule-30",
+      "severity": "guidance",
+      "summary": "JSDoc is used on all classes, fields, and methods."
+    },
+    {
+      "id": "javascript-rule-31",
+      "severity": "guidance",
+      "summary": "Use `@param`, `@return`, `@override`, `@deprecated`."
+    },
+    {
+      "id": "javascript-rule-32",
+      "severity": "guidance",
+      "summary": "Type annotations are enclosed in braces (e.g., `/** @param {string} userName */`)."
+    }
+  ],
+  "source": "bundled_template"
+}

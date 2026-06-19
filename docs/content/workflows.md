@@ -222,13 +222,12 @@ Artifact sync can:
 - Catalog known project, style guide, track, release, and external artifacts.
 - Return JSON schemas for spec, plan, style guide, release, journal, and
   evidence artifacts.
-- Import legacy Markdown into canonical JSON where no canonical file exists.
 - Validate canonicals and preview generated projections.
 - Return diffs and a review bundle before any confirmed mutation.
 
 Common scopes:
 
-- `all`: validate/import/render every known artifact.
+- `all`: validate/render every known artifact.
 - `track:<id>`: spec, plan, learnings, handoff, and index projection for one
   track.
 - `styleguides`: style guide catalog and selected guide projections.
@@ -236,8 +235,8 @@ Common scopes:
   and project-level projections.
 
 Confirmed sync requires the dry-run review bundle first, then `execute:true`
-and `humanConfirmed:true`. Unmarked legacy Markdown is skipped unless the user
-explicitly approves `force:true`.
+and `humanConfirmed:true`. Unmarked generated projections are skipped unless
+the user explicitly approves `force:true`.
 
 ## `cadre-revert`
 

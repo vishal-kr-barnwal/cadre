@@ -2,36 +2,41 @@
   "templates": [
     {
       "id": "product",
-      "source": "product.md",
-      "target": "cadre/product.md",
+      "source": "product.json",
+      "target": "cadre/product.json",
+      "projection": "cadre/product.md",
       "purpose": "Product summary, users, workflows, domain model, invariants, architecture boundaries, data ownership, and release expectations.",
       "scope": "target-project"
     },
     {
       "id": "workflow",
-      "source": "workflow.md",
-      "target": "cadre/workflow.md",
+      "source": "workflow.json",
+      "target": "cadre/workflow.json",
+      "projection": "cadre/workflow.md",
       "purpose": "Project development, verification, review, and commit expectations.",
       "scope": "target-project"
     },
     {
       "id": "product-guidelines",
-      "source": "product_guidelines.md",
-      "target": "cadre/product_guidelines.md",
+      "source": "product_guidelines.json",
+      "target": "cadre/product_guidelines.json",
+      "projection": "cadre/product_guidelines.md",
       "purpose": "Product principles, user promises, non-goals, and decision rules reviewed during setup.",
       "scope": "target-project"
     },
     {
       "id": "patterns",
-      "source": "patterns.md",
-      "target": "cadre/patterns.md",
+      "source": "patterns_seed.json",
+      "target": "cadre/patterns.jsonl",
+      "projection": "cadre/patterns.md",
       "purpose": "Reusable codebase patterns and completed-track learnings.",
       "scope": "target-project"
     },
     {
       "id": "learnings",
-      "source": "learnings.md",
-      "target": "cadre/tracks/<track_id>/learnings.md",
+      "source": "learnings_seed.json",
+      "target": "cadre/tracks/<track_id>/learnings.jsonl",
+      "projection": "cadre/tracks/<track_id>/learnings.md",
       "purpose": "Per-track learning journal starter.",
       "scope": "target-project"
     },
@@ -58,8 +63,9 @@
     },
     {
       "id": "style-guides",
-      "source": "code_styleguides/*.md",
-      "target": "cadre/code_styleguides/*.md",
+      "source": "styleguides/*.json",
+      "target": "cadre/styleguides/*.json",
+      "projection": "cadre/code_styleguides/*.md",
       "purpose": "Language-specific implementation guidance selected by setup packets.",
       "scope": "target-project"
     },

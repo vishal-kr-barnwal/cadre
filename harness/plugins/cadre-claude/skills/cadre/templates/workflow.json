@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "schema": "cadre.workflow.v1",
+  "kind": "workflow",
+  "title": "Project Workflow",
+  "summary": "",
+  "sections": [
+    {
+      "heading": "Guiding Principles",
+      "body": "1. **Cadre State Is Packet-Owned:** Cadre records progress through MCP\n   task-completion, mutation, workflow, review, Beads, and validation packets.\n2. **The JSON Plan Is Authoritative:** `plan.json` describes the work. `plan.md`\n   is generated for human review only and must not drive runtime behavior.\n3. **The Tech Stack Is Deliberate:** Changes to the tech stack must be reflected\n   in Cadre context through the appropriate packet before implementation relies on\n   them.\n4. **Test-Driven Development:** Write tests before implementing behavior whenever\n   the task is testable.\n5. **High Code Coverage:** Aim for more than 80 percent coverage for new or\n   changed modules unless the packet records an approved exception.\n6. **User Experience First:** Product decisions should prioritize the user's\n   workflow, clarity, and failure recovery.\n7. **Non-Interactive and CI-Aware:** Prefer one-shot project commands for tests,\n   builds, linters, and formatters."
+    },
+    {
+      "heading": "Task Lifecycle",
+      "body": "All Cadre orchestration uses MCP packets. If a required packet returns `ok:false`,\nhalt and report the packet error instead of recreating Cadre state logic outside\nMCP.\n\n1. **Select Work:** Use Cadre status or implementation-prep packets to select the\n   next available track, phase, or task.\n2. **Claim Work:** Use the implementation workflow packet or mutation packet to\n   claim ownership before product edits begin.\n3. **Red Phase:** Add or update product tests that express the expected behavior.\n   Run the relevant project test command and confirm the new test fails for the\n   intended reason when practical.\n4. **Green Phase:** Implement the smallest product change that satisfies the test\n   and acceptance criteria.\n5. **Refactor:** Improve clarity, duplication, performance, and accessibility\n   while preserving behavior.\n6. **Verify:** Run targeted tests first, then broader project checks according to\n   risk. Include coverage when the project has coverage tooling.\n7. **Commit Product Work:** Make clear product commits for the completed unit of\n   work according to the team's normal commit policy.\n8. **Record Completion:** Call the Cadre task-completion packet with test,\n   coverage, commit, and summary evidence. The packet updates plan state, metadata,\n   Beads state, journals, and indexes."
+    },
+    {
+      "heading": "Commit Discipline",
+      "body": "- Prefer one product commit per completed task or coherent implementation\n  checkpoint.\n- For larger tasks, commit after each significant tested change instead of\n  batching an entire track into one commit.\n- Keep commit messages task-aware by mentioning the track id, phase/task intent,\n  or user-visible behavior changed.\n- After each task-level commit, call the Cadre task-completion packet with the\n  commit SHA, tests run, coverage when available, files changed, and a concise\n  implementation note. Cadre records that evidence in track metadata, journals,\n  and Beads-backed notes.\n- Do not mark a task complete until its commit evidence and verification summary\n  have been recorded through Cadre."
+    },
+    {
+      "heading": "Polyrepo Notes",
+      "body": "In polyrepo mode, Cadre packets identify the repo, branch, worktree, task, and\ncommit evidence for each product repository. Product commands run in the\nappropriate repo worktree. Cadre control-plane synchronization, cross-repo review\nlinks, fleet status, and merge-train metadata are packet-owned.\n\nIn monorepo mode, the same packet lifecycle applies with a single product repo."
+    },
+    {
+      "heading": "Quality Gates",
+      "body": "Before marking any task complete through Cadre packets, verify:\n\n- Tests for the changed behavior pass.\n- Coverage meets the project's threshold or the packet records an approved reason.\n- Code follows the relevant style guide in `styleguides/*.json`; Markdown under\n  `code_styleguides/` is generated for human readability only.\n- Public APIs are documented when the project convention requires it.\n- Type checks, lint checks, and static analysis pass when configured.\n- User-facing changes have appropriate accessibility and responsive checks.\n- Documentation is updated when behavior, setup, or operations changed.\n- Security-sensitive changes receive explicit review evidence."
+    },
+    {
+      "heading": "Phase Completion",
+      "body": "When a task completes a phase, use Cadre workflow and completion packets to gather\nphase evidence, validate coverage, record the checkpoint, and refresh indexes.\nManual verification plans may be summarized for the user, but Cadre checkpoint\nstate is recorded only through packets."
+    },
+    {
+      "heading": "Development Commands",
+      "body": "Project setup, tests, builds, linters, formatters, local servers, and product\ncommits remain normal product work. Use the commands configured by the project and\nkeep them non-interactive. These commands must not mutate Cadre control-plane,\nBeads, provider, index, review, archive, handoff, or validation state directly."
+    }
+  ]
+}

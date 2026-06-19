@@ -6,7 +6,6 @@ import { spawnSync } from "node:child_process";
 import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../types";
 import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../guards";
 import { LOCK_STALE_MS, STALE_LEASE_MS } from "../domain/lease-policy";
-import { parsePlanText } from "../domain/plan-parser";
 import { PROVIDER_MODES } from "../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../lsp/language-registry";
@@ -391,14 +390,6 @@ function markerForPlanStatus(status: unknown): string {
   return " ";
 }
 
-function statusForPlanMarker(marker: unknown): string {
-  if (marker === "x") return "completed";
-  if (marker === "~") return "in_progress";
-  if (marker === "!") return "blocked";
-  if (marker === "-") return "skipped";
-  return "pending";
-}
-
 function trackPlanJsonPath(track: CadreTrack): string {
   return track.plan_json_path || path.join(track.dir, "plan.json");
 }
@@ -416,6 +407,7 @@ function trackHandoffJsonPath(track: CadreTrack): string {
 }
 
 function planJsonPathForPlanPath(file: string): string {
+  if (file.endsWith(".json")) return file;
   return path.join(path.dirname(file), "plan.json");
 }
 
@@ -574,6 +566,7 @@ function normalizePlanManualVerification(plan: JsonObject, specJson?: JsonObject
     };
   });
   const trackPhaseIndex = normalizedPhases.length + 1;
+  const trackPhaseDepends = normalizedPhases.map((phase) => `phase${phase.phase_index}`);
   const existingTrackTask = asArray(asJsonObject(existingTrackPhase).tasks).map(asJsonObject)
     .find((task) => isManualVerificationTaskObject(task, "track"));
   const trackManualTask: JsonObject = {
@@ -609,11 +602,11 @@ function normalizePlanManualVerification(plan: JsonObject, specJson?: JsonObject
         phase_index: trackPhaseIndex,
         title: `Phase ${trackPhaseIndex}: User Manual Verification`,
         execution_mode: "sequential",
-        depends_on: phaseManualKeys,
+        depends_on: trackPhaseDepends,
         annotations: {
           ...asJsonObject(asJsonObject(existingTrackPhase).annotations),
           execution: "sequential",
-          depends: phaseManualKeys.join(","),
+          depends: trackPhaseDepends.join(","),
         },
         tasks: [trackManualTask],
       },
@@ -621,53 +614,16 @@ function normalizePlanManualVerification(plan: JsonObject, specJson?: JsonObject
   };
 }
 
-function planJsonFromText(trackId: string, text: string, specJson?: JsonObject | null): JsonObject {
-  const parsed = parsePlanText(text);
-  const plan = {
-    version: 1,
-    schema: "cadre.plan.v1",
-    track_id: trackId,
-    title: `Plan: ${trackId}`,
-    source: "markdown_import",
-    updated_at: utcNow(),
-    phases: parsed.phases.map((phase) => ({
-      phase_index: phase.phase_index,
-      title: phase.title,
-      execution_mode: asOptionalString(phase.annotations.execution) || "sequential",
-      depends_on: asOptionalString(phase.annotations.depends)
-        ? asString(phase.annotations.depends).split(",").map((item) => item.trim()).filter(Boolean)
-        : [],
-      annotations: phase.annotations,
-      tasks: phase.tasks.map((task) => ({
-        task_index: task.task_index,
-        task_key: task.task_key,
-        title: task.title,
-        status: statusForPlanMarker(task.marker),
-        files: task.files || [],
-        depends_on: task.depends || [],
-        repo: task.repo || null,
-        annotations: task.annotations,
-        commit_shas: task.commit_shas || [],
-        repo_shas: task.repo_shas || {},
-        ...(asOptionalString(task.annotations["task-type"]) ? { task_type: asOptionalString(task.annotations["task-type"]) } : {}),
-        ...(asOptionalString(task.annotations["manual-verification-scope"]) || asOptionalString(task.annotations["manual-verification"])
-          ? { manual_verification: { scope: asOptionalString(task.annotations["manual-verification-scope"]) || asOptionalString(task.annotations["manual-verification"]) } }
-          : {}),
-      })),
-    })),
-  };
-  return normalizePlanManualVerification(plan, specJson);
-}
-
 function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
   const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
     const phase = asJsonObject(rawPhase);
     const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
     const phaseDepends = asStringArray(phase.depends_on);
+    const hasExplicitPhaseDepends = Object.prototype.hasOwnProperty.call(phase, "depends_on");
     const annotations = {
       ...asJsonObject(phase.annotations),
       ...(asOptionalString(phase.execution_mode) ? { execution: asOptionalString(phase.execution_mode) } : {}),
-      ...(phaseDepends.length > 0 ? { depends: phaseDepends.join(",") } : {}),
+      ...(hasExplicitPhaseDepends ? { depends: phaseDepends.join(",") } : {}),
     };
     const tasks: PlanTask[] = asArray(phase.tasks).map((rawTask, taskOffset) => {
       const task = asJsonObject(rawTask);
@@ -719,7 +675,9 @@ function renderPlanMarkdown(raw: JsonObject): string {
   for (const phase of parsed.phases) {
     parts.push(`## Phase ${phase.phase_index}: ${phase.title.replace(/^Phase\s+\d+:\s*/i, "")}`);
     if (phase.annotations.execution) parts.push(`<!-- execution: ${phase.annotations.execution} -->`);
-    if (phase.annotations.depends) parts.push(`<!-- depends: ${phase.annotations.depends} -->`);
+    if (Object.prototype.hasOwnProperty.call(phase.annotations, "depends")) {
+      parts.push(`<!-- depends: ${phase.annotations.depends || ""} -->`);
+    }
     parts.push("");
     for (const task of phase.tasks) {
       const commit = task.commit_shas && task.commit_shas.length > 0 ? ` (${task.commit_shas[task.commit_shas.length - 1]})` : "";
@@ -948,30 +906,6 @@ function renderSpecMarkdown(raw: JsonObject): string {
   return normalizedText(parts.join("\n"));
 }
 
-function styleGuideJsonFromMarkdown(id: string, text: string, source = "markdown_import"): JsonObject {
-  const doc = markdownDocJson("styleguide", text, { id, source });
-  const ruleLines = normalizedText(text)
-    .split("\n")
-    .filter((line) => /^\s*-\s+/.test(line))
-    .slice(0, 80);
-  return {
-    ...doc,
-    schema: "cadre.styleguide.v1",
-    id,
-    title: doc.title || id,
-    languages: id === "general" ? [] : [id],
-    frameworks: [],
-    file_patterns: [],
-    applies_to: ["planning", "implementation", "review", "tests"],
-    rules: ruleLines.map((line, index) => ({
-      id: `${id}-rule-${index + 1}`,
-      severity: "guidance",
-      summary: line.replace(/^\s*-\s+/, "").trim(),
-    })),
-    version: 1,
-  };
-}
-
 function renderStyleGuideMarkdown(raw: JsonObject): string {
   const id = asOptionalString(raw.id) || "styleguide";
   const title = asOptionalString(raw.title) || id;
@@ -1006,9 +940,9 @@ function isCadreProjectRoot(root: string): boolean {
   return [
     "tracks.json",
     "setup_state.json",
-    "product.md",
+    "product.json",
     "tech-stack.json",
-    "workflow.md",
+    "workflow.json",
     "beads.json",
     "config.json",
     "repos.json",
@@ -1592,10 +1526,11 @@ function coverageThreshold(root: string): number {
     const value = Number(config[key]);
     if (Number.isFinite(value) && value >= 0) return value;
   }
-  const workflowPath = path.join(root, "cadre", "workflow.md");
-  if (fileExists(workflowPath)) {
-    const text = fs.readFileSync(workflowPath, "utf8");
-    const match = text.match(/(?:coverage|test coverage)[^\n%]{0,80}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  const workflowPath = path.join(root, "cadre", "workflow.json");
+  const workflow = readJson<JsonObject | null>(workflowPath, null);
+  if (workflow) {
+    const text = JSON.stringify(workflow);
+    const match = text.match(/(?:coverage|test coverage)[^%]{0,120}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
     if (match?.[1]) return Number(match[1]);
   }
   return 80;
@@ -1738,14 +1673,23 @@ function listTracks(root: string): CadreTrack[] {
   return tracks;
 }
 
+function parsePlanJson(raw: unknown): ParsedPlan {
+  return planJsonToParsedPlan(asJsonObject(raw));
+}
+
 function parsePlanFile(file: string): ParsedPlan {
   const planJsonPath = planJsonPathForPlanPath(file);
   if (fileExists(planJsonPath)) {
     const raw = readJson<JsonObject | null>(planJsonPath, null);
-    if (raw) return planJsonToParsedPlan(raw);
+    if (raw) return parsePlanJson(raw);
   }
-  if (!fileExists(file)) return { ok: true, phases: [], tasks: [], warnings: [], errors: [] };
-  return parsePlanText(fs.readFileSync(file, "utf8"));
+  return {
+    ok: false,
+    phases: [],
+    tasks: [],
+    warnings: [],
+    errors: [`Missing canonical plan JSON: ${planJsonPath}`],
+  };
 }
 
 function planClaims(root: string, track: CadreTrack, topology = loadTopology(root)): Claim[] {
@@ -2654,104 +2598,88 @@ function packetText(value: unknown, fallback: string): string {
   return (text && text.trim() ? text : fallback).replace(/\n*$/, "\n");
 }
 
-function workflowTextHasBaselineSections(text: string): boolean {
-  return [
-    "## Guiding Principles",
-    "## Task Lifecycle",
-    "## Commit Discipline",
-    "## Quality Gates",
-    "## Phase Completion",
-    "## Development Commands",
-  ].every((heading) => text.includes(heading));
+const MARKDOWN_PAYLOAD_FIELDS = [
+  "productText",
+  "productGuidelinesText",
+  "product_guidelines_text",
+  "workflowText",
+  "specText",
+  "planText",
+  "planPath",
+];
+
+function markdownPayloadError(args: RuntimeArgs = {}): CoreResult | null {
+  const raw = args as UnknownRecord;
+  const provided = MARKDOWN_PAYLOAD_FIELDS.filter((field) => raw[field] !== undefined);
+  if (provided.length === 0) return null;
+  return {
+    ok: false,
+    error: `Markdown payload fields are not supported: ${provided.join(", ")}. Use structured JSON fields instead.`,
+    unsupported_fields: provided,
+    expected_fields: ["product", "productGuidelines", "workflowPolicy", "spec", "plan"],
+  };
 }
 
-function stripTopLevelWorkflowHeading(text: string): string {
-  return text
-    .replace(/\n*$/, "\n")
-    .replace(/^#\s+Project Workflow\s*\n+/i, "")
-    .trim();
+function normalizeProjectDoc(kind: string, raw: unknown, templateFile: string, fallbackTitle: string, notesHeading: string): JsonObject {
+  const template = templateJson(templateFile, {
+    version: 1,
+    schema: `cadre.${kind}.v1`,
+    kind,
+    title: fallbackTitle,
+    summary: "",
+    sections: [],
+  });
+  const provided = isRecord(raw) ? asJsonObject(raw) : {};
+  const templateSections = asArray(template.sections).map(asJsonObject);
+  const providedSections = asArray(provided.sections).map(asJsonObject);
+  const providedSummary = asOptionalString(provided.summary || provided.description || provided.notes);
+  const sections = providedSections.length > 0
+    ? providedSections
+    : [
+        ...templateSections,
+        ...(providedSummary && isRecord(raw) ? [{ heading: notesHeading, body: providedSummary }] : []),
+      ];
+  return {
+    ...template,
+    ...provided,
+    version: 1,
+    schema: `cadre.${kind}.v1`,
+    kind,
+    title: asOptionalString(provided.title) || asOptionalString(template.title) || fallbackTitle,
+    summary: asOptionalString(provided.summary || provided.description) || asOptionalString(template.summary) || "",
+    sections,
+    updated_at: utcNow(),
+  };
 }
 
-function setupWorkflowText(value: unknown): string {
-  const fallback = templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n");
-  const provided = asOptionalString(value);
-  if (!provided || !provided.trim()) return fallback.replace(/\n*$/, "\n");
-  const normalized = provided.replace(/\n*$/, "\n");
-  if (workflowTextHasBaselineSections(normalized)) return normalized;
-  const projectNotes = stripTopLevelWorkflowHeading(normalized);
-  if (!projectNotes) return fallback.replace(/\n*$/, "\n");
-  return [
-    fallback.replace(/\n*$/, ""),
-    "## Project-Specific Workflow Notes",
-    projectNotes,
-    "",
-  ].join("\n\n");
+function normalizeSpecJson(trackId: string, raw: unknown): JsonObject {
+  const spec = normalizedSpecFromRaw({
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: trackId,
+    title: `Spec: ${trackId}`,
+    ...asJsonObject(raw),
+  });
+  return {
+    ...spec,
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: trackId,
+    updated_at: utcNow(),
+  };
 }
 
-function textHasSections(text: string, headings: string[]): boolean {
-  return headings.every((heading) => text.includes(heading));
-}
-
-function stripTopLevelHeading(text: string, heading: string): string {
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text
-    .replace(/\n*$/, "\n")
-    .replace(new RegExp(`^#\\s+${escaped}\\s*\\n+`, "i"), "")
-    .trim();
-}
-
-function mergeTemplateBackedText(value: unknown, template: string, fallback: string, headings: string[], notesHeading: string): string {
-  const baseline = templateText(template, fallback).replace(/\n*$/, "\n");
-  const provided = asOptionalString(value);
-  if (!provided || !provided.trim()) return baseline;
-  const normalized = provided.replace(/\n*$/, "\n");
-  if (textHasSections(normalized, headings)) return normalized;
-  const notes = stripTopLevelHeading(normalized, baseline.split(/\r?\n/, 1)[0]?.replace(/^#\s+/, "") || "");
-  if (!notes) return baseline;
-  return [
-    baseline.replace(/\n*$/, ""),
-    notesHeading,
-    notes,
-    "",
-  ].join("\n\n");
-}
-
-function setupProductText(value: unknown): string {
-  return mergeTemplateBackedText(
-    value,
-    "product.md",
-    "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n",
-    [
-      "## Product Summary",
-      "## Users And Personas",
-      "## Core Workflows",
-      "## Domain Model",
-      "## Product Invariants",
-      "## Architecture Boundaries",
-      "## Data And Integrations",
-      "## Quality And Release Expectations",
-    ],
-    "## Project-Specific Product Notes"
-  );
-}
-
-function setupProductGuidelinesText(value: unknown): string {
-  return mergeTemplateBackedText(
-    value,
-    "product_guidelines.md",
-    "# Product Guidelines\n\nCapture product principles, user promises, non-goals, and decision rules.\n",
-    [
-      "## Product Principles",
-      "## User Promises",
-      "## Trust And Safety Boundaries",
-      "## Domain And Workflow Rules",
-      "## Data Ownership",
-      "## Non-Goals",
-      "## Decision Rules",
-      "## Review Checklist",
-    ],
-    "## Project-Specific Product Guideline Notes"
-  );
+function normalizePlanJson(trackId: string, raw: unknown, specJson?: JsonObject | null): JsonObject {
+  const plan = {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: trackId,
+    title: `Plan: ${trackId}`,
+    ...asJsonObject(raw),
+  };
+  return normalizePlanManualVerification({ ...plan, track_id: trackId }, specJson);
 }
 
 function templateJson(relativePath: string, fallback: JsonObject): JsonObject {
@@ -2952,13 +2880,13 @@ function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 function availableStyleGuideIds(): string[] {
-  const dir = templatePath("code_styleguides/general.md");
+  const dir = templatePath("styleguides/general.json");
   if (!dir) return [];
   const styleDir = path.dirname(dir);
   try {
     return fs.readdirSync(styleDir)
-      .filter((file) => file.endsWith(".md"))
-      .map((file) => path.basename(file, ".md"))
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => path.basename(file, ".json"))
       .sort();
   } catch {
     return [];
@@ -2970,7 +2898,8 @@ function normalizeStyleGuideId(value: string): string {
     .trim()
     .replace(/\\/g, "/")
     .replace(/^.*code_styleguides\//, "")
-    .replace(/\.md$/i, "")
+    .replace(/^.*styleguides\//, "")
+    .replace(/\.(md|json)$/i, "")
     .toLowerCase();
 }
 
@@ -3182,15 +3111,20 @@ function setupShouldWriteLsp(args: RuntimeArgs, lspRecommendations: CoreResult):
 
 function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): ReviewFile[] {
   const rawArgs = args as UnknownRecord;
-  const productText = setupProductText(rawArgs.productText);
-  const productGuidelinesText = setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text);
-  const workflowText = setupWorkflowText(rawArgs.workflowText);
-  const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
   const techStack = techStackForPacket(root, args);
-  const productJson = markdownDocJson("product", productText);
-  const productGuidelinesJson = markdownDocJson("product_guidelines", productGuidelinesText);
-  const workflowJson = markdownDocJson("workflow", workflowText);
+  const productJson = normalizeProjectDoc("product", rawArgs.product, "product.json", "Product Context", "Project-Specific Product Notes");
+  const productGuidelinesJson = normalizeProjectDoc(
+    "product_guidelines",
+    rawArgs.productGuidelines || rawArgs.product_guidelines,
+    "product_guidelines.json",
+    "Product Guidelines",
+    "Project-Specific Product Guideline Notes"
+  );
+  const workflowJson = normalizeProjectDoc("workflow", rawArgs.workflowPolicy || rawArgs.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes");
+  const patternsSeed = templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
+  const patternsText = asOptionalString(patternsSeed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
   const patternsEntry: JsonObject = {
+    ...patternsSeed,
     id: "initial",
     kind: "patterns_seed",
     recorded_at: utcNow(),
@@ -3204,20 +3138,26 @@ function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResu
     generated_at: utcNow(),
   };
   const files: ReviewFile[] = [
-    jsonReviewFile("cadre/product.json", "Product context canonical", "productText", productJson),
+    jsonReviewFile("cadre/product.json", "Product context canonical", "product", productJson),
     textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context"))),
-    jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelinesText", productGuidelinesJson),
+    jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelines", productGuidelinesJson),
     textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines"))),
     jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-    jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowText", workflowJson),
+    jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowPolicy", workflowJson),
     textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow"))),
-    plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns.md", `${JSON.stringify(patternsEntry)}\n`),
+    plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", `${JSON.stringify(patternsEntry)}\n`),
     textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText)),
     jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),
     textReviewFile("cadre/code_styleguides/README.md", "Style guide catalog", "cadre/styleguides/index.json", withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))),
     ...selectedStyleGuides.flatMap((guideId) => {
-      const guideText = templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`);
-      const guideJson = styleGuideJsonFromMarkdown(guideId, guideText, "bundled_template");
+      const guideJson = templateJson(`styleguides/${guideId}.json`, {
+        version: 1,
+        schema: "cadre.styleguide.v1",
+        id: guideId,
+        title: guideId,
+        rules: [],
+        source: "bundled_template",
+      });
       return [
         jsonReviewFile(`cadre/styleguides/${guideId}.json`, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guideJson),
         textReviewFile(
@@ -3250,7 +3190,7 @@ function setupReviewArtifacts(reviewFiles: ReviewFile[], styleGuides: CoreResult
   const artifacts: JsonObject[] = [
     ...reviewArtifactsFromFiles(reviewFiles),
     {
-      path: "cadre/code_styleguides/*.md",
+      path: "cadre/styleguides/*.json",
       title: "Selected code style guides",
       kind: "selection",
       source: "tech-stack.json/styleGuideIds",
@@ -3387,18 +3327,21 @@ function packetReviewArtifact(title: string, source: string, fields: JsonObject 
 }
 
 function trackLearningsText(trackId: string): string {
-  return templateText("learnings.md", "# Track Learnings: {{track_id}}\n\n")
+  const seed = templateJson("learnings_seed.json", {
+    text: "# Track Learnings: {{track_id}}\n\nPatterns, gotchas, and context discovered during implementation.\n",
+  });
+  return (asOptionalString(seed.text) || "# Track Learnings: {{track_id}}\n\n")
     .replace(/\{\{track_id\}\}/g, trackId)
     .replace(/\n*$/, "\n");
 }
 
 function installedStyleGuideIds(root: string): string[] {
-  const dir = path.join(root, "cadre", "code_styleguides");
+  const dir = path.join(root, "cadre", "styleguides");
   if (!fileExists(dir)) return [];
   try {
     return fs.readdirSync(dir)
-      .filter((file) => file.endsWith(".md"))
-      .map((file) => path.basename(file, ".md"))
+      .filter((file) => file.endsWith(".json") && file !== "index.json")
+      .map((file) => path.basename(file, ".json"))
       .sort();
   } catch {
     return [];
@@ -3434,7 +3377,7 @@ function implementationStyleGuides(root: string, trackId: string | null | undefi
     return {
       ok: true,
       available: false,
-      source: "cadre/code_styleguides",
+      source: "cadre/styleguides",
       installed: [],
       selected: [],
       guides: [],
@@ -3471,11 +3414,13 @@ function implementationStyleGuides(root: string, trackId: string | null | undefi
   ])).sort();
   const maxChars = Math.max(1000, Math.min(Number(args.styleGuideMaxChars || 6000), 20000));
   const guides = selected.map((id) => {
-    const file = path.join(root, "cadre", "code_styleguides", `${id}.md`);
-    const text = fileExists(file) ? fs.readFileSync(file, "utf8") : "";
+    const file = path.join(root, "cadre", "styleguides", `${id}.json`);
+    const guide = readJson<JsonObject | null>(file, null) || {};
+    const text = JSON.stringify(guide, null, 2);
     return {
       id,
       path: path.relative(root, file),
+      guide,
       content: text.slice(0, maxChars),
       truncated: text.length > maxChars,
       bytes: Buffer.byteLength(text, "utf8"),
@@ -3489,7 +3434,7 @@ function implementationStyleGuides(root: string, trackId: string | null | undefi
   return {
     ok: missing.length === 0,
     available: true,
-    source: "cadre/code_styleguides",
+    source: "cadre/styleguides",
     tech_stack_source: "cadre/tech-stack.json",
     installed,
     selected,
@@ -3504,6 +3449,8 @@ function implementationStyleGuides(root: string, trackId: string | null | undefi
 
 function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "setup", args);
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return { ...summary, ...markdownError };
   const rawArgs = args as UnknownRecord;
   const requestedTopology = asOptionalString(rawArgs.topology)?.toLowerCase();
   const reposPayload = isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null;
@@ -3555,7 +3502,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     review_bundle: reviewBundle,
     warnings,
     required_payload: args.execute === true
-      ? ["productText", "techStack"]
+      ? ["product", "techStack"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
         .concat(polyrepoRequested && !reposPayload ? ["repos"] : [])
       : [],
@@ -3566,7 +3513,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
       "Review setup artifacts with the user; call setup_scaffold with execute:true and humanConfirmed:true only after explicit approval.",
     ],
     packet_notes: [
-      "cadre-setup is packet-only: agents gather user intent, then pass confirmed document text to this packet.",
+      "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
       "Setup writes are human-in-loop: mutating setup packets require humanConfirmed:true after artifact review.",
       "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves.",
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
@@ -3577,7 +3524,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const cadreDir = path.join(root, "cadre");
   const force = asBoolean(rawArgs.force, false);
   const missingPayload = [
-    ...(!asOptionalString(rawArgs.productText)?.trim() ? ["productText"] : []),
+    ...(!isRecord(rawArgs.product) ? ["product"] : []),
     ...(!techStackFromArgs(args) ? ["techStack"] : []),
     ...(provider.requires_confirmation === true || !providerMode ? ["providerMode"] : []),
     ...(polyrepoRequested && !reposPayload ? ["repos"] : []),
@@ -3641,27 +3588,44 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     appendJsonl(file, value);
     written.push(path.relative(root, file));
   };
-  const writeProjectDoc = (relativePath: string, kind: string, text: string, title: string): void => {
+  const writeProjectDoc = (relativePath: string, kind: string, value: JsonObject, title: string): void => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
-    const value = markdownDocJson(kind, text);
     writeSetupJson(jsonPath, value);
     writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
   };
 
   fs.mkdirSync(path.join(cadreDir, "tracks"), { recursive: true });
   fs.mkdirSync(path.join(cadreDir, "archive"), { recursive: true });
-  writeProjectDoc("product.md", "product", setupProductText(rawArgs.productText), "Product Context");
+  writeProjectDoc(
+    "product.md",
+    "product",
+    normalizeProjectDoc("product", rawArgs.product, "product.json", "Product Context", "Project-Specific Product Notes"),
+    "Product Context"
+  );
   writeProjectDoc(
     "product_guidelines.md",
     "product_guidelines",
-    setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text),
+    normalizeProjectDoc(
+      "product_guidelines",
+      rawArgs.productGuidelines || rawArgs.product_guidelines,
+      "product_guidelines.json",
+      "Product Guidelines",
+      "Project-Specific Product Guideline Notes"
+    ),
     "Product Guidelines"
   );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
-  writeProjectDoc("workflow.md", "workflow", setupWorkflowText(rawArgs.workflowText), "Project Workflow");
+  writeProjectDoc(
+    "workflow.md",
+    "workflow",
+    normalizeProjectDoc("workflow", rawArgs.workflowPolicy || rawArgs.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes"),
+    "Project Workflow"
+  );
   writeSetupJson("tracks.json", trackIndexPayload(root, []));
-  const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
+  const patternsSeed = templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
+  const patternsText = asOptionalString(patternsSeed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
   writeSetupJsonlEntry("patterns.jsonl", {
+    ...patternsSeed,
     id: "initial",
     kind: "patterns_seed",
     recorded_at: utcNow(),
@@ -3671,8 +3635,14 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const beforeStyleWritten = written.length;
   const beforeStyleSkipped = skipped.length;
   for (const guideId of asStringArray(styleGuides.selected)) {
-    const guideText = templateText(`code_styleguides/${guideId}.md`, `# ${guideId}\n\n`);
-    const guideJson = styleGuideJsonFromMarkdown(guideId, guideText, "bundled_template");
+    const guideJson = templateJson(`styleguides/${guideId}.json`, {
+      version: 1,
+      schema: "cadre.styleguide.v1",
+      id: guideId,
+      title: guideId,
+      source: "bundled_template",
+      rules: [],
+    });
     writeSetupJson(`styleguides/${guideId}.json`, guideJson);
     writeText(
       `code_styleguides/${guideId}.md`,
@@ -3759,11 +3729,12 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
-function newTrackReviewFiles(trackId: string, specText: string | undefined, planText: string, metadata: TrackMetadata): ReviewFile[] {
+function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
-  const specJson = specJsonFromText(trackId, specText || `# Spec: ${trackId}\n`);
-  const planJson = planJsonFromText(trackId, planText, specJson);
+  const specJson = normalizeSpecJson(trackId, spec);
+  const planJson = normalizePlanJson(trackId, plan, specJson);
   const learningsEntry: JsonObject = {
+    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
     id: "initial",
     kind: "learnings_seed",
     track_id: trackId,
@@ -3774,7 +3745,7 @@ function newTrackReviewFiles(trackId: string, specText: string | undefined, plan
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/spec.json`,
       "Track spec canonical",
-      "specText",
+      "spec",
       specJson
     ),
     textReviewFile(
@@ -3786,7 +3757,7 @@ function newTrackReviewFiles(trackId: string, specText: string | undefined, plan
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/plan.json`,
       "Track plan canonical",
-      "planText",
+      "plan",
       planJson
     ),
     textReviewFile(
@@ -3804,7 +3775,7 @@ function newTrackReviewFiles(trackId: string, specText: string | undefined, plan
     plainReviewFile(
       `cadre/tracks/${safeTrack}/learnings.jsonl`,
       "Track learnings canonical",
-      "template:learnings.md",
+      "template:learnings_seed.json",
       `${JSON.stringify(learningsEntry)}\n`
     ),
     textReviewFile(
@@ -3817,11 +3788,14 @@ function newTrackReviewFiles(trackId: string, specText: string | undefined, plan
 }
 
 function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+  const summary = workflowSummary(root, "newtrack", args);
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return { ...summary, ...markdownError };
   const trackId = args.trackId || args.track_id;
-  const planText = asOptionalString(args.planText);
-  const specText = asOptionalString(args.specText);
-  if (!trackId) return { ...workflowSummary(root, "newtrack", args), ok: false, error: "trackId is required" };
-  if (!planText) return { ...workflowSummary(root, "newtrack", args), ok: false, error: "planText is required" };
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };
+  const specJson = normalizeSpecJson(String(trackId), args.spec || { title: `Spec: ${trackId}`, description: asOptionalString(args.description) || String(trackId) });
+  const planJson = normalizePlanJson(String(trackId), args.plan, specJson);
   const metadata: TrackMetadata = {
     track_id: trackId,
     type: "feature",
@@ -3835,24 +3809,24 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
     worktree_path: `.worktrees/${trackId}`,
     ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
   };
-  const reviewFiles = newTrackReviewFiles(String(trackId), specText, planText, metadata);
+  const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "newtrack", args, reviewFiles, { track_id: String(trackId) });
   const humanReview = humanReviewState("newtrack", args, reviewArtifacts, reviewBundle);
   const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
   const dryRun = args.execute !== true;
-  const assist = planAssist(root, { ...args, planText, trackId });
+  const assist = planAssist(root, { ...args, plan: planJson, trackId });
   const beads = createBeadsTree(root, {
     ...args,
     dryRun: true,
     trackId,
-    planText,
-    specText: specText || "",
+    plan: planJson,
+    spec: specJson,
     metadata,
   });
   if (dryRun) {
     return {
-      ...workflowSummary(root, "newtrack", args),
+      ...summary,
       ok: assist.ok !== false && beads.ok !== false,
       dry_run: true,
       track_id: trackId,
@@ -3866,11 +3840,11 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   }
   if (findTrack(root, trackId)) {
-    return { ...workflowSummary(root, "newtrack", args), ok: false, track_id: trackId, error: "Track already exists" };
+    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
   }
   if (!humanReviewConfirmed(args)) {
     return {
-      ...workflowSummary(root, "newtrack", args),
+      ...summary,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_human_review",
@@ -3888,16 +3862,15 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
   }
   if (!commandExists("bd", root)) {
     return {
-      ...workflowSummary(root, "newtrack", args),
+      ...summary,
       ok: false,
       track_id: trackId,
       error: "Beads CLI (bd) is required for live track creation",
     };
   }
   const dir = path.join(root, "cadre", "tracks", safeName(trackId));
-  const specJson = specJsonFromText(String(trackId), specText || `# Spec: ${trackId}\n`);
-  const planJson = planJsonFromText(String(trackId), planText, specJson);
   const learningsEntry: JsonObject = {
+    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
     id: "initial",
     kind: "learnings_seed",
     track_id: String(trackId),
@@ -3912,11 +3885,11 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
   fs.writeFileSync(path.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
   fs.writeFileSync(path.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}\n`);
   fs.writeFileSync(path.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
-  const liveBeads = createBeadsTree(root, { ...args, trackId, dryRun: false });
+  const liveBeads = createBeadsTree(root, { ...args, trackId, plan: planJson, spec: specJson, dryRun: false });
   if (!liveBeads.ok) {
     fs.rmSync(dir, { recursive: true, force: true });
     return {
-      ...workflowSummary(root, "newtrack", args),
+      ...summary,
       ok: false,
       track_id: trackId,
       stage: "create_beads_tree",
@@ -3925,7 +3898,7 @@ function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
   }
   const regen = regenIndex(root);
   return {
-    ...workflowSummary(root, "newtrack", args),
+    ...summary,
     ok: regen.ok !== false,
     dry_run: false,
     track_id: trackId,
@@ -4450,14 +4423,17 @@ function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResult {
 function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "revise", args);
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return { ...summary, ...markdownError };
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   const track = findTrack(root, trackId);
   const context = trackContext(root, trackId);
   const impact = lspImpact(root, args);
   const reviewFiles: ReviewFile[] = [];
-  const revisedSpec = asOptionalString(args.specText);
-  const revisedPlan = asOptionalString(args.planText);
-  const revisionRequested = revisedSpec !== undefined || revisedPlan !== undefined;
+  const existingSpec = track ? readJson<JsonObject | null>(trackSpecJsonPath(track), null) : null;
+  const revisedSpec = isRecord(args.spec) ? normalizeSpecJson(trackId, args.spec) : null;
+  const revisedPlan = isRecord(args.plan) ? normalizePlanJson(trackId, args.plan, revisedSpec || existingSpec) : null;
+  const revisionRequested = Boolean(revisedSpec || revisedPlan);
   if (revisionRequested && !track) {
     return {
       ...summary,
@@ -4467,27 +4443,22 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
       error: `Track not found: ${trackId}`,
     };
   }
-  if (track && revisedSpec !== undefined) {
-    const specJson = specJsonFromText(track.track_id, revisedSpec);
-    reviewFiles.push(jsonReviewFile(path.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "specText", specJson));
+  if (track && revisedSpec) {
+    reviewFiles.push(jsonReviewFile(path.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
     reviewFiles.push(textReviewFile(
       path.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(specJson))
+      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec))
     ));
   }
-  if (track && revisedPlan !== undefined) {
-    const specJson = revisedSpec !== undefined
-      ? specJsonFromText(track.track_id, revisedSpec)
-      : readJson<JsonObject | null>(trackSpecJsonPath(track), null);
-    const planJson = planJsonFromText(track.track_id, revisedPlan, specJson);
-    reviewFiles.push(jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "planText", planJson));
+  if (track && revisedPlan) {
+    reviewFiles.push(jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
     reviewFiles.push(textReviewFile(
       path.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson))
+      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan))
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -4541,20 +4512,15 @@ function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
   }
   const writeResult = withTrackLock(root, track.track_id, () => {
     const written: string[] = [];
-    if (revisedSpec !== undefined) {
-      const specJson = specJsonFromText(track.track_id, revisedSpec);
-      writeJsonEnsured(trackSpecJsonPath(track), specJson);
-      fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(specJson)));
+    if (revisedSpec) {
+      writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
+      fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
       written.push(path.relative(root, trackSpecJsonPath(track)));
       written.push(path.relative(root, track.spec_path));
     }
-    if (revisedPlan !== undefined) {
-      const specJson = revisedSpec !== undefined
-        ? specJsonFromText(track.track_id, revisedSpec)
-        : readJson<JsonObject | null>(trackSpecJsonPath(track), null);
-      const planJson = planJsonFromText(track.track_id, revisedPlan, specJson);
-      writeJsonEnsured(trackPlanJsonPath(track), planJson);
-      fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(planJson)));
+    if (revisedPlan) {
+      writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
+      fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
       written.push(path.relative(root, trackPlanJsonPath(track)));
       written.push(path.relative(root, track.plan_path));
     }
@@ -4579,19 +4545,32 @@ function refreshedPatternsText(text: string, now = utcNow()): { text: string; st
   return { text: next, stamp };
 }
 
+function refreshedPatternsArtifacts(root: string): { files: ReviewFile[]; jsonlPath: string; projectionPath: string; jsonl: string; projection: string; stamp: string } | null {
+  const jsonlPath = path.join(root, "cadre", "patterns.jsonl");
+  if (!fileExists(jsonlPath)) return null;
+  const entries = readJsonl(jsonlPath);
+  const seed = entries[0] || templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
+  const currentText = asOptionalString(seed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
+  const next = refreshedPatternsText(currentText);
+  const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
+  const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
+  const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries));
+  const projectionPath = path.join(root, "cadre", "patterns.md");
+  return {
+    files: [
+      plainReviewFile(path.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
+      textReviewFile(path.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection),
+    ],
+    jsonlPath,
+    projectionPath,
+    jsonl,
+    projection,
+    stamp: next.stamp,
+  };
+}
+
 function refreshReviewFiles(root: string): ReviewFile[] {
-  const patternsPath = path.join(root, "cadre", "patterns.md");
-  if (!fileExists(patternsPath)) return [];
-  const current = fs.readFileSync(patternsPath, "utf8");
-  const next = refreshedPatternsText(current);
-  return [
-    textReviewFile(
-      path.relative(root, patternsPath),
-      "Refreshed project patterns",
-      "refresh:patterns",
-      next.text
-    ),
-  ];
+  return refreshedPatternsArtifacts(root)?.files || [];
 }
 
 function revertGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
@@ -4716,13 +4695,19 @@ function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   }
   const regen = args.execute === true ? regenIndex(root) : null;
-  const patternsPath = path.join(root, "cadre", "patterns.md");
   let patterns: CoreResult | null = null;
-  if (args.execute === true && fileExists(patternsPath)) {
-    const text = fs.readFileSync(patternsPath, "utf8");
-    const next = refreshedPatternsText(text);
-    fs.writeFileSync(patternsPath, next.text);
-    patterns = { ok: true, path: path.relative(root, patternsPath), refreshed_at: next.stamp };
+  if (args.execute === true) {
+    const refreshed = refreshedPatternsArtifacts(root);
+    if (refreshed) {
+      fs.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      fs.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      patterns = {
+        ok: true,
+        path: path.relative(root, refreshed.jsonlPath),
+        projection: path.relative(root, refreshed.projectionPath),
+        refreshed_at: refreshed.stamp,
+      };
+    }
   }
   return {
     ...summary,
@@ -5002,27 +4987,6 @@ function renderJsonlMarkdown(title: string, entries: JsonObject[]): string {
   return normalizedText(parts.join("\n"));
 }
 
-function legacyImportForArtifact(root: string, def: ArtifactDefinition): JsonObject | null {
-  if (!def.projection) return null;
-  const projection = path.join(root, def.projection);
-  if (!fileExists(projection)) return null;
-  const text = fs.readFileSync(projection, "utf8");
-  if (def.id === "product") return markdownDocJson("product", text);
-  if (def.id === "product-guidelines") return markdownDocJson("product_guidelines", text);
-  if (def.id === "workflow") return markdownDocJson("workflow", text);
-  if (def.id.startsWith("styleguide:")) return styleGuideJsonFromMarkdown(def.id.split(":").pop() || "styleguide", text);
-  if (def.id.endsWith(":spec")) {
-    const trackId = def.id.split(":").slice(-2, -1)[0] || path.basename(path.dirname(projection));
-    return specJsonFromText(trackId, text);
-  }
-  if (def.id.endsWith(":plan")) {
-    const trackId = def.id.split(":").slice(-2, -1)[0] || path.basename(path.dirname(projection));
-    return planJsonFromText(trackId, text);
-  }
-  if (def.id.endsWith(":handoff")) return markdownDocJson("handoff", text);
-  return null;
-}
-
 function renderArtifact(root: string, def: ArtifactDefinition, args: RuntimeArgs = {}): ArtifactRenderResult {
   const canonicalPath = path.join(root, def.canonical);
   const projectionPath = def.projection ? path.join(root, def.projection) : undefined;
@@ -5046,13 +5010,6 @@ function renderArtifact(root: string, def: ArtifactDefinition, args: RuntimeArgs
     else body = renderJsonCodeblock(def.title, raw);
   } else {
     missingCanonical = true;
-    raw = legacyImportForArtifact(root, def);
-    if (raw) {
-      if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
-      else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
-      else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
-      else body = renderMarkdownDoc(raw, def.title);
-    }
   }
   if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
   const content = withGeneratedMarker(def.canonical, def.schema, body);
@@ -5065,7 +5022,7 @@ function renderArtifact(root: string, def: ArtifactDefinition, args: RuntimeArgs
     content,
     changed: projectionPath ? normalizedText(existing) !== normalizedText(content) : false,
     missing_canonical: missingCanonical,
-    legacy_import_available: Boolean(raw && missingCanonical),
+    legacy_import_available: false,
   };
 }
 
@@ -5118,7 +5075,13 @@ function artifactDiff(root: string, args: RuntimeArgs = {}): CoreResult {
 function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
   const execute = args.execute === true;
   const force = args.force === true;
-  const importLegacy = args.importLegacy !== false && args.import_legacy !== false;
+  if ((args as UnknownRecord).importLegacy !== undefined || (args as UnknownRecord).import_legacy !== undefined) {
+    return {
+      ok: false,
+      error: "Legacy Markdown import is not supported. Create canonical JSON/JSONL artifacts and rerun artifact sync.",
+      unsupported_fields: ["importLegacy", "import_legacy"].filter((field) => (args as UnknownRecord)[field] !== undefined),
+    };
+  }
   const defs = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
   const reviewFiles: ReviewFile[] = [];
   const artifacts: JsonObject[] = [];
@@ -5139,17 +5102,6 @@ function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     if (rendered.ok === false || !rendered.content || !def.projection) {
       if (rendered.missing_canonical) warnings.push(`Missing canonical for ${def.id}`);
       continue;
-    }
-    const canonicalFile = path.join(root, def.canonical);
-    if (rendered.missing_canonical && rendered.legacy_import_available && importLegacy) {
-      const imported = legacyImportForArtifact(root, def);
-      if (imported) {
-        reviewFiles.push(jsonReviewFile(def.canonical, `${def.title} canonical import`, "legacy_markdown", imported));
-        if (execute && humanReviewConfirmed(args)) {
-          writeJsonEnsured(canonicalFile, imported);
-          written.push(def.canonical);
-        }
-      }
     }
     reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
     if (!execute) continue;
@@ -5199,10 +5151,16 @@ function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 function artifactImport(root: string, args: RuntimeArgs = {}): CoreResult {
-  return artifactSync(root, { ...args, importLegacy: true, scope: args.scope || "all" });
+  return {
+    ok: false,
+    error: "Legacy Markdown import is not supported. Create canonical JSON/JSONL artifacts and rerun artifact sync.",
+    action: asOptionalString(args.action) || "import",
+  };
 }
 
 function artifactPacket(root: string, args: RuntimeArgs = {}): CoreResult {
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return markdownError;
   const action = asOptionalString(args.action) || "catalog";
   if (action === "catalog") return artifactCatalog(root, args);
   if (action === "schema") return artifactSchema(args.artifact || args.id || args.scope);
@@ -5216,6 +5174,8 @@ function artifactPacket(root: string, args: RuntimeArgs = {}): CoreResult {
 
 function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return shapeWorkflowResponse(root, workflow, args, { ...workflowSummary(root, workflow, args), ...markdownError });
   const mutating = args.execute === true && [
     "newtrack",
     "new_track",
@@ -5718,16 +5678,18 @@ function likelyTestCandidatesForFile(root: string, file: string): string[] {
 }
 
 function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return markdownError;
   const trackId = args.trackId || args.track_id || null;
   const track = trackId ? findTrack(root, trackId) : null;
-  if (trackId && !track && !args.planText) return { ok: false, error: `Track not found: ${trackId}` };
+  if (trackId && !track && !args.plan) return { ok: false, error: `Track not found: ${trackId}` };
   const topology = loadTopology(root);
-  const plan = args.planText
-    ? parsePlanText(args.planText)
+  const plan = args.plan
+    ? parsePlanJson(normalizePlanJson(String(trackId || asOptionalString(args.plan.track_id) || "draft"), args.plan))
     : track
       ? parsePlanFile(track.plan_path)
       : null;
-  if (!plan) return { ok: false, error: "trackId or planText is required" };
+  if (!plan) return { ok: false, error: "trackId or plan is required" };
 
   const repoErrors = track ? unresolvedPlanRepos(root, track, args) : [];
   const claims = (plan.tasks || []).map((task) => {
@@ -5965,11 +5927,22 @@ function specContextFromText(text: string): SpecContext {
   return { overview, acceptance };
 }
 
-function trackSpecContext(track: CadreTrack, fallbackText = ""): SpecContext {
-  const text = track.spec_path && fileExists(track.spec_path)
-    ? fs.readFileSync(track.spec_path, "utf8")
-    : fallbackText;
-  return specContextFromText(text);
+function specContextFromJson(raw: unknown): SpecContext {
+  const spec = normalizeSpecJson(asOptionalString(asJsonObject(raw).track_id) || "track", raw);
+  const overview = compactLines([
+    asOptionalString(spec.description),
+    ...specItemsFromRaw(spec.functional_requirements).map((item) => `${asOptionalString(item.heading)}: ${asOptionalString(item.body)}`),
+    ...specItemsFromRaw(spec.non_functional_requirements).map((item) => `${asOptionalString(item.heading)}: ${asOptionalString(item.body)}`),
+  ].filter(Boolean).join("\n"), 1400);
+  const acceptance = compactLines(specItemsFromRaw(spec.acceptance_criteria)
+    .map((item) => `${asOptionalString(item.heading)}: ${asOptionalString(item.body)}`)
+    .filter(Boolean)
+    .join("\n"), 1000);
+  return { overview, acceptance };
+}
+
+function trackSpecContext(track: CadreTrack): SpecContext {
+  return specContextFromJson(readJson<JsonObject | null>(trackSpecJsonPath(track), null) || { track_id: track.track_id });
 }
 
 function taskDesignText(track: CadreTrack, phase: PlanPhase, task: PlanTask, specContext: SpecContext): string {
@@ -5999,13 +5972,15 @@ function addCreateContext(args: string[], design: string | null | undefined, acc
 }
 
 function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return markdownError;
   const trackId = args.trackId || args.track_id;
   if (!trackId) return { ok: false, error: "trackId is required" };
   const dryRun = args.dryRun === true;
   const diskTrack = findTrack(root, trackId);
   if (!diskTrack && !dryRun) return { ok: false, error: `Track not found: ${trackId}` };
-  if (!diskTrack && dryRun && !args.planText) {
-    return { ok: false, error: `Track not found: ${trackId}; dryRun without track files requires planText` };
+  if (!diskTrack && dryRun && !args.plan) {
+    return { ok: false, error: `Track not found: ${trackId}; dryRun without track files requires plan` };
   }
   const draftMetadata: TrackMetadata = {
     track_id: trackId,
@@ -6033,14 +6008,11 @@ function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
   }
 
   const identity = args.identity || gitIdentity(root);
-  const plan = args.planText
-    ? planJsonToParsedPlan(planJsonFromText(
-      String(trackId),
-      args.planText,
-      specJsonFromText(String(trackId), asOptionalString(args.specText) || `# Spec: ${trackId}\n`)
-    ))
+  const specJson = args.spec ? normalizeSpecJson(String(trackId), args.spec) : readJson<JsonObject | null>(trackSpecJsonPath(track), null);
+  const plan = args.plan
+    ? parsePlanJson(normalizePlanJson(String(trackId), args.plan, specJson))
     : parsePlanFile(track.plan_path);
-  const specContext = trackSpecContext(track, args.specText || "");
+  const specContext = specContextFromJson(specJson);
   const epicId = args.epicId || track.metadata.beads_epic || `cadre-${track.track_id}`;
   const commands: BeadsCommandPlanEntry[] = [];
   const results: CommandResult[] = [];
@@ -6136,7 +6108,8 @@ function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResult {
 
   for (const phase of plan.phases) {
     const phaseKey = `phase${phase.phase_index}`;
-    if (!phase.annotations.depends && phase.phase_index > 1) {
+    const hasExplicitPhaseDepends = Object.prototype.hasOwnProperty.call(phase.annotations || {}, "depends");
+    if (!hasExplicitPhaseDepends && phase.phase_index > 1) {
       const previousPhaseId = phaseIds[`phase${phase.phase_index - 1}`];
       const currentPhaseId = phaseIds[phaseKey];
       if (currentPhaseId && previousPhaseId) runBd(["dep", "add", currentPhaseId, previousPhaseId, "--json"]);
@@ -6479,18 +6452,6 @@ function setTrackStatus(root: string, trackId: string, status: string): CoreResu
   });
 }
 
-function markerForStatus(status: string): string {
-  const markers: Record<string, string> = {
-    pending: " ",
-    new: " ",
-    in_progress: "~",
-    completed: "x",
-    blocked: "!",
-    skipped: "-",
-  };
-  return markers[status] || status;
-}
-
 function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreResult {
   const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
@@ -6502,7 +6463,6 @@ function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreRes
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
 
   const planJsonPath = trackPlanJsonPath(track);
-  const marker = markerForStatus(args.status || "completed");
   const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
   const recordedAt = utcNow();
   const lastTaskResult = {
@@ -6580,30 +6540,11 @@ function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): CoreRes
       plan_json: planPatch,
     };
   }
-  const lines = fs.readFileSync(track.plan_path, "utf8").split(/\r?\n/);
-  const idx = task.line - 1;
-  const line = lines[idx];
-  if (!line) return { ok: false, error: `Task line missing at ${task.line}` };
-  let nextLine = line.replace(/^(\s*-\s+\[)[ x~!\-](\]\s+)/, `$1${marker}$2`);
-  if (commitSha && !nextLine.includes(commitSha)) {
-    nextLine = `${nextLine} (${commitSha.slice(0, 12)})`;
-  }
-  lines[idx] = nextLine;
-  try {
-    fs.writeFileSync(track.plan_path, `${lines.join("\n").replace(/\n+$/, "")}\n`);
-  } catch (error) {
-    return { ok: false, track_id: track.track_id, stage: "plan_write", error: errorMessage(error), metadata };
-  }
-  const metadataValue = asJsonObject(metadata.value);
-  const beadsTasks = asJsonObject(metadataValue.beads_tasks);
   return {
-    ok: true,
+    ok: false,
     track_id: track.track_id,
-    task_key: task.task_key,
-    line: task.line,
-    status: args.status || "completed",
-    commit_sha: commitSha || null,
-    beads_task_id: asOptionalString(beadsTasks[task.task_key]) || null,
+    stage: "missing_plan_json",
+    error: `Missing canonical plan JSON: ${planJsonPath}`,
     metadata,
   };
 }
@@ -8884,7 +8825,7 @@ function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
       markers: [
         "cadre/tracks.json",
         "cadre/setup_state.json",
-        "cadre/product.md",
+        "cadre/product.json",
         "cadre/config.json",
         "cadre/beads.json",
         "cadre/lsp.json",
@@ -9166,7 +9107,7 @@ export {
   metadataPatch,
   parallelWorkflow,
   parsePlanFile,
-  parsePlanText,
+  parsePlanJson,
   phaseSchedule,
   planClaims,
   planAssist,

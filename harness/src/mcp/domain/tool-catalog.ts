@@ -29,7 +29,6 @@ const PROPS: Record<string, JsonObject> = {
   track_id: { type: "string" },
   phaseIndex: { type: "number" },
   taskIndex: { type: "number" },
-  planPath: { type: "string" },
   status: { type: "string" },
   patch: { type: "object" },
   identity: { type: "string" },
@@ -68,9 +67,11 @@ const PROPS: Record<string, JsonObject> = {
   styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
   styleGuideMaxChars: { type: "number" },
   techStack: { type: "object" },
-  productText: { type: "string" },
-  productGuidelinesText: { type: "string" },
-  workflowText: { type: "string" },
+  product: { type: "object" },
+  productGuidelines: { type: "object" },
+  product_guidelines: { type: "object" },
+  workflowPolicy: { type: "object" },
+  workflow_policy: { type: "object" },
   humanConfirmed: { type: "boolean" },
   human_confirmed: { type: "boolean" },
   manualVerificationMode: { type: "string", enum: ["offline", "autorun"] },
@@ -87,8 +88,8 @@ const PROPS: Record<string, JsonObject> = {
   reviewFiles: { type: "boolean" },
   reviewBundleDir: { type: "string" },
   review_bundle_dir: { type: "string" },
-  specText: { type: "string" },
-  planText: { type: "string" },
+  spec: { type: "object" },
+  plan: { type: "object" },
   args: { type: "object" },
   type: { type: "string" },
   jobId: { type: "string" },
@@ -98,8 +99,6 @@ const PROPS: Record<string, JsonObject> = {
   artifact_action: { type: "string" },
   includeArchive: { type: "boolean" },
   include_archive: { type: "boolean" },
-  importLegacy: { type: "boolean" },
-  import_legacy: { type: "boolean" },
   view: { type: "string" },
   description: { type: "string" },
   handoffText: { type: "string" },
@@ -145,8 +144,25 @@ function packetSchema(options: ToolOptions): JsonObject {
       properties: props(fieldNames, options.actionEnum, options.workflowEnum),
       required: options.required || [],
       ...(options.anyOf ? { anyOf: options.anyOf } : {}),
-      ...(options.allOf ? { allOf: options.allOf } : {}),
+      allOf: [...(options.allOf || []), forbidMarkdownPayloadFields()],
       additionalProperties: true,
+    },
+  };
+}
+
+function forbidMarkdownPayloadFields(): JsonObject {
+  return {
+    not: {
+      anyOf: [
+        "productText",
+        "productGuidelinesText",
+        "workflowText",
+        "specText",
+        "planText",
+        "planPath",
+        "importLegacy",
+        "import_legacy",
+      ].map((name) => ({ required: [name] })),
     },
   };
 }
@@ -181,7 +197,7 @@ export const TOOLS = [
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: WORKFLOWS,
-    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "productText", "productGuidelinesText", "workflowText", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "specText", "planText", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive", "importLegacy", "import_legacy"],
+    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "continuationToken", "continuation_token", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -206,13 +222,13 @@ export const TOOLS = [
   }),
   packetSchema({
     name: "cadre_track",
-    description: "Cadre track packet: context, plan parsing, integrity, phase scheduling, implementation prep, planning evidence, worktree planning, and Beads tree creation.",
+    description: "Cadre track packet: context, JSON plan parsing, integrity, phase scheduling, implementation prep, planning evidence, worktree planning, and Beads tree creation.",
     actionEnum: ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"],
-    fields: ["action", "trackId", "track_id", "planPath", "execute", "identity", "takeover", "base", "head", "styleGuideIds", "styleGuideMaxChars", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["action", "trackId", "track_id", "plan", "execute", "identity", "takeover", "base", "head", "styleGuideIds", "styleGuideMaxChars", "responseMode", "response_mode", "detail", "compact"],
     required: ["root", "action"],
     allOf: [
       requireTrackForActions(["context", "phase_schedule", "prepare_implementation", "create_beads_tree", "worktree_plan"]),
-      { if: { properties: { action: { enum: ["parse_plan"] } }, required: ["action"] }, then: { required: ["planPath"] } },
+      { if: { properties: { action: { enum: ["parse_plan"] } }, required: ["action"] }, then: { anyOf: [{ required: ["plan"] }, { required: ["trackId"] }, { required: ["track_id"] }] } },
     ],
   }),
   packetSchema({
@@ -273,9 +289,9 @@ export const TOOLS = [
   }),
   packetSchema({
     name: "cadre_artifact",
-    description: "Cadre artifact packet: catalog, schema, import legacy Markdown, validate canonicals, render projections, diff, and sync generated artifacts.",
-    actionEnum: ["catalog", "schema", "import", "validate", "render", "diff", "sync"],
-    fields: ["action", "artifact", "id", "scope", "trackId", "track_id", "execute", "humanConfirmed", "human_confirmed", "force", "includeArchive", "include_archive", "importLegacy", "import_legacy", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir"],
+    description: "Cadre artifact packet: catalog, schema, validate JSON canonicals, render human projections, diff, and sync generated artifacts.",
+    actionEnum: ["catalog", "schema", "validate", "render", "diff", "sync"],
+    fields: ["action", "artifact", "id", "scope", "trackId", "track_id", "execute", "humanConfirmed", "human_confirmed", "force", "includeArchive", "include_archive", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir"],
     required: ["root", "action"],
   }),
 ];
