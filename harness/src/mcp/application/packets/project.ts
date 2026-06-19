@@ -25,6 +25,7 @@ export async function projectPacket(deps: RuntimeDependencies, args: RuntimeArgs
   const root = deps.rootResolver.requireCadreRoot(args);
   if (action === "topology") return envelope({ ok: true, root, topology: deps.core.loadTopology(root) });
   if (action === "tech_stack_summary") return envelope(deps.core.techStackSummary(root, args));
+  if (action === "integrations") return envelope(deps.core.integrationInventory(root, args));
   if (action === "sync_control_plane") return envelope(deps.core.syncControlPlane(root, args));
   if (action === "polyrepo_preflight") return envelope(deps.core.polyrepoPreflight(root));
   return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });

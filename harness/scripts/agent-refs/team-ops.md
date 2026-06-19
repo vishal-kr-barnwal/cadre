@@ -36,6 +36,8 @@ Use `cadre_intel` before prompt-side repo scans when possible. It can return
 repo maps, dependency graphs, workspace diagnostics, test impact, LSP setup,
 LSP impact, and warm review evidence. Polyrepo projects return repo-qualified
 results so clients can distinguish control-plane files from product-repo files.
+Use `cadre://integrations` when you need one bounded view of provider, code
+search, issue, CI, logging, knowledge-base, and LSP coverage.
 
 Recommended optional MCP additions for larger teams:
 

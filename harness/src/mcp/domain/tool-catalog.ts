@@ -163,11 +163,11 @@ export const TOOLS = [
   }),
   packetSchema({
     name: "cadre_project",
-    description: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight.",
-    actionEnum: ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"],
+    description: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, integrations, sync, and polyrepo preflight.",
+    actionEnum: ["ping", "doctor", "root", "topology", "tech_stack_summary", "integrations", "sync_control_plane", "polyrepo_preflight"],
     fields: ["action", "execute", "responseMode", "response_mode", "detail", "compact"],
     required: ["action"],
-    allOf: [requireRootForActions(["root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"])],
+    allOf: [requireRootForActions(["root", "topology", "tech_stack_summary", "integrations", "sync_control_plane", "polyrepo_preflight"])],
   }),
   packetSchema({
     name: "cadre_status",

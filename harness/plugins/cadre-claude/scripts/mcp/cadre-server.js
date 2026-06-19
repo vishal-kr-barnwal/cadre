@@ -47,6 +47,7 @@ __export(cadre_core_exports, {
   gitIdentity: () => gitIdentity,
   heartbeatTrack: () => heartbeatTrack,
   implementationPrep: () => implementationPrep,
+  integrationInventory: () => integrationInventory,
   isCadreProjectRoot: () => isCadreProjectRoot,
   isIgnoredRepoMapFile: () => isIgnoredRepoMapFile,
   listTracks: () => listTracks,
@@ -89,6 +90,7 @@ __export(cadre_core_exports, {
   withTrackLock: () => withTrackLock,
   workflowPacket: () => workflowPacket,
   workspaceDiagnostics: () => workspaceDiagnostics,
+  workspaceHealth: () => workspaceHealth,
   worktreePlan: () => worktreePlan
 });
 
@@ -114,6 +116,9 @@ function asOptionalString(value) {
 }
 function asNumber(value, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+function asOptionalNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
 }
 function asBoolean(value, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
@@ -2254,6 +2259,8 @@ function workflowSetup(root, args = {}) {
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
   const lspRecommendations = lspSetup(root, { ...args, execute: false });
+  const detailMode = workflowResponseMode(args) === "detail";
+  const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const beadsPlan = setupBeads(root, { ...args, execute: false });
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
@@ -2263,10 +2270,13 @@ function workflowSetup(root, args = {}) {
     ...summary,
     ok: styleGuides.ok,
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
-    workspace: workspaceDiagnostics(root, { execute: false }),
-    dependency_graph: dependencyGraph(root),
-    lsp: lspConfigStatus(root),
-    lsp_setup: lspRecommendations,
+    workspace_health: workspaceHealthResult,
+    workspace: workspaceHealthResult.workspace,
+    dependency_graph: workspaceHealthResult.dependency_graph,
+    lsp: workspaceHealthResult.lsp,
+    lsp_setup: detailMode ? lspRecommendations : summarizeLspSetupResult(lspRecommendations),
+    integrations: workspaceHealthResult.integrations,
+    detail_resources: workspaceHealthResult.detail_resources,
     beads_init: beadsPlan,
     provider,
     sync_mode: syncModeRecommendation,
@@ -2374,6 +2384,7 @@ function workflowSetup(root, args = {}) {
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {},
+    ...isRecord(rawArgs.integrations) ? { integrations: asJsonObject(rawArgs.integrations) } : {},
     ...configOverrides
   };
   writeSetupJson("config.json", configPayload);
@@ -5736,6 +5747,289 @@ function dependencyGraph(root, args = {}) {
     repos: repoGraphs
   };
 }
+function countRecords(records) {
+  return Array.isArray(records) ? records.length : 0;
+}
+function workspaceHealthDetailResources(root) {
+  const encodedRoot = encodeURIComponent(root);
+  return [
+    `cadre://workspace-health?root=${encodedRoot}&responseMode=detail`,
+    `cadre://workspace-diagnostics?root=${encodedRoot}`,
+    `cadre://repo-topology?root=${encodedRoot}`,
+    `cadre://repo-map?root=${encodedRoot}`,
+    `cadre://lsp-status?root=${encodedRoot}`,
+    `cadre://integrations?root=${encodedRoot}`
+  ];
+}
+function summarizeWorkspaceDiagnosticsResult(result) {
+  return {
+    ok: result.ok !== false,
+    repo_count: countRecords(result.repos),
+    adapter_count: countRecords(result.adapters),
+    command_count: countRecords(result.commands),
+    result_count: countRecords(result.results)
+  };
+}
+function summarizeDependencyGraphResult(result) {
+  return {
+    ok: result.ok !== false,
+    repo_count: countRecords(result.repos),
+    manifest_count: countRecords(result.manifests),
+    edge_count: countRecords(result.edges)
+  };
+}
+function summarizeLspSetupResult(result) {
+  return {
+    ok: result.ok !== false,
+    available: result.available !== false,
+    execute: result.execute === true,
+    dry_run: result.dry_run !== false,
+    written: result.written === true,
+    added: Array.isArray(result.added) ? result.added.slice(0, 10) : [],
+    added_count: countRecords(result.added),
+    missing_from_config_count: countRecords(result.missingFromConfig),
+    missing_commands_count: countRecords(result.missingCommands)
+  };
+}
+function summarizeLspCoverage(root, args = {}) {
+  const status = asJsonObject(lspConfigStatus(root));
+  const setup = asJsonObject(lspSetup(root, { ...args, execute: false }));
+  const configured = Array.isArray(status.servers) ? status.servers.map((server) => asJsonObject(server).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
+  const recommended = Array.isArray(setup.recommended) ? setup.recommended.map((entry) => asJsonObject(entry).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
+  const missing = recommended.filter((id) => !configured.includes(id));
+  const covered = recommended.filter((id) => configured.includes(id));
+  return {
+    ok: status.configured !== false && setup.ok !== false,
+    status_configured: status.configured !== false,
+    configured_count: configured.length,
+    recommended_count: recommended.length,
+    covered_count: covered.length,
+    missing_count: missing.length,
+    coverage: recommended.length > 0 ? Math.round(covered.length / recommended.length * 100) : null,
+    configured: configured.slice(0, 10),
+    recommended: recommended.slice(0, 10),
+    missing: missing.slice(0, 10)
+  };
+}
+function normalizeIntegrationValue(value) {
+  if (value == null) {
+    return { configured: false, available: null };
+  }
+  if (typeof value === "boolean") {
+    return { configured: true, available: value };
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return { configured: false, available: null };
+    const lower = text.toLowerCase();
+    if (["false", "0", "no", "off", "disabled"].includes(lower)) {
+      return { configured: true, available: false, label: text };
+    }
+    return { configured: true, available: true, label: text };
+  }
+  if (isRecord(value)) {
+    const entry = asJsonObject(value);
+    const configured = Object.keys(entry).length > 0;
+    const available = typeof entry.available === "boolean" ? entry.available : typeof entry.enabled === "boolean" ? entry.enabled : typeof entry.configured === "boolean" ? entry.configured : entry.command || entry.server || entry.url ? true : null;
+    return {
+      configured,
+      available,
+      label: asOptionalString(entry.label) || asOptionalString(entry.name),
+      command: asOptionalString(entry.command),
+      server: asOptionalString(entry.server),
+      url: asOptionalString(entry.url),
+      provider: asOptionalString(entry.provider),
+      platform: asOptionalString(entry.platform),
+      kind: asOptionalString(entry.kind)
+    };
+  }
+  return { configured: false, available: null };
+}
+function pickIntegrationCandidate(scopes, keys) {
+  for (const { source, scope } of scopes) {
+    if (!isRecord(scope)) continue;
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(scope, key)) {
+        const value = asJsonObject(scope)[key];
+        if (value !== void 0 && value !== null) return { source: `${source}.${key}`, value };
+      }
+    }
+  }
+  return null;
+}
+function integrationStatus(root, args, kind, label, keys, mode) {
+  const topology = loadTopology(root);
+  const config = asJsonObject(topology.config || {});
+  const configIntegrations = isRecord(config.integrations) ? asJsonObject(config.integrations) : {};
+  const candidate = pickIntegrationCandidate([
+    { source: "config.integrations", scope: configIntegrations },
+    { source: "config", scope: config },
+    { source: "args", scope: args }
+  ], keys);
+  const normalized = normalizeIntegrationValue(candidate?.value);
+  const status = {
+    kind,
+    label,
+    configured: normalized.configured === true || candidate != null,
+    available: normalized.available,
+    source: candidate?.source || "not_configured"
+  };
+  if (normalized.label) status.value = normalized.label;
+  if (normalized.command) status.command = normalized.command;
+  if (normalized.server) status.server = normalized.server;
+  if (normalized.url) status.url = normalized.url;
+  if (normalized.provider) status.provider = normalized.provider;
+  if (normalized.platform) status.platform = normalized.platform;
+  if (normalized.kind) status.integration_kind = normalized.kind;
+  if (mode === "detail") {
+    status.candidates = keys;
+  }
+  return status;
+}
+function integrationInventory(root, args = {}) {
+  const mode = workflowResponseMode(args);
+  const provider = providerMcpAvailability(root, args);
+  const lsp = summarizeLspCoverage(root, args);
+  const optionalMcps = [
+    integrationStatus(root, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
+    integrationStatus(root, args, "issue_tracker", "Issue tracker", ["issue_tracker", "issueTracker", "jira", "jira_mcp", "jiraMcp", "linear", "linear_mcp", "linearMcp"], mode),
+    integrationStatus(root, args, "ci", "CI", ["ci", "ci_provider", "ciProvider", "ci_mcp", "ciMcp", "ci_mcp_available", "ciMcpAvailable"], mode),
+    integrationStatus(root, args, "logging", "Logging", ["logging", "observability", "telemetry", "sentry", "sentry_mcp", "datadog", "datadog_mcp", "honeycomb", "honeycomb_mcp"], mode),
+    integrationStatus(root, args, "knowledge_base", "Knowledge base", ["knowledge_base", "knowledgeBase", "kb", "docs", "confluence", "notion", "knowledge_base_mcp", "knowledgeBaseMcp"], mode)
+  ];
+  const configuredOptionalCount = optionalMcps.filter((entry) => entry.configured === true).length;
+  const availableOptionalCount = optionalMcps.filter((entry) => entry.available === true).length;
+  const unavailableOptionalCount = optionalMcps.filter((entry) => entry.configured === true && entry.available === false).length;
+  const detailResources = workspaceHealthDetailResources(root);
+  const summary = {
+    provider_mode: asOptionalString(provider.provider_mode) || "local",
+    provider_available: provider.available ?? null,
+    optional_configured_count: configuredOptionalCount,
+    optional_available_count: availableOptionalCount,
+    optional_unavailable_count: unavailableOptionalCount,
+    lsp_configured_count: asOptionalNumber(lsp.configured_count),
+    lsp_recommended_count: asOptionalNumber(lsp.recommended_count),
+    lsp_covered_count: asOptionalNumber(lsp.covered_count),
+    lsp_missing_count: asOptionalNumber(lsp.missing_count),
+    lsp_coverage: asOptionalNumber(lsp.coverage)
+  };
+  if (mode === "detail") {
+    return {
+      ok: true,
+      root,
+      response_mode: mode,
+      detail_available: true,
+      provider,
+      optional_mcps: optionalMcps,
+      lsp: {
+        coverage: lsp,
+        status: lspConfigStatus(root),
+        setup: lspSetup(root, { ...args, execute: false })
+      },
+      summary,
+      detail_resources: detailResources
+    };
+  }
+  return {
+    ok: true,
+    root,
+    response_mode: mode,
+    detail_available: true,
+    provider: {
+      ok: provider.ok !== false,
+      provider_mode: provider.provider_mode || "local",
+      available: provider.available ?? null,
+      required_provider_mcp: provider.required_provider_mcp || null,
+      source: provider.source || null,
+      remote_host: provider.remote_host || null,
+      requires_confirmation: provider.requires_confirmation === true
+    },
+    optional_mcps: optionalMcps.map((entry) => ({
+      kind: entry.kind,
+      label: entry.label,
+      configured: entry.configured,
+      available: entry.available,
+      source: entry.source
+    })),
+    lsp,
+    summary,
+    detail_resources: detailResources
+  };
+}
+function workspaceHealth(root, args = {}) {
+  const mode = workflowResponseMode(args);
+  const topology = loadTopology(root);
+  const techStack = techStackSummary(root, args);
+  const workspace = workspaceDiagnostics(root, { execute: false });
+  const dependencyGraphResult = dependencyGraph(root);
+  const lspCoverage = summarizeLspCoverage(root, args);
+  const availableWorkResult = availableWork(root);
+  const integrations2 = integrationInventory(root, { ...args, responseMode: mode });
+  const detailResources = workspaceHealthDetailResources(root);
+  if (mode === "detail") {
+    return {
+      ok: true,
+      root,
+      response_mode: mode,
+      detail_available: true,
+      topology: {
+        polyrepo: topology.polyrepo,
+        default_repo: topology.defaultRepo || null,
+        sync_mode: topology.config.sync_mode || "local",
+        repos: topology.repos
+      },
+      tech_stack: techStack,
+      workspace,
+      dependency_graph: dependencyGraphResult,
+      parallel: availableWorkResult,
+      languages: {
+        detected: lspCoverage.recommended,
+        configured: lspCoverage.configured
+      },
+      lsp: {
+        coverage: lspCoverage,
+        status: lspConfigStatus(root),
+        setup: lspSetup(root, { ...args, execute: false })
+      },
+      integrations: integrations2,
+      detail_resources: detailResources
+    };
+  }
+  return {
+    ok: true,
+    root,
+    response_mode: mode,
+    detail_available: true,
+    topology: {
+      polyrepo: topology.polyrepo,
+      default_repo: topology.defaultRepo || null,
+      sync_mode: topology.config.sync_mode || "local",
+      repo_count: countRecords(asJsonObject(topology.repos).repos)
+    },
+    tech_stack: techStack.ok === false ? { ok: false, error: techStack.error || "Missing tech stack" } : {
+      ok: true,
+      path: techStack.path,
+      summary: techStack.summary,
+      styleGuideIds: techStack.styleGuideIds
+    },
+    workspace: summarizeWorkspaceDiagnosticsResult(workspace),
+    dependency_graph: summarizeDependencyGraphResult(dependencyGraphResult),
+    parallel: availableWorkResult.ok === false ? { ok: false, error: availableWorkResult.error || "Available work unavailable" } : {
+      ok: true,
+      available_count: countRecords(availableWorkResult.available),
+      reclaimable_count: countRecords(availableWorkResult.reclaimable),
+      available: Array.isArray(availableWorkResult.available) ? availableWorkResult.available.slice(0, 5) : [],
+      reclaimable: Array.isArray(availableWorkResult.reclaimable) ? availableWorkResult.reclaimable.slice(0, 5) : []
+    },
+    languages: {
+      detected: lspCoverage.recommended,
+      configured: lspCoverage.configured
+    },
+    lsp: lspCoverage,
+    integrations: integrations2,
+    detail_resources: detailResources
+  };
+}
 function lspConfigStatus(root) {
   const configPath = import_node_path3.default.join(root, "cadre", "lsp.json");
   const config = readJson(configPath, null);
@@ -6123,7 +6417,8 @@ var RESOURCE_DEFINITIONS = [
   { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project." },
   { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path." },
   { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path." },
-  { uri: "cadre://workspace-health", name: "Cadre workspace health", description: "Compact topology, tech stack, LSP, and dependency health snapshot. Read with ?root=/path." },
+  { uri: "cadre://workspace-health", name: "Cadre workspace health", description: "Compact topology, tech stack, LSP, dependency, and integration health snapshot. Read with ?root=/path." },
+  { uri: "cadre://integrations", name: "Cadre integrations", description: "Optional MCP inventory and LSP coverage. Read with ?root=/path." },
   { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path." },
@@ -6148,11 +6443,12 @@ var RESOURCE_CONTRACTS = {
   "cadre://team-board": { required: ["root"] },
   "cadre://fleet-board": { required: ["root"] },
   "cadre://beads-summary": { required: ["root"] },
-  "cadre://workspace-health": { required: ["root"] },
+  "cadre://workspace-health": { required: ["root"], optional: ["responseMode", "detail", "compact"] },
+  "cadre://integrations": { required: ["root"], optional: ["responseMode", "detail", "compact"] },
   "cadre://track-context": { required: ["root", "trackId"] },
   "cadre://review-evidence": { required: ["root", "trackId"] },
   "cadre://collisions": { required: ["root"] },
-  "cadre://repo-map": { required: ["root"] },
+  "cadre://repo-map": { required: ["root"], optional: ["symbol"] },
   "cadre://workspace-diagnostics": { required: ["root"] },
   "cadre://lsp-status": { required: ["root"] },
   "cadre://repo-topology": { required: ["root"] },
@@ -6169,6 +6465,13 @@ var RESOURCE_CONTRACTS = {
   "cadre://track-plan": { required: ["root", "trackId"] },
   "cadre://job-result": { required: ["root", "jobId"] }
 };
+function contractQueryParams(contract) {
+  return Array.from(/* @__PURE__ */ new Set([
+    ...contract.required,
+    ...contract.optional || [],
+    ...(contract.requiredAny || []).flat()
+  ]));
+}
 function resourceList() {
   return {
     resources: RESOURCE_DEFINITIONS.map((resource) => ({ ...resource, mimeType: "application/json" }))
@@ -6178,8 +6481,9 @@ function resourceTemplatesList() {
   const resources = RESOURCE_DEFINITIONS;
   const templates = resources.map((resource) => {
     const contract = RESOURCE_CONTRACTS[resource.uri] || { required: ["root"] };
+    const queryParams = contractQueryParams(contract).filter(Boolean);
     return {
-      uriTemplate: `${resource.uri}{?root,trackId,symbol,workflow,files,base,head,jobId}`,
+      uriTemplate: queryParams.length > 0 ? `${resource.uri}{?${queryParams.join(",")}}` : resource.uri,
       name: resource.name,
       description: resource.description,
       mimeType: "application/json",
@@ -6201,7 +6505,11 @@ function parseResourceUri(uri) {
     jobId: params.get("jobId"),
     baseRef: params.get("base"),
     headRef: params.get("head"),
-    files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean)
+    files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean),
+    responseMode: params.get("responseMode"),
+    response_mode: params.get("response_mode"),
+    detail: params.has("detail") ? params.get("detail") !== "false" : null,
+    compact: params.has("compact") ? params.get("compact") !== "false" : null
   };
 }
 
@@ -6349,11 +6657,11 @@ var TOOLS = [
   }),
   packetSchema({
     name: "cadre_project",
-    description: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, sync, and polyrepo preflight.",
-    actionEnum: ["ping", "doctor", "root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"],
+    description: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, integrations, sync, and polyrepo preflight.",
+    actionEnum: ["ping", "doctor", "root", "topology", "tech_stack_summary", "integrations", "sync_control_plane", "polyrepo_preflight"],
     fields: ["action", "execute", "responseMode", "response_mode", "detail", "compact"],
     required: ["action"],
-    allOf: [requireRootForActions(["root", "topology", "tech_stack_summary", "sync_control_plane", "polyrepo_preflight"])]
+    allOf: [requireRootForActions(["root", "topology", "tech_stack_summary", "integrations", "sync_control_plane", "polyrepo_preflight"])]
   }),
   packetSchema({
     name: "cadre_status",
@@ -6433,118 +6741,43 @@ var TOOLS = [
 
 // src/mcp/application/resources-service.ts
 var import_node_path4 = __toESM(require("node:path"));
-function summarizeRecords(records, limit = 8) {
-  if (!Array.isArray(records)) return [];
-  return records.slice(0, limit).map((record) => asJsonObject(record));
-}
-function summarizeAdapters(adapters) {
-  return summarizeRecords(adapters, 10).map((adapter) => ({
-    id: adapter.id || null,
-    repo: adapter.repo || null,
-    path: adapter.path || null,
-    available: adapter.available,
-    manifest: adapter.manifest || null,
-    ecosystem: adapter.ecosystem || null,
-    commands: Array.isArray(adapter.commands) ? adapter.commands.slice(0, 3) : []
-  }));
-}
-function summarizeCommands(commands) {
-  return summarizeRecords(commands, 10).map((command) => ({
-    adapter: command.adapter || null,
-    command: command.command || null,
-    cwd: command.cwd || null,
-    repo: command.repo || null,
-    path: command.path || null
-  }));
-}
-function summarizeRecs(recommended) {
-  return summarizeRecords(recommended, 10).map((rec) => ({
-    id: rec.id || null,
-    label: rec.label || null,
-    command: rec.command || null,
-    files: rec.files || 0,
-    available: rec.available,
-    samples: Array.isArray(rec.samples) ? rec.samples.slice(0, 3) : []
-  }));
-}
-function workspaceHealth(root) {
-  const topology = asJsonObject(loadTopology(root));
-  const topologyRepos = asJsonObject(topology.repos);
-  const topologyConfig = asJsonObject(topology.config);
-  const workspace = workspaceDiagnostics(root);
-  const dependencyGraph2 = dependencyGraph(root);
-  const techStack = techStackSummary(root);
-  const lspStatus = lspConfigStatus(root);
-  const lspSetup2 = lspSetup(root, { execute: false });
-  const availableWork2 = availableWork(root);
-  const lspStatusObject = asJsonObject(lspStatus);
-  return {
-    ok: true,
-    root,
-    languages: {
-      detected: summarizeRecs(lspSetup2.ok === false ? [] : lspSetup2.recommended).map((rec) => rec.id).filter(Boolean),
-      configured: Array.isArray(lspStatusObject.servers) ? lspStatusObject.servers.map((server) => asJsonObject(server).id || null).filter((id) => typeof id === "string" && id.length > 0) : []
-    },
-    topology: {
-      polyrepo: Boolean(topology.polyrepo),
-      default_repo: topology.defaultRepo || null,
-      sync_mode: typeof topologyConfig.sync_mode === "string" ? topologyConfig.sync_mode : "local",
-      repos: Array.isArray(topologyRepos.repos) ? topologyRepos.repos.slice(0, 10).map((repo) => {
-        const entry = asJsonObject(repo);
-        return {
-          name: entry.name || null,
-          submodule_path: entry.submodule_path || null,
-          worktree_path: entry.worktree_path || null,
-          enabled: entry.enabled !== false
-        };
-      }) : []
-    },
-    tech_stack: techStack.ok === false ? { ok: false, error: techStack.error || "Missing tech stack" } : {
-      ok: true,
-      path: techStack.path,
-      summary: techStack.summary,
-      styleGuideIds: techStack.styleGuideIds
-    },
-    workspace: {
-      adapters: summarizeAdapters(workspace.adapters),
-      commands: summarizeCommands(workspace.commands),
-      repo_count: Array.isArray(workspace.repos) ? workspace.repos.length : 0
-    },
-    dependency_graph: {
-      manifest_count: Array.isArray(dependencyGraph2.manifests) ? dependencyGraph2.manifests.length : 0,
-      edge_count: Array.isArray(dependencyGraph2.edges) ? dependencyGraph2.edges.length : 0,
-      repo_count: Array.isArray(dependencyGraph2.repos) ? dependencyGraph2.repos.length : 0,
-      manifests: summarizeRecords(dependencyGraph2.manifests, 10)
-    },
-    parallel: availableWork2.ok === false ? { ok: false, error: availableWork2.error || "Available work unavailable" } : {
-      ok: true,
-      available_count: Array.isArray(availableWork2.available) ? availableWork2.available.length : 0,
-      reclaimable_count: Array.isArray(availableWork2.reclaimable) ? availableWork2.reclaimable.length : 0,
-      available: summarizeRecords(availableWork2.available, 5),
-      reclaimable: summarizeRecords(availableWork2.reclaimable, 5)
-    },
-    lsp: {
-      status: lspStatus,
-      setup: lspSetup2.ok === false ? { ok: false, error: lspSetup2.error || "LSP setup unavailable" } : {
-        ok: true,
-        config: lspSetup2.config,
-        missingFromConfig: Array.isArray(lspSetup2.missingFromConfig) ? lspSetup2.missingFromConfig : [],
-        missingCommands: Array.isArray(lspSetup2.missingCommands) ? lspSetup2.missingCommands.slice(0, 10) : [],
-        recommended: summarizeRecs(lspSetup2.recommended),
-        workspaceFolders: Array.isArray(lspSetup2.workspaceFolders) ? lspSetup2.workspaceFolders.slice(0, 10) : [],
-        added: Array.isArray(lspSetup2.added) ? lspSetup2.added : []
-      }
-    }
+function normalizeResourceArgs(resource) {
+  const args = {
+    base: resource.base,
+    files: resource.files
   };
+  if (resource.root != null) args.root = resource.root;
+  if (resource.trackId != null) args.trackId = resource.trackId;
+  if (resource.symbol != null) args.symbol = resource.symbol;
+  if (resource.workflow != null) args.workflow = resource.workflow;
+  if (resource.jobId != null) args.jobId = resource.jobId;
+  if (resource.baseRef != null) args.baseRef = resource.baseRef;
+  if (resource.headRef != null) args.headRef = resource.headRef;
+  const responseMode = resource.responseMode ?? resource.response_mode;
+  if (responseMode != null) {
+    args.responseMode = responseMode;
+    args.response_mode = responseMode;
+  }
+  if (resource.detail != null) args.detail = resource.detail;
+  if (resource.compact != null) args.compact = resource.compact;
+  return args;
+}
+function workspaceHealth2(root, args = {}) {
+  return asJsonObject(workspaceHealth(root, args));
+}
+function integrations(root, args = {}) {
+  return asJsonObject(integrationInventory(root, args));
 }
 function resourceRead(uri, deps) {
   const resource = parseResourceUri(uri);
+  const normalizedResource = normalizeResourceArgs(resource);
   const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
   let value;
   if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
   else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
   else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
-  else if (resource.base === "cadre://workspace-health") value = workspaceHealth(root);
+  else if (resource.base === "cadre://workspace-health") value = workspaceHealth2(root, normalizedResource);
+  else if (resource.base === "cadre://integrations") value = integrations(root, normalizedResource);
   else if (resource.base === "cadre://track-context") value = deps.core.trackContext(root, resource.trackId);
   else if (resource.base === "cadre://review-evidence") value = deps.core.reviewEvidence(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = deps.core.collisionScan(root);
@@ -6758,6 +6991,7 @@ async function projectPacket(deps, args) {
   const root = deps.rootResolver.requireCadreRoot(args);
   if (action === "topology") return envelope({ ok: true, root, topology: deps.core.loadTopology(root) });
   if (action === "tech_stack_summary") return envelope(deps.core.techStackSummary(root, args));
+  if (action === "integrations") return envelope(deps.core.integrationInventory(root, args));
   if (action === "sync_control_plane") return envelope(deps.core.syncControlPlane(root, args));
   if (action === "polyrepo_preflight") return envelope(deps.core.polyrepoPreflight(root));
   return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });

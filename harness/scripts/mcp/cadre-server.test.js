@@ -223,6 +223,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
     assert.ok(projectActions.includes("tech_stack_summary"));
+    assert.ok(projectActions.includes("integrations"));
     const trackTool = tools.tools.find((tool) => tool.name === "cadre_track");
     const trackActions = trackTool.inputSchema.properties.action.enum;
     assert.ok(trackActions.includes("plan_assist"));
@@ -253,6 +254,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://fleet-board"));
     assert.ok(uris.includes("cadre://beads-summary"));
     assert.ok(uris.includes("cadre://workspace-health"));
+    assert.ok(uris.includes("cadre://integrations"));
     assert.ok(uris.includes("cadre://review-evidence"));
     assert.ok(uris.includes("cadre://workspace-diagnostics"));
     assert.ok(uris.includes("cadre://lsp-status"));
@@ -270,6 +272,10 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
     const templateByUri = new Map(templates.resourceTemplates.map((template) => [template.uriTemplate.split("{")[0], template]));
     assert.deepEqual(templateByUri.get("cadre://provider-actions").required, ["root", "trackId", "workflow"]);
+    assert.deepEqual(templateByUri.get("cadre://workspace-health").optional, ["responseMode", "detail", "compact"]);
+    assert.deepEqual(templateByUri.get("cadre://integrations").optional, ["responseMode", "detail", "compact"]);
+    assert.ok(templateByUri.get("cadre://workspace-health").uriTemplate.includes("responseMode"));
+    assert.ok(templateByUri.get("cadre://repo-map").optional.includes("symbol"));
     assert.deepEqual(templateByUri.get("cadre://ship-plan").required, ["root", "trackId"]);
     assert.deepEqual(templateByUri.get("cadre://land-plan").required, ["root", "trackId"]);
     assert.deepEqual(templateByUri.get("cadre://job-result").required, ["root", "jobId"]);
@@ -291,6 +297,12 @@ test("MCP root resolution rejects harness skill directories without project stat
       arguments: { action: "root", root: path.join(root, "project", "cadre") },
     });
     assert.equal(parseTextJson(valid).data.root, path.join(root, "project"));
+
+    const integrations = await request("tools/call", {
+      name: "cadre_project",
+      arguments: { action: "integrations", root: path.join(root, "project") },
+    });
+    assert.equal(parseTextJson(integrations).data.ok, true);
 
     const doctor = await request("tools/call", {
       name: "cadre_project",
@@ -365,7 +377,8 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
     assert.equal(health.data.ok, true);
     assert.equal(health.data.root, projectRoot);
     assert.ok(Array.isArray(health.data.languages.detected));
-    assert.ok(Array.isArray(health.data.workspace.adapters));
+    assert.equal(health.data.workspace.repo_count, 1);
+    assert.ok(Array.isArray(health.data.integrations.optional_mcps));
     assert.equal(typeof health.data.parallel.available_count, "number");
 
     await new Promise((resolve) => {
@@ -606,6 +619,30 @@ test("MCP team-scale workflow packets compose on one track", async () => {
       uri: `cadre://lsp-status?root=${encodeURIComponent(root)}`,
     });
     assert.equal(JSON.parse(lspResource.contents[0].text).data.ok, true);
+
+    const healthResource = await request("resources/read", {
+      uri: `cadre://workspace-health?root=${encodeURIComponent(root)}`,
+    });
+    const parsedHealth = JSON.parse(healthResource.contents[0].text);
+    assert.equal(parsedHealth.data.response_mode, "compact");
+    assert.equal(parsedHealth.data.workspace.repo_count, 1);
+    assert.ok(Array.isArray(parsedHealth.data.languages.detected));
+    assert.equal(typeof parsedHealth.data.parallel.available_count, "number");
+    assert.ok(parsedHealth.data.integrations.optional_mcps.some((entry) => entry.kind === "code_search"));
+
+    const healthDetailResource = await request("resources/read", {
+      uri: `cadre://workspace-health?root=${encodeURIComponent(root)}&responseMode=detail`,
+    });
+    const parsedHealthDetail = JSON.parse(healthDetailResource.contents[0].text);
+    assert.equal(parsedHealthDetail.data.response_mode, "detail");
+    assert.ok(Array.isArray(parsedHealthDetail.data.workspace.adapters));
+
+    const integrationsResource = await request("resources/read", {
+      uri: `cadre://integrations?root=${encodeURIComponent(root)}&responseMode=detail`,
+    });
+    const parsedIntegrations = JSON.parse(integrationsResource.contents[0].text);
+    assert.equal(parsedIntegrations.data.response_mode, "detail");
+    assert.ok(Array.isArray(parsedIntegrations.data.optional_mcps));
 
     const releaseResource = await request("resources/read", {
       uri: `cadre://release-plan?root=${encodeURIComponent(root)}`,

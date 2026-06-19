@@ -45,8 +45,10 @@ requested workflow needs:
   planning, implementation, and review context.
 - `cadre/patterns.md` before implementation or new-track planning.
 - Active track files only after a track is selected.
-- Compact MCP resources for team dashboards, review queues, LSP status, provider
-  actions, and quality gates.
+- Compact MCP resources for team dashboards, review queues, integrations, LSP
+  status, provider actions, and quality gates.
+- Use `cadre://workspace-health` for compact repo, dependency, LSP, and
+  parallel summaries, and `cadre://integrations` for optional MCP coverage.
 
 `cadre/tracks.md` is a derived human index. Resolve live status from MCP packets
 and track metadata, not by treating the index as authoritative.

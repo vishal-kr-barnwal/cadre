@@ -70,6 +70,7 @@ Useful compact resources:
 | `cadre://quality-gate` | Plan integrity, review gate, and collision state for one track. |
 | `cadre://parallel-state` | Worker wave and merge-back state. |
 | `cadre://repo-topology` | Mono/polyrepo topology and configured repos. |
+| `cadre://integrations` | Optional MCP availability and LSP coverage in one compact view. |
 
 These resources are bounded so agents do not need to reread the whole Cadre
 tree to answer status questions.

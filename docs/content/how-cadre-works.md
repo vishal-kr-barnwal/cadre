@@ -43,7 +43,7 @@ include:
 | Surface | What it owns |
 |---------|--------------|
 | `cadre_workflow` | High-level setup, newtrack, implement, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, and formula flows. |
-| `cadre_project` | Runtime ping, doctor output, root resolution, shared sync, and polyrepo preflight. |
+| `cadre_project` | Runtime ping, doctor output, root resolution, integrations inventory, shared sync, and polyrepo preflight. |
 | `cadre_track` | Track context, plan parsing, phase scheduling, integrity, Beads tree creation, and worktree planning. |
 | `cadre_mutate` | Controlled state updates such as claim, heartbeat, metadata patch, review record, task result, worker state, status, and index regeneration. |
 | `cadre_complete_task` | Verification, coverage gate, plan progress, metadata, and Beads completion in one path. |
@@ -54,7 +54,12 @@ include:
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
 `cadre://review-queue`, `cadre://handoff-inbox`, `cadre://quality-gate`,
-`cadre://parallel-state`, `cadre://repo-map`, and `cadre://repo-topology`.
+`cadre://parallel-state`, `cadre://repo-map`, `cadre://repo-topology`,
+`cadre://workspace-health`, and `cadre://integrations`.
+
+`cadre://workspace-health` is compact by default. Use
+`responseMode=detail` when you need the full workspace, dependency graph, and
+LSP inventory.
 
 ## Beads Memory
 
@@ -144,6 +149,9 @@ Cadre uses code intelligence to reduce blind spots:
 - `dependency_graph` reports repo-qualified dependency edges.
 - `lsp_setup` recommends language servers and can write `cadre/lsp.json`.
 - `lsp_warm_review` reuses initialized language servers for repeated reviews.
+- `cadre://integrations` summarizes optional MCP availability and LSP
+  coverage, so teams can see provider, code-search, issue, CI, logging, and
+  knowledge-base support in one place.
 
 LSP is optional. If `cadre/lsp.json` is absent, Cadre records that code
 intelligence was skipped instead of blocking ordinary work.

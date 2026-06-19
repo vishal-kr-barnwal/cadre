@@ -47,4 +47,8 @@ export interface ResourceQuery extends JsonObject {
   baseRef: string | null;
   headRef: string | null;
   files: string[];
+  responseMode: string | null;
+  response_mode: string | null;
+  detail: boolean | null;
+  compact: boolean | null;
 }

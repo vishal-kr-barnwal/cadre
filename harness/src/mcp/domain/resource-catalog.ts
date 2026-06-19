@@ -10,13 +10,15 @@ type ResourceDefinition = {
 type ResourceContract = {
   required: string[];
   requiredAny?: string[][];
+  optional?: string[];
 };
 
 const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
   { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project." },
   { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path." },
   { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path." },
-  { uri: "cadre://workspace-health", name: "Cadre workspace health", description: "Compact topology, tech stack, LSP, and dependency health snapshot. Read with ?root=/path." },
+  { uri: "cadre://workspace-health", name: "Cadre workspace health", description: "Compact topology, tech stack, LSP, dependency, and integration health snapshot. Read with ?root=/path." },
+  { uri: "cadre://integrations", name: "Cadre integrations", description: "Optional MCP inventory and LSP coverage. Read with ?root=/path." },
   { uri: "cadre://track-context", name: "Cadre track context", description: "Track context. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://review-evidence", name: "Cadre review evidence", description: "Review evidence artifact. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://collisions", name: "Cadre collisions", description: "File collision scan. Read with ?root=/path." },
@@ -42,11 +44,12 @@ const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
   "cadre://team-board": { required: ["root"] },
   "cadre://fleet-board": { required: ["root"] },
   "cadre://beads-summary": { required: ["root"] },
-  "cadre://workspace-health": { required: ["root"] },
+  "cadre://workspace-health": { required: ["root"], optional: ["responseMode", "detail", "compact"] },
+  "cadre://integrations": { required: ["root"], optional: ["responseMode", "detail", "compact"] },
   "cadre://track-context": { required: ["root", "trackId"] },
   "cadre://review-evidence": { required: ["root", "trackId"] },
   "cadre://collisions": { required: ["root"] },
-  "cadre://repo-map": { required: ["root"] },
+  "cadre://repo-map": { required: ["root"], optional: ["symbol"] },
   "cadre://workspace-diagnostics": { required: ["root"] },
   "cadre://lsp-status": { required: ["root"] },
   "cadre://repo-topology": { required: ["root"] },
@@ -64,6 +67,14 @@ const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
   "cadre://job-result": { required: ["root", "jobId"] },
 };
 
+function contractQueryParams(contract: ResourceContract): string[] {
+  return Array.from(new Set([
+    ...contract.required,
+    ...(contract.optional || []),
+    ...(contract.requiredAny || []).flat(),
+  ]));
+}
+
 export function resourceList(): JsonObject {
   return {
     resources: RESOURCE_DEFINITIONS.map((resource) => ({ ...resource, mimeType: "application/json" })),
@@ -74,8 +85,9 @@ export function resourceTemplatesList(): JsonObject {
   const resources = RESOURCE_DEFINITIONS;
   const templates = resources.map((resource) => {
     const contract = RESOURCE_CONTRACTS[resource.uri] || { required: ["root"] };
+    const queryParams = contractQueryParams(contract).filter(Boolean);
     return {
-      uriTemplate: `${resource.uri}{?root,trackId,symbol,workflow,files,base,head,jobId}`,
+      uriTemplate: queryParams.length > 0 ? `${resource.uri}{?${queryParams.join(",")}}` : resource.uri,
       name: resource.name,
       description: resource.description,
       mimeType: "application/json",
@@ -99,5 +111,9 @@ export function parseResourceUri(uri: string): ResourceQuery {
     baseRef: params.get("base"),
     headRef: params.get("head"),
     files: (params.get("files") || "").split(",").map((item) => item.trim()).filter(Boolean),
+    responseMode: params.get("responseMode"),
+    response_mode: params.get("response_mode"),
+    detail: params.has("detail") ? params.get("detail") !== "false" : null,
+    compact: params.has("compact") ? params.get("compact") !== "false" : null,
   };
 }

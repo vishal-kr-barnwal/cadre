@@ -815,12 +815,52 @@ test("workflow setup writes detected and requested style guides from templates",
     const techStack = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"));
     assert.deepEqual(techStack.languages, ["TypeScript"]);
     assert.match(setup.techStackSummary.summary, /languages: TypeScript/);
+    assert.equal(setup.workspace_health.response_mode, "compact");
+    assert.ok(Array.isArray(setup.detail_resources));
+    assert.ok(setup.detail_resources.some((uri) => uri.includes("workspace-diagnostics")));
     const beads = JSON.parse(fs.readFileSync(path.join(root, "cadre", "beads.json"), "utf8"));
     assert.equal(beads.mode, "normal");
     assert.equal(beads.packet_only, true);
     assert.equal(fs.existsSync(path.join(root, ".beads")), true);
   } finally {
     process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace health defaults to compact summaries and detail mode exposes full inventory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workspace-health-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "package.json"), JSON.stringify({
+      name: "health",
+      private: true,
+      scripts: { test: "node --test" },
+    }, null, 2));
+    write(path.join(root, "src", "index.ts"), "export const value = 1;\n");
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({
+      integrations: {
+        code_search: { server: "sourcegraph", available: true },
+        issue_tracker: "linear",
+      },
+    }, null, 2));
+
+    const compact = core.workspaceHealth(root);
+    assert.equal(compact.response_mode, "compact");
+    assert.equal(compact.detail_available, true);
+    assert.equal(compact.workspace.repo_count, 1);
+    assert.ok(Array.isArray(compact.detail_resources));
+    assert.ok(compact.detail_resources.some((uri) => uri.includes("integrations")));
+    assert.ok(compact.integrations.optional_mcps.some((entry) => entry.kind === "code_search"));
+    assert.ok(typeof compact.lsp.coverage === "number" || compact.lsp.coverage === null);
+
+    const detail = core.workspaceHealth(root, { responseMode: "detail" });
+    assert.equal(detail.response_mode, "detail");
+    assert.ok(Array.isArray(detail.workspace.adapters));
+    assert.ok(Array.isArray(detail.dependency_graph.manifests));
+    assert.ok(Array.isArray(detail.integrations.optional_mcps));
+    assert.equal(detail.integrations.summary.optional_configured_count >= 1, true);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

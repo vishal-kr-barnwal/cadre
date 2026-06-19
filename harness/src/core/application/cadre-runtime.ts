@@ -2310,6 +2310,8 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
   const lspRecommendations = lspSetup(root, { ...args, execute: false });
+  const detailMode = workflowResponseMode(args) === "detail";
+  const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const beadsPlan = setupBeads(root, { ...args, execute: false });
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
@@ -2319,10 +2321,13 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     ...summary,
     ok: styleGuides.ok,
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
-    workspace: workspaceDiagnostics(root, { execute: false }),
-    dependency_graph: dependencyGraph(root),
-    lsp: lspConfigStatus(root),
-    lsp_setup: lspRecommendations,
+    workspace_health: workspaceHealthResult,
+    workspace: workspaceHealthResult.workspace,
+    dependency_graph: workspaceHealthResult.dependency_graph,
+    lsp: workspaceHealthResult.lsp,
+    lsp_setup: detailMode ? lspRecommendations : summarizeLspSetupResult(lspRecommendations),
+    integrations: workspaceHealthResult.integrations,
+    detail_resources: workspaceHealthResult.detail_resources,
     beads_init: beadsPlan,
     provider,
     sync_mode: syncModeRecommendation,
@@ -2438,6 +2443,7 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...(asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {}),
+    ...(isRecord(rawArgs.integrations) ? { integrations: asJsonObject(rawArgs.integrations) } : {}),
     ...configOverrides,
   };
   writeSetupJson("config.json", configPayload);
@@ -6071,6 +6077,318 @@ function dependencyGraph(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
+function countRecords(records: unknown): number {
+  return Array.isArray(records) ? records.length : 0;
+}
+
+function workspaceHealthDetailResources(root: string): string[] {
+  const encodedRoot = encodeURIComponent(root);
+  return [
+    `cadre://workspace-health?root=${encodedRoot}&responseMode=detail`,
+    `cadre://workspace-diagnostics?root=${encodedRoot}`,
+    `cadre://repo-topology?root=${encodedRoot}`,
+    `cadre://repo-map?root=${encodedRoot}`,
+    `cadre://lsp-status?root=${encodedRoot}`,
+    `cadre://integrations?root=${encodedRoot}`,
+  ];
+}
+
+function summarizeWorkspaceDiagnosticsResult(result: CoreResult): CoreResult {
+  return {
+    ok: result.ok !== false,
+    repo_count: countRecords(result.repos),
+    adapter_count: countRecords(result.adapters),
+    command_count: countRecords(result.commands),
+    result_count: countRecords(result.results),
+  };
+}
+
+function summarizeDependencyGraphResult(result: CoreResult): CoreResult {
+  return {
+    ok: result.ok !== false,
+    repo_count: countRecords(result.repos),
+    manifest_count: countRecords(result.manifests),
+    edge_count: countRecords(result.edges),
+  };
+}
+
+function summarizeLspSetupResult(result: CoreResult): CoreResult {
+  return {
+    ok: result.ok !== false,
+    available: result.available !== false,
+    execute: result.execute === true,
+    dry_run: result.dry_run !== false,
+    written: result.written === true,
+    added: Array.isArray(result.added) ? result.added.slice(0, 10) : [],
+    added_count: countRecords(result.added),
+    missing_from_config_count: countRecords(result.missingFromConfig),
+    missing_commands_count: countRecords(result.missingCommands),
+  };
+}
+
+function summarizeLspCoverage(root: string, args: RuntimeArgs = {}): CoreResult {
+  const status = asJsonObject(lspConfigStatus(root));
+  const setup = asJsonObject(lspSetup(root, { ...args, execute: false }));
+  const configured = Array.isArray(status.servers)
+    ? status.servers
+      .map((server) => asJsonObject(server).id || null)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+  const recommended = Array.isArray(setup.recommended)
+    ? setup.recommended
+      .map((entry) => asJsonObject(entry).id || null)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+  const missing = recommended.filter((id) => !configured.includes(id));
+  const covered = recommended.filter((id) => configured.includes(id));
+  return {
+    ok: status.configured !== false && setup.ok !== false,
+    status_configured: status.configured !== false,
+    configured_count: configured.length,
+    recommended_count: recommended.length,
+    covered_count: covered.length,
+    missing_count: missing.length,
+    coverage: recommended.length > 0 ? Math.round((covered.length / recommended.length) * 100) : null,
+    configured: configured.slice(0, 10),
+    recommended: recommended.slice(0, 10),
+    missing: missing.slice(0, 10),
+  };
+}
+
+function normalizeIntegrationValue(value: unknown): JsonObject {
+  if (value == null) {
+    return { configured: false, available: null };
+  }
+  if (typeof value === "boolean") {
+    return { configured: true, available: value };
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return { configured: false, available: null };
+    const lower = text.toLowerCase();
+    if (["false", "0", "no", "off", "disabled"].includes(lower)) {
+      return { configured: true, available: false, label: text };
+    }
+    return { configured: true, available: true, label: text };
+  }
+  if (isRecord(value)) {
+    const entry = asJsonObject(value);
+    const configured = Object.keys(entry).length > 0;
+    const available = typeof entry.available === "boolean"
+      ? entry.available
+      : typeof entry.enabled === "boolean"
+        ? entry.enabled
+        : typeof entry.configured === "boolean"
+          ? entry.configured
+          : (entry.command || entry.server || entry.url ? true : null);
+    return {
+      configured,
+      available,
+      label: asOptionalString(entry.label) || asOptionalString(entry.name),
+      command: asOptionalString(entry.command),
+      server: asOptionalString(entry.server),
+      url: asOptionalString(entry.url),
+      provider: asOptionalString(entry.provider),
+      platform: asOptionalString(entry.platform),
+      kind: asOptionalString(entry.kind),
+    };
+  }
+  return { configured: false, available: null };
+}
+
+function pickIntegrationCandidate(scopes: Array<{ source: string; scope: UnknownRecord | JsonObject | null | undefined }>, keys: string[]): { source: string; value: unknown } | null {
+  for (const { source, scope } of scopes) {
+    if (!isRecord(scope)) continue;
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(scope, key)) {
+        const value = asJsonObject(scope)[key];
+        if (value !== undefined && value !== null) return { source: `${source}.${key}`, value };
+      }
+    }
+  }
+  return null;
+}
+
+function integrationStatus(root: string, args: RuntimeArgs, kind: string, label: string, keys: string[], mode: "compact" | "detail"): JsonObject {
+  const topology = loadTopology(root);
+  const config = asJsonObject(topology.config || {});
+  const configIntegrations = isRecord(config.integrations) ? asJsonObject(config.integrations) : {};
+  const candidate = pickIntegrationCandidate([
+    { source: "config.integrations", scope: configIntegrations },
+    { source: "config", scope: config },
+    { source: "args", scope: args as UnknownRecord },
+  ], keys);
+  const normalized = normalizeIntegrationValue(candidate?.value);
+  const status: JsonObject = {
+    kind,
+    label,
+    configured: normalized.configured === true || candidate != null,
+    available: normalized.available,
+    source: candidate?.source || "not_configured",
+  };
+  if (normalized.label) status.value = normalized.label;
+  if (normalized.command) status.command = normalized.command;
+  if (normalized.server) status.server = normalized.server;
+  if (normalized.url) status.url = normalized.url;
+  if (normalized.provider) status.provider = normalized.provider;
+  if (normalized.platform) status.platform = normalized.platform;
+  if (normalized.kind) status.integration_kind = normalized.kind;
+  if (mode === "detail") {
+    status.candidates = keys;
+  }
+  return status;
+}
+
+function integrationInventory(root: string, args: RuntimeArgs = {}): CoreResult {
+  const mode = workflowResponseMode(args);
+  const provider = providerMcpAvailability(root, args);
+  const lsp = summarizeLspCoverage(root, args);
+  const optionalMcps = [
+    integrationStatus(root, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
+    integrationStatus(root, args, "issue_tracker", "Issue tracker", ["issue_tracker", "issueTracker", "jira", "jira_mcp", "jiraMcp", "linear", "linear_mcp", "linearMcp"], mode),
+    integrationStatus(root, args, "ci", "CI", ["ci", "ci_provider", "ciProvider", "ci_mcp", "ciMcp", "ci_mcp_available", "ciMcpAvailable"], mode),
+    integrationStatus(root, args, "logging", "Logging", ["logging", "observability", "telemetry", "sentry", "sentry_mcp", "datadog", "datadog_mcp", "honeycomb", "honeycomb_mcp"], mode),
+    integrationStatus(root, args, "knowledge_base", "Knowledge base", ["knowledge_base", "knowledgeBase", "kb", "docs", "confluence", "notion", "knowledge_base_mcp", "knowledgeBaseMcp"], mode),
+  ];
+  const configuredOptionalCount = optionalMcps.filter((entry) => entry.configured === true).length;
+  const availableOptionalCount = optionalMcps.filter((entry) => entry.available === true).length;
+  const unavailableOptionalCount = optionalMcps.filter((entry) => entry.configured === true && entry.available === false).length;
+  const detailResources = workspaceHealthDetailResources(root);
+  const summary = {
+    provider_mode: asOptionalString(provider.provider_mode) || "local",
+    provider_available: provider.available ?? null,
+    optional_configured_count: configuredOptionalCount,
+    optional_available_count: availableOptionalCount,
+    optional_unavailable_count: unavailableOptionalCount,
+    lsp_configured_count: asOptionalNumber(lsp.configured_count),
+    lsp_recommended_count: asOptionalNumber(lsp.recommended_count),
+    lsp_covered_count: asOptionalNumber(lsp.covered_count),
+    lsp_missing_count: asOptionalNumber(lsp.missing_count),
+    lsp_coverage: asOptionalNumber(lsp.coverage),
+  };
+  if (mode === "detail") {
+    return {
+      ok: true,
+      root,
+      response_mode: mode,
+      detail_available: true,
+      provider,
+      optional_mcps: optionalMcps,
+      lsp: {
+        coverage: lsp,
+        status: lspConfigStatus(root),
+        setup: lspSetup(root, { ...args, execute: false }),
+      },
+      summary,
+      detail_resources: detailResources,
+    };
+  }
+  return {
+    ok: true,
+    root,
+    response_mode: mode,
+    detail_available: true,
+    provider: {
+      ok: provider.ok !== false,
+      provider_mode: provider.provider_mode || "local",
+      available: provider.available ?? null,
+      required_provider_mcp: provider.required_provider_mcp || null,
+      source: provider.source || null,
+      remote_host: provider.remote_host || null,
+      requires_confirmation: provider.requires_confirmation === true,
+    },
+    optional_mcps: optionalMcps.map((entry) => ({
+      kind: entry.kind,
+      label: entry.label,
+      configured: entry.configured,
+      available: entry.available,
+      source: entry.source,
+    })),
+    lsp,
+    summary,
+    detail_resources: detailResources,
+  };
+}
+
+function workspaceHealth(root: string, args: RuntimeArgs = {}): CoreResult {
+  const mode = workflowResponseMode(args);
+  const topology = loadTopology(root);
+  const techStack = techStackSummary(root, args);
+  const workspace = workspaceDiagnostics(root, { execute: false });
+  const dependencyGraphResult = dependencyGraph(root);
+  const lspCoverage = summarizeLspCoverage(root, args);
+  const availableWorkResult = availableWork(root);
+  const integrations = integrationInventory(root, { ...args, responseMode: mode });
+  const detailResources = workspaceHealthDetailResources(root);
+  if (mode === "detail") {
+    return {
+      ok: true,
+      root,
+      response_mode: mode,
+      detail_available: true,
+      topology: {
+        polyrepo: topology.polyrepo,
+        default_repo: topology.defaultRepo || null,
+        sync_mode: topology.config.sync_mode || "local",
+        repos: topology.repos,
+      },
+      tech_stack: techStack,
+      workspace,
+      dependency_graph: dependencyGraphResult,
+      parallel: availableWorkResult,
+      languages: {
+        detected: lspCoverage.recommended,
+        configured: lspCoverage.configured,
+      },
+      lsp: {
+        coverage: lspCoverage,
+        status: lspConfigStatus(root),
+        setup: lspSetup(root, { ...args, execute: false }),
+      },
+      integrations,
+      detail_resources: detailResources,
+    };
+  }
+  return {
+    ok: true,
+    root,
+    response_mode: mode,
+    detail_available: true,
+    topology: {
+      polyrepo: topology.polyrepo,
+      default_repo: topology.defaultRepo || null,
+      sync_mode: topology.config.sync_mode || "local",
+      repo_count: countRecords(asJsonObject(topology.repos).repos),
+    },
+    tech_stack: techStack.ok === false
+      ? { ok: false, error: techStack.error || "Missing tech stack" }
+      : {
+        ok: true,
+        path: techStack.path,
+        summary: techStack.summary,
+        styleGuideIds: techStack.styleGuideIds,
+    },
+    workspace: summarizeWorkspaceDiagnosticsResult(workspace),
+    dependency_graph: summarizeDependencyGraphResult(dependencyGraphResult),
+    parallel: availableWorkResult.ok === false
+      ? { ok: false, error: availableWorkResult.error || "Available work unavailable" }
+      : {
+        ok: true,
+        available_count: countRecords(availableWorkResult.available),
+        reclaimable_count: countRecords(availableWorkResult.reclaimable),
+        available: Array.isArray(availableWorkResult.available) ? availableWorkResult.available.slice(0, 5) : [],
+        reclaimable: Array.isArray(availableWorkResult.reclaimable) ? availableWorkResult.reclaimable.slice(0, 5) : [],
+      },
+    languages: {
+      detected: lspCoverage.recommended,
+      configured: lspCoverage.configured,
+    },
+    lsp: lspCoverage,
+    integrations,
+    detail_resources: detailResources,
+  };
+}
+
 function lspConfigStatus(root: string): CoreResult {
   const configPath = path.join(root, "cadre", "lsp.json");
   const config = readJson<unknown>(configPath, null);
@@ -6449,8 +6767,10 @@ export {
   heartbeatTrack,
   trackContext,
   testImpact,
+  integrationInventory,
   worktreePlan,
   workflowPacket,
+  workspaceHealth,
   workspaceDiagnostics,
   withLock,
   withTrackLock,

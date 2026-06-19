@@ -26,6 +26,8 @@ they conflict with stale local notes.
   provider-evidence writes, and PR/MR/CI status normalization.
 - `cadre_intel` owns repo maps, LSP setup/review/impact, workspace diagnostics,
   test impact, dependency graphs, and daemon lifecycle.
+- `cadre_project action: integrations` and `cadre://integrations` report
+  configured optional MCPs plus LSP coverage in one bounded view.
 - `cadre_job` starts, lists, cancels, and reads async job artifacts.
 
 ## Response Modes
@@ -50,6 +52,8 @@ Use MCP resources for bounded dashboards:
 - `cadre://parallel-state?root=...&trackId=...`
 - `cadre://quality-gate?root=...&trackId=...`
 - `cadre://repo-map?root=...`
+- `cadre://integrations?root=...`
+- `cadre://workspace-health?root=...`
 - `cadre://workspace-diagnostics?root=...`
 - `cadre://test-impact?root=...&files=...`
 - `cadre://lsp-status?root=...`
