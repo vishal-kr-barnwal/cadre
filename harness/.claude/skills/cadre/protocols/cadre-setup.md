@@ -25,7 +25,9 @@ arguments and confirmed user context.
 3. Use the returned doctor report, workspace diagnostics, dependency graph, LSP
    status, and tech-stack summary to ask only for missing product, structured
    tech-stack JSON, workflow, repo topology, Beads, LSP, CI, and provider
-   decisions.
+   decisions. Do not inspect installed plugin scripts or template directories to
+   compensate for missing packet output; the packet owns template discovery and
+   review bundles.
 4. Present the returned setup review artifacts to the user using
    `review_bundle` when present. The bundle contains full dry-run files and a
    manifest on disk so clients can open or render the proposed `product.md`,
@@ -40,9 +42,11 @@ arguments and confirmed user context.
    `execute: true`, and `humanConfirmed: true`. Include any confirmed
    `styleGuideIds`; do not drop the user-supplied list to hide setup warnings.
    For polyrepo setup, include the confirmed `repos` payload and topology/CI
-   options returned or requested by the packet. For LSP setup, pass `lsp: true`
-   or use `cadre_intel` with `action: "lsp_setup"` when setup recommendations
-   need a separate review/write step.
+   options returned or requested by the packet. Setup writes `cadre/lsp.json`
+   by default when language-server recommendations are detected; pass
+   `lsp: false` only when the user explicitly wants to skip LSP setup, or use
+   `cadre_intel` with `action: "lsp_setup"` when recommendations need a
+   separate review/write step.
 6. Summarize created files, selected code style guides, Beads initialization,
    LSP/provider status, warnings, and the first recommended packet.
 

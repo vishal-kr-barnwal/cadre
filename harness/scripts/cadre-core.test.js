@@ -846,6 +846,9 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/python.md"));
+    assert.equal(setup.lsp_setup.written, true);
+    assert.ok(setup.lsp_setup.added.includes("typescript"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
     assert.ok(setup.written.includes("cadre/product_guidelines.md"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.md")), true);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /# Codebase Patterns/);
@@ -860,6 +863,38 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.equal(beads.mode, "normal");
     assert.equal(beads.packet_only, true);
     assert.equal(fs.existsSync(path.join(root, ".beads")), true);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("generated plugin setup resolves skill templates and writes default LSP config", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plugin-template-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
+    write(path.join(root, "src", "lib.rs"), "pub fn plugin_template_smoke() -> bool { true }\n");
+    const pluginCore = require(path.join(__dirname, "..", "plugins", "cadre", "scripts", "cadre-core.js"));
+
+    const setup = pluginCore.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      humanConfirmed: true,
+      providerMode: "local",
+      productText: "# Product\n",
+      techStack: { languages: ["Rust"], styleGuideIds: ["rust"] },
+    });
+
+    assert.equal(setup.ok, true);
+    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/rust.md"));
+    assert.match(fs.readFileSync(path.join(root, "cadre", "workflow.md"), "utf8"), /Guiding Principles/);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /# Codebase Patterns/);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "code_styleguides", "rust.md"), "utf8"), /Effective Rust/);
+    assert.equal(setup.lsp_setup.written, true);
+    assert.ok(setup.lsp_setup.added.includes("rust"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
   } finally {
     process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });

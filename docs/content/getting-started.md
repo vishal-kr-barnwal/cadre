@@ -86,9 +86,10 @@ cadre-setup
 ```
 
 Setup asks for product context, tech stack, topology, sync mode, provider mode,
-quality gate, optional CI templates, and optional LSP setup. The workflow is
-packet-owned: the agent should call Cadre MCP, and Cadre MCP writes the control
-plane.
+quality gate, optional CI templates, and LSP setup. When language-server
+recommendations are detected, setup writes `cadre/lsp.json` by default unless
+you opt out. The workflow is packet-owned: the agent should call Cadre MCP, and
+Cadre MCP writes the control plane.
 
 Successful setup creates:
 
@@ -103,7 +104,7 @@ Successful setup creates:
 | `cadre/config.json` | Sync mode, provider mode, review, and quality settings. |
 | `cadre/beads.json` | Beads integration settings. |
 | `cadre/repos.json` | Polyrepo topology when enabled. |
-| `cadre/lsp.json` | Optional language-server configuration. |
+| `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
 
 Track directories later live under `cadre/tracks/<track_id>/` and contain
 `metadata.json`, `spec.md`, `plan.md`, `learnings.md`, and optional handoff or

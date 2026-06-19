@@ -1836,11 +1836,21 @@ function shapeWorkflowResponse(root: string, workflow: string, args: RuntimeArgs
 }
 
 function templatePath(relativePath: string): string | null {
-  const candidates = [
-    path.join(__dirname, "..", "templates", relativePath),
-    path.join(__dirname, "..", "..", "templates", relativePath),
-    path.join(__dirname, "templates", relativePath),
-  ];
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: string): void => {
+    if (seen.has(candidate)) return;
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+  let dir = __dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    add(path.join(dir, "templates", relativePath));
+    add(path.join(dir, "skills", "cadre", "templates", relativePath));
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
   for (const candidate of candidates) {
     if (fileExists(candidate)) return candidate;
   }
@@ -2259,6 +2269,21 @@ function setupLspWriteRequested(args: RuntimeArgs = {}): boolean {
     || args.write_lsp === true;
 }
 
+function setupLspWriteDisabled(args: RuntimeArgs = {}): boolean {
+  const rawArgs = args as UnknownRecord;
+  return rawArgs.lsp === false
+    || args.setupLsp === false
+    || args.setup_lsp === false
+    || args.writeLsp === false
+    || args.write_lsp === false;
+}
+
+function setupShouldWriteLsp(args: RuntimeArgs, lspRecommendations: CoreResult): boolean {
+  if (setupLspWriteRequested(args)) return true;
+  if (setupLspWriteDisabled(args)) return false;
+  return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
+}
+
 function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): ReviewFile[] {
   const rawArgs = args as UnknownRecord;
   const productText = packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n");
@@ -2400,8 +2425,8 @@ function setupReviewBundle(root: string, args: RuntimeArgs, reviewFiles: ReviewF
   });
 }
 
-function setupLspReviewArtifacts(args: RuntimeArgs = {}): JsonObject[] {
-  if (setupLspWriteRequested(args)) {
+function setupLspReviewArtifacts(args: RuntimeArgs = {}, writeRequested = setupLspWriteRequested(args)): JsonObject[] {
+  if (writeRequested) {
     return [
       {
         path: "cadre/lsp.json",
@@ -2415,8 +2440,8 @@ function setupLspReviewArtifacts(args: RuntimeArgs = {}): JsonObject[] {
   return [];
 }
 
-function appendLspReviewArtifacts(artifacts: JsonObject[], args: RuntimeArgs = {}): JsonObject[] {
-  artifacts.push(...setupLspReviewArtifacts(args));
+function appendLspReviewArtifacts(artifacts: JsonObject[], args: RuntimeArgs = {}, writeRequested = setupLspWriteRequested(args)): JsonObject[] {
+  artifacts.push(...setupLspReviewArtifacts(args, writeRequested));
   return artifacts;
 }
 
@@ -2559,17 +2584,17 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
   const lspRecommendations = lspSetup(root, { ...args, execute: false });
+  const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const beadsPlan = setupBeads(root, { ...args, execute: false });
-  const lspWriteRequested = setupLspWriteRequested(args);
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
   const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
   const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
-  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args);
+  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
   const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
   const warnings = [
     ...asStringArray(styleGuides.warnings),

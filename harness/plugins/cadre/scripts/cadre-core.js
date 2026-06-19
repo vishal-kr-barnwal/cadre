@@ -1838,11 +1838,21 @@ function shapeWorkflowResponse(root, workflow, args, result) {
   return compactObject(enriched);
 }
 function templatePath(relativePath) {
-  const candidates = [
-    import_node_path3.default.join(__dirname, "..", "templates", relativePath),
-    import_node_path3.default.join(__dirname, "..", "..", "templates", relativePath),
-    import_node_path3.default.join(__dirname, "templates", relativePath)
-  ];
+  const candidates = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (candidate) => {
+    if (seen.has(candidate)) return;
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+  let dir = __dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    add(import_node_path3.default.join(dir, "templates", relativePath));
+    add(import_node_path3.default.join(dir, "skills", "cadre", "templates", relativePath));
+    const parent = import_node_path3.default.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
   for (const candidate of candidates) {
     if (fileExists(candidate)) return candidate;
   }
@@ -2199,6 +2209,15 @@ function setupLspWriteRequested(args = {}) {
   const rawArgs = args;
   return rawArgs.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true;
 }
+function setupLspWriteDisabled(args = {}) {
+  const rawArgs = args;
+  return rawArgs.lsp === false || args.setupLsp === false || args.setup_lsp === false || args.writeLsp === false || args.write_lsp === false;
+}
+function setupShouldWriteLsp(args, lspRecommendations) {
+  if (setupLspWriteRequested(args)) return true;
+  if (setupLspWriteDisabled(args)) return false;
+  return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
+}
 function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
   const rawArgs = args;
   const productText = packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n");
@@ -2330,8 +2349,8 @@ function setupReviewBundle(root, args, reviewFiles, styleGuides) {
     }
   });
 }
-function setupLspReviewArtifacts(args = {}) {
-  if (setupLspWriteRequested(args)) {
+function setupLspReviewArtifacts(args = {}, writeRequested = setupLspWriteRequested(args)) {
+  if (writeRequested) {
     return [
       {
         path: "cadre/lsp.json",
@@ -2344,8 +2363,8 @@ function setupLspReviewArtifacts(args = {}) {
   }
   return [];
 }
-function appendLspReviewArtifacts(artifacts, args = {}) {
-  artifacts.push(...setupLspReviewArtifacts(args));
+function appendLspReviewArtifacts(artifacts, args = {}, writeRequested = setupLspWriteRequested(args)) {
+  artifacts.push(...setupLspReviewArtifacts(args, writeRequested));
   return artifacts;
 }
 function humanReviewState(workflow, args, artifacts, reviewBundle = null) {
@@ -2472,17 +2491,17 @@ function workflowSetup(root, args = {}) {
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
   const lspRecommendations = lspSetup(root, { ...args, execute: false });
+  const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const beadsPlan = setupBeads(root, { ...args, execute: false });
-  const lspWriteRequested = setupLspWriteRequested(args);
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
   const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
   const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
-  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args);
+  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
   const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
   const warnings = [
     ...asStringArray(styleGuides.warnings),

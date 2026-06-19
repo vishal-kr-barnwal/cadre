@@ -8,7 +8,8 @@ copy template files by hand during workflows.
 
 The setup packet returns a template manifest with template ids, source paths,
 target paths, purpose, and scope. Use that manifest for explanation and review;
-do not infer setup writes by scanning the plugin cache or harness checkout.
+do not infer setup writes by scanning the plugin cache or harness checkout, and
+do not inspect installed runtime scripts to locate templates.
 
 ## Packet Ownership
 
