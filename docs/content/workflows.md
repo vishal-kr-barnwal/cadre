@@ -43,10 +43,10 @@ What setup gathers:
 What setup writes:
 
 - `cadre/product.md`
+- `cadre/product_guidelines.md`
 - `cadre/tech-stack.json`
 - `cadre/workflow.md`
 - `cadre/patterns.md`
-- `cadre/learnings.md`
 - `cadre/tracks.md`
 - `cadre/config.json`
 - `cadre/beads.json`

@@ -1,6 +1,13 @@
 {
   "templates": [
     {
+      "id": "product",
+      "source": "product.md",
+      "target": "cadre/product.md",
+      "purpose": "Product summary, users, workflows, domain model, invariants, architecture boundaries, data ownership, and release expectations.",
+      "scope": "target-project"
+    },
+    {
       "id": "workflow",
       "source": "workflow.md",
       "target": "cadre/workflow.md",

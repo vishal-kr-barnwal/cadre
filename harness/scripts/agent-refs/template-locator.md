@@ -1,9 +1,9 @@
 # Cadre Template Assets
 
-Cadre ships starter templates for workflow policy, project patterns, track
-learnings, Beads configuration, and language style guides. These assets are
-consumed by Cadre MCP packets. Agents should not locate template directories or
-copy template files by hand during workflows.
+Cadre ships starter templates for product context, product guidelines, workflow
+policy, project patterns, track learnings, Beads configuration, and language
+style guides. These assets are consumed by Cadre MCP packets. Agents should not
+locate template directories or copy template files by hand during workflows.
 
 The setup packet returns a template manifest with template ids, source paths,
 target paths, purpose, and scope. Use that manifest for explanation and review;

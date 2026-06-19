@@ -43,6 +43,21 @@ MCP.
    coverage, commit, and summary evidence. The packet updates plan state, metadata,
    Beads state, journals, and indexes.
 
+## Commit Discipline
+
+- Prefer one product commit per completed task or coherent implementation
+  checkpoint.
+- For larger tasks, commit after each significant tested change instead of
+  batching an entire track into one commit.
+- Keep commit messages task-aware by mentioning the track id, phase/task intent,
+  or user-visible behavior changed.
+- After each task-level commit, call the Cadre task-completion packet with the
+  commit SHA, tests run, coverage when available, files changed, and a concise
+  implementation note. Cadre records that evidence in track metadata, journals,
+  and Beads-backed notes.
+- Do not mark a task complete until its commit evidence and verification summary
+  have been recorded through Cadre.
+
 ## Polyrepo Notes
 
 In polyrepo mode, Cadre packets identify the repo, branch, worktree, task, and

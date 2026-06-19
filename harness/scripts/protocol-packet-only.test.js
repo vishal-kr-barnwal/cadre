@@ -97,6 +97,23 @@ test("Cadre protocols and workflow template stay packet-only", () => {
   assert.deepEqual(failures, []);
 });
 
+test("Workflow templates include task-level commit evidence guidance", () => {
+  const failures = [];
+  for (const file of [
+    path.join(root, "templates", "workflow.md"),
+    path.join(root, ".agents", "skills", "cadre", "templates", "workflow.md"),
+    path.join(root, ".claude", "skills", "cadre", "templates", "workflow.md"),
+    path.join(root, "plugins", "cadre", "skills", "cadre", "templates", "workflow.md"),
+    path.join(root, "plugins", "cadre-claude", "skills", "cadre", "templates", "workflow.md"),
+  ]) {
+    const text = fs.readFileSync(file, "utf8");
+    if (!/## Commit Discipline/.test(text)) failures.push(`${path.relative(root, file)}: missing Commit Discipline section`);
+    if (!/one product commit per completed task/.test(text)) failures.push(`${path.relative(root, file)}: missing task-level commit guidance`);
+    if (!/Cadre task-completion packet with the\s+commit SHA/.test(text)) failures.push(`${path.relative(root, file)}: missing packet-owned commit evidence guidance`);
+  }
+  assert.deepEqual(failures, []);
+});
+
 test("Generated Codex and Claude skill bundles only differ in platform-sliced references", () => {
   const codexSkill = path.join(root, "plugins", "cadre", "skills", "cadre");
   const claudeSkill = path.join(root, "plugins", "cadre-claude", "skills", "cadre");

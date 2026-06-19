@@ -1868,6 +1868,106 @@ function packetText(value: unknown, fallback: string): string {
   return (text && text.trim() ? text : fallback).replace(/\n*$/, "\n");
 }
 
+function workflowTextHasBaselineSections(text: string): boolean {
+  return [
+    "## Guiding Principles",
+    "## Task Lifecycle",
+    "## Commit Discipline",
+    "## Quality Gates",
+    "## Phase Completion",
+    "## Development Commands",
+  ].every((heading) => text.includes(heading));
+}
+
+function stripTopLevelWorkflowHeading(text: string): string {
+  return text
+    .replace(/\n*$/, "\n")
+    .replace(/^#\s+Project Workflow\s*\n+/i, "")
+    .trim();
+}
+
+function setupWorkflowText(value: unknown): string {
+  const fallback = templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n");
+  const provided = asOptionalString(value);
+  if (!provided || !provided.trim()) return fallback.replace(/\n*$/, "\n");
+  const normalized = provided.replace(/\n*$/, "\n");
+  if (workflowTextHasBaselineSections(normalized)) return normalized;
+  const projectNotes = stripTopLevelWorkflowHeading(normalized);
+  if (!projectNotes) return fallback.replace(/\n*$/, "\n");
+  return [
+    fallback.replace(/\n*$/, ""),
+    "## Project-Specific Workflow Notes",
+    projectNotes,
+    "",
+  ].join("\n\n");
+}
+
+function textHasSections(text: string, headings: string[]): boolean {
+  return headings.every((heading) => text.includes(heading));
+}
+
+function stripTopLevelHeading(text: string, heading: string): string {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(/\n*$/, "\n")
+    .replace(new RegExp(`^#\\s+${escaped}\\s*\\n+`, "i"), "")
+    .trim();
+}
+
+function mergeTemplateBackedText(value: unknown, template: string, fallback: string, headings: string[], notesHeading: string): string {
+  const baseline = templateText(template, fallback).replace(/\n*$/, "\n");
+  const provided = asOptionalString(value);
+  if (!provided || !provided.trim()) return baseline;
+  const normalized = provided.replace(/\n*$/, "\n");
+  if (textHasSections(normalized, headings)) return normalized;
+  const notes = stripTopLevelHeading(normalized, baseline.split(/\r?\n/, 1)[0]?.replace(/^#\s+/, "") || "");
+  if (!notes) return baseline;
+  return [
+    baseline.replace(/\n*$/, ""),
+    notesHeading,
+    notes,
+    "",
+  ].join("\n\n");
+}
+
+function setupProductText(value: unknown): string {
+  return mergeTemplateBackedText(
+    value,
+    "product.md",
+    "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n",
+    [
+      "## Product Summary",
+      "## Users And Personas",
+      "## Core Workflows",
+      "## Domain Model",
+      "## Product Invariants",
+      "## Architecture Boundaries",
+      "## Data And Integrations",
+      "## Quality And Release Expectations",
+    ],
+    "## Project-Specific Product Notes"
+  );
+}
+
+function setupProductGuidelinesText(value: unknown): string {
+  return mergeTemplateBackedText(
+    value,
+    "product_guidelines.md",
+    "# Product Guidelines\n\nCapture product principles, user promises, non-goals, and decision rules.\n",
+    [
+      "## Product Principles",
+      "## User Promises",
+      "## Trust And Safety Boundaries",
+      "## Domain And Workflow Rules",
+      "## Data Ownership",
+      "## Non-Goals",
+      "## Decision Rules",
+      "## Review Checklist",
+    ],
+    "## Project-Specific Product Guideline Notes"
+  );
+}
+
 function templateJson(relativePath: string, fallback: JsonObject): JsonObject {
   return readJson<JsonObject>(templatePath(relativePath) || "", fallback);
 }
@@ -2286,12 +2386,9 @@ function setupShouldWriteLsp(args: RuntimeArgs, lspRecommendations: CoreResult):
 
 function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): ReviewFile[] {
   const rawArgs = args as UnknownRecord;
-  const productText = packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n");
-  const productGuidelinesText = packetText(
-    rawArgs.productGuidelinesText || rawArgs.product_guidelines_text,
-    templateText("product_guidelines.md", "# Product Guidelines\n\nCapture product principles, user promises, non-goals, and decision rules.\n")
-  );
-  const workflowText = packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n"));
+  const productText = setupProductText(rawArgs.productText);
+  const productGuidelinesText = setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text);
+  const workflowText = setupWorkflowText(rawArgs.workflowText);
   const patternsText = templateText("patterns.md", "# Project Patterns\n\n");
   const techStack = techStackForPacket(root, args);
   const files: ReviewFile[] = [
@@ -2707,19 +2804,15 @@ function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   fs.mkdirSync(path.join(cadreDir, "archive"), { recursive: true });
   writeText(
     "product.md",
-    packetText(rawArgs.productText, "# Product Context\n\nDescribe the product, users, workflows, and constraints.\n")
+    setupProductText(rawArgs.productText)
   );
   writeText(
     "product_guidelines.md",
-    packetText(
-      rawArgs.productGuidelinesText || rawArgs.product_guidelines_text,
-      templateText("product_guidelines.md", "# Product Guidelines\n\nCapture product principles, user promises, non-goals, and decision rules.\n")
-    )
+    setupProductGuidelinesText(rawArgs.productGuidelinesText || rawArgs.product_guidelines_text)
   );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
-  writeText("workflow.md", packetText(rawArgs.workflowText, templateText("workflow.md", "# Project Workflow\n\nCadre state is recorded through MCP packets.\n")));
+  writeText("workflow.md", setupWorkflowText(rawArgs.workflowText));
   writeText("tracks.md", "# Tracks\n\n<!-- cadre:index:start -->\n<!-- cadre:index:end -->\n");
-  writeText("learnings.md", "# Project Learnings\n\n");
   writeText("patterns.md", templateText("patterns.md", "# Project Patterns\n\n"));
   const beforeStyleWritten = written.length;
   const beforeStyleSkipped = skipped.length;

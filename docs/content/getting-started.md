@@ -96,10 +96,10 @@ Successful setup creates:
 | File | Purpose |
 |------|---------|
 | `cadre/product.md` | Product goals, users, workflows, constraints, and domain notes. |
+| `cadre/product_guidelines.md` | Product principles, trust boundaries, non-goals, decision rules, and review checklist. |
 | `cadre/tech-stack.json` | Languages, frameworks, package managers, platforms, and test commands. |
 | `cadre/workflow.md` | Development, verification, review, and commit expectations. |
 | `cadre/patterns.md` | Reusable implementation patterns promoted from completed work. |
-| `cadre/learnings.md` | Project-level learning journal. |
 | `cadre/tracks.md` | Derived human index rebuilt from track metadata. |
 | `cadre/config.json` | Sync mode, provider mode, review, and quality settings. |
 | `cadre/beads.json` | Beads integration settings. |

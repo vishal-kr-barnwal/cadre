@@ -834,6 +834,7 @@ test("workflow setup writes detected and requested style guides from templates",
     });
 
     assert.equal(setup.ok, true);
+    assert.ok(setup.templates.templates.some((template) => template.id === "product"));
     assert.ok(setup.templates.templates.some((template) => template.id === "target-monorepo-ci"));
     assert.ok(setup.templates.templates.some((template) => template.scope === "harness-only"));
     assert.equal(setup.styleGuides.source, "tech-stack.json");
@@ -850,8 +851,19 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.lsp_setup.added.includes("typescript"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
     assert.ok(setup.written.includes("cadre/product_guidelines.md"));
+    assert.ok(setup.written.includes("cadre/product.md"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.md")), true);
+    const product = fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8");
+    assert.match(product, /## Product Summary/);
+    assert.match(product, /## Core Workflows/);
+    assert.match(product, /## Product Invariants/);
+    assert.match(product, /## Project-Specific Product Notes/);
+    const guidelines = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
+    assert.match(guidelines, /## Trust And Safety Boundaries/);
+    assert.match(guidelines, /## Domain And Workflow Rules/);
+    assert.match(guidelines, /## Review Checklist/);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /# Codebase Patterns/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "learnings.md")), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.md")), false);
     const techStack = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"));
     assert.deepEqual(techStack.languages, ["TypeScript"]);
@@ -895,6 +907,75 @@ test("generated plugin setup resolves skill templates and writes default LSP con
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("rust"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup preserves baseline workflow quality gates with custom notes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-workflow-template-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
+
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      humanConfirmed: true,
+      providerMode: "local",
+      productText: "# Product\n",
+      workflowText: "# Project Workflow\n\nRun `cargo test` before broad validation.\n",
+      techStack: { languages: ["Rust"] },
+    });
+
+    assert.equal(setup.ok, true);
+    const workflow = fs.readFileSync(path.join(root, "cadre", "workflow.md"), "utf8");
+    assert.match(workflow, /## Guiding Principles/);
+    assert.match(workflow, /Test-Driven Development/);
+    assert.match(workflow, /## Task Lifecycle/);
+    assert.match(workflow, /## Commit Discipline/);
+    assert.match(workflow, /## Quality Gates/);
+    assert.match(workflow, /## Phase Completion/);
+    assert.match(workflow, /## Development Commands/);
+    assert.match(workflow, /## Project-Specific Workflow Notes/);
+    assert.match(workflow, /Run `cargo test` before broad validation\./);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup preserves baseline product context with custom notes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-product-template-test-"));
+  const oldPath = process.env.PATH;
+  try {
+    git(root, ["init"]);
+    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
+
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      humanConfirmed: true,
+      providerMode: "local",
+      productText: "# Product Context\n\nA self-hosted feature flag platform for internal teams.\n",
+      productGuidelinesText: "# Product Guidelines\n\nPreserve tenant isolation and audit trails.\n",
+      techStack: { languages: ["Rust"] },
+    });
+
+    assert.equal(setup.ok, true);
+    const product = fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8");
+    assert.match(product, /## Users And Personas/);
+    assert.match(product, /## Domain Model/);
+    assert.match(product, /## Data And Integrations/);
+    assert.match(product, /## Project-Specific Product Notes/);
+    assert.match(product, /self-hosted feature flag platform/);
+    const guidelines = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
+    assert.match(guidelines, /## Trust And Safety Boundaries/);
+    assert.match(guidelines, /## Data Ownership/);
+    assert.match(guidelines, /## Project-Specific Product Guideline Notes/);
+    assert.match(guidelines, /tenant isolation and audit trails/);
   } finally {
     process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });

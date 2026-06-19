@@ -36,6 +36,15 @@ arguments and confirmed user context.
    `workflow: "setup_scaffold"`, `productText`, structured `techStack`, and
    `execute: true`, and `humanConfirmed: true`. Include any confirmed
    `styleGuideIds`; do not drop the user-supplied list to hide setup warnings.
+   If project-specific `productText` or `productGuidelinesText` is supplied,
+   Cadre keeps the baseline product template sections for users, workflows,
+   domain model, invariants, architecture boundaries, trust boundaries, data
+   ownership, decision rules, and review checklist, then appends incomplete
+   custom product text as project-specific notes.
+   If project-specific `workflowText` is supplied, Cadre keeps the baseline
+   workflow template sections for guiding principles, task lifecycle, TDD,
+   commit discipline, phase completion, development commands, and quality gates,
+   then appends incomplete custom workflow text as project-specific notes.
    For polyrepo setup, include the confirmed `repos` payload and topology/CI
    options returned or requested by the packet. Setup writes `cadre/lsp.json`
    by default when language-server recommendations are detected; pass
