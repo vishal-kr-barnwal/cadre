@@ -50,18 +50,18 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          pnpm exec wrangler pages project list --json > "$RUNNER_TEMP/cloudflare-pages-projects.json"
-          if node - "$CLOUDFLARE_PAGES_PROJECT_NAME" "$RUNNER_TEMP/cloudflare-pages-projects.json" <<'NODE'
-          const fs = require("node:fs");
-          const [, , projectName, projectsPath] = process.argv;
-          const payload = JSON.parse(fs.readFileSync(projectsPath, "utf8"));
-          const projects = Array.isArray(payload) ? payload : payload.result ?? payload.items ?? [];
-          process.exit(projects.some((project) => project.name === projectName) ? 0 : 1);
-          NODE
-          then
-            echo "Cloudflare Pages project ${CLOUDFLARE_PAGES_PROJECT_NAME} already exists."
+          create_log="$RUNNER_TEMP/cloudflare-pages-project-create.log"
+          if pnpm exec wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" --production-branch=main >"$create_log" 2>&1; then
+            cat "$create_log"
+            echo "Cloudflare Pages project ${CLOUDFLARE_PAGES_PROJECT_NAME} created."
           else
-            pnpm exec wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" --production-branch=main
+            if grep -q "A project with this name already exists" "$create_log"; then
+              cat "$create_log"
+              echo "Cloudflare Pages project ${CLOUDFLARE_PAGES_PROJECT_NAME} already exists."
+            else
+              cat "$create_log" >&2
+              exit 1
+            fi
           fi
       - name: Deploy Cloudflare Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
