@@ -2,8 +2,7 @@ import { asJsonObject, errorMessage, isRecord } from "../../guards";
 import type { McpMessage } from "../domain/protocol-types";
 
 function send(payload: unknown): void {
-  const body = JSON.stringify(payload);
-  process.stdout.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
+  process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
 
 function respond(message: McpMessage, result: unknown): void {
@@ -22,30 +21,21 @@ function respondError(message: McpMessage, error: unknown): void {
 }
 
 export function startStdioTransport(handle: (message: McpMessage) => Promise<unknown>): void {
-  let buffer = Buffer.alloc(0);
+  let buffer = "";
 
   process.stdin.on("data", (chunk: Buffer) => {
-    buffer = Buffer.concat([buffer, chunk]);
+    buffer += chunk.toString("utf8");
     while (true) {
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) return;
-      const header = buffer.slice(0, headerEnd).toString("utf8");
-      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
-      if (!lengthMatch) {
-        buffer = buffer.slice(headerEnd + 4);
-        continue;
-      }
-      const length = Number(lengthMatch[1]);
-      const bodyStart = headerEnd + 4;
-      const bodyEnd = bodyStart + length;
-      if (buffer.length < bodyEnd) return;
-      const body = buffer.slice(bodyStart, bodyEnd).toString("utf8");
-      buffer = buffer.slice(bodyEnd);
+      const lineEnd = buffer.indexOf("\n");
+      if (lineEnd === -1) return;
+      const line = buffer.slice(0, lineEnd).replace(/\r$/, "");
+      buffer = buffer.slice(lineEnd + 1);
+      if (!line.trim()) continue;
       let message: McpMessage;
       try {
-        message = asJsonObject(JSON.parse(body)) as McpMessage;
+        message = asJsonObject(JSON.parse(line)) as McpMessage;
       } catch (error) {
-        respondError({} as McpMessage, error);
+        respondError({ id: null } as McpMessage, error);
         continue;
       }
       Promise.resolve(handle(message))

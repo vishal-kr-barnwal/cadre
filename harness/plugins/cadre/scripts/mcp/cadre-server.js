@@ -6514,7 +6514,7 @@ function parseResourceUri(uri) {
 }
 
 // src/mcp/domain/tool-catalog.ts
-var PROTOCOL_VERSION = "2025-11-25";
+var PROTOCOL_VERSION = "2025-06-18";
 var SERVER_INSTRUCTIONS = [
   "Cadre MCP is the packet-owned runtime for Cadre workflows. Pass an explicit root on every project-scoped call; setup packets may use a root candidate before cadre/ exists.",
   "Prefer compact responses and Cadre resources for dashboards, review queues, quality gates, workspace health, repo maps, job results, and status views.",
@@ -7574,10 +7574,8 @@ var handle = runtime.handle;
 
 // src/mcp/presentation/stdio-transport.ts
 function send(payload) {
-  const body = JSON.stringify(payload);
-  process.stdout.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
-\r
-${body}`);
+  process.stdout.write(`${JSON.stringify(payload)}
+`);
 }
 function respond(message, result) {
   if (!Object.prototype.hasOwnProperty.call(message, "id")) return;
@@ -7593,29 +7591,20 @@ function respondError(message, error) {
   });
 }
 function startStdioTransport(handle2) {
-  let buffer = Buffer.alloc(0);
+  let buffer = "";
   process.stdin.on("data", (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
+    buffer += chunk.toString("utf8");
     while (true) {
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) return;
-      const header = buffer.slice(0, headerEnd).toString("utf8");
-      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
-      if (!lengthMatch) {
-        buffer = buffer.slice(headerEnd + 4);
-        continue;
-      }
-      const length = Number(lengthMatch[1]);
-      const bodyStart = headerEnd + 4;
-      const bodyEnd = bodyStart + length;
-      if (buffer.length < bodyEnd) return;
-      const body = buffer.slice(bodyStart, bodyEnd).toString("utf8");
-      buffer = buffer.slice(bodyEnd);
+      const lineEnd = buffer.indexOf("\n");
+      if (lineEnd === -1) return;
+      const line = buffer.slice(0, lineEnd).replace(/\r$/, "");
+      buffer = buffer.slice(lineEnd + 1);
+      if (!line.trim()) continue;
       let message;
       try {
-        message = asJsonObject(JSON.parse(body));
+        message = asJsonObject(JSON.parse(line));
       } catch (error) {
-        respondError({}, error);
+        respondError({ id: null }, error);
         continue;
       }
       Promise.resolve(handle2(message)).then((result) => respond(message, result)).catch((error) => respondError(message, error));

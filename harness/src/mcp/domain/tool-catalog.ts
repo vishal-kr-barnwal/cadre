@@ -1,6 +1,6 @@
 import type { JsonObject } from "../../types";
 
-export const PROTOCOL_VERSION = "2025-11-25";
+export const PROTOCOL_VERSION = "2025-06-18";
 
 export const SERVER_INSTRUCTIONS = [
   "Cadre MCP is the packet-owned runtime for Cadre workflows. Pass an explicit root on every project-scoped call; setup packets may use a root candidate before cadre/ exists.",

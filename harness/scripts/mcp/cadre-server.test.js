@@ -48,20 +48,12 @@ function startServer() {
   server.stdout.on("data", (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
     while (true) {
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) return;
-      const header = buffer.slice(0, headerEnd).toString("utf8");
-      const match = header.match(/Content-Length:\s*(\d+)/i);
-      if (!match) {
-        buffer = buffer.slice(headerEnd + 4);
-        continue;
-      }
-      const length = Number(match[1]);
-      const bodyStart = headerEnd + 4;
-      const bodyEnd = bodyStart + length;
-      if (buffer.length < bodyEnd) return;
-      const message = JSON.parse(buffer.slice(bodyStart, bodyEnd).toString("utf8"));
-      buffer = buffer.slice(bodyEnd);
+      const lineEnd = buffer.indexOf("\n");
+      if (lineEnd === -1) return;
+      const line = buffer.slice(0, lineEnd).toString("utf8").replace(/\r$/, "");
+      buffer = buffer.slice(lineEnd + 1);
+      if (!line.trim()) continue;
+      const message = JSON.parse(line);
       const waiter = pending.get(message.id);
       if (!waiter) continue;
       pending.delete(message.id);
@@ -73,7 +65,7 @@ function startServer() {
   function request(method, params = {}) {
     const id = nextId++;
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
-    server.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
+    server.stdin.write(`${body}\n`);
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
       setTimeout(() => {
@@ -194,7 +186,7 @@ test("MCP root resolution rejects harness skill directories without project stat
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-test-"));
   const { server, request } = startServer();
   try {
-    const initialized = await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    const initialized = await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
     assert.match(initialized.instructions, /root/);
     assert.match(initialized.instructions, /compact/);
     assert.match(initialized.instructions, /packet-owned/);
@@ -356,7 +348,7 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
     }, null, 2));
     write(path.join(projectRoot, "src", "index.ts"), "export const value = 1;\n");
 
-    await first.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    await first.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
     const started = parseTextJson(await first.request("tools/call", {
       name: "cadre_job",
       arguments: {
@@ -388,7 +380,7 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
 
     const second = startServer();
     try {
-      await second.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+      await second.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
       const listed = parseTextJson(await second.request("tools/call", {
         name: "cadre_job",
         arguments: { action: "list", root: projectRoot },
@@ -481,7 +473,7 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
     git(appRoot, ["add", "."]);
     git(appRoot, ["commit", "-m", "change app"]);
 
-    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
     const review = parseTextJson(await request("tools/call", {
       name: "cadre_intel",
       arguments: {
@@ -535,7 +527,7 @@ test("MCP team-scale workflow packets compose on one track", async () => {
   <!-- files: src/app.test.ts -->
 `);
 
-    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
 
     const planAssist = parseTextJson(await request("tools/call", {
       name: "cadre_track",
