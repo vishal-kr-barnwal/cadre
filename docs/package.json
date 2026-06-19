@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "deploy": "pnpm build && wrangler pages deploy out --project-name=cadre-docs",
+    "deploy": "pnpm build && wrangler pages deploy out --project-name=${CLOUDFLARE_PAGES_PROJECT_NAME:-cadre-docs}",
     "preview:pages": "pnpm build && wrangler pages dev out",
     "start": "next start",
     "lint": "eslint",
