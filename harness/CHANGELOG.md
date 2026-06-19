@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Detailed platform usage guide (`../docs/content/how-cadre-works.md`) covering installation,
   setup, topology choice, daily workflows, review/ship/land, team operation,
   MCP/LSP usage, CI, and troubleshooting.
-- Root GitHub Pages documentation site under `../docs/`, plus a Cadre logo
+- Root Next.js documentation site under `../docs/`, plus a Cadre logo
   asset used by the docs and repository README.
 - Initial dependency-free Cadre MCP server (`scripts/mcp/cadre-server.js`) with
   tools/resources for index regeneration, plan parsing, team status, available

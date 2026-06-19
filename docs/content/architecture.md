@@ -125,10 +125,11 @@ pnpm check
 
 ## Public Docs Flow
 
-Root `docs/` is a static-export Next.js app. GitHub Pages deployment builds the
-app from Markdown content in `docs/content/` and uploads `docs/out` through the
-Pages artifact workflow. It intentionally does not require MkDocs, Docusaurus,
-or another documentation framework.
+Root `docs/` is a static-export Next.js app. The deployment workflow builds the
+app from Markdown content in `docs/content/` and deploys the generated
+`docs/out` artifact as Cloudflare Workers Static Assets through Wrangler. It
+intentionally does not require MkDocs, Docusaurus, or another documentation
+framework.
 
 When public documentation describes plugin internals, keep it aligned with the
 master sources under `harness/`. When plugin instruction references are needed,

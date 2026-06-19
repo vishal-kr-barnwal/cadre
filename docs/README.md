@@ -12,6 +12,13 @@ pnpm typecheck
 pnpm build
 ```
 
-The app uses static export for GitHub Pages. Set `GITHUB_PAGES=true` and
-`NEXT_PUBLIC_BASE_PATH=/your-repo-name` when publishing under a project Pages
+The app uses static export and deploys to Cloudflare Workers Static Assets with
+Wrangler. The default deployment expects the Worker at the domain root; set
+`NEXT_PUBLIC_BASE_PATH=/your-subpath` only when intentionally serving from a
 subpath.
+
+```bash
+pnpm build
+pnpm preview:worker
+pnpm deploy
+```

@@ -103,7 +103,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               </Button>
             </div>
             <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
-              {["Claude Code", "OpenAI Codex", "GitHub Pages"].map((label) => (
+              {["Claude Code", "OpenAI Codex", "Beads memory"].map((label) => (
                 <div key={label} className="rounded-xl border bg-card px-4 py-3 text-sm font-medium text-cadre-ink">
                   {label}
                 </div>

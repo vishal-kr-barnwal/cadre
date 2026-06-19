@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Cadre mark</title>
+  <desc id="desc">A precise connected bead and workflow track mark.</desc>
+  <defs>
+    <linearGradient id="track-gradient" x1="46" y1="46" x2="210" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#134e4a"/>
+    </linearGradient>
+    <linearGradient id="amber-gradient" x1="100" y1="84" x2="156" y2="172" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f6c453"/>
+      <stop offset="1" stop-color="#d99a18"/>
+    </linearGradient>
+  </defs>
+  <rect x="28" y="28" width="200" height="200" rx="48" fill="#ffffff"/>
+  <rect x="31" y="31" width="194" height="194" rx="45" fill="none" stroke="#d7e3df" stroke-width="6"/>
+  <path
+    d="M76 84H132C158.51 84 180 105.49 180 132V180"
+    fill="none"
+    stroke="url(#track-gradient)"
+    stroke-width="18"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M180 84H124C97.49 84 76 105.49 76 132V180"
+    fill="none"
+    stroke="#0f172a"
+    stroke-width="18"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M76 180H132C158.51 180 180 158.51 180 132V84"
+    fill="none"
+    stroke="#14b8a6"
+    stroke-width="12"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.95"
+  />
+  <circle cx="76" cy="84" r="22" fill="#ffffff" stroke="#0f172a" stroke-width="10"/>
+  <circle cx="180" cy="84" r="22" fill="#ffffff" stroke="#0f766e" stroke-width="10"/>
+  <circle cx="76" cy="180" r="22" fill="#ffffff" stroke="#0f766e" stroke-width="10"/>
+  <circle cx="180" cy="180" r="22" fill="#ffffff" stroke="#0f172a" stroke-width="10"/>
+  <circle cx="128" cy="132" r="27" fill="url(#amber-gradient)" stroke="#ffffff" stroke-width="9"/>
+  <circle cx="128" cy="132" r="8" fill="#0f172a"/>
+</svg>

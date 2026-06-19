@@ -1,4 +1,4 @@
-name: Docs
+name: Docs Worker
 
 on:
   push:
@@ -14,15 +14,13 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: docs-worker
   cancel-in-progress: false
 
 jobs:
-  build:
+  check-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,22 +34,17 @@ jobs:
           cache-dependency-path: docs/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm --dir docs install --frozen-lockfile
-      - name: Build docs
-        env:
-          GITHUB_PAGES: "true"
-          NEXT_PUBLIC_BASE_PATH: "/${{ github.event.repository.name }}"
+      - name: Lint
+        run: pnpm --dir docs lint
+      - name: Typecheck
+        run: pnpm --dir docs typecheck
+      - name: Build static export
         run: pnpm --dir docs build
-      - uses: actions/upload-pages-artifact@v3
+      - name: Deploy Cloudflare Worker
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: docs/out
-
-  deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: docs
+          command: deploy

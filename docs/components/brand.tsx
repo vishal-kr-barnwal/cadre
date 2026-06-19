@@ -7,12 +7,15 @@ export function Brand({ className }: { className?: string }) {
   return (
     <Link href="/" className={cn("flex items-center gap-3", className)}>
       <Image
-        src="/cadre-logo.png"
-        alt="Cadre"
-        width={132}
-        height={40}
+        src="/cadre-mark.png"
+        alt=""
+        width={30}
+        height={30}
         priority
       />
+      <span className="text-sm font-semibold tracking-normal text-cadre-ink">
+        Cadre
+      </span>
     </Link>
   )
 }

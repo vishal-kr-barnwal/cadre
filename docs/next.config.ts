@@ -1,6 +1,5 @@
 import type { NextConfig } from "next"
 
-const isPages = process.env.GITHUB_PAGES === "true"
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
 
 const nextConfig: NextConfig = {
@@ -9,8 +8,8 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
   trailingSlash: true,
-  basePath: isPages && basePath ? basePath : undefined,
-  assetPrefix: isPages && basePath ? `${basePath}/` : undefined,
+  basePath: basePath || undefined,
+  assetPrefix: basePath ? `${basePath}/` : undefined,
 }
 
 export default nextConfig

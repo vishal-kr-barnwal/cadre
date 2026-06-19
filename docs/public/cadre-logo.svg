@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 360" role="img" aria-labelledby="title desc">
+  <title id="title">Cadre logo</title>
+  <desc id="desc">Cadre wordmark with a connected bead and workflow track mark.</desc>
+  <defs>
+    <linearGradient id="track-gradient" x1="76" y1="76" x2="284" y2="284" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#134e4a"/>
+    </linearGradient>
+    <linearGradient id="amber-gradient" x1="144" y1="124" x2="216" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f6c453"/>
+      <stop offset="1" stop-color="#d99a18"/>
+    </linearGradient>
+  </defs>
+  <rect width="820" height="360" fill="none"/>
+  <g>
+    <rect x="50" y="50" width="260" height="260" rx="62" fill="#ffffff"/>
+    <rect x="54" y="54" width="252" height="252" rx="58" fill="none" stroke="#d7e3df" stroke-width="8"/>
+    <path
+      d="M112 122H184C218.24 122 246 149.76 246 184V246"
+      fill="none"
+      stroke="url(#track-gradient)"
+      stroke-width="24"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M246 122H174C139.76 122 112 149.76 112 184V246"
+      fill="none"
+      stroke="#0f172a"
+      stroke-width="24"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M112 246H184C218.24 246 246 218.24 246 184V122"
+      fill="none"
+      stroke="#14b8a6"
+      stroke-width="16"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      opacity="0.95"
+    />
+    <circle cx="112" cy="122" r="29" fill="#ffffff" stroke="#0f172a" stroke-width="13"/>
+    <circle cx="246" cy="122" r="29" fill="#ffffff" stroke="#0f766e" stroke-width="13"/>
+    <circle cx="112" cy="246" r="29" fill="#ffffff" stroke="#0f766e" stroke-width="13"/>
+    <circle cx="246" cy="246" r="29" fill="#ffffff" stroke="#0f172a" stroke-width="13"/>
+    <circle cx="180" cy="184" r="35" fill="url(#amber-gradient)" stroke="#ffffff" stroke-width="12"/>
+    <circle cx="180" cy="184" r="10" fill="#0f172a"/>
+  </g>
+  <text
+    x="365"
+    y="224"
+    fill="#0f172a"
+    font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    font-size="128"
+    font-weight="760"
+    letter-spacing="-2"
+  >Cadre</text>
+</svg>
