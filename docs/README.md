@@ -12,13 +12,15 @@ pnpm typecheck
 pnpm build
 ```
 
-The app uses static export and deploys to Cloudflare Workers Static Assets with
-Wrangler. The default deployment expects the Worker at the domain root; set
+The app uses static export and deploys to Cloudflare Pages with Wrangler Direct
+Upload. The default deployment expects the Pages site at the domain root; set
 `NEXT_PUBLIC_BASE_PATH=/your-subpath` only when intentionally serving from a
-subpath.
+subpath. The default Pages project name is `cadre-docs`; update
+`--project-name` in `package.json` and `.github/workflows/docs.yml` if the
+Cloudflare Pages project uses another name.
 
 ```bash
 pnpm build
-pnpm preview:worker
+pnpm preview:pages
 pnpm deploy
 ```

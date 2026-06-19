@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "deploy": "pnpm build && wrangler deploy",
-    "preview:worker": "pnpm build && wrangler dev",
+    "deploy": "pnpm build && wrangler pages deploy out --project-name=cadre-docs",
+    "preview:pages": "pnpm build && wrangler pages dev out",
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",

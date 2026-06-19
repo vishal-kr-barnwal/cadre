@@ -1,4 +1,4 @@
-name: Docs Worker
+name: Docs Pages
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: docs-worker
+  group: docs-pages
   cancel-in-progress: false
 
 jobs:
@@ -40,11 +40,11 @@ jobs:
         run: pnpm --dir docs typecheck
       - name: Build static export
         run: pnpm --dir docs build
-      - name: Deploy Cloudflare Worker
+      - name: Deploy Cloudflare Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: docs
-          command: deploy
+          command: pages deploy out --project-name=cadre-docs

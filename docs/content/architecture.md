@@ -127,7 +127,7 @@ pnpm check
 
 Root `docs/` is a static-export Next.js app. The deployment workflow builds the
 app from Markdown content in `docs/content/` and deploys the generated
-`docs/out` artifact as Cloudflare Workers Static Assets through Wrangler. It
+`docs/out` artifact to Cloudflare Pages through Wrangler Direct Upload. It
 intentionally does not require MkDocs, Docusaurus, or another documentation
 framework.
 
