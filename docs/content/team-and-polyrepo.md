@@ -1,3 +1,10 @@
+---
+title: Team And Polyrepo
+description: Shared sync, ownership, leases, team boards, polyrepo control repos, and merge trains.
+section: Scale
+order: 6
+---
+
 # Team And Polyrepo
 
 Cadre supports solo work, single-repo teams, and polyrepo control repos. The
@@ -178,4 +185,3 @@ Required setup:
   product repo.
 - Branch protection on product repos and the control repo.
 - Merge commits enabled so submodule gitlinks can pin deterministic merge SHAs.
-

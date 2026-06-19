@@ -1,3 +1,10 @@
+---
+title: Troubleshooting
+description: Common install, MCP, Beads, provider, LSP, and generated-bundle failures.
+section: Support
+order: 8
+---
+
 # Troubleshooting
 
 Use this guide when Cadre setup, workflows, provider evidence, generated
@@ -202,4 +209,3 @@ pnpm check
 
 For narrow runtime changes, run the relevant `node --test` file first, then the
 full check before handoff.
-

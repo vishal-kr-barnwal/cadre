@@ -1,6 +1,6 @@
 # Cadre
 
-![Cadre logo](../docs/assets/cadre-logo.png)
+![Cadre logo](../docs/public/cadre-logo.png)
 
 **Measure twice, code once.**
 
@@ -116,13 +116,14 @@ pnpm check
 Generated plugin bundles under `.agents/`, `.claude/`, and `plugins/` are
 rebuilt from master sources. Edit the masters, then regenerate.
 
-Public documentation lives in the repo-root `docs/` directory:
+Public documentation lives in the repo-root `docs/` Next.js app. Markdown page
+source is in `docs/content/`:
 
-- [Documentation Home](../docs/index.md)
-- [Getting Started](../docs/getting-started.md)
-- [How Cadre Works](../docs/how-cadre-works.md)
-- [Workflows](../docs/workflows.md)
-- [Architecture](../docs/architecture.md)
-- [Team And Polyrepo](../docs/team-and-polyrepo.md)
-- [Parallel Execution](../docs/parallel-execution.md)
-- [Troubleshooting](../docs/troubleshooting.md)
+- [Documentation Home](../docs/content/overview.md)
+- [Getting Started](../docs/content/getting-started.md)
+- [How Cadre Works](../docs/content/how-cadre-works.md)
+- [Workflows](../docs/content/workflows.md)
+- [Architecture](../docs/content/architecture.md)
+- [Team And Polyrepo](../docs/content/team-and-polyrepo.md)
+- [Parallel Execution](../docs/content/parallel-execution.md)
+- [Troubleshooting](../docs/content/troubleshooting.md)

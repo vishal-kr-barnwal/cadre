@@ -1,3 +1,10 @@
+---
+title: Parallel Execution
+description: Phase annotations, worker waves, file claims, merge-back, and failure recovery.
+section: Scale
+order: 7
+---
+
 # Parallel Execution
 
 Cadre can run safe portions of a plan in parallel. The scheduler is conservative
@@ -152,4 +159,3 @@ Typical failure handling:
 | Missing evidence | Refuses completion until required commit, test, or coverage evidence exists. |
 
 Recovery should always go through Cadre packets.
-

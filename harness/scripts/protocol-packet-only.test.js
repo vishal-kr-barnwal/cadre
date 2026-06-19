@@ -8,7 +8,7 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(root, "..");
-const publicDocsRoot = path.join(repoRoot, "docs");
+const publicDocsRoot = path.join(repoRoot, "docs", "content");
 const protocolDirs = [
   path.join(root, "skills", "cadre", "protocols"),
   path.join(root, ".agents", "skills", "cadre", "protocols"),

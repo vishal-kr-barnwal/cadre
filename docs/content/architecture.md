@@ -1,3 +1,10 @@
+---
+title: Architecture
+description: Harness package layout, generated plugin bundles, source files, and development flow.
+section: Internals
+order: 5
+---
+
 # Architecture
 
 This repository is the Cadre harness/package repository. It builds the runtime,
@@ -8,7 +15,11 @@ install into Claude Code and OpenAI Codex.
 
 ```text
 .
-├── docs/                         # Public GitHub Pages Markdown docs
+├── docs/                         # Public Next.js/shadcn docs website
+│   ├── app/                      # App Router routes and homepage
+│   ├── components/               # Docs shell, Markdown renderer, shadcn UI
+│   ├── content/                  # Markdown documentation source
+│   └── public/                   # Static assets such as the Cadre logo
 ├── harness/
 │   ├── skills/cadre/             # Master skill and workflow protocols
 │   ├── scripts/agent-refs/       # Master reference docs copied or sliced into plugins
@@ -39,7 +50,9 @@ Edit master sources, then regenerate generated output.
 | `harness/scripts/agent-refs/` | Reference material bundled with plugin skills. Some files are platform-sliced. |
 | `harness/templates/` | Files copied into target projects by `cadre-setup`. |
 | `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
-| `docs/` | Public GitHub Pages Markdown documentation. |
+| `docs/` | Public Next.js/shadcn documentation website. |
+| `docs/content/` | Markdown source for generated documentation routes. |
+| `docs/public/` | Static assets served by the docs app. |
 
 Generated outputs under `harness/.agents/`, `harness/.claude/`, and
 `harness/plugins/` carry an `AUTO-GENERATED` marker and should not be edited by
@@ -112,9 +125,10 @@ pnpm check
 
 ## Public Docs Flow
 
-Root `docs/` is plain Markdown and can be published by GitHub Pages from the
-default branch's `/docs` folder. It intentionally does not require MkDocs,
-Docusaurus, or another generator.
+Root `docs/` is a static-export Next.js app. GitHub Pages deployment builds the
+app from Markdown content in `docs/content/` and uploads `docs/out` through the
+Pages artifact workflow. It intentionally does not require MkDocs, Docusaurus,
+or another documentation framework.
 
 When public documentation describes plugin internals, keep it aligned with the
 master sources under `harness/`. When plugin instruction references are needed,

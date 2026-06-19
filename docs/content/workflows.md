@@ -1,3 +1,10 @@
+---
+title: Workflows
+description: Detailed guide to the Cadre workflow lifecycle and every cadre-* command.
+section: Core Concepts
+order: 4
+---
+
 # Workflows
 
 Cadre workflows are invoked by asking for the Cadre skill and then a
@@ -243,4 +250,3 @@ Handles Cadre formula or template operations.
 
 Formula workflows are packet-owned and should use the bundled template locator
 instead of copying generated plugin assets by hand.
-

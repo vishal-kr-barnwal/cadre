@@ -1,3 +1,10 @@
+---
+title: Getting Started
+description: Install Beads, install the Cadre plugin, and initialize a target project.
+section: Start
+order: 2
+---
+
 # Getting Started
 
 This guide gets Cadre installed in Claude Code or OpenAI Codex and initializes
@@ -174,4 +181,3 @@ cadre-archive
 
 Use `cadre-release` to summarize completed track metadata into release
 artifacts.
-

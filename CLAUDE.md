@@ -25,7 +25,8 @@ harness/
 Root files are intentionally thin:
 
 - `README.md` points to `harness/` and the public docs.
-- `docs/` contains the canonical public GitHub Pages Markdown docs.
+- `docs/` contains the canonical public Next.js/shadcn docs site, with
+  Markdown source under `docs/content/`.
 - `.agents/plugins/marketplace.json` points Codex to
   `harness/plugins/cadre`.
 - `.claude-plugin/marketplace.json` points Claude Code to

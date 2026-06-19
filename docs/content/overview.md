@@ -1,6 +1,13 @@
+---
+title: Cadre
+description: Context-driven development harness for AI coding agents.
+section: Overview
+order: 1
+---
+
 # Cadre
 
-![Cadre logo](assets/cadre-logo.png)
+![Cadre logo](/cadre-logo.png)
 
 **Measure twice, code once.**
 
@@ -112,10 +119,9 @@ not manually reconstruct Cadre state.
 ## Repository Roles
 
 This repository is the Cadre harness/package repository. The implementation
-lives under `harness/`; the public GitHub Pages documentation lives here under
-root `docs/`.
+lives under `harness/`; the public documentation website lives in the root
+`docs/` Next.js app, with these Markdown pages under `docs/content/`.
 
 Generated plugin bundles under `harness/.agents/`, `harness/.claude/`, and
 `harness/plugins/` are rebuilt from master sources. Do not edit generated
 bundles by hand.
-

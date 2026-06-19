@@ -1,3 +1,10 @@
+---
+title: How Cadre Works
+description: Packet-owned workflows, MCP runtime, Beads memory, review gates, provider evidence, and code intelligence.
+section: Core Concepts
+order: 3
+---
+
 # How Cadre Works
 
 Cadre separates human-readable project context from deterministic state
@@ -150,4 +157,3 @@ invalid plan annotations.
 
 Agents should retry only when a packet marks the operation retryable or
 idempotent. Otherwise they report the packet error and next actions.
-

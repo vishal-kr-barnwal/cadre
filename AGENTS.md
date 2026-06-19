@@ -11,7 +11,8 @@ behavior in a fixture.
 ## Repository Shape
 
 - Cadre implementation lives in `harness/`.
-- Root `docs/` contains the canonical public GitHub Pages Markdown docs.
+- Root `docs/` contains the canonical public Next.js/shadcn docs site, with
+  Markdown source under `docs/content/`.
 - Root `README.md` is a thin pointer to the harness package.
 - Root `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json`
   are plugin registration shims that point to `harness/plugins/`.

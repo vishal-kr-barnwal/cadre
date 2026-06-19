@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional LSP setup flow for `/cadre-setup` plus `/cadre-refresh --lsp`, backed
   by a bundled scanner that recommends language servers, writes/appends
   `cadre/lsp.json`, and reports missing install commands.
-- Detailed platform usage guide (`../docs/how-cadre-works.md`) covering installation,
+- Detailed platform usage guide (`../docs/content/how-cadre-works.md`) covering installation,
   setup, topology choice, daily workflows, review/ship/land, team operation,
   MCP/LSP usage, CI, and troubleshooting.
 - Root GitHub Pages documentation site under `../docs/`, plus a Cadre logo
@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   depend on public docs.
 - Synced Codex-facing `AGENTS.md` with the newer team-scale review,
   ownership, coverage, collision, and shared-control-plane rules.
-- Added MCP/LSP rollout guidance in `../docs/how-cadre-works.md`.
+- Added MCP/LSP rollout guidance in `../docs/content/how-cadre-works.md`.
 
 ### Removed
 - Deleted the legacy `scripts/install.sh` copy-based installer and removed
@@ -120,7 +120,7 @@ projects are unaffected).
 
 ### Fixed
 - Corrected **SQLite → Dolt** storage-engine references in
-  `../docs/parallel-execution.md` and `../docs/how-cadre-works.md`, and reconciled the
+  `../docs/content/parallel-execution.md` and `../docs/content/how-cadre-works.md`, and reconciled the
   "Dolt server required" vs "no server required" contradiction between the skill
   docs.
 
@@ -152,7 +152,7 @@ top of polyrepo control-repo support.
   - **Shared sync mode** — control plane (`cadre/` + Beads Dolt graph) is
     pushed/pulled for team collaboration; product code stays local until landed.
   - New references `polyrepo-git.md`, `cadre-sync.md`; CI templates under
-    `templates/ci/`; guide at `../docs/team-and-polyrepo.md`.
+    `templates/ci/`; guide at `../docs/content/team-and-polyrepo.md`.
 - All `cadre-*` commands updated to branch on topology; monorepo behavior is
   byte-for-byte unchanged.
 - **SDLC tail commands** — `/cadre-review` (diff quality gate), `/cadre-ship`
@@ -249,7 +249,7 @@ top of polyrepo control-repo support.
   Manager, GitHub Copilot `/fleet` (Copilot CLI) or VS Code subagents — with a
   **sequential fallback** for platforms that have no parallel primitive. The
   worker prompt itself is unchanged and platform-agnostic.
-- Updated `../docs/parallel-execution.md` and `../docs/how-cadre-works.md` to describe
+- Updated `../docs/content/parallel-execution.md` and `../docs/content/how-cadre-works.md` to describe
   per-platform dispatch instead of `Task()` only.
 
 ---
@@ -325,7 +325,7 @@ Antigravity.
   (`.claude/commands/`), the single source of truth. A `--check` mode fails if
   the committed output is stale (for CI).
 - **`AGENTS.md`** — shared agent context for Codex and Antigravity.
-- **[`../docs/getting-started.md`](../docs/getting-started.md)** — install & version guide with a
+- **[`../docs/content/getting-started.md`](../docs/content/getting-started.md)** — install & version guide with a
   cross-platform compatibility matrix, per-platform setup steps, and the
   versioning policy.
 
