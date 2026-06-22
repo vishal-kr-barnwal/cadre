@@ -2,7 +2,7 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-formula",
-  "description": "Manage track templates (Beads formulas) - list, show, create, wisp",
+  "description": "Manage native Cadre formulas and local wisps",
   "workflow": "formula",
   "markdownUse": "human_projection_only",
   "preconditions": [
@@ -27,11 +27,11 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"formula\"` and the requested formula operation as structured JSON arguments."
+      "instruction": "Call `cadre_workflow` with `workflow: \"formula\"` and the requested native formula operation as structured JSON arguments: list, show, cook, wisp_create, wisp_list, wisp_update_step, wisp_squash, wisp_burn, or pour."
     },
     {
       "step": 3,
-      "instruction": "For direct Beads formula operations exposed by MCP, call `cadre_beads` with the packet-owned operation instead of shelling out to Beads."
+      "instruction": "Use `pour` for reviewed persistent output; it routes generated spec and plan JSON through normal `cadre-newtrack` creation. Local wisps remain under `cadre/local/wisps/` until squashed or burned."
     },
     {
       "step": 4,
@@ -45,7 +45,7 @@
     "humanConfirmationArgument": "humanConfirmed"
   },
   "forbiddenActions": [
-    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
     "Do not read or write Markdown projections as canonical state",
     "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
   ],

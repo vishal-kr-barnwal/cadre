@@ -1,6 +1,6 @@
 ---
 title: How Cadre Works
-description: Packet-owned workflows, MCP runtime, Beads memory, review gates, provider evidence, and code intelligence.
+description: Packet-owned workflows, MCP runtime, native Cadre memory, review gates, provider evidence, and code intelligence.
 section: Core Concepts
 order: 3
 ---
@@ -27,8 +27,8 @@ The operating rule is simple:
 5. The agent summarizes the packet result and follows returned next actions.
 
 Agents should not mutate `metadata.json`, `plan.json`, `tracks.json`, generated
-projections, Beads tasks, parallel state, review verdicts, or provider evidence
-by hand.
+projections, event/message logs, local wisps, parallel state, review verdicts,
+or provider evidence by hand.
 
 ## MCP Runtime
 
@@ -49,14 +49,13 @@ include:
 |---------|--------------|
 | `cadre_workflow` | High-level setup, newtrack, implement, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, and artifact-sync aliases. |
 | `cadre_project` | Runtime ping, doctor output, root resolution, integrations inventory, shared sync, and polyrepo preflight. |
-| `cadre_track` | Track context, plan parsing, phase scheduling, integrity, Beads tree creation, and worktree planning. |
+| `cadre_track` | Track context, plan parsing, phase scheduling, integrity checks, and worktree planning. |
 | `cadre_mutate` | Controlled state updates such as claim, heartbeat, metadata patch, review record, task result, worker state, status, and index regeneration. |
-| `cadre_complete_task` | Verification, coverage gate, plan progress, metadata, and Beads completion in one path. |
+| `cadre_complete_task` | Verification, coverage gate, plan progress, metadata, journals, and native events in one path. |
 | `cadre_parallel` | Worker waves, setup, finish records, merge-back, and cleanup. |
 | `cadre_review` | Review assist, machine gate, provider evidence, PR/CI status, and final gate evaluation. |
 | `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, and warm review. |
 | `cadre_artifact` | Canonical artifact catalog, schema, validation, projection rendering, diff, and sync. |
-| `cadre_beads` | Structured low-level Beads operations used by packets. |
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
 `cadre://review-queue`, `cadre://handoff-inbox`, `cadre://quality-gate`,
@@ -69,25 +68,27 @@ Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`
 `responseMode=detail` when you need the full workspace, dependency graph, and
 LSP inventory.
 
-## Beads Memory
+## Native Memory
 
-Beads owns durable task memory. Cadre owns how agents interact with it.
-During setup, Cadre returns a few Beads epic-prefix recommendations. The user
-can choose one or provide another prefix with at most two words.
+Cadre owns durable task memory directly. Tracks and plans remain the work graph:
+`metadata.json` is the epic-level record, `plan.json` phases and tasks are the
+children, and `depends_on` plus task `depends` fields are the dependency graph.
 
-During setup, Cadre initializes Beads and records integration settings. During
-track creation, Cadre maps the spec and plan into a Beads tree with epic, phase,
-task, and dependency nodes. During implementation and review, packets record
-notes, blockers, completion, labels, and handoff details.
+During setup, Cadre initializes packet-owned native state. During track creation,
+Cadre writes the spec, plan, metadata, learnings, generated projections, and an
+event record. During implementation and review, packets record notes, blockers,
+completion, tags, labels, handoffs, and operational details in native JSON/JSONL
+files.
 
 This gives Cadre three useful properties:
 
 - Work survives conversation compaction and session handoff.
 - Task dependencies remain structured instead of buried in prose.
-- Team boards can combine Cadre metadata with Beads task state.
+- Team boards combine Cadre metadata with native events, messages, review state,
+  leases, blockers, and task progress.
 
-In polyrepo projects, the control repo owns one shared Beads graph for every
-product repo. Product repos do not receive their own `.beads/` directories.
+In polyrepo projects, the control repo owns the shared Cadre state for every
+product repo. Product repos do not receive separate workflow databases.
 
 ## Tracks And Plans
 
@@ -95,7 +96,7 @@ A Cadre track is the durable unit of work. Each track has:
 
 | File | Role |
 |------|------|
-| `metadata.json` | Source of truth for track id, status, owner, reviewer, review state, Beads ids, worktree paths, and repo routing. |
+| `metadata.json` | Source of truth for track id, status, owner, reviewer, review state ids, worktree paths, and repo routing. |
 | `spec.json` and `spec.md` | Canonical spec JSON plus generated projection for title, description, functional requirements, non-functional requirements, acceptance criteria, and out of scope. |
 | `plan.json` and `plan.md` | Canonical plan JSON plus generated projection for phases, tasks, dependencies, file claims, repo annotations, and task completion markers. |
 | `learnings.jsonl` and `learnings.md` | Append-only observations plus generated projection for later pattern promotion. |
@@ -182,7 +183,7 @@ intelligence was skipped instead of blocking ordinary work.
 ## Failure Model
 
 Packets fail closed when required state or evidence is missing. Common blocking
-conditions include missing MCP, unavailable Beads support, sync conflicts,
+conditions include missing MCP, sync conflicts,
 ownership conflicts, dependency gates, provider gates, failed review gates, and
 invalid plan annotations.
 

@@ -40,7 +40,7 @@ export function WorkflowVisual() {
       </div>
       <div className="mt-5 grid grid-cols-3 gap-3 text-center text-xs font-medium text-muted-foreground">
         <div className="rounded-lg bg-cadre-teal-soft px-3 py-2 text-cadre-ink">MCP</div>
-        <div className="rounded-lg bg-cadre-amber-soft px-3 py-2 text-cadre-ink">Beads</div>
+        <div className="rounded-lg bg-cadre-amber-soft px-3 py-2 text-cadre-ink">Events</div>
         <div className="rounded-lg bg-muted px-3 py-2 text-cadre-ink">LSP</div>
       </div>
     </div>

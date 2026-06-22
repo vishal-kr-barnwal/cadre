@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields. Present the returned `beads_prefix.recommendations` and ask the user to choose one or provide another prefix."
+      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields. Use the returned setup review artifacts and native state summary for the user review."
     },
     {
       "step": 3,
@@ -39,11 +39,11 @@
     },
     {
       "step": 5,
-      "instruction": "When the user confirms the setup payload, selected Beads prefix, and review artifacts, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, `humanConfirmed: true`, and `beadsEpicPrefix` set to the chosen prefix. The prefix must be at most two words."
+      "instruction": "When the user confirms the setup payload and review artifacts, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, and `humanConfirmed: true`."
     },
     {
       "step": 6,
-      "instruction": "Summarize created canonical JSON/JSONL files, generated human projections, selected code style guides, Beads initialization, warnings, and next packet."
+      "instruction": "Summarize created canonical JSON/JSONL files, generated human projections, selected code style guides, native state initialization, warnings, and next packet."
     }
   ],
   "confirmation": {
@@ -53,7 +53,7 @@
     "humanConfirmationArgument": "humanConfirmed"
   },
   "forbiddenActions": [
-    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
     "Do not read or write Markdown projections as canonical state",
     "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
   ],
@@ -67,7 +67,6 @@
   ],
   "references": [
     "template-locator",
-    "beads-integration",
     "mcp-contract"
   ]
 }

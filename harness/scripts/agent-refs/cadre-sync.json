@@ -6,7 +6,7 @@
   "markdownUse": "human_projection_only",
   "rules": [
     "Spec, plan, repository config, provider config, and topology conflicts are",
-    "Ephemeral worker state and Beads store details are MCP-owned and regenerated or",
+    "Ephemeral worker state and native local state details are MCP-owned and regenerated or",
     "Track-id collisions, shared-mode retries, and sync safety classification are"
   ],
   "sections": [
@@ -16,7 +16,7 @@
     },
     {
       "heading": "Preamble",
-      "body": "Before any workflow mutates Cadre state, call the workflow packet requested by\nthe protocol. The packet is responsible for shared-mode preflight, remote\nverification, Beads graph sync, merge-driver health, conflict detection, and\nbounded retry policy.\n\nIf the packet reports a sync conflict, halt and summarize the conflicting files\nor state categories from the packet result. Do not hand-merge Cadre files, Beads\nstate, or generated state JSON."
+      "body": "Before any workflow mutates Cadre state, call the workflow packet requested by\nthe protocol. The packet is responsible for shared-mode preflight, remote\nverification, native state sync, merge-driver health, conflict detection, and\nbounded retry policy.\n\nIf the packet reports a sync conflict, halt and summarize the conflicting files\nor state categories from the packet result. Do not hand-merge Cadre files\nstate, or generated state JSON."
     },
     {
       "heading": "Postamble",
@@ -24,7 +24,7 @@
     },
     {
       "heading": "Conflict Policy",
-      "body": "- Spec, plan, repository config, provider config, and topology conflicts are\n  surfaced to the user by packet results.\n- Ephemeral worker state and Beads store details are MCP-owned and regenerated or\n  repaired only through packets.\n- Track-id collisions, shared-mode retries, and sync safety classification are\n  handled by packets. Agents report the packet result and stop when it blocks."
+      "body": "- Spec, plan, repository config, provider config, and topology conflicts are\n  surfaced to the user by packet results.\n- Ephemeral worker state and native local state details are MCP-owned and regenerated or\n  repaired only through packets.\n- Track-id collisions, shared-mode retries, and sync safety classification are\n  handled by packets. Agents report the packet result and stop when it blocks."
     }
   ]
 }

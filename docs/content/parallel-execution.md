@@ -142,8 +142,8 @@ resources instead of editing worker state.
 
 When a worker finishes, the coordinator records evidence and asks Cadre to
 merge the worker branch back into the track worktree. After a clean merge,
-Cadre can complete the task, update plan progress, record metadata, write Beads
-notes, and close mapped Beads tasks through the same packet-owned path.
+Cadre can complete the task, update plan progress, record metadata, write the
+completion journal, and append native events through the same packet-owned path.
 
 Cleanup removes merged workers. Failed or conflicted workers remain available
 for recovery unless force cleanup is explicit.

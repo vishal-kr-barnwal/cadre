@@ -49,7 +49,7 @@
     "humanConfirmationArgument": "humanConfirmed"
   },
   "forbiddenActions": [
-    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
     "Do not read or write Markdown projections as canonical state",
     "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
   ],

@@ -31,7 +31,7 @@ cadre-monorepo-check:
               --arg metadata_path "$md" \
               --arg spec_path "${dir}spec.json" \
               --arg plan_path "${dir}plan.json" \
-              '{track_id, name:(.name // .description // .track_id), status:(.status // "new"), priority:(.priority // "medium"), owner:(.owner // null), reviewer:(.reviewer // null), beads_epic:(.beads_epic // null), review:(.review // null), metadata_path:$metadata_path, spec_path:$spec_path, plan_path:$plan_path}' \
+              '{track_id, name:(.name // .description // .track_id), status:(.status // "new"), priority:(.priority // "medium"), owner:(.owner // null), reviewer:(.reviewer // null), tags:(.tags // []), review:(.review // null), metadata_path:$metadata_path, spec_path:$spec_path, plan_path:$plan_path}' \
               "$md" >> "$entries"
           done
         fi
@@ -56,7 +56,6 @@ cadre-monorepo-check:
       else
         missing=0
         for line in \
-          '.beads/** merge=ours' \
           'cadre/tracks/**/parallel_state.json  merge=ours'; do
           pat="$(printf '%s' "$line" | sed 's/  */[[:space:]][[:space:]]*/g')"
           if ! grep -Eq "$pat" .gitattributes 2>/dev/null; then

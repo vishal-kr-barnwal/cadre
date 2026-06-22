@@ -35,14 +35,14 @@ available work.
 Shared sync covers:
 
 - `cadre/` project state.
-- The Beads Dolt graph.
+- Native Cadre event, message, formula, and operation state.
 - Review and handoff evidence.
 - Team-board visible ownership and blocker state.
 
 Product code remains local until ship or land workflows publish it.
 
 Shared-mode mutating workflows run a sync preamble and postamble through
-Cadre packets. Merge attributes protect machine-owned state such as Beads DB
+Cadre packets. Merge attributes protect machine-owned state such as native state
 files and parallel worker audit files from unsafe text merges.
 
 ## Ownership And Leases
@@ -63,7 +63,7 @@ Useful compact resources:
 
 | Resource | Use |
 |----------|-----|
-| `cadre://team-board` | WIP, owners, blockers, handoffs, reviews, and Beads evidence. |
+| `cadre://team-board` | WIP, owners, blockers, handoffs, reviews, and native evidence. |
 | `cadre://my-next-actions` | Current user's WIP, review work, handoffs, available work, and reclaimable work. |
 | `cadre://review-queue` | Tracks awaiting review or changes. |
 | `cadre://handoff-inbox` | Incoming resumable context. |
@@ -80,7 +80,7 @@ tree to answer status questions.
 Polyrepo mode is opt-in. It activates when `cadre/repos.json` exists with
 `"mode": "polyrepo"`.
 
-The control repo owns Cadre state and Beads memory:
+The control repo owns Cadre state and native Cadre memory:
 
 ```text
 platform-control/
@@ -88,7 +88,9 @@ platform-control/
 │   ├── repos.json
 │   ├── config.json
 │   └── tracks/<id>/
-├── .beads/
+│   ├── events.jsonl
+│   ├── messages/
+│   └── local/wisps/   # git-ignored local runs
 ├── .gitmodules
 ├── repos/api/
 ├── repos/web/

@@ -34,8 +34,6 @@ SOURCE_SKILL_FILE="skills/cadre/SKILL.md"
 SOURCE_PROTOCOL_DIR="skills/cadre/protocols"
 
 JSON_REFS=(
-  "scripts/agent-refs/beads-error-handler.json"
-  "scripts/agent-refs/beads-integration.json"
   "scripts/agent-refs/parallel-execution.json"
   "scripts/agent-refs/template-locator.json"
   "scripts/agent-refs/polyrepo-git.json"
@@ -240,7 +238,6 @@ plugin_manifest_json() {
     "cadre",
     "context-driven-development",
     "skills",
-    "beads",
     "mcp"
   ],
   "skills": "./skills/",
@@ -284,7 +281,6 @@ JSON
     "cadre",
     "context-driven-development",
     "skills",
-    "beads",
     "mcp"
   ],
   "skills": "./skills/",

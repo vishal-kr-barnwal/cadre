@@ -13,15 +13,15 @@ order: 1
 
 Cadre is a context-driven development harness for AI coding agents. It gives
 Claude Code and OpenAI Codex the same packet-owned workflow: structured setup,
-spec-first tracks, Beads-backed task memory, review gates, team boards,
-parallel worker orchestration, and mono/polyrepo delivery.
+spec-first tracks, native task memory, review gates, team boards, parallel
+worker orchestration, and mono/polyrepo delivery.
 
 Cadre is not a prompt collection that asks agents to edit state by hand. The
 installed plugins are thin MCP entrypoints with `SKILL.md` and client MCP
 configuration. The global `cadre-mcp` runtime embeds the skill contract,
 workflow protocols, references, template inventory, jobs, and LSP helper modes.
-Agents call Cadre packets, and those packets own Cadre state,
-Beads writes, review records, provider evidence, and derived indexes.
+Agents call Cadre packets, and those packets own Cadre state, native event and
+message logs, review records, provider evidence, and derived indexes.
 
 ## Why Cadre Exists
 
@@ -32,19 +32,12 @@ the same files when a team works in parallel. Cadre makes the workflow durable:
 |------|--------------|
 | Project context | Canonical product, workflow, pattern, tech-stack, and style-guide artifacts with generated human projections. |
 | Work planning | Canonical track specs and plans with testable acceptance criteria, file annotations, and generated review projections. |
-| Durable memory | Beads stores the task graph, dependencies, notes, blockers, and handoffs. |
+| Durable memory | Cadre stores the task graph, dependencies, notes, blockers, handoffs, events, and local wisps. |
 | Team safety | Owners, advisory leases, collision scans, review queues, and shared sync. |
 | Code intelligence | Repo maps, dependency graph, test impact, diagnostics, and optional LSP review. |
 | Delivery | Review gates, hosted provider evidence, monorepo ship, and polyrepo land. |
 
 ## Quick Start
-
-Install Beads:
-
-```bash
-npm install -g @beads/bd
-bd --version
-```
 
 Install Cadre and wire detected clients:
 
@@ -95,9 +88,9 @@ not manually reconstruct Cadre state.
 
 ## Documentation Map
 
-- [Getting Started](getting-started.md): install Beads, install the plugin, run
+- [Getting Started](getting-started.md): install the plugin, run
   first setup, and verify the runtime.
-- [How Cadre Works](how-cadre-works.md): packet-owned workflows, MCP, Beads,
+- [How Cadre Works](how-cadre-works.md): packet-owned workflows, MCP,
   tracks, review gates, provider evidence, and code intelligence.
 - [Workflows](workflows.md): detailed guide for every `cadre-*` workflow.
 - [Architecture](architecture.md): harness package layout, thin install-time
@@ -106,7 +99,7 @@ not manually reconstruct Cadre state.
   fleet boards, cross-repo PR groups, and merge train behavior.
 - [Parallel Execution](parallel-execution.md): plan annotations, worker waves,
   file claims, merge-back, and recovery.
-- [Troubleshooting](troubleshooting.md): common install, MCP, Beads, provider,
+- [Troubleshooting](troubleshooting.md): common install, MCP, provider,
   LSP, and plugin-generation failures.
 
 ## Repository Roles

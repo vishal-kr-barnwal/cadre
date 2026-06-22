@@ -20,13 +20,13 @@ const featureCards = [
   {
     title: "Packet-owned workflows",
     description:
-      "Agents call deterministic Cadre packets instead of editing plans, metadata, Beads, or review state by hand.",
+      "Agents call deterministic Cadre packets instead of editing plans, metadata, or review state by hand.",
     icon: WorkflowIcon,
   },
   {
     title: "Durable task memory",
     description:
-      "Beads keeps the task graph, dependencies, notes, blockers, and handoffs available across sessions.",
+      "Native Cadre events, messages, journals, and plans keep work available across sessions.",
     icon: BoxesIcon,
   },
   {
@@ -89,7 +89,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               </p>
               <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
                 Cadre is a context-driven development harness for AI coding agents,
-                combining spec-first tracks, Beads-backed task memory, review gates,
+                combining spec-first tracks, native task memory, review gates,
                 team boards, parallel worker orchestration, and mono/polyrepo delivery.
               </p>
             </div>
@@ -103,7 +103,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               </Button>
             </div>
             <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
-              {["Claude Code", "OpenAI Codex", "Beads memory"].map((label) => (
+              {["Claude Code", "OpenAI Codex", "native Cadre memory"].map((label) => (
                 <div key={label} className="rounded-xl border bg-card px-4 py-3 text-sm font-medium text-cadre-ink">
                   {label}
                 </div>

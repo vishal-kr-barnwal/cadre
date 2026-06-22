@@ -19,7 +19,7 @@
   "sections": [
     {
       "heading": "Sync Mode",
-      "body": "Use `local` mode for solo work or private experiments. Use `shared` mode when\nmultiple people need to see ownership, leases, review queues, blockers, and\navailable work. Shared sync is packet-owned; agents should rely on Cadre packet\nresults for pre/post sync status and recovery instructions.\n\nGenerated setup can configure `.gitattributes` for Beads and parallel worker\nstate so shared control-plane merges stay low-conflict."
+      "body": "Use `local` mode for solo work or private experiments. Use `shared` mode when\nmultiple people need to see ownership, leases, review queues, blockers, and\navailable work. Shared sync is packet-owned; agents should rely on Cadre packet\nresults for pre/post sync status and recovery instructions.\n\nGenerated setup can configure `.gitattributes` for parallel worker state so shared control-plane merges stay low-conflict."
     },
     {
       "heading": "Parallelism",

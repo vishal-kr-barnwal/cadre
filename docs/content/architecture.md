@@ -142,7 +142,7 @@ Cadre uses semantic versioning:
 
 | Bump | When |
 |------|------|
-| Major | Breaking changes to `cadre/` layout, workflow behavior, or Beads schema. |
+| Major | Breaking changes to `cadre/` layout, workflow behavior, or native state schema. |
 | Minor | New workflows, platform support, or opt-in features. |
 | Patch | Bug fixes and documentation. |
 

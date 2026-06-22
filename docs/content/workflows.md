@@ -37,7 +37,7 @@ What setup gathers:
 - Monorepo or polyrepo topology.
 - Local or shared sync mode.
 - Local, GitHub, or GitLab provider mode.
-- Beads integration and optional CI templates.
+- Native event/message/formula state and optional CI templates.
 - Optional LSP recommendations.
 
 What setup writes:
@@ -49,12 +49,15 @@ What setup writes:
 - `cadre/patterns.jsonl` and generated `cadre/patterns.md`
 - `cadre/tracks.json`
 - `cadre/config.json`
-- `cadre/beads.json`
+- `cadre/events.jsonl`
+- `cadre/messages/*.jsonl`
+- `cadre/formulas/*.json` when reusable formulas are added
+- git-ignored `cadre/local/wisps/*.json`
 - optional `cadre/repos.json`
 - optional `cadre/lsp.json`
 - selected `cadre/styleguides/*.json` and generated `cadre/code_styleguides/*.md`
 
-Setup requires Beads. If `bd` is missing or not usable, setup stops.
+Setup has no external task-memory CLI prerequisite.
 
 ## `cadre-newtrack`
 
@@ -69,7 +72,7 @@ The new-track packet previews or creates:
 - Canonical `plan.json` plus generated `plan.md` with phases, tasks, file
   claims, dependencies, and repo annotations.
 - Append-only `learnings.jsonl` plus generated `learnings.md`.
-- Beads epic/phase/task tree.
+- Native track event record.
 - Worktree plan.
 - Planning evidence such as likely tests, semantic impact, and parallel
   candidates.
@@ -100,7 +103,7 @@ only tasks whose phase dependencies, task dependencies, worker state, and file
 claims are ready.
 
 Task completion should use `cadre_complete_task` so verification, coverage,
-plan progress, metadata, and Beads notes are recorded consistently.
+plan progress, metadata, journals, and events are recorded consistently.
 
 ## `cadre-status`
 
@@ -206,7 +209,7 @@ Revise should preserve track history and reason about:
 - Plan dependency changes.
 - File claim changes.
 - Repo annotation changes.
-- Beads dependency updates.
+- Native dependency and event updates.
 - Review or implementation state that may be invalidated.
 
 Revised specs and plans are reviewed from packet-generated bundle files before
@@ -280,7 +283,7 @@ Validation can inspect:
 - Cadre setup files.
 - Generated index drift.
 - Plan annotation integrity.
-- Beads health.
+- Native event/message state health.
 - Sync mode and merge-driver readiness.
 - Polyrepo manifest and submodule parity.
 - LSP configuration.
@@ -293,7 +296,7 @@ workflow returns an unexpected state.
 
 Records blocked or skipped work through packets.
 
-Flagged work remains visible to status boards and Beads memory. In shared mode,
+Flagged work remains visible to status boards and native Cadre memory. In shared mode,
 the control plane sync makes blockers visible to teammates.
 
 Status changes require reviewing the packet dry-run status proposal before

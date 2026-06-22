@@ -137,12 +137,6 @@
     "team-ops": {
       "uri": "cadre://agent-reference?name=team-ops"
     },
-    "beads-integration": {
-      "uri": "cadre://agent-reference?name=beads-integration"
-    },
-    "beads-error-handler": {
-      "uri": "cadre://agent-reference?name=beads-error-handler"
-    },
     "cadre-sync": {
       "uri": "cadre://agent-reference?name=cadre-sync"
     },
@@ -160,13 +154,13 @@
     }
   },
   "operatingDefaults": [
-    "Setup requires Beads and writes cadre/beads.json through packets",
+    "Setup writes native Cadre event, message, formula, and local wisp state through packets",
     "Shared sync is recommended for teams and packet-owned",
     "Hosted provider evidence must come through official provider MCPs and be written back through Cadre packets",
     "LSP/code-intelligence packets should be used for repo maps, impact checks, review assistance, diagnostics, and test-impact hints"
   ],
   "forbidden": [
-    "Do not mutate cadre/, Beads, provider state, indexes, worker state, or merge/cleanup state outside Cadre packets",
+    "Do not mutate cadre/, provider state, indexes, worker state, event/message state, or merge/cleanup state outside Cadre packets",
     "Do not use Markdown as alternate input, legacy import source, or runtime state",
     "Do not manually edit generated Markdown projections as workflow state"
   ]

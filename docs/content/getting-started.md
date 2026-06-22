@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Beads, install the Cadre plugin, and initialize a target project.
+description: Install the Cadre plugin and initialize a target project.
 section: Start
 order: 2
 ---
@@ -9,34 +9,6 @@ order: 2
 
 This guide gets Cadre installed in Claude Code or OpenAI Codex and initializes
 the first target project.
-
-## Prerequisites
-
-Cadre requires Beads. Beads provides the durable task graph that survives across
-agent sessions and stores implementation notes, dependencies, blockers, labels,
-and handoff evidence.
-
-Install Beads once:
-
-```bash
-npm install -g @beads/bd
-```
-
-Other supported install routes are Homebrew and Go:
-
-```bash
-brew install beads
-go install github.com/steveyegge/beads/cmd/bd@latest
-```
-
-Verify the CLI:
-
-```bash
-bd --version
-```
-
-If `bd` is unavailable, `cadre-setup` stops before writing the project control
-plane.
 
 ## Install Cadre
 
@@ -80,9 +52,7 @@ cadre-setup
 ```
 
 Setup asks for product context, tech stack, topology, sync mode, provider mode,
-Beads epic prefix, quality gate, optional CI templates, and LSP setup. Cadre
-returns a few Beads prefix recommendations, and the user can choose one or
-provide another prefix with at most two words. When language-server
+quality gate, optional CI templates, and LSP setup. When language-server
 recommendations are detected, setup writes `cadre/lsp.json` by default unless
 you opt out. The workflow is packet-owned: the agent should call Cadre MCP, and
 Cadre MCP writes the control plane.
@@ -98,7 +68,10 @@ Successful setup creates:
 | `cadre/patterns.jsonl` and `cadre/patterns.md` | Append-only pattern events plus generated pattern summary. |
 | `cadre/tracks.json` | Generated project-level track index rebuilt from track metadata. |
 | `cadre/config.json` | Sync mode, provider mode, review, and quality settings. |
-| `cadre/beads.json` | Beads integration settings, including the selected epic prefix. |
+| `cadre/events.jsonl` | Packet-owned activity log for setup, status, completion, handoff, and operational records. |
+| `cadre/messages/*.jsonl` | Native inbox/outbox state for handoff and delegation records. |
+| `cadre/formulas/*.json` | Native formula templates when the project adds reusable workflows. |
+| `cadre/local/wisps/*.json` | Git-ignored local formula runs. |
 | `cadre/repos.json` | Polyrepo topology when enabled. |
 | `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
 | `cadre/styleguides/*.json` and `cadre/code_styleguides/*.md` | Canonical style guidance plus generated guide projections. |
@@ -139,8 +112,9 @@ cadre-newtrack "Add OAuth login"
 ```
 
 Cadre returns planning evidence: likely files, dependency hints, test impact,
-parallel candidates, Beads tree preview, and a worktree plan. When the track is
-created, Beads receives the mapped task tree.
+parallel candidates, native event records, and a worktree plan. When the track
+is created, the spec, plan, metadata, learnings, projections, and index become
+normal Cadre state.
 
 Start or resume implementation:
 

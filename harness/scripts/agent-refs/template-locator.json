@@ -26,7 +26,7 @@
     },
     {
       "heading": "Agent Use",
-      "body": "Use template references only to understand what the packet-created files mean.\nAll setup, new-track, LSP, style-guide, Beads, and index writes are packet-owned."
+      "body": "Use template references only to understand what the packet-created files mean.\nAll setup, new-track, LSP, style-guide, and index writes are packet-owned."
     }
   ]
 }

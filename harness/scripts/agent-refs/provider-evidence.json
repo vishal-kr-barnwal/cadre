@@ -11,7 +11,7 @@
     "`cadre_review` with `action: \"provider_evidence\"`",
     "`cadre_workflow` with `workflow: \"ship\"` or `workflow: \"land\"` and",
     "`cadre_mutate` with `action: \"record_review\"` when recording the final review",
-    "Cadre Beads packets for notes or labels when the workflow packet asks for them"
+    "Cadre native Cadre packets for notes or labels when the workflow packet asks for them"
   ],
   "sections": [
     {
@@ -20,7 +20,7 @@
     },
     {
       "heading": "Write-Back Targets",
-      "body": "Use these packet paths to persist provider evidence:\n\n- `cadre_review` with `action: \"provider_evidence\"`\n- `cadre_workflow` with `workflow: \"ship\"` or `workflow: \"land\"` and\n  `providerEvidence`\n- `cadre_mutate` with `action: \"record_review\"` when recording the final review\n  verdict\n- Cadre Beads packets for notes or labels when the workflow packet asks for them\n\nNever treat a hosted label, provider issue state, or PR/MR review as Cadre state\nuntil a Cadre packet records the corresponding decision."
+      "body": "Use these packet paths to persist provider evidence:\n\n- `cadre_review` with `action: \"provider_evidence\"`\n- `cadre_workflow` with `workflow: \"ship\"` or `workflow: \"land\"` and\n  `providerEvidence`\n- `cadre_mutate` with `action: \"record_review\"` when recording the final review\n  verdict\n- Cadre native Cadre packets for notes or labels when the workflow packet asks for them\n\nNever treat a hosted label, provider issue state, or PR/MR review as Cadre state\nuntil a Cadre packet records the corresponding decision."
     }
   ]
 }

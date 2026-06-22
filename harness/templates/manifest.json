@@ -48,13 +48,6 @@
       "scope": "target-project"
     },
     {
-      "id": "beads",
-      "source": "beads.json",
-      "target": "cadre/beads.json",
-      "purpose": "Beads integration defaults.",
-      "scope": "target-project"
-    },
-    {
       "id": "repos",
       "source": "repos.json",
       "target": "cadre/repos.json",

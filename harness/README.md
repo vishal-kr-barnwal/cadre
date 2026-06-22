@@ -5,7 +5,7 @@
 **Measure twice, code once.**
 
 Cadre is a context-driven development harness for AI coding agents. It combines
-spec-first tracks, Beads-backed durable task memory, review gates, team boards,
+spec-first tracks, native durable task memory, review gates, team boards,
 parallel worker orchestration, and mono/polyrepo delivery into one packet-owned
 workflow.
 
@@ -15,8 +15,8 @@ Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
 
 - **Structured work:** setup, new track, implementation, review, ship/land,
   archive, release, handoff, refresh, revise, validate, flag, and formula flows.
-- **Persistent memory:** Beads stores task graph, dependencies, notes, handoffs,
-  and resume evidence; agents access it through Cadre packets.
+- **Persistent memory:** Cadre stores task graph state, dependencies, notes,
+  handoffs, events, and resume evidence through native packet-owned files.
 - **Team safety:** ownership, advisory leases, collision scans, review queues,
   shared sync, and compact MCP dashboard resources.
 - **Polyglot intelligence:** repo maps, dependency graphs, test impact,
@@ -26,13 +26,6 @@ Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
   protocols, references, templates, and packet tools.
 
 ## Install
-
-Install Beads first; setup requires the `bd` CLI to be available.
-
-```bash
-npm install -g @beads/bd
-bd --version
-```
 
 Install Cadre from npm and let the CLI wire detected clients:
 
@@ -56,7 +49,7 @@ cadre-ship
 ```
 
 Cadre workflows are packet-owned. The agent verifies Cadre MCP, passes a
-per-call `root`, and lets the runtime perform state reads/writes, Beads work,
+per-call `root`, and lets the runtime perform state reads/writes, formula work,
 parallel worker state, provider evidence write-back, and shared sync. Do not
 maintain Cadre state by hand.
 
@@ -71,13 +64,16 @@ maintain Cadre state by hand.
 - `cadre/tracks.json` as the generated track index
 - `cadre/patterns.jsonl` plus generated `cadre/patterns.md`
 - `cadre/config.json`
-- `cadre/beads.json`
+- `cadre/events.jsonl`
+- `cadre/messages/outbox.jsonl` and `cadre/messages/inbox.jsonl`
+- `cadre/formulas/*.json` when formulas are added
+- git-ignored `cadre/local/wisps/*.json` for local ephemeral formula runs
 - `cadre/styleguides/*.json` plus generated `cadre/code_styleguides/*.md`
 - optional `cadre/repos.json` for polyrepo topology
 - optional `cadre/lsp.json` for LSP recommendations
 
-Setup also initializes Beads, can configure shared-sync merge attributes, and
-can scaffold hosted CI checks when requested.
+Setup also initializes native Cadre state, can configure shared-sync merge
+attributes, and can scaffold hosted CI checks when requested.
 
 ## Team And Repo Modes
 

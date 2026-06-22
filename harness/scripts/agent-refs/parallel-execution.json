@@ -7,18 +7,18 @@
   "rules": [
     "Work only on the product files assigned in the packet payload.",
     "Run product tests, builds, linters, and commits according to the worker prompt.",
-    "Do not mutate Cadre control-plane files, Beads state, provider state, worktree",
+    "Do not mutate Cadre control-plane files, native Cadre event/message state, provider state, worktree",
     "Return structured evidence to the coordinator: worker id, task id, repo,",
     "If product implementation fails, return the failure evidence. The coordinator",
     "Use only `cadre_parallel`, `cadre_complete_task`, and other Cadre MCP packets",
-    "Treat `parallel_state.json` and Beads state as packet-owned artifacts.",
-    "A worker conflict, failed test, missing commit, low coverage, or missing Beads",
+    "Treat `parallel_state.json` and native Cadre event/message state as packet-owned artifacts.",
+    "A worker conflict, failed test, missing commit, low coverage, or missing native task evidence",
     "Product shell commands are allowed only for product implementation,"
   ],
   "sections": [
     {
       "heading": "Packet Flow",
-      "body": "1. Call `cadre_workflow` with `workflow: \"implement\"` and the selected `trackId`\n   to obtain implementation prep and the phase schedule.\n2. For a parallel phase, call `cadre_parallel` with `action: \"plan\"` or\n   `action: \"next_wave\"` to obtain the ready worker set.\n3. Call `cadre_parallel` with `action: \"setup_workers\"` and the current client\n   `agentIdentifier` (`\"claude\"` or `\"codex\"`) to get the packet-owned\n   worktree/setup plan and selected dispatch adapter. Add `execute:true` only\n   when the user or workflow has authorized mutation.\n4. Dispatch exactly the workers returned by the packet. Do not add, remove,\n   reorder, split, or merge workers outside the packet result.\n5. As each worker finishes, call `cadre_parallel` with `action: \"record_finish\"`\n   and the worker result evidence. Use `execute:true` when recording completion.\n6. After the wave finishes, call `cadre_parallel` with `action: \"merge_back\"` for\n   the packet-owned merge plan. Add `execute:true` only when ready to mutate.\n7. Call `cadre_parallel` with `action: \"cleanup\"` for packet-owned cleanup. Add\n   `execute:true` only after merge-back is clean or the packet explicitly marks a\n   worker safe to clean.\n8. Repeat `next_wave` until the packet reports no ready workers.\n\nAll dependency gates, file collision checks, repo routing, Beads updates,\nparallel audit state, merge conflict state, task completion, and cleanup are\npacket-owned."
+      "body": "1. Call `cadre_workflow` with `workflow: \"implement\"` and the selected `trackId`\n   to obtain implementation prep and the phase schedule.\n2. For a parallel phase, call `cadre_parallel` with `action: \"plan\"` or\n   `action: \"next_wave\"` to obtain the ready worker set.\n3. Call `cadre_parallel` with `action: \"setup_workers\"` and the current client\n   `agentIdentifier` (`\"claude\"` or `\"codex\"`) to get the packet-owned\n   worktree/setup plan and selected dispatch adapter. Add `execute:true` only\n   when the user or workflow has authorized mutation.\n4. Dispatch exactly the workers returned by the packet. Do not add, remove,\n   reorder, split, or merge workers outside the packet result.\n5. As each worker finishes, call `cadre_parallel` with `action: \"record_finish\"`\n   and the worker result evidence. Use `execute:true` when recording completion.\n6. After the wave finishes, call `cadre_parallel` with `action: \"merge_back\"` for\n   the packet-owned merge plan. Add `execute:true` only when ready to mutate.\n7. Call `cadre_parallel` with `action: \"cleanup\"` for packet-owned cleanup. Add\n   `execute:true` only after merge-back is clean or the packet explicitly marks a\n   worker safe to clean.\n8. Repeat `next_wave` until the packet reports no ready workers.\n\nAll dependency gates, file collision checks, repo routing, event/message updates,\nparallel audit state, merge conflict state, task completion, and cleanup are\npacket-owned."
     },
     {
       "heading": "Dispatching Each Worker",
@@ -26,11 +26,11 @@
     },
     {
       "heading": "Worker Rules",
-      "body": "- Work only on the product files assigned in the packet payload.\n- Run product tests, builds, linters, and commits according to the worker prompt.\n- Do not mutate Cadre control-plane files, Beads state, provider state, worktree\n  topology, merge state, or cleanup state directly.\n- Return structured evidence to the coordinator: worker id, task id, repo,\n  commit evidence, tests run, coverage when available, files changed, summary,\n  and blockers.\n- If product implementation fails, return the failure evidence. The coordinator\n  records it through Cadre packets."
+      "body": "- Work only on the product files assigned in the packet payload.\n- Run product tests, builds, linters, and commits according to the worker prompt.\n- Do not mutate Cadre control-plane files, native Cadre event/message state, provider state, worktree\n  topology, merge state, or cleanup state directly.\n- Return structured evidence to the coordinator: worker id, task id, repo,\n  commit evidence, tests run, coverage when available, files changed, summary,\n  and blockers.\n- If product implementation fails, return the failure evidence. The coordinator\n  records it through Cadre packets."
     },
     {
       "heading": "Coordinator Rules",
-      "body": "- Use only `cadre_parallel`, `cadre_complete_task`, and other Cadre MCP packets\n  named by packet results for Cadre state changes.\n- Treat `parallel_state.json` and Beads state as packet-owned artifacts.\n- A worker conflict, failed test, missing commit, low coverage, or missing Beads\n  mapping is handled by the packet result. Report the packet error and halt when\n  it is blocking.\n- Product shell commands are allowed only for product implementation,\n  verification, and commits inside worker scope."
+      "body": "- Use only `cadre_parallel`, `cadre_complete_task`, and other Cadre MCP packets\n  named by packet results for Cadre state changes.\n- Treat `parallel_state.json` and native Cadre event/message state as packet-owned artifacts.\n- A worker conflict, failed test, missing commit, low coverage, or missing native\n  task evidence is handled by the packet result. Report the packet error and halt when\n  it is blocking.\n- Product shell commands are allowed only for product implementation,\n  verification, and commits inside worker scope."
     }
   ],
   "platforms": {

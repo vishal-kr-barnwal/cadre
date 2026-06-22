@@ -12,7 +12,7 @@ description: |
   - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
 
   Interoperable across Claude Code and OpenAI Codex.
-  Integrates with Beads for persistent task memory across sessions.
+  Uses native Cadre state for persistent task memory across sessions.
 ---
 
 # Cadre Skill Shim

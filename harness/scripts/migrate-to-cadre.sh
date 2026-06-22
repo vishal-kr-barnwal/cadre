@@ -31,7 +31,7 @@ run "git mv conductor cadre 2>/dev/null || mv conductor cadre"
 
 say "2/3  Rewriting /conductor-* command refs and conductor/ paths inside cadre/"
 while IFS= read -r f; do
-  run "perl -pi -e 's{/conductor-}{/cadre-}g; s{conductor/}{cadre/}g; s/Conductor-Beads/Cadre/g; s/Conductor/Cadre/g' \"$f\""
+  run "perl -pi -e 's{/conductor-}{/cadre-}g; s{conductor/}{cadre/}g; s/Conductor/Cadre/g' \"$f\""
 done < <(grep -rIl 'conductor' cadre 2>/dev/null || true)
 
 say "3/3  Updating .gitattributes merge-driver paths (if present)"

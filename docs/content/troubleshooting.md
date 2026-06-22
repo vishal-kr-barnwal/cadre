@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Common install, MCP, Beads, provider, LSP, and plugin-generation failures.
+description: Common install, MCP, provider, LSP, and plugin-generation failures.
 section: Support
 order: 8
 ---
@@ -10,23 +10,21 @@ order: 8
 Use this guide when Cadre setup, workflows, provider evidence, plugin
 generation, or code intelligence do not behave as expected.
 
-## Beads Is Missing
+## Native State Looks Stale
 
 Symptom:
 
 ```text
-bd: command not found
+status or handoff data looks out of date
 ```
 
 Fix:
 
-```bash
-npm install -g @beads/bd
-bd --version
-```
-
-Cadre setup requires Beads. If Beads is missing, install it and rerun
-`cadre-setup`.
+- Run `cadre-validate`.
+- Check `cadre/events.jsonl`, `cadre/messages/*.jsonl`, and `cadre/tracks.json`
+  through Cadre packets rather than editing them by hand.
+- If setup never created native state, rerun `cadre-setup` with reviewed
+  structured payloads.
 
 ## Cadre MCP Is Unavailable
 
@@ -196,7 +194,7 @@ Fix:
 Symptoms:
 
 - Control-plane sync fails.
-- Beads Dolt graph cannot push or pull.
+- Native event/message state cannot sync cleanly.
 - Merge driver warnings appear.
 
 Fix:
@@ -207,7 +205,7 @@ Fix:
   plans.
 - Rerun `cadre-validate`.
 
-Do not text-merge Beads DB files by hand.
+Do not text-merge native state files by hand.
 
 ## Harness Development Checks
 

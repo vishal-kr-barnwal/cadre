@@ -19,8 +19,7 @@
     "context-driven-development",
     "mcp",
     "codex",
-    "claude",
-    "beads"
+    "claude"
   ],
   "type": "commonjs",
   "packageManager": "pnpm@11.4.0",
