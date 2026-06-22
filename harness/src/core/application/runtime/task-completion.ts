@@ -10,15 +10,13 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { beadsTaskWrite } from "./beads-task-write";
-import { BeadsCompletionState, CoreResult, CoverageResult } from "./contracts";
+import { CoreResult, CoverageResult } from "./contracts";
 import { coverageThreshold, runCoverage } from "../../infrastructure/runtime/coverage";
-import { readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { utcNow } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
-import { patchCompletionJournal, prepareManualVerificationCompletion, readCompletionJournal } from "./manual-verification";
+import { patchCompletionJournal, prepareManualVerificationCompletion } from "./manual-verification";
 import { isManualVerificationTaskObject } from "./plan-docs";
 import { isWorkingRootError, resolveTaskWorkingRoot } from "./repo-resolution";
-import { commandExists } from "../../infrastructure/runtime/system";
 import { findTrack } from "./track-context";
 import { recordTaskResultUnlocked } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
@@ -99,54 +97,6 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     };
   }
 
-  const metadataBefore = readJson<TrackMetadata>(track.metadata_path, track.metadata) || track.metadata;
-  const mappedBeadsTaskId = metadataBefore.beads_tasks ? asOptionalString(metadataBefore.beads_tasks[task.task_key]) || null : null;
-  const explicitBeadsTaskId = args.beadsTaskId || args.taskId || null;
-  const beadsTaskId = explicitBeadsTaskId || mappedBeadsTaskId;
-  const beadsConfigured = Boolean(
-    explicitBeadsTaskId ||
-    metadataBefore.beads_epic ||
-    (metadataBefore.beads_tasks && Object.keys(metadataBefore.beads_tasks).length > 0)
-  );
-  const beadsAvailable = commandExists("bd", root);
-  const beads: BeadsCompletionState = {
-    attempted: false,
-    required: beadsConfigured,
-    available: beadsAvailable,
-    note: null,
-    close: null,
-    skipped_reason: null,
-  };
-  if (beadsConfigured && !beadsTaskId) {
-    return {
-      ok: false,
-      stage: "beads_mapping",
-      blocked: true,
-      threshold,
-      working_root: workingRoot,
-      coverage,
-      beads,
-      reason: "Track has Beads metadata but this plan task has no mapped Beads task id; task was not marked complete",
-    };
-  }
-  if (beadsTaskId && !beadsAvailable) {
-    return {
-      ok: false,
-      stage: "beads_unavailable",
-      blocked: true,
-      threshold,
-      working_root: workingRoot,
-      coverage,
-      beads,
-      reason: "Beads CLI (bd) is required for this mapped task but is not installed or not on PATH; task was not marked complete",
-    };
-  }
-  if (!beadsConfigured) {
-    beads.skipped_reason = "Track has no Beads task mapping";
-  } else {
-    beads.attempted = true;
-  }
-
   const lastTestRun = manualVerificationTask ? null : {
     command: coverage.command,
     cwd: coverage.cwd || workingRoot.path,
@@ -192,7 +142,7 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
         stage: "record_task_result_failed",
         error: taskResult.error || asOptionalString(taskResult.stage) || "record task result failed",
       }));
-      return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, beads, journal: entry };
+      return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, journal: entry };
     }
     const taskResultJson = asJsonObject(taskResult);
     const recordedEntry = patchCompletionJournal(track, journalKey, (current) => ({
@@ -210,62 +160,8 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
   const stateResult = args.lock === false
     ? recordState()
     : withTrackLock(root, track.track_id, recordState);
-  if (!stateResult.ok) return { ...stateResult, threshold, working_root: workingRoot, coverage, beads };
+  if (!stateResult.ok) return { ...stateResult, threshold, working_root: workingRoot, coverage };
   const stateTaskResult = asJsonObject(stateResult.task_result);
-
-  if (beadsTaskId) {
-    const latest = readCompletionJournal(track).entries[journalKey] || {};
-    if (!latest.beads_note_written) {
-      const note = [
-        dedupKey,
-        `COMPLETED: ${task.title}`,
-        `COMMIT: ${sha}`,
-        `COVERAGE: ${coverage.coverage == null ? "unmeasured" : `${coverage.coverage}%`}`,
-        args.summary ? `SUMMARY: ${args.summary}` : null,
-      ].filter(Boolean).join("\n");
-      const noteResult = beadsTaskWrite(root, { operation: "note", id: beadsTaskId, note, dedupKey });
-      beads.note = noteResult;
-      if (!noteResult.ok) return { ok: false, stage: "beads_note", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads, journal: latest };
-      const writeNote = () => patchCompletionJournal(track, journalKey, (current) => ({
-        ...current,
-        stage: "beads_note_written",
-        beads_note_written: true,
-        beads_note_at: utcNow(),
-      }));
-      if (args.lock === false) writeNote();
-      else {
-        const noteJournal = withTrackLock(root, track.track_id, writeNote);
-        if (!noteJournal.ok) return { ...noteJournal, stage: "journal_note", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads };
-      }
-    } else {
-      beads.note = { ok: true, skipped: true, reason: "completion journal already recorded Beads note" };
-    }
-
-    const afterNote = readCompletionJournal(track).entries[journalKey] || {};
-    if (!afterNote.beads_close_written) {
-      const closeResult = beadsTaskWrite(root, {
-        operation: "close",
-        id: beadsTaskId,
-        continue: true,
-        reason: args.reason || `commit: ${args.commitSha || "completed"}`,
-      });
-      beads.close = closeResult;
-      if (!closeResult.ok) return { ok: false, stage: "beads_close", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads, journal: afterNote };
-      const writeClose = () => patchCompletionJournal(track, journalKey, (current) => ({
-        ...current,
-        stage: "beads_closed",
-        beads_close_written: true,
-        beads_close_at: utcNow(),
-      }));
-      if (args.lock === false) writeClose();
-      else {
-        const closeJournal = withTrackLock(root, track.track_id, writeClose);
-        if (!closeJournal.ok) return { ...closeJournal, stage: "journal_close", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads };
-      }
-    } else {
-      beads.close = { ok: true, skipped: true, reason: "completion journal already recorded Beads close" };
-    }
-  }
 
   const markComplete = () => patchCompletionJournal(track, journalKey, (current) => ({
     ...current,
@@ -284,7 +180,6 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     threshold,
     coverage,
     task_result: stateTaskResult,
-    beads,
     journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal,
   };
 }

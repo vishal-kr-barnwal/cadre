@@ -72,8 +72,7 @@ export interface TrackMetadata extends JsonObject {
   reviewer?: string | null;
   git_branch?: string;
   worktree_path?: string;
-  beads_epic?: string | null;
-  beads_tasks?: JsonObject;
+  tags?: string[];
   last_coverage?: number | null;
   review?: ReviewMetadata;
   review_evidence?: JsonObject;
@@ -280,13 +279,8 @@ export interface RuntimeArgs extends JsonObject {
   includeHeavy?: boolean;
   agentIdentifier?: "claude" | "codex";
   epicId?: string;
-  beadsConfig?: JsonObject;
-  beads_config?: JsonObject;
-  beadsEpicPrefix?: string;
-  beads_epic_prefix?: string;
   assignee?: string;
   taskId?: string | null;
-  beadsTaskId?: string | null | undefined;
   workerId?: string | null;
   worker_id?: string | null;
   worktree?: string | null;

@@ -23,7 +23,6 @@ function isCadreStateDirectory(dir: string): boolean {
     "product.json",
     "tech-stack.json",
     "workflow.json",
-    "beads.json",
     "config.json",
     "repos.json",
   ].some((name) => fs.existsSync(path.join(dir, name))) || isDirectory(path.join(dir, "tracks"));

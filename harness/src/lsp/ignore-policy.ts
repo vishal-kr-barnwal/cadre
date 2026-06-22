@@ -4,7 +4,6 @@ const DEFAULT_IGNORES = new Set([
   ".git",
   ".hg",
   ".svn",
-  ".beads",
   ".worktrees",
   ".agents",
   ".claude",

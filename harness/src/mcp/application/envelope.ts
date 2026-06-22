@@ -46,7 +46,3 @@ export function syncedEnvelope(root: string, operation: string, fn: () => unknow
     sync_post: syncPost,
   });
 }
-
-export function beadsOperationMutates(operation: unknown): boolean {
-  return !["ready", "list", "show", "formula_list"].includes(String(operation || ""));
-}

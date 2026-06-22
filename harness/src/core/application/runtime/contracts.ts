@@ -140,15 +140,6 @@ export interface PhaseScheduleNode extends UnknownRecord {
   tasks: JsonObject[];
 }
 
-export interface BdJsonResult extends UnknownRecord {
-  ok: boolean;
-  available: boolean;
-  args: string[];
-  json: unknown;
-  stdout_tail?: string;
-  stderr_tail?: string;
-}
-
 export interface TrackSummary extends UnknownRecord {
   track_id: string;
   name: string;
@@ -156,7 +147,7 @@ export interface TrackSummary extends UnknownRecord {
   priority: string;
   owner: string | null;
   reviewer: string | null;
-  beads_epic: string | null;
+  tags: string[];
   review: JsonObject | null;
 }
 
@@ -193,23 +184,9 @@ export interface SpecContext extends JsonObject {
   acceptance: string;
 }
 
-export interface BeadsCommandPlanEntry extends JsonObject {
-  command: string;
-  args: string[];
-}
-
 export interface CompletionJournal extends JsonObject {
   entries: Record<string, JsonObject>;
   updated_at?: string;
-}
-
-export interface BeadsCompletionState extends UnknownRecord {
-  attempted: boolean;
-  required: boolean;
-  available: boolean;
-  note: CoreResult | null;
-  close: CoreResult | null;
-  skipped_reason: string | null;
 }
 
 export interface ParallelWorker extends UnknownRecord {
@@ -218,7 +195,6 @@ export interface ParallelWorker extends UnknownRecord {
   phase_index?: number | null;
   task_index?: number | null;
   task_key?: string | null;
-  beads_task_id?: string | null;
   repo?: string | null;
   worktree?: string | null;
   branch?: string | null;

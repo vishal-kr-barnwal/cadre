@@ -17,14 +17,13 @@ import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { appendLspReviewArtifacts, humanReviewState, setupReviewArtifacts, setupReviewBundle, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
-import { configuredCiProvider, lspSetup, setupBeads, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
+import { configuredCiProvider, lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
 import { renderStyleGuideMarkdown } from "./spec-docs";
 import { trackIndexPayload } from "./status";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed, setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
-import { resolveBeadsEpicPrefix } from "./beads-config";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "setup", args);
@@ -43,8 +42,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
-  const beadsPlan = setupBeads(root, { ...args, execute: false });
-  const beadsPrefix = resolveBeadsEpicPrefix(root, args);
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
@@ -68,8 +65,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     lsp_setup: detailMode ? lspRecommendations : summarizeLspSetupResult(lspRecommendations),
     integrations: workspaceHealthResult.integrations,
     detail_resources: workspaceHealthResult.detail_resources,
-    beads_init: beadsPlan,
-    beads_prefix: beadsPrefix,
     provider,
     sync_mode: syncModeRecommendation,
     sync_recommendation: teamSize >= 2 && syncModeRecommendation !== "shared"
@@ -86,12 +81,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       ? ["product", "techStack"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
         .concat(polyrepoRequested && !reposPayload ? ["repos"] : [])
-        .concat(beadsPrefix.selected ? [] : asStringArray(beadsPrefix.missing_payload))
       : [],
     next_actions: [
-      ...(!beadsPrefix.selected
-        ? ["Choose beadsEpicPrefix from the recommendations or provide another prefix using at most two words."]
-        : []),
       ...(provider.requires_confirmation === true
         ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
         : []),
@@ -113,7 +104,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     ...(!techStackFromArgs(args) ? ["techStack"] : []),
     ...(provider.requires_confirmation === true || !providerMode ? ["providerMode"] : []),
     ...(polyrepoRequested && !reposPayload ? ["repos"] : []),
-    ...(beadsPrefix.selected ? [] : asStringArray(beadsPrefix.missing_payload)),
   ];
   if (missingPayload.length > 0) {
     return {
@@ -130,17 +120,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       phase_state: "awaiting_human_review",
       stage: "human_review",
       error: "Human confirmation is required before writing setup artifacts",
-    };
-  }
-  const beadsInit = setupBeads(root, args);
-  if (beadsInit.ok === false) {
-    return {
-      ...result,
-      ok: false,
-      phase_state: "blocked",
-      stage: "beads_init",
-      beads_init: beadsInit,
-      error: asOptionalString(beadsInit.error) || asOptionalString(beadsInit.reason) || "Beads initialization failed",
     };
   }
   const written: string[] = [];
@@ -264,17 +243,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     ...configOverrides,
   };
   writeSetupJson("config.json", configPayload);
-  const beadsConfigOverrides = {
-    ...asJsonObject(rawArgs.beadsConfig),
-    ...asJsonObject(rawArgs.beads_config),
-  };
-  writeSetupJson("beads.json", {
-    ...templateJson("beads.json", { enabled: true, mode: "normal" }),
-    packet_only: true,
-    ...beadsConfigOverrides,
-    epicPrefix: beadsPrefix.epic_prefix,
-    epicPrefixMaxWords: 2,
-  });
   let repos: JsonObject | null = null;
   if (reposPayload) {
     repos = reposPayload;
@@ -312,7 +280,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       skipped: skipped.slice(beforeStyleSkipped),
     },
     lsp_setup: lspSetupResult,
-    beads_init: beadsInit,
     gitattributes,
     ci_setup: ciSetup,
     polyrepo_setup: polyrepoSetup,

@@ -21,7 +21,7 @@ import { prCiStatus, reviewAssist } from "./quality-gates";
 import { implementationPrep } from "./repo-resolution";
 import { humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { syncControlPlane } from "./review-records";
-import { availableWork, beadsSummary, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
+import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
 import { findTrack, trackContext } from "./track-context";
 import { reviewGate } from "./track-mutations";
@@ -50,7 +50,6 @@ export function workflowStatus(root: string, args: RuntimeArgs = {}): CoreResult
   if (mode === "fleet" || mode === "repos") return { ...summary, ok: true, status: fleetStatus(root, args) };
   if (mode === "available") return { ...summary, ok: true, status: availableWork(root) };
   if (mode === "collisions") return { ...summary, ok: true, status: collisionScan(root) };
-  if (mode === "beads") return { ...summary, ok: true, status: beadsSummary(root) };
   if (mode === "doctor") return { ...summary, ok: true, status: doctor(root, { hasCadreProject: true }) };
   return { ...summary, ok: true, status: liveStatus(root) };
 }
@@ -89,7 +88,6 @@ export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResu
     integrity: planIntegrity(root, args.trackId || args.track_id || null),
     collisions: collisionScan(root),
     fleet: fleetStatus(root, { includeCollisions: false }),
-    beads: beadsSummary(root),
   };
 }
 
@@ -195,7 +193,6 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     ...summary,
     track_id: trackId,
     track_context: context,
-    beads: beadsSummary(root),
     handoff_path: path.relative(root, handoffPath),
     human_review: humanReview,
     review_artifacts: reviewArtifacts,

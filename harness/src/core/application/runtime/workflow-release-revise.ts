@@ -58,7 +58,7 @@ export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): Relea
       priority: track.priority,
       owner: track.owner,
       reviewer: track.reviewer,
-      beads_epic: track.beads_epic,
+      tags: track.tags || [],
       review: track.review,
     })),
   };

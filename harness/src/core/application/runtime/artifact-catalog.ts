@@ -79,7 +79,6 @@ export function artifactSchema(artifact: unknown): JsonObject {
       owner: { type: "string" },
       reviewer: { type: "string" },
       review: { type: "object" },
-      beads_tasks: { type: "object" },
       worktree_path: { type: "string" },
     }),
     release: objectSchema(["version", "completed_tracks"], {
@@ -137,7 +136,6 @@ export function artifactDefinitions(root: string, args: RuntimeArgs = {}): Artif
     { id: "tracks-index", title: "Track index", canonical: "cadre/tracks.json", schema: TRACKS_INDEX_SCHEMA, scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
-    { id: "beads-config", title: "Beads config", canonical: "cadre/beads.json", schema: "cadre.beads.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "setup-state", title: "Setup state", canonical: "cadre/setup_state.json", schema: "cadre.setup_state.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
   ];
   if (fileExists(path.join(root, "cadre", "repos.json")) || fileExists(path.join(root, "cadre", "repos.md"))) {

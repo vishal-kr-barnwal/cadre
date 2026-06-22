@@ -151,7 +151,6 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
     const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
     if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
   else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
-  else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
   else if (resource.base === "cadre://workspace-health") value = workspaceHealth(root, normalizedResource);
   else if (resource.base === "cadre://integrations") value = integrations(root, normalizedResource);
   else if (resource.base === "cadre://mcp-readiness") value = deps.core.mcpReadiness(root, normalizedResource);

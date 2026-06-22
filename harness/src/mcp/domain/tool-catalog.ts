@@ -5,7 +5,7 @@ export const PROTOCOL_VERSION = "2025-06-18";
 export const SERVER_INSTRUCTIONS = [
   "Cadre MCP is the packet-owned runtime for Cadre workflows. Pass an explicit root on every project-scoped call; setup packets may use a root candidate before cadre/ exists.",
   "Prefer compact responses and Cadre resources for dashboards, review queues, quality gates, workspace health, repo maps, job results, and status views.",
-  "Do not mutate cadre/, Beads, provider state, indexes, worker state, or merge/cleanup state outside Cadre packets.",
+  "Do not mutate cadre/, provider state, indexes, worker state, or merge/cleanup state outside Cadre packets.",
 ].join(" ");
 
 interface ToolOptions {
@@ -53,10 +53,6 @@ const PROPS: Record<string, JsonObject> = {
   provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
   mcpCapabilities: { type: "object" },
   mcp_capabilities: { type: "object" },
-  beadsConfig: { type: "object" },
-  beads_config: { type: "object" },
-  beadsEpicPrefix: { type: "string", description: "Selected Beads epic prefix, at most two words." },
-  beads_epic_prefix: { type: "string", description: "Selected Beads epic prefix, at most two words." },
   continuationToken: { type: "string" },
   continuation_token: { type: "string" },
   responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
@@ -219,7 +215,7 @@ export const TOOLS = [
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: WORKFLOWS,
-    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "beadsConfig", "beads_config", "beadsEpicPrefix", "beads_epic_prefix", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive"],
+    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -237,19 +233,19 @@ export const TOOLS = [
   }),
   packetSchema({
     name: "cadre_status",
-    description: "Cadre status packet: live, team, mine, available, collisions, fleet, Beads summary, and team board.",
-    actionEnum: ["live", "team", "mine", "available", "collisions", "board", "fleet", "beads_summary"],
+    description: "Cadre status packet: live, team, mine, available, collisions, fleet, and team board.",
+    actionEnum: ["live", "team", "mine", "available", "collisions", "board", "fleet"],
     fields: ["action", "identity", "view", "limit", "includeHeavy", "responseMode", "response_mode", "detail", "compact"],
     required: ["root", "action"],
   }),
   packetSchema({
     name: "cadre_track",
-    description: "Cadre track packet: context, JSON plan parsing, integrity, phase scheduling, implementation prep, planning evidence, worktree planning, and Beads tree creation.",
-    actionEnum: ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"],
-    fields: ["action", "trackId", "track_id", "plan", "execute", "identity", "takeover", "base", "head", "limit", "includeHeavy", "styleGuideIds", "styleGuideMaxChars", "beadsConfig", "beads_config", "beadsEpicPrefix", "beads_epic_prefix", "responseMode", "response_mode", "detail", "compact"],
+    description: "Cadre track packet: context, JSON plan parsing, integrity, phase scheduling, implementation prep, planning evidence, and worktree planning.",
+    actionEnum: ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "plan_assist", "worktree_plan"],
+    fields: ["action", "trackId", "track_id", "plan", "execute", "identity", "takeover", "base", "head", "limit", "includeHeavy", "styleGuideIds", "styleGuideMaxChars", "responseMode", "response_mode", "detail", "compact"],
     required: ["root", "action"],
     allOf: [
-      requireTrackForActions(["context", "phase_schedule", "prepare_implementation", "create_beads_tree", "worktree_plan"]),
+      requireTrackForActions(["context", "phase_schedule", "prepare_implementation", "worktree_plan"]),
       { if: { properties: { action: { enum: ["parse_plan"] } }, required: ["action"] }, then: { anyOf: [{ required: ["plan"] }, { required: ["trackId"] }, { required: ["track_id"] }] } },
     ],
   }),
@@ -272,16 +268,10 @@ export const TOOLS = [
   }),
   packetSchema({
     name: "cadre_complete_task",
-    description: "Journaled task completion: coverage gate, locked plan/metadata writes, and idempotent Beads note/close.",
+    description: "Journaled task completion: coverage gate plus locked plan, metadata, and completion journal writes.",
     fields: ["trackId", "track_id", "phaseIndex", "taskIndex", "commitSha", "repo", "command", "timeoutMs", "coverage", "force", "allowNoCommit", "humanConfirmed", "human_confirmed", "manualVerificationMode", "manual_verification_mode", "manualVerificationSummary", "manual_verification_summary", "manualVerificationChecks", "manual_verification_checks", "manualVerificationCommand", "manual_verification_command", "manualVerificationResult", "manual_verification_result", "async"],
     required: ["root", "phaseIndex", "taskIndex"],
     anyOf: trackIdAnyOf(),
-  }),
-  packetSchema({
-    name: "cadre_beads",
-    description: "CLI-backed Beads packet for ready/list/show/update/note/close/labels/deps/create/mail/formula/compact/dolt/sql/worktree.",
-    fields: ["operation", "id", "description", "status", "patch", "args"],
-    required: ["root", "operation"],
   }),
   packetSchema({
     name: "cadre_job",

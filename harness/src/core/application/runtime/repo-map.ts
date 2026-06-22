@@ -27,7 +27,7 @@ export function isIgnoredRepoMapFile(file: unknown): boolean {
   if (normalized.startsWith("plugins/cadre-claude/")) return true;
   return normalized
     .split("/")
-    .some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part));
+    .some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
 }
 
 export function selectedRepoNames(args: RuntimeArgs = {}): Set<string> | null {

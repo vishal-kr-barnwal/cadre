@@ -10,7 +10,6 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { createBeadsTree } from "./beads-tree";
 import { CoreResult, ReviewFile } from "./contracts";
 import { safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { withGeneratedMarker } from "./markdown-docs";
@@ -19,7 +18,7 @@ import { planAssist, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
 import { humanReviewState, jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
-import { commandExists, gitIdentity } from "../../infrastructure/runtime/system";
+import { gitIdentity } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
 import { findTrack } from "./track-context";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
@@ -111,23 +110,14 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, plan: planJson, trackId });
-  const beads = createBeadsTree(root, {
-    ...args,
-    dryRun: true,
-    trackId,
-    plan: planJson,
-    spec: specJson,
-    metadata,
-  });
   if (dryRun) {
     return {
       ...summary,
-      ok: assist.ok !== false && beads.ok !== false,
+      ok: assist.ok !== false,
       dry_run: true,
       track_id: trackId,
       metadata,
       plan_assist: assist,
-      beads_tree: beads,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
@@ -147,20 +137,11 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       track_id: trackId,
       metadata,
       plan_assist: assist,
-      beads_tree: beads,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
       warnings,
       error: "Human confirmation is required before creating track artifacts",
-    };
-  }
-  if (!commandExists("bd", root)) {
-    return {
-      ...summary,
-      ok: false,
-      track_id: trackId,
-      error: "Beads CLI (bd) is required for live track creation",
     };
   }
   const dir = path.join(root, "cadre", "tracks", safeName(trackId));
@@ -180,17 +161,6 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   fs.writeFileSync(path.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
   fs.writeFileSync(path.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}\n`);
   fs.writeFileSync(path.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
-  const liveBeads = createBeadsTree(root, { ...args, trackId, plan: planJson, spec: specJson, dryRun: false });
-  if (!liveBeads.ok) {
-    fs.rmSync(dir, { recursive: true, force: true });
-    return {
-      ...summary,
-      ok: false,
-      track_id: trackId,
-      stage: "create_beads_tree",
-      beads_tree: liveBeads,
-    };
-  }
   const regen = regenIndex(root);
   return {
     ...summary,
@@ -198,7 +168,6 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     dry_run: false,
     track_id: trackId,
     metadata_path: path.relative(root, path.join(dir, "metadata.json")),
-    beads_tree: liveBeads,
     regen,
     human_review: humanReview,
     worktree_plan: worktreePlan(root, { trackId }),

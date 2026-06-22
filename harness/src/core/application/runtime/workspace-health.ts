@@ -182,7 +182,6 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
         "cadre/setup_state.json",
         "cadre/product.json",
         "cadre/config.json",
-        "cadre/beads.json",
         "cadre/lsp.json",
       ].filter((name) => fileExists(path.join(candidateRoot, name))),
     },
@@ -190,10 +189,6 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
       available: commandExists("git", candidateRoot),
       identity: gitIdentity(candidateRoot),
       merge_ours: mergeDriverStatus(candidateRoot),
-    },
-    beads: {
-      available: commandExists("bd", candidateRoot),
-      config_present: fileExists(path.join(candidateRoot, "cadre", "beads.json")),
     },
     lsp: lspStatus,
     provider: providerMcpAvailability(candidateRoot, options),
@@ -205,9 +200,6 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
   const warnings: string[] = [];
   if (!checks.cadre_project.ok) {
     warnings.push("No Cadre project markers found. This is fine for the Cadre harness/source repo, but project-scoped Cadre workflows need setup first.");
-  }
-  if (checks.cadre_project.ok && !checks.beads.available) {
-    warnings.push("Beads CLI (bd) is not available; Cadre project workflows require it.");
   }
   if (checks.lsp.configured && lspMissing.length > 0) {
     warnings.push(`LSP config exists but missing server commands: ${lspMissing.join(", ")}`);

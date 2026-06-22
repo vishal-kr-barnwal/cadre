@@ -154,33 +154,6 @@ function compactLspSetup(value: unknown): JsonObject | null {
   };
 }
 
-function compactBeadsPrefix(value: unknown): JsonObject | unknown {
-  if (!isRecord(value)) return value;
-  const prefix = asJsonObject(value);
-  return {
-    selected: prefix.selected === true,
-    required: prefix.required === true,
-    epic_prefix: asOptionalString(prefix.epic_prefix) || "",
-    source: asOptionalString(prefix.source) || null,
-    example: asOptionalString(prefix.example) || null,
-    max_words: prefix.max_words,
-    missing_payload: asStringArray(prefix.missing_payload),
-    recommendations: Array.isArray(prefix.recommendations)
-      ? prefix.recommendations.slice(0, 5).map((entry) => {
-        const recommendation = asJsonObject(entry);
-        return {
-          label: asOptionalString(recommendation.label) || null,
-          epic_prefix: asOptionalString(recommendation.epic_prefix) || null,
-          example: asOptionalString(recommendation.example) || null,
-          recommended: recommendation.recommended === true,
-          reason: asOptionalString(recommendation.reason) || null,
-        };
-      })
-      : [],
-    error: asOptionalString(prefix.error) || undefined,
-  };
-}
-
 function compactSetupResponse(result: CoreResult): CoreResult {
   const styleGuides = compactStyleGuides(result.styleGuides);
   const reviewBundle = compactReviewBundle(result.review_bundle);
@@ -240,16 +213,6 @@ function compactSetupResponse(result: CoreResult): CoreResult {
           : [],
       }
       : null,
-    beads_init: isRecord(result.beads_init)
-      ? {
-        ok: asJsonObject(result.beads_init).ok !== false,
-        available: asJsonObject(result.beads_init).available,
-        execute: asJsonObject(result.beads_init).execute === true,
-        dry_run: asJsonObject(result.beads_init).dry_run !== false,
-        reason: asOptionalString(asJsonObject(result.beads_init).reason) || null,
-      }
-      : result.beads_init,
-    beads_prefix: compactBeadsPrefix(result.beads_prefix),
     styleGuides,
     styleguide_ids: asStringArray(styleGuides.selected),
     templates: compactTemplateManifest(result.templates),

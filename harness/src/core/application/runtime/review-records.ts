@@ -17,7 +17,7 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { providerEvidenceRequirement, providerFromConfig } from "./quality-gates";
 import { gitRevParse, reviewedShasForTrack } from "./repo-resolution";
 import { asArray } from "./status";
-import { commandExists, controlPlaneSyncSafety, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
+import { controlPlaneSyncSafety, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
 import { findTrack } from "./track-context";
 import { reviewGate } from "./track-mutations";
 
@@ -182,9 +182,7 @@ export function syncControlPlane(root: string, args: RuntimeArgs = {}): CoreResu
   }
   if (mode === "pre") {
     commands.push(runCommand("git", ["pull", "--rebase", remote, branch], { cwd: root }));
-    if (commandExists("bd", root)) commands.push(runCommand("bd", ["dolt", "pull"], { cwd: root }));
   } else if (mode === "post") {
-    if (commandExists("bd", root)) commands.push(runCommand("bd", ["dolt", "push"], { cwd: root }));
     commands.push(runCommand("git", ["push", remote, branch], { cwd: root }));
   } else {
     return { ok: false, error: `Invalid sync mode: ${mode}`, commands };

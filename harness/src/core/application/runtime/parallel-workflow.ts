@@ -243,7 +243,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
     `Source root: ${sourceRoot}`,
     `Worker worktree: ${worktree}`,
     ownedFiles.length > 0 ? `Owned files: ${ownedFiles.join(", ")}` : "Owned files: none declared; inspect the task plan before editing.",
-    "Use only Cadre packets for Cadre, Beads, provider, index, and worker-state mutations.",
+    "Use only Cadre packets for Cadre, provider, index, and worker-state mutations.",
     "Change only the assigned product files unless the task requires a narrowly related test or manifest update.",
     "Run the smallest relevant tests first, then the configured project gate when practical.",
     "Commit the worker worktree changes and return the structured result JSON.",

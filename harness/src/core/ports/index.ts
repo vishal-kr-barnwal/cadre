@@ -31,10 +31,6 @@ export interface TemplateStore {
   json(relativePath: string, fallback: JsonObject): JsonObject;
 }
 
-export interface BeadsGateway {
-  run(root: string, args: string[]): JsonObject;
-}
-
 export interface ProviderGateway {
   mode(root: string, args?: RuntimeArgs): JsonObject;
   evidence(root: string, args?: RuntimeArgs): JsonObject;

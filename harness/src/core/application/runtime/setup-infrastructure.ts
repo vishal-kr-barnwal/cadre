@@ -25,55 +25,9 @@ export function configuredCiProvider(root: string, args: RuntimeArgs = {}): "git
   return provider === "github" || provider === "gitlab" ? provider : null;
 }
 
-export function setupBeads(root: string, args: RuntimeArgs = {}): CoreResult {
-  const available = commandExists("bd", root);
-  const stateDir = path.join(root, ".beads");
-  const initialized = fileExists(stateDir);
-  const command = ["bd", "init", "--non-interactive", "--role", "maintainer"];
-  if (args.execute !== true) {
-    return {
-      ok: true,
-      available,
-      initialized,
-      dry_run: true,
-      planned_command: command,
-      state_path: ".beads",
-    };
-  }
-  if (!available) {
-    return {
-      ok: false,
-      available: false,
-      initialized: false,
-      required: true,
-      error: "Beads CLI (bd) is required for cadre-setup execute and was not found on PATH",
-    };
-  }
-  if (initialized) {
-    return {
-      ok: true,
-      available: true,
-      initialized: true,
-      skipped: true,
-      reason: ".beads already exists",
-      state_path: ".beads",
-    };
-  }
-  const result = runCommand("bd", command.slice(1), { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  return {
-    ok: result.ok,
-    available: true,
-    initialized: result.ok || fileExists(stateDir),
-    command,
-    result,
-    state_path: ".beads",
-  };
-}
-
 export function setupGitattributes(root: string): CoreResult {
   const file = path.join(root, ".gitattributes");
   const required = [
-    ".beads/** merge=ours",
     "cadre/tracks/**/parallel_state.json merge=ours",
   ];
   const existing = fileExists(file) ? fs.readFileSync(file, "utf8") : "";

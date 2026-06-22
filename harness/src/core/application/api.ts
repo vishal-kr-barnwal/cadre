@@ -1,7 +1,5 @@
 export { artifactCatalog, artifactPacket, artifactRender, artifactSync } from "./runtime/artifact-actions";
 export { artifactSchema } from "./runtime/artifact-catalog";
-export { beadsTaskWrite } from "./runtime/beads-task-write";
-export { createBeadsTree } from "./runtime/beads-tree";
 export { collisionScan } from "./runtime/collision";
 export { integrationInventory } from "./runtime/integrations";
 export { mcpReadiness } from "./runtime/mcp-readiness";
@@ -15,7 +13,7 @@ export { repoMap } from "./runtime/repo-map";
 export { implementationPrep } from "./runtime/repo-resolution";
 export { providerEvidence, recordReview, reviewEvidence, syncControlPlane } from "./runtime/review-records";
 export { lspSetup } from "./runtime/setup-infrastructure";
-export { availableWork, beadsSummary, fleetStatus, liveStatus, teamBoard, teamStatus } from "./runtime/status";
+export { availableWork, fleetStatus, liveStatus, teamBoard, teamStatus } from "./runtime/status";
 export { isCadreProjectRoot } from "../infrastructure/runtime/system";
 export { completeTask } from "./runtime/task-completion";
 export { techStackSummary } from "./runtime/tech-stack";

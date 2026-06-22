@@ -31,7 +31,7 @@ const OPTIONAL_CATEGORIES: ReadinessCategory[] = [
     kind: "issue_tracker",
     label: "Issue tracker",
     aliases: ["issue_tracker", "issueTracker", "jira", "linear", "github_issues", "gitlab_issues"],
-    purpose: "Link tracks, Beads tasks, and provider issues without forcing agents through local CLI fallbacks.",
+    purpose: "Link Cadre tracks, native workflow state, and provider issues without forcing agents through local CLI fallbacks.",
     required: false,
     recommended: true,
   },

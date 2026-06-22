@@ -10,7 +10,7 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { compactLines } from "./beads-tree";
+import { compactLines } from "./text-utils";
 import { utcNow } from "../../infrastructure/runtime/json-store";
 import { normalizedText, splitMarkdownSections } from "./markdown-docs";
 import { asArray } from "./status";

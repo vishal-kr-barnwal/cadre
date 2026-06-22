@@ -24,7 +24,6 @@ export function isCadreProjectRoot(root: string): boolean {
     "product.json",
     "tech-stack.json",
     "workflow.json",
-    "beads.json",
     "config.json",
     "repos.json",
   ].some((name) => fileExists(path.join(cadreDir, name))) || fileExists(path.join(cadreDir, "tracks"));
@@ -115,7 +114,6 @@ export function isControlPlaneFile(file: unknown): boolean {
   const normalized = String(file || "").replace(/\\/g, "/").replace(/^\.\//, "");
   if (!normalized) return true;
   if (normalized.startsWith("cadre/")) return true;
-  if (normalized.startsWith(".beads/")) return true;
   if (normalized === ".gitattributes" || normalized === ".gitmodules") return true;
   if (normalized === "cadre-merge-train.gitlab-ci.yml") return true;
   if (normalized === ".gitlab-ci.yml") return true;

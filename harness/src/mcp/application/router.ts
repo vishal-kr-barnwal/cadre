@@ -1,6 +1,6 @@
 import type { JsonObject, RuntimeArgs, TextJsonResult } from "../../types";
 import { asJsonObject, asOptionalString } from "../../guards";
-import { asTextJson, beadsOperationMutates, envelope, syncedEnvelope } from "./envelope";
+import { asTextJson, envelope, syncedEnvelope } from "./envelope";
 import { resourceList, resourceTemplatesList } from "../domain/resource-catalog";
 import { PROTOCOL_VERSION, SERVER_INSTRUCTIONS, TOOLS } from "../domain/tool-catalog";
 import { resourceRead } from "./resources-service";
@@ -39,13 +39,6 @@ function createToolCall(deps: RuntimeDependencies) {
       const root = deps.rootResolver.requireCadreRoot(args);
       if (args.async === true) return asTextJson(envelope({ ok: true, job: deps.jobs.start("complete_task", root, args) }));
       return asTextJson(syncedEnvelope(root, "complete_task", () => deps.core.completeTask(root, { ...args, execute: false })));
-    }
-    if (name === "cadre_beads") {
-      const root = deps.rootResolver.requireCadreRoot(args);
-      if (beadsOperationMutates(args.operation)) {
-        return asTextJson(syncedEnvelope(root, `beads:${args.operation || "unknown"}`, () => deps.core.beadsTaskWrite(root, args)));
-      }
-      return asTextJson(envelope(deps.core.beadsTaskWrite(root, args)));
     }
     if (name === "cadre_job") return asTextJson(jobPacket(deps, args));
     if (name === "cadre_review") return asTextJson(await reviewPacket(deps, args));

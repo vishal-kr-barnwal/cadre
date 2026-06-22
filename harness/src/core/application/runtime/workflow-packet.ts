@@ -11,14 +11,12 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { artifactPacket } from "./artifact-actions";
-import { beadsTaskWrite } from "./beads-task-write";
 import { CoreResult } from "./contracts";
-import { textHash, utcNow } from "../../infrastructure/runtime/json-store";
+import { utcNow } from "../../infrastructure/runtime/json-store";
 import { humanReviewState, packetReviewArtifact } from "./review-bundles";
 import { selectedTrackId } from "./status";
-import { commandExists } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
-import { findTrack, trackContext } from "./track-context";
+import { trackContext } from "./track-context";
 import { metadataPatch, setTrackStatus } from "./track-mutations";
 import { workflowArchive, workflowHandoff, workflowImplement, workflowReview, workflowStatus, workflowValidate } from "./workflow-basic";
 import { workflowNewTrack } from "./workflow-new-track";
@@ -144,24 +142,13 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
             last_status_at: utcNow(),
           },
         });
-        const latestTrack = findTrack(root, trackId);
-        const epic = latestTrack?.metadata.beads_epic;
-        const beads = epic && reason
-          ? beadsTaskWrite(root, {
-            operation: "note",
-            id: epic,
-            note: `Cadre ${status}: ${reason}`,
-            dedupKey: `cadre-flag-${trackId}-${status}-${textHash(reason).slice(0, 12)}`,
-          })
-          : null;
         return {
           ...summary,
-          ok: patch.ok !== false && (!beads || beads.ok !== false),
+          ok: patch.ok !== false,
           dry_run: false,
           track_context: context,
           status_result: statusResult,
           metadata_patch: patch,
-          beads,
           human_review: humanReview,
           review_artifacts: reviewArtifacts,
         };
@@ -172,7 +159,7 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
       return {
         ...workflowSummary(root, "formula", args),
         ok: true,
-        formulas: commandExists("bd", root) ? beadsTaskWrite(root, { operation: "formula_list" }) : { ok: false, available: false },
+        formulas: { ok: true, items: [] },
       };
     default:
       return {

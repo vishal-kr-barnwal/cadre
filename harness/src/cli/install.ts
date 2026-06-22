@@ -156,7 +156,7 @@ function pluginManifest(target: Target, runtime: RuntimePaths): Record<string, u
     homepage: metadata.homepage,
     repository: metadata.repository,
     license: metadata.license,
-    keywords: ["cadre", "context-driven-development", "skills", "beads", "mcp"],
+    keywords: ["cadre", "context-driven-development", "skills", "mcp"],
     skills: "./skills/",
   };
   if (target === "claude") {

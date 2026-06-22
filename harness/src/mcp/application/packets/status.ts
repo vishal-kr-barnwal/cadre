@@ -13,6 +13,5 @@ export function statusPacket(deps: RuntimeDependencies, args: RuntimeArgs): Runt
   if (action === "collisions") return envelope(deps.core.collisionScan(root));
   if (action === "board") return envelope(deps.core.teamBoard(root, args));
   if (action === "fleet") return envelope(deps.core.fleetStatus(root, args));
-  if (action === "beads_summary") return envelope(deps.core.beadsSummary(root));
   return envelope({ ok: false, error: `Unknown cadre_status action: ${action}` });
 }

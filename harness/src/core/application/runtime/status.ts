@@ -11,7 +11,7 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { collisionScan } from "./collision";
-import { BdJsonResult, CoreResult, TrackSummary } from "./contracts";
+import { CoreResult, TrackSummary } from "./contracts";
 import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
 import { trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
@@ -76,18 +76,6 @@ export function teamStatus(root: string): CoreResult {
   };
 }
 
-export function runBdJson(root: string, args: string[]): BdJsonResult {
-  if (!commandExists("bd", root)) return { ok: false, available: false, args, json: null };
-  const result = runCommand("bd", args, { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  let json: unknown = null;
-  try {
-    json = JSON.parse(result.stdout || "null");
-  } catch {
-    // Preserve raw output below.
-  }
-  return { ok: result.ok, available: true, args, json, stdout_tail: result.stdout.slice(-2000), stderr_tail: result.stderr.slice(-2000) };
-}
-
 export function asArray(value: unknown): CoreResult[] {
   if (Array.isArray(value)) return value.filter(isRecord);
   if (isRecord(value) && Array.isArray(value.items)) return value.items.filter(isRecord).map(asJsonObject);
@@ -115,7 +103,7 @@ export function metadataTrackSummary(track: CadreTrack): TrackSummary {
     priority: track.metadata.priority || "medium",
     owner: track.metadata.owner || null,
     reviewer: track.metadata.reviewer || null,
-    beads_epic: track.metadata.beads_epic || null,
+    tags: asStringArray(track.metadata.tags),
     review: track.metadata.review ? asJsonObject(track.metadata.review) : null,
   };
 }
@@ -185,13 +173,10 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
   const identity = gitIdentity(root);
   const scope = args.mine === true ? "mine" : "all";
   const byId = new Map<string, CadreTrack>(tracks.map((track) => [track.track_id, track]));
-  const byEpic = new Map<string, CadreTrack>(
-    tracks
-      .flatMap((track): Array<[string, CadreTrack]> => track.metadata.beads_epic ? [[track.metadata.beads_epic, track]] : [])
-  );
   const wip: CoreResult[] = [];
   const reviewQueue: CoreResult[] = [];
   const blockers: CoreResult[] = [];
+  const handoffs: CoreResult[] = [];
 
   for (const track of tracks) {
     const summary = metadataTrackSummary(track);
@@ -242,51 +227,9 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
     }
   }
 
-  const beads = {
-    available: commandExists("bd", root),
-    wip: null as BdJsonResult | null,
-    handoffs: null as BdJsonResult | null,
-    review_labels: {} as Record<string, BdJsonResult>,
-    blocked_edges: null as BdJsonResult | null,
-  };
-  const handoffs: CoreResult[] = [];
-  if (beads.available) {
-    beads.wip = runBdJson(root, ["list", "--status", "in_progress", "--json"]);
-    beads.handoffs = runBdJson(root, ["list", "--label", "handoff:pending", "--json"]);
-    beads.blocked_edges = runBdJson(root, ["ready", "--json"]);
-    for (const label of ["review:changes", "review:ready", "review:requested"]) {
-      beads.review_labels[label] = runBdJson(root, ["list", "--label", label, "--json"]);
-      const reviewLabel = beads.review_labels[label];
-      for (const issue of asArray(reviewLabel?.json)) {
-        const id = asOptionalString(issue.id) || asOptionalString(issue.issue_id) || asOptionalString(issue.issueId) || asOptionalString(issue.parent) || asOptionalString(issue.epic) || null;
-        const track = id ? byEpic.get(id) : null;
-        if (track) {
-          reviewQueue.push({
-            ...metadataTrackSummary(track),
-            review_state: label.replace("review:", ""),
-            source: "beads_label",
-            bead_id: id,
-          });
-        }
-      }
-    }
-    for (const issue of asArray(beads.handoffs?.json)) {
-      const id = asOptionalString(issue.id) || asOptionalString(issue.issue_id) || asOptionalString(issue.issueId) || null;
-      const track = id ? byEpic.get(id) : null;
-      const assignee = asOptionalString(issue.assignee) || asOptionalString(issue.assigned_to) || null;
-      if (scope === "mine" && assignee !== identity) continue;
-      handoffs.push({
-        track_id: track ? track.track_id : null,
-        bead_id: id,
-        assignee,
-        title: issue.title || issue.summary || null,
-      });
-    }
-  }
-
   const dedupReview = new Map();
   for (const item of reviewQueue) {
-    const key = `${item.track_id}:${item.review_state}:${item.bead_id || ""}`;
+    const key = `${item.track_id}:${item.review_state || ""}`;
     if (!dedupReview.has(key)) dedupReview.set(key, item);
   }
 
@@ -301,7 +244,6 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
     incoming_handoffs: handoffs,
     review_queue: Array.from(dedupReview.values()),
     blockers,
-    beads,
     lsp: lspRuntimeSummary(root),
   };
 }
@@ -353,41 +295,7 @@ export function fleetStatus(root: string, args: RuntimeArgs = {}): CoreResult {
     repos,
     provider: providerMcpAvailability(root, args),
     lsp: lspRuntimeSummary(root),
-    beads_available: commandExists("bd", root),
     collisions: args.includeCollisions === false ? null : collisionScan(root),
-  };
-}
-
-export function beadsSummary(root: string): CoreResult {
-  const available = commandExists("bd", root);
-  if (!available) {
-    return {
-      ok: true,
-      available: false,
-      root,
-      reason: "Beads CLI (bd) is not installed or not on PATH",
-      ready: null,
-      in_progress: null,
-      blocked: null,
-      review: null,
-    };
-  }
-  const ready = runBdJson(root, ["ready", "--json"]);
-  const inProgress = runBdJson(root, ["list", "--status", "in_progress", "--json"]);
-  const blocked = runBdJson(root, ["list", "--status", "blocked", "--json"]);
-  const review = {
-    requested: runBdJson(root, ["list", "--label", "review:requested", "--json"]),
-    ready: runBdJson(root, ["list", "--label", "review:ready", "--json"]),
-    changes: runBdJson(root, ["list", "--label", "review:changes", "--json"]),
-  };
-  return {
-    ok: true,
-    available: true,
-    root,
-    ready,
-    in_progress: inProgress,
-    blocked,
-    review,
   };
 }
 

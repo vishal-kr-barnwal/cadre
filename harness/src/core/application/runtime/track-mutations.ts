@@ -10,8 +10,6 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { beadsTaskWrite } from "./beads-task-write";
-import { extractAssignee, parseCommandJson } from "./beads-tree";
 import { CoreResult } from "./contracts";
 import { fileExists, patchJsonFile, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { trackLockName, withTrackLock } from "../../infrastructure/runtime/locking";
@@ -20,7 +18,7 @@ import { renderPlanMarkdown, trackPlanJsonPath } from "./plan-docs";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { regenIndex } from "./project-maintenance";
 import { asArray } from "./status";
-import { commandExists, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
+import { gitIdentity } from "../../infrastructure/runtime/system";
 import { findTrack } from "./track-context";
 import { holdInfo, listTracks, parsePlanFile } from "./track-schedule";
 
@@ -129,19 +127,13 @@ export function heartbeatTrackUnlocked(root: string, track: CadreTrack, args: Ru
       last_updated: now,
     }), { lock: false });
   }
-  let beads = null;
-  const epic = track.metadata.beads_epic;
-  if (epic && commandExists("bd", root)) {
-    beads = beadsTaskWrite(root, { operation: "update", id: epic, assignee: identity || "" });
-  }
   return {
-    ok: metadataResult.ok && (!stateResult || stateResult.ok) && (!beads || beads.ok),
+    ok: metadataResult.ok && (!stateResult || stateResult.ok),
     track_id: track.track_id,
     owner: identity,
     heartbeat_at: now,
     metadata: metadataResult,
     state: stateResult,
-    beads,
   };
 }
 
@@ -162,46 +154,6 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
     return { ok: false, claimed: false, reason: "foreign-held", held_by: heldBy, hold };
   }
 
-  const commands: CommandResult[] = [];
-  if (track.metadata.beads_epic) {
-    if (!commandExists("bd", root)) {
-      return { ok: false, claimed: false, error: "Beads CLI (bd) is required but was not found" };
-    }
-    const escapedIdentity = identity.replace(/'/g, "''");
-    const escapedEpic = String(track.metadata.beads_epic).replace(/'/g, "''");
-    const sql =
-      `UPDATE issues SET assignee='${escapedIdentity}' ` +
-      `WHERE id='${escapedEpic}' AND (` +
-      `assignee IS NULL OR assignee='' OR assignee='${escapedIdentity}' ` +
-      `OR updated_at < datetime('now','-30 minutes'))`;
-    commands.push(runCommand("bd", ["sql", sql], { cwd: root }));
-    const last = commands[commands.length - 1];
-    if (!last || !last.ok) return { ok: false, claimed: false, error: "Beads claim failed", commands };
-    const verify = runCommand("bd", ["show", track.metadata.beads_epic, "--json"], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-    commands.push(verify);
-    if (!verify.ok) return { ok: false, claimed: false, error: "Beads claim verification failed", commands };
-    const assignedTo = extractAssignee(parseCommandJson(verify));
-    if (!assignedTo) {
-      return {
-        ok: false,
-        claimed: false,
-        reason: "claim-unverified",
-        error: "Beads claim verification did not expose an assignee",
-        commands,
-      };
-    }
-    if (assignedTo !== identity) {
-      return {
-        ok: false,
-        claimed: false,
-        reason: "foreign-held",
-        held_by: assignedTo,
-        hold,
-        commands,
-      };
-    }
-  }
-
   const topology = loadTopology(root);
   const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
     metadata.owner = identity;
@@ -217,7 +169,7 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
     }
     return metadata;
   }, { lock: false });
-  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult, commands };
+  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult };
   const statePath = path.join(track.dir, "implement_state.json");
   writeJson(statePath, {
     status: "starting",
@@ -232,7 +184,6 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
     owner: identity,
     previous_hold: hold,
     metadata: metadataResult,
-    commands,
   };
 }
 
@@ -341,8 +292,6 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
       track.plan_path,
       withGeneratedMarker(path.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
     );
-    const metadataValue = asJsonObject(metadata.value);
-    const beadsTasks = asJsonObject(metadataValue.beads_tasks);
     return {
       ok: true,
       track_id: track.track_id,
@@ -350,7 +299,6 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
       line: task.line,
       status: args.status || "completed",
       commit_sha: commitSha || null,
-      beads_task_id: asOptionalString(beadsTasks[task.task_key]) || null,
       metadata,
       plan_json: planPatch,
     };

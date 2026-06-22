@@ -1,7 +1,5 @@
 export * from "./artifact-actions";
 export * from "./artifact-catalog";
-export * from "./beads-task-write";
-export * from "./beads-tree";
 export * from "./collision";
 export * from "./contracts";
 export * from "../../infrastructure/runtime/coverage";
@@ -28,6 +26,7 @@ export * from "./status";
 export * from "../../infrastructure/runtime/system";
 export * from "./task-completion";
 export * from "./tech-stack";
+export * from "./text-utils";
 export * from "./track-context";
 export * from "./track-mutations";
 export * from "./track-schedule";
