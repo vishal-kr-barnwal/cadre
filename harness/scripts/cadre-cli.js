@@ -136,7 +136,7 @@ function pluginManifest(target, runtime) {
     name: PACKAGE_PLUGIN_NAME,
     version: metadata.version,
     description: metadata.description,
-    author: { name: "Vishal Barnwal", url: "https://github.com/vishal-kr-barnwal" },
+    author: { name: "Vishal Kumar", url: "https://github.com/vishal-kr-barnwal" },
     homepage: metadata.homepage,
     repository: metadata.repository,
     license: metadata.license,
@@ -153,7 +153,7 @@ function pluginManifest(target, runtime) {
       displayName: PACKAGE_DISPLAY_NAME,
       shortDescription: "MCP-first planning, tracks, reviews, and packet tools.",
       longDescription: "Cadre packages context-driven development workflows for Codex through one global MCP runtime.",
-      developerName: "Vishal Barnwal",
+      developerName: "Vishal Kumar",
       category: "Productivity",
       capabilities: ["Read", "Write", "Interactive"],
       defaultPrompt: ["Set up this repo with Cadre.", "Show Cadre team status.", "Review the current Cadre track."],
@@ -188,14 +188,14 @@ function marketplace(target, pluginRoot, runtime) {
   }
   return {
     name: PACKAGE_PLUGIN_NAME,
-    owner: { name: "Vishal Barnwal" },
+    owner: { name: "Vishal Kumar" },
     description: "Cadre MCP-first workflows for Claude Code.",
     plugins: [{
       name: PACKAGE_PLUGIN_NAME,
       source: pluginRoot,
       description: metadata.description,
       version: metadata.version,
-      author: { name: "Vishal Barnwal" },
+      author: { name: "Vishal Kumar" },
       category: "productivity",
       tags: ["cadre", "skills", "mcp", "context-driven-development"]
     }]
