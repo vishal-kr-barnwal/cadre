@@ -33,20 +33,20 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/cadre-core.ts
 var cadre_core_exports = {};
 __export(cadre_core_exports, {
+  appendCadreEvent: () => appendCadreEvent,
+  appendCadreMessage: () => appendCadreMessage,
   artifactCatalog: () => artifactCatalog,
   artifactPacket: () => artifactPacket,
   artifactRender: () => artifactRender,
   artifactSchema: () => artifactSchema,
   artifactSync: () => artifactSync,
   availableWork: () => availableWork,
-  beadsSummary: () => beadsSummary,
-  beadsTaskWrite: () => beadsTaskWrite,
   claimTrack: () => claimTrack,
   collisionScan: () => collisionScan,
   completeTask: () => completeTask,
-  createBeadsTree: () => createBeadsTree,
   dependencyGraph: () => dependencyGraph,
   doctor: () => doctor,
+  ensureNativeState: () => ensureNativeState,
   fleetStatus: () => fleetStatus,
   heartbeatTrack: () => heartbeatTrack,
   implementationPrep: () => implementationPrep,
@@ -60,6 +60,7 @@ __export(cadre_core_exports, {
   lspSetup: () => lspSetup,
   mcpReadiness: () => mcpReadiness,
   metadataPatch: () => metadataPatch,
+  nativeStateSummary: () => nativeStateSummary,
   parallelWorkflow: () => parallelWorkflow,
   parsePlanFile: () => parsePlanFile,
   parsePlanJson: () => parsePlanJson,
@@ -69,6 +70,8 @@ __export(cadre_core_exports, {
   polyrepoPreflight: () => polyrepoPreflight,
   prCiStatus: () => prCiStatus,
   providerEvidence: () => providerEvidence,
+  readCadreEvents: () => readCadreEvents,
+  readCadreMessages: () => readCadreMessages,
   recordParallelWorker: () => recordParallelWorker,
   recordReview: () => recordReview,
   recordTaskResult: () => recordTaskResult,
@@ -86,6 +89,7 @@ __export(cadre_core_exports, {
   testCoverage: () => testCoverage,
   testImpact: () => testImpact,
   trackContext: () => trackContext,
+  workflowFormula: () => workflowFormula,
   workflowPacket: () => workflowPacket,
   workspaceDiagnostics: () => workspaceDiagnostics,
   workspaceHealth: () => workspaceHealth,
@@ -94,8 +98,8 @@ __export(cadre_core_exports, {
 module.exports = __toCommonJS(cadre_core_exports);
 
 // src/core/application/runtime/artifact-actions.ts
-var import_node_fs13 = __toESM(require("node:fs"));
-var import_node_path28 = __toESM(require("node:path"));
+var import_node_fs14 = __toESM(require("node:fs"));
+var import_node_path27 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -130,8 +134,8 @@ function errorCode(error) {
 }
 
 // src/core/application/runtime/artifact-catalog.ts
-var import_node_fs12 = __toESM(require("node:fs"));
-var import_node_path27 = __toESM(require("node:path"));
+var import_node_fs13 = __toESM(require("node:fs"));
+var import_node_path26 = __toESM(require("node:path"));
 
 // src/core/infrastructure/runtime/json-store.ts
 var import_node_fs2 = __toESM(require("node:fs"));
@@ -160,7 +164,6 @@ function isCadreProjectRoot(root) {
     "product.json",
     "tech-stack.json",
     "workflow.json",
-    "beads.json",
     "config.json",
     "repos.json"
   ].some((name) => fileExists(import_node_path.default.join(cadreDir, name))) || fileExists(import_node_path.default.join(cadreDir, "tracks"));
@@ -237,7 +240,6 @@ function isControlPlaneFile(file) {
   const normalized = String(file || "").replace(/\\/g, "/").replace(/^\.\//, "");
   if (!normalized) return true;
   if (normalized.startsWith("cadre/")) return true;
-  if (normalized.startsWith(".beads/")) return true;
   if (normalized === ".gitattributes" || normalized === ".gitmodules") return true;
   if (normalized === "cadre-merge-train.gitlab-ci.yml") return true;
   if (normalized === ".gitlab-ci.yml") return true;
@@ -518,10 +520,10 @@ function appendJsonl(file, value) {
 }
 
 // src/core/application/runtime/plan-docs.ts
-var import_node_path26 = __toESM(require("node:path"));
+var import_node_path25 = __toESM(require("node:path"));
 
 // src/core/application/runtime/status.ts
-var import_node_path25 = __toESM(require("node:path"));
+var import_node_path24 = __toESM(require("node:path"));
 
 // src/core/infrastructure/runtime/project-config.ts
 var import_node_path4 = __toESM(require("node:path"));
@@ -673,8 +675,8 @@ function parseCoveragePercent(text) {
 }
 
 // src/core/application/runtime/track-schedule.ts
-var import_node_fs11 = __toESM(require("node:fs"));
-var import_node_path24 = __toESM(require("node:path"));
+var import_node_fs12 = __toESM(require("node:fs"));
+var import_node_path23 = __toESM(require("node:path"));
 
 // src/core/infrastructure/runtime/coverage.ts
 var import_node_fs3 = __toESM(require("node:fs"));
@@ -772,10 +774,10 @@ function staleInfo(value, now = Date.now()) {
 }
 
 // src/core/application/runtime/repo-resolution.ts
-var import_node_path23 = __toESM(require("node:path"));
+var import_node_path22 = __toESM(require("node:path"));
 
 // src/core/application/runtime/planning.ts
-var import_node_path20 = __toESM(require("node:path"));
+var import_node_path19 = __toESM(require("node:path"));
 
 // src/lsp/language-registry.ts
 var import_node_fs4 = __toESM(require("node:fs"));
@@ -788,7 +790,6 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
   ".hg",
   ".svn",
-  ".beads",
   ".worktrees",
   ".agents",
   ".claude",
@@ -971,15 +972,6 @@ var import_node_path8 = __toESM(require("node:path"));
 function findTrack(root, trackId) {
   return listTracks(root).find((item) => item.track_id === trackId) || null;
 }
-function priorityRank(priority) {
-  const ranks = {
-    critical: 0,
-    high: 1,
-    medium: 2,
-    low: 3
-  };
-  return ranks[String(priority || "medium").toLowerCase()] ?? 2;
-}
 function trackContext(root, trackId) {
   const track = findTrack(root, trackId);
   if (!track) return { ok: false, error: `Track not found: ${trackId}` };
@@ -1031,8 +1023,7 @@ function trackContext(root, trackId) {
       metadata_path: import_node_path8.default.relative(root, track.metadata_path || import_node_path8.default.join(track.dir, "metadata.json")),
       plan_path: import_node_path8.default.relative(root, track.plan_path),
       spec_path: import_node_path8.default.relative(root, track.spec_path),
-      beads_epic: track.metadata.beads_epic || null,
-      beads_tasks: track.metadata.beads_tasks || {},
+      tags: asStringArray(track.metadata.tags),
       review: track.metadata.review || null,
       last_coverage: track.metadata.last_coverage ?? null
     },
@@ -1044,11 +1035,11 @@ function trackContext(root, trackId) {
 }
 
 // src/core/application/runtime/review-records.ts
-var import_node_path17 = __toESM(require("node:path"));
+var import_node_path16 = __toESM(require("node:path"));
 
 // src/core/application/runtime/quality-gates.ts
-var import_node_fs8 = __toESM(require("node:fs"));
-var import_node_path16 = __toESM(require("node:path"));
+var import_node_fs9 = __toESM(require("node:fs"));
+var import_node_path15 = __toESM(require("node:path"));
 
 // src/core/application/runtime/mcp-readiness.ts
 var OPTIONAL_CATEGORIES = [
@@ -1064,7 +1055,7 @@ var OPTIONAL_CATEGORIES = [
     kind: "issue_tracker",
     label: "Issue tracker",
     aliases: ["issue_tracker", "issueTracker", "jira", "linear", "github_issues", "gitlab_issues"],
-    purpose: "Link tracks, Beads tasks, and provider issues without forcing agents through local CLI fallbacks.",
+    purpose: "Link Cadre tracks, native workflow state, and provider issues without forcing agents through local CLI fallbacks.",
     required: false,
     recommended: true
   },
@@ -1434,7 +1425,7 @@ function isIgnoredRepoMapFile(file) {
   if (normalized.startsWith(".claude-plugin/")) return true;
   if (normalized.startsWith("plugins/cadre/")) return true;
   if (normalized.startsWith("plugins/cadre-claude/")) return true;
-  return normalized.split("/").some((part) => [".git", ".beads", "node_modules", "dist", "build", "coverage"].includes(part));
+  return normalized.split("/").some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
 }
 function selectedRepoNames(args = {}) {
   const values = [
@@ -1586,8 +1577,8 @@ function repoMap(root, args = {}) {
 }
 
 // src/core/application/runtime/track-mutations.ts
-var import_node_fs7 = __toESM(require("node:fs"));
-var import_node_path15 = __toESM(require("node:path"));
+var import_node_fs8 = __toESM(require("node:fs"));
+var import_node_path14 = __toESM(require("node:path"));
 
 // src/core/domain/track-status.ts
 var STATUS_MARKERS = {
@@ -1599,8 +1590,1064 @@ var STATUS_MARKERS = {
 };
 var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
 
-// src/core/application/runtime/beads-tree.ts
-var import_node_path14 = __toESM(require("node:path"));
+// src/core/application/runtime/native-state.ts
+var import_node_fs7 = __toESM(require("node:fs"));
+var import_node_path13 = __toESM(require("node:path"));
+function nativeStatePaths(root) {
+  return {
+    events: import_node_path13.default.join(root, "cadre", "events.jsonl"),
+    formulas: import_node_path13.default.join(root, "cadre", "formulas"),
+    operations: import_node_path13.default.join(root, "cadre", "operations"),
+    messages: import_node_path13.default.join(root, "cadre", "messages"),
+    inbox: import_node_path13.default.join(root, "cadre", "messages", "inbox.jsonl"),
+    outbox: import_node_path13.default.join(root, "cadre", "messages", "outbox.jsonl"),
+    wisps: import_node_path13.default.join(root, "cadre", "local", "wisps")
+  };
+}
+function compactStamp(value) {
+  return value.replace(/[^0-9A-Za-z]+/g, "").slice(0, 16);
+}
+function nativeId(prefix, payload) {
+  const recordedAt = asOptionalString(payload.recorded_at) || utcNow();
+  return `${prefix}_${compactStamp(recordedAt)}_${textHash(JSON.stringify(payload)).slice(0, 12)}`;
+}
+function readJsonlObjects(file, limit = 200) {
+  if (!fileExists(file)) return [];
+  const lines = import_node_fs7.default.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
+  const selected = limit > 0 ? lines.slice(-limit) : lines;
+  const out = [];
+  for (const line of selected) {
+    try {
+      out.push(asJsonObject(JSON.parse(line)));
+    } catch {
+    }
+  }
+  return out;
+}
+function countJsonlLines(file) {
+  if (!fileExists(file)) return 0;
+  return import_node_fs7.default.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).length;
+}
+function ensureCadreLocalIgnored(root) {
+  const cadreDir = import_node_path13.default.join(root, "cadre");
+  const ignorePath = import_node_path13.default.join(cadreDir, ".gitignore");
+  import_node_fs7.default.mkdirSync(cadreDir, { recursive: true });
+  const current = fileExists(ignorePath) ? import_node_fs7.default.readFileSync(ignorePath, "utf8") : "";
+  const lines = current.split(/\r?\n/).filter(Boolean);
+  if (!lines.includes("/local/")) {
+    lines.push("/local/");
+    import_node_fs7.default.writeFileSync(ignorePath, `${lines.join("\n")}
+`);
+    return import_node_path13.default.relative(root, ignorePath);
+  }
+  return null;
+}
+function ensureNativeState(root) {
+  const paths = nativeStatePaths(root);
+  for (const dir of [
+    asOptionalString(paths.formulas),
+    asOptionalString(paths.operations),
+    asOptionalString(paths.messages),
+    asOptionalString(paths.wisps)
+  ].filter((value) => Boolean(value))) {
+    import_node_fs7.default.mkdirSync(dir, { recursive: true });
+  }
+  const ignore_path = ensureCadreLocalIgnored(root);
+  return {
+    ok: true,
+    paths: {
+      events: import_node_path13.default.relative(root, String(paths.events)),
+      formulas: import_node_path13.default.relative(root, String(paths.formulas)),
+      operations: import_node_path13.default.relative(root, String(paths.operations)),
+      messages: import_node_path13.default.relative(root, String(paths.messages)),
+      wisps: import_node_path13.default.relative(root, String(paths.wisps))
+    },
+    ignore_path
+  };
+}
+function appendCadreEvent(root, event) {
+  ensureNativeState(root);
+  const recorded_at = asOptionalString(event.recorded_at) || utcNow();
+  const kind = asOptionalString(event.kind || event.type) || "event";
+  const actor = asOptionalString(event.actor) || gitIdentity(root) || null;
+  const entry = {
+    ...event,
+    version: 1,
+    schema: "cadre.event.v1",
+    id: asOptionalString(event.id) || nativeId("evt", { ...event, recorded_at, kind }),
+    kind,
+    recorded_at,
+    actor
+  };
+  const file = import_node_path13.default.join(root, "cadre", "events.jsonl");
+  appendJsonl(file, entry);
+  return { ok: true, path: import_node_path13.default.relative(root, file), event: entry };
+}
+function readCadreEvents(root, limit = 50) {
+  return readJsonlObjects(import_node_path13.default.join(root, "cadre", "events.jsonl"), limit);
+}
+function appendCadreMessage(root, box, message) {
+  ensureNativeState(root);
+  const recorded_at = asOptionalString(message.recorded_at) || utcNow();
+  const direction = box === "outbox" ? "outgoing" : "incoming";
+  const entry = {
+    ...message,
+    version: 1,
+    schema: "cadre.message.v1",
+    id: asOptionalString(message.id) || nativeId(`msg_${box}`, { ...message, recorded_at, direction }),
+    box,
+    direction,
+    status: asOptionalString(message.status) || "pending",
+    recorded_at,
+    from: asOptionalString(message.from) || gitIdentity(root) || null
+  };
+  const file = import_node_path13.default.join(root, "cadre", "messages", `${box}.jsonl`);
+  appendJsonl(file, entry);
+  return { ok: true, path: import_node_path13.default.relative(root, file), message: entry };
+}
+function readCadreMessages(root, box, limit = 50) {
+  return readJsonlObjects(import_node_path13.default.join(root, "cadre", "messages", `${box}.jsonl`), limit);
+}
+function nativeStateSummary(root) {
+  const paths = nativeStatePaths(root);
+  return {
+    ok: true,
+    paths: {
+      events: import_node_path13.default.relative(root, String(paths.events)),
+      inbox: import_node_path13.default.relative(root, String(paths.inbox)),
+      outbox: import_node_path13.default.relative(root, String(paths.outbox)),
+      operations: import_node_path13.default.relative(root, String(paths.operations)),
+      formulas: import_node_path13.default.relative(root, String(paths.formulas)),
+      wisps: import_node_path13.default.relative(root, String(paths.wisps))
+    },
+    counts: {
+      events: countJsonlLines(String(paths.events)),
+      inbox: countJsonlLines(String(paths.inbox)),
+      outbox: countJsonlLines(String(paths.outbox))
+    },
+    recent_events: readCadreEvents(root, 8),
+    recent_inbox: readCadreMessages(root, "inbox", 8),
+    recent_outbox: readCadreMessages(root, "outbox", 8)
+  };
+}
+
+// src/core/application/runtime/track-mutations.ts
+function reviewGate(root, trackId, options = {}) {
+  const track = listTracks(root).find((item) => item.track_id === trackId);
+  if (!track) {
+    return { ok: false, track_id: trackId, reasons: [`Track not found: ${trackId}`] };
+  }
+  const config = loadTopology(root).config || {};
+  const review = track.metadata.review || null;
+  const reasons = [];
+  const warnings = [];
+  if (!review) {
+    if (config.allow_unreviewed_ship === true) {
+      warnings.push("No recorded review verdict; allowed by config.allow_unreviewed_ship");
+    } else {
+      reasons.push("No recorded review verdict");
+    }
+  } else {
+    if (review.verdict !== "approved") {
+      reasons.push(`Review verdict is ${review.verdict || "absent"}`);
+    }
+    if ((review.blocking_count || 0) > 0) {
+      reasons.push(`Review has ${review.blocking_count} blocking finding(s)`);
+    }
+    if (config.require_second_reviewer === true && review.self_reviewed === true) {
+      reasons.push("Self-review is not sufficient when require_second_reviewer is true");
+    }
+    const hasPinnedReview = Boolean(review.reviewed_sha) || Boolean(review.reviewed_shas && Object.values(review.reviewed_shas).some(Boolean));
+    if (!hasPinnedReview) {
+      if (config.allow_unpinned_review_ship === true) {
+        warnings.push("Review does not record reviewed_sha/reviewed_shas; allowed by config.allow_unpinned_review_ship");
+      } else {
+        reasons.push("Review does not record reviewed_sha/reviewed_shas");
+      }
+    } else if (review.reviewed_sha && options.headSha && options.headSha !== review.reviewed_sha) {
+      reasons.push(`Head ${options.headSha} differs from reviewed_sha ${review.reviewed_sha}; re-review required`);
+    }
+    if (review.reviewed_shas && options.headShas && typeof options.headShas === "object") {
+      for (const [repo, reviewedSha] of Object.entries(review.reviewed_shas)) {
+        const headSha = options.headShas[repo];
+        if (typeof reviewedSha === "string" && typeof headSha === "string" && headSha !== reviewedSha) {
+          reasons.push(`Repo ${repo} head ${headSha} differs from reviewed_shas.${repo} ${reviewedSha}; re-review required`);
+        }
+      }
+    }
+  }
+  return {
+    ok: reasons.length === 0,
+    track_id: track.track_id,
+    review,
+    reasons,
+    warnings
+  };
+}
+function metadataPatch(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const patch = args.patch && typeof args.patch === "object" ? args.patch : null;
+  if (!patch) return { ok: false, error: "patch object is required" };
+  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }), {
+    root,
+    lockName: trackLockName(track.track_id)
+  });
+  return {
+    ok: result.ok,
+    track_id: track.track_id,
+    metadata_path: import_node_path14.default.relative(root, track.metadata_path),
+    patch_keys: Object.keys(patch).sort(),
+    result,
+    event: result.ok ? appendCadreEvent(root, {
+      kind: "metadata_updated",
+      workflow: "metadata_patch",
+      track_id: track.track_id,
+      patch_keys: Object.keys(patch).sort(),
+      tags: asStringArray(asJsonObject(patch).tags),
+      depends_on: asStringArray(asJsonObject(patch).depends_on)
+    }) : null
+  };
+}
+function heartbeatTrack(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => heartbeatTrackUnlocked(root, track, args));
+}
+function heartbeatTrackUnlocked(root, track, args = {}) {
+  const identity = args.identity || gitIdentity(root) || track.metadata.owner || null;
+  const now = asOptionalString(args.now) || utcNow();
+  const topology = loadTopology(root);
+  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
+    if (topology.config.sync_mode === "shared") {
+      const existingLease = asJsonObject(metadata.lease);
+      metadata.lease = {
+        ...existingLease,
+        owner: identity,
+        acquired_at: asOptionalString(existingLease.acquired_at) || now,
+        heartbeat_at: now
+      };
+    }
+    metadata.owner = metadata.owner || identity;
+    metadata.updated_at = now;
+    return metadata;
+  }, { lock: false });
+  const statePath = import_node_path14.default.join(track.dir, "implement_state.json");
+  let stateResult = null;
+  if (fileExists(statePath)) {
+    stateResult = patchJsonFile(statePath, (state) => ({
+      ...state,
+      owner: state.owner || identity,
+      last_updated: now
+    }), { lock: false });
+  }
+  return {
+    ok: metadataResult.ok && (!stateResult || stateResult.ok),
+    track_id: track.track_id,
+    owner: identity,
+    heartbeat_at: now,
+    metadata: metadataResult,
+    state: stateResult
+  };
+}
+function claimTrack(root, trackId, options = {}) {
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  return withTrackLock(root, track.track_id, () => claimTrackUnlocked(root, track, options));
+}
+function claimTrackUnlocked(root, track, options = {}) {
+  const identity = options.identity || gitIdentity(root);
+  if (!identity) return { ok: false, error: "No git identity found for claim" };
+  const now = utcNow();
+  const hold = holdInfo(track);
+  const heldBy = hold.lease_owner || hold.owner;
+  const stale = hold.lease_stale || hold.state_stale || !heldBy || heldBy === identity;
+  if (heldBy && heldBy !== identity && !stale && options.takeover !== true) {
+    return { ok: false, claimed: false, reason: "foreign-held", held_by: heldBy, hold };
+  }
+  const topology = loadTopology(root);
+  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
+    metadata.owner = identity;
+    metadata.updated_at = now;
+    if (topology.config.sync_mode === "shared") {
+      const existingLease = asJsonObject(metadata.lease);
+      metadata.lease = {
+        ...existingLease,
+        owner: identity,
+        acquired_at: existingLease.owner === identity ? asOptionalString(existingLease.acquired_at) || now : now,
+        heartbeat_at: now
+      };
+    }
+    return metadata;
+  }, { lock: false });
+  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult };
+  const statePath = import_node_path14.default.join(track.dir, "implement_state.json");
+  writeJson(statePath, {
+    status: "starting",
+    owner: identity,
+    track_id: track.track_id,
+    last_updated: now
+  });
+  const event = appendCadreEvent(root, {
+    kind: "track_claimed",
+    workflow: "claim",
+    track_id: track.track_id,
+    owner: identity,
+    previous_owner: heldBy || null
+  });
+  return {
+    ok: true,
+    claimed: true,
+    track_id: track.track_id,
+    owner: identity,
+    previous_hold: hold,
+    metadata: metadataResult,
+    event
+  };
+}
+function setTrackStatus(root, trackId, status) {
+  if (!VALID_STATUSES.has(status)) {
+    return {
+      ok: false,
+      error: `Invalid status: ${status}`,
+      valid_statuses: Array.from(VALID_STATUSES)
+    };
+  }
+  const track = listTracks(root).find((item) => item.track_id === trackId);
+  if (!track) {
+    return { ok: false, error: `Track not found: ${trackId}` };
+  }
+  return withTrackLock(root, trackId, () => {
+    const metadata = patchJsonFile(track.metadata_path, (current) => ({
+      ...current,
+      status
+    }), { lock: false });
+    if (!metadata.ok) {
+      return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
+    }
+    const regen = regenIndex(root);
+    const event = appendCadreEvent(root, {
+      kind: "status_changed",
+      workflow: "set_status",
+      track_id: trackId,
+      status
+    });
+    return {
+      ok: Boolean(regen.ok),
+      track_id: trackId,
+      status,
+      metadata,
+      regen,
+      event
+    };
+  });
+}
+function recordTaskResultUnlocked(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  const plan = parsePlanFile(track.plan_path);
+  const phaseIndex = Number(args.phaseIndex);
+  const taskIndex = Number(args.taskIndex);
+  const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
+  const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
+  if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
+  const planJsonPath = trackPlanJsonPath(track);
+  const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
+  const recordedAt = utcNow();
+  const lastTaskResult = {
+    phase_index: phaseIndex,
+    task_index: taskIndex,
+    task_key: task.task_key,
+    status: args.status || "completed",
+    commit_sha: commitSha || null,
+    repo: args.repo || task.repo || null,
+    working_root: args.workingRoot || null,
+    recorded_at: recordedAt
+  };
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    if (typeof args.coverage === "number") current.last_coverage = args.coverage;
+    if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
+    if (isRecord(args.manualVerificationEvidence)) current.last_manual_verification_result = asJsonObject(args.manualVerificationEvidence);
+    current.last_task_result = lastTaskResult;
+    return current;
+  });
+  if (!metadata.ok) {
+    return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  }
+  if (fileExists(planJsonPath)) {
+    const planPatch = patchJsonFile(planJsonPath, (current) => {
+      const phases = asArray(current.phases).map((rawPhase) => {
+        const currentPhase = asJsonObject(rawPhase);
+        if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
+        return {
+          ...currentPhase,
+          tasks: asArray(currentPhase.tasks).map((rawTask) => {
+            const currentTask = asJsonObject(rawTask);
+            if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
+            const commitShas = Array.from(/* @__PURE__ */ new Set([
+              ...asStringArray(currentTask.commit_shas),
+              ...commitSha ? [commitSha.slice(0, 12)] : []
+            ]));
+            return {
+              ...currentTask,
+              status: args.status || "completed",
+              commit_shas: commitShas,
+              completion_evidence: {
+                ...asJsonObject(currentTask.completion_evidence),
+                commit_sha: commitSha || null,
+                repo: args.repo || task.repo || null,
+                working_root: args.workingRoot || null,
+                coverage: typeof args.coverage === "number" ? args.coverage : null,
+                recorded_at: recordedAt,
+                ...isRecord(args.manualVerificationEvidence) ? { manual_verification: asJsonObject(args.manualVerificationEvidence) } : {}
+              }
+            };
+          })
+        };
+      });
+      return { ...current, phases, updated_at: recordedAt };
+    });
+    if (!planPatch.ok) {
+      return { ok: false, track_id: track.track_id, stage: "plan_json_patch", metadata, plan_json: planPatch };
+    }
+    const nextPlan = asJsonObject(planPatch.value);
+    import_node_fs8.default.writeFileSync(
+      track.plan_path,
+      withGeneratedMarker(import_node_path14.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+    );
+    return {
+      ok: true,
+      track_id: track.track_id,
+      task_key: task.task_key,
+      line: task.line,
+      status: args.status || "completed",
+      commit_sha: commitSha || null,
+      event: appendCadreEvent(root, {
+        kind: "task_result_recorded",
+        workflow: "record_task_result",
+        track_id: track.track_id,
+        phase_index: phaseIndex,
+        task_index: taskIndex,
+        task_key: task.task_key,
+        status: args.status || "completed",
+        commit_sha: commitSha || null,
+        repo: args.repo || task.repo || null
+      }),
+      metadata,
+      plan_json: planPatch
+    };
+  }
+  return {
+    ok: false,
+    track_id: track.track_id,
+    stage: "missing_plan_json",
+    error: `Missing canonical plan JSON: ${planJsonPath}`,
+    metadata
+  };
+}
+function recordTaskResult(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  if (args.lock === false) return recordTaskResultUnlocked(root, args);
+  return withTrackLock(root, track.track_id, () => recordTaskResultUnlocked(root, { ...args, lock: false }));
+}
+
+// src/core/application/runtime/quality-gates.ts
+function testCoverage(root, args = {}) {
+  let track = null;
+  let task = null;
+  let workingRoot = {
+    repo: args.repo || ".",
+    path: args.workingRoot ? import_node_path15.default.resolve(root, args.workingRoot) : root,
+    source: args.workingRoot ? "argument.workingRoot" : "project-root"
+  };
+  if (args.trackId) {
+    track = findTrack(root, args.trackId);
+    if (!track) {
+      return { ok: false, available: false, error: `Track not found: ${args.trackId}` };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      const plan = parsePlanFile(track.plan_path);
+      const phase = (plan.phases || []).find((item) => item.phase_index === Number(args.phaseIndex));
+      task = phase?.tasks.find((item) => item.task_index === Number(args.taskIndex)) || null;
+    }
+    workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+    if (isWorkingRootError(workingRoot)) {
+      return {
+        ok: false,
+        available: false,
+        stage: "polyrepo_repo_resolution",
+        working_root: workingRoot,
+        reason: workingRoot.error
+      };
+    }
+  }
+  const coverageRun = runCoverage(root, args, workingRoot.path);
+  if (!coverageRun.available) return coverageRun;
+  const { command, coverage } = coverageRun;
+  let task_result = null;
+  let metadata = null;
+  if (track) {
+    const writeCoverage = () => {
+      metadata = patchJsonFile(track.metadata_path, (current) => {
+        current.last_test_run = {
+          command,
+          cwd: coverageRun.cwd || workingRoot.path,
+          ok: coverageRun.ok,
+          status: coverageRun.status,
+          signal: coverageRun.signal,
+          coverage,
+          measured_at: utcNow()
+        };
+        if (typeof coverage === "number") current.last_coverage = coverage;
+        return current;
+      }, { lock: false });
+      return metadata;
+    };
+    const metadataWrite = withTrackLock(root, track.track_id, writeCoverage);
+    if (!metadataWrite.ok) return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_lock", metadata: metadataWrite };
+    const metadataResult = metadata ?? metadataWrite;
+    if (!metadataResult.ok) {
+      return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata: metadataResult };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      task_result = recordTaskResult(root, {
+        trackId: args.trackId,
+        phaseIndex: args.phaseIndex,
+        taskIndex: args.taskIndex,
+        status: args.status || (coverageRun.ok ? "completed" : "blocked"),
+        commitSha: args.commitSha,
+        coverage,
+        repo: workingRoot.repo,
+        workingRoot: import_node_path15.default.relative(root, workingRoot.path) || "."
+      });
+    }
+  }
+  return {
+    ok: coverageRun.ok,
+    available: true,
+    command,
+    cwd: coverageRun.cwd,
+    status: coverageRun.status,
+    signal: coverageRun.signal,
+    coverage,
+    coverage_source: coverageRun.coverage_source,
+    timed_out: coverageRun.signal === "SIGTERM" || coverageRun.signal === "SIGKILL",
+    stdout_tail: coverageRun.stdout_tail,
+    stderr_tail: coverageRun.stderr_tail,
+    working_root: workingRoot,
+    metadata,
+    task_result
+  };
+}
+function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
+  const explicit = args.machineCommand || args.machine_command || args.command;
+  if (explicit) return String(explicit);
+  const config = loadTopology(root).config || {};
+  for (const key of [
+    "review_machine_gate_command",
+    "machine_gate_command",
+    "review_check_command",
+    "typecheck_command",
+    "build_command",
+    "check_command"
+  ]) {
+    if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
+  }
+  const pkg = loadPackageJson(workingRoot);
+  const scripts = pkg ? asJsonObject(pkg.scripts) : {};
+  if (Object.keys(scripts).length > 0) {
+    for (const name of ["typecheck", "check", "build", "lint"]) {
+      if (scripts[name]) {
+        if (fileExists(import_node_path15.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(import_node_path15.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
+        return `npm run ${name}`;
+      }
+    }
+  }
+  return null;
+}
+function runMachineGate(root, args = {}, workingRoot = root) {
+  const command = configuredMachineGateCommand(root, args, workingRoot);
+  if (!command) {
+    return {
+      ok: true,
+      available: false,
+      reason: "No review machine-gate command configured or discovered",
+      hints: [
+        "Pass { machineCommand } explicitly",
+        "Set cadre/config.json review_machine_gate_command",
+        "Add a package script named typecheck, check, build, or lint"
+      ]
+    };
+  }
+  const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1e3);
+  const result = runCommand(command, [], {
+    cwd: workingRoot,
+    shell: true,
+    timeoutMs,
+    maxBuffer: 30 * 1024 * 1024
+  });
+  return {
+    ok: result.ok,
+    available: true,
+    command,
+    cwd: workingRoot,
+    status: result.status,
+    signal: result.signal,
+    timed_out: result.signal === "SIGTERM" || result.signal === "SIGKILL",
+    stdout_tail: result.stdout.slice(-4e3),
+    stderr_tail: result.stderr.slice(-4e3)
+  };
+}
+function reviewMachineGate(root, args = {}) {
+  const trackId = args.trackId || args.track_id || null;
+  const track = trackId ? findTrack(root, trackId) : null;
+  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
+  if (track) {
+    const repoError = repoEntriesError(root, track, args);
+    if (repoError) return repoError;
+  }
+  const entries = track ? repoEntriesForTrack(root, track, args) : [{
+    repo: args.repo || ".",
+    root: args.workingRoot ? import_node_path15.default.resolve(root, args.workingRoot) : root,
+    path: args.workingRoot || ".",
+    source: args.workingRoot ? "argument.workingRoot" : "project-root"
+  }];
+  const results = entries.map((entry) => {
+    const gate = runMachineGate(root, args, entry.root);
+    return {
+      repo: entry.repo,
+      path: entry.path,
+      source: entry.source,
+      ...gate
+    };
+  });
+  const blocking = results.filter((result) => result.available === true && !result.ok);
+  return {
+    ok: blocking.length === 0,
+    available: results.some((result) => result.available === true),
+    track_id: trackId,
+    results,
+    blocking_count: blocking.length
+  };
+}
+function providerFromConfig(root, args = {}) {
+  return asOptionalString(configuredProvider(root, args).provider_mode) || "local";
+}
+function providerEvidenceRequirement(root, args = {}) {
+  const providerInfo = configuredProvider(root, args);
+  const provider = asOptionalString(providerInfo.provider_mode) || "local";
+  const readiness = providerReadiness(root, args);
+  const track = args.trackId ? findTrack(root, args.trackId) : null;
+  const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
+  const target = args.pr || args.prNumber || args.mr || branch || null;
+  const kind = provider === "gitlab" ? "gitlab_merge_request_status" : "github_pull_request_status";
+  const minimumFields = provider === "gitlab" ? ["url", "state", "source_branch", "target_branch", "head_sha", "approvals", "pipeline_status", "discussions"] : ["url", "state", "head_ref", "base_ref", "head_sha", "review_decision", "status_checks", "workflow_runs", "comments"];
+  return {
+    ok: false,
+    available: false,
+    provider,
+    target,
+    branch,
+    provider_mode: provider,
+    required_provider_mcp: provider === "local" ? null : {
+      provider,
+      server: provider,
+      purpose: "Fetch provider evidence through the installed provider MCP. CLI fallback is intentionally disabled."
+    },
+    mcp_readiness: readiness,
+    detected_agent_capability_evidence: readiness.detected_agent_capability_evidence || null,
+    missing_evidence_fields: readiness.missing_evidence_fields || [],
+    required_evidence: provider === "local" ? null : {
+      kind,
+      provider,
+      target,
+      branch,
+      minimum_fields: minimumFields,
+      write_back: {
+        tool: "cadre_review",
+        action: "provider_evidence",
+        trackId: args.trackId || args.track_id || null
+      }
+    },
+    exact_write_back_packet: provider === "local" ? null : {
+      tool: "cadre_review",
+      arguments: {
+        root,
+        action: "provider_evidence",
+        trackId: args.trackId || args.track_id || null,
+        providerEvidence: `<${provider}-mcp-evidence>`
+      }
+    },
+    next_actions: provider === "local" ? [] : [
+      `Use the installed ${provider} MCP to fetch PR/MR metadata, reviews, checks or pipeline status, and discussion evidence for the target.`,
+      "Call cadre_review with action provider_evidence and the fetched evidence before recording review or shipping."
+    ],
+    reason: provider === "local" ? "provider_mode is local; provider evidence is not required" : `${provider} provider evidence must come from the ${provider} MCP; CLI fallback is disabled`,
+    unsupported_reason: provider === "local" ? null : `provider_mode ${provider} requires ${provider} MCP evidence; Cadre workflow packets do not use provider CLI fallback`
+  };
+}
+function prCiStatus(root, args = {}) {
+  const provider = providerFromConfig(root, args);
+  const evidence = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  if (provider === "local") {
+    return {
+      ok: true,
+      available: false,
+      skipped: true,
+      provider,
+      provider_mode: "local",
+      reason: "provider_mode is local; no provider MCP evidence required"
+    };
+  }
+  if (provider !== "github" && provider !== "gitlab") {
+    return { ok: false, available: false, provider, reason: `Unsupported provider_mode: ${provider}` };
+  }
+  if (evidence) {
+    return {
+      ok: true,
+      available: true,
+      provider,
+      provider_mode: provider,
+      evidence_source: `${provider}_mcp`,
+      evidence: asJsonObject(evidence)
+    };
+  }
+  return providerEvidenceRequirement(root, args);
+}
+function diffSurface(root, base, head) {
+  const range = `${base}...${head}`;
+  const stat = runCommand("git", ["diff", "--stat", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  const names = runCommand("git", ["diff", "--name-only", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  return {
+    ok: stat.ok || names.ok,
+    base,
+    head,
+    stat: stat.stdout.trim(),
+    files: names.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+    errors: [stat.stderr, names.stderr].filter(Boolean).join("\n").trim()
+  };
+}
+function scanReviewTodos(root, files, limit = 100) {
+  const findings = [];
+  const patterns = [
+    /\bTODO\b/i,
+    /\bFIXME\b/i,
+    /\bstub\b/i,
+    /throw new Error\(["']not implemented/i
+  ];
+  for (const file of files || []) {
+    if (isIgnoredRepoMapFile(file)) continue;
+    const abs = import_node_path15.default.join(root, file);
+    if (!fileExists(abs)) continue;
+    let stat;
+    try {
+      stat = import_node_fs9.default.statSync(abs);
+    } catch {
+      continue;
+    }
+    if (stat.size > 1024 * 1024) continue;
+    const lines = import_node_fs9.default.readFileSync(abs, "utf8").split(/\r?\n/);
+    for (let index = 0; index < lines.length && findings.length < limit; index += 1) {
+      const line = lines[index] || "";
+      if (patterns.some((pattern) => pattern.test(line))) {
+        findings.push({ file, line: index + 1, snippet: line.trim().slice(0, 180) });
+      }
+    }
+  }
+  return findings;
+}
+function reviewAssist(root, args = {}) {
+  const trackId = args.trackId || args.track_id;
+  if (!trackId) return { ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  if (!context.ok) return context;
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return repoError;
+  const plan = parsePlanFile(track.plan_path);
+  const base = args.base || "main";
+  const head = args.head || track.metadata.git_branch || "HEAD";
+  const repoEntries = repoEntriesForTrack(root, track, args);
+  const repoDiffs = repoEntries.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    cwd: entry.root,
+    source: entry.source,
+    ...diffSurface(entry.root, entry.base || base, entry.head || head)
+  }));
+  const diff = repoDiffs.find((entry) => entry.repo === ".") || diffSurface(root, base, head);
+  const incompleteTasks = [];
+  for (const phase of plan.phases) {
+    for (const task of phase.tasks) {
+      if (task.marker !== "x" && task.marker !== "-") {
+        incompleteTasks.push({
+          phase: phase.phase_index,
+          task: task.task_index,
+          task_key: task.task_key,
+          title: task.title,
+          marker: task.marker,
+          repo: task.repo || null
+        });
+      }
+    }
+  }
+  const todoLimit = Number(args.todoLimit || 100);
+  const repoTodos = repoDiffs.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    cwd: entry.cwd,
+    todos: scanReviewTodos(entry.cwd || root, entry.files, todoLimit)
+  }));
+  const todos = repoTodos.flatMap((entry) => entry.todos.map((todo) => ({ ...todo, repo: entry.repo }))).slice(0, todoLimit);
+  const lsp = args.includeLsp === false ? null : args.lspResult || args.lsp_result || lspReview(root, { base, head, config: args.config });
+  const machineGate = args.includeMachine === false ? null : reviewMachineGate(root, args);
+  const lspObject = asJsonObject(lsp);
+  const machineGateObject = asJsonObject(machineGate);
+  const blocking = [];
+  if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
+  if (todos.length > 0) blocking.push(`${todos.length} TODO/FIXME/stub marker(s) found in changed files`);
+  if (track.metadata.last_coverage == null) blocking.push("No measured coverage recorded on the track");
+  if (lsp && lspObject.available !== false && Array.isArray(lspObject.findings)) {
+    const lspBlocking = asArray(lspObject.findings).filter((finding) => finding.severity === "blocking" || finding.blocking === true);
+    if (lspBlocking.length > 0) blocking.push(`${lspBlocking.length} blocking LSP/code-intelligence finding(s)`);
+  }
+  const machineBlockingCount = asNumber(machineGateObject.blocking_count);
+  if (machineGate && machineBlockingCount > 0) {
+    blocking.push(`${machineBlockingCount} machine gate check(s) failed`);
+  }
+  const result = {
+    ok: true,
+    root,
+    track_id: trackId,
+    base,
+    head,
+    diff,
+    repo_diffs: repoDiffs,
+    task_counts: context.task_counts,
+    incomplete_tasks: incompleteTasks,
+    coverage: track.metadata.last_coverage ?? null,
+    todos,
+    repo_todos: repoTodos,
+    lsp,
+    machine_gate: machineGate,
+    suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
+    blocking_reasons: blocking
+  };
+  const mode = (asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null)) || "compact").toLowerCase();
+  if (["detail", "detailed", "full", "verbose"].includes(mode)) return result;
+  const lspSummary = asJsonObject(result.lsp);
+  const gateSummary = asJsonObject(result.machine_gate);
+  const diffSummary = asJsonObject(diff);
+  const diffFiles = Array.isArray(diffSummary.files) ? diffSummary.files : [];
+  return {
+    ok: true,
+    root,
+    track_id: trackId,
+    base,
+    head,
+    task_counts: context.task_counts,
+    diff: {
+      repo: diffSummary.repo || ".",
+      file_count: diffFiles.length,
+      stat: asOptionalString(diffSummary.stat) || ""
+    },
+    repo_diffs: repoDiffs.slice(0, 20).map((entry) => ({
+      repo: entry.repo,
+      path: entry.path,
+      files: Array.isArray(entry.files) ? entry.files.slice(0, 50) : [],
+      file_count: Array.isArray(entry.files) ? entry.files.length : 0,
+      stat: entry.stat
+    })),
+    repo_diffs_count: repoDiffs.length,
+    incomplete_tasks: incompleteTasks.slice(0, 20),
+    incomplete_tasks_count: incompleteTasks.length,
+    coverage: track.metadata.last_coverage ?? null,
+    todos: todos.slice(0, 20),
+    todos_count: todos.length,
+    lsp: lsp ? {
+      available: lspSummary.available !== false,
+      degraded: lspSummary.degraded === true || lspSummary.fallback === "text_scan",
+      findings_count: Array.isArray(lspSummary.findings) ? lspSummary.findings.length : 0,
+      server_count: Array.isArray(lspSummary.servers) ? lspSummary.servers.length : 0,
+      polyrepo: lspSummary.polyrepo === true
+    } : null,
+    machine_gate: machineGate ? {
+      ok: gateSummary.ok !== false,
+      available: gateSummary.available !== false,
+      blocking_count: Number(gateSummary.blocking_count || 0),
+      result_count: Array.isArray(gateSummary.results) ? gateSummary.results.length : 0
+    } : null,
+    suggested_verdict: result.suggested_verdict,
+    blocking_reasons: blocking,
+    detail_available: true
+  };
+}
+
+// src/core/application/runtime/review-records.ts
+function recordReview(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  return withTrackLock(root, track.track_id, () => recordReviewUnlocked(root, track, args));
+}
+function recordReviewUnlocked(root, track, args = {}) {
+  const verdict = args.verdict || "";
+  if (!["approved", "changes_requested"].includes(verdict)) {
+    return { ok: false, error: `Invalid review verdict: ${verdict}` };
+  }
+  const reviewer = args.reviewer || gitIdentity(root);
+  const pins = reviewedShasForTrack(root, track, args);
+  if (pins.ok === false) return pins;
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    const existing = asJsonObject(current.review);
+    const existingReviewer = asOptionalString(existing.reviewer);
+    const existingVerdict = asOptionalString(existing.verdict);
+    const existingBlockingCount = Number(existing.blocking_count || 0);
+    if (verdict === "approved" && args.allowOverride !== true && existingReviewer && existingReviewer !== reviewer && (existingVerdict === "changes_requested" || existingBlockingCount > 0)) {
+      throw new Error("Approval would override another reviewer's open changes_requested verdict");
+    }
+    current.review = {
+      verdict,
+      blocking_count: Number(args.blockingCount || 0),
+      date: args.date || utcNow(),
+      reviewer: reviewer || null,
+      coverage: args.coverage ?? current.last_coverage ?? null,
+      self_reviewed: Boolean(reviewer && current.owner && reviewer === current.owner),
+      reviewed_sha: asOptionalString(pins.reviewed_sha) || null,
+      reviewed_shas: asJsonObject(pins.reviewed_shas),
+      review_seq: Number(existing.review_seq || 0) + 1
+    };
+    return current;
+  }, { lock: false });
+  if (!metadata.ok) {
+    return {
+      ok: false,
+      track_id: track.track_id,
+      stage: "metadata_patch",
+      error: metadata.error,
+      requires_override: /override another reviewer/.test(metadata.error || ""),
+      metadata
+    };
+  }
+  const gate = reviewGate(root, track.track_id, args);
+  return { ok: true, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate };
+}
+function reviewEvidencePath(track) {
+  return import_node_path16.default.join(track.dir, "review-evidence.json");
+}
+function reviewEvidence(root, trackId) {
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const evidencePath = reviewEvidencePath(track);
+  const evidence = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path16.default.relative(root, evidencePath),
+    evidence
+  };
+}
+function providerEvidence(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => providerEvidenceUnlocked(root, track, args));
+}
+function providerEvidenceUnlocked(root, track, args = {}) {
+  const evidencePath = reviewEvidencePath(track);
+  const existing = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  const entries = Array.isArray(existing.entries) ? existing.entries.map(asJsonObject) : [];
+  const findings = Array.isArray(args.findings) ? args.findings.map(asJsonObject) : [];
+  const blockingCount = findings.filter(
+    (finding) => finding.blocking === true || asString(finding.severity) === "blocking"
+  ).length;
+  const provider = args.provider || providerFromConfig(root, args);
+  const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  const providerStatus = fetched ? asJsonObject(fetched) : null;
+  if (!providerStatus && args.fetch !== false) {
+    return {
+      ok: false,
+      track_id: track.track_id,
+      stage: "provider_mcp_evidence_required",
+      provider,
+      requirement: providerEvidenceRequirement(root, { ...args, trackId: track.track_id })
+    };
+  }
+  const entry = {
+    id: `review-${entries.length + 1}`,
+    recorded_at: utcNow(),
+    provider,
+    reviewer: args.reviewer || gitIdentity(root) || null,
+    reviewed_sha: args.reviewedSha || args.reviewed_sha || gitRevParse(root, "HEAD"),
+    blocking_count: Number(args.blockingCount ?? blockingCount),
+    verdict: args.verdict || null,
+    findings,
+    evidence: providerStatus,
+    notes: asOptionalString(args.notes) || null
+  };
+  const next = {
+    ...existing,
+    track_id: track.track_id,
+    entries: [...entries, entry],
+    updated_at: entry.recorded_at
+  };
+  writeJson(evidencePath, next);
+  appendJsonl(import_node_path16.default.join(track.dir, "review-evidence.jsonl"), entry);
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    current.review_evidence = {
+      path: import_node_path16.default.relative(root, evidencePath),
+      entries: asArray(next.entries).length || entries.length + 1,
+      latest_id: entry.id,
+      latest_recorded_at: entry.recorded_at,
+      provider,
+      blocking_count: entry.blocking_count
+    };
+    return current;
+  }, { lock: false });
+  if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path16.default.relative(root, evidencePath),
+    entry,
+    metadata
+  };
+}
+function syncControlPlane(root, args = {}) {
+  const topology = loadTopology(root);
+  if (topology.config.sync_mode !== "shared") {
+    return { ok: true, skipped: true, reason: "sync_mode is not shared", commands: [] };
+  }
+  const mode = args.mode || "pre";
+  const remote = asOptionalString(topology.config.control_remote) || "origin";
+  const branch = asOptionalString(topology.config.control_branch) || "main";
+  const commands = [];
+  commands.push(runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root }));
+  const safety = controlPlaneSyncSafety(root, mode, remote, branch);
+  if (!safety.ok) {
+    return { ok: false, mode, remote, branch, safety, commands };
+  }
+  if (mode === "pre") {
+    commands.push(runCommand("git", ["pull", "--rebase", remote, branch], { cwd: root }));
+  } else if (mode === "post") {
+    commands.push(runCommand("git", ["push", remote, branch], { cwd: root }));
+  } else {
+    return { ok: false, error: `Invalid sync mode: ${mode}`, commands };
+  }
+  return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, safety, commands };
+}
+
+// src/core/application/runtime/text-utils.ts
+function compactLines(value, limit = 1200) {
+  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join("\n").slice(0, limit);
+}
 
 // src/core/application/runtime/spec-docs.ts
 function normalizedSpecHeading(heading) {
@@ -1821,1544 +2868,9 @@ function renderStyleGuideMarkdown(raw) {
   return normalizedText(parts.join("\n"));
 }
 
-// src/core/application/runtime/beads-config.ts
-var import_node_path13 = __toESM(require("node:path"));
-var MAX_PREFIX_WORDS = 2;
-function firstString(...values) {
-  for (const value of values) {
-    if (typeof value === "string") return value;
-  }
-  return void 0;
-}
-function words(value) {
-  return String(value || "").trim().split(/[\s_-]+/).map((word) => word.trim()).filter(Boolean);
-}
-function normalizeBeadsEpicPrefix(value) {
-  const raw = asOptionalString(value);
-  if (raw === void 0) return "";
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  return safeName(trimmed.toLowerCase()).replace(/_+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
-}
-function prefixError(value) {
-  const raw = asOptionalString(value);
-  if (raw === void 0 || !raw.trim()) return "beadsEpicPrefix is required";
-  if (words(raw).length > MAX_PREFIX_WORDS) return "beadsEpicPrefix must be at most two words";
-  return null;
-}
-function firstWordsSlug(value, fallback) {
-  const selected = words(value).slice(0, MAX_PREFIX_WORDS).join(" ") || fallback;
-  return normalizeBeadsEpicPrefix(selected);
-}
-function productTitle(args = {}) {
-  const product = asJsonObject(args.product);
-  return firstString(product.title, product.name, product.id);
-}
-function projectBeadsEpicPrefix(root) {
-  return firstWordsSlug(import_node_path13.default.basename(root), "project");
-}
-function productBeadsEpicPrefix(root, args = {}) {
-  return firstWordsSlug(productTitle(args), projectBeadsEpicPrefix(root));
-}
-function exampleFor(prefix) {
-  return `${prefix}-<track_id>`;
-}
-function recommendation(label, epicPrefix, reason, recommended = false) {
-  return {
-    label,
-    epic_prefix: epicPrefix,
-    example: exampleFor(epicPrefix),
-    recommended,
-    reason
-  };
-}
-function beadsPrefixRecommendations(root, args = {}) {
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  const add = (entry) => {
-    const prefix = asOptionalString(entry.epic_prefix);
-    if (!prefix || seen.has(prefix)) return;
-    seen.add(prefix);
-    out.push(entry);
-  };
-  const projectPrefix = projectBeadsEpicPrefix(root);
-  add(recommendation("Project", projectPrefix, "Derived from the project directory.", true));
-  const productPrefix = productBeadsEpicPrefix(root, args);
-  add(recommendation("Product", productPrefix, "Derived from the product title."));
-  return out;
-}
-function configuredPrefix(args) {
-  const rawArgs = args;
-  const inlineConfig = {
-    ...asJsonObject(rawArgs.beadsConfig),
-    ...asJsonObject(rawArgs.beads_config)
-  };
-  return firstString(rawArgs.beadsEpicPrefix, rawArgs.beads_epic_prefix, inlineConfig.epicPrefix, inlineConfig.epic_prefix);
-}
-function resolveBeadsEpicPrefix(root, args = {}) {
-  const recommendations = beadsPrefixRecommendations(root, args);
-  const directPrefix = configuredPrefix(args);
-  if (directPrefix !== void 0) {
-    const error = prefixError(directPrefix);
-    if (error) {
-      return {
-        selected: false,
-        required: true,
-        epic_prefix: "",
-        source: "invalid_argument",
-        example: exampleFor("<prefix>"),
-        max_words: MAX_PREFIX_WORDS,
-        missing_payload: ["beadsEpicPrefix"],
-        recommendations,
-        error
-      };
-    }
-    const epicPrefix = normalizeBeadsEpicPrefix(directPrefix);
-    return {
-      selected: true,
-      required: false,
-      epic_prefix: epicPrefix,
-      source: "arguments",
-      example: exampleFor(epicPrefix),
-      max_words: MAX_PREFIX_WORDS,
-      missing_payload: [],
-      recommendations
-    };
-  }
-  const diskConfig = readJson(import_node_path13.default.join(root, "cadre", "beads.json"), {});
-  const diskPrefix = firstString(diskConfig.epicPrefix, diskConfig.epic_prefix);
-  if (diskPrefix !== void 0) {
-    const error = prefixError(diskPrefix);
-    if (error) {
-      return {
-        selected: false,
-        required: true,
-        epic_prefix: asOptionalString(recommendations[0]?.epic_prefix) || projectBeadsEpicPrefix(root),
-        source: "invalid_cadre/beads.json",
-        example: exampleFor(asOptionalString(recommendations[0]?.epic_prefix) || projectBeadsEpicPrefix(root)),
-        max_words: MAX_PREFIX_WORDS,
-        missing_payload: ["beadsEpicPrefix"],
-        recommendations,
-        error
-      };
-    }
-    const epicPrefix = normalizeBeadsEpicPrefix(diskPrefix);
-    return {
-      selected: true,
-      required: false,
-      epic_prefix: epicPrefix,
-      source: "cadre/beads.json",
-      example: exampleFor(epicPrefix),
-      max_words: MAX_PREFIX_WORDS,
-      missing_payload: [],
-      recommendations
-    };
-  }
-  const defaultPrefix = asOptionalString(recommendations[0]?.epic_prefix) || projectBeadsEpicPrefix(root);
-  return {
-    selected: false,
-    required: true,
-    epic_prefix: defaultPrefix,
-    source: "setup_required",
-    example: exampleFor(defaultPrefix),
-    max_words: MAX_PREFIX_WORDS,
-    missing_payload: ["beadsEpicPrefix"],
-    recommendations
-  };
-}
-function beadsEpicIdForTrack(root, trackId, args = {}) {
-  const prefix = resolveBeadsEpicPrefix(root, args).epic_prefix;
-  return prefix ? `${prefix}-${trackId}` : trackId;
-}
-
-// src/core/application/runtime/beads-tree.ts
-function extractBeadsId(json, fallback = null) {
-  if (!isRecord(json)) return fallback;
-  for (const key of ["id", "issue_id", "issueId"]) {
-    const value = json[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  const issue = json.issue;
-  if (isRecord(issue) && typeof issue.id === "string" && issue.id.trim()) return issue.id.trim();
-  return fallback;
-}
-function extractAssignee(json) {
-  if (Array.isArray(json)) {
-    for (const item of json) {
-      const nested = extractAssignee(item);
-      if (nested) return nested;
-    }
-    return null;
-  }
-  if (!isRecord(json)) return null;
-  const direct = json.assignee || json.assigned_to || json.owner || json.claimed_by;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  for (const key of ["issue", "task", "epic", "data"]) {
-    const nested = extractAssignee(json[key]);
-    if (nested) return nested;
-  }
-  return null;
-}
-function parseCommandJson(result) {
-  try {
-    return JSON.parse(asString(result.stdout) || "null");
-  } catch {
-    return null;
-  }
-}
-function beadsCommandPlanEntry(args) {
-  return { command: ["bd", ...args].join(" "), args };
-}
-function compactLines(value, limit = 1200) {
-  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join("\n").slice(0, limit);
-}
-function specContextFromJson(raw) {
-  const spec = normalizeSpecJson(asOptionalString(asJsonObject(raw).track_id) || "track", raw);
-  const overview = compactLines([
-    asOptionalString(spec.description),
-    ...specItemsFromRaw(spec.functional_requirements).map((item) => `${asOptionalString(item.heading)}: ${asOptionalString(item.body)}`),
-    ...specItemsFromRaw(spec.non_functional_requirements).map((item) => `${asOptionalString(item.heading)}: ${asOptionalString(item.body)}`)
-  ].filter(Boolean).join("\n"), 1400);
-  const acceptance = compactLines(specItemsFromRaw(spec.acceptance_criteria).map((item) => `${asOptionalString(item.heading)}: ${asOptionalString(item.body)}`).filter(Boolean).join("\n"), 1e3);
-  return { overview, acceptance };
-}
-function taskDesignText(track, phase, task, specContext) {
-  return compactLines([
-    `Track: ${track.track_id}`,
-    `Phase: ${phase.title}`,
-    `Task: ${task.title}`,
-    task.files && task.files.length ? `Files: ${task.files.join(", ")}` : null,
-    task.depends && task.depends.length ? `Depends on: ${task.depends.join(", ")}` : null,
-    task.repo ? `Repo: ${task.repo}` : null,
-    specContext.overview ? `Spec context: ${specContext.overview}` : null
-  ].filter(Boolean).join("\n"), 1800);
-}
-function taskAcceptanceText(task, specContext) {
-  return compactLines([
-    `Complete when this task is implemented, tested, and committed.`,
-    task.files && task.files.length ? `Owned files changed only as needed: ${task.files.join(", ")}` : null,
-    specContext.acceptance ? `Track acceptance context: ${specContext.acceptance}` : null
-  ].filter(Boolean).join("\n"), 1600);
-}
-function addCreateContext(args, design, acceptance) {
-  if (design) args.push("--design", design);
-  if (acceptance) args.push("--acceptance", acceptance);
-  return args;
-}
-function createBeadsTree(root, args = {}) {
-  const markdownError = markdownPayloadError(args);
-  if (markdownError) return markdownError;
-  const trackId = args.trackId || args.track_id;
-  if (!trackId) return { ok: false, error: "trackId is required" };
-  const dryRun = args.dryRun === true;
-  const diskTrack = findTrack(root, trackId);
-  if (!diskTrack && !dryRun) return { ok: false, error: `Track not found: ${trackId}` };
-  if (!diskTrack && dryRun && !args.plan) {
-    return { ok: false, error: `Track not found: ${trackId}; dryRun without track files requires plan` };
-  }
-  const draftMetadata = {
-    track_id: trackId,
-    type: "feature",
-    status: "new",
-    priority: "medium",
-    description: trackId,
-    git_branch: `track/${trackId}`,
-    ...args.metadata && typeof args.metadata === "object" ? args.metadata : {}
-  };
-  const track = diskTrack || {
-    track_id: trackId,
-    dir: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId)),
-    metadata_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "metadata.json"),
-    plan_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "plan.md"),
-    spec_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "spec.md"),
-    plan_json_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "plan.json"),
-    spec_json_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "spec.json"),
-    learnings_jsonl_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "learnings.jsonl"),
-    handoff_json_path: import_node_path14.default.join(root, "cadre", "tracks", safeName(trackId), "handoff.json"),
-    metadata: draftMetadata
-  };
-  if (!dryRun && !commandExists("bd", root)) {
-    return { ok: false, available: false, reason: "Beads CLI (bd) is not installed or not on PATH" };
-  }
-  const identity = args.identity || gitIdentity(root);
-  const specJson = args.spec ? normalizeSpecJson(String(trackId), args.spec) : readJson(trackSpecJsonPath(track), null);
-  const plan = args.plan ? parsePlanJson(normalizePlanJson(String(trackId), args.plan, specJson)) : parsePlanFile(track.plan_path);
-  const specContext = specContextFromJson(specJson);
-  const beadsPrefix = resolveBeadsEpicPrefix(root, args);
-  if (!beadsPrefix.selected && beadsPrefix.error) {
-    return {
-      ok: false,
-      error: beadsPrefix.error,
-      missing_payload: beadsPrefix.missing_payload,
-      beads_prefix: beadsPrefix
-    };
-  }
-  const epicId = args.epicId || track.metadata.beads_epic || beadsEpicIdForTrack(root, String(track.track_id), args);
-  const commands = [];
-  const results = [];
-  const beadsTasks = {};
-  const runBd = (bdArgs) => {
-    commands.push(beadsCommandPlanEntry(bdArgs));
-    if (dryRun) {
-      const id = bdArgs[0] === "create" && bdArgs.includes("--id") ? epicId : `dry-${commands.length}`;
-      return { ok: true, status: 0, stdout: JSON.stringify({ id }), stderr: "", command: "bd", args: bdArgs };
-    }
-    const result = runCommand("bd", bdArgs, { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-    results.push(result);
-    return result;
-  };
-  const showEpic = dryRun ? { ok: false } : runCommand("bd", ["show", epicId, "--json"], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  if (showEpic.ok) {
-    if (track.metadata.beads_epic === epicId && track.metadata.beads_tasks && Object.keys(track.metadata.beads_tasks).length > 0) {
-      return {
-        ok: true,
-        available: true,
-        existing: true,
-        dry_run: false,
-        track_id: track.track_id,
-        beads_epic_prefix: beadsPrefix.epic_prefix,
-        beads_epic: epicId,
-        beads_tasks: track.metadata.beads_tasks,
-        commands,
-        results,
-        metadata_patch: {
-          beads_epic: epicId,
-          beads_tasks: track.metadata.beads_tasks
-        }
-      };
-    }
-    return {
-      ok: false,
-      available: true,
-      existing: true,
-      reason: `Beads epic ${epicId} already exists but metadata.beads_tasks is missing; reconcile existing children before creating new ones`,
-      commands,
-      results
-    };
-  } else {
-    const epicArgs = addCreateContext([
-      "create",
-      `${track.track_id}: ${track.metadata.description || track.metadata.name || track.track_id}`,
-      "--id",
-      epicId,
-      "-t",
-      "epic",
-      "-p",
-      String(priorityRank(track.metadata.priority))
-    ], specContext.overview, specContext.acceptance);
-    epicArgs.push("--json");
-    if (identity) epicArgs.splice(epicArgs.length - 1, 0, "--assignee", identity);
-    const epicResult = runBd(epicArgs);
-    if (!epicResult.ok) return { ok: false, available: true, stage: "create_epic", commands, results };
-  }
-  const phaseIds = {};
-  for (const phase of plan.phases) {
-    const phaseKey = `phase${phase.phase_index}`;
-    const phaseResult = runBd(addCreateContext(
-      ["create", phase.title, "-t", "task", "--parent", epicId, "--labels", "cadre:phase"],
-      `Phase for Cadre track ${track.track_id}: ${phase.title}`,
-      `All tasks in this phase are complete or intentionally skipped.`
-    ).concat("--json"));
-    if (!phaseResult.ok) return { ok: false, available: true, stage: "create_phase", phase: phaseKey, commands, results };
-    const phaseId = extractBeadsId(parseCommandJson(phaseResult), dryRun ? `dry-${phaseKey}` : null);
-    if (!phaseId) return { ok: false, available: true, stage: "parse_phase_id", phase: phaseKey, commands, results };
-    phaseIds[phaseKey] = phaseId;
-    beadsTasks[phaseKey] = phaseId;
-    for (const task of phase.tasks) {
-      const taskKey = task.task_key || `phase${phase.phase_index}_task${task.task_index}`;
-      const taskResult = runBd(addCreateContext([
-        "create",
-        task.title,
-        "-t",
-        "task",
-        "--parent",
-        phaseId,
-        "--labels",
-        "cadre:task"
-      ], taskDesignText(track, phase, task, specContext), taskAcceptanceText(task, specContext)).concat("--json"));
-      if (!taskResult.ok) return { ok: false, available: true, stage: "create_task", task: taskKey, commands, results };
-      const taskId = extractBeadsId(parseCommandJson(taskResult), dryRun ? `dry-${taskKey}` : null);
-      if (!taskId) return { ok: false, available: true, stage: "parse_task_id", task: taskKey, commands, results };
-      beadsTasks[taskKey] = taskId;
-    }
-  }
-  for (const phase of plan.phases) {
-    const phaseKey = `phase${phase.phase_index}`;
-    const hasExplicitPhaseDepends = Object.prototype.hasOwnProperty.call(phase.annotations || {}, "depends");
-    if (!hasExplicitPhaseDepends && phase.phase_index > 1) {
-      const previousPhaseId = phaseIds[`phase${phase.phase_index - 1}`];
-      const currentPhaseId = phaseIds[phaseKey];
-      if (currentPhaseId && previousPhaseId) runBd(["dep", "add", currentPhaseId, previousPhaseId, "--json"]);
-    } else if (phase.annotations.depends) {
-      for (const dep of asString(phase.annotations.depends).split(",").map((item) => item.trim()).filter(Boolean)) {
-        const currentPhaseId = phaseIds[phaseKey];
-        const dependencyPhaseId = phaseIds[dep];
-        if (currentPhaseId && dependencyPhaseId) runBd(["dep", "add", currentPhaseId, dependencyPhaseId, "--json"]);
-      }
-    }
-    const execution = phase.annotations.execution || "sequential";
-    for (const task of phase.tasks) {
-      const taskKey = task.task_key || `phase${phase.phase_index}_task${task.task_index}`;
-      if (execution !== "parallel" && task.task_index > 1) {
-        const taskId = beadsTasks[taskKey];
-        const previousTask = phase.tasks.find((candidate) => candidate.task_index === task.task_index - 1);
-        const previousTaskKey = previousTask?.task_key || `phase${phase.phase_index}_task${task.task_index - 1}`;
-        const previousTaskId = beadsTasks[previousTaskKey];
-        if (taskId && previousTaskId) runBd(["dep", "add", taskId, previousTaskId, "--json"]);
-      }
-      if (execution === "parallel") {
-        for (const dep of task.depends || []) {
-          const taskDep = dep.match(/^task(\d+)$/);
-          const dependencyTask = taskDep ? phase.tasks.find((candidate) => candidate.task_index === Number(taskDep[1])) : null;
-          const depKey = dependencyTask?.task_key || (taskDep ? `phase${phase.phase_index}_task${taskDep[1]}` : dep);
-          const taskId = beadsTasks[taskKey];
-          const dependencyTaskId = beadsTasks[depKey];
-          if (taskId && dependencyTaskId) runBd(["dep", "add", taskId, dependencyTaskId, "--json"]);
-        }
-      }
-    }
-  }
-  runBd([
-    "note",
-    epicId,
-    [
-      `TRACK INITIALIZED: ${track.track_id}`,
-      `PHASES: ${plan.phases.length}`,
-      `BRANCH: ${track.metadata.git_branch || `track/${track.track_id}`}`
-    ].join("\n"),
-    "--json"
-  ]);
-  for (const phase of plan.phases) {
-    if ((phase.annotations.execution || "sequential") !== "parallel") continue;
-    for (const task of phase.tasks) {
-      const taskKey = `phase${phase.phase_index}_task${task.task_index}`;
-      const taskId = beadsTasks[taskKey];
-      if (!taskId) continue;
-      runBd([
-        "note",
-        taskId,
-        [
-          "PARALLEL_ENABLED: true",
-          `FILES_OWNED: ${(task.files || []).join(", ")}`,
-          `DEPENDS_ON: ${(task.depends || []).join(", ") || "none"}`,
-          task.repo ? `REPO: ${task.repo}` : null
-        ].filter(Boolean).join("\n"),
-        "--json"
-      ]);
-    }
-  }
-  let metadataPatch2 = null;
-  if (!dryRun) {
-    metadataPatch2 = patchJsonFile(track.metadata_path, (metadata) => ({
-      ...metadata,
-      beads_epic: epicId,
-      beads_tasks: beadsTasks
-    }), {
-      root,
-      lockName: trackLockName(track.track_id)
-    });
-    if (!metadataPatch2.ok) {
-      return { ok: false, available: true, stage: "metadata_patch", commands, results, metadata_patch: metadataPatch2 };
-    }
-  }
-  return {
-    ok: true,
-    available: true,
-    dry_run: dryRun,
-    track_id: track.track_id,
-    beads_epic_prefix: beadsPrefix.epic_prefix,
-    beads_epic: epicId,
-    beads_tasks: beadsTasks,
-    commands,
-    results,
-    metadata_patch: {
-      beads_epic: epicId,
-      beads_tasks: beadsTasks
-    },
-    metadata_write: metadataPatch2
-  };
-}
-
-// src/core/application/runtime/beads-task-write.ts
-function beadsTaskWrite(root, args = {}) {
-  if (!commandExists("bd", root)) {
-    return { ok: false, available: false, reason: "Beads CLI (bd) is not installed or not on PATH" };
-  }
-  const op = args.operation;
-  const id = args.id || args.taskId || args.issueId;
-  const commands = [];
-  const runBd = (bdArgs) => {
-    const result = runCommand("bd", bdArgs, { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-    commands.push(result);
-    return result;
-  };
-  if (op === "ready") {
-    const bdArgs = ["ready", "--json"];
-    if (args.parent) bdArgs.push("--parent", String(args.parent));
-    runBd(bdArgs);
-  } else if (op === "list") {
-    const bdArgs = ["list", "--json"];
-    if (args.status) bdArgs.push("--status", String(args.status));
-    if (args.label) bdArgs.push("--label", String(args.label));
-    if (args.parent) bdArgs.push("--parent", String(args.parent));
-    runBd(bdArgs);
-  } else if (op === "show") {
-    if (!id) return { ok: false, available: true, error: "id is required for show" };
-    const bdArgs = ["show", String(id)];
-    if (args.long === true) bdArgs.push("--long");
-    bdArgs.push("--json");
-    runBd(bdArgs);
-  } else if (op === "update") {
-    if (!id) return { ok: false, available: true, error: "id is required for update" };
-    const bdArgs = ["update", String(id), "--json"];
-    if (args.status) bdArgs.push("--status", String(args.status));
-    if (Object.prototype.hasOwnProperty.call(args, "assignee")) bdArgs.push("--assignee", String(args.assignee || ""));
-    if (args.priority) bdArgs.push("--priority", String(args.priority));
-    if (args.notes) bdArgs.push("--notes", String(args.notes));
-    runBd(bdArgs);
-  } else if (op === "note") {
-    if (!id || !args.note) return { ok: false, available: true, error: "id and note are required for note" };
-    if (args.dedupKey) {
-      const show = runCommand("bd", ["show", String(id), "--long", "--json"], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-      commands.push(show);
-      if (show.ok && `${show.stdout}
-${show.stderr}`.includes(String(args.dedupKey))) {
-        return { ok: true, available: true, operation: op, skipped: true, reason: "dedupKey already present", commands, json: parseCommandJson(show) };
-      }
-    }
-    runBd(["note", String(id), String(args.note), "--json"]);
-  } else if (op === "close") {
-    if (!id) return { ok: false, available: true, error: "id is required for close" };
-    const bdArgs = ["close", String(id), "--reason", String(args.reason || "Task completed"), "--json"];
-    if (args.continue === true) bdArgs.splice(2, 0, "--continue");
-    runBd(bdArgs);
-  } else if (op === "label_add" || op === "label_remove") {
-    if (!id || !args.label) return { ok: false, available: true, error: "id and label are required for label operations" };
-    runBd(["label", op === "label_add" ? "add" : "remove", String(id), String(args.label), "--json"]);
-  } else if (op === "dep_add" || op === "dep_remove") {
-    if (!id || !args.dependsOn) return { ok: false, available: true, error: "id and dependsOn are required for dependency operations" };
-    runBd(["dep", op === "dep_add" ? "add" : "remove", String(id), String(args.dependsOn), "--json"]);
-  } else if (op === "create") {
-    if (!args.title) return { ok: false, available: true, error: "title is required for create" };
-    const bdArgs = ["create", String(args.title), "--json"];
-    if (args.id) bdArgs.push("--id", String(args.id));
-    if (args.type) bdArgs.push("-t", String(args.type));
-    if (args.parent) bdArgs.push("--parent", String(args.parent));
-    if (args.priority) bdArgs.push("-p", String(args.priority));
-    if (args.deps) bdArgs.push("--deps", String(args.deps));
-    if (args.labels) bdArgs.push("--labels", Array.isArray(args.labels) ? args.labels.join(",") : String(args.labels));
-    if (args.design) bdArgs.push("--design", String(args.design));
-    if (args.acceptance) bdArgs.push("--acceptance", String(args.acceptance));
-    if (args.ephemeral === true) bdArgs.push("--ephemeral");
-    runBd(bdArgs);
-  } else if (op === "mail_send") {
-    if (!args.to || !args.subject) return { ok: false, available: true, error: "to and subject are required for mail_send" };
-    const bdArgs = ["mail", "send", String(args.to), "--subject", String(args.subject), "--json"];
-    if (args.body) bdArgs.push("--body", String(args.body));
-    runBd(bdArgs);
-  } else if (op === "formula_list") {
-    runBd(["formula", "list", "--json"]);
-  } else if (op === "formula_show") {
-    if (!args.name) return { ok: false, available: true, error: "name is required for formula_show" };
-    runBd(["formula", "show", String(args.name), "--json"]);
-  } else if (op === "compact") {
-    if (args.all === true) runBd(["admin", "compact", "--auto", "--all"]);
-    else if (id) runBd(["admin", "compact", "--auto", "--id", String(id)]);
-    else return { ok: false, available: true, error: "id or all=true is required for compact" };
-  } else if (op === "rules_compact") {
-    runBd(["rules", "compact", "--auto"]);
-  } else if (op === "dolt_pull" || op === "dolt_push") {
-    runBd(["dolt", op === "dolt_pull" ? "pull" : "push"]);
-  } else if (op === "sql") {
-    if (!args.sql) return { ok: false, available: true, error: "sql is required for sql" };
-    runBd(["sql", String(args.sql)]);
-  } else if (op === "worktree_create") {
-    if (!args.path || !args.branch) return { ok: false, available: true, error: "path and branch are required for worktree_create" };
-    runBd(["worktree", "create", String(args.path), "--branch", String(args.branch)]);
-  } else if (op === "worktree_remove") {
-    if (!args.path) return { ok: false, available: true, error: "path is required for worktree_remove" };
-    const bdArgs = ["worktree", "remove", String(args.path)];
-    if (args.force === true) bdArgs.push("--force");
-    runBd(bdArgs);
-  } else {
-    return {
-      ok: false,
-      available: true,
-      error: `Unsupported Beads operation: ${op}`,
-      operations: [
-        "ready",
-        "list",
-        "show",
-        "update",
-        "note",
-        "close",
-        "label_add",
-        "label_remove",
-        "dep_add",
-        "dep_remove",
-        "create",
-        "mail_send",
-        "formula_list",
-        "formula_show",
-        "compact",
-        "rules_compact",
-        "dolt_pull",
-        "dolt_push",
-        "sql",
-        "worktree_create",
-        "worktree_remove"
-      ]
-    };
-  }
-  const ok = commands.every((cmd) => cmd.ok || op === "close" && /already|closed/i.test(`${cmd.stdout}
-${cmd.stderr}`));
-  let json = null;
-  const last = commands[commands.length - 1];
-  try {
-    json = JSON.parse(last && last.stdout ? last.stdout : "null");
-  } catch {
-  }
-  const rowsAffectedMatch = last ? `${last.stdout}
-${last.stderr}`.match(/(?:rows?\s+affected|affected\s+rows?)\D+(\d+)/i) : null;
-  return {
-    ok,
-    available: true,
-    operation: op,
-    commands,
-    json,
-    rows_affected: rowsAffectedMatch?.[1] ? Number(rowsAffectedMatch[1]) : null
-  };
-}
-
-// src/core/application/runtime/track-mutations.ts
-function reviewGate(root, trackId, options = {}) {
-  const track = listTracks(root).find((item) => item.track_id === trackId);
-  if (!track) {
-    return { ok: false, track_id: trackId, reasons: [`Track not found: ${trackId}`] };
-  }
-  const config = loadTopology(root).config || {};
-  const review = track.metadata.review || null;
-  const reasons = [];
-  const warnings = [];
-  if (!review) {
-    if (config.allow_unreviewed_ship === true) {
-      warnings.push("No recorded review verdict; allowed by config.allow_unreviewed_ship");
-    } else {
-      reasons.push("No recorded review verdict");
-    }
-  } else {
-    if (review.verdict !== "approved") {
-      reasons.push(`Review verdict is ${review.verdict || "absent"}`);
-    }
-    if ((review.blocking_count || 0) > 0) {
-      reasons.push(`Review has ${review.blocking_count} blocking finding(s)`);
-    }
-    if (config.require_second_reviewer === true && review.self_reviewed === true) {
-      reasons.push("Self-review is not sufficient when require_second_reviewer is true");
-    }
-    const hasPinnedReview = Boolean(review.reviewed_sha) || Boolean(review.reviewed_shas && Object.values(review.reviewed_shas).some(Boolean));
-    if (!hasPinnedReview) {
-      if (config.allow_unpinned_review_ship === true) {
-        warnings.push("Review does not record reviewed_sha/reviewed_shas; allowed by config.allow_unpinned_review_ship");
-      } else {
-        reasons.push("Review does not record reviewed_sha/reviewed_shas");
-      }
-    } else if (review.reviewed_sha && options.headSha && options.headSha !== review.reviewed_sha) {
-      reasons.push(`Head ${options.headSha} differs from reviewed_sha ${review.reviewed_sha}; re-review required`);
-    }
-    if (review.reviewed_shas && options.headShas && typeof options.headShas === "object") {
-      for (const [repo, reviewedSha] of Object.entries(review.reviewed_shas)) {
-        const headSha = options.headShas[repo];
-        if (typeof reviewedSha === "string" && typeof headSha === "string" && headSha !== reviewedSha) {
-          reasons.push(`Repo ${repo} head ${headSha} differs from reviewed_shas.${repo} ${reviewedSha}; re-review required`);
-        }
-      }
-    }
-  }
-  return {
-    ok: reasons.length === 0,
-    track_id: track.track_id,
-    review,
-    reasons,
-    warnings
-  };
-}
-function metadataPatch(root, args = {}) {
-  const track = findTrack(root, args.trackId || args.track_id);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  const patch = args.patch && typeof args.patch === "object" ? args.patch : null;
-  if (!patch) return { ok: false, error: "patch object is required" };
-  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }), {
-    root,
-    lockName: trackLockName(track.track_id)
-  });
-  return {
-    ok: result.ok,
-    track_id: track.track_id,
-    metadata_path: import_node_path15.default.relative(root, track.metadata_path),
-    patch_keys: Object.keys(patch).sort(),
-    result
-  };
-}
-function heartbeatTrack(root, args = {}) {
-  const track = findTrack(root, args.trackId || args.track_id);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  return withTrackLock(root, track.track_id, () => heartbeatTrackUnlocked(root, track, args));
-}
-function heartbeatTrackUnlocked(root, track, args = {}) {
-  const identity = args.identity || gitIdentity(root) || track.metadata.owner || null;
-  const now = asOptionalString(args.now) || utcNow();
-  const topology = loadTopology(root);
-  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
-    if (topology.config.sync_mode === "shared") {
-      const existingLease = asJsonObject(metadata.lease);
-      metadata.lease = {
-        ...existingLease,
-        owner: identity,
-        acquired_at: asOptionalString(existingLease.acquired_at) || now,
-        heartbeat_at: now
-      };
-    }
-    metadata.owner = metadata.owner || identity;
-    metadata.updated_at = now;
-    return metadata;
-  }, { lock: false });
-  const statePath = import_node_path15.default.join(track.dir, "implement_state.json");
-  let stateResult = null;
-  if (fileExists(statePath)) {
-    stateResult = patchJsonFile(statePath, (state) => ({
-      ...state,
-      owner: state.owner || identity,
-      last_updated: now
-    }), { lock: false });
-  }
-  let beads = null;
-  const epic = track.metadata.beads_epic;
-  if (epic && commandExists("bd", root)) {
-    beads = beadsTaskWrite(root, { operation: "update", id: epic, assignee: identity || "" });
-  }
-  return {
-    ok: metadataResult.ok && (!stateResult || stateResult.ok) && (!beads || beads.ok),
-    track_id: track.track_id,
-    owner: identity,
-    heartbeat_at: now,
-    metadata: metadataResult,
-    state: stateResult,
-    beads
-  };
-}
-function claimTrack(root, trackId, options = {}) {
-  const track = findTrack(root, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  return withTrackLock(root, track.track_id, () => claimTrackUnlocked(root, track, options));
-}
-function claimTrackUnlocked(root, track, options = {}) {
-  const identity = options.identity || gitIdentity(root);
-  if (!identity) return { ok: false, error: "No git identity found for claim" };
-  const now = utcNow();
-  const hold = holdInfo(track);
-  const heldBy = hold.lease_owner || hold.owner;
-  const stale = hold.lease_stale || hold.state_stale || !heldBy || heldBy === identity;
-  if (heldBy && heldBy !== identity && !stale && options.takeover !== true) {
-    return { ok: false, claimed: false, reason: "foreign-held", held_by: heldBy, hold };
-  }
-  const commands = [];
-  if (track.metadata.beads_epic) {
-    if (!commandExists("bd", root)) {
-      return { ok: false, claimed: false, error: "Beads CLI (bd) is required but was not found" };
-    }
-    const escapedIdentity = identity.replace(/'/g, "''");
-    const escapedEpic = String(track.metadata.beads_epic).replace(/'/g, "''");
-    const sql = `UPDATE issues SET assignee='${escapedIdentity}' WHERE id='${escapedEpic}' AND (assignee IS NULL OR assignee='' OR assignee='${escapedIdentity}' OR updated_at < datetime('now','-30 minutes'))`;
-    commands.push(runCommand("bd", ["sql", sql], { cwd: root }));
-    const last = commands[commands.length - 1];
-    if (!last || !last.ok) return { ok: false, claimed: false, error: "Beads claim failed", commands };
-    const verify = runCommand("bd", ["show", track.metadata.beads_epic, "--json"], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-    commands.push(verify);
-    if (!verify.ok) return { ok: false, claimed: false, error: "Beads claim verification failed", commands };
-    const assignedTo = extractAssignee(parseCommandJson(verify));
-    if (!assignedTo) {
-      return {
-        ok: false,
-        claimed: false,
-        reason: "claim-unverified",
-        error: "Beads claim verification did not expose an assignee",
-        commands
-      };
-    }
-    if (assignedTo !== identity) {
-      return {
-        ok: false,
-        claimed: false,
-        reason: "foreign-held",
-        held_by: assignedTo,
-        hold,
-        commands
-      };
-    }
-  }
-  const topology = loadTopology(root);
-  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
-    metadata.owner = identity;
-    metadata.updated_at = now;
-    if (topology.config.sync_mode === "shared") {
-      const existingLease = asJsonObject(metadata.lease);
-      metadata.lease = {
-        ...existingLease,
-        owner: identity,
-        acquired_at: existingLease.owner === identity ? asOptionalString(existingLease.acquired_at) || now : now,
-        heartbeat_at: now
-      };
-    }
-    return metadata;
-  }, { lock: false });
-  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult, commands };
-  const statePath = import_node_path15.default.join(track.dir, "implement_state.json");
-  writeJson(statePath, {
-    status: "starting",
-    owner: identity,
-    track_id: track.track_id,
-    last_updated: now
-  });
-  return {
-    ok: true,
-    claimed: true,
-    track_id: track.track_id,
-    owner: identity,
-    previous_hold: hold,
-    metadata: metadataResult,
-    commands
-  };
-}
-function setTrackStatus(root, trackId, status) {
-  if (!VALID_STATUSES.has(status)) {
-    return {
-      ok: false,
-      error: `Invalid status: ${status}`,
-      valid_statuses: Array.from(VALID_STATUSES)
-    };
-  }
-  const track = listTracks(root).find((item) => item.track_id === trackId);
-  if (!track) {
-    return { ok: false, error: `Track not found: ${trackId}` };
-  }
-  return withTrackLock(root, trackId, () => {
-    const metadata = patchJsonFile(track.metadata_path, (current) => ({
-      ...current,
-      status
-    }), { lock: false });
-    if (!metadata.ok) {
-      return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
-    }
-    const regen = regenIndex(root);
-    return {
-      ok: Boolean(regen.ok),
-      track_id: trackId,
-      status,
-      metadata,
-      regen
-    };
-  });
-}
-function recordTaskResultUnlocked(root, args = {}) {
-  const track = findTrack(root, args.trackId);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  const plan = parsePlanFile(track.plan_path);
-  const phaseIndex = Number(args.phaseIndex);
-  const taskIndex = Number(args.taskIndex);
-  const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
-  const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
-  if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
-  const planJsonPath = trackPlanJsonPath(track);
-  const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
-  const recordedAt = utcNow();
-  const lastTaskResult = {
-    phase_index: phaseIndex,
-    task_index: taskIndex,
-    task_key: task.task_key,
-    status: args.status || "completed",
-    commit_sha: commitSha || null,
-    repo: args.repo || task.repo || null,
-    working_root: args.workingRoot || null,
-    recorded_at: recordedAt
-  };
-  const metadata = patchJsonFile(track.metadata_path, (current) => {
-    if (typeof args.coverage === "number") current.last_coverage = args.coverage;
-    if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
-    if (isRecord(args.manualVerificationEvidence)) current.last_manual_verification_result = asJsonObject(args.manualVerificationEvidence);
-    current.last_task_result = lastTaskResult;
-    return current;
-  });
-  if (!metadata.ok) {
-    return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
-  }
-  if (fileExists(planJsonPath)) {
-    const planPatch = patchJsonFile(planJsonPath, (current) => {
-      const phases = asArray(current.phases).map((rawPhase) => {
-        const currentPhase = asJsonObject(rawPhase);
-        if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
-        return {
-          ...currentPhase,
-          tasks: asArray(currentPhase.tasks).map((rawTask) => {
-            const currentTask = asJsonObject(rawTask);
-            if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
-            const commitShas = Array.from(/* @__PURE__ */ new Set([
-              ...asStringArray(currentTask.commit_shas),
-              ...commitSha ? [commitSha.slice(0, 12)] : []
-            ]));
-            return {
-              ...currentTask,
-              status: args.status || "completed",
-              commit_shas: commitShas,
-              completion_evidence: {
-                ...asJsonObject(currentTask.completion_evidence),
-                commit_sha: commitSha || null,
-                repo: args.repo || task.repo || null,
-                working_root: args.workingRoot || null,
-                coverage: typeof args.coverage === "number" ? args.coverage : null,
-                recorded_at: recordedAt,
-                ...isRecord(args.manualVerificationEvidence) ? { manual_verification: asJsonObject(args.manualVerificationEvidence) } : {}
-              }
-            };
-          })
-        };
-      });
-      return { ...current, phases, updated_at: recordedAt };
-    });
-    if (!planPatch.ok) {
-      return { ok: false, track_id: track.track_id, stage: "plan_json_patch", metadata, plan_json: planPatch };
-    }
-    const nextPlan = asJsonObject(planPatch.value);
-    import_node_fs7.default.writeFileSync(
-      track.plan_path,
-      withGeneratedMarker(import_node_path15.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
-    );
-    const metadataValue = asJsonObject(metadata.value);
-    const beadsTasks = asJsonObject(metadataValue.beads_tasks);
-    return {
-      ok: true,
-      track_id: track.track_id,
-      task_key: task.task_key,
-      line: task.line,
-      status: args.status || "completed",
-      commit_sha: commitSha || null,
-      beads_task_id: asOptionalString(beadsTasks[task.task_key]) || null,
-      metadata,
-      plan_json: planPatch
-    };
-  }
-  return {
-    ok: false,
-    track_id: track.track_id,
-    stage: "missing_plan_json",
-    error: `Missing canonical plan JSON: ${planJsonPath}`,
-    metadata
-  };
-}
-function recordTaskResult(root, args = {}) {
-  const track = findTrack(root, args.trackId);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  if (args.lock === false) return recordTaskResultUnlocked(root, args);
-  return withTrackLock(root, track.track_id, () => recordTaskResultUnlocked(root, { ...args, lock: false }));
-}
-
-// src/core/application/runtime/quality-gates.ts
-function testCoverage(root, args = {}) {
-  let track = null;
-  let task = null;
-  let workingRoot = {
-    repo: args.repo || ".",
-    path: args.workingRoot ? import_node_path16.default.resolve(root, args.workingRoot) : root,
-    source: args.workingRoot ? "argument.workingRoot" : "project-root"
-  };
-  if (args.trackId) {
-    track = findTrack(root, args.trackId);
-    if (!track) {
-      return { ok: false, available: false, error: `Track not found: ${args.trackId}` };
-    }
-    if (args.phaseIndex != null && args.taskIndex != null) {
-      const plan = parsePlanFile(track.plan_path);
-      const phase = (plan.phases || []).find((item) => item.phase_index === Number(args.phaseIndex));
-      task = phase?.tasks.find((item) => item.task_index === Number(args.taskIndex)) || null;
-    }
-    workingRoot = resolveTaskWorkingRoot(root, track, task, args);
-    if (isWorkingRootError(workingRoot)) {
-      return {
-        ok: false,
-        available: false,
-        stage: "polyrepo_repo_resolution",
-        working_root: workingRoot,
-        reason: workingRoot.error
-      };
-    }
-  }
-  const coverageRun = runCoverage(root, args, workingRoot.path);
-  if (!coverageRun.available) return coverageRun;
-  const { command, coverage } = coverageRun;
-  let task_result = null;
-  let metadata = null;
-  if (track) {
-    const writeCoverage = () => {
-      metadata = patchJsonFile(track.metadata_path, (current) => {
-        current.last_test_run = {
-          command,
-          cwd: coverageRun.cwd || workingRoot.path,
-          ok: coverageRun.ok,
-          status: coverageRun.status,
-          signal: coverageRun.signal,
-          coverage,
-          measured_at: utcNow()
-        };
-        if (typeof coverage === "number") current.last_coverage = coverage;
-        return current;
-      }, { lock: false });
-      return metadata;
-    };
-    const metadataWrite = withTrackLock(root, track.track_id, writeCoverage);
-    if (!metadataWrite.ok) return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_lock", metadata: metadataWrite };
-    const metadataResult = metadata ?? metadataWrite;
-    if (!metadataResult.ok) {
-      return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata: metadataResult };
-    }
-    if (args.phaseIndex != null && args.taskIndex != null) {
-      task_result = recordTaskResult(root, {
-        trackId: args.trackId,
-        phaseIndex: args.phaseIndex,
-        taskIndex: args.taskIndex,
-        status: args.status || (coverageRun.ok ? "completed" : "blocked"),
-        commitSha: args.commitSha,
-        coverage,
-        repo: workingRoot.repo,
-        workingRoot: import_node_path16.default.relative(root, workingRoot.path) || "."
-      });
-    }
-  }
-  return {
-    ok: coverageRun.ok,
-    available: true,
-    command,
-    cwd: coverageRun.cwd,
-    status: coverageRun.status,
-    signal: coverageRun.signal,
-    coverage,
-    coverage_source: coverageRun.coverage_source,
-    timed_out: coverageRun.signal === "SIGTERM" || coverageRun.signal === "SIGKILL",
-    stdout_tail: coverageRun.stdout_tail,
-    stderr_tail: coverageRun.stderr_tail,
-    working_root: workingRoot,
-    metadata,
-    task_result
-  };
-}
-function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
-  const explicit = args.machineCommand || args.machine_command || args.command;
-  if (explicit) return String(explicit);
-  const config = loadTopology(root).config || {};
-  for (const key of [
-    "review_machine_gate_command",
-    "machine_gate_command",
-    "review_check_command",
-    "typecheck_command",
-    "build_command",
-    "check_command"
-  ]) {
-    if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
-  }
-  const pkg = loadPackageJson(workingRoot);
-  const scripts = pkg ? asJsonObject(pkg.scripts) : {};
-  if (Object.keys(scripts).length > 0) {
-    for (const name of ["typecheck", "check", "build", "lint"]) {
-      if (scripts[name]) {
-        if (fileExists(import_node_path16.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
-        if (fileExists(import_node_path16.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
-        return `npm run ${name}`;
-      }
-    }
-  }
-  return null;
-}
-function runMachineGate(root, args = {}, workingRoot = root) {
-  const command = configuredMachineGateCommand(root, args, workingRoot);
-  if (!command) {
-    return {
-      ok: true,
-      available: false,
-      reason: "No review machine-gate command configured or discovered",
-      hints: [
-        "Pass { machineCommand } explicitly",
-        "Set cadre/config.json review_machine_gate_command",
-        "Add a package script named typecheck, check, build, or lint"
-      ]
-    };
-  }
-  const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1e3);
-  const result = runCommand(command, [], {
-    cwd: workingRoot,
-    shell: true,
-    timeoutMs,
-    maxBuffer: 30 * 1024 * 1024
-  });
-  return {
-    ok: result.ok,
-    available: true,
-    command,
-    cwd: workingRoot,
-    status: result.status,
-    signal: result.signal,
-    timed_out: result.signal === "SIGTERM" || result.signal === "SIGKILL",
-    stdout_tail: result.stdout.slice(-4e3),
-    stderr_tail: result.stderr.slice(-4e3)
-  };
-}
-function reviewMachineGate(root, args = {}) {
-  const trackId = args.trackId || args.track_id || null;
-  const track = trackId ? findTrack(root, trackId) : null;
-  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
-  if (track) {
-    const repoError = repoEntriesError(root, track, args);
-    if (repoError) return repoError;
-  }
-  const entries = track ? repoEntriesForTrack(root, track, args) : [{
-    repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path16.default.resolve(root, args.workingRoot) : root,
-    path: args.workingRoot || ".",
-    source: args.workingRoot ? "argument.workingRoot" : "project-root"
-  }];
-  const results = entries.map((entry) => {
-    const gate = runMachineGate(root, args, entry.root);
-    return {
-      repo: entry.repo,
-      path: entry.path,
-      source: entry.source,
-      ...gate
-    };
-  });
-  const blocking = results.filter((result) => result.available === true && !result.ok);
-  return {
-    ok: blocking.length === 0,
-    available: results.some((result) => result.available === true),
-    track_id: trackId,
-    results,
-    blocking_count: blocking.length
-  };
-}
-function providerFromConfig(root, args = {}) {
-  return asOptionalString(configuredProvider(root, args).provider_mode) || "local";
-}
-function providerEvidenceRequirement(root, args = {}) {
-  const providerInfo = configuredProvider(root, args);
-  const provider = asOptionalString(providerInfo.provider_mode) || "local";
-  const readiness = providerReadiness(root, args);
-  const track = args.trackId ? findTrack(root, args.trackId) : null;
-  const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
-  const target = args.pr || args.prNumber || args.mr || branch || null;
-  const kind = provider === "gitlab" ? "gitlab_merge_request_status" : "github_pull_request_status";
-  const minimumFields = provider === "gitlab" ? ["url", "state", "source_branch", "target_branch", "head_sha", "approvals", "pipeline_status", "discussions"] : ["url", "state", "head_ref", "base_ref", "head_sha", "review_decision", "status_checks", "workflow_runs", "comments"];
-  return {
-    ok: false,
-    available: false,
-    provider,
-    target,
-    branch,
-    provider_mode: provider,
-    required_provider_mcp: provider === "local" ? null : {
-      provider,
-      server: provider,
-      purpose: "Fetch provider evidence through the installed provider MCP. CLI fallback is intentionally disabled."
-    },
-    mcp_readiness: readiness,
-    detected_agent_capability_evidence: readiness.detected_agent_capability_evidence || null,
-    missing_evidence_fields: readiness.missing_evidence_fields || [],
-    required_evidence: provider === "local" ? null : {
-      kind,
-      provider,
-      target,
-      branch,
-      minimum_fields: minimumFields,
-      write_back: {
-        tool: "cadre_review",
-        action: "provider_evidence",
-        trackId: args.trackId || args.track_id || null
-      }
-    },
-    exact_write_back_packet: provider === "local" ? null : {
-      tool: "cadre_review",
-      arguments: {
-        root,
-        action: "provider_evidence",
-        trackId: args.trackId || args.track_id || null,
-        providerEvidence: `<${provider}-mcp-evidence>`
-      }
-    },
-    next_actions: provider === "local" ? [] : [
-      `Use the installed ${provider} MCP to fetch PR/MR metadata, reviews, checks or pipeline status, and discussion evidence for the target.`,
-      "Call cadre_review with action provider_evidence and the fetched evidence before recording review or shipping."
-    ],
-    reason: provider === "local" ? "provider_mode is local; provider evidence is not required" : `${provider} provider evidence must come from the ${provider} MCP; CLI fallback is disabled`,
-    unsupported_reason: provider === "local" ? null : `provider_mode ${provider} requires ${provider} MCP evidence; Cadre workflow packets do not use provider CLI fallback`
-  };
-}
-function prCiStatus(root, args = {}) {
-  const provider = providerFromConfig(root, args);
-  const evidence = args.evidence || args.providerEvidence || args.provider_evidence || null;
-  if (provider === "local") {
-    return {
-      ok: true,
-      available: false,
-      skipped: true,
-      provider,
-      provider_mode: "local",
-      reason: "provider_mode is local; no provider MCP evidence required"
-    };
-  }
-  if (provider !== "github" && provider !== "gitlab") {
-    return { ok: false, available: false, provider, reason: `Unsupported provider_mode: ${provider}` };
-  }
-  if (evidence) {
-    return {
-      ok: true,
-      available: true,
-      provider,
-      provider_mode: provider,
-      evidence_source: `${provider}_mcp`,
-      evidence: asJsonObject(evidence)
-    };
-  }
-  return providerEvidenceRequirement(root, args);
-}
-function diffSurface(root, base, head) {
-  const range = `${base}...${head}`;
-  const stat = runCommand("git", ["diff", "--stat", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  const names = runCommand("git", ["diff", "--name-only", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  return {
-    ok: stat.ok || names.ok,
-    base,
-    head,
-    stat: stat.stdout.trim(),
-    files: names.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
-    errors: [stat.stderr, names.stderr].filter(Boolean).join("\n").trim()
-  };
-}
-function scanReviewTodos(root, files, limit = 100) {
-  const findings = [];
-  const patterns = [
-    /\bTODO\b/i,
-    /\bFIXME\b/i,
-    /\bstub\b/i,
-    /throw new Error\(["']not implemented/i
-  ];
-  for (const file of files || []) {
-    if (isIgnoredRepoMapFile(file)) continue;
-    const abs = import_node_path16.default.join(root, file);
-    if (!fileExists(abs)) continue;
-    let stat;
-    try {
-      stat = import_node_fs8.default.statSync(abs);
-    } catch {
-      continue;
-    }
-    if (stat.size > 1024 * 1024) continue;
-    const lines = import_node_fs8.default.readFileSync(abs, "utf8").split(/\r?\n/);
-    for (let index = 0; index < lines.length && findings.length < limit; index += 1) {
-      const line = lines[index] || "";
-      if (patterns.some((pattern) => pattern.test(line))) {
-        findings.push({ file, line: index + 1, snippet: line.trim().slice(0, 180) });
-      }
-    }
-  }
-  return findings;
-}
-function reviewAssist(root, args = {}) {
-  const trackId = args.trackId || args.track_id;
-  if (!trackId) return { ok: false, error: "trackId is required" };
-  const context = trackContext(root, trackId);
-  if (!context.ok) return context;
-  const track = findTrack(root, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  const repoError = repoEntriesError(root, track, args);
-  if (repoError) return repoError;
-  const plan = parsePlanFile(track.plan_path);
-  const base = args.base || "main";
-  const head = args.head || track.metadata.git_branch || "HEAD";
-  const repoEntries = repoEntriesForTrack(root, track, args);
-  const repoDiffs = repoEntries.map((entry) => ({
-    repo: entry.repo,
-    path: entry.path,
-    cwd: entry.root,
-    source: entry.source,
-    ...diffSurface(entry.root, entry.base || base, entry.head || head)
-  }));
-  const diff = repoDiffs.find((entry) => entry.repo === ".") || diffSurface(root, base, head);
-  const incompleteTasks = [];
-  for (const phase of plan.phases) {
-    for (const task of phase.tasks) {
-      if (task.marker !== "x" && task.marker !== "-") {
-        incompleteTasks.push({
-          phase: phase.phase_index,
-          task: task.task_index,
-          task_key: task.task_key,
-          title: task.title,
-          marker: task.marker,
-          repo: task.repo || null
-        });
-      }
-    }
-  }
-  const todoLimit = Number(args.todoLimit || 100);
-  const repoTodos = repoDiffs.map((entry) => ({
-    repo: entry.repo,
-    path: entry.path,
-    cwd: entry.cwd,
-    todos: scanReviewTodos(entry.cwd || root, entry.files, todoLimit)
-  }));
-  const todos = repoTodos.flatMap((entry) => entry.todos.map((todo) => ({ ...todo, repo: entry.repo }))).slice(0, todoLimit);
-  const lsp = args.includeLsp === false ? null : args.lspResult || args.lsp_result || lspReview(root, { base, head, config: args.config });
-  const machineGate = args.includeMachine === false ? null : reviewMachineGate(root, args);
-  const lspObject = asJsonObject(lsp);
-  const machineGateObject = asJsonObject(machineGate);
-  const blocking = [];
-  if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
-  if (todos.length > 0) blocking.push(`${todos.length} TODO/FIXME/stub marker(s) found in changed files`);
-  if (track.metadata.last_coverage == null) blocking.push("No measured coverage recorded on the track");
-  if (lsp && lspObject.available !== false && Array.isArray(lspObject.findings)) {
-    const lspBlocking = asArray(lspObject.findings).filter((finding) => finding.severity === "blocking" || finding.blocking === true);
-    if (lspBlocking.length > 0) blocking.push(`${lspBlocking.length} blocking LSP/code-intelligence finding(s)`);
-  }
-  const machineBlockingCount = asNumber(machineGateObject.blocking_count);
-  if (machineGate && machineBlockingCount > 0) {
-    blocking.push(`${machineBlockingCount} machine gate check(s) failed`);
-  }
-  const result = {
-    ok: true,
-    root,
-    track_id: trackId,
-    base,
-    head,
-    diff,
-    repo_diffs: repoDiffs,
-    task_counts: context.task_counts,
-    incomplete_tasks: incompleteTasks,
-    coverage: track.metadata.last_coverage ?? null,
-    todos,
-    repo_todos: repoTodos,
-    lsp,
-    machine_gate: machineGate,
-    suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
-    blocking_reasons: blocking
-  };
-  const mode = (asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null)) || "compact").toLowerCase();
-  if (["detail", "detailed", "full", "verbose"].includes(mode)) return result;
-  const lspSummary = asJsonObject(result.lsp);
-  const gateSummary = asJsonObject(result.machine_gate);
-  const diffSummary = asJsonObject(diff);
-  const diffFiles = Array.isArray(diffSummary.files) ? diffSummary.files : [];
-  return {
-    ok: true,
-    root,
-    track_id: trackId,
-    base,
-    head,
-    task_counts: context.task_counts,
-    diff: {
-      repo: diffSummary.repo || ".",
-      file_count: diffFiles.length,
-      stat: asOptionalString(diffSummary.stat) || ""
-    },
-    repo_diffs: repoDiffs.slice(0, 20).map((entry) => ({
-      repo: entry.repo,
-      path: entry.path,
-      files: Array.isArray(entry.files) ? entry.files.slice(0, 50) : [],
-      file_count: Array.isArray(entry.files) ? entry.files.length : 0,
-      stat: entry.stat
-    })),
-    repo_diffs_count: repoDiffs.length,
-    incomplete_tasks: incompleteTasks.slice(0, 20),
-    incomplete_tasks_count: incompleteTasks.length,
-    coverage: track.metadata.last_coverage ?? null,
-    todos: todos.slice(0, 20),
-    todos_count: todos.length,
-    lsp: lsp ? {
-      available: lspSummary.available !== false,
-      degraded: lspSummary.degraded === true || lspSummary.fallback === "text_scan",
-      findings_count: Array.isArray(lspSummary.findings) ? lspSummary.findings.length : 0,
-      server_count: Array.isArray(lspSummary.servers) ? lspSummary.servers.length : 0,
-      polyrepo: lspSummary.polyrepo === true
-    } : null,
-    machine_gate: machineGate ? {
-      ok: gateSummary.ok !== false,
-      available: gateSummary.available !== false,
-      blocking_count: Number(gateSummary.blocking_count || 0),
-      result_count: Array.isArray(gateSummary.results) ? gateSummary.results.length : 0
-    } : null,
-    suggested_verdict: result.suggested_verdict,
-    blocking_reasons: blocking,
-    detail_available: true
-  };
-}
-
-// src/core/application/runtime/review-records.ts
-function recordReview(root, args = {}) {
-  const track = findTrack(root, args.trackId);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  return withTrackLock(root, track.track_id, () => recordReviewUnlocked(root, track, args));
-}
-function recordReviewUnlocked(root, track, args = {}) {
-  const verdict = args.verdict || "";
-  if (!["approved", "changes_requested"].includes(verdict)) {
-    return { ok: false, error: `Invalid review verdict: ${verdict}` };
-  }
-  const reviewer = args.reviewer || gitIdentity(root);
-  const pins = reviewedShasForTrack(root, track, args);
-  if (pins.ok === false) return pins;
-  const metadata = patchJsonFile(track.metadata_path, (current) => {
-    const existing = asJsonObject(current.review);
-    const existingReviewer = asOptionalString(existing.reviewer);
-    const existingVerdict = asOptionalString(existing.verdict);
-    const existingBlockingCount = Number(existing.blocking_count || 0);
-    if (verdict === "approved" && args.allowOverride !== true && existingReviewer && existingReviewer !== reviewer && (existingVerdict === "changes_requested" || existingBlockingCount > 0)) {
-      throw new Error("Approval would override another reviewer's open changes_requested verdict");
-    }
-    current.review = {
-      verdict,
-      blocking_count: Number(args.blockingCount || 0),
-      date: args.date || utcNow(),
-      reviewer: reviewer || null,
-      coverage: args.coverage ?? current.last_coverage ?? null,
-      self_reviewed: Boolean(reviewer && current.owner && reviewer === current.owner),
-      reviewed_sha: asOptionalString(pins.reviewed_sha) || null,
-      reviewed_shas: asJsonObject(pins.reviewed_shas),
-      review_seq: Number(existing.review_seq || 0) + 1
-    };
-    return current;
-  }, { lock: false });
-  if (!metadata.ok) {
-    return {
-      ok: false,
-      track_id: track.track_id,
-      stage: "metadata_patch",
-      error: metadata.error,
-      requires_override: /override another reviewer/.test(metadata.error || ""),
-      metadata
-    };
-  }
-  const gate = reviewGate(root, track.track_id, args);
-  return { ok: true, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate };
-}
-function reviewEvidencePath(track) {
-  return import_node_path17.default.join(track.dir, "review-evidence.json");
-}
-function reviewEvidence(root, trackId) {
-  const track = findTrack(root, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  const evidencePath = reviewEvidencePath(track);
-  const evidence = readJson(evidencePath, {
-    track_id: track.track_id,
-    entries: []
-  });
-  return {
-    ok: true,
-    track_id: track.track_id,
-    path: import_node_path17.default.relative(root, evidencePath),
-    evidence
-  };
-}
-function providerEvidence(root, args = {}) {
-  const track = findTrack(root, args.trackId || args.track_id);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  return withTrackLock(root, track.track_id, () => providerEvidenceUnlocked(root, track, args));
-}
-function providerEvidenceUnlocked(root, track, args = {}) {
-  const evidencePath = reviewEvidencePath(track);
-  const existing = readJson(evidencePath, {
-    track_id: track.track_id,
-    entries: []
-  });
-  const entries = Array.isArray(existing.entries) ? existing.entries.map(asJsonObject) : [];
-  const findings = Array.isArray(args.findings) ? args.findings.map(asJsonObject) : [];
-  const blockingCount = findings.filter(
-    (finding) => finding.blocking === true || asString(finding.severity) === "blocking"
-  ).length;
-  const provider = args.provider || providerFromConfig(root, args);
-  const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
-  const providerStatus = fetched ? asJsonObject(fetched) : null;
-  if (!providerStatus && args.fetch !== false) {
-    return {
-      ok: false,
-      track_id: track.track_id,
-      stage: "provider_mcp_evidence_required",
-      provider,
-      requirement: providerEvidenceRequirement(root, { ...args, trackId: track.track_id })
-    };
-  }
-  const entry = {
-    id: `review-${entries.length + 1}`,
-    recorded_at: utcNow(),
-    provider,
-    reviewer: args.reviewer || gitIdentity(root) || null,
-    reviewed_sha: args.reviewedSha || args.reviewed_sha || gitRevParse(root, "HEAD"),
-    blocking_count: Number(args.blockingCount ?? blockingCount),
-    verdict: args.verdict || null,
-    findings,
-    evidence: providerStatus,
-    notes: asOptionalString(args.notes) || null
-  };
-  const next = {
-    ...existing,
-    track_id: track.track_id,
-    entries: [...entries, entry],
-    updated_at: entry.recorded_at
-  };
-  writeJson(evidencePath, next);
-  appendJsonl(import_node_path17.default.join(track.dir, "review-evidence.jsonl"), entry);
-  const metadata = patchJsonFile(track.metadata_path, (current) => {
-    current.review_evidence = {
-      path: import_node_path17.default.relative(root, evidencePath),
-      entries: asArray(next.entries).length || entries.length + 1,
-      latest_id: entry.id,
-      latest_recorded_at: entry.recorded_at,
-      provider,
-      blocking_count: entry.blocking_count
-    };
-    return current;
-  }, { lock: false });
-  if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
-  return {
-    ok: true,
-    track_id: track.track_id,
-    path: import_node_path17.default.relative(root, evidencePath),
-    entry,
-    metadata
-  };
-}
-function syncControlPlane(root, args = {}) {
-  const topology = loadTopology(root);
-  if (topology.config.sync_mode !== "shared") {
-    return { ok: true, skipped: true, reason: "sync_mode is not shared", commands: [] };
-  }
-  const mode = args.mode || "pre";
-  const remote = asOptionalString(topology.config.control_remote) || "origin";
-  const branch = asOptionalString(topology.config.control_branch) || "main";
-  const commands = [];
-  commands.push(runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root }));
-  const safety = controlPlaneSyncSafety(root, mode, remote, branch);
-  if (!safety.ok) {
-    return { ok: false, mode, remote, branch, safety, commands };
-  }
-  if (mode === "pre") {
-    commands.push(runCommand("git", ["pull", "--rebase", remote, branch], { cwd: root }));
-    if (commandExists("bd", root)) commands.push(runCommand("bd", ["dolt", "pull"], { cwd: root }));
-  } else if (mode === "post") {
-    if (commandExists("bd", root)) commands.push(runCommand("bd", ["dolt", "push"], { cwd: root }));
-    commands.push(runCommand("git", ["push", remote, branch], { cwd: root }));
-  } else {
-    return { ok: false, error: `Invalid sync mode: ${mode}`, commands };
-  }
-  return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, safety, commands };
-}
-
 // src/core/application/runtime/packaged-assets.ts
-var import_node_fs9 = __toESM(require("node:fs"));
-var import_node_path18 = __toESM(require("node:path"));
+var import_node_fs10 = __toESM(require("node:fs"));
+var import_node_path17 = __toESM(require("node:path"));
 var SEARCH_DEPTH = 8;
 function embeddedAssets() {
   return typeof __CADRE_EMBEDDED_ASSETS__ !== "undefined" ? __CADRE_EMBEDDED_ASSETS__ : null;
@@ -3371,7 +2883,7 @@ function unique2(values) {
 }
 function isFile(file) {
   try {
-    return import_node_fs9.default.statSync(file).isFile();
+    return import_node_fs10.default.statSync(file).isFile();
   } catch {
     return false;
   }
@@ -3381,7 +2893,7 @@ function walkingCandidates(factory) {
   let dir = __dirname;
   for (let depth = 0; depth < SEARCH_DEPTH; depth += 1) {
     candidates.push(...factory(dir));
-    const parent = import_node_path18.default.dirname(dir);
+    const parent = import_node_path17.default.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
@@ -3392,12 +2904,12 @@ function findFile(candidates) {
 }
 function walkTemplateFiles(dir, base = dir) {
   const files = [];
-  for (const entry of import_node_fs9.default.readdirSync(dir, { withFileTypes: true })) {
-    const full = import_node_path18.default.join(dir, entry.name);
+  for (const entry of import_node_fs10.default.readdirSync(dir, { withFileTypes: true })) {
+    const full = import_node_path17.default.join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...walkTemplateFiles(full, base));
     } else if (entry.isFile()) {
-      files.push(import_node_path18.default.relative(base, full).split(import_node_path18.default.sep).join("/"));
+      files.push(import_node_path17.default.relative(base, full).split(import_node_path17.default.sep).join("/"));
     }
   }
   return files;
@@ -3405,9 +2917,9 @@ function walkTemplateFiles(dir, base = dir) {
 function packagedTemplatePath(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
   return findFile(walkingCandidates((dir) => [
-    import_node_path18.default.join(dir, "assets", "cadre", "templates", normalized),
-    import_node_path18.default.join(dir, "templates", normalized),
-    import_node_path18.default.join(dir, "skills", "cadre", "templates", normalized)
+    import_node_path17.default.join(dir, "assets", "cadre", "templates", normalized),
+    import_node_path17.default.join(dir, "templates", normalized),
+    import_node_path17.default.join(dir, "skills", "cadre", "templates", normalized)
   ]));
 }
 function packagedTemplateText(relativePath) {
@@ -3415,7 +2927,7 @@ function packagedTemplateText(relativePath) {
   const embedded = embeddedAssets()?.templates?.[normalized];
   if (typeof embedded === "string") return embedded;
   const file = packagedTemplatePath(normalized);
-  return file ? import_node_fs9.default.readFileSync(file, "utf8") : null;
+  return file ? import_node_fs10.default.readFileSync(file, "utf8") : null;
 }
 function packagedTemplateJson(relativePath) {
   const text = packagedTemplateText(relativePath);
@@ -3434,7 +2946,7 @@ function packagedTemplatePaths(prefix = "") {
   }
   const manifest = packagedTemplatePath("manifest.json");
   if (!manifest) return [];
-  const root = import_node_path18.default.dirname(manifest);
+  const root = import_node_path17.default.dirname(manifest);
   return walkTemplateFiles(root).filter((file) => !normalizedPrefix || file === normalizedPrefix || file.startsWith(`${normalizedPrefix}/`)).sort();
 }
 function packagedTemplateSource(relativePath) {
@@ -3581,30 +3093,6 @@ function compactLspSetup(value) {
     recommended_count: Array.isArray(setup.recommended) ? setup.recommended.length : Number(setup.recommended_count || 0)
   };
 }
-function compactBeadsPrefix(value) {
-  if (!isRecord(value)) return value;
-  const prefix = asJsonObject(value);
-  return {
-    selected: prefix.selected === true,
-    required: prefix.required === true,
-    epic_prefix: asOptionalString(prefix.epic_prefix) || "",
-    source: asOptionalString(prefix.source) || null,
-    example: asOptionalString(prefix.example) || null,
-    max_words: prefix.max_words,
-    missing_payload: asStringArray(prefix.missing_payload),
-    recommendations: Array.isArray(prefix.recommendations) ? prefix.recommendations.slice(0, 5).map((entry) => {
-      const recommendation2 = asJsonObject(entry);
-      return {
-        label: asOptionalString(recommendation2.label) || null,
-        epic_prefix: asOptionalString(recommendation2.epic_prefix) || null,
-        example: asOptionalString(recommendation2.example) || null,
-        recommended: recommendation2.recommended === true,
-        reason: asOptionalString(recommendation2.reason) || null
-      };
-    }) : [],
-    error: asOptionalString(prefix.error) || void 0
-  };
-}
 function compactSetupResponse(result) {
   const styleGuides = compactStyleGuides(result.styleGuides);
   const reviewBundle = compactReviewBundle(result.review_bundle);
@@ -3656,14 +3144,6 @@ function compactSetupResponse(result) {
       provider: asJsonObject(result.integrations).provider || null,
       optional_mcps: Array.isArray(asJsonObject(result.integrations).optional_mcps) ? asJsonObject(result.integrations).optional_mcps : []
     } : null,
-    beads_init: isRecord(result.beads_init) ? {
-      ok: asJsonObject(result.beads_init).ok !== false,
-      available: asJsonObject(result.beads_init).available,
-      execute: asJsonObject(result.beads_init).execute === true,
-      dry_run: asJsonObject(result.beads_init).dry_run !== false,
-      reason: asOptionalString(asJsonObject(result.beads_init).reason) || null
-    } : result.beads_init,
-    beads_prefix: compactBeadsPrefix(result.beads_prefix),
     styleGuides,
     styleguide_ids: asStringArray(styleGuides.selected),
     templates: compactTemplateManifest(result.templates),
@@ -4047,7 +3527,7 @@ function templateManifest() {
 }
 
 // src/core/application/runtime/workspace-intel.ts
-var import_node_path19 = __toESM(require("node:path"));
+var import_node_path18 = __toESM(require("node:path"));
 function lspImpact(root, args = {}) {
   const limit = Number(args.limit || 50);
   const symbols = Array.isArray(args.symbols) ? args.symbols : args.symbol ? [args.symbol] : [];
@@ -4093,7 +3573,7 @@ function detectWorkspaceAdapters(root) {
   const pkg = loadPackageJson(root);
   if (pkg) {
     const scripts = asJsonObject(pkg.scripts);
-    const runner = fileExists(import_node_path19.default.join(root, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path19.default.join(root, "yarn.lock")) ? "yarn" : "npm run";
+    const runner = fileExists(import_node_path18.default.join(root, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path18.default.join(root, "yarn.lock")) ? "yarn" : "npm run";
     const scriptCommands = ["typecheck", "check", "test", "build", "lint"].filter((script) => scripts[script]).map((script) => runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`);
     adapters.push({
       id: "node",
@@ -4102,34 +3582,34 @@ function detectWorkspaceAdapters(root) {
       available: commandExists(runner.split(" ")[0] || "npm", root),
       commands: scriptCommands
     });
-    if (fileExists(import_node_path19.default.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
+    if (fileExists(import_node_path18.default.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
       adapters.push({
         id: "nx",
         ecosystem: "javascript",
-        manifest: fileExists(import_node_path19.default.join(root, "nx.json")) ? "nx.json" : "package.json",
+        manifest: fileExists(import_node_path18.default.join(root, "nx.json")) ? "nx.json" : "package.json",
         available: commandExists("nx", root) || commandExists("pnpm", root) || commandExists("npx", root),
         commands: ["nx affected -t test", "nx affected -t build"]
       });
     }
   }
-  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path19.default.join(root, file)))) {
+  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path18.default.join(root, file)))) {
     adapters.push({ id: "pytest", ecosystem: "python", manifest: "pyproject.toml", available: commandExists("pytest", root), commands: ["pytest"] });
   }
-  if (fileExists(import_node_path19.default.join(root, "go.mod"))) {
+  if (fileExists(import_node_path18.default.join(root, "go.mod"))) {
     adapters.push({ id: "go", ecosystem: "go", manifest: "go.mod", available: commandExists("go", root), commands: ["go test ./..."] });
   }
-  if (fileExists(import_node_path19.default.join(root, "Cargo.toml"))) {
+  if (fileExists(import_node_path18.default.join(root, "Cargo.toml"))) {
     adapters.push({ id: "cargo", ecosystem: "rust", manifest: "Cargo.toml", available: commandExists("cargo", root), commands: ["cargo test"] });
   }
-  if (fileExists(import_node_path19.default.join(root, "pom.xml"))) {
+  if (fileExists(import_node_path18.default.join(root, "pom.xml"))) {
     adapters.push({ id: "maven", ecosystem: "java", manifest: "pom.xml", available: commandExists("mvn", root), commands: ["mvn test"] });
   }
-  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path19.default.join(root, file)));
+  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path18.default.join(root, file)));
   if (gradleManifest) {
-    const gradlew = fileExists(import_node_path19.default.join(root, "gradlew")) ? "./gradlew" : "gradle";
+    const gradlew = fileExists(import_node_path18.default.join(root, "gradlew")) ? "./gradlew" : "gradle";
     adapters.push({ id: "gradle", ecosystem: "jvm", manifest: gradleManifest, available: gradlew === "./gradlew" || commandExists("gradle", root), commands: [`${gradlew} test`] });
   }
-  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path19.default.join(root, file)))) {
+  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path18.default.join(root, file)))) {
     adapters.push({ id: "bazel", ecosystem: "polyglot", manifest: "MODULE.bazel", available: commandExists("bazel", root), commands: ["bazel test //..."] });
   }
   return adapters;
@@ -4193,14 +3673,14 @@ function testImpact(root, args = {}) {
     const likelyTests = Object.fromEntries(files2.map((file) => [file, likelyTestCandidatesForFile(entry.root, file)]));
     const manifests = /* @__PURE__ */ new Set();
     for (const file of files2) {
-      let dir = import_node_path19.default.dirname(import_node_path19.default.join(entry.root, file));
+      let dir = import_node_path18.default.dirname(import_node_path18.default.join(entry.root, file));
       while (dir.startsWith(entry.root)) {
         for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
-          const candidate = import_node_path19.default.join(dir, manifest);
-          if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path19.default.relative(entry.root, candidate)));
+          const candidate = import_node_path18.default.join(dir, manifest);
+          if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path18.default.relative(entry.root, candidate)));
         }
         if (dir === entry.root) break;
-        dir = import_node_path19.default.dirname(dir);
+        dir = import_node_path18.default.dirname(dir);
       }
     }
     return {
@@ -4247,7 +3727,7 @@ function dependencyGraph(root, args = {}) {
   ]);
   const repoGraphs = repoEntries.map((entry) => {
     const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
-    const manifests2 = files.filter((file) => manifestPatterns.has(import_node_path19.default.basename(file))).map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(import_node_path19.default.dirname(file)), kind: import_node_path19.default.basename(file) }));
+    const manifests2 = files.filter((file) => manifestPatterns.has(import_node_path18.default.basename(file))).map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(import_node_path18.default.dirname(file)), kind: import_node_path18.default.basename(file) }));
     return {
       repo: entry.repo,
       root: entry.root,
@@ -4278,15 +3758,15 @@ function dependencyGraph(root, args = {}) {
 function likelyTestCandidatesForFile(root, file) {
   const normalized = normalizeClaimPath(file);
   if (!normalized) return [];
-  const parsed = import_node_path20.default.parse(normalized);
+  const parsed = import_node_path19.default.parse(normalized);
   const candidates = [
-    import_node_path20.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-    import_node_path20.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-    import_node_path20.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-    import_node_path20.default.join("test", normalized),
-    import_node_path20.default.join("tests", normalized)
+    import_node_path19.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+    import_node_path19.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+    import_node_path19.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+    import_node_path19.default.join("test", normalized),
+    import_node_path19.default.join("tests", normalized)
   ].map((candidate) => normalizeClaimPath(candidate));
-  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path20.default.join(root, candidate)))));
+  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path19.default.join(root, candidate)))));
 }
 function taskSearchTokens(task) {
   return Array.from(new Set(String(task.title || "").toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 4).slice(0, 8)));
@@ -4417,7 +3897,7 @@ function worktreePlan(root, args = {}) {
     const repoBranch = args.branch || entry.head || branch;
     const base = args.base || entry.base || "main";
     const relWorktree = topology.polyrepo ? `.worktrees/${track.track_id}/${safeName(repo)}` : asOptionalString(track.metadata.worktree_path) || `.worktrees/${track.track_id}`;
-    const absWorktree = import_node_path20.default.resolve(root, relWorktree);
+    const absWorktree = import_node_path19.default.resolve(root, relWorktree);
     return {
       repo,
       source_root: entry.root,
@@ -4490,15 +3970,15 @@ function planIntegrity(root, trackId = null) {
 }
 
 // src/core/application/runtime/review-bundles.ts
-var import_node_fs10 = __toESM(require("node:fs"));
-var import_node_path22 = __toESM(require("node:path"));
+var import_node_fs11 = __toESM(require("node:fs"));
+var import_node_path21 = __toESM(require("node:path"));
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_node_os2 = __toESM(require("node:os"));
 
 // src/core/application/runtime/tech-stack.ts
-var import_node_path21 = __toESM(require("node:path"));
+var import_node_path20 = __toESM(require("node:path"));
 function availableStyleGuideIds() {
-  return templateRelativePaths("styleguides").filter((file) => file.endsWith(".json")).map((file) => import_node_path21.default.basename(file, ".json")).sort();
+  return templateRelativePaths("styleguides").filter((file) => file.endsWith(".json")).map((file) => import_node_path20.default.basename(file, ".json")).sort();
 }
 function normalizeStyleGuideId(value) {
   return value.trim().replace(/\\/g, "/").replace(/^.*code_styleguides\//, "").replace(/^.*styleguides\//, "").replace(/\.(md|json)$/i, "").toLowerCase();
@@ -4552,7 +4032,7 @@ function techStackFromArgs(args = {}) {
   return isRecord(args.techStack) ? asJsonObject(args.techStack) : null;
 }
 function loadTechStack(root) {
-  return readJson(import_node_path21.default.join(root, "cadre", "tech-stack.json"), null);
+  return readJson(import_node_path20.default.join(root, "cadre", "tech-stack.json"), null);
 }
 function techStackForPacket(root, args = {}) {
   return techStackFromArgs(args) || loadTechStack(root);
@@ -4567,7 +4047,7 @@ function techStackSummary(root, args = {}) {
     return {
       ok: false,
       root,
-      path: import_node_path21.default.relative(root, import_node_path21.default.join(root, "cadre", "tech-stack.json")),
+      path: import_node_path20.default.relative(root, import_node_path20.default.join(root, "cadre", "tech-stack.json")),
       error: "Missing structured tech stack: cadre/tech-stack.json"
     };
   }
@@ -4586,7 +4066,7 @@ function techStackSummary(root, args = {}) {
   return {
     ok: true,
     root,
-    path: import_node_path21.default.relative(root, import_node_path21.default.join(root, "cadre", "tech-stack.json")),
+    path: import_node_path20.default.relative(root, import_node_path20.default.join(root, "cadre", "tech-stack.json")),
     techStack,
     styleGuideIds: styleGuideIdsForTechStack(techStack),
     summary: lines.length > 0 ? lines.join("\n") : "No tech stack details recorded."
@@ -4773,21 +4253,21 @@ function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras 
   if (args.execute === true && humanReviewConfirmed(args) || rawArgs.reviewBundle === false || rawArgs.reviewFiles === false) return null;
   const explicitDir = asOptionalString(rawArgs.reviewBundleDir || rawArgs.review_bundle_dir || rawArgs.reviewDir || rawArgs.review_dir);
   const rootHash = import_node_crypto2.default.createHash("sha256").update(root).digest("hex").slice(0, 12);
-  const defaultDirectory = import_node_path22.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path22.default.basename(root))}-${rootHash}`);
-  let directory = explicitDir ? import_node_path22.default.resolve(root, explicitDir) : defaultDirectory;
-  const resolvedRoot = import_node_path22.default.resolve(root);
-  const resolvedCadre = import_node_path22.default.join(resolvedRoot, "cadre");
-  const relativeToCadre = import_node_path22.default.relative(resolvedCadre, directory);
-  const insideCadre = relativeToCadre === "" || !relativeToCadre.startsWith("..") && !import_node_path22.default.isAbsolute(relativeToCadre);
+  const defaultDirectory = import_node_path21.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path21.default.basename(root))}-${rootHash}`);
+  let directory = explicitDir ? import_node_path21.default.resolve(root, explicitDir) : defaultDirectory;
+  const resolvedRoot = import_node_path21.default.resolve(root);
+  const resolvedCadre = import_node_path21.default.join(resolvedRoot, "cadre");
+  const relativeToCadre = import_node_path21.default.relative(resolvedCadre, directory);
+  const insideCadre = relativeToCadre === "" || !relativeToCadre.startsWith("..") && !import_node_path21.default.isAbsolute(relativeToCadre);
   const unsafeExplicitDir = Boolean(explicitDir) && (directory === resolvedRoot || insideCadre);
   const warnings = unsafeExplicitDir ? [`Ignored unsafe reviewBundleDir ${explicitDir}; using a temp review bundle outside the project control plane.`] : [];
   if (unsafeExplicitDir) directory = defaultDirectory;
-  if (!explicitDir || unsafeExplicitDir) import_node_fs10.default.rmSync(directory, { recursive: true, force: true });
-  import_node_fs10.default.mkdirSync(directory, { recursive: true });
+  if (!explicitDir || unsafeExplicitDir) import_node_fs11.default.rmSync(directory, { recursive: true, force: true });
+  import_node_fs11.default.mkdirSync(directory, { recursive: true });
   const files = reviewFiles.map((file) => {
-    const reviewPath = import_node_path22.default.join(directory, file.path);
-    import_node_fs10.default.mkdirSync(import_node_path22.default.dirname(reviewPath), { recursive: true });
-    import_node_fs10.default.writeFileSync(reviewPath, file.content);
+    const reviewPath = import_node_path21.default.join(directory, file.path);
+    import_node_fs11.default.mkdirSync(import_node_path21.default.dirname(reviewPath), { recursive: true });
+    import_node_fs11.default.writeFileSync(reviewPath, file.content);
     return {
       path: file.path,
       review_path: reviewPath,
@@ -4798,7 +4278,7 @@ function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras 
       ...reviewStats(file.content)
     };
   });
-  const manifestPath = import_node_path22.default.join(directory, "manifest.json");
+  const manifestPath = import_node_path21.default.join(directory, "manifest.json");
   const relativeReviewPaths = files.map((file) => shellQuote(String(file.path)));
   const openCommand = relativeReviewPaths.length > 0 ? `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${relativeReviewPaths.join(" ")}` : `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${shellQuote("manifest.json")}`;
   const printCommand = relativeReviewPaths.length > 0 ? `cd ${shellQuote(directory)} && for file in ${relativeReviewPaths.join(" ")}; do printf '\\n### %s\\n' "$file"; sed -n '1,240p' "$file"; done` : `sed -n '1,240p' ${shellQuote(manifestPath)}`;
@@ -4882,10 +4362,10 @@ function trackLearningsText(trackId) {
   return (asOptionalString(seed.text) || "# Track Learnings: {{track_id}}\n\n").replace(/\{\{track_id\}\}/g, trackId).replace(/\n*$/, "\n");
 }
 function installedStyleGuideIds(root) {
-  const dir = import_node_path22.default.join(root, "cadre", "styleguides");
+  const dir = import_node_path21.default.join(root, "cadre", "styleguides");
   if (!fileExists(dir)) return [];
   try {
-    return import_node_fs10.default.readdirSync(dir).filter((file) => file.endsWith(".json") && file !== "index.json").map((file) => import_node_path22.default.basename(file, ".json")).sort();
+    return import_node_fs11.default.readdirSync(dir).filter((file) => file.endsWith(".json") && file !== "index.json").map((file) => import_node_path21.default.basename(file, ".json")).sort();
   } catch {
     return [];
   }
@@ -4894,8 +4374,8 @@ function styleGuideIdsForFiles(files) {
   const ids = /* @__PURE__ */ new Set();
   for (const rawFile of files) {
     const file = normalizeClaimPath(rawFile);
-    const ext = import_node_path22.default.extname(file).toLowerCase();
-    const base = import_node_path22.default.basename(file).toLowerCase();
+    const ext = import_node_path21.default.extname(file).toLowerCase();
+    const base = import_node_path21.default.basename(file).toLowerCase();
     if ([".ts", ".tsx"].includes(ext)) ids.add("typescript");
     if ([".js", ".jsx", ".mjs", ".cjs"].includes(ext)) ids.add("javascript");
     if ([".html", ".css", ".scss", ".sass", ".less", ".vue", ".svelte"].includes(ext)) ids.add("html-css");
@@ -4952,12 +4432,12 @@ function implementationStyleGuides(root, trackId, args = {}) {
   ])).sort();
   const maxChars = Math.max(1e3, Math.min(Number(args.styleGuideMaxChars || 6e3), 2e4));
   const guides = selected.map((id) => {
-    const file = import_node_path22.default.join(root, "cadre", "styleguides", `${id}.json`);
+    const file = import_node_path21.default.join(root, "cadre", "styleguides", `${id}.json`);
     const guide = readJson(file, null) || {};
     const text = JSON.stringify(guide, null, 2);
     return {
       id,
-      path: import_node_path22.default.relative(root, file),
+      path: import_node_path21.default.relative(root, file),
       guide,
       content: text.slice(0, maxChars),
       truncated: text.length > maxChars,
@@ -5071,7 +4551,7 @@ function repoEntriesError(root, track, args = {}) {
 }
 function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
   if (args.workingRoot) {
-    const candidate = import_node_path23.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path23.default.resolve(root, args.workingRoot);
+    const candidate = import_node_path22.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path22.default.resolve(root, args.workingRoot);
     return { repo: args.repo || task?.repo || ".", path: candidate, source: "argument.workingRoot" };
   }
   const topology = loadTopology(root);
@@ -5082,14 +4562,14 @@ function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         repo,
-        path: rel ? import_node_path23.default.resolve(root, rel) : root,
+        path: rel ? import_node_path22.default.resolve(root, rel) : root,
         source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path"
       };
     }
     return unresolvedWorkingRoot(root, track, String(repo || ""), task);
   }
   if (track.metadata.worktree_path) {
-    const candidate = import_node_path23.default.resolve(root, track.metadata.worktree_path);
+    const candidate = import_node_path22.default.resolve(root, track.metadata.worktree_path);
     if (fileExists(candidate)) {
       return { repo: ".", path: candidate, source: "metadata.worktree_path" };
     }
@@ -5105,7 +4585,7 @@ function repoEntriesForTrack(root, track, args = {}) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         repo,
-        root: rel ? import_node_path23.default.resolve(root, rel) : root,
+        root: rel ? import_node_path22.default.resolve(root, rel) : root,
         path: rel,
         base: args.base || info.base_branch || "main",
         head: args.head || info.git_branch || track.metadata.git_branch || `track/${track.track_id}`,
@@ -5115,7 +4595,7 @@ function repoEntriesForTrack(root, track, args = {}) {
   }
   return [{
     repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path23.default.resolve(root, args.workingRoot) : root,
+    root: args.workingRoot ? import_node_path22.default.resolve(root, args.workingRoot) : root,
     path: args.workingRoot || ".",
     base: args.base || "main",
     head: args.head || track.metadata.git_branch || `track/${track.track_id}`,
@@ -5216,7 +4696,7 @@ function implementationPrep(root, args = {}) {
 
 // src/core/application/runtime/track-schedule.ts
 function workStateForTrack(track) {
-  const statePath = import_node_path24.default.join(track.dir, "implement_state.json");
+  const statePath = import_node_path23.default.join(track.dir, "implement_state.json");
   return readJson(statePath, null);
 }
 function holdInfo(track, now = Date.now()) {
@@ -5258,27 +4738,27 @@ function taskCounts(plan) {
   return counts;
 }
 function listTrackDirs(root) {
-  const tracksDir = import_node_path24.default.join(root, "cadre", "tracks");
+  const tracksDir = import_node_path23.default.join(root, "cadre", "tracks");
   if (!fileExists(tracksDir)) return [];
-  return import_node_fs11.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path24.default.join(tracksDir, entry.name)).sort();
+  return import_node_fs12.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path23.default.join(tracksDir, entry.name)).sort();
 }
 function listTracks(root) {
   const tracks = [];
   for (const dir of listTrackDirs(root)) {
-    const metadataPath = import_node_path24.default.join(dir, "metadata.json");
+    const metadataPath = import_node_path23.default.join(dir, "metadata.json");
     const metadata = readJson(metadataPath, null);
     if (!metadata) continue;
-    const trackId = metadata.track_id || import_node_path24.default.basename(dir);
+    const trackId = metadata.track_id || import_node_path23.default.basename(dir);
     tracks.push({
       track_id: trackId,
       dir,
       metadata_path: metadataPath,
-      plan_path: import_node_path24.default.join(dir, "plan.md"),
-      spec_path: import_node_path24.default.join(dir, "spec.md"),
-      plan_json_path: import_node_path24.default.join(dir, "plan.json"),
-      spec_json_path: import_node_path24.default.join(dir, "spec.json"),
-      learnings_jsonl_path: import_node_path24.default.join(dir, "learnings.jsonl"),
-      handoff_json_path: import_node_path24.default.join(dir, "handoff.json"),
+      plan_path: import_node_path23.default.join(dir, "plan.md"),
+      spec_path: import_node_path23.default.join(dir, "spec.md"),
+      plan_json_path: import_node_path23.default.join(dir, "plan.json"),
+      spec_json_path: import_node_path23.default.join(dir, "spec.json"),
+      learnings_jsonl_path: import_node_path23.default.join(dir, "learnings.jsonl"),
+      handoff_json_path: import_node_path23.default.join(dir, "handoff.json"),
       metadata
     });
   }
@@ -5479,7 +4959,8 @@ function phaseSchedule(root, args = {}) {
         marker: task.marker,
         repo: task.repo || (topology.polyrepo ? topology.defaultRepo : "."),
         files: task.files || [],
-        depends: task.depends || []
+        depends: task.depends || [],
+        labels: task.labels || []
       }))
     };
   });
@@ -5652,16 +5133,6 @@ function teamStatus(root) {
     }))
   };
 }
-function runBdJson(root, args) {
-  if (!commandExists("bd", root)) return { ok: false, available: false, args, json: null };
-  const result = runCommand("bd", args, { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  let json = null;
-  try {
-    json = JSON.parse(result.stdout || "null");
-  } catch {
-  }
-  return { ok: result.ok, available: true, args, json, stdout_tail: result.stdout.slice(-2e3), stderr_tail: result.stderr.slice(-2e3) };
-}
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(isRecord);
   if (isRecord(value) && Array.isArray(value.items)) return value.items.filter(isRecord).map(asJsonObject);
@@ -5687,12 +5158,12 @@ function metadataTrackSummary(track) {
     priority: track.metadata.priority || "medium",
     owner: track.metadata.owner || null,
     reviewer: track.metadata.reviewer || null,
-    beads_epic: track.metadata.beads_epic || null,
+    tags: asStringArray(track.metadata.tags),
     review: track.metadata.review ? asJsonObject(track.metadata.review) : null
   };
 }
 function lspRuntimeSummary(root) {
-  const configPath = import_node_path25.default.join(root, "cadre", "lsp.json");
+  const configPath = import_node_path24.default.join(root, "cadre", "lsp.json");
   const config = readJson(configPath, null);
   const servers = isRecord(config) && Array.isArray(config.servers) ? config.servers.map((server) => asJsonObject(server)) : [];
   const entries = servers.map((server) => {
@@ -5705,7 +5176,7 @@ function lspRuntimeSummary(root) {
   });
   return {
     configured: Boolean(config),
-    path: import_node_path25.default.relative(root, configPath),
+    path: import_node_path24.default.relative(root, configPath),
     server_count: entries.length,
     available_count: entries.filter((entry) => entry.available === true).length,
     missing_count: entries.filter((entry) => entry.available !== true).length,
@@ -5732,9 +5203,9 @@ function trackIndexPayload(root, tracks = listTracks(root)) {
     counts[status] = (counts[status] || 0) + 1;
     return {
       ...summary,
-      metadata_path: import_node_path25.default.relative(root, track.metadata_path),
-      spec_path: import_node_path25.default.relative(root, trackSpecJsonPath(track)),
-      plan_path: import_node_path25.default.relative(root, trackPlanJsonPath(track))
+      metadata_path: import_node_path24.default.relative(root, track.metadata_path),
+      spec_path: import_node_path24.default.relative(root, trackSpecJsonPath(track)),
+      plan_path: import_node_path24.default.relative(root, trackPlanJsonPath(track))
     };
   });
   return {
@@ -5750,12 +5221,11 @@ function teamBoard(root, args = {}) {
   const identity = gitIdentity(root);
   const scope = args.mine === true ? "mine" : "all";
   const byId = new Map(tracks.map((track) => [track.track_id, track]));
-  const byEpic = new Map(
-    tracks.flatMap((track) => track.metadata.beads_epic ? [[track.metadata.beads_epic, track]] : [])
-  );
   const wip = [];
   const reviewQueue = [];
   const blockers = [];
+  const handoffs = [];
+  const outgoingHandoffs = [];
   for (const track of tracks) {
     const summary = metadataTrackSummary(track);
     const hold = holdInfo(track);
@@ -5797,50 +5267,39 @@ function teamBoard(root, args = {}) {
       }
     }
   }
-  const beads = {
-    available: commandExists("bd", root),
-    wip: null,
-    handoffs: null,
-    review_labels: {},
-    blocked_edges: null
-  };
-  const handoffs = [];
-  if (beads.available) {
-    beads.wip = runBdJson(root, ["list", "--status", "in_progress", "--json"]);
-    beads.handoffs = runBdJson(root, ["list", "--label", "handoff:pending", "--json"]);
-    beads.blocked_edges = runBdJson(root, ["ready", "--json"]);
-    for (const label of ["review:changes", "review:ready", "review:requested"]) {
-      beads.review_labels[label] = runBdJson(root, ["list", "--label", label, "--json"]);
-      const reviewLabel = beads.review_labels[label];
-      for (const issue of asArray(reviewLabel?.json)) {
-        const id = asOptionalString(issue.id) || asOptionalString(issue.issue_id) || asOptionalString(issue.issueId) || asOptionalString(issue.parent) || asOptionalString(issue.epic) || null;
-        const track = id ? byEpic.get(id) : null;
-        if (track) {
-          reviewQueue.push({
-            ...metadataTrackSummary(track),
-            review_state: label.replace("review:", ""),
-            source: "beads_label",
-            bead_id: id
-          });
-        }
-      }
-    }
-    for (const issue of asArray(beads.handoffs?.json)) {
-      const id = asOptionalString(issue.id) || asOptionalString(issue.issue_id) || asOptionalString(issue.issueId) || null;
-      const track = id ? byEpic.get(id) : null;
-      const assignee = asOptionalString(issue.assignee) || asOptionalString(issue.assigned_to) || null;
-      if (scope === "mine" && assignee !== identity) continue;
-      handoffs.push({
-        track_id: track ? track.track_id : null,
-        bead_id: id,
-        assignee,
-        title: issue.title || issue.summary || null
-      });
-    }
+  for (const message of readCadreMessages(root, "inbox", 200)) {
+    if (asOptionalString(message.kind) !== "handoff") continue;
+    const recipient = asOptionalString(message.to || message.recipient) || null;
+    if (scope === "mine" && recipient && recipient !== identity) continue;
+    handoffs.push({
+      source: "message_inbox",
+      message_id: asOptionalString(message.id) || null,
+      track_id: asOptionalString(message.track_id) || null,
+      from: asOptionalString(message.from) || null,
+      to: recipient,
+      subject: asOptionalString(message.subject) || null,
+      status: asOptionalString(message.status) || "pending",
+      recorded_at: asOptionalString(message.recorded_at) || null
+    });
+  }
+  for (const message of readCadreMessages(root, "outbox", 200)) {
+    if (asOptionalString(message.kind) !== "handoff") continue;
+    const sender = asOptionalString(message.from) || null;
+    if (scope === "mine" && sender && sender !== identity) continue;
+    outgoingHandoffs.push({
+      source: "message_outbox",
+      message_id: asOptionalString(message.id) || null,
+      track_id: asOptionalString(message.track_id) || null,
+      from: sender,
+      to: asOptionalString(message.to || message.recipient) || null,
+      subject: asOptionalString(message.subject) || null,
+      status: asOptionalString(message.status) || "pending",
+      recorded_at: asOptionalString(message.recorded_at) || null
+    });
   }
   const dedupReview = /* @__PURE__ */ new Map();
   for (const item of reviewQueue) {
-    const key = `${item.track_id}:${item.review_state}:${item.bead_id || ""}`;
+    const key = `${item.track_id}:${item.review_state || ""}`;
     if (!dedupReview.has(key)) dedupReview.set(key, item);
   }
   return {
@@ -5852,9 +5311,10 @@ function teamBoard(root, args = {}) {
     summary: teamStatus(root),
     wip,
     incoming_handoffs: handoffs,
+    outgoing_handoffs: outgoingHandoffs,
     review_queue: Array.from(dedupReview.values()),
     blockers,
-    beads,
+    native_state: nativeStateSummary(root),
     lsp: lspRuntimeSummary(root)
   };
 }
@@ -5886,7 +5346,7 @@ function fleetStatus(root, args = {}) {
       const repo = asJsonObject(raw);
       const name = asOptionalString(repo.name) || asOptionalString(repo.submodule_path) || "unknown";
       const rel = asOptionalString(repo.submodule_path) || "";
-      const repoRoot = rel ? import_node_path25.default.resolve(root, rel) : root;
+      const repoRoot = rel ? import_node_path24.default.resolve(root, rel) : root;
       repos.push({
         name,
         role: "product",
@@ -5904,40 +5364,7 @@ function fleetStatus(root, args = {}) {
     repos,
     provider: providerMcpAvailability(root, args),
     lsp: lspRuntimeSummary(root),
-    beads_available: commandExists("bd", root),
     collisions: args.includeCollisions === false ? null : collisionScan(root)
-  };
-}
-function beadsSummary(root) {
-  const available = commandExists("bd", root);
-  if (!available) {
-    return {
-      ok: true,
-      available: false,
-      root,
-      reason: "Beads CLI (bd) is not installed or not on PATH",
-      ready: null,
-      in_progress: null,
-      blocked: null,
-      review: null
-    };
-  }
-  const ready = runBdJson(root, ["ready", "--json"]);
-  const inProgress = runBdJson(root, ["list", "--status", "in_progress", "--json"]);
-  const blocked = runBdJson(root, ["list", "--status", "blocked", "--json"]);
-  const review = {
-    requested: runBdJson(root, ["list", "--label", "review:requested", "--json"]),
-    ready: runBdJson(root, ["list", "--label", "review:ready", "--json"]),
-    changes: runBdJson(root, ["list", "--label", "review:changes", "--json"])
-  };
-  return {
-    ok: true,
-    available: true,
-    root,
-    ready,
-    in_progress: inProgress,
-    blocked,
-    review
   };
 }
 function availableWork(root) {
@@ -6079,20 +5506,20 @@ function markerForPlanStatus(status) {
 // src/core/application/runtime/plan-docs.ts
 var MANUAL_VERIFICATION_TASK_TYPE = "user_manual_verification";
 function trackPlanJsonPath(track) {
-  return track.plan_json_path || import_node_path26.default.join(track.dir, "plan.json");
+  return track.plan_json_path || import_node_path25.default.join(track.dir, "plan.json");
 }
 function trackSpecJsonPath(track) {
-  return track.spec_json_path || import_node_path26.default.join(track.dir, "spec.json");
+  return track.spec_json_path || import_node_path25.default.join(track.dir, "spec.json");
 }
 function trackLearningsJsonlPath(track) {
-  return track.learnings_jsonl_path || import_node_path26.default.join(track.dir, "learnings.jsonl");
+  return track.learnings_jsonl_path || import_node_path25.default.join(track.dir, "learnings.jsonl");
 }
 function trackHandoffJsonPath(track) {
-  return track.handoff_json_path || import_node_path26.default.join(track.dir, "handoff.json");
+  return track.handoff_json_path || import_node_path25.default.join(track.dir, "handoff.json");
 }
 function planJsonPathForPlanPath(file) {
   if (file.endsWith(".json")) return file;
-  return import_node_path26.default.join(import_node_path26.default.dirname(file), "plan.json");
+  return import_node_path25.default.join(import_node_path25.default.dirname(file), "plan.json");
 }
 function manualVerificationScope(value) {
   const task = asJsonObject(value);
@@ -6291,10 +5718,12 @@ function planJsonToParsedPlan(raw) {
       const taskKey = asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskIndex}`;
       const files = asStringArray(task.files);
       const depends = asStringArray(task.depends_on || task.depends);
+      const labels = asStringArray(task.labels);
       const taskAnnotations = {
         ...asJsonObject(task.annotations),
         ...files.length > 0 ? { files: files.join(", ") } : {},
         ...depends.length > 0 ? { depends: depends.join(",") } : {},
+        ...labels.length > 0 ? { labels: labels.join(",") } : {},
         ...asOptionalString(task.repo) ? { repo: asOptionalString(task.repo) } : {}
       };
       return {
@@ -6305,6 +5734,7 @@ function planJsonToParsedPlan(raw) {
         annotations: taskAnnotations,
         files,
         depends,
+        labels,
         repo: asOptionalString(task.repo) || null,
         line: Number(task.line || phaseIndex * 100 + taskIndex),
         phase_index: phaseIndex,
@@ -6342,6 +5772,7 @@ function renderPlanMarkdown(raw) {
       if (task.repo) parts.push(`  <!-- repo: ${task.repo} -->`);
       if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
       if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
+      if (task.labels && task.labels.length > 0) parts.push(`  <!-- labels: ${task.labels.join(", ")} -->`);
       if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
       if (task.task_type) parts.push(`  <!-- task-type: ${task.task_type} -->`);
       if (task.manual_verification) {
@@ -6360,7 +5791,7 @@ function renderPlanMarkdown(raw) {
 // src/core/application/runtime/artifact-catalog.ts
 function safeReadDir(dir) {
   try {
-    return import_node_fs12.default.readdirSync(dir).sort();
+    return import_node_fs13.default.readdirSync(dir).sort();
   } catch {
     return [];
   }
@@ -6420,7 +5851,6 @@ function artifactSchema(artifact) {
       owner: { type: "string" },
       reviewer: { type: "string" },
       review: { type: "object" },
-      beads_tasks: { type: "object" },
       worktree_path: { type: "string" }
     }),
     release: objectSchema(["version", "completed_tracks"], {
@@ -6474,23 +5904,22 @@ function artifactDefinitions(root, args = {}) {
     { id: "tracks-index", title: "Track index", canonical: "cadre/tracks.json", schema: TRACKS_INDEX_SCHEMA, scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
-    { id: "beads-config", title: "Beads config", canonical: "cadre/beads.json", schema: "cadre.beads.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "setup-state", title: "Setup state", canonical: "cadre/setup_state.json", schema: "cadre.setup_state.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" }
   ];
-  if (fileExists(import_node_path27.default.join(root, "cadre", "repos.json")) || fileExists(import_node_path27.default.join(root, "cadre", "repos.md"))) {
+  if (fileExists(import_node_path26.default.join(root, "cadre", "repos.json")) || fileExists(import_node_path26.default.join(root, "cadre", "repos.md"))) {
     defs.push({ id: "repos", title: "Repository topology", canonical: "cadre/repos.json", projection: "cadre/repos.md", schema: "cadre.repos.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" });
   }
-  if (fileExists(import_node_path27.default.join(root, "cadre", "lsp.json"))) {
+  if (fileExists(import_node_path26.default.join(root, "cadre", "lsp.json"))) {
     defs.push({ id: "lsp-config", title: "LSP config", canonical: "cadre/lsp.json", schema: "cadre.lsp.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" });
   }
-  const styleJsonDir = import_node_path27.default.join(root, "cadre", "styleguides");
-  const styleMdDir = import_node_path27.default.join(root, "cadre", "code_styleguides");
+  const styleJsonDir = import_node_path26.default.join(root, "cadre", "styleguides");
+  const styleMdDir = import_node_path26.default.join(root, "cadre", "code_styleguides");
   const styleIds = /* @__PURE__ */ new Set();
   for (const file of safeReadDir(styleJsonDir)) {
-    if (file.endsWith(".json") && file !== "index.json") styleIds.add(import_node_path27.default.basename(file, ".json"));
+    if (file.endsWith(".json") && file !== "index.json") styleIds.add(import_node_path26.default.basename(file, ".json"));
   }
   for (const file of safeReadDir(styleMdDir)) {
-    if (file.endsWith(".md") && file !== "README.md") styleIds.add(import_node_path27.default.basename(file, ".md"));
+    if (file.endsWith(".md") && file !== "README.md") styleIds.add(import_node_path26.default.basename(file, ".md"));
   }
   if (styleIds.size > 0) {
     defs.push({ id: "styleguides-index", title: "Style guide catalog", canonical: "cadre/styleguides/index.json", projection: "cadre/code_styleguides/README.md", schema: "cadre.styleguide_index.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
@@ -6500,50 +5929,50 @@ function artifactDefinitions(root, args = {}) {
   }
   for (const track of listTracks(root)) {
     defs.push(
-      { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: import_node_path27.default.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
-      { id: `track:${track.track_id}:spec`, title: `Spec: ${track.track_id}`, canonical: import_node_path27.default.relative(root, trackSpecJsonPath(track)), projection: import_node_path27.default.relative(root, track.spec_path), schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
-      { id: `track:${track.track_id}:plan`, title: `Plan: ${track.track_id}`, canonical: import_node_path27.default.relative(root, trackPlanJsonPath(track)), projection: import_node_path27.default.relative(root, track.plan_path), schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
-      { id: `track:${track.track_id}:learnings`, title: `Learnings: ${track.track_id}`, canonical: import_node_path27.default.relative(root, trackLearningsJsonlPath(track)), projection: import_node_path27.default.relative(root, track.learnings_path || import_node_path27.default.join(track.dir, "learnings.md")), schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "markdown" },
-      { id: `track:${track.track_id}:handoff`, title: `Handoff: ${track.track_id}`, canonical: import_node_path27.default.relative(root, trackHandoffJsonPath(track)), projection: import_node_path27.default.relative(root, import_node_path27.default.join(track.dir, "HANDOFF.md")), schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+      { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: import_node_path26.default.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
+      { id: `track:${track.track_id}:spec`, title: `Spec: ${track.track_id}`, canonical: import_node_path26.default.relative(root, trackSpecJsonPath(track)), projection: import_node_path26.default.relative(root, track.spec_path), schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:plan`, title: `Plan: ${track.track_id}`, canonical: import_node_path26.default.relative(root, trackPlanJsonPath(track)), projection: import_node_path26.default.relative(root, track.plan_path), schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:learnings`, title: `Learnings: ${track.track_id}`, canonical: import_node_path26.default.relative(root, trackLearningsJsonlPath(track)), projection: import_node_path26.default.relative(root, track.learnings_path || import_node_path26.default.join(track.dir, "learnings.md")), schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "markdown" },
+      { id: `track:${track.track_id}:handoff`, title: `Handoff: ${track.track_id}`, canonical: import_node_path26.default.relative(root, trackHandoffJsonPath(track)), projection: import_node_path26.default.relative(root, import_node_path26.default.join(track.dir, "HANDOFF.md")), schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
     );
-    const reviewEvidenceJsonl = import_node_path27.default.join(track.dir, "review-evidence.jsonl");
-    const reviewEvidenceJson = import_node_path27.default.join(track.dir, "review-evidence.json");
-    const completionJournal = import_node_path27.default.join(track.dir, "completion_journal.jsonl");
-    const parallelState = import_node_path27.default.join(track.dir, "parallel_state.json");
-    const implementState = import_node_path27.default.join(track.dir, "implement_state.json");
+    const reviewEvidenceJsonl = import_node_path26.default.join(track.dir, "review-evidence.jsonl");
+    const reviewEvidenceJson = import_node_path26.default.join(track.dir, "review-evidence.json");
+    const completionJournal = import_node_path26.default.join(track.dir, "completion_journal.jsonl");
+    const parallelState = import_node_path26.default.join(track.dir, "parallel_state.json");
+    const implementState = import_node_path26.default.join(track.dir, "implement_state.json");
     if (fileExists(reviewEvidenceJsonl)) {
-      defs.push({ id: `track:${track.track_id}:review-evidence`, title: `Review evidence: ${track.track_id}`, canonical: import_node_path27.default.relative(root, reviewEvidenceJsonl), schema: "cadre.review_evidence.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:review-evidence`, title: `Review evidence: ${track.track_id}`, canonical: import_node_path26.default.relative(root, reviewEvidenceJsonl), schema: "cadre.review_evidence.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
     }
     if (fileExists(reviewEvidenceJson)) {
-      defs.push({ id: `track:${track.track_id}:review-evidence-summary`, title: `Review evidence summary: ${track.track_id}`, canonical: import_node_path27.default.relative(root, reviewEvidenceJson), schema: "cadre.review_evidence_summary.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:review-evidence-summary`, title: `Review evidence summary: ${track.track_id}`, canonical: import_node_path26.default.relative(root, reviewEvidenceJson), schema: "cadre.review_evidence_summary.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
     }
     if (fileExists(completionJournal)) {
-      defs.push({ id: `track:${track.track_id}:completion-journal`, title: `Completion journal: ${track.track_id}`, canonical: import_node_path27.default.relative(root, completionJournal), schema: "cadre.completion_journal.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:completion-journal`, title: `Completion journal: ${track.track_id}`, canonical: import_node_path26.default.relative(root, completionJournal), schema: "cadre.completion_journal.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
     }
     if (fileExists(parallelState)) {
-      defs.push({ id: `track:${track.track_id}:parallel-state`, title: `Parallel state: ${track.track_id}`, canonical: import_node_path27.default.relative(root, parallelState), schema: "cadre.parallel_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:parallel-state`, title: `Parallel state: ${track.track_id}`, canonical: import_node_path26.default.relative(root, parallelState), schema: "cadre.parallel_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
     }
     if (fileExists(implementState)) {
-      defs.push({ id: `track:${track.track_id}:implement-state`, title: `Implementation state: ${track.track_id}`, canonical: import_node_path27.default.relative(root, implementState), schema: "cadre.implement_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:implement-state`, title: `Implementation state: ${track.track_id}`, canonical: import_node_path26.default.relative(root, implementState), schema: "cadre.implement_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
     }
   }
-  const releasesDir = import_node_path27.default.join(root, "cadre", "releases");
+  const releasesDir = import_node_path26.default.join(root, "cadre", "releases");
   for (const file of safeReadDir(releasesDir)) {
     if (!file.endsWith(".json")) continue;
-    const version = import_node_path27.default.basename(file, ".json");
+    const version = import_node_path26.default.basename(file, ".json");
     defs.push({ id: `release:${version}`, title: `Release - ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
   }
-  const jobsDir = import_node_path27.default.join(root, "cadre", "jobs");
+  const jobsDir = import_node_path26.default.join(root, "cadre", "jobs");
   for (const file of safeReadDir(jobsDir)) {
     if (!file.endsWith(".json")) continue;
-    const jobId = import_node_path27.default.basename(file, ".json");
+    const jobId = import_node_path26.default.basename(file, ".json");
     defs.push({ id: `job:${jobId}`, title: `Job ${jobId}`, canonical: `cadre/jobs/${file}`, schema: "cadre.job.v1", scope: "external", sourceFormat: "json", projectionFormat: "none" });
   }
   if (args.includeArchive === true || args.include_archive === true) {
-    const archiveDir = import_node_path27.default.join(root, "cadre", "archive");
+    const archiveDir = import_node_path26.default.join(root, "cadre", "archive");
     for (const trackId of safeReadDir(archiveDir)) {
-      const dir = import_node_path27.default.join(archiveDir, trackId);
-      if (!fileExists(import_node_path27.default.join(dir, "metadata.json"))) continue;
+      const dir = import_node_path26.default.join(archiveDir, trackId);
+      if (!fileExists(import_node_path26.default.join(dir, "metadata.json"))) continue;
       defs.push(
         { id: `archive:${trackId}:spec`, title: `Archived spec: ${trackId}`, canonical: `cadre/archive/${trackId}/spec.json`, projection: `cadre/archive/${trackId}/spec.md`, schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
         { id: `archive:${trackId}:plan`, title: `Archived plan: ${trackId}`, canonical: `cadre/archive/${trackId}/plan.json`, projection: `cadre/archive/${trackId}/plan.md`, schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
@@ -6571,8 +6000,8 @@ function artifactMatches(def, args = {}) {
 function artifactCatalog(root, args = {}) {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args)).map((def) => ({
     ...def,
-    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path28.default.join(root, "cadre", "tracks")) : fileExists(import_node_path28.default.join(root, def.canonical)),
-    projection_exists: def.projection ? fileExists(import_node_path28.default.join(root, def.projection)) : false
+    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path27.default.join(root, "cadre", "tracks")) : fileExists(import_node_path27.default.join(root, def.canonical)),
+    projection_exists: def.projection ? fileExists(import_node_path27.default.join(root, def.projection)) : false
   }));
   return { ok: true, root, artifacts };
 }
@@ -6586,7 +6015,7 @@ ${JSON.stringify(value, null, 2)}
 }
 function readJsonl(file) {
   if (!fileExists(file)) return [];
-  return import_node_fs13.default.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+  return import_node_fs14.default.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
     try {
       return asJsonObject(JSON.parse(line));
     } catch {
@@ -6609,8 +6038,8 @@ function renderJsonlMarkdown(title, entries) {
   return normalizedText(parts.join("\n"));
 }
 function renderArtifact(root, def, args = {}) {
-  const canonicalPath = import_node_path28.default.join(root, def.canonical);
-  const projectionPath = def.projection ? import_node_path28.default.join(root, def.projection) : void 0;
+  const canonicalPath = import_node_path27.default.join(root, def.canonical);
+  const projectionPath = def.projection ? import_node_path27.default.join(root, def.projection) : void 0;
   let raw = null;
   let body = "";
   let missingCanonical = false;
@@ -6634,7 +6063,7 @@ function renderArtifact(root, def, args = {}) {
   }
   if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
   const content = withGeneratedMarker(def.canonical, def.schema, body);
-  const existing = projectionPath && fileExists(projectionPath) ? import_node_fs13.default.readFileSync(projectionPath, "utf8") : "";
+  const existing = projectionPath && fileExists(projectionPath) ? import_node_fs14.default.readFileSync(projectionPath, "utf8") : "";
   return {
     ok: true,
     artifact_id: def.id,
@@ -6666,7 +6095,7 @@ function artifactRender(root, args = {}) {
 function artifactValidate(root, args = {}) {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
   const results = artifacts.map((def) => {
-    const file = import_node_path28.default.join(root, def.canonical);
+    const file = import_node_path27.default.join(root, def.canonical);
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
     if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
     const value = readJson(file, null);
@@ -6722,15 +6151,15 @@ function artifactSync(root, args = {}) {
     reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
     if (!execute) continue;
     if (!humanReviewConfirmed(args)) continue;
-    const projectionFile = import_node_path28.default.join(root, def.projection);
-    const existing = fileExists(projectionFile) ? import_node_fs13.default.readFileSync(projectionFile, "utf8") : "";
+    const projectionFile = import_node_path27.default.join(root, def.projection);
+    const existing = fileExists(projectionFile) ? import_node_fs14.default.readFileSync(projectionFile, "utf8") : "";
     if (existing && !hasGeneratedMarker(existing) && !force) {
       skipped.push(def.projection);
       warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
       continue;
     }
     ensureParent(projectionFile);
-    import_node_fs13.default.writeFileSync(projectionFile, rendered.content);
+    import_node_fs14.default.writeFileSync(projectionFile, rendered.content);
     written.push(def.projection);
   }
   const reviewBundle = workflowReviewBundle(root, "artifacts", args, reviewFiles, {
@@ -6787,64 +6216,19 @@ function artifactPacket(root, args = {}) {
 }
 
 // src/core/application/runtime/setup-infrastructure.ts
-var import_node_fs14 = __toESM(require("node:fs"));
-var import_node_path29 = __toESM(require("node:path"));
+var import_node_fs15 = __toESM(require("node:fs"));
+var import_node_path28 = __toESM(require("node:path"));
 function configuredCiProvider(root, args = {}) {
   const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root).config.provider_mode);
   const provider = normalizeProviderMode(raw);
   return provider === "github" || provider === "gitlab" ? provider : null;
 }
-function setupBeads(root, args = {}) {
-  const available = commandExists("bd", root);
-  const stateDir = import_node_path29.default.join(root, ".beads");
-  const initialized = fileExists(stateDir);
-  const command = ["bd", "init", "--non-interactive", "--role", "maintainer"];
-  if (args.execute !== true) {
-    return {
-      ok: true,
-      available,
-      initialized,
-      dry_run: true,
-      planned_command: command,
-      state_path: ".beads"
-    };
-  }
-  if (!available) {
-    return {
-      ok: false,
-      available: false,
-      initialized: false,
-      required: true,
-      error: "Beads CLI (bd) is required for cadre-setup execute and was not found on PATH"
-    };
-  }
-  if (initialized) {
-    return {
-      ok: true,
-      available: true,
-      initialized: true,
-      skipped: true,
-      reason: ".beads already exists",
-      state_path: ".beads"
-    };
-  }
-  const result = runCommand("bd", command.slice(1), { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  return {
-    ok: result.ok,
-    available: true,
-    initialized: result.ok || fileExists(stateDir),
-    command,
-    result,
-    state_path: ".beads"
-  };
-}
 function setupGitattributes(root) {
-  const file = import_node_path29.default.join(root, ".gitattributes");
+  const file = import_node_path28.default.join(root, ".gitattributes");
   const required = [
-    ".beads/** merge=ours",
     "cadre/tracks/**/parallel_state.json merge=ours"
   ];
-  const existing = fileExists(file) ? import_node_fs14.default.readFileSync(file, "utf8") : "";
+  const existing = fileExists(file) ? import_node_fs15.default.readFileSync(file, "utf8") : "";
   const lines = existing.split(/\r?\n/).filter(Boolean);
   let changed = false;
   for (const line of required) {
@@ -6854,13 +6238,13 @@ function setupGitattributes(root) {
     }
   }
   if (changed || !fileExists(file)) {
-    import_node_fs14.default.writeFileSync(file, `${lines.join("\n")}
+    import_node_fs15.default.writeFileSync(file, `${lines.join("\n")}
 `);
   }
   const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root });
   return {
     ok: mergeDriver.ok,
-    path: import_node_path29.default.relative(root, file),
+    path: import_node_path28.default.relative(root, file),
     changed,
     merge_driver: mergeDriver
   };
@@ -6876,13 +6260,13 @@ function setupCiTemplates(root, provider, args = {}) {
   const sourceText = templateText(template, "");
   const source = templateSourceLabel(template) || template;
   if (!sourceText) return { ok: false, error: `Missing CI template ${template}` };
-  const target = provider === "github" ? import_node_path29.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path29.default.join(root, ".gitlab-ci.yml");
+  const target = provider === "github" ? import_node_path28.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path28.default.join(root, ".gitlab-ci.yml");
   if (fileExists(target) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source, path: import_node_path29.default.relative(root, target) };
+    return { ok: true, skipped: true, provider, source, path: import_node_path28.default.relative(root, target) };
   }
-  import_node_fs14.default.mkdirSync(import_node_path29.default.dirname(target), { recursive: true });
-  import_node_fs14.default.writeFileSync(target, sourceText);
-  return { ok: true, provider, source, path: import_node_path29.default.relative(root, target), written: true };
+  import_node_fs15.default.mkdirSync(import_node_path28.default.dirname(target), { recursive: true });
+  import_node_fs15.default.writeFileSync(target, sourceText);
+  return { ok: true, provider, source, path: import_node_path28.default.relative(root, target), written: true };
 }
 function setupSubmodulePlan(root, repos, args = {}) {
   const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
@@ -6892,7 +6276,7 @@ function setupSubmodulePlan(root, repos, args = {}) {
     const url = asOptionalString(repo.url);
     const submodulePath = asOptionalString(repo.submodule_path);
     if (!name || !url || !submodulePath || repo.enabled === false) continue;
-    if (fileExists(import_node_path29.default.join(root, submodulePath))) continue;
+    if (fileExists(import_node_path28.default.join(root, submodulePath))) continue;
     commands.push(plannedGitAction(
       `submodule-${safeName(name)}`,
       "submodule_add",
@@ -6960,7 +6344,7 @@ function lspSetup(root, args = {}) {
 }
 
 // src/core/application/runtime/workspace-health.ts
-var import_node_path30 = __toESM(require("node:path"));
+var import_node_path29 = __toESM(require("node:path"));
 function workspaceHealth(root, args = {}) {
   const mode = workflowResponseMode(args);
   const topology = loadTopology(root);
@@ -7047,12 +6431,12 @@ function workspaceHealth(root, args = {}) {
   };
 }
 function lspConfigStatus(root) {
-  const configPath = import_node_path30.default.join(root, "cadre", "lsp.json");
+  const configPath = import_node_path29.default.join(root, "cadre", "lsp.json");
   const config = readJson(configPath, null);
   if (!config) {
     return {
       configured: false,
-      path: import_node_path30.default.relative(root, configPath),
+      path: import_node_path29.default.relative(root, configPath),
       servers: [],
       missing: [],
       daemon: {
@@ -7067,7 +6451,7 @@ function lspConfigStatus(root) {
   const servers = Array.isArray(configObject.servers) ? configObject.servers.map((server) => asJsonObject(server)) : [];
   return {
     configured: true,
-    path: import_node_path30.default.relative(root, configPath),
+    path: import_node_path29.default.relative(root, configPath),
     servers: servers.map((server) => {
       const command = asOptionalString(server.command);
       return {
@@ -7096,8 +6480,8 @@ function mergeDriverStatus(root) {
   };
 }
 function doctor(root, options = {}) {
-  const candidateRoot = import_node_path30.default.resolve(root || process.cwd());
-  const generatedCheck = import_node_path30.default.join(candidateRoot, "scripts", "generate-skills.sh");
+  const candidateRoot = import_node_path29.default.resolve(root || process.cwd());
+  const generatedCheck = import_node_path29.default.join(candidateRoot, "scripts", "generate-skills.sh");
   const lspStatus = lspConfigStatus(candidateRoot);
   const lspMissing = asStringArray(lspStatus.missing);
   const checks = {
@@ -7110,18 +6494,13 @@ function doctor(root, options = {}) {
         "cadre/setup_state.json",
         "cadre/product.json",
         "cadre/config.json",
-        "cadre/beads.json",
         "cadre/lsp.json"
-      ].filter((name) => fileExists(import_node_path30.default.join(candidateRoot, name)))
+      ].filter((name) => fileExists(import_node_path29.default.join(candidateRoot, name)))
     },
     git: {
       available: commandExists("git", candidateRoot),
       identity: gitIdentity(candidateRoot),
       merge_ours: mergeDriverStatus(candidateRoot)
-    },
-    beads: {
-      available: commandExists("bd", candidateRoot),
-      config_present: fileExists(import_node_path30.default.join(candidateRoot, "cadre", "beads.json"))
     },
     lsp: lspStatus,
     provider: providerMcpAvailability(candidateRoot, options),
@@ -7133,9 +6512,6 @@ function doctor(root, options = {}) {
   const warnings = [];
   if (!checks.cadre_project.ok) {
     warnings.push("No Cadre project markers found. This is fine for the Cadre harness/source repo, but project-scoped Cadre workflows need setup first.");
-  }
-  if (checks.cadre_project.ok && !checks.beads.available) {
-    warnings.push("Beads CLI (bd) is not available; Cadre project workflows require it.");
   }
   if (checks.lsp.configured && lspMissing.length > 0) {
     warnings.push(`LSP config exists but missing server commands: ${lspMissing.join(", ")}`);
@@ -7370,16 +6746,507 @@ function integrationInventory(root, args = {}) {
   };
 }
 
+// src/core/application/runtime/formula-workflow.ts
+var import_node_fs17 = __toESM(require("node:fs"));
+var import_node_path31 = __toESM(require("node:path"));
+
+// src/core/application/runtime/workflow-new-track.ts
+var import_node_fs16 = __toESM(require("node:fs"));
+var import_node_path30 = __toESM(require("node:path"));
+function newTrackReviewFiles(trackId, spec, plan, metadata) {
+  const safeTrack = safeName(trackId);
+  const specJson = normalizeSpecJson(trackId, spec);
+  const planJson = normalizePlanJson(trackId, plan, specJson);
+  const learningsEntry = {
+    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: trackId,
+    recorded_at: utcNow(),
+    text: trackLearningsText(trackId)
+  };
+  return [
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/spec.json`,
+      "Track spec canonical",
+      "spec",
+      specJson
+    ),
+    textReviewFile(
+      `cadre/tracks/${safeTrack}/spec.md`,
+      "Track spec",
+      "spec.json",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson))
+    ),
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/plan.json`,
+      "Track plan canonical",
+      "plan",
+      planJson
+    ),
+    textReviewFile(
+      `cadre/tracks/${safeTrack}/plan.md`,
+      "Track plan",
+      "plan.json",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson))
+    ),
+    jsonReviewFile(
+      `cadre/tracks/${safeTrack}/metadata.json`,
+      "Track metadata",
+      "metadata",
+      metadata
+    ),
+    plainReviewFile(
+      `cadre/tracks/${safeTrack}/learnings.jsonl`,
+      "Track learnings canonical",
+      "template:learnings_seed.json",
+      `${JSON.stringify(learningsEntry)}
+`
+    ),
+    textReviewFile(
+      `cadre/tracks/${safeTrack}/learnings.md`,
+      "Track learnings",
+      "learnings.jsonl",
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId))
+    )
+  ];
+}
+function workflowNewTrack(root, args = {}) {
+  const summary = workflowSummary(root, "newtrack", args);
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return { ...summary, ...markdownError };
+  const trackId = args.trackId || args.track_id;
+  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
+  if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };
+  const specJson = normalizeSpecJson(String(trackId), args.spec || { title: `Spec: ${trackId}`, description: asOptionalString(args.description) || String(trackId) });
+  const planJson = normalizePlanJson(String(trackId), args.plan, specJson);
+  const metadata = {
+    track_id: trackId,
+    type: "feature",
+    status: "new",
+    priority: "medium",
+    depends_on: [],
+    description: asOptionalString(args.description) || trackId,
+    owner: gitIdentity(root) || null,
+    reviewer: null,
+    git_branch: `track/${trackId}`,
+    worktree_path: `.worktrees/${trackId}`,
+    ...args.metadata && typeof args.metadata === "object" ? args.metadata : {}
+  };
+  const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  const reviewBundle = workflowReviewBundle(root, "newtrack", args, reviewFiles, { track_id: String(trackId) });
+  const humanReview = humanReviewState("newtrack", args, reviewArtifacts, reviewBundle);
+  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const dryRun = args.execute !== true;
+  const assist = planAssist(root, { ...args, plan: planJson, trackId });
+  if (dryRun) {
+    return {
+      ...summary,
+      ok: assist.ok !== false,
+      dry_run: true,
+      track_id: trackId,
+      metadata,
+      plan_assist: assist,
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      review_bundle: reviewBundle,
+      warnings
+    };
+  }
+  if (findTrack(root, trackId)) {
+    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
+  }
+  if (!humanReviewConfirmed(args)) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
+      track_id: trackId,
+      metadata,
+      plan_assist: assist,
+      human_review: humanReview,
+      review_artifacts: reviewArtifacts,
+      review_bundle: reviewBundle,
+      warnings,
+      error: "Human confirmation is required before creating track artifacts"
+    };
+  }
+  const dir = import_node_path30.default.join(root, "cadre", "tracks", safeName(trackId));
+  const learningsEntry = {
+    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: String(trackId),
+    recorded_at: utcNow(),
+    text: trackLearningsText(String(trackId))
+  };
+  import_node_fs16.default.mkdirSync(dir, { recursive: true });
+  writeJson(import_node_path30.default.join(dir, "metadata.json"), metadata);
+  writeJson(import_node_path30.default.join(dir, "spec.json"), specJson);
+  writeJson(import_node_path30.default.join(dir, "plan.json"), planJson);
+  import_node_fs16.default.writeFileSync(import_node_path30.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
+  import_node_fs16.default.writeFileSync(import_node_path30.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
+  import_node_fs16.default.writeFileSync(import_node_path30.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
+`);
+  import_node_fs16.default.writeFileSync(import_node_path30.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
+  const regen = regenIndex(root);
+  const event = appendCadreEvent(root, {
+    kind: "track_created",
+    workflow: "newtrack",
+    track_id: String(trackId),
+    status: metadata.status,
+    tags: metadata.tags || []
+  });
+  return {
+    ...summary,
+    ok: regen.ok !== false,
+    dry_run: false,
+    track_id: trackId,
+    metadata_path: import_node_path30.default.relative(root, import_node_path30.default.join(dir, "metadata.json")),
+    regen,
+    event,
+    human_review: humanReview,
+    worktree_plan: worktreePlan(root, { trackId })
+  };
+}
+
+// src/core/application/runtime/formula-workflow.ts
+var READ_ACTIONS = /* @__PURE__ */ new Set(["list", "show", "cook", "wisp_list", "pour"]);
+function formulaAction(args) {
+  const rawArgs = args;
+  const raw = asOptionalString(rawArgs.operation) || asOptionalString(rawArgs.mode) || asOptionalString(rawArgs.formulaAction || rawArgs.formula_action) || (asOptionalString(args.action) && asOptionalString(args.action) !== "formula" ? asOptionalString(args.action) : null) || "list";
+  const normalized = raw.replace(/^formula_/, "").replace(/-/g, "_");
+  if (normalized === "wisp_update") return "wisp_update_step";
+  if (normalized === "squash") return "wisp_squash";
+  if (normalized === "burn") return "wisp_burn";
+  if (normalized === "create_wisp") return "wisp_create";
+  if (normalized === "list_wisps") return "wisp_list";
+  if (normalized === "update_step") return "wisp_update_step";
+  return [
+    "list",
+    "show",
+    "cook",
+    "wisp_create",
+    "wisp_list",
+    "wisp_update_step",
+    "wisp_squash",
+    "wisp_burn",
+    "pour"
+  ].includes(normalized) ? normalized : "list";
+}
+function formulaDir(root) {
+  return import_node_path31.default.join(root, "cadre", "formulas");
+}
+function wispDir(root) {
+  return import_node_path31.default.join(root, "cadre", "local", "wisps");
+}
+function formulaId(args) {
+  const rawArgs = args;
+  return asOptionalString(args.id) || asOptionalString(rawArgs.formulaId || rawArgs.formula_id) || asOptionalString(args.name) || null;
+}
+function wispId(args) {
+  const rawArgs = args;
+  return asOptionalString(args.id) || asOptionalString(rawArgs.wispId || rawArgs.wisp_id) || null;
+}
+function formulaPath(root, id) {
+  return import_node_path31.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
+}
+function wispPath(root, id) {
+  return import_node_path31.default.join(wispDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
+}
+function loadFormula(root, id) {
+  if (!id) return { ok: false, error: "formula id is required" };
+  const file = formulaPath(root, id);
+  const formula = readJson(file, null);
+  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path31.default.relative(root, file) };
+  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path31.default.relative(root, file), formula };
+}
+function variablesFromArgs(formula, args) {
+  const rawArgs = args;
+  return {
+    ...asJsonObject(formula.defaults),
+    ...asJsonObject(rawArgs.variables),
+    ...asJsonObject(rawArgs.vars)
+  };
+}
+function variableValue(variables, key) {
+  const value = key.split(".").reduce((current, part) => isRecord(current) ? asJsonObject(current)[part] : void 0, variables);
+  if (value == null) return "";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+function renderTemplateValue(value, variables) {
+  if (typeof value === "string") {
+    return value.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (_match, key) => variableValue(variables, String(key)));
+  }
+  if (Array.isArray(value)) return value.map((item) => renderTemplateValue(item, variables));
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(asJsonObject(value)).map(([key, entry]) => [key, renderTemplateValue(entry, variables)]));
+  }
+  return value;
+}
+function stepsFromFormula(formula) {
+  return Array.isArray(formula.steps) ? formula.steps.map(asJsonObject) : [];
+}
+function cookedPlan(trackId, formula, rendered) {
+  if (isRecord(rendered.plan)) return asJsonObject(rendered.plan);
+  const steps = stepsFromFormula(rendered);
+  const phaseTitle = asOptionalString(rendered.phase_title) || asOptionalString(rendered.recommended_phase) || "Formula";
+  return {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: trackId,
+    title: `Plan: ${trackId}`,
+    phases: [{
+      phase_index: 1,
+      title: phaseTitle,
+      execution_mode: asOptionalString(rendered.execution_mode) || "sequential",
+      depends_on: asStringArray(rendered.dependencies),
+      tasks: steps.map((step, index) => ({
+        task_index: index + 1,
+        task_key: asOptionalString(step.id || step.key) || `formula_step_${index + 1}`,
+        title: asOptionalString(step.title) || asOptionalString(step.description) || `Formula step ${index + 1}`,
+        status: asOptionalString(step.status) || "pending",
+        labels: asStringArray(step.labels),
+        depends_on: asStringArray(step.depends_on || step.depends),
+        files: asStringArray(step.files),
+        repo: asOptionalString(step.repo) || null,
+        task_type: asOptionalString(step.task_type) || null,
+        description: asOptionalString(step.description) || null
+      }))
+    }]
+  };
+}
+function cookedSpec(trackId, formula, rendered) {
+  if (isRecord(rendered.spec)) return asJsonObject(rendered.spec);
+  return {
+    version: 1,
+    schema: "cadre.spec.v1",
+    track_id: trackId,
+    title: asOptionalString(rendered.title) || `Spec: ${trackId}`,
+    description: asOptionalString(rendered.description) || asOptionalString(formula.description) || asOptionalString(formula.title) || trackId,
+    acceptance: asStringArray(rendered.acceptance)
+  };
+}
+function cookFormula(root, args) {
+  const loaded = loadFormula(root, formulaId(args));
+  if (loaded.ok === false) return loaded;
+  const formula = asJsonObject(loaded.formula);
+  const variables = variablesFromArgs(formula, args);
+  const rendered = asJsonObject(renderTemplateValue(formula, variables));
+  const trackId = asOptionalString(args.trackId || args.track_id) || asOptionalString(args.trackName || args.track_name) || `${asOptionalString(formula.id) || loaded.id}-draft`;
+  return {
+    ok: true,
+    formula_id: loaded.id,
+    title: asOptionalString(formula.title) || loaded.id,
+    variables,
+    recommended_phase: asOptionalString(formula.recommended_phase) || null,
+    dependencies: asStringArray(formula.dependencies),
+    spec: cookedSpec(trackId, formula, rendered),
+    plan: cookedPlan(trackId, formula, rendered)
+  };
+}
+function listFormulas(root) {
+  ensureNativeState(root);
+  const dir = formulaDir(root);
+  const items = fileExists(dir) ? import_node_fs17.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
+    const file = import_node_path31.default.join(dir, name);
+    const formula = readJson(file, {});
+    return {
+      id: asOptionalString(formula.id) || name.replace(/\.json$/i, ""),
+      title: asOptionalString(formula.title) || asOptionalString(formula.id) || name,
+      recommended_phase: asOptionalString(formula.recommended_phase) || null,
+      path: import_node_path31.default.relative(root, file)
+    };
+  }) : [];
+  return { ok: true, formulas: items, count: items.length };
+}
+function wispSteps(cooked) {
+  const plan = asJsonObject(cooked.plan);
+  const phases = Array.isArray(plan.phases) ? plan.phases.map(asJsonObject) : [];
+  return phases.flatMap((phase) => {
+    const phaseIndex = Number(phase.phase_index || phase.index || 1);
+    return (Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : []).map((task, index) => ({
+      step_id: asOptionalString(task.task_key || task.id || task.key) || `step_${phaseIndex}_${index + 1}`,
+      phase_index: phaseIndex,
+      task_index: Number(task.task_index || task.index || index + 1),
+      title: asOptionalString(task.title) || `Step ${index + 1}`,
+      status: "pending",
+      evidence: null,
+      updated_at: null
+    }));
+  });
+}
+function createWisp(root, args) {
+  const cooked = cookFormula(root, args);
+  if (cooked.ok === false) return cooked;
+  const formula_id = asOptionalString(cooked.formula_id) || "formula";
+  const now = utcNow();
+  const id = asOptionalString(args.wispId || args.wisp_id) || `wisp_${safeName(formula_id)}_${textHash(`${now}:${JSON.stringify(cooked.variables || {})}`).slice(0, 10)}`;
+  const wisp = {
+    version: 1,
+    schema: "cadre.wisp.v1",
+    id,
+    formula_id,
+    status: "active",
+    owner: asOptionalString(args.identity) || null,
+    ttl: asOptionalString(args.ttl) || null,
+    created_at: now,
+    updated_at: now,
+    variables: asJsonObject(cooked.variables),
+    spec: asJsonObject(cooked.spec),
+    plan: asJsonObject(cooked.plan),
+    steps: wispSteps(asJsonObject(cooked)),
+    evidence: []
+  };
+  const file = wispPath(root, id);
+  writeJsonEnsured(file, wisp);
+  const event = appendCadreEvent(root, { kind: "wisp_created", workflow: "formula", formula_id, wisp_id: id });
+  return { ok: true, wisp_id: id, path: import_node_path31.default.relative(root, file), wisp, event };
+}
+function listWisps(root) {
+  ensureNativeState(root);
+  const dir = wispDir(root);
+  const wisps = fileExists(dir) ? import_node_fs17.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
+    const file = import_node_path31.default.join(dir, name);
+    const wisp = readJson(file, {});
+    return {
+      id: asOptionalString(wisp.id) || name.replace(/\.json$/i, ""),
+      formula_id: asOptionalString(wisp.formula_id) || null,
+      status: asOptionalString(wisp.status) || null,
+      owner: asOptionalString(wisp.owner) || null,
+      updated_at: asOptionalString(wisp.updated_at) || null,
+      path: import_node_path31.default.relative(root, file)
+    };
+  }) : [];
+  return { ok: true, wisps, count: wisps.length };
+}
+function updateWispStep(root, args) {
+  const id = wispId(args);
+  if (!id) return { ok: false, error: "wisp id is required" };
+  const file = wispPath(root, id);
+  const wisp = readJson(file, null);
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path31.default.relative(root, file) };
+  const rawArgs = args;
+  const stepId = asOptionalString(rawArgs.stepId || rawArgs.step_id || rawArgs.taskKey || rawArgs.task_key);
+  const stepIndex = Number(rawArgs.stepIndex || rawArgs.step_index || args.taskIndex || 0);
+  const steps = Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [];
+  const index = steps.findIndex(
+    (step, offset) => stepId && asOptionalString(step.step_id) === stepId || stepIndex > 0 && offset + 1 === stepIndex
+  );
+  if (index < 0) return { ok: false, error: "Wisp step not found", wisp_id: id, step_id: stepId || null, step_index: stepIndex || null };
+  const now = utcNow();
+  const status = asOptionalString(args.status) || "completed";
+  const currentStep = steps[index] || {};
+  steps[index] = {
+    ...currentStep,
+    status,
+    evidence: isRecord(args.evidence) ? asJsonObject(args.evidence) : asOptionalString(args.evidence) || asJsonObject(currentStep.evidence),
+    summary: asOptionalString(args.summary) || asOptionalString(currentStep.summary) || null,
+    updated_at: now
+  };
+  const next = { ...wisp, steps, status: asOptionalString(wisp.status) || "active", updated_at: now };
+  writeJsonEnsured(file, next);
+  const event = appendCadreEvent(root, { kind: "wisp_step_updated", workflow: "formula", wisp_id: id, step_id: asOptionalString(steps[index].step_id) || null, status });
+  return { ok: true, wisp_id: id, path: import_node_path31.default.relative(root, file), step: steps[index], wisp: next, event };
+}
+function squashWisp(root, args) {
+  const id = wispId(args);
+  if (!id) return { ok: false, error: "wisp id is required" };
+  const file = wispPath(root, id);
+  const wisp = readJson(file, null);
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path31.default.relative(root, file) };
+  const digest = {
+    version: 1,
+    schema: "cadre.wisp_digest.v1",
+    id: `digest_${safeName(id)}_${textHash(`${utcNow()}:${JSON.stringify(wisp)}`).slice(0, 10)}`,
+    wisp_id: id,
+    formula_id: asOptionalString(wisp.formula_id) || null,
+    status: asOptionalString(args.status) || asOptionalString(wisp.status) || "squashed",
+    summary: asOptionalString(args.summary) || null,
+    recorded_at: utcNow(),
+    steps: Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [],
+    evidence: Array.isArray(wisp.evidence) ? wisp.evidence.map(asJsonObject) : []
+  };
+  const digestPath = import_node_path31.default.join(root, "cadre", "operations", "wisp-digests.jsonl");
+  appendJsonl(digestPath, digest);
+  const event = appendCadreEvent(root, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
+  return { ok: true, wisp_id: id, digest, path: import_node_path31.default.relative(root, digestPath), event };
+}
+function burnWisp(root, args) {
+  const id = wispId(args);
+  if (!id) return { ok: false, error: "wisp id is required" };
+  const file = wispPath(root, id);
+  const existed = fileExists(file);
+  if (existed) import_node_fs17.default.rmSync(file, { force: true });
+  const event = appendCadreEvent(root, { kind: "wisp_burned", workflow: "formula", wisp_id: id, existed });
+  return { ok: true, wisp_id: id, existed, path: import_node_path31.default.relative(root, file), event };
+}
+function pourFormula(root, args) {
+  const id = wispId(args);
+  const wisp = id ? readJson(wispPath(root, id), null) : null;
+  const cooked = wisp ? { ok: true, formula_id: asOptionalString(wisp.formula_id), spec: asJsonObject(wisp.spec), plan: asJsonObject(wisp.plan), variables: asJsonObject(wisp.variables) } : cookFormula(root, args);
+  if (cooked.ok === false) return cooked;
+  const formula_id = asOptionalString(cooked.formula_id) || formulaId(args) || "formula";
+  const trackId = asOptionalString(args.trackId || args.track_id) || asOptionalString(args.outputTrackId || args.output_track_id) || `${safeName(formula_id)}-${textHash(JSON.stringify(cooked.variables || {})).slice(0, 8)}`;
+  const tags = Array.from(/* @__PURE__ */ new Set([
+    `formula:${formula_id}`,
+    ...asStringArray(asJsonObject(args.metadata).tags)
+  ]));
+  const result = workflowNewTrack(root, {
+    ...args,
+    workflow: "newtrack",
+    action: "newtrack",
+    trackId,
+    spec: asJsonObject(cooked.spec),
+    plan: asJsonObject(cooked.plan),
+    description: asOptionalString(args.description) || `Formula output: ${formula_id}`,
+    metadata: {
+      ...asJsonObject(args.metadata),
+      tags
+    }
+  });
+  const event = result.ok === false ? null : appendCadreEvent(root, { kind: "formula_poured", workflow: "formula", formula_id, wisp_id: id || null, track_id: trackId });
+  return { ...result, formula_id, wisp_id: id || null, pour_event: event };
+}
+function workflowFormula(root, args = {}) {
+  const action = formulaAction(args);
+  const summary = workflowSummary(root, "formula", args);
+  ensureNativeState(root);
+  if (action === "list") return { ...summary, action, ...listFormulas(root) };
+  if (action === "show") return { ...summary, action, ...loadFormula(root, formulaId(args)) };
+  if (action === "cook") return { ...summary, action, ...cookFormula(root, args) };
+  if (action === "wisp_list") return { ...summary, action, ...listWisps(root) };
+  if (args.execute !== true && !READ_ACTIONS.has(action)) {
+    return {
+      ...summary,
+      ok: false,
+      action,
+      dry_run: true,
+      phase_state: "awaiting_execute",
+      error: `Formula action ${action} requires execute:true`
+    };
+  }
+  if (action === "wisp_create") return { ...summary, action, ...createWisp(root, args) };
+  if (action === "wisp_update_step") return { ...summary, action, ...updateWispStep(root, args) };
+  if (action === "wisp_squash") return { ...summary, action, ...squashWisp(root, args) };
+  if (action === "wisp_burn") return { ...summary, action, ...burnWisp(root, args) };
+  if (action === "pour") return { ...summary, action, ...pourFormula(root, args) };
+  return { ...summary, ok: false, action, error: `Unknown formula action: ${action}` };
+}
+
 // src/core/application/runtime/parallel-state.ts
-var import_node_path33 = __toESM(require("node:path"));
+var import_node_path34 = __toESM(require("node:path"));
 
 // src/core/application/runtime/task-completion.ts
-var import_node_path32 = __toESM(require("node:path"));
+var import_node_path33 = __toESM(require("node:path"));
 
 // src/core/application/runtime/manual-verification.ts
-var import_node_path31 = __toESM(require("node:path"));
+var import_node_path32 = __toESM(require("node:path"));
 function completionJournalPath(track) {
-  return import_node_path31.default.join(track.dir, "completion_journal.json");
+  return import_node_path32.default.join(track.dir, "completion_journal.json");
 }
 function readCompletionJournal(track) {
   const value = readJson(completionJournalPath(track), { entries: {} });
@@ -7399,7 +7266,7 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
-  appendJsonl(import_node_path31.default.join(track.dir, "completion_journal.jsonl"), {
+  appendJsonl(import_node_path32.default.join(track.dir, "completion_journal.jsonl"), {
     key,
     recorded_at: journal.updated_at,
     entry: journal.entries[key]
@@ -7616,51 +7483,6 @@ function completeTaskInner(root, args = {}) {
       reason: `Coverage ${coverage.coverage}% is below required ${threshold}%; task was not marked complete`
     };
   }
-  const metadataBefore = readJson(track.metadata_path, track.metadata) || track.metadata;
-  const mappedBeadsTaskId = metadataBefore.beads_tasks ? asOptionalString(metadataBefore.beads_tasks[task.task_key]) || null : null;
-  const explicitBeadsTaskId = args.beadsTaskId || args.taskId || null;
-  const beadsTaskId = explicitBeadsTaskId || mappedBeadsTaskId;
-  const beadsConfigured = Boolean(
-    explicitBeadsTaskId || metadataBefore.beads_epic || metadataBefore.beads_tasks && Object.keys(metadataBefore.beads_tasks).length > 0
-  );
-  const beadsAvailable = commandExists("bd", root);
-  const beads = {
-    attempted: false,
-    required: beadsConfigured,
-    available: beadsAvailable,
-    note: null,
-    close: null,
-    skipped_reason: null
-  };
-  if (beadsConfigured && !beadsTaskId) {
-    return {
-      ok: false,
-      stage: "beads_mapping",
-      blocked: true,
-      threshold,
-      working_root: workingRoot,
-      coverage,
-      beads,
-      reason: "Track has Beads metadata but this plan task has no mapped Beads task id; task was not marked complete"
-    };
-  }
-  if (beadsTaskId && !beadsAvailable) {
-    return {
-      ok: false,
-      stage: "beads_unavailable",
-      blocked: true,
-      threshold,
-      working_root: workingRoot,
-      coverage,
-      beads,
-      reason: "Beads CLI (bd) is required for this mapped task but is not installed or not on PATH; task was not marked complete"
-    };
-  }
-  if (!beadsConfigured) {
-    beads.skipped_reason = "Track has no Beads task mapping";
-  } else {
-    beads.attempted = true;
-  }
   const lastTestRun = manualVerificationTask ? null : {
     command: coverage.command,
     cwd: coverage.cwd || workingRoot.path,
@@ -7696,7 +7518,7 @@ function completeTaskInner(root, args = {}) {
       commitSha: args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path32.default.relative(root, workingRoot.path) || ".",
+      workingRoot: import_node_path33.default.relative(root, workingRoot.path) || ".",
       ...lastTestRun ? { lastTestRun } : {},
       ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
@@ -7706,7 +7528,7 @@ function completeTaskInner(root, args = {}) {
         stage: "record_task_result_failed",
         error: taskResult.error || asOptionalString(taskResult.stage) || "record task result failed"
       }));
-      return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, beads, journal: entry };
+      return { ok: false, stage: "record_task_result", threshold, working_root: workingRoot, coverage, task_result: taskResult, journal: entry };
     }
     const taskResultJson = asJsonObject(taskResult);
     const recordedEntry = patchCompletionJournal(track, journalKey, (current) => ({
@@ -7722,66 +7544,27 @@ function completeTaskInner(root, args = {}) {
     return { ok: true, task_result: taskResult, journal: recordedEntry };
   };
   const stateResult = args.lock === false ? recordState() : withTrackLock(root, track.track_id, recordState);
-  if (!stateResult.ok) return { ...stateResult, threshold, working_root: workingRoot, coverage, beads };
+  if (!stateResult.ok) return { ...stateResult, threshold, working_root: workingRoot, coverage };
   const stateTaskResult = asJsonObject(stateResult.task_result);
-  if (beadsTaskId) {
-    const latest = readCompletionJournal(track).entries[journalKey] || {};
-    if (!latest.beads_note_written) {
-      const note = [
-        dedupKey,
-        `COMPLETED: ${task.title}`,
-        `COMMIT: ${sha}`,
-        `COVERAGE: ${coverage.coverage == null ? "unmeasured" : `${coverage.coverage}%`}`,
-        args.summary ? `SUMMARY: ${args.summary}` : null
-      ].filter(Boolean).join("\n");
-      const noteResult = beadsTaskWrite(root, { operation: "note", id: beadsTaskId, note, dedupKey });
-      beads.note = noteResult;
-      if (!noteResult.ok) return { ok: false, stage: "beads_note", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads, journal: latest };
-      const writeNote = () => patchCompletionJournal(track, journalKey, (current) => ({
-        ...current,
-        stage: "beads_note_written",
-        beads_note_written: true,
-        beads_note_at: utcNow()
-      }));
-      if (args.lock === false) writeNote();
-      else {
-        const noteJournal = withTrackLock(root, track.track_id, writeNote);
-        if (!noteJournal.ok) return { ...noteJournal, stage: "journal_note", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads };
-      }
-    } else {
-      beads.note = { ok: true, skipped: true, reason: "completion journal already recorded Beads note" };
-    }
-    const afterNote = readCompletionJournal(track).entries[journalKey] || {};
-    if (!afterNote.beads_close_written) {
-      const closeResult = beadsTaskWrite(root, {
-        operation: "close",
-        id: beadsTaskId,
-        continue: true,
-        reason: args.reason || `commit: ${args.commitSha || "completed"}`
-      });
-      beads.close = closeResult;
-      if (!closeResult.ok) return { ok: false, stage: "beads_close", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads, journal: afterNote };
-      const writeClose = () => patchCompletionJournal(track, journalKey, (current) => ({
-        ...current,
-        stage: "beads_closed",
-        beads_close_written: true,
-        beads_close_at: utcNow()
-      }));
-      if (args.lock === false) writeClose();
-      else {
-        const closeJournal = withTrackLock(root, track.track_id, writeClose);
-        if (!closeJournal.ok) return { ...closeJournal, stage: "journal_close", threshold, working_root: workingRoot, coverage, task_result: stateTaskResult, beads };
-      }
-    } else {
-      beads.close = { ok: true, skipped: true, reason: "completion journal already recorded Beads close" };
-    }
-  }
   const markComplete = () => patchCompletionJournal(track, journalKey, (current) => ({
     ...current,
     stage: "completed",
     completed_at: current.completed_at || utcNow()
   }));
   const completedJournal = args.lock === false ? markComplete() : withTrackLock(root, track.track_id, markComplete);
+  const event = appendCadreEvent(root, {
+    kind: "task_completed",
+    workflow: "complete_task",
+    track_id: track.track_id,
+    phase_index: phaseIndex,
+    task_index: taskIndex,
+    task_key: stateTaskResult.task_key,
+    status: args.status || "completed",
+    commit_sha: sha,
+    coverage: coverage.coverage ?? null,
+    summary: args.summary || null,
+    journal_key: journalKey
+  });
   return {
     ok: true,
     track_id: track.track_id,
@@ -7790,7 +7573,7 @@ function completeTaskInner(root, args = {}) {
     threshold,
     coverage,
     task_result: stateTaskResult,
-    beads,
+    event,
     journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal
   };
 }
@@ -7813,7 +7596,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
     return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };
   }
-  const statePath = import_node_path33.default.join(track.dir, "parallel_state.json");
+  const statePath = import_node_path34.default.join(track.dir, "parallel_state.json");
   const existing = readJson(statePath, {
     track_id: track.track_id,
     execution_mode: "parallel",
@@ -7838,7 +7621,6 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
     phase_index: args.phaseIndex ?? existingWorker?.phase_index ?? null,
     task_index: args.taskIndex ?? existingWorker?.task_index ?? null,
     task_key: args.phaseIndex && args.taskIndex ? `phase${args.phaseIndex}_task${args.taskIndex}` : existingWorker?.task_key ?? null,
-    beads_task_id: args.beadsTaskId || args.taskId || existingWorker?.beads_task_id || null,
     repo: args.repo || existingWorker?.repo || null,
     worktree: args.worktree || existingWorker?.worktree || null,
     branch: args.branch || existingWorker?.branch || null,
@@ -7874,7 +7656,6 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
       allowLowCoverage: args.allowLowCoverage,
       summary: args.summary || `parallel worker ${workerId}`,
       reason: args.reason || `merged ${workerId}`,
-      beadsTaskId: nextWorker.beads_task_id,
       repo: nextWorker.repo || args.repo,
       workingRoot: args.workingRoot || nextWorker.worktree || args.worktree,
       lock: false
@@ -7885,7 +7666,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   return {
     ok: true,
     track_id: track.track_id,
-    state_path: import_node_path33.default.relative(root, statePath),
+    state_path: import_node_path34.default.relative(root, statePath),
     worker: nextWorker,
     completion,
     summary: {
@@ -7897,7 +7678,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   };
 }
 function parallelStatePath(track) {
-  return import_node_path33.default.join(track.dir, "parallel_state.json");
+  return import_node_path34.default.join(track.dir, "parallel_state.json");
 }
 function readParallelState(track) {
   const existing = readJson(parallelStatePath(track), {
@@ -7917,7 +7698,7 @@ function readParallelState(track) {
 }
 
 // src/core/application/runtime/parallel-workflow.ts
-var import_node_path34 = __toESM(require("node:path"));
+var import_node_path35 = __toESM(require("node:path"));
 function positiveInt(value, fallback, max = 20) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -7930,7 +7711,7 @@ function changedFilesFromArgs(args) {
   return asStringArray(args.filesChanged || args.files_changed || args.files);
 }
 function isManifestChange(file) {
-  const base = import_node_path34.default.basename(file).toLowerCase();
+  const base = import_node_path35.default.basename(file).toLowerCase();
   return [
     "package.json",
     "package-lock.json",
@@ -7951,7 +7732,7 @@ function isManifestChange(file) {
   ].includes(base);
 }
 function fileStem(file) {
-  return import_node_path34.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
+  return import_node_path35.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
 }
 function isNarrowTestChange(file, ownedFiles) {
   const normalized = normalizeClaimPath(file);
@@ -8110,7 +7891,7 @@ function workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentI
     `Source root: ${sourceRoot}`,
     `Worker worktree: ${worktree}`,
     ownedFiles.length > 0 ? `Owned files: ${ownedFiles.join(", ")}` : "Owned files: none declared; inspect the task plan before editing.",
-    "Use only Cadre packets for Cadre, Beads, provider, index, and worker-state mutations.",
+    "Use only Cadre packets for Cadre, provider, index, and worker-state mutations.",
     "Change only the assigned product files unless the task requires a narrowly related test or manifest update.",
     "Run the smallest relevant tests first, then the configured project gate when practical.",
     "Commit the worker worktree changes and return the structured result JSON."
@@ -8180,7 +7961,7 @@ function parallelSetupWorkers(root, track, args = {}) {
     const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
-    const worktree = import_node_path34.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    const worktree = import_node_path35.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
     const sourceRoot = asString(entry.root || root);
     commands.push(plannedCommand(
       "git",
@@ -8349,8 +8130,8 @@ function parallelWorkflow(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-basic.ts
-var import_node_fs15 = __toESM(require("node:fs"));
-var import_node_path35 = __toESM(require("node:path"));
+var import_node_fs18 = __toESM(require("node:fs"));
+var import_node_path36 = __toESM(require("node:path"));
 function workflowImplement(root, args = {}) {
   const prep = implementationPrep(root, {
     ...args,
@@ -8371,7 +8152,6 @@ function workflowStatus(root, args = {}) {
   if (mode === "fleet" || mode === "repos") return { ...summary, ok: true, status: fleetStatus(root, args) };
   if (mode === "available") return { ...summary, ok: true, status: availableWork(root) };
   if (mode === "collisions") return { ...summary, ok: true, status: collisionScan(root) };
-  if (mode === "beads") return { ...summary, ok: true, status: beadsSummary(root) };
   if (mode === "doctor") return { ...summary, ok: true, status: doctor(root, { hasCadreProject: true }) };
   return { ...summary, ok: true, status: liveStatus(root) };
 }
@@ -8408,7 +8188,7 @@ function workflowValidate(root, args = {}) {
     integrity: planIntegrity(root, args.trackId || args.track_id || null),
     collisions: collisionScan(root),
     fleet: fleetStatus(root, { includeCollisions: false }),
-    beads: beadsSummary(root)
+    native_state: nativeStateSummary(root)
   };
 }
 function workflowArchive(root, args = {}) {
@@ -8450,16 +8230,16 @@ function workflowArchive(root, args = {}) {
   const syncPre = syncControlPlane(root, { mode: "pre" });
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
   const archived = [];
-  const archiveRoot = import_node_path35.default.join(root, "cadre", "archive");
-  import_node_fs15.default.mkdirSync(archiveRoot, { recursive: true });
+  const archiveRoot = import_node_path36.default.join(root, "cadre", "archive");
+  import_node_fs18.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target = import_node_path35.default.join(archiveRoot, track.track_id);
+    const target = import_node_path36.default.join(archiveRoot, track.track_id);
     if (fileExists(target)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs15.default.renameSync(track.dir, target);
-    archived.push({ track_id: track.track_id, ok: true, path: import_node_path35.default.relative(root, target) });
+    import_node_fs18.default.renameSync(track.dir, target);
+    archived.push({ track_id: track.track_id, ok: true, path: import_node_path36.default.relative(root, target) });
   }
   const regen = regenIndex(root);
   const syncPost = syncControlPlane(root, { mode: "post" });
@@ -8489,16 +8269,16 @@ function workflowHandoff(root, args = {}) {
     "",
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
-  const handoffPath = import_node_path35.default.join(track.dir, "HANDOFF.md");
+  const handoffPath = import_node_path36.default.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
   const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
   const reviewFiles = [
-    jsonReviewFile(import_node_path35.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    jsonReviewFile(import_node_path36.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
     textReviewFile(
-      import_node_path35.default.relative(root, handoffPath),
+      import_node_path36.default.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(import_node_path35.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+      withGeneratedMarker(import_node_path36.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
     )
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -8509,8 +8289,7 @@ function workflowHandoff(root, args = {}) {
     ...summary,
     track_id: trackId,
     track_context: context,
-    beads: beadsSummary(root),
-    handoff_path: import_node_path35.default.relative(root, handoffPath),
+    handoff_path: import_node_path36.default.relative(root, handoffPath),
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,
@@ -8536,203 +8315,40 @@ function workflowHandoff(root, args = {}) {
   }
   if (args.execute === true) {
     writeJsonEnsured(handoffJsonPath, handoffJson);
-    import_node_fs15.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path35.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
+    import_node_fs18.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path36.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
   }
+  const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
+  const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
+  const message = appendCadreMessage(root, "outbox", {
+    kind: "handoff",
+    workflow: "handoff",
+    track_id: trackId,
+    to: recipient,
+    subject,
+    body: asOptionalString(args.body) || text,
+    handoff_path: import_node_path36.default.relative(root, handoffPath),
+    handoff_json_path: import_node_path36.default.relative(root, handoffJsonPath)
+  });
+  const event = appendCadreEvent(root, {
+    kind: "handoff_created",
+    workflow: "handoff",
+    track_id: trackId,
+    to: recipient,
+    subject,
+    handoff_path: import_node_path36.default.relative(root, handoffPath)
+  });
   return {
     ...base,
     ok: true,
     dry_run: args.execute !== true,
-    phase_state: "executed"
-  };
-}
-
-// src/core/application/runtime/workflow-new-track.ts
-var import_node_fs16 = __toESM(require("node:fs"));
-var import_node_path36 = __toESM(require("node:path"));
-function newTrackReviewFiles(trackId, spec, plan, metadata) {
-  const safeTrack = safeName(trackId);
-  const specJson = normalizeSpecJson(trackId, spec);
-  const planJson = normalizePlanJson(trackId, plan, specJson);
-  const learningsEntry = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: trackId,
-    recorded_at: utcNow(),
-    text: trackLearningsText(trackId)
-  };
-  return [
-    jsonReviewFile(
-      `cadre/tracks/${safeTrack}/spec.json`,
-      "Track spec canonical",
-      "spec",
-      specJson
-    ),
-    textReviewFile(
-      `cadre/tracks/${safeTrack}/spec.md`,
-      "Track spec",
-      "spec.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson))
-    ),
-    jsonReviewFile(
-      `cadre/tracks/${safeTrack}/plan.json`,
-      "Track plan canonical",
-      "plan",
-      planJson
-    ),
-    textReviewFile(
-      `cadre/tracks/${safeTrack}/plan.md`,
-      "Track plan",
-      "plan.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson))
-    ),
-    jsonReviewFile(
-      `cadre/tracks/${safeTrack}/metadata.json`,
-      "Track metadata",
-      "metadata",
-      metadata
-    ),
-    plainReviewFile(
-      `cadre/tracks/${safeTrack}/learnings.jsonl`,
-      "Track learnings canonical",
-      "template:learnings_seed.json",
-      `${JSON.stringify(learningsEntry)}
-`
-    ),
-    textReviewFile(
-      `cadre/tracks/${safeTrack}/learnings.md`,
-      "Track learnings",
-      "learnings.jsonl",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId))
-    )
-  ];
-}
-function workflowNewTrack(root, args = {}) {
-  const summary = workflowSummary(root, "newtrack", args);
-  const markdownError = markdownPayloadError(args);
-  if (markdownError) return { ...summary, ...markdownError };
-  const trackId = args.trackId || args.track_id;
-  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };
-  const specJson = normalizeSpecJson(String(trackId), args.spec || { title: `Spec: ${trackId}`, description: asOptionalString(args.description) || String(trackId) });
-  const planJson = normalizePlanJson(String(trackId), args.plan, specJson);
-  const metadata = {
-    track_id: trackId,
-    type: "feature",
-    status: "new",
-    priority: "medium",
-    depends_on: [],
-    description: asOptionalString(args.description) || trackId,
-    owner: gitIdentity(root) || null,
-    reviewer: null,
-    git_branch: `track/${trackId}`,
-    worktree_path: `.worktrees/${trackId}`,
-    ...args.metadata && typeof args.metadata === "object" ? args.metadata : {}
-  };
-  const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
-  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const reviewBundle = workflowReviewBundle(root, "newtrack", args, reviewFiles, { track_id: String(trackId) });
-  const humanReview = humanReviewState("newtrack", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
-  const dryRun = args.execute !== true;
-  const assist = planAssist(root, { ...args, plan: planJson, trackId });
-  const beads = createBeadsTree(root, {
-    ...args,
-    dryRun: true,
-    trackId,
-    plan: planJson,
-    spec: specJson,
-    metadata
-  });
-  if (dryRun) {
-    return {
-      ...summary,
-      ok: assist.ok !== false && beads.ok !== false,
-      dry_run: true,
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      beads_tree: beads,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
-      warnings
-    };
-  }
-  if (findTrack(root, trackId)) {
-    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
-  }
-  if (!humanReviewConfirmed(args)) {
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      beads_tree: beads,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
-      warnings,
-      error: "Human confirmation is required before creating track artifacts"
-    };
-  }
-  if (!commandExists("bd", root)) {
-    return {
-      ...summary,
-      ok: false,
-      track_id: trackId,
-      error: "Beads CLI (bd) is required for live track creation"
-    };
-  }
-  const dir = import_node_path36.default.join(root, "cadre", "tracks", safeName(trackId));
-  const learningsEntry = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: String(trackId),
-    recorded_at: utcNow(),
-    text: trackLearningsText(String(trackId))
-  };
-  import_node_fs16.default.mkdirSync(dir, { recursive: true });
-  writeJson(import_node_path36.default.join(dir, "metadata.json"), metadata);
-  writeJson(import_node_path36.default.join(dir, "spec.json"), specJson);
-  writeJson(import_node_path36.default.join(dir, "plan.json"), planJson);
-  import_node_fs16.default.writeFileSync(import_node_path36.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
-  import_node_fs16.default.writeFileSync(import_node_path36.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
-  import_node_fs16.default.writeFileSync(import_node_path36.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
-`);
-  import_node_fs16.default.writeFileSync(import_node_path36.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
-  const liveBeads = createBeadsTree(root, { ...args, trackId, plan: planJson, spec: specJson, dryRun: false });
-  if (!liveBeads.ok) {
-    import_node_fs16.default.rmSync(dir, { recursive: true, force: true });
-    return {
-      ...summary,
-      ok: false,
-      track_id: trackId,
-      stage: "create_beads_tree",
-      beads_tree: liveBeads
-    };
-  }
-  const regen = regenIndex(root);
-  return {
-    ...summary,
-    ok: regen.ok !== false,
-    dry_run: false,
-    track_id: trackId,
-    metadata_path: import_node_path36.default.relative(root, import_node_path36.default.join(dir, "metadata.json")),
-    beads_tree: liveBeads,
-    regen,
-    human_review: humanReview,
-    worktree_plan: worktreePlan(root, { trackId })
+    phase_state: "executed",
+    message,
+    event
   };
 }
 
 // src/core/application/runtime/workflow-refresh-revert.ts
-var import_node_fs17 = __toESM(require("node:fs"));
+var import_node_fs19 = __toESM(require("node:fs"));
 var import_node_path37 = __toESM(require("node:path"));
 function refreshedPatternsText(text, now = utcNow()) {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
@@ -8886,8 +8502,8 @@ function workflowRefresh(root, args = {}) {
   if (args.execute === true) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
-      import_node_fs17.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      import_node_fs17.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      import_node_fs19.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      import_node_fs19.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
       patterns = {
         ok: true,
         path: import_node_path37.default.relative(root, refreshed.jsonlPath),
@@ -8915,7 +8531,7 @@ function workflowRefresh(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-release-revise.ts
-var import_node_fs18 = __toESM(require("node:fs"));
+var import_node_fs20 = __toESM(require("node:fs"));
 var import_node_path38 = __toESM(require("node:path"));
 function releaseArtifactPlan(root, args = {}) {
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
@@ -8946,7 +8562,7 @@ function releaseArtifactPlan(root, args = {}) {
       priority: track.priority,
       owner: track.owner,
       reviewer: track.reviewer,
-      beads_epic: track.beads_epic,
+      tags: track.tags || [],
       review: track.review
     }))
   };
@@ -9012,8 +8628,8 @@ function workflowRelease(root, args = {}) {
       error: "Human confirmation is required before writing release artifacts"
     };
   }
-  import_node_fs18.default.mkdirSync(plan.releaseDir, { recursive: true });
-  import_node_fs18.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+  import_node_fs20.default.mkdirSync(plan.releaseDir, { recursive: true });
+  import_node_fs20.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `);
   writeJson(plan.releaseJson, plan.metadata);
   const indexPatch = patchJsonFile(import_node_path38.default.join(root, "cadre", "setup_state.json"), (current) => {
@@ -9133,13 +8749,13 @@ function workflowRevise(root, args = {}) {
     const written = [];
     if (revisedSpec) {
       writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      import_node_fs18.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path38.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
+      import_node_fs20.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path38.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
       written.push(import_node_path38.default.relative(root, trackSpecJsonPath(track)));
       written.push(import_node_path38.default.relative(root, track.spec_path));
     }
     if (revisedPlan) {
       writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      import_node_fs18.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path38.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
+      import_node_fs20.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path38.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
       written.push(import_node_path38.default.relative(root, trackPlanJsonPath(track)));
       written.push(import_node_path38.default.relative(root, track.plan_path));
     }
@@ -9157,7 +8773,7 @@ function workflowRevise(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-setup.ts
-var import_node_fs19 = __toESM(require("node:fs"));
+var import_node_fs21 = __toESM(require("node:fs"));
 var import_node_path39 = __toESM(require("node:path"));
 function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
@@ -9174,8 +8790,6 @@ function workflowSetup(root, args = {}) {
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
-  const beadsPlan = setupBeads(root, { ...args, execute: false });
-  const beadsPrefix = resolveBeadsEpicPrefix(root, args);
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
@@ -9199,8 +8813,6 @@ function workflowSetup(root, args = {}) {
     lsp_setup: detailMode ? lspRecommendations : summarizeLspSetupResult(lspRecommendations),
     integrations: workspaceHealthResult.integrations,
     detail_resources: workspaceHealthResult.detail_resources,
-    beads_init: beadsPlan,
-    beads_prefix: beadsPrefix,
     provider,
     sync_mode: syncModeRecommendation,
     sync_recommendation: teamSize >= 2 && syncModeRecommendation !== "shared" ? "Team setup detected; use syncMode/shared sync for 10-20 person coordination." : null,
@@ -9211,9 +8823,8 @@ function workflowSetup(root, args = {}) {
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,
     warnings,
-    required_payload: args.execute === true ? ["product", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []).concat(beadsPrefix.selected ? [] : asStringArray(beadsPrefix.missing_payload)) : [],
+    required_payload: args.execute === true ? ["product", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: [
-      ...!beadsPrefix.selected ? ["Choose beadsEpicPrefix from the recommendations or provide another prefix using at most two words."] : [],
       ...provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
       "Review setup artifacts with the user; call setup_scaffold with execute:true and humanConfirmed:true only after explicit approval."
     ],
@@ -9231,8 +8842,7 @@ function workflowSetup(root, args = {}) {
     ...!isRecord(rawArgs.product) ? ["product"] : [],
     ...!techStackFromArgs(args) ? ["techStack"] : [],
     ...provider.requires_confirmation === true || !providerMode ? ["providerMode"] : [],
-    ...polyrepoRequested && !reposPayload ? ["repos"] : [],
-    ...beadsPrefix.selected ? [] : asStringArray(beadsPrefix.missing_payload)
+    ...polyrepoRequested && !reposPayload ? ["repos"] : []
   ];
   if (missingPayload.length > 0) {
     return {
@@ -9251,17 +8861,6 @@ function workflowSetup(root, args = {}) {
       error: "Human confirmation is required before writing setup artifacts"
     };
   }
-  const beadsInit = setupBeads(root, args);
-  if (beadsInit.ok === false) {
-    return {
-      ...result,
-      ok: false,
-      phase_state: "blocked",
-      stage: "beads_init",
-      beads_init: beadsInit,
-      error: asOptionalString(beadsInit.error) || asOptionalString(beadsInit.reason) || "Beads initialization failed"
-    };
-  }
   const written = [];
   const skipped = [];
   const writeText = (relativePath, text) => {
@@ -9270,8 +8869,8 @@ function workflowSetup(root, args = {}) {
       skipped.push(import_node_path39.default.relative(root, file));
       return;
     }
-    import_node_fs19.default.mkdirSync(import_node_path39.default.dirname(file), { recursive: true });
-    import_node_fs19.default.writeFileSync(file, text);
+    import_node_fs21.default.mkdirSync(import_node_path39.default.dirname(file), { recursive: true });
+    import_node_fs21.default.writeFileSync(file, text);
     written.push(import_node_path39.default.relative(root, file));
   };
   const writeSetupJson = (relativePath, value) => {
@@ -9280,7 +8879,7 @@ function workflowSetup(root, args = {}) {
       skipped.push(import_node_path39.default.relative(root, file));
       return;
     }
-    import_node_fs19.default.mkdirSync(import_node_path39.default.dirname(file), { recursive: true });
+    import_node_fs21.default.mkdirSync(import_node_path39.default.dirname(file), { recursive: true });
     writeJson(file, value);
     written.push(import_node_path39.default.relative(root, file));
   };
@@ -9298,8 +8897,11 @@ function workflowSetup(root, args = {}) {
     writeSetupJson(jsonPath, value);
     writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
   };
-  import_node_fs19.default.mkdirSync(import_node_path39.default.join(cadreDir, "tracks"), { recursive: true });
-  import_node_fs19.default.mkdirSync(import_node_path39.default.join(cadreDir, "archive"), { recursive: true });
+  import_node_fs21.default.mkdirSync(import_node_path39.default.join(cadreDir, "tracks"), { recursive: true });
+  import_node_fs21.default.mkdirSync(import_node_path39.default.join(cadreDir, "archive"), { recursive: true });
+  const nativeState = ensureNativeState(root);
+  const nativeIgnorePath = asOptionalString(nativeState.ignore_path);
+  if (nativeIgnorePath) written.push(nativeIgnorePath);
   writeProjectDoc(
     "product.md",
     "product",
@@ -9382,17 +8984,6 @@ function workflowSetup(root, args = {}) {
     ...configOverrides
   };
   writeSetupJson("config.json", configPayload);
-  const beadsConfigOverrides = {
-    ...asJsonObject(rawArgs.beadsConfig),
-    ...asJsonObject(rawArgs.beads_config)
-  };
-  writeSetupJson("beads.json", {
-    ...templateJson("beads.json", { enabled: true, mode: "normal" }),
-    packet_only: true,
-    ...beadsConfigOverrides,
-    epicPrefix: beadsPrefix.epic_prefix,
-    epicPrefixMaxWords: 2
-  });
   let repos = null;
   if (reposPayload) {
     repos = reposPayload;
@@ -9411,6 +9002,15 @@ function workflowSetup(root, args = {}) {
     ci: ciSetup,
     submodules: setupSubmodulePlan(root, repos, args)
   } : null;
+  const setupEvent = appendCadreEvent(root, {
+    kind: "setup_completed",
+    workflow: "setup",
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
+    sync_mode: syncModeRecommendation,
+    provider_mode: providerMode || "local",
+    written_count: written.length,
+    skipped_count: skipped.length
+  });
   return {
     ...result,
     ok: true,
@@ -9425,7 +9025,8 @@ function workflowSetup(root, args = {}) {
       skipped: skipped.slice(beforeStyleSkipped)
     },
     lsp_setup: lspSetupResult,
-    beads_init: beadsInit,
+    native_state: nativeState,
+    event: setupEvent,
     gitattributes,
     ci_setup: ciSetup,
     polyrepo_setup: polyrepoSetup,
@@ -9604,6 +9205,7 @@ function workflowPacket(root, args = {}) {
     "refresh",
     "flag",
     "revert",
+    "formula",
     "artifacts",
     "artifact_sync"
   ].includes(workflow);
@@ -9708,22 +9310,21 @@ function workflowPacket(root, args = {}) {
             last_status_at: utcNow()
           }
         });
-        const latestTrack = findTrack(root, trackId);
-        const epic = latestTrack?.metadata.beads_epic;
-        const beads = epic && reason ? beadsTaskWrite(root, {
-          operation: "note",
-          id: epic,
-          note: `Cadre ${status}: ${reason}`,
-          dedupKey: `cadre-flag-${trackId}-${status}-${textHash(reason).slice(0, 12)}`
-        }) : null;
+        const event = appendCadreEvent(root, {
+          kind: "status_changed",
+          workflow: "flag",
+          track_id: trackId,
+          status,
+          reason
+        });
         return {
           ...summary,
-          ok: patch.ok !== false && (!beads || beads.ok !== false),
+          ok: patch.ok !== false,
           dry_run: false,
           track_context: context,
           status_result: statusResult,
           metadata_patch: patch,
-          beads,
+          event,
           human_review: humanReview,
           review_artifacts: reviewArtifacts
         };
@@ -9731,11 +9332,7 @@ function workflowPacket(root, args = {}) {
       case "revert":
         return workflowRevert(root, args);
       case "formula":
-        return {
-          ...workflowSummary(root, "formula", args),
-          ok: true,
-          formulas: commandExists("bd", root) ? beadsTaskWrite(root, { operation: "formula_list" }) : { ok: false, available: false }
-        };
+        return workflowFormula(root, args);
       default:
         return {
           ...workflowSummary(root, workflow, args),
@@ -9748,20 +9345,20 @@ function workflowPacket(root, args = {}) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  appendCadreEvent,
+  appendCadreMessage,
   artifactCatalog,
   artifactPacket,
   artifactRender,
   artifactSchema,
   artifactSync,
   availableWork,
-  beadsSummary,
-  beadsTaskWrite,
   claimTrack,
   collisionScan,
   completeTask,
-  createBeadsTree,
   dependencyGraph,
   doctor,
+  ensureNativeState,
   fleetStatus,
   heartbeatTrack,
   implementationPrep,
@@ -9775,6 +9372,7 @@ function workflowPacket(root, args = {}) {
   lspSetup,
   mcpReadiness,
   metadataPatch,
+  nativeStateSummary,
   parallelWorkflow,
   parsePlanFile,
   parsePlanJson,
@@ -9784,6 +9382,8 @@ function workflowPacket(root, args = {}) {
   polyrepoPreflight,
   prCiStatus,
   providerEvidence,
+  readCadreEvents,
+  readCadreMessages,
   recordParallelWorker,
   recordReview,
   recordTaskResult,
@@ -9801,6 +9401,7 @@ function workflowPacket(root, args = {}) {
   testCoverage,
   testImpact,
   trackContext,
+  workflowFormula,
   workflowPacket,
   workspaceDiagnostics,
   workspaceHealth,

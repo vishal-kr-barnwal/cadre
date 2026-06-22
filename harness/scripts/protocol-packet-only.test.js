@@ -82,10 +82,6 @@ const jsonContractFiles = Array.from(new Set([
 ]));
 
 const forbidden = [
-  {
-    name: "raw Beads state command",
-    pattern: /\bbd\s+(?:note|update|create|dep|label|close|ready|show|mail|formula|compact|dolt|sql|worktree|init|list|admin|rules)\b/i,
-  },
   { name: "direct JSON state surgery", pattern: /\bjq\b/i },
   { name: "direct GitHub provider command", pattern: /\bgh\s+\S+/i },
   { name: "direct GitLab provider command", pattern: /\bglab\s+\S+/i },
@@ -501,17 +497,13 @@ test("User-facing workflow docs stay packet-owned and JSON-first", () => {
     path.join(publicDocsRoot, "troubleshooting.md"),
   ];
   const forbiddenDocs = [
-    { name: "direct Beads workflow command", pattern: /\bbd\s+(?:ready|show|note|update|create|dep|label|close|mail|formula|compact|dolt|sql|worktree|init|list|admin|rules)\b/i },
     { name: "direct provider shell command", pattern: /\b(?:gh|glab)\s+\S+/i },
     { name: "old index command", pattern: /cadre-status\s+--regen-index/i },
     { name: "stale product guidelines file", pattern: /product-guidelines\.md/i },
     { name: "manual plan mutation", pattern: /\b(?:edit|write|rewrite|mark|change)\s+`?plan\.md`?/i },
     { name: "Markdown canonical state", pattern: /Markdown.{0,80}(?:authoritative|canonical)|(?:authoritative|canonical).{0,80}Markdown/i },
   ];
-  const allowed = [
-    /\bbd\s+--version\b/i,
-    /\bnpm\s+install\s+-g\s+@beads\/bd\b/i,
-  ];
+  const allowed = [];
   const failures = [];
   for (const file of docs) {
     const text = fs.readFileSync(file, "utf8");
@@ -522,6 +514,39 @@ test("User-facing workflow docs stay packet-owned and JSON-first", () => {
       const lineText = text.split(/\r?\n/)[line - 1] || "";
       if (allowed.some((pattern) => pattern.test(lineText))) continue;
       failures.push(`${path.relative(repoRoot, file)}:${line}: ${rule.name}: ${match[0]}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("Retired external task-state integration has no public references", () => {
+  const legacy = String.fromCharCode(98, 101, 97, 100, 115);
+  const shortCli = String.fromCharCode(98, 100);
+  const patterns = [
+    new RegExp(legacy, "i"),
+    new RegExp(`\\.${legacy}`, "i"),
+    new RegExp(`\\b${shortCli}\\s`),
+    new RegExp(`cadre_${legacy}`, "i"),
+    new RegExp(`${legacy}_`, "i"),
+    new RegExp(`create_${legacy}_tree`, "i"),
+  ];
+  const allowed = new Set(["harness/CHANGELOG.md"]);
+  const tracked = spawnSync("git", ["ls-files"], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(tracked.status, 0, tracked.stderr || tracked.stdout);
+  const failures = [];
+  const textExtensions = new Set([".cjs", ".css", ".html", ".js", ".json", ".md", ".mjs", ".sh", ".ts", ".tsx", ".txt", ".yaml", ".yml"]);
+  for (const rel of tracked.stdout.split(/\r?\n/).filter(Boolean)) {
+    if (allowed.has(rel)) continue;
+    const file = path.join(repoRoot, rel);
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) continue;
+    if (!textExtensions.has(path.extname(rel))) continue;
+    const text = fs.readFileSync(file, "utf8");
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (!match) continue;
+      const line = text.slice(0, match.index).split("\n").length;
+      failures.push(`${rel}:${line}: ${match[0]}`);
+      break;
     }
   }
   assert.deepEqual(failures, []);

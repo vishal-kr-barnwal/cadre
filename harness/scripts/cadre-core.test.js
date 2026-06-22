@@ -248,67 +248,6 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function installFakeBd(root) {
-  const bin = path.join(root, "bin");
-  const bd = path.join(bin, "bd");
-  write(bd, `#!/bin/sh
-printf '%s\n' "$*" >> "$PWD/bd.log"
-case "$1" in
-  init)
-    mkdir -p "$PWD/.beads"
-    printf '{"ok":true}\n'
-    ;;
-  show)
-    if [ -f "$PWD/bd-notes.txt" ]; then cat "$PWD/bd-notes.txt"; else printf '{}\n'; fi
-    ;;
-  note)
-    printf '%s\n' "$3" >> "$PWD/bd-notes.txt"
-    printf '{"ok":true}\n'
-    ;;
-  sql)
-    printf 'Rows affected: 3\n'
-    ;;
-  close|label|dep|create|ready|list|update|mail|formula|admin|rules|dolt|worktree)
-    printf '{"ok":true}\n'
-    ;;
-  *)
-    printf '{"ok":true}\n'
-    ;;
-esac
-`);
-  fs.chmodSync(bd, 0o755);
-  return bin;
-}
-
-function installTrackCreationFakeBd(root) {
-  const bin = path.join(root, "bin");
-  const bd = path.join(bin, "bd");
-  write(bd, `#!/bin/sh
-printf '%s\n' "$*" >> "$PWD/bd.log"
-case "$1" in
-  init)
-    mkdir -p "$PWD/.beads"
-    printf '{"ok":true}\n'
-    ;;
-  show)
-    exit 1
-    ;;
-  create)
-    title="$(printf '%s' "$2" | tr -c 'A-Za-z0-9' '_' | cut -c1-24)"
-    printf '{"id":"bd-%s"}\n' "$title"
-    ;;
-  note|dep)
-    printf '{"ok":true}\n'
-    ;;
-  *)
-    printf '{"ok":true}\n'
-    ;;
-esac
-`);
-  fs.chmodSync(bd, 0o755);
-  return bin;
-}
-
 test("repoMap filters generated bundles and local variable noise", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-core-test-"));
   try {
@@ -666,66 +605,6 @@ test("MCP readiness records provider capability evidence without making optional
   }
 });
 
-test("createBeadsTree dryRun plans epic, tasks, deps, notes, and metadata patch", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-tree-test-"));
-  try {
-    git(root, ["init"]);
-    writeTrack(root, "beads_20260617", samplePlan("beads_20260617"));
-
-    const result = core.createBeadsTree(root, {
-      trackId: "beads_20260617",
-      identity: "dev@example.com",
-      beadsEpicPrefix: "product",
-      dryRun: true,
-    });
-    assert.equal(result.ok, true);
-    assert.equal(result.dry_run, true);
-    assert.equal(result.beads_epic, "product-beads_20260617");
-    assert.ok(result.beads_tasks.phase1);
-    assert.ok(result.beads_tasks.phase1_task2);
-    assert.ok(result.commands.some((entry) => entry.args[0] === "dep"));
-    assert.ok(result.commands.some((entry) => entry.args.includes("--design")));
-    assert.ok(result.commands.some((entry) => entry.args.includes("--acceptance")));
-    assert.equal(result.metadata_patch.beads_epic, "product-beads_20260617");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("createBeadsTree dryRun can preflight a track before files exist", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-draft-test-"));
-  try {
-    git(root, ["init"]);
-    write(path.join(root, "cadre", "tracks.json"), JSON.stringify({
-      version: 1,
-      schema: "cadre.tracks_index.v1",
-      generated_at: "2026-06-17T00:00:00.000Z",
-      counts: { new: 0, in_progress: 0, completed: 0, blocked: 0, skipped: 0 },
-      tracks: [],
-    }, null, 2));
-
-    const result = core.createBeadsTree(root, {
-      trackId: "draft_20260617",
-      identity: "dev@example.com",
-      beadsEpicPrefix: "draft",
-      dryRun: true,
-      plan: samplePlan("draft_20260617"),
-      spec: sampleSpec("spec", { acceptance_criteria: [{ heading: "Works", body: "Works before files exist." }] }),
-      metadata: { description: "Draft track", priority: "high" },
-    });
-
-    assert.equal(result.ok, true);
-    assert.equal(result.dry_run, true);
-    assert.equal(result.beads_epic, "draft-draft_20260617");
-    assert.ok(result.beads_tasks.phase1_task1);
-    assert.ok(result.beads_tasks.phase1_manual_verification);
-    assert.ok(result.beads_tasks.track_manual_verification);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "draft_20260617")), false);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("metadataPatch preserves unrelated metadata while patching selected keys", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-metadata-patch-test-"));
   try {
@@ -1014,50 +893,11 @@ test("completeTask records approved autorun manual verification evidence", () =>
   }
 });
 
-test("completeTask refuses mapped Beads tasks when bd is unavailable without mutating plan", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-beads-test-"));
-  const oldPath = process.env.PATH;
-  try {
-    git(root, ["init"]);
-    writeTrack(root, "beads_required_20260617", samplePlan("beads_required_20260617"), {
-      beads_epic: "cadre-beads_required_20260617",
-      beads_tasks: { phase1_task1: "bd-task-1" },
-    });
-    process.env.PATH = "/nonexistent";
-
-    const result = core.completeTask(root, {
-      trackId: "beads_required_20260617",
-      phaseIndex: 1,
-      taskIndex: 1,
-      commitSha: "abcdef123456",
-      command: "printf 'Statements : 86%%\\n'",
-      coverageThreshold: 80,
-    });
-
-    assert.equal(result.ok, false);
-    assert.equal(result.stage, "beads_unavailable");
-    const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "beads_required_20260617", "plan.md"), "utf8");
-    assert.match(plan, /- \[ \] Task 1: Implement core/);
-    const metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "beads_required_20260617", "metadata.json"), "utf8"));
-    assert.equal(metadata.last_task_result, undefined);
-    assert.equal(metadata.last_test_run, undefined);
-  } finally {
-    process.env.PATH = oldPath;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("completeTask writes a recovery journal and avoids duplicate Beads notes on retry", () => {
+test("completeTask writes completion journal and native events on retry", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-journal-test-"));
-  const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    const fakeBin = installFakeBd(root);
-    process.env.PATH = `${fakeBin}:${oldPath}`;
-    writeTrack(root, "journal_20260617", samplePlan("journal_20260617"), {
-      beads_epic: "cadre-journal_20260617",
-      beads_tasks: { phase1_task1: "bd-task-1" },
-    });
+    writeTrack(root, "journal_20260617", samplePlan("journal_20260617"));
 
     const args = {
       trackId: "journal_20260617",
@@ -1071,54 +911,18 @@ test("completeTask writes a recovery journal and avoids duplicate Beads notes on
     assert.equal(first.ok, true);
     const second = core.completeTask(root, args);
     assert.equal(second.ok, true);
-    assert.equal(second.beads.note.skipped, true);
-    assert.equal(second.beads.close.skipped, true);
 
     const journal = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "journal_20260617", "completion_journal.json"), "utf8"));
     const entries = Object.values(journal.entries);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].stage, "completed");
-    assert.equal(entries[0].beads_note_written, true);
-    assert.equal(entries[0].beads_close_written, true);
-
-    const log = fs.readFileSync(path.join(root, "bd.log"), "utf8").trim().split(/\n/);
-    assert.equal(log.filter((line) => line.startsWith("note ")).length, 1);
-    assert.equal(log.filter((line) => line.startsWith("close ")).length, 1);
+    const events = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8")
+      .trim()
+      .split(/\n/)
+      .map((line) => JSON.parse(line));
+    assert.ok(events.some((event) => event.kind === "task_result_recorded"));
+    assert.ok(events.some((event) => event.kind === "task_completed"));
   } finally {
-    process.env.PATH = oldPath;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("beadsTaskWrite covers expanded CLI operations and SQL rows affected parsing", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-beads-wrapper-test-"));
-  const oldPath = process.env.PATH;
-  try {
-    git(root, ["init"]);
-    const fakeBin = installFakeBd(root);
-    process.env.PATH = `${fakeBin}:${oldPath}`;
-
-    const sql = core.beadsTaskWrite(root, { operation: "sql", sql: "update beads set status='closed'" });
-    assert.equal(sql.ok, true);
-    assert.equal(sql.rows_affected, 3);
-
-    const create = core.beadsTaskWrite(root, {
-      operation: "create",
-      title: "Keep label order",
-      labels: ["review:ready", "team:api"],
-    });
-    assert.equal(create.ok, true);
-    const label = core.beadsTaskWrite(root, { operation: "label_add", id: "bd-1", label: "review:ready" });
-    assert.equal(label.ok, true);
-    const dep = core.beadsTaskWrite(root, { operation: "dep_add", id: "bd-2", dependsOn: "bd-1" });
-    assert.equal(dep.ok, true);
-
-    const log = fs.readFileSync(path.join(root, "bd.log"), "utf8");
-    assert.match(log, /create Keep label order --json --labels review:ready,team:api/);
-    assert.match(log, /label add bd-1 review:ready --json/);
-    assert.match(log, /dep add bd-2 bd-1 --json/);
-  } finally {
-    process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1142,7 +946,7 @@ test("shared control-plane post sync fails closed when remote verification fails
   }
 });
 
-test("teamBoard returns WIP, review queue, and blockers without Beads", () => {
+test("teamBoard returns WIP, review queue, blockers, and native state", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-team-board-test-"));
   try {
     git(root, ["init"]);
@@ -1160,13 +964,14 @@ test("teamBoard returns WIP, review queue, and blockers without Beads", () => {
     assert.ok(board.wip.some((item) => item.track_id === "active_20260617"));
     assert.ok(board.review_queue.some((item) => item.track_id === "active_20260617"));
     assert.ok(board.blockers.some((item) => item.track_id === "blocked_20260617"));
-    assert.equal(typeof board.beads.available, "boolean");
+    assert.equal(board.native_state.ok, true);
+    assert.equal(typeof board.native_state.counts.events, "number");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("fleetStatus and beadsSummary degrade cleanly", () => {
+test("fleetStatus degrades cleanly for missing product repos", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-fleet-test-"));
   try {
     git(root, ["init"]);
@@ -1188,11 +993,74 @@ test("fleetStatus and beadsSummary degrade cleanly", () => {
     assert.ok(fleet.repos.some((repo) => repo.name === "missing" && repo.exists === false));
     assert.equal(fleet.provider.provider_mode, "local");
     assert.equal(fleet.provider.available, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
-    const beads = core.beadsSummary(root);
-    assert.equal(beads.ok, true);
-    assert.equal(typeof beads.available, "boolean");
-    assert.ok(Object.prototype.hasOwnProperty.call(beads, "ready"));
+test("workflow formula supports native formulas, wisps, squash, burn, and pour", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-formula-native-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "formulas", "sample.json"), JSON.stringify({
+      version: 1,
+      schema: "cadre.formula.v1",
+      id: "sample",
+      title: "Sample Formula",
+      defaults: { track: "formula_track" },
+      steps: [
+        { id: "build", title: "Build {{track}}", labels: ["formula"], files: ["src/{{track}}.ts"] },
+        { id: "verify", title: "Verify {{track}}", depends_on: ["build"] },
+      ],
+    }, null, 2));
+
+    const list = core.workflowPacket(root, { workflow: "formula", action: "list" });
+    assert.equal(list.ok, true);
+    assert.equal(list.count, 1);
+    const show = core.workflowPacket(root, { workflow: "formula", action: "show", id: "sample" });
+    assert.equal(show.ok, true);
+    assert.equal(show.formula.title, "Sample Formula");
+    const cook = core.workflowPacket(root, { workflow: "formula", action: "cook", id: "sample", variables: { track: "oauth" }, trackId: "oauth_track", responseMode: "detail" });
+    assert.equal(cook.ok, true);
+    assert.equal(cook.plan.phases[0].tasks[0].title, "Build oauth");
+    assert.deepEqual(cook.plan.phases[0].tasks[0].labels, ["formula"]);
+
+    const created = core.workflowPacket(root, { workflow: "formula", action: "wisp_create", execute: true, id: "sample", variables: { track: "oauth" } });
+    assert.equal(created.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "wisps", `${created.wisp_id}.json`)), true);
+    const updated = core.workflowPacket(root, {
+      workflow: "formula",
+      action: "wisp_update_step",
+      execute: true,
+      wispId: created.wisp_id,
+      stepId: "build",
+      status: "completed",
+      evidence: { tests: "ok" },
+    });
+    assert.equal(updated.ok, true);
+    assert.equal(updated.step.status, "completed");
+    const wisps = core.workflowPacket(root, { workflow: "formula", action: "wisp_list" });
+    assert.equal(wisps.count, 1);
+    const squash = core.workflowPacket(root, { workflow: "formula", action: "wisp_squash", execute: true, wispId: created.wisp_id, summary: "ready" });
+    assert.equal(squash.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "operations", "wisp-digests.jsonl")), true);
+    const burn = core.workflowPacket(root, { workflow: "formula", action: "wisp_burn", execute: true, wispId: created.wisp_id });
+    assert.equal(burn.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "wisps", `${created.wisp_id}.json`)), false);
+
+    const pour = core.workflowPacket(root, {
+      workflow: "formula",
+      action: "pour",
+      id: "sample",
+      variables: { track: "oauth" },
+      trackId: "oauth_formula_track",
+      reviewBundleDir: ".formula-review",
+      responseMode: "detail",
+    });
+    assert.equal(pour.ok, true);
+    assert.equal(pour.dry_run, true);
+    assert.equal(pour.metadata.tags.includes("formula:sample"), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "oauth_formula_track")), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1205,7 +1073,6 @@ test("workflow setup requires human confirmation before writing reviewed artifac
     const args = {
       workflow: "setup",
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       reviewBundleDir: ".cadre-review",
@@ -1231,56 +1098,11 @@ test("workflow setup requires human confirmation before writing reviewed artifac
   }
 });
 
-test("workflow setup recommends Beads prefixes and requires a selected prefix before writing", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-beads-prefix-test-"));
-  try {
-    git(root, ["init"]);
-
-    const preview = core.workflowPacket(root, {
-      workflow: "setup",
-      providerMode: "local",
-      product: { title: "Acme Portal", summary: "Test product" },
-      techStack: { languages: ["TypeScript"] },
-    });
-    assert.equal(preview.ok, true);
-    assert.equal(preview.beads_prefix.selected, false);
-    assert.ok(preview.beads_prefix.recommendations.some((entry) => entry.epic_prefix === "acme-portal"));
-    assert.ok(preview.next_actions.some((action) => action.includes("beadsEpicPrefix")));
-
-    const blocked = core.workflowPacket(root, {
-      workflow: "setup",
-      execute: true,
-      humanConfirmed: true,
-      providerMode: "local",
-      product: { title: "Acme Portal", summary: "Test product" },
-      techStack: { languages: ["TypeScript"] },
-    });
-    assert.equal(blocked.ok, false);
-    assert.ok(blocked.missing_payload.includes("beadsEpicPrefix"));
-    assert.equal(fs.existsSync(path.join(root, "cadre", "beads.json")), false);
-
-    const invalid = core.workflowPacket(root, {
-      workflow: "setup",
-      execute: true,
-      humanConfirmed: true,
-      providerMode: "local",
-      beadsEpicPrefix: "too many prefix words",
-      product: { title: "Acme Portal", summary: "Test product" },
-      techStack: { languages: ["TypeScript"] },
-    });
-    assert.equal(invalid.ok, false);
-    assert.match(invalid.beads_prefix.error, /at most two words/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("workflow setup writes detected and requested style guides from templates", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-test-"));
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
     write(path.join(root, "tsconfig.json"), "{}\n");
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
@@ -1290,7 +1112,6 @@ test("workflow setup writes detected and requested style guides from templates",
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
@@ -1356,12 +1177,13 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.equal(setup.workspace_health.response_mode, "compact");
     assert.ok(Array.isArray(setup.detail_resources));
     assert.ok(setup.detail_resources.some((uri) => uri.includes("workspace-diagnostics")));
-    const beads = JSON.parse(fs.readFileSync(path.join(root, "cadre", "beads.json"), "utf8"));
-    assert.equal(beads.mode, "normal");
-    assert.equal(beads.packet_only, true);
-    assert.equal(beads.epicPrefix, "product");
-    assert.equal(beads.epicPrefixMaxWords, 2);
-    assert.equal(fs.existsSync(path.join(root, ".beads")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "events.jsonl")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "messages")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "formulas")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "wisps")), true);
+    assert.match(fs.readFileSync(path.join(root, "cadre", ".gitignore"), "utf8"), /\/local\//);
+    const events = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8").trim().split(/\n/).map((line) => JSON.parse(line));
+    assert.ok(events.some((event) => event.kind === "setup_completed"));
   } finally {
     process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
@@ -1373,7 +1195,6 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "src", "lib.rs"), "pub fn plugin_template_smoke() -> bool { true }\n");
 
     const setup = core.workflowPacket(root, {
@@ -1381,7 +1202,6 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Rust"], styleGuideIds: ["rust"] },
     });
@@ -1412,14 +1232,12 @@ test("workflow setup preserves baseline workflow quality gates with custom notes
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
 
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       workflowPolicy: { title: "Project Workflow", summary: "Run `cargo test` before broad validation." },
       techStack: { languages: ["Rust"] },
@@ -1447,14 +1265,12 @@ test("workflow setup preserves baseline product context with custom notes", () =
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
 
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product Context", summary: "A self-hosted feature flag platform for internal teams." },
       productGuidelines: { title: "Product Guidelines", summary: "Preserve tenant isolation and audit trails." },
       techStack: { languages: ["Rust"] },
@@ -1521,14 +1337,12 @@ test("workflow setup records provider mode from remotes or local intent", () => 
   const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-local-provider-test-"));
   const oldPath = process.env.PATH;
   try {
-    process.env.PATH = `${installTrackCreationFakeBd(githubRoot)}:${oldPath}`;
     git(githubRoot, ["init"]);
     git(githubRoot, ["remote", "add", "origin", "git@github.com:org/app.git"]);
     const githubSetup = core.workflowPacket(githubRoot, {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1545,7 +1359,6 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Go"] },
     });
@@ -1561,7 +1374,6 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Python"] },
     });
@@ -1583,7 +1395,6 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "repos", "app", "src", "index.ts"), "export const app = true;\n");
 
     const setup = core.workflowPacket(root, {
@@ -1592,7 +1403,6 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
       humanConfirmed: true,
       topology: "polyrepo",
       providerMode: "github",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       lsp: true,
@@ -1612,7 +1422,7 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
     assert.equal(setup.polyrepo_setup.ci.path, ".github/workflows/cadre-merge-train.yml");
     assert.equal(setup.polyrepo_setup.submodules.dry_run, true);
     assert.equal(fs.existsSync(path.join(root, ".github", "workflows", "cadre-merge-train.yml")), true);
-    assert.match(fs.readFileSync(path.join(root, ".gitattributes"), "utf8"), /\.beads\/\*\* merge=ours/);
+    assert.match(fs.readFileSync(path.join(root, ".gitattributes"), "utf8"), /cadre\/tracks\/\*\*\/parallel_state\.json/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "repos.json")), true);
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("typescript"));
@@ -1628,7 +1438,6 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     git(root, ["remote", "add", "origin", "git@github.com:org/app.git"]);
     git(root, ["remote", "add", "mirror", "git@gitlab.com:org/app.git"]);
 
@@ -1656,7 +1465,6 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1674,7 +1482,6 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     git(root, ["remote", "add", "origin", "git@example.internal:org/app.git"]);
 
     const blocked = core.workflowPacket(root, {
@@ -1692,7 +1499,6 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1725,48 +1531,11 @@ test("workflow setup warns on unknown explicit style guide ids without dropping 
   }
 });
 
-test("workflow setup execute requires Beads init before writing project state", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-beads-required-test-"));
-  const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-empty-path-"));
-  const oldPath = process.env.PATH;
-  try {
-    git(root, ["init"]);
-    process.env.PATH = emptyBin;
-
-    const dryRun = core.workflowPacket(root, {
-      workflow: "setup",
-      product: { title: "Product", summary: "Test product" },
-      techStack: { languages: ["TypeScript"] },
-      providerMode: "local",
-    });
-    assert.equal(dryRun.ok, true);
-    assert.equal(dryRun.beads_init.available, false);
-
-    const blocked = core.workflowPacket(root, {
-      workflow: "setup",
-      execute: true,
-      humanConfirmed: true,
-      beadsEpicPrefix: "product",
-      product: { title: "Product", summary: "Test product" },
-      techStack: { languages: ["TypeScript"] },
-      providerMode: "local",
-    });
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "beads_init");
-    assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
-  } finally {
-    process.env.PATH = oldPath;
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(emptyBin, { recursive: true, force: true });
-  }
-});
-
 test("implementationPrep returns packet-selected style guides", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-implement-style-test-"));
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
     write(path.join(root, "tsconfig.json"), "{}\n");
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
@@ -1776,7 +1545,6 @@ test("implementationPrep returns packet-selected style guides", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
@@ -1821,12 +1589,10 @@ test("workflow newtrack writes template-backed track learnings", () => {
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2079,7 +1845,6 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
   const setupRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-setup-test-"));
   const oldPath = process.env.PATH;
   try {
-    process.env.PATH = `${installTrackCreationFakeBd(setupRoot)}:${oldPath}`;
     git(root, ["init"]);
     git(root, ["config", "user.email", "workflow@example.com"]);
     git(root, ["config", "user.name", "Workflow Test"]);
@@ -2096,7 +1861,6 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
-      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });

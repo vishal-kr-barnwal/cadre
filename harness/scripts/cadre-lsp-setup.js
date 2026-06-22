@@ -68,7 +68,6 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
   ".hg",
   ".svn",
-  ".beads",
   ".worktrees",
   ".agents",
   ".claude",

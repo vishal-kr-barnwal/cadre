@@ -23,33 +23,6 @@ function git(root, args) {
   return result;
 }
 
-function installFakeBd(root) {
-  const bin = path.join(root, "bin");
-  const bd = path.join(bin, "bd");
-  write(bd, `#!/bin/sh
-case "$1" in
-  init)
-    mkdir -p "$PWD/.beads"
-    printf '{"ok":true}\\n'
-    ;;
-  create)
-    printf '{"id":"bd-fake"}\\n'
-    ;;
-  show)
-    exit 1
-    ;;
-  note|dep|label|ready|close|list|update|mail|formula|admin|rules|dolt|sql|worktree)
-    printf '{"ok":true}\\n'
-    ;;
-  *)
-    printf '{"ok":true}\\n'
-    ;;
-esac
-`);
-  fs.chmodSync(bd, 0o755);
-  return bin;
-}
-
 function sampleSpec(id) {
   return {
     version: 1,
@@ -276,7 +249,6 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
   const { server, request } = startServer({
     serverPath,
     cwd: path.resolve(__dirname, "..", ".."),
-    env: { PATH: `${installFakeBd(root)}:${process.env.PATH || ""}` },
   });
   try {
     git(root, ["init"]);
@@ -293,7 +265,6 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
         humanConfirmed: true,
         providerMode: "github",
         ciProvider: "github",
-        beadsEpicPrefix: "embedded",
         product: { title: "Embedded Product", summary: "Validate bundled setup templates." },
         productGuidelines: { title: "Guidelines", summary: "Keep packet ownership intact." },
         workflowPolicy: { title: "Workflow", summary: "Use Cadre packets." },
@@ -361,7 +332,6 @@ test("MCP root resolution rejects harness skill directories without project stat
       "cadre_parallel",
       "cadre_mutate",
       "cadre_complete_task",
-      "cadre_beads",
       "cadre_job",
       "cadre_review",
       "cadre_intel",
@@ -381,8 +351,8 @@ test("MCP root resolution rejects harness skill directories without project stat
     }
     assert.equal(artifactActions.includes("import"), false);
     assert.ok(workflowTool.inputSchema.allOf.some((entry) => entry.not?.anyOf?.some((item) => item.required?.includes("planText"))));
-    assert.ok(workflowTool.inputSchema.properties.beadsEpicPrefix);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "beadsPrefixMode"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "formulaId"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "wispId"), true);
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
     assert.ok(projectActions.includes("tech_stack_summary"));
@@ -414,7 +384,6 @@ test("MCP root resolution rejects harness skill directories without project stat
     const statusTool = tools.tools.find((tool) => tool.name === "cadre_status");
     const statusActions = statusTool.inputSchema.properties.action.enum;
     assert.ok(statusActions.includes("fleet"));
-    assert.ok(statusActions.includes("beads_summary"));
     const resources = await request("resources/list", {});
     const uris = resources.resources.map((resource) => resource.uri);
     assert.ok(uris.includes("cadre://skill-contract"));
@@ -424,7 +393,6 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://agent-reference"));
     assert.ok(uris.includes("cadre://template-inventory"));
     assert.ok(uris.includes("cadre://fleet-board"));
-    assert.ok(uris.includes("cadre://beads-summary"));
     assert.ok(uris.includes("cadre://workspace-health"));
     assert.ok(uris.includes("cadre://integrations"));
     assert.ok(uris.includes("cadre://mcp-readiness"));
