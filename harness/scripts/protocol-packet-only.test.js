@@ -202,7 +202,7 @@ test("Protocol files are structured JSON workflow definitions", () => {
   assert.deepEqual(failures, []);
 });
 
-test("Reference files are structured JSON and carry platform dispatch in JSON", () => {
+test("Reference files are structured JSON and carry agent dispatch in JSON", () => {
   for (const dir of referenceDirs) {
     for (const file of jsonFiles(dir)) {
       const reference = readJson(file);
@@ -211,6 +211,8 @@ test("Reference files are structured JSON and carry platform dispatch in JSON", 
       assert.ok(Array.isArray(reference.rules), path.relative(root, file));
       assert.ok(Array.isArray(reference.sections), path.relative(root, file));
       if (reference.id === "parallel-execution") {
+        assert.equal(reference.platforms.codex.agentIdentifier, "codex");
+        assert.equal(reference.platforms.claude.agentIdentifier, "claude");
         assert.equal(typeof reference.platforms.codex.dispatch, "string");
         assert.equal(typeof reference.platforms.claude.dispatch, "string");
       }

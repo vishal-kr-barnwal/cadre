@@ -545,7 +545,11 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.equal(next.workers.length, 1);
     assert.equal(next.workers[0].task_key, "phase1_task1");
 
-    const setup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617" });
+    const missingAgent = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617" });
+    assert.equal(missingAgent.ok, false);
+    assert.match(missingAgent.error, /agentIdentifier/);
+
+    const setup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "codex" });
     assert.equal(setup.ok, true);
     assert.equal(setup.dry_run, true);
     assert.equal(setup.commands.length, 1);
@@ -554,12 +558,18 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.ok(setup.workers[0].dispatch.prompt.includes("parallel_20260617"));
     assert.equal(setup.workers[0].dispatch.canonical_worker_contract, "cadre_parallel.dispatch.v1");
     assert.deepEqual(setup.workers[0].dispatch.owned_files, ["src/core.js"]);
-    assert.equal(setup.workers[0].dispatch.platform_dispatch.claude.mechanism, "Task");
-    assert.equal(setup.workers[0].dispatch.platform_dispatch.codex.mechanism, "multi_agent_v1.spawn_agent");
+    assert.equal(setup.workers[0].dispatch.agent_identifier, "codex");
+    assert.equal(setup.workers[0].dispatch.selected_dispatch.agent_identifier, "codex");
+    assert.equal(setup.workers[0].dispatch.selected_dispatch.mechanism, "multi_agent_v1.spawn_agent");
+    assert.equal(Object.prototype.hasOwnProperty.call(setup.workers[0].dispatch, "platform_dispatch"), false);
     assert.ok(setup.workers[0].dispatch.expected_result_schema.required.includes("commit_sha"));
     assert.equal(setup.workers[0].dispatch.record_finish_packet.tool, "cadre_parallel");
     assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.trackId, "parallel_20260617");
     assert.ok(setup.workers[0].dispatch.finish_evidence_fields.includes("filesChanged"));
+
+    const claudeSetup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "claude" });
+    assert.equal(claudeSetup.workers[0].dispatch.selected_dispatch.agent_identifier, "claude");
+    assert.equal(claudeSetup.workers[0].dispatch.selected_dispatch.mechanism, "Task");
 
     const dryRecord = core.parallelWorkflow(root, {
       action: "record_finish",

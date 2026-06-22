@@ -70,7 +70,7 @@ The coordinator loop is:
 
 ```text
 cadre_parallel { action: "next_wave" }
-cadre_parallel { action: "setup_workers", execute: true }
+cadre_parallel { action: "setup_workers", agentIdentifier: "codex", execute: true }
 dispatch exactly the returned workers
 cadre_parallel { action: "record_finish", execute: true, ...workerEvidence }
 cadre_parallel { action: "merge_back", execute: true }
@@ -79,6 +79,8 @@ cadre_parallel { action: "cleanup", execute: true }
 
 Cadre returns ready groups only when dependencies, file claims, repo routing,
 worker state, and plan integrity are safe.
+`setup_workers` requires `agentIdentifier` and returns a single
+`selected_dispatch` adapter for that caller.
 
 ## Worker Payloads
 

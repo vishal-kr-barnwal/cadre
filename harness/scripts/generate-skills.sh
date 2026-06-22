@@ -123,22 +123,6 @@ extract_description() {
   ' "$1"
 }
 
-dispatch_sentence() {
-  case "$1" in
-    claude) echo 'Use the **`Task` tool**, one call per MCP-provided worker prompt; see MCP reference `cadre://agent-reference?name=parallel-execution`.' ;;
-    codex)  echo 'Use tool discovery for `multi_agent_v1.spawn_agent`; if unavailable, follow packet alternate dispatch instructions or halt with `dispatch-unavailable`; see MCP reference `cadre://agent-reference?name=parallel-execution`.' ;;
-  esac
-}
-
-apply_dispatch() {
-  awk -v repl="$(dispatch_sentence "$1")" '
-    /<!-- DISPATCH:start -->/ { match($0, /^[ \t]*/); print substr($0, 1, RLENGTH) repl; skip = 1; next }
-    /<!-- DISPATCH:end -->/   { skip = 0; next }
-    skip == 1 { next }
-    { print }
-  '
-}
-
 write_file() {
   local path="$1"
   mkdir -p "$(dirname "$path")"
