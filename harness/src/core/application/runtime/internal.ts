@@ -2,6 +2,7 @@ export * from "./artifact-actions";
 export * from "./artifact-catalog";
 export * from "./collision";
 export * from "./contracts";
+export * from "./formula-workflow";
 export * from "../../infrastructure/runtime/coverage";
 export * from "./health-summaries";
 export * from "./integrations";

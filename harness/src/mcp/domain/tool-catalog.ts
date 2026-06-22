@@ -39,6 +39,16 @@ const PROPS: Record<string, JsonObject> = {
   config: { type: "string" },
   operation: { type: "string" },
   id: { type: "string" },
+  formulaId: { type: "string" },
+  formula_id: { type: "string" },
+  variables: { type: "object" },
+  vars: { type: "object" },
+  wispId: { type: "string" },
+  wisp_id: { type: "string" },
+  stepId: { type: "string" },
+  step_id: { type: "string" },
+  stepIndex: { type: "number" },
+  step_index: { type: "number" },
   command: { type: "string" },
   machineCommand: { type: "string" },
   timeoutMs: { type: "number" },
@@ -51,6 +61,7 @@ const PROPS: Record<string, JsonObject> = {
   provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },
   providerEvidence: { oneOf: [{ type: "object" }, { type: "string" }] },
   provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
+  evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
   mcpCapabilities: { type: "object" },
   mcp_capabilities: { type: "object" },
   continuationToken: { type: "string" },
@@ -203,6 +214,18 @@ const WORKFLOWS = [
   "artifact_sync",
 ];
 
+const FORMULA_ACTIONS = [
+  "list",
+  "show",
+  "cook",
+  "wisp_create",
+  "wisp_list",
+  "wisp_update_step",
+  "wisp_squash",
+  "wisp_burn",
+  "pour",
+];
+
 export const TOOLS = [
   packetSchema({
     name: "cadre_resource",
@@ -214,8 +237,8 @@ export const TOOLS = [
     name: "cadre_workflow",
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
-    actionEnum: WORKFLOWS,
-    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive"],
+    actionEnum: [...WORKFLOWS, ...FORMULA_ACTIONS],
+    fields: ["workflow", "action", "operation", "id", "formulaId", "formula_id", "variables", "vars", "wispId", "wisp_id", "stepId", "step_id", "stepIndex", "step_index", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive", "status", "summary", "evidence"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{

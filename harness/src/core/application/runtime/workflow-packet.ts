@@ -12,6 +12,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 
 import { artifactPacket } from "./artifact-actions";
 import { CoreResult } from "./contracts";
+import { workflowFormula } from "./formula-workflow";
 import { utcNow } from "../../infrastructure/runtime/json-store";
 import { appendCadreEvent } from "./native-state";
 import { humanReviewState, packetReviewArtifact } from "./review-bundles";
@@ -40,6 +41,7 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
     "refresh",
     "flag",
     "revert",
+    "formula",
     "artifacts",
     "artifact_sync",
   ].includes(workflow);
@@ -165,11 +167,7 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
     case "revert":
       return workflowRevert(root, args);
     case "formula":
-      return {
-        ...workflowSummary(root, "formula", args),
-        ok: true,
-        formulas: { ok: true, items: [] },
-      };
+      return workflowFormula(root, args);
     default:
       return {
         ...workflowSummary(root, workflow, args),
