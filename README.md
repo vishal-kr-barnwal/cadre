@@ -15,12 +15,14 @@ Root files are intentionally thin:
   register the generated plugins from `harness/plugins/`.
 - `LICENSE` and `.gitignore` apply to the whole repository.
 
-Use the harness package for development:
+Install workspace dependencies from the repository root:
 
 ```bash
-cd harness
+pnpm install
 pnpm check
 ```
+
+For harness-only development, use `pnpm --filter cadre-ai check`.
 
 Install Cadre from npm and wire supported clients with:
 

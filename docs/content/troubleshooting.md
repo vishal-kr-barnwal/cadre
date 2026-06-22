@@ -85,9 +85,8 @@ Symptoms:
 Fix:
 
 ```bash
-cd harness
-pnpm generate
-pnpm check
+pnpm --filter cadre-ai generate
+pnpm --filter cadre-ai check
 ```
 
 Edit master sources only:
@@ -213,10 +212,9 @@ Do not text-merge Beads DB files by hand.
 For changes in this repository:
 
 ```bash
-cd harness
-node --test scripts/protocol-packet-only.test.js
-pnpm generate
-pnpm check
+pnpm --filter cadre-ai exec node --test scripts/protocol-packet-only.test.js
+pnpm --filter cadre-ai generate
+pnpm --filter cadre-ai check
 ```
 
 For narrow runtime changes, run the relevant `node --test` file first, then the

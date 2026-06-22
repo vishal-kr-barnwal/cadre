@@ -93,16 +93,14 @@ Runtime JavaScript under `harness/scripts/` is built from TypeScript under
 `harness/src/`.
 
 ```bash
-cd harness
-pnpm build
+pnpm --filter cadre-ai build
 ```
 
 The default full validation command runs typecheck, runtime build, generated
 bundle drift check, tests, and the team-scale simulation:
 
 ```bash
-cd harness
-pnpm check
+pnpm --filter cadre-ai check
 ```
 
 ## Development Flow
@@ -111,27 +109,28 @@ For harness changes:
 
 1. Edit master source files.
 2. Run targeted tests when the change is narrow.
-3. Run `pnpm generate` when generated bundles need refresh.
-4. Run `pnpm check` before handoff.
+3. Run `pnpm --filter cadre-ai generate` when generated bundles need refresh.
+4. Run `pnpm --filter cadre-ai check` before handoff.
 
 Useful commands:
 
 ```bash
-cd harness
-pnpm typecheck
-pnpm build
-pnpm generate
-node --test scripts/protocol-packet-only.test.js
-pnpm check
+pnpm --filter cadre-ai typecheck
+pnpm --filter cadre-ai build
+pnpm --filter cadre-ai generate
+pnpm --filter cadre-ai exec node --test scripts/protocol-packet-only.test.js
+pnpm --filter cadre-ai check
 ```
 
 ## Public Docs Flow
 
-Root `docs/` is a static-export Next.js app. The deployment workflow builds the
-app from Markdown content in `docs/content/` and deploys the generated
-`docs/out` artifact to Cloudflare Pages through Wrangler Direct Upload. It
-creates the Pages project on first deploy when needed and intentionally does
-not require MkDocs, Docusaurus, or another documentation framework.
+Root `docs/` is a static-export Next.js app. The release workflow runs only
+when a GitHub release is published; it publishes the `cadre-ai` npm package,
+then builds the app from Markdown content in `docs/content/` and deploys the
+generated `docs/out` artifact to Cloudflare Pages through Wrangler Direct
+Upload. It creates the Pages project on first deploy when needed and
+intentionally does not require MkDocs, Docusaurus, or another documentation
+framework.
 
 When public documentation describes plugin internals, keep it aligned with the
 master sources under `harness/`. When plugin instruction references are needed,

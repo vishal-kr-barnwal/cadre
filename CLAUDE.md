@@ -25,6 +25,8 @@ harness/
 Root files are intentionally thin:
 
 - `README.md` points to `harness/` and the public docs.
+- `package.json`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml` define the root
+  workspace for `harness/` and `docs/`.
 - `docs/` contains the canonical public Next.js/shadcn docs site, with
   Markdown source under `docs/content/`.
 - `.agents/plugins/marketplace.json` points Codex to
@@ -35,12 +37,14 @@ Root files are intentionally thin:
 
 ## Development Rules
 
-Run package commands from `harness/`:
+Run workspace commands from the repository root:
 
 ```bash
-cd harness
+pnpm install
 pnpm check
 ```
+
+For harness-only validation, run `pnpm --filter cadre-ai check`.
 
 Edit master sources only:
 
@@ -54,12 +58,12 @@ Edit master sources only:
 Regenerate derived bundles with:
 
 ```bash
-cd harness
-pnpm generate
+pnpm --filter cadre-ai generate
 ```
 
 Runtime JavaScript under `harness/scripts/` and `harness/templates/scripts/`
-is generated from TypeScript under `harness/src/`.
+is generated from TypeScript under `harness/src/` by
+`pnpm --filter cadre-ai build`.
 
 ## TypeScript Architecture Guidelines
 

@@ -14,18 +14,22 @@ behavior in a fixture.
 - Root `docs/` contains the canonical public Next.js/shadcn docs site, with
   Markdown source under `docs/content/`.
 - Root `README.md` is a thin pointer to the harness package.
+- Root `package.json`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml` define the
+  pnpm workspace for `harness/` and `docs/`.
 - Root `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json`
   are plugin registration shims that point to `harness/plugins/`.
 - Root `AGENTS.md` and `CLAUDE.md` describe harness development behavior.
 
 ## Harness Development
 
-Run package commands from `harness/`:
+Run workspace commands from the repository root:
 
 ```bash
-cd harness
+pnpm install
 pnpm check
 ```
+
+For harness-only validation, run `pnpm --filter cadre-ai check`.
 
 Edit master sources, not generated bundles:
 
@@ -40,12 +44,12 @@ Generated outputs under `harness/.agents/`, `harness/.claude/`,
 `harness/plugins/`, and harness marketplace files are rebuilt with:
 
 ```bash
-cd harness
-pnpm generate
+pnpm --filter cadre-ai generate
 ```
 
 Runtime JavaScript under `harness/scripts/` and `harness/templates/scripts/`
-is built from TypeScript in `harness/src/` by `pnpm build`.
+is built from TypeScript in `harness/src/` by
+`pnpm --filter cadre-ai build`.
 
 ## TypeScript Architecture Guidelines
 
@@ -78,8 +82,7 @@ worktree changes and never rewrite existing user work without instruction.
 Before reporting completion for harness changes, prefer:
 
 ```bash
-cd harness
-pnpm check
+pnpm --filter cadre-ai check
 ```
 
 For narrow changes, run the relevant targeted `node --test` command first, then

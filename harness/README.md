@@ -98,11 +98,11 @@ This repository is the Cadre harness/package repo. Runtime sources live in
 `src/`, master skill/protocol sources live in `skills/cadre/`, references live
 in `scripts/agent-refs/`, and templates live in `templates/`.
 
-Run package commands from this directory:
+Run package commands from the repository root:
 
 ```bash
-pnpm generate
-pnpm check
+pnpm --filter cadre-ai generate
+pnpm --filter cadre-ai check
 ```
 
 Generated plugin bundles under `.agents/`, `.claude/`, and `plugins/` are

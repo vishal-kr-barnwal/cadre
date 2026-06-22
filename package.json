@@ -1,0 +1,13 @@
+{
+  "name": "cadre-ai-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.4.0",
+  "scripts": {
+    "check": "pnpm --filter cadre-ai check && pnpm --filter cadre-docs lint && pnpm --filter cadre-docs typecheck && pnpm --filter cadre-docs build",
+    "check:harness": "pnpm --filter cadre-ai check",
+    "check:docs": "pnpm --filter cadre-docs lint && pnpm --filter cadre-docs typecheck && pnpm --filter cadre-docs build",
+    "docs:lint": "pnpm --filter cadre-docs lint",
+    "docs:build": "pnpm --filter cadre-docs build",
+    "harness:pack": "pnpm --filter cadre-ai pack --dry-run"
+  }
+}

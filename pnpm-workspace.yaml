@@ -1,8 +1,10 @@
-packages: []
+packages:
+  - harness
+  - docs
 
 allowBuilds:
+  esbuild: true
   sharp: true
   unrs-resolver: true
-  msw: false
-  esbuild: true
   workerd: true
+  msw: false
