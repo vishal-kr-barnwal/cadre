@@ -12339,7 +12339,7 @@ function createMcpRuntime(deps) {
       return {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { resources: { listChanged: false }, tools: { listChanged: false } },
-        serverInfo: { name: "cadre", version: "2.0.0" },
+        serverInfo: { name: "cadre", version: "1.0.0" },
         instructions: SERVER_INSTRUCTIONS
       };
     }

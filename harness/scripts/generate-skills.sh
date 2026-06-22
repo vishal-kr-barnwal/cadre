@@ -56,7 +56,7 @@ ROOT_CLAUDE_PLUGIN_MARKETPLACE=".claude-plugin/marketplace.json"
 ROOT_CODEX_PLUGIN_MARKETPLACE=".agents/plugins/marketplace.json"
 
 PLUGIN_NAME="cadre"
-PLUGIN_VERSION="2.0.0"
+PLUGIN_VERSION="1.0.0"
 PLUGIN_DESCRIPTION="MCP-first Cadre workflows using the global cadre-mcp runtime for context-driven development."
 PLUGIN_AUTHOR_NAME="Vishal Kumar"
 PLUGIN_AUTHOR_URL="https://github.com/vishal-kr-barnwal"

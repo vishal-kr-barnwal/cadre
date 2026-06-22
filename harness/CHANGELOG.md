@@ -62,12 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deleted the legacy `scripts/install.sh` copy-based installer and removed
   manual skill-copy installation instructions from the docs.
 
-## [2.0.0] — 2026-06-16
+## [1.0.0] — 2026-06-22
 
 Team-scale hardening (10–20 person teams) plus a platform-surface trim. The
 concurrency model was already sound; this round closes the enforcement gaps that
 only bite under concurrent use, and narrows supported platforms to the two that are
-actually maintained. **Major bump:** dropping the Cursor / Antigravity / Copilot
+actually maintained. **Release note:** dropping the Cursor / Antigravity / Copilot
 command sets is a breaking removal of supported integrations (Claude Code and Codex
 projects are unaffected).
 
@@ -124,7 +124,7 @@ projects are unaffected).
   "Dolt server required" vs "no server required" contradiction between the skill
   docs.
 
-## [1.0.0] — 2026-06-16
+## 1.0.0 rename baseline — 2026-06-16
 
 First stable release under the **Cadre** name (renamed from Conductor-Beads). Adds
 a full team-scale SDLC layer — enforced review gate, per-person identity + advisory
@@ -405,8 +405,7 @@ capabilities:
 - Ralph-style learnings system (`learnings.md` → `patterns.md`).
 - Explicit no-push git policy across all commands.
 
-[2.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v2.0.0
-[1.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v1.0.0
+[1.0.0]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/1.0.0
 [0.3.4]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.4
 [0.3.3]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.3
 [0.3.2]: https://github.com/vishal-kr-barnwal/Cadre/releases/tag/v0.3.2

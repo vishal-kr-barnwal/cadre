@@ -9,7 +9,7 @@
       "name": "cadre",
       "source": "./harness/plugins/cadre-claude",
       "description": "MCP-first Cadre workflows using the global cadre-mcp runtime for context-driven development.",
-      "version": "2.0.0",
+      "version": "1.0.0",
       "author": {
         "name": "Vishal Kumar"
       },
