@@ -72,6 +72,8 @@ LSP inventory.
 ## Beads Memory
 
 Beads owns durable task memory. Cadre owns how agents interact with it.
+During setup, Cadre returns a few Beads epic-prefix recommendations. The user
+can choose one or provide another prefix with at most two words.
 
 During setup, Cadre initializes Beads and records integration settings. During
 track creation, Cadre maps the spec and plan into a Beads tree with epic, phase,

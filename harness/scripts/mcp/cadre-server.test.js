@@ -293,6 +293,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
         humanConfirmed: true,
         providerMode: "github",
         ciProvider: "github",
+        beadsEpicPrefix: "embedded",
         product: { title: "Embedded Product", summary: "Validate bundled setup templates." },
         productGuidelines: { title: "Guidelines", summary: "Keep packet ownership intact." },
         workflowPolicy: { title: "Workflow", summary: "Use Cadre packets." },
@@ -380,6 +381,8 @@ test("MCP root resolution rejects harness skill directories without project stat
     }
     assert.equal(artifactActions.includes("import"), false);
     assert.ok(workflowTool.inputSchema.allOf.some((entry) => entry.not?.anyOf?.some((item) => item.required?.includes("planText"))));
+    assert.ok(workflowTool.inputSchema.properties.beadsEpicPrefix);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "beadsPrefixMode"), false);
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
     assert.ok(projectActions.includes("tech_stack_summary"));

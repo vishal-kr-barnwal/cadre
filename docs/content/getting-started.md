@@ -89,7 +89,9 @@ cadre-setup
 ```
 
 Setup asks for product context, tech stack, topology, sync mode, provider mode,
-quality gate, optional CI templates, and LSP setup. When language-server
+Beads epic prefix, quality gate, optional CI templates, and LSP setup. Cadre
+returns a few Beads prefix recommendations, and the user can choose one or
+provide another prefix with at most two words. When language-server
 recommendations are detected, setup writes `cadre/lsp.json` by default unless
 you opt out. The workflow is packet-owned: the agent should call Cadre MCP, and
 Cadre MCP writes the control plane.
@@ -105,7 +107,7 @@ Successful setup creates:
 | `cadre/patterns.jsonl` and `cadre/patterns.md` | Append-only pattern events plus generated pattern summary. |
 | `cadre/tracks.json` | Generated project-level track index rebuilt from track metadata. |
 | `cadre/config.json` | Sync mode, provider mode, review, and quality settings. |
-| `cadre/beads.json` | Beads integration settings. |
+| `cadre/beads.json` | Beads integration settings, including the selected epic prefix. |
 | `cadre/repos.json` | Polyrepo topology when enabled. |
 | `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
 | `cadre/styleguides/*.json` and `cadre/code_styleguides/*.md` | Canonical style guidance plus generated guide projections. |

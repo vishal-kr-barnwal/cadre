@@ -280,6 +280,10 @@ export interface RuntimeArgs extends JsonObject {
   includeHeavy?: boolean;
   agentIdentifier?: "claude" | "codex";
   epicId?: string;
+  beadsConfig?: JsonObject;
+  beads_config?: JsonObject;
+  beadsEpicPrefix?: string;
+  beads_epic_prefix?: string;
   assignee?: string;
   taskId?: string | null;
   beadsTaskId?: string | null | undefined;

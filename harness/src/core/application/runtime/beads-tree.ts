@@ -20,6 +20,7 @@ import { findTrack, priorityRank } from "./track-context";
 import { metadataPatch } from "./track-mutations";
 import { parsePlanFile, parsePlanJson } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson } from "./workflow-response";
+import { beadsEpicIdForTrack, resolveBeadsEpicPrefix } from "./beads-config";
 
 export function extractBeadsId(json: unknown, fallback: string | null = null): string | null {
   if (!isRecord(json)) return fallback;
@@ -180,7 +181,16 @@ export function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResul
     ? parsePlanJson(normalizePlanJson(String(trackId), args.plan, specJson))
     : parsePlanFile(track.plan_path);
   const specContext = specContextFromJson(specJson);
-  const epicId = args.epicId || track.metadata.beads_epic || `cadre-${track.track_id}`;
+  const beadsPrefix = resolveBeadsEpicPrefix(root, args);
+  if (!beadsPrefix.selected && beadsPrefix.error) {
+    return {
+      ok: false,
+      error: beadsPrefix.error,
+      missing_payload: beadsPrefix.missing_payload,
+      beads_prefix: beadsPrefix,
+    };
+  }
+  const epicId = args.epicId || track.metadata.beads_epic || beadsEpicIdForTrack(root, String(track.track_id), args);
   const commands: BeadsCommandPlanEntry[] = [];
   const results: CommandResult[] = [];
   const beadsTasks: Record<string, string | null> = {};
@@ -205,6 +215,7 @@ export function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResul
         existing: true,
         dry_run: false,
         track_id: track.track_id,
+        beads_epic_prefix: beadsPrefix.epic_prefix,
         beads_epic: epicId,
         beads_tasks: track.metadata.beads_tasks,
         commands,
@@ -364,6 +375,7 @@ export function createBeadsTree(root: string, args: RuntimeArgs = {}): CoreResul
     available: true,
     dry_run: dryRun,
     track_id: track.track_id,
+    beads_epic_prefix: beadsPrefix.epic_prefix,
     beads_epic: epicId,
     beads_tasks: beadsTasks,
     commands,

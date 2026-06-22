@@ -53,6 +53,10 @@ const PROPS: Record<string, JsonObject> = {
   provider_evidence: { oneOf: [{ type: "object" }, { type: "string" }] },
   mcpCapabilities: { type: "object" },
   mcp_capabilities: { type: "object" },
+  beadsConfig: { type: "object" },
+  beads_config: { type: "object" },
+  beadsEpicPrefix: { type: "string", description: "Selected Beads epic prefix, at most two words." },
+  beads_epic_prefix: { type: "string", description: "Selected Beads epic prefix, at most two words." },
   continuationToken: { type: "string" },
   continuation_token: { type: "string" },
   responseMode: { type: "string", enum: ["compact", "detail", "detailed", "full", "verbose"] },
@@ -215,7 +219,7 @@ export const TOOLS = [
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: WORKFLOWS,
-    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive"],
+    fields: ["workflow", "action", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "beadsConfig", "beads_config", "beadsEpicPrefix", "beads_epic_prefix", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -242,7 +246,7 @@ export const TOOLS = [
     name: "cadre_track",
     description: "Cadre track packet: context, JSON plan parsing, integrity, phase scheduling, implementation prep, planning evidence, worktree planning, and Beads tree creation.",
     actionEnum: ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "create_beads_tree", "plan_assist", "worktree_plan"],
-    fields: ["action", "trackId", "track_id", "plan", "execute", "identity", "takeover", "base", "head", "limit", "includeHeavy", "styleGuideIds", "styleGuideMaxChars", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["action", "trackId", "track_id", "plan", "execute", "identity", "takeover", "base", "head", "limit", "includeHeavy", "styleGuideIds", "styleGuideMaxChars", "beadsConfig", "beads_config", "beadsEpicPrefix", "beads_epic_prefix", "responseMode", "response_mode", "detail", "compact"],
     required: ["root", "action"],
     allOf: [
       requireTrackForActions(["context", "phase_schedule", "prepare_implementation", "create_beads_tree", "worktree_plan"]),

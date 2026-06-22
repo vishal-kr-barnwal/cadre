@@ -675,17 +675,18 @@ test("createBeadsTree dryRun plans epic, tasks, deps, notes, and metadata patch"
     const result = core.createBeadsTree(root, {
       trackId: "beads_20260617",
       identity: "dev@example.com",
+      beadsEpicPrefix: "product",
       dryRun: true,
     });
     assert.equal(result.ok, true);
     assert.equal(result.dry_run, true);
-    assert.equal(result.beads_epic, "cadre-beads_20260617");
+    assert.equal(result.beads_epic, "product-beads_20260617");
     assert.ok(result.beads_tasks.phase1);
     assert.ok(result.beads_tasks.phase1_task2);
     assert.ok(result.commands.some((entry) => entry.args[0] === "dep"));
     assert.ok(result.commands.some((entry) => entry.args.includes("--design")));
     assert.ok(result.commands.some((entry) => entry.args.includes("--acceptance")));
-    assert.equal(result.metadata_patch.beads_epic, "cadre-beads_20260617");
+    assert.equal(result.metadata_patch.beads_epic, "product-beads_20260617");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -706,6 +707,7 @@ test("createBeadsTree dryRun can preflight a track before files exist", () => {
     const result = core.createBeadsTree(root, {
       trackId: "draft_20260617",
       identity: "dev@example.com",
+      beadsEpicPrefix: "draft",
       dryRun: true,
       plan: samplePlan("draft_20260617"),
       spec: sampleSpec("spec", { acceptance_criteria: [{ heading: "Works", body: "Works before files exist." }] }),
@@ -714,7 +716,7 @@ test("createBeadsTree dryRun can preflight a track before files exist", () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.dry_run, true);
-    assert.equal(result.beads_epic, "cadre-draft_20260617");
+    assert.equal(result.beads_epic, "draft-draft_20260617");
     assert.ok(result.beads_tasks.phase1_task1);
     assert.ok(result.beads_tasks.phase1_manual_verification);
     assert.ok(result.beads_tasks.track_manual_verification);
@@ -1203,6 +1205,7 @@ test("workflow setup requires human confirmation before writing reviewed artifac
     const args = {
       workflow: "setup",
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       reviewBundleDir: ".cadre-review",
@@ -1228,6 +1231,50 @@ test("workflow setup requires human confirmation before writing reviewed artifac
   }
 });
 
+test("workflow setup recommends Beads prefixes and requires a selected prefix before writing", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-beads-prefix-test-"));
+  try {
+    git(root, ["init"]);
+
+    const preview = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      product: { title: "Acme Portal", summary: "Test product" },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(preview.ok, true);
+    assert.equal(preview.beads_prefix.selected, false);
+    assert.ok(preview.beads_prefix.recommendations.some((entry) => entry.epic_prefix === "acme-portal"));
+    assert.ok(preview.next_actions.some((action) => action.includes("beadsEpicPrefix")));
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      humanConfirmed: true,
+      providerMode: "local",
+      product: { title: "Acme Portal", summary: "Test product" },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(blocked.ok, false);
+    assert.ok(blocked.missing_payload.includes("beadsEpicPrefix"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "beads.json")), false);
+
+    const invalid = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      humanConfirmed: true,
+      providerMode: "local",
+      beadsEpicPrefix: "too many prefix words",
+      product: { title: "Acme Portal", summary: "Test product" },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.beads_prefix.error, /at most two words/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow setup writes detected and requested style guides from templates", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-test-"));
   const oldPath = process.env.PATH;
@@ -1243,6 +1290,7 @@ test("workflow setup writes detected and requested style guides from templates",
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
@@ -1311,6 +1359,8 @@ test("workflow setup writes detected and requested style guides from templates",
     const beads = JSON.parse(fs.readFileSync(path.join(root, "cadre", "beads.json"), "utf8"));
     assert.equal(beads.mode, "normal");
     assert.equal(beads.packet_only, true);
+    assert.equal(beads.epicPrefix, "product");
+    assert.equal(beads.epicPrefixMaxWords, 2);
     assert.equal(fs.existsSync(path.join(root, ".beads")), true);
   } finally {
     process.env.PATH = oldPath;
@@ -1331,6 +1381,7 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Rust"], styleGuideIds: ["rust"] },
     });
@@ -1368,6 +1419,7 @@ test("workflow setup preserves baseline workflow quality gates with custom notes
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       workflowPolicy: { title: "Project Workflow", summary: "Run `cargo test` before broad validation." },
       techStack: { languages: ["Rust"] },
@@ -1402,6 +1454,7 @@ test("workflow setup preserves baseline product context with custom notes", () =
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product Context", summary: "A self-hosted feature flag platform for internal teams." },
       productGuidelines: { title: "Product Guidelines", summary: "Preserve tenant isolation and audit trails." },
       techStack: { languages: ["Rust"] },
@@ -1475,6 +1528,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1491,6 +1545,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Go"] },
     });
@@ -1506,6 +1561,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Python"] },
     });
@@ -1536,6 +1592,7 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
       humanConfirmed: true,
       topology: "polyrepo",
       providerMode: "github",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       lsp: true,
@@ -1599,6 +1656,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1634,6 +1692,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
       execute: true,
       humanConfirmed: true,
       providerMode: "local",
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1687,6 +1746,7 @@ test("workflow setup execute requires Beads init before writing project state", 
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       providerMode: "local",
@@ -1716,6 +1776,7 @@ test("implementationPrep returns packet-selected style guides", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
@@ -1765,6 +1826,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2034,6 +2096,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,
+      beadsEpicPrefix: "product",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });

@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields."
+      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields. Present the returned `beads_prefix.recommendations` and ask the user to choose one or provide another prefix."
     },
     {
       "step": 3,
@@ -39,7 +39,7 @@
     },
     {
       "step": 5,
-      "instruction": "When the user confirms the setup payload and review artifacts, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, and `humanConfirmed: true`."
+      "instruction": "When the user confirms the setup payload, selected Beads prefix, and review artifacts, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, `humanConfirmed: true`, and `beadsEpicPrefix` set to the chosen prefix. The prefix must be at most two words."
     },
     {
       "step": 6,
