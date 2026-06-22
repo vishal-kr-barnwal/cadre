@@ -41,6 +41,7 @@ jobs:
         run: |
           package_version="$(node -p "require('./harness/package.json').version")"
           release_version="${GITHUB_REF_NAME#v}"
+          release_version="${release_version#release-}"
           if [ "$package_version" != "$release_version" ]; then
             echo "Release tag ${GITHUB_REF_NAME} does not match cadre-ai package version ${package_version}." >&2
             exit 1
