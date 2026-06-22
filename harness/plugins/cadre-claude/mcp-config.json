@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "cadre": {
-      "command": "cadre-mcp",
-      "args": [],
-      "cwd": "."
-    }
-  }
-}

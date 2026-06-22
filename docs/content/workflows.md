@@ -304,4 +304,4 @@ confirmed mutation.
 Handles Cadre formula or template operations.
 
 Formula workflows are packet-owned and should use MCP-served template locator
-resources instead of copying generated plugin files by hand.
+resources instead of copying plugin files by hand.

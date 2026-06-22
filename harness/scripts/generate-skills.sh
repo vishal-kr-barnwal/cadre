@@ -3,7 +3,7 @@
 # generate-skills.sh — Build the Claude and Codex plugin bundles from the
 # master Cadre skill protocol sources.
 #
-# One source of truth is transformed into:
+# One source of truth is transformed into ignored local/install-time artifacts:
 #   - Claude skill build artifact -> .claude/skills/cadre/SKILL.md
 #   - Codex skill build artifact  -> .agents/skills/cadre/SKILL.md
 #   - Claude plugin marketplace -> .claude-plugin/marketplace.json + plugins/cadre-claude/
@@ -14,13 +14,14 @@
 # `scripts/agent-refs/`, templates in `templates/`, and runtime TypeScript in
 # `src/`. Generated plugins are thin MCP entrypoints; the npm package owns the
 # embedded `cadre-mcp` runtime. Runtime JavaScript under `scripts/` is built
-# from `src/` by `pnpm build`. Generated files carry an AUTO-GENERATED marker;
-# do not hand-edit generated bundles.
+# from `src/` by `pnpm build`. Plugin and marketplace outputs are generated on
+# demand for source validation and `cadre install`; they are not source files.
 #
 # Usage:
 #   pnpm generate
 #   pnpm check
 #   CADRE_SKIP_RUNTIME_BUILD=1 bash scripts/generate-skills.sh
+#   CADRE_SKIP_RUNTIME_BUILD=1 CADRE_GENERATE_OUT=/tmp/cadre-gen bash scripts/generate-skills.sh
 #   bash scripts/generate-skills.sh --check
 #
 set -euo pipefail
@@ -71,9 +72,18 @@ MODE="${1:-generate}"
 if [[ "${1:-}" == "--" && "${2:-}" == "--check" ]]; then
   MODE="--check"
 fi
-GEN_ROOT=""
+GEN_ROOT="${CADRE_GENERATE_OUT:-}"
+CLEAN_GEN_ROOT=false
 if [[ "$MODE" == "--check" ]]; then
-  GEN_ROOT="$(mktemp -d)"
+  if [[ -z "$GEN_ROOT" ]]; then
+    GEN_ROOT="$(mktemp -d)"
+    CLEAN_GEN_ROOT=true
+  fi
+fi
+if [[ -n "$GEN_ROOT" ]]; then
+  mkdir -p "$GEN_ROOT"
+fi
+if [[ "$CLEAN_GEN_ROOT" == "true" ]]; then
   trap 'rm -rf "$GEN_ROOT"' EXIT
 fi
 
@@ -410,11 +420,12 @@ JSON
 }
 
 validate_generated_plugins() {
-  node <<'NODE'
+  CADRE_VALIDATE_ROOT="${GEN_ROOT:-$REPO_ROOT}" CADRE_VALIDATE_REPO_ROOT="${GEN_ROOT:+$GEN_ROOT/root}" node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 
-const root = process.cwd();
+const root = process.env.CADRE_VALIDATE_ROOT || process.cwd();
+const repoRoot = process.env.CADRE_VALIDATE_REPO_ROOT || path.resolve(root, "..");
 const checks = [
   ["plugins/cadre/.codex-plugin/plugin.json", ["name", "version", "skills", "mcpServers"]],
   ["plugins/cadre/.mcp.json", ["mcpServers"]],
@@ -482,7 +493,6 @@ const harnessClaudeMarketplace = JSON.parse(fs.readFileSync(path.join(root, ".cl
 if (harnessClaudeMarketplace.plugins?.[0]?.source !== "./plugins/cadre-claude") {
   throw new Error("Harness Claude marketplace has wrong plugin path");
 }
-const repoRoot = path.resolve(root, "..");
 const rootCodexMarketplace = JSON.parse(fs.readFileSync(path.join(repoRoot, ".agents/plugins/marketplace.json"), "utf8"));
 if (rootCodexMarketplace.plugins?.[0]?.source?.path !== "./harness/plugins/cadre") {
   throw new Error("Root Codex marketplace has wrong plugin path");
@@ -562,9 +572,7 @@ generate_plugins() {
   write_plugin_mcp_config_for_platform "claude" "$CLAUDE_PLUGIN_DIR"
   write_marketplaces
   write_root_marketplaces
-  if [[ -z "$GEN_ROOT" ]]; then
-    validate_generated_plugins
-  fi
+  validate_generated_plugins
 }
 
 main() {
@@ -602,45 +610,8 @@ main() {
   count="$(ls "$SOURCE_PROTOCOL_DIR"/cadre-*.json | wc -l | tr -d ' ')"
 
   if [[ "$MODE" == "--check" ]]; then
-    stale=false
-    check_generated_dir() {
-      local path="$1"
-      if ! diff -rq "$GEN_ROOT/$path" "$REPO_ROOT/$path" >/dev/null 2>&1; then
-        echo "stale: $path" >&2
-        diff -rq "$GEN_ROOT/$path" "$REPO_ROOT/$path" >&2 || true
-        stale=true
-      fi
-    }
-    check_generated_file() {
-      local path="$1"
-      if ! diff -q "$GEN_ROOT/$path" "$REPO_ROOT/$path" >/dev/null 2>&1; then
-        echo "stale: $path" >&2
-        diff -q "$GEN_ROOT/$path" "$REPO_ROOT/$path" >&2 || true
-        stale=true
-      fi
-    }
-    check_generated_root_file() {
-      local path="$1"
-      if ! diff -q "$GEN_ROOT/root/$path" "$ROOT_REPO/$path" >/dev/null 2>&1; then
-        echo "stale: ../$path" >&2
-        diff -q "$GEN_ROOT/root/$path" "$ROOT_REPO/$path" >&2 || true
-        stale=true
-      fi
-    }
-    for d in "$CLAUDE_SKILL_DIR" "$CODEX_SKILL_DIR" "$CLAUDE_PLUGIN_DIR" "$CODEX_PLUGIN_DIR"; do
-      check_generated_dir "$d"
-    done
-    check_generated_file "$CODEX_PLUGIN_MARKETPLACE"
-    check_generated_file "$CLAUDE_PLUGIN_MARKETPLACE"
-    check_generated_root_file "$ROOT_CODEX_PLUGIN_MARKETPLACE"
-    check_generated_root_file "$ROOT_CLAUDE_PLUGIN_MARKETPLACE"
-
-    if ! $stale; then
-      echo "✓ Generated plugin bundles are up to date."
-    else
-      echo "✗ Generated skill/plugin output is stale. Run: pnpm generate" >&2
-      exit 1
-    fi
+    echo "✓ Generated plugin bundles can be produced from source."
+    echo "  Checked thin Codex/Claude plugin manifests, MCP configs, and marketplaces."
   else
     echo "✓ Embedded $count workflow protocols into the Cadre MCP runtime."
     echo "  .claude/skills/cadre/ .agents/skills/cadre/ contain SKILL.md only"

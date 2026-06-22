@@ -38,7 +38,7 @@ The `cadre-ai` npm package installs a dependency-free stdio MCP server:
 cadre-mcp
 ```
 
-The generated plugins are thin client entrypoints. They point Claude Code and
+The installed plugins are thin client entrypoints. They point Claude Code and
 OpenAI Codex at the global `cadre-mcp` runtime, which embeds Cadre contracts,
 workflow protocols, references, and target-project templates.
 

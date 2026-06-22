@@ -26,9 +26,3 @@ Load `cadre://skill-contract` for the authoritative `cadre.skill.v1` contract.
 Use `cadre://workflow-protocols` to discover workflow protocol resources, then
 load `cadre://workflow-protocol?workflow=<name>` for the active workflow.
 References and template inventory are also MCP-served through Cadre resources.
-
-Do not depend on local `skill.json`, `protocols/`, `references/`, or
-`templates/` files. Markdown in this file exists only because current skill
-packaging requires a `SKILL.md` entrypoint. Markdown projections elsewhere in
-Cadre are for human review only; do not use them as workflow input, fallback
-state, or canonical truth.

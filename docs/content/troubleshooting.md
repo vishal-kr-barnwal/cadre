@@ -1,14 +1,14 @@
 ---
 title: Troubleshooting
-description: Common install, MCP, Beads, provider, LSP, and generated-bundle failures.
+description: Common install, MCP, Beads, provider, LSP, and plugin-generation failures.
 section: Support
 order: 8
 ---
 
 # Troubleshooting
 
-Use this guide when Cadre setup, workflows, provider evidence, generated
-bundles, or code intelligence do not behave as expected.
+Use this guide when Cadre setup, workflows, provider evidence, plugin
+generation, or code intelligence do not behave as expected.
 
 ## Beads Is Missing
 
@@ -74,13 +74,14 @@ Fix:
 One MCP process can serve multiple projects. Cadre depends on the per-call root,
 not the server's remembered cwd.
 
-## Generated Bundles Are Stale
+## Plugin Generation Fails
 
 Symptoms:
 
-- `pnpm check` reports generated output drift.
-- Plugin files under `harness/plugins/` do not match master sources.
-- Marketplace shims point at outdated paths.
+- `pnpm check` reports that plugin bundles cannot be produced.
+- `pnpm --filter cadre-ai generate` fails while writing local validation
+  fixtures.
+- `cadre install --check` reports missing or stale installed plugin files.
 
 Fix:
 
@@ -98,8 +99,9 @@ Edit master sources only:
 - `harness/src/`
 - root `docs/` for public documentation
 
-Do not hand-edit generated bundles under `harness/.agents/`,
-`harness/.claude/`, or `harness/plugins/`.
+Do not treat generated bundles under `harness/.agents/`, `harness/.claude/`,
+`harness/.claude-plugin/`, or `harness/plugins/` as source files. They are
+ignored local fixtures and can be recreated at any time.
 
 ## Provider Evidence Is Pending
 

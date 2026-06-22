@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: Harness package layout, thin generated plugin bundles, source files, and development flow.
+description: Harness package layout, thin install-time plugin bundles, source files, and development flow.
 section: Internals
 order: 5
 ---
@@ -8,7 +8,7 @@ order: 5
 # Architecture
 
 This repository is the Cadre harness/package repository. It builds the runtime,
-skill shim, MCP-served contracts, references, templates, tests, and generated
+skill shim, MCP-served contracts, references, templates, tests, and install-time
 thin plugin bundles that users install into Claude Code and OpenAI Codex.
 
 ## Repository Shape
@@ -22,15 +22,10 @@ thin plugin bundles that users install into Claude Code and OpenAI Codex.
 │   └── public/                   # Static assets such as the Cadre logo
 ├── harness/
 │   ├── skills/cadre/             # Master skill and workflow protocols
-│   ├── scripts/agent-refs/       # Master reference docs copied or sliced into plugins
+│   ├── scripts/agent-refs/       # Master references embedded into cadre-mcp
 │   ├── templates/                # Target-project templates and CI templates
 │   ├── src/                      # TypeScript runtime, MCP, and LSP sources
-│   ├── scripts/                  # Built JS runtime, generator, tests, helper scripts
-│   ├── plugins/                  # Generated Claude and Codex plugin bundles
-│   ├── .agents/                  # Generated Codex local skill/plugin artifacts
-│   └── .claude/                  # Generated Claude local skill artifacts
-├── .agents/plugins/marketplace.json
-├── .claude-plugin/marketplace.json
+│   └── scripts/                  # Built JS runtime, generator, tests, helper scripts
 ├── AGENTS.md
 ├── CLAUDE.md
 └── README.md
@@ -41,7 +36,8 @@ depend on the retired harness documentation folder.
 
 ## Master Sources
 
-Edit master sources, then regenerate generated output.
+Edit master sources, then run generation or install commands when plugin shells
+need to be materialized.
 
 | Source | Owns |
 |--------|------|
@@ -55,14 +51,16 @@ Edit master sources, then regenerate generated output.
 | `docs/content/` | Markdown source for generated documentation routes. |
 | `docs/public/` | Static assets served by the docs app. |
 
-Generated outputs under `harness/.agents/`, `harness/.claude/`, and
-`harness/plugins/` carry an `AUTO-GENERATED` marker and should not be edited by
-hand.
+Generated plugin and marketplace outputs under `harness/.agents/`,
+`harness/.claude/`, `harness/.claude-plugin/`, and `harness/plugins/` are
+ignored local validation fixtures. User-facing copies are written by
+`cadre install`.
 
-## Generated Plugin Bundles
+## Install-Time Plugin Bundles
 
 `harness/scripts/generate-skills.sh` builds platform-specific bundles from one
-source of truth.
+source of truth for local validation. The published `cadre-ai` package writes
+the same thin plugin shape through `cadre install`.
 
 | Output | Purpose |
 |--------|---------|
@@ -72,8 +70,8 @@ source of truth.
 | `harness/.claude/skills/cadre/` | Harness-local Claude skill output. |
 | `harness/.agents/plugins/marketplace.json` | Harness-local Codex marketplace. |
 | `harness/.claude-plugin/marketplace.json` | Harness-local Claude marketplace. |
-| root `.agents/plugins/marketplace.json` | Repo-root Codex marketplace shim. |
-| root `.claude-plugin/marketplace.json` | Repo-root Claude marketplace shim. |
+| generated root `.agents/plugins/marketplace.json` | Repo-root Codex marketplace path in local fixtures. |
+| generated root `.claude-plugin/marketplace.json` | Repo-root Claude marketplace path in local fixtures. |
 
 The generator:
 
@@ -85,7 +83,7 @@ The generator:
 - Uses MCP-provided worker prompts for parallel dispatch; Claude uses `Task`,
   and Codex uses multi-agent tool discovery from the parallel execution
   reference.
-- Rewrites marketplace shims for root and harness development paths.
+- Rewrites marketplace files in the selected generated or install location.
 
 ## Runtime Build
 
@@ -97,7 +95,7 @@ pnpm --filter cadre-ai build
 ```
 
 The default full validation command runs typecheck, runtime build, generated
-bundle drift check, tests, and the team-scale simulation:
+bundle production checks, tests, and the team-scale simulation:
 
 ```bash
 pnpm --filter cadre-ai check
@@ -109,7 +107,8 @@ For harness changes:
 
 1. Edit master source files.
 2. Run targeted tests when the change is narrow.
-3. Run `pnpm --filter cadre-ai generate` when generated bundles need refresh.
+3. Run `pnpm --filter cadre-ai generate` when local plugin fixtures need
+   validation.
 4. Run `pnpm --filter cadre-ai check` before handoff.
 
 Useful commands:

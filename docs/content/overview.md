@@ -100,14 +100,14 @@ not manually reconstruct Cadre state.
 - [How Cadre Works](how-cadre-works.md): packet-owned workflows, MCP, Beads,
   tracks, review gates, provider evidence, and code intelligence.
 - [Workflows](workflows.md): detailed guide for every `cadre-*` workflow.
-- [Architecture](architecture.md): harness package layout, thin generated
+- [Architecture](architecture.md): harness package layout, thin install-time
   plugins, source-of-truth files, and development commands.
 - [Team And Polyrepo](team-and-polyrepo.md): shared sync, ownership, leases,
   fleet boards, cross-repo PR groups, and merge train behavior.
 - [Parallel Execution](parallel-execution.md): plan annotations, worker waves,
   file claims, merge-back, and recovery.
 - [Troubleshooting](troubleshooting.md): common install, MCP, Beads, provider,
-  LSP, and generated-bundle failures.
+  LSP, and plugin-generation failures.
 
 ## Repository Roles
 
@@ -115,6 +115,7 @@ This repository is the Cadre harness/package repository. The implementation
 lives under `harness/`; the public documentation website lives in the root
 `docs/` Next.js app, with these Markdown pages under `docs/content/`.
 
-Generated plugin bundles under `harness/.agents/`, `harness/.claude/`, and
-`harness/plugins/` are rebuilt from master sources. They are thin client
-entrypoints; do not edit generated bundles by hand.
+Plugin bundles are thin install-time entrypoints written by `cadre install`.
+Harness-local generated copies under `harness/.agents/`, `harness/.claude/`,
+`harness/.claude-plugin/`, and `harness/plugins/` are ignored validation
+fixtures, not source files.

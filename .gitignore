@@ -209,6 +209,12 @@ __marimo__/
 
 # Cadre
 tmp/
+/.agents/
+/.claude-plugin/
+/harness/.agents/
+/harness/.claude/
+/harness/.claude-plugin/
+/harness/plugins/
 
 # Node / PNPM
 node_modules/

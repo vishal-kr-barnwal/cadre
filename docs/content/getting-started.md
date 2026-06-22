@@ -66,18 +66,9 @@ cadre install --target codex
 cadre install --target claude
 ```
 
-For source development, repository marketplace shims remain available after the
-npm package is installed:
-
-```text
-/plugin marketplace add vishal-kr-barnwal/Cadre
-/plugin install cadre@cadre
-```
-
-```bash
-codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
-codex plugin add cadre@cadre
-```
+For source development, keep using the npm-first install path. Harness
+contributors can run `pnpm --filter cadre-ai generate` to create ignored local
+plugin fixtures for validation, but those generated files are not checked in.
 
 ## First Project Setup
 
