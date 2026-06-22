@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: Harness package layout, generated plugin bundles, source files, and development flow.
+description: Harness package layout, thin generated plugin bundles, source files, and development flow.
 section: Internals
 order: 5
 ---
@@ -9,7 +9,7 @@ order: 5
 
 This repository is the Cadre harness/package repository. It builds the runtime,
 skill shim, MCP-served contracts, references, templates, tests, and generated
-plugin bundles that users install into Claude Code and OpenAI Codex.
+thin plugin bundles that users install into Claude Code and OpenAI Codex.
 
 ## Repository Shape
 
@@ -46,10 +46,10 @@ Edit master sources, then regenerate generated output.
 | Source | Owns |
 |--------|------|
 | `harness/skills/cadre/SKILL.md` | Cadre skill activation shim that points agents at MCP contract resources. |
-| `harness/skills/cadre/skill.json` | Master `cadre.skill.v1` contract served by MCP resources and copied into plugin `assets/cadre/`. |
-| `harness/skills/cadre/protocols/` | Master workflow protocol bodies served by MCP resources and copied into plugin `assets/cadre/protocols/`. |
-| `harness/scripts/agent-refs/` | Reference material served by MCP reference resources and copied into plugin `assets/cadre/references/`. |
-| `harness/templates/` | Target-project templates copied into plugin `assets/cadre/templates/` and written by `cadre-setup`. |
+| `harness/skills/cadre/skill.json` | Master `cadre.skill.v1` contract embedded into `cadre-mcp` and served by MCP resources. |
+| `harness/skills/cadre/protocols/` | Master workflow protocol bodies embedded into `cadre-mcp` and served by MCP resources. |
+| `harness/scripts/agent-refs/` | Reference material embedded into `cadre-mcp` and served by MCP reference resources. |
+| `harness/templates/` | Target-project templates embedded into `cadre-mcp` and written by `cadre-setup`. |
 | `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
 | `docs/` | Public Next.js/shadcn documentation website. |
 | `docs/content/` | Markdown source for generated documentation routes. |
@@ -78,13 +78,13 @@ source of truth.
 The generator:
 
 - Copies the master `SKILL.md` shim into each platform bundle.
-- Copies the skill contract, workflow protocols, references, and templates into
-  plugin `assets/cadre/` so clients can inspect packaged assets directly.
-- Copies a small `scripts/mcp/cadre-server.js` plugin runtime that loads those
-  external assets. The standalone harness runtime keeps embedded assets for
-  direct local use.
-- Adds the Claude-only `agents/cadre-worker.md` overlay while Codex uses
-  multi-agent tool discovery from the parallel execution reference.
+- Writes platform MCP configs that point at the global `cadre-mcp` runtime.
+- Keeps plugins thin: no copied assets, scripts, or platform worker agents.
+- Embeds the skill contract, workflow protocols, references, and templates into
+  `scripts/mcp/cadre-server.js`.
+- Uses MCP-provided worker prompts for parallel dispatch; Claude uses `Task`,
+  and Codex uses multi-agent tool discovery from the parallel execution
+  reference.
 - Rewrites marketplace shims for root and harness development paths.
 
 ## Runtime Build
@@ -135,8 +135,8 @@ not require MkDocs, Docusaurus, or another documentation framework.
 
 When public documentation describes plugin internals, keep it aligned with the
 master sources under `harness/`. When plugin instruction references are needed,
-place them under `harness/scripts/agent-refs/` so generated bundles are
-self-contained and independent from public docs.
+place them under `harness/scripts/agent-refs/` so `cadre-mcp` can serve them as
+resources independent from public docs.
 
 ## Versioning
 

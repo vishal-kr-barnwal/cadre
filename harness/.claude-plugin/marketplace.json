@@ -8,7 +8,7 @@
     {
       "name": "cadre",
       "source": "./plugins/cadre-claude",
-      "description": "Skill-first Cadre workflows with bundled MCP tooling for context-driven development.",
+      "description": "MCP-first Cadre workflows using the global cadre-mcp runtime for context-driven development.",
       "version": "2.0.0",
       "author": {
         "name": "Vishal Barnwal"

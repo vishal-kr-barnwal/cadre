@@ -22,7 +22,7 @@
     },
     {
       "heading": "Dispatching Each Worker",
-      "body": "<!-- AGENT:claude -->\nCall the generated `cadre-worker` plugin agent when it is available; otherwise\ncall the **`Task` tool** once per worker. In both cases pass the worker prompt\nand packet payload. Use the worker worktree from the packet for isolation when\nthe platform supports it. Worker calls are awaitable; wait for every worker in\nthe wave before calling the next Cadre packet.\n<!-- /AGENT:claude -->\n<!-- AGENT:codex -->\nUse Codex multi-agent tools when they are available. Search tool discovery for\n`multi_agent_v1.spawn_agent`, then spawn one worker agent per packet worker,\npass the worker prompt and packet payload, and wait with the corresponding\nmulti-agent wait tool before calling the next Cadre packet. If\n`multi_agent_v1.spawn_agent` is unavailable, follow the packet's alternate\ndispatch instructions when present; otherwise halt with a clear\n`dispatch-unavailable` message instead of simulating worker state locally.\n<!-- /AGENT:codex -->"
+      "body": "<!-- AGENT:claude -->\nCall the **`Task` tool** once per packet worker. Pass the MCP-provided worker\nprompt, dispatch payload, worktree, owned files, and expected result schema to\neach task. Worker calls are awaitable; wait for every worker in the wave before\ncalling the next Cadre packet.\n<!-- /AGENT:claude -->\n<!-- AGENT:codex -->\nUse Codex multi-agent tools when they are available. Search tool discovery for\n`multi_agent_v1.spawn_agent`, then spawn one worker agent per packet worker,\npass the MCP-provided worker prompt and dispatch payload, and wait with the\ncorresponding multi-agent wait tool before calling the next Cadre packet. If\n`multi_agent_v1.spawn_agent` is unavailable, follow the packet's alternate\ndispatch instructions when present; otherwise halt with a clear\n`dispatch-unavailable` message instead of simulating worker state locally.\n<!-- /AGENT:codex -->"
     },
     {
       "heading": "Worker Rules",
@@ -38,7 +38,7 @@
       "dispatch": "Use Codex multi-agent tools when available. Search tool discovery for multi_agent_v1.spawn_agent, spawn one worker per packet worker, wait for all workers, then call the next Cadre packet. If unavailable, follow packet alternate dispatch instructions or halt with dispatch-unavailable."
     },
     "claude": {
-      "dispatch": "Use the generated cadre-worker plugin agent when available, otherwise the Task tool once per packet worker. Wait for every worker in the wave before calling the next Cadre packet."
+      "dispatch": "Use the Task tool once per MCP-provided worker prompt. Pass dispatch payload, worktree, owned files, expected result schema, and wait for every worker before calling the next Cadre packet."
     }
   }
 }

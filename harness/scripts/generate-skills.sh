@@ -12,9 +12,10 @@
 # Edit the source skill in `skills/cadre/SKILL.md`, protocol sources in
 # `skills/cadre/protocols/cadre-*.json`, reference masters in
 # `scripts/agent-refs/`, templates in `templates/`, and runtime TypeScript in
-# `src/`. The plugin ships the skill shim plus one MCP runtime bundle; runtime
-# JavaScript under `scripts/` is built from `src/` by `pnpm build`. Generated
-# files carry an AUTO-GENERATED marker; do not hand-edit generated bundles.
+# `src/`. Generated plugins are thin MCP entrypoints; the npm package owns the
+# embedded `cadre-mcp` runtime. Runtime JavaScript under `scripts/` is built
+# from `src/` by `pnpm build`. Generated files carry an AUTO-GENERATED marker;
+# do not hand-edit generated bundles.
 #
 # Usage:
 #   pnpm generate
@@ -56,7 +57,7 @@ ROOT_CODEX_PLUGIN_MARKETPLACE=".agents/plugins/marketplace.json"
 
 PLUGIN_NAME="cadre"
 PLUGIN_VERSION="2.0.0"
-PLUGIN_DESCRIPTION="Skill-first Cadre workflows with bundled MCP tooling for context-driven development."
+PLUGIN_DESCRIPTION="MCP-first Cadre workflows using the global cadre-mcp runtime for context-driven development."
 PLUGIN_AUTHOR_NAME="Vishal Barnwal"
 PLUGIN_AUTHOR_URL="https://github.com/vishal-kr-barnwal"
 PLUGIN_HOMEPAGE="https://github.com/vishal-kr-barnwal/Cadre"
@@ -124,7 +125,7 @@ extract_description() {
 
 dispatch_sentence() {
   case "$1" in
-    claude) echo 'Use the generated `cadre-worker` plugin agent when available, otherwise the **`Task` tool**, one call per worker; see MCP reference `cadre://agent-reference?name=parallel-execution`.' ;;
+    claude) echo 'Use the **`Task` tool**, one call per MCP-provided worker prompt; see MCP reference `cadre://agent-reference?name=parallel-execution`.' ;;
     codex)  echo 'Use tool discovery for `multi_agent_v1.spawn_agent`; if unavailable, follow packet alternate dispatch instructions or halt with `dispatch-unavailable`; see MCP reference `cadre://agent-reference?name=parallel-execution`.' ;;
   esac
 }
@@ -212,35 +213,6 @@ copy_skill_tree() {
     source_path="$REPO_ROOT/$src"
   fi
   copy_tree_with_links "$source_path" "$(out_path "$dest")"
-}
-
-copy_plugin_assets() {
-  local plugin_dir="$1" asset_dest ref src name
-  asset_dest="$(out_path "$plugin_dir/assets/cadre")"
-  rm -rf "$asset_dest"
-  mkdir -p "$asset_dest/references" "$asset_dest/protocols"
-  cp -p "$REPO_ROOT/skills/cadre/skill.json" "$asset_dest/skill.json"
-  for src in "$SOURCE_PROTOCOL_DIR"/cadre-*.json; do
-    name="$(basename "$src" .json)"
-    cp -p "$src" "$asset_dest/protocols/$name.json"
-  done
-  for ref in "${JSON_REFS[@]}"; do
-    cp -p "$REPO_ROOT/$ref" "$asset_dest/references/$(basename "$ref")"
-  done
-  copy_tree_with_links "$REPO_ROOT/$TEMPLATES_SRC" "$asset_dest/templates"
-}
-
-copy_plugin_scripts() {
-  local plugin_dir="$1" source_dir="$2" dest source
-  dest="$(out_path "$plugin_dir/scripts")"
-  rm -rf "$dest"
-  mkdir -p "$dest/mcp"
-  source="$source_dir/mcp/cadre-server.external.js"
-  if [[ ! -f "$source" ]]; then
-    source="$source_dir/mcp/cadre-server.js"
-  fi
-  cp -p "$source" "$dest/mcp/cadre-server.js"
-  chmod +x "$dest/mcp/cadre-server.js"
 }
 
 build_runtime() {
@@ -345,10 +317,8 @@ write_plugin_mcp_config() {
 {
   "mcpServers": {
     "cadre": {
-      "command": "node",
-      "args": [
-        "./scripts/mcp/cadre-server.js"
-      ],
+      "command": "cadre-mcp",
+      "args": [],
       "cwd": "."
     }
   }
@@ -455,32 +425,6 @@ JSON
   esac
 }
 
-write_claude_worker_agent() {
-  local agent_dir
-  agent_dir="$(out_path "$CLAUDE_PLUGIN_DIR/agents")"
-  mkdir -p "$agent_dir"
-  cat > "$agent_dir/cadre-worker.md" <<'EOF'
----
-name: cadre-worker
-description: Execute one packet-assigned Cadre parallel worker task inside its provided worktree, then return structured evidence to the coordinator.
-isolation: worktree
-skills:
-  - cadre
----
-
-You are a Cadre parallel worker. Execute only the task in the packet payload from
-the coordinator. Work only in the provided repo/worktree and only on assigned
-product files. Do not edit Cadre control-plane files, Beads state, provider
-state, worker topology, merge state, or cleanup state.
-
-Run the task's relevant product verification and commit product changes locally
-when the worker prompt asks for commit evidence. Return structured evidence:
-worker id, task key, repo, commit SHA, tests run, coverage when available, files
-changed, summary, and blockers. If implementation fails, return failure evidence
-instead of repairing Cadre state yourself.
-EOF
-}
-
 validate_generated_plugins() {
   node <<'NODE'
 const fs = require("node:fs");
@@ -507,15 +451,15 @@ const codexManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre/
 if (codexManifest.skills !== "./skills/") throw new Error("Codex plugin manifest has wrong skills path");
 if (codexManifest.mcpServers !== "./.mcp.json") throw new Error("Codex plugin manifest has wrong MCP path");
 const codexMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre/.mcp.json"), "utf8"));
-if (codexMcp.mcpServers?.cadre?.args?.[0] !== "./scripts/mcp/cadre-server.js") {
-  throw new Error("Codex MCP config has wrong runtime path");
+if (codexMcp.mcpServers?.cadre?.command !== "cadre-mcp" || codexMcp.mcpServers?.cadre?.args?.length !== 0) {
+  throw new Error("Codex MCP config must point at global cadre-mcp");
 }
 const claudeManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-claude/.claude-plugin/plugin.json"), "utf8"));
 if (claudeManifest.skills !== "./skills/") throw new Error("Claude plugin manifest has wrong skills path");
 if (claudeManifest.mcpServers !== "./mcp-config.json") throw new Error("Claude plugin manifest has wrong MCP path");
 const claudeMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-claude/mcp-config.json"), "utf8"));
-if (claudeMcp.mcpServers?.cadre?.args?.[0] !== "./scripts/mcp/cadre-server.js") {
-  throw new Error("Claude MCP config has wrong runtime path");
+if (claudeMcp.mcpServers?.cadre?.command !== "cadre-mcp" || claudeMcp.mcpServers?.cadre?.args?.length !== 0) {
+  throw new Error("Claude MCP config must point at global cadre-mcp");
 }
 for (const field of ["name", "version", "description", "homepage", "repository", "license"]) {
   if (codexManifest[field] !== claudeManifest[field]) {
@@ -566,26 +510,17 @@ if (rootClaudeMarketplace.plugins?.[0]?.source !== "./harness/plugins/cadre-clau
 
 for (const rel of [
   "plugins/cadre/skills/cadre/SKILL.md",
-  "plugins/cadre/scripts/mcp/cadre-server.js",
-  "plugins/cadre/assets/cadre/skill.json",
-  "plugins/cadre/assets/cadre/protocols",
-  "plugins/cadre/assets/cadre/references",
-  "plugins/cadre/assets/cadre/templates",
   "plugins/cadre-claude/skills/cadre/SKILL.md",
-  "plugins/cadre-claude/scripts/mcp/cadre-server.js",
-  "plugins/cadre-claude/assets/cadre/skill.json",
-  "plugins/cadre-claude/assets/cadre/protocols",
-  "plugins/cadre-claude/assets/cadre/references",
-  "plugins/cadre-claude/assets/cadre/templates",
-  "plugins/cadre-claude/agents/cadre-worker.md",
 ]) {
   if (!fs.existsSync(path.join(root, rel))) throw new Error(`missing ${rel}`);
 }
 for (const rel of [
   "plugins/cadre/README.md",
+  "plugins/cadre/assets",
   "plugins/cadre/references",
   "plugins/cadre/templates",
   "plugins/cadre/agents",
+  "plugins/cadre/scripts",
   "plugins/cadre/scripts/cadre-core.js",
   "plugins/cadre/scripts/cadre-job-runner.js",
   "plugins/cadre/scripts/cadre-lsp-setup.js",
@@ -594,8 +529,11 @@ for (const rel of [
   "plugins/cadre/skills/cadre/skill.json",
   "plugins/cadre/skills/cadre/protocols",
   "plugins/cadre-claude/README.md",
+  "plugins/cadre-claude/assets",
   "plugins/cadre-claude/references",
   "plugins/cadre-claude/templates",
+  "plugins/cadre-claude/agents",
+  "plugins/cadre-claude/scripts",
   "plugins/cadre-claude/scripts/cadre-core.js",
   "plugins/cadre-claude/scripts/cadre-job-runner.js",
   "plugins/cadre-claude/scripts/cadre-lsp-setup.js",
@@ -627,20 +565,17 @@ generate_plugins() {
   rm -rf "$(out_path "$CODEX_PLUGIN_DIR")" "$(out_path "$CLAUDE_PLUGIN_DIR")"
 
   generate_plugin_bundle() {
-    local skill_dir="$1" plugin_dir="$2" script_source="$3" script_mode="${4:-copy}"
+    local skill_dir="$1" plugin_dir="$2"
     copy_skill_tree "$skill_dir" "$plugin_dir/skills/cadre"
-    copy_plugin_scripts "$plugin_dir" "$script_source" "$script_mode"
-    copy_plugin_assets "$plugin_dir"
   }
 
-  generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR" "$REPO_ROOT/scripts" "copy"
-  generate_plugin_bundle "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR" "$(out_path "$CODEX_PLUGIN_DIR/scripts")" "link"
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR"
+  generate_plugin_bundle "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR"
 
   write_plugin_manifest "codex" "$CODEX_PLUGIN_DIR"
   write_plugin_mcp_config_for_platform "codex" "$CODEX_PLUGIN_DIR"
   write_plugin_manifest "claude" "$CLAUDE_PLUGIN_DIR"
   write_plugin_mcp_config_for_platform "claude" "$CLAUDE_PLUGIN_DIR"
-  write_claude_worker_agent
   write_marketplaces
   write_root_marketplaces
   if [[ -z "$GEN_ROOT" ]]; then
@@ -725,7 +660,7 @@ main() {
   else
     echo "✓ Embedded $count workflow protocols into the Cadre MCP runtime."
     echo "  .claude/skills/cadre/ .agents/skills/cadre/ contain SKILL.md only"
-    echo "  plugins/cadre-claude/ plugins/cadre/ contain SKILL.md, external assets/cadre/, and scripts/mcp/cadre-server.js"
+    echo "  plugins/cadre-claude/ plugins/cadre/ are thin MCP entrypoints for global cadre-mcp"
   fi
 }
 

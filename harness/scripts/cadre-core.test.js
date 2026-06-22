@@ -447,19 +447,24 @@ test("parsePlanJson captures execution, repo ownership, dependencies, and commit
 
 test("build emits every required runtime bundle path", () => {
   for (const file of [
+    "scripts/cadre-cli.js",
     "scripts/cadre-core.js",
     "scripts/cadre-job-runner.js",
     "scripts/cadre-lsp-setup.js",
     "scripts/cadre-lsp-review.js",
     "scripts/cadre-lsp-daemon.js",
     "scripts/mcp/cadre-server.js",
-    "scripts/mcp/cadre-server.external.js",
-    "plugins/cadre/scripts/mcp/cadre-server.js",
-    "plugins/cadre-claude/scripts/mcp/cadre-server.js",
   ]) {
     assert.equal(fs.existsSync(path.join(__dirname, "..", file)), true, `missing ${file}`);
   }
   for (const file of [
+    "scripts/mcp/cadre-server.external.js",
+    "plugins/cadre/assets",
+    "plugins/cadre/agents",
+    "plugins/cadre/scripts",
+    "plugins/cadre-claude/assets",
+    "plugins/cadre-claude/agents",
+    "plugins/cadre-claude/scripts",
     "plugins/cadre/scripts/cadre-core.js",
     "plugins/cadre/scripts/cadre-job-runner.js",
     "plugins/cadre/scripts/cadre-lsp-setup.js",
@@ -547,10 +552,14 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.equal(setup.results.length, 0);
     assert.equal(typeof setup.workers[0].dispatch.prompt, "string");
     assert.ok(setup.workers[0].dispatch.prompt.includes("parallel_20260617"));
+    assert.equal(setup.workers[0].dispatch.canonical_worker_contract, "cadre_parallel.dispatch.v1");
     assert.deepEqual(setup.workers[0].dispatch.owned_files, ["src/core.js"]);
+    assert.equal(setup.workers[0].dispatch.platform_dispatch.claude.mechanism, "Task");
+    assert.equal(setup.workers[0].dispatch.platform_dispatch.codex.mechanism, "multi_agent_v1.spawn_agent");
     assert.ok(setup.workers[0].dispatch.expected_result_schema.required.includes("commit_sha"));
     assert.equal(setup.workers[0].dispatch.record_finish_packet.tool, "cadre_parallel");
     assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.trackId, "parallel_20260617");
+    assert.ok(setup.workers[0].dispatch.finish_evidence_fields.includes("filesChanged"));
 
     const dryRecord = core.parallelWorkflow(root, {
       action: "record_finish",

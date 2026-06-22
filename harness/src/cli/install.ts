@@ -1,0 +1,397 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+type Target = "codex" | "claude";
+type Scope = "user" | "project" | "local";
+
+interface CliContext {
+  skillShim: string;
+}
+
+interface ParsedInstall {
+  target: "auto" | "all" | Target;
+  scope: Scope;
+  dryRun: boolean;
+  check: boolean;
+  force: boolean;
+  yes: boolean;
+  cadreHome: string;
+}
+
+interface RuntimePaths {
+  runtimeRoot: string;
+  nodePath: string;
+  mcpServer: string;
+}
+
+interface CommandPlan {
+  command: string;
+  args: string[];
+}
+
+interface TargetPaths {
+  pluginRoot: string;
+  marketplaceRoot: string;
+  marketplaceFile: string;
+}
+
+const PACKAGE_PLUGIN_NAME = "cadre";
+const PACKAGE_DISPLAY_NAME = "Cadre";
+
+function usage(): string {
+  return [
+    "Cadre CLI",
+    "",
+    "Usage:",
+    "  cadre install [--target codex|claude|all] [--scope user|project|local] [--dry-run] [--check] [--force] [--yes]",
+    "  cadre doctor",
+    "  cadre help",
+  ].join("\n");
+}
+
+function parseInstall(argv: string[]): ParsedInstall {
+  const parsed: ParsedInstall = {
+    target: "auto",
+    scope: "user",
+    dryRun: false,
+    check: false,
+    force: false,
+    yes: false,
+    cadreHome: process.env.CADRE_HOME || path.join(os.homedir(), ".cadre"),
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--dry-run") parsed.dryRun = true;
+    else if (arg === "--check") parsed.check = true;
+    else if (arg === "--force") parsed.force = true;
+    else if (arg === "--yes" || arg === "-y") parsed.yes = true;
+    else if (arg === "--target") {
+      const value = argv[index + 1];
+      if (value !== "codex" && value !== "claude" && value !== "all") throw new Error("--target must be codex, claude, or all");
+      parsed.target = value;
+      index += 1;
+    } else if (arg === "--scope") {
+      const value = argv[index + 1];
+      if (value !== "user" && value !== "project" && value !== "local") throw new Error("--scope must be user, project, or local");
+      parsed.scope = value;
+      index += 1;
+    } else if (arg === "--home") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--home requires a path");
+      parsed.cadreHome = path.resolve(value);
+      index += 1;
+    } else {
+      throw new Error(`Unknown install option: ${arg}`);
+    }
+  }
+  return parsed;
+}
+
+function runtimePaths(): RuntimePaths {
+  const runtimeRoot = path.resolve(__dirname, "..");
+  return {
+    runtimeRoot,
+    nodePath: process.execPath,
+    mcpServer: path.join(runtimeRoot, "scripts", "mcp", "cadre-server.js"),
+  };
+}
+
+function commandExists(command: string): boolean {
+  const result = spawnSync(process.platform === "win32" ? "where" : "command", process.platform === "win32" ? [command] : ["-v", command], {
+    encoding: "utf8",
+    shell: process.platform !== "win32",
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+function selectedTargets(options: ParsedInstall): Target[] {
+  if (options.target === "codex" || options.target === "claude") return [options.target];
+  if (options.target === "all") return ["codex", "claude"];
+  return (["codex", "claude"] as Target[]).filter((target) => commandExists(target));
+}
+
+function targetPaths(home: string, target: Target): TargetPaths {
+  const pluginRoot = path.join(home, "plugins", target, PACKAGE_PLUGIN_NAME);
+  const marketplaceRoot = path.join(home, "marketplaces", target);
+  return {
+    pluginRoot,
+    marketplaceRoot,
+    marketplaceFile: target === "codex"
+      ? path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json")
+      : path.join(marketplaceRoot, ".claude-plugin", "marketplace.json"),
+  };
+}
+
+function readPackageMetadata(runtimeRoot: string): Record<string, string> {
+  try {
+    const json = JSON.parse(fs.readFileSync(path.join(runtimeRoot, "package.json"), "utf8")) as Record<string, unknown>;
+    return {
+      version: typeof json.version === "string" ? json.version : "0.0.0",
+      description: typeof json.description === "string" ? json.description : "MCP-first Cadre workflows.",
+      homepage: typeof json.homepage === "string" ? json.homepage : "https://github.com/vishal-kr-barnwal/Cadre",
+      repository: typeof json.repository === "string" ? json.repository : "https://github.com/vishal-kr-barnwal/Cadre",
+      license: typeof json.license === "string" ? json.license : "Apache-2.0",
+    };
+  } catch {
+    return {
+      version: "0.0.0",
+      description: "MCP-first Cadre workflows.",
+      homepage: "https://github.com/vishal-kr-barnwal/Cadre",
+      repository: "https://github.com/vishal-kr-barnwal/Cadre",
+      license: "Apache-2.0",
+    };
+  }
+}
+
+function pluginManifest(target: Target, runtime: RuntimePaths): Record<string, unknown> {
+  const metadata = readPackageMetadata(runtime.runtimeRoot);
+  const base = {
+    name: PACKAGE_PLUGIN_NAME,
+    version: metadata.version,
+    description: metadata.description,
+    author: { name: "Vishal Barnwal", url: "https://github.com/vishal-kr-barnwal" },
+    homepage: metadata.homepage,
+    repository: metadata.repository,
+    license: metadata.license,
+    keywords: ["cadre", "context-driven-development", "skills", "beads", "mcp"],
+    skills: "./skills/",
+  };
+  if (target === "claude") {
+    return { ...base, displayName: PACKAGE_DISPLAY_NAME, mcpServers: "./mcp-config.json" };
+  }
+  return {
+    ...base,
+    mcpServers: "./.mcp.json",
+    interface: {
+      displayName: PACKAGE_DISPLAY_NAME,
+      shortDescription: "MCP-first planning, tracks, reviews, and packet tools.",
+      longDescription: "Cadre packages context-driven development workflows for Codex through one global MCP runtime.",
+      developerName: "Vishal Barnwal",
+      category: "Productivity",
+      capabilities: ["Read", "Write", "Interactive"],
+      defaultPrompt: ["Set up this repo with Cadre.", "Show Cadre team status.", "Review the current Cadre track."],
+      brandColor: "#10A37F",
+    },
+  };
+}
+
+function mcpConfig(runtime: RuntimePaths): Record<string, unknown> {
+  return {
+    mcpServers: {
+      cadre: {
+        command: runtime.nodePath,
+        args: [runtime.mcpServer],
+        cwd: runtime.runtimeRoot,
+      },
+    },
+  };
+}
+
+function marketplace(target: Target, pluginRoot: string, runtime: RuntimePaths): Record<string, unknown> {
+  const metadata = readPackageMetadata(runtime.runtimeRoot);
+  if (target === "codex") {
+    return {
+      name: PACKAGE_PLUGIN_NAME,
+      interface: { displayName: PACKAGE_DISPLAY_NAME },
+      plugins: [{
+        name: PACKAGE_PLUGIN_NAME,
+        source: { source: "local", path: pluginRoot },
+        policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+        category: "Productivity",
+      }],
+    };
+  }
+  return {
+    name: PACKAGE_PLUGIN_NAME,
+    owner: { name: "Vishal Barnwal" },
+    description: "Cadre MCP-first workflows for Claude Code.",
+    plugins: [{
+      name: PACKAGE_PLUGIN_NAME,
+      source: pluginRoot,
+      description: metadata.description,
+      version: metadata.version,
+      author: { name: "Vishal Barnwal" },
+      category: "productivity",
+      tags: ["cadre", "skills", "mcp", "context-driven-development"],
+    }],
+  };
+}
+
+function writeJson(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeText(file: string, text: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text.endsWith("\n") ? text : `${text}\n`);
+}
+
+function writeThinPlugin(target: Target, paths: TargetPaths, runtime: RuntimePaths, skillShim: string): void {
+  fs.rmSync(paths.pluginRoot, { recursive: true, force: true });
+  writeText(path.join(paths.pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
+  if (target === "codex") {
+    writeJson(path.join(paths.pluginRoot, ".codex-plugin", "plugin.json"), pluginManifest(target, runtime));
+    writeJson(path.join(paths.pluginRoot, ".mcp.json"), mcpConfig(runtime));
+  } else {
+    writeJson(path.join(paths.pluginRoot, ".claude-plugin", "plugin.json"), pluginManifest(target, runtime));
+    writeJson(path.join(paths.pluginRoot, "mcp-config.json"), mcpConfig(runtime));
+  }
+  writeJson(paths.marketplaceFile, marketplace(target, paths.pluginRoot, runtime));
+}
+
+function installCommands(target: Target, paths: TargetPaths, scope: Scope): CommandPlan[] {
+  if (target === "codex") {
+    return [
+      { command: "codex", args: ["plugin", "marketplace", "add", paths.marketplaceRoot] },
+      { command: "codex", args: ["plugin", "add", "cadre@cadre"] },
+    ];
+  }
+  return [
+    { command: "claude", args: ["plugin", "marketplace", "add", "--scope", scope, paths.marketplaceRoot] },
+    { command: "claude", args: ["plugin", "install", "--scope", scope, "cadre@cadre"] },
+  ];
+}
+
+function runCommand(plan: CommandPlan): { ok: boolean; status: number | null; stderr: string } {
+  const result = spawnSync(plan.command, plan.args, { encoding: "utf8" });
+  return { ok: result.status === 0, status: result.status, stderr: result.stderr || "" };
+}
+
+function assertNoThinPluginPayload(paths: TargetPaths): string[] {
+  const forbidden = ["assets", "agents", "scripts"].filter((name) => fs.existsSync(path.join(paths.pluginRoot, name)));
+  return forbidden.map((name) => `${paths.pluginRoot}/${name}`);
+}
+
+function pingMcp(runtime: RuntimePaths): { ok: boolean; reason?: string } {
+  if (!fs.existsSync(runtime.mcpServer)) return { ok: false, reason: `missing MCP server: ${runtime.mcpServer}` };
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "cadre_project", arguments: { action: "ping" } },
+  };
+  const result = spawnSync(runtime.nodePath, [runtime.mcpServer], {
+    cwd: runtime.runtimeRoot,
+    input: `${JSON.stringify(request)}\n`,
+    encoding: "utf8",
+    timeout: 3000,
+  });
+  if (result.status !== 0 && !result.stdout.trim()) return { ok: false, reason: result.stderr || `MCP exited with ${result.status}` };
+  const line = result.stdout.split(/\r?\n/).find((entry) => entry.trim());
+  if (!line) return { ok: false, reason: "MCP returned no JSON-RPC response" };
+  try {
+    const parsed = JSON.parse(line) as { result?: { content?: Array<{ text?: string }> }; error?: { message?: string } };
+    if (parsed.error) return { ok: false, reason: parsed.error.message || "MCP returned an error" };
+    const text = parsed.result?.content?.[0]?.text;
+    const body = text ? JSON.parse(text) as { data?: { ok?: boolean } } : null;
+    return body?.data?.ok === true ? { ok: true } : { ok: false, reason: "MCP ping did not return ok:true" };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function checkTarget(target: Target, paths: TargetPaths, runtime: RuntimePaths): string[] {
+  const errors: string[] = [];
+  const skill = path.join(paths.pluginRoot, "skills", "cadre", "SKILL.md");
+  if (!fs.existsSync(skill)) errors.push(`missing ${skill}`);
+  const manifest = target === "codex"
+    ? path.join(paths.pluginRoot, ".codex-plugin", "plugin.json")
+    : path.join(paths.pluginRoot, ".claude-plugin", "plugin.json");
+  const mcp = target === "codex" ? path.join(paths.pluginRoot, ".mcp.json") : path.join(paths.pluginRoot, "mcp-config.json");
+  if (!fs.existsSync(manifest)) errors.push(`missing ${manifest}`);
+  if (!fs.existsSync(mcp)) errors.push(`missing ${mcp}`);
+  errors.push(...assertNoThinPluginPayload(paths).map((entry) => `thin plugin contains forbidden payload ${entry}`));
+  if (fs.existsSync(mcp)) {
+    const config = JSON.parse(fs.readFileSync(mcp, "utf8")) as { mcpServers?: { cadre?: { command?: string; args?: string[]; cwd?: string } } };
+    const server = config.mcpServers?.cadre;
+    if (server?.command !== runtime.nodePath) errors.push(`${mcp} does not point at the current Node runtime`);
+    if (server?.args?.[0] !== runtime.mcpServer) errors.push(`${mcp} does not point at ${runtime.mcpServer}`);
+    if (server?.cwd !== runtime.runtimeRoot) errors.push(`${mcp} has wrong cwd`);
+  }
+  return errors;
+}
+
+function printPlan(target: Target, paths: TargetPaths, commands: CommandPlan[]): void {
+  process.stdout.write(`Cadre ${target} plugin: ${paths.pluginRoot}\n`);
+  process.stdout.write(`Cadre ${target} marketplace: ${paths.marketplaceRoot}\n`);
+  for (const command of commands) process.stdout.write(`Would run: ${command.command} ${command.args.join(" ")}\n`);
+}
+
+function runInstall(argv: string[], context: CliContext): number {
+  const options = parseInstall(argv);
+  const runtime = runtimePaths();
+  const targets = selectedTargets(options);
+  if (targets.length === 0) {
+    process.stderr.write("No supported client detected. Install Codex or Claude, or pass --target codex|claude.\n");
+    return 1;
+  }
+  const ping = pingMcp(runtime);
+  if (!ping.ok) {
+    process.stderr.write(`Cadre MCP check failed: ${ping.reason}\n`);
+    return 1;
+  }
+  let ok = true;
+  for (const target of targets) {
+    const paths = targetPaths(options.cadreHome, target);
+    const commands = installCommands(target, paths, options.scope);
+    if (options.dryRun) {
+      printPlan(target, paths, commands);
+      continue;
+    }
+    if (!options.check) writeThinPlugin(target, paths, runtime, context.skillShim);
+    const errors = checkTarget(target, paths, runtime);
+    if (errors.length > 0) {
+      ok = false;
+      for (const error of errors) process.stderr.write(`${error}\n`);
+      continue;
+    }
+    if (options.check) {
+      process.stdout.write(`Cadre ${target} plugin is installed and points at ${runtime.mcpServer}\n`);
+      continue;
+    }
+    if (!commandExists(target)) {
+      ok = false;
+      process.stderr.write(`${target} command not found; plugin files were written but native registration was skipped.\n`);
+      continue;
+    }
+    for (const command of commands) {
+      const result = runCommand(command);
+      if (!result.ok) {
+        ok = false;
+        process.stderr.write(`${command.command} ${command.args.join(" ")} failed: ${result.stderr}\n`);
+      }
+    }
+    if (ok) process.stdout.write(`Installed Cadre ${target} plugin through ${paths.marketplaceRoot}\n`);
+  }
+  return ok ? 0 : 1;
+}
+
+function runDoctor(): number {
+  const runtime = runtimePaths();
+  const ping = pingMcp(runtime);
+  const checks = [
+    `package root: ${runtime.runtimeRoot}`,
+    `node: ${runtime.nodePath}`,
+    `cadre-mcp: ${runtime.mcpServer}`,
+    `mcp ping: ${ping.ok ? "ok" : `failed (${ping.reason})`}`,
+  ];
+  process.stdout.write(`${checks.join("\n")}\n`);
+  return ping.ok ? 0 : 1;
+}
+
+export async function runCli(argv: string[], context: CliContext): Promise<void> {
+  const command = argv[0] || "help";
+  let code = 0;
+  if (command === "install") code = runInstall(argv.slice(1), context);
+  else if (command === "doctor") code = runDoctor();
+  else if (command === "help" || command === "--help" || command === "-h") process.stdout.write(`${usage()}\n`);
+  else {
+    process.stderr.write(`${usage()}\n`);
+    code = 1;
+  }
+  if (code !== 0) process.exit(code);
+}

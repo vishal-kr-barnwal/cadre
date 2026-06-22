@@ -38,47 +38,46 @@ bd --version
 If `bd` is unavailable, `cadre-setup` stops before writing the project control
 plane.
 
-## Install The Plugin
+## Install Cadre
 
-Cadre ships as generated plugins for Claude Code and OpenAI Codex. Both plugin
-bundles are generated from the same master skill, MCP-served protocols,
-references, target-project templates, and TypeScript runtime.
+Cadre ships as the `cadre-ai` npm package. The package installs the global
+`cadre` CLI and `cadre-mcp` runtime, then `cadre install` writes thin client
+plugins for detected Claude Code and OpenAI Codex installations.
 
-### Claude Code
+```bash
+npm install -g cadre-ai
+cadre install
+cadre doctor
+```
 
-Claude reads the repository marketplace at `.claude-plugin/marketplace.json`.
+The installed plugins contain only platform wiring:
+
+- `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
+- `.mcp.json` for Codex or `mcp-config.json` for Claude.
+
+The plugin does not copy Cadre assets, worker agents, or MCP runtime scripts.
+The global `cadre-mcp` binary embeds the skill contract, protocols, references,
+target-project templates, resources, packet tools, jobs, and LSP helper modes.
+
+To target one client explicitly:
+
+```bash
+cadre install --target codex
+cadre install --target claude
+```
+
+For source development, repository marketplace shims remain available after the
+npm package is installed:
 
 ```text
 /plugin marketplace add vishal-kr-barnwal/Cadre
 /plugin install cadre@cadre
 ```
 
-The installed Claude plugin contains:
-
-- `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
-- `mcp-config.json` for the Cadre MCP server.
-- `assets/cadre/` with the skill contract, protocols, references, and templates.
-- `scripts/mcp/cadre-server.js`, the Cadre runtime for resources, packet tools,
-  jobs, and LSP helpers.
-- `agents/cadre-worker.md`, the Claude worker overlay for parallel dispatch.
-
-### OpenAI Codex
-
-Codex reads the repository marketplace at `.agents/plugins/marketplace.json`.
-
 ```bash
 codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
 codex plugin add cadre@cadre
 ```
-
-The installed Codex plugin contains:
-
-- `.codex-plugin/plugin.json`.
-- `.mcp.json` for the Cadre MCP server.
-- `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
-- `assets/cadre/` with the skill contract, protocols, references, and templates.
-- `scripts/mcp/cadre-server.js`, the Cadre runtime for resources, packet tools,
-  jobs, and LSP helpers.
 
 ## First Project Setup
 

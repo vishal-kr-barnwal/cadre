@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "cadre": {
-      "command": "node",
-      "args": [
-        "./scripts/mcp/cadre-server.js"
-      ],
+      "command": "cadre-mcp",
+      "args": [],
       "cwd": "."
     }
   }

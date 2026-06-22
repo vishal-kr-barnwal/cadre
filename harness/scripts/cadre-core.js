@@ -7928,12 +7928,39 @@ function workerDispatchPayload(root, track, worker, worktree, sourceRoot) {
     "Run the smallest relevant tests first, then the configured project gate when practical.",
     "Commit the worker worktree changes and return the structured result JSON."
   ].join("\n");
+  const recordFinishArguments = {
+    root,
+    action: "record_finish",
+    trackId: track.track_id,
+    workerId,
+    status: "awaiting_merge",
+    phaseIndex: worker.phase_index,
+    taskIndex: worker.task_index,
+    repo,
+    commitSha: "<commit-sha>",
+    coverage: "<coverage-number-or-null>",
+    filesChanged: ["<changed-file>"],
+    tests: [{ command: "<test-command>", cwd: worktree, ok: true, status: 0 }],
+    summary: "<worker-summary>",
+    blockers: []
+  };
   return {
     prompt,
+    canonical_worker_contract: "cadre_parallel.dispatch.v1",
     repo,
     worktree,
     source_root: sourceRoot,
     owned_files: ownedFiles,
+    platform_dispatch: {
+      claude: {
+        mechanism: "Task",
+        instruction: "Call the Task tool once for this prompt and dispatch payload. Return the result JSON to the coordinator."
+      },
+      codex: {
+        mechanism: "multi_agent_v1.spawn_agent",
+        instruction: "Use tool discovery for multi_agent_v1.spawn_agent, pass this prompt and dispatch payload, then wait for completion."
+      }
+    },
     expected_result_schema: {
       type: "object",
       required: ["worker_id", "task_key", "repo", "status", "summary", "files_changed", "tests", "commit_sha"],
@@ -7957,23 +7984,9 @@ function workerDispatchPayload(root, track, worker, worktree, sourceRoot) {
     },
     record_finish_packet: {
       tool: "cadre_parallel",
-      arguments: {
-        root,
-        action: "record_finish",
-        trackId: track.track_id,
-        workerId,
-        status: "awaiting_merge",
-        phaseIndex: worker.phase_index,
-        taskIndex: worker.task_index,
-        repo,
-        commitSha: "<commit-sha>",
-        coverage: "<coverage-number-or-null>",
-        filesChanged: ["<changed-file>"],
-        tests: [{ command: "<test-command>", cwd: worktree, ok: true, status: 0 }],
-        summary: "<worker-summary>",
-        blockers: []
-      }
-    }
+      arguments: recordFinishArguments
+    },
+    finish_evidence_fields: Object.keys(recordFinishArguments)
   };
 }
 function parallelSetupWorkers(root, track, args = {}) {

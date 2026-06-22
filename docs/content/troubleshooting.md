@@ -38,9 +38,21 @@ Symptoms:
 
 Fix:
 
-1. Confirm the Cadre plugin is installed.
-2. Restart the agent/client so plugin MCP configuration is reloaded.
-3. Run the workflow again.
+1. Confirm the global package is installed:
+
+   ```bash
+   npm install -g cadre-ai
+   cadre doctor
+   ```
+
+2. Confirm client plugin wiring:
+
+   ```bash
+   cadre install --check
+   ```
+
+3. Restart the agent/client so plugin MCP configuration is reloaded.
+4. Run the workflow again.
 
 Cadre workflows do not have a prompt-side degraded mode. If MCP is unavailable,
 repair plugin/runtime wiring instead of editing Cadre files manually.

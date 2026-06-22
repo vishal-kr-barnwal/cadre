@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -7,13 +7,13 @@ import { build } from "esbuild";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const entries = [
+  ["src/cli.ts", "scripts/cadre-cli.js", "cli"],
   ["src/cadre-core.ts", "scripts/cadre-core.js"],
   ["src/cadre-job-runner.ts", "scripts/cadre-job-runner.js"],
   ["src/cadre-lsp-setup.ts", "scripts/cadre-lsp-setup.js"],
   ["src/cadre-lsp-review.ts", "scripts/cadre-lsp-review.js"],
   ["src/cadre-lsp-daemon.ts", "scripts/cadre-lsp-daemon.js"],
-  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.js", "embedded"],
-  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.external.js", "external"]
+  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.js", "embedded"]
 ];
 
 const banner = [
@@ -60,15 +60,20 @@ const embeddedAssets = {
   templates: collectTemplates()
 };
 
+rmSync(path.join(repoRoot, "scripts/mcp/cadre-server.external.js"), { force: true });
+
 for (const [, outfile] of entries) {
   mkdirSync(path.dirname(path.join(repoRoot, outfile)), { recursive: true });
 }
 
 await Promise.all(
   entries.map(([entry, outfile, assetMode]) => {
-    const entryBanner = assetMode === "embedded"
-      ? `${banner}\nconst __CADRE_EMBEDDED_ASSETS__ = ${JSON.stringify(embeddedAssets)};`
-      : banner;
+    let entryBanner = banner;
+    if (assetMode === "embedded") {
+      entryBanner = `${banner}\nconst __CADRE_EMBEDDED_ASSETS__ = ${JSON.stringify(embeddedAssets)};`;
+    } else if (assetMode === "cli") {
+      entryBanner = `${banner}\nconst __CADRE_SKILL_SHIM__ = ${JSON.stringify(readFileSync(path.join(repoRoot, "skills/cadre/SKILL.md"), "utf8"))};`;
+    }
     return (
     build({
       entryPoints: [path.join(repoRoot, entry)],
@@ -78,7 +83,7 @@ await Promise.all(
       target: "node18",
       format: "cjs",
       legalComments: "none",
-      minify: assetMode === "external",
+      minify: false,
       banner: { js: entryBanner },
       logLevel: "silent"
     })

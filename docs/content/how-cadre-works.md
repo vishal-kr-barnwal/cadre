@@ -32,15 +32,15 @@ by hand.
 
 ## MCP Runtime
 
-The generated plugins bundle a dependency-free stdio MCP server:
+The `cadre-ai` npm package installs a dependency-free stdio MCP server:
 
 ```bash
-node scripts/mcp/cadre-server.js
+cadre-mcp
 ```
 
-Plugin runtimes load packaged Cadre contracts, workflow protocols, references,
-and target-project templates from `assets/cadre/`. The standalone harness
-runtime keeps an embedded asset copy for direct local use.
+The generated plugins are thin client entrypoints. They point Claude Code and
+OpenAI Codex at the global `cadre-mcp` runtime, which embeds Cadre contracts,
+workflow protocols, references, and target-project templates.
 
 The server exposes workflow tools and compact resources. Important tool groups
 include:

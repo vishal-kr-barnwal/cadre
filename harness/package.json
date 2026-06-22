@@ -1,16 +1,48 @@
 {
-  "name": "cadre-runtime",
+  "name": "cadre-ai",
   "version": "2.0.0",
-  "private": true,
-  "description": "TypeScript-built runtime scripts for Cadre LSP and MCP tooling.",
+  "description": "MCP-first Cadre workflows for context-driven development.",
+  "author": {
+    "name": "Vishal Barnwal",
+    "url": "https://github.com/vishal-kr-barnwal"
+  },
+  "homepage": "https://github.com/vishal-kr-barnwal/Cadre",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vishal-kr-barnwal/Cadre.git",
+    "directory": "harness"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "cadre",
+    "cadre-ai",
+    "context-driven-development",
+    "mcp",
+    "codex",
+    "claude",
+    "beads"
+  ],
   "type": "commonjs",
   "packageManager": "pnpm@11.4.0",
   "main": "scripts/cadre-core.js",
   "bin": {
+    "cadre": "scripts/cadre-cli.js",
+    "cadre-ai": "scripts/cadre-cli.js",
     "cadre-lsp-setup": "scripts/cadre-lsp-setup.js",
     "cadre-lsp-review": "scripts/cadre-lsp-review.js",
     "cadre-mcp": "scripts/mcp/cadre-server.js"
   },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "scripts/cadre-cli.js",
+    "scripts/cadre-core.js",
+    "scripts/cadre-job-runner.js",
+    "scripts/cadre-lsp-daemon.js",
+    "scripts/cadre-lsp-review.js",
+    "scripts/cadre-lsp-setup.js",
+    "scripts/mcp/cadre-server.js"
+  ],
   "scripts": {
     "build": "node scripts/build-runtime.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
@@ -20,7 +52,7 @@
     "check:runtime": "pnpm build:runtime",
     "check:generated": "bash scripts/generate-skills.sh --check",
     "check:test": "pnpm test",
-    "test": "node --test scripts/source-architecture.test.js scripts/cadre-core.test.js scripts/mcp/cadre-server.test.js scripts/protocol-packet-only.test.js && node scripts/cadre-team-scale-sim.js",
+    "test": "node --test scripts/source-architecture.test.js scripts/cadre-core.test.js scripts/cadre-cli.test.js scripts/mcp/cadre-server.test.js scripts/protocol-packet-only.test.js && node scripts/cadre-team-scale-sim.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

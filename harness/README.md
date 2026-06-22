@@ -19,9 +19,9 @@ workflow.
   shared sync, and compact MCP dashboard resources.
 - **Polyglot intelligence:** repo maps, dependency graphs, test impact,
   workspace diagnostics, LSP setup, warm LSP review, and async job artifacts.
-- **Two agent surfaces:** Claude Code and OpenAI Codex plugins are generated from
-  the same master skill, protocols, MCP-served references, MCP-owned templates,
-  and TypeScript runtime.
+- **Two agent surfaces:** Claude Code and OpenAI Codex plugins are thin MCP
+  entrypoints. The global `cadre-mcp` runtime owns the skill contract,
+  protocols, references, templates, and packet tools.
 
 ## Install
 
@@ -32,20 +32,12 @@ npm install -g @beads/bd
 bd --version
 ```
 
-Install the Cadre plugin from this repository's marketplace shim.
-
-Claude Code:
-
-```text
-/plugin marketplace add vishal-kr-barnwal/Cadre
-/plugin install cadre@cadre
-```
-
-OpenAI Codex:
+Install Cadre from npm and let the CLI wire detected clients:
 
 ```bash
-codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
-codex plugin add cadre@cadre
+npm install -g cadre-ai
+cadre install
+cadre doctor
 ```
 
 ## Use
@@ -114,7 +106,8 @@ pnpm check
 ```
 
 Generated plugin bundles under `.agents/`, `.claude/`, and `plugins/` are
-rebuilt from master sources. Edit the masters, then regenerate.
+rebuilt from master sources. They contain only platform manifests, MCP config,
+and `SKILL.md`; the embedded MCP runtime is built under `scripts/`.
 
 Public documentation lives in the repo-root `docs/` Next.js app. Markdown page
 source is in `docs/content/`:

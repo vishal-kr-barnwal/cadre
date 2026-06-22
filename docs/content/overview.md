@@ -17,11 +17,10 @@ spec-first tracks, Beads-backed task memory, review gates, team boards,
 parallel worker orchestration, and mono/polyrepo delivery.
 
 Cadre is not a prompt collection that asks agents to edit state by hand. The
-installed plugin bundles one Cadre MCP runtime, `SKILL.md`, and external
-`assets/cadre/` files for the skill contract, protocols, references, and
-templates. The runtime serves workflow protocols, references, template
-inventory, jobs, and LSP helper modes through MCP. Agents call Cadre packets,
-and those packets own Cadre state,
+installed plugins are thin MCP entrypoints with `SKILL.md` and client MCP
+configuration. The global `cadre-mcp` runtime embeds the skill contract,
+workflow protocols, references, template inventory, jobs, and LSP helper modes.
+Agents call Cadre packets, and those packets own Cadre state,
 Beads writes, review records, provider evidence, and derived indexes.
 
 ## Why Cadre Exists
@@ -47,20 +46,11 @@ npm install -g @beads/bd
 bd --version
 ```
 
-Install the Cadre plugin from this repository.
-
-Claude Code:
-
-```text
-/plugin marketplace add vishal-kr-barnwal/Cadre
-/plugin install cadre@cadre
-```
-
-OpenAI Codex:
+Install Cadre and wire detected clients:
 
 ```bash
-codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
-codex plugin add cadre@cadre
+npm install -g cadre-ai
+cadre install
 ```
 
 In a target project, activate Cadre and run setup:
@@ -110,8 +100,8 @@ not manually reconstruct Cadre state.
 - [How Cadre Works](how-cadre-works.md): packet-owned workflows, MCP, Beads,
   tracks, review gates, provider evidence, and code intelligence.
 - [Workflows](workflows.md): detailed guide for every `cadre-*` workflow.
-- [Architecture](architecture.md): harness package layout, generated plugin
-  bundles, source-of-truth files, and development commands.
+- [Architecture](architecture.md): harness package layout, thin generated
+  plugins, source-of-truth files, and development commands.
 - [Team And Polyrepo](team-and-polyrepo.md): shared sync, ownership, leases,
   fleet boards, cross-repo PR groups, and merge train behavior.
 - [Parallel Execution](parallel-execution.md): plan annotations, worker waves,
@@ -126,5 +116,5 @@ lives under `harness/`; the public documentation website lives in the root
 `docs/` Next.js app, with these Markdown pages under `docs/content/`.
 
 Generated plugin bundles under `harness/.agents/`, `harness/.claude/`, and
-`harness/plugins/` are rebuilt from master sources. Do not edit generated
-bundles by hand.
+`harness/plugins/` are rebuilt from master sources. They are thin client
+entrypoints; do not edit generated bundles by hand.

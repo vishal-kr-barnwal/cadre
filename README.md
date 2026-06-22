@@ -3,7 +3,7 @@
 # Cadre Harness Repository
 
 This repository builds and packages the Cadre workflow harness. The Cadre
-runtime, protocols, generated skills, plugin bundles, templates, and tests live
+runtime, protocols, generated skills, thin plugin bundles, templates, and tests live
 under [`harness/`](harness/). The public documentation website lives under
 [`docs/`](docs/), with Markdown source in [`docs/content/`](docs/content/).
 
@@ -22,11 +22,11 @@ cd harness
 pnpm check
 ```
 
-Install the Codex plugin from this repository with:
+Install Cadre from npm and wire supported clients with:
 
 ```bash
-codex plugin marketplace add vishal-kr-barnwal/Cadre --sparse .agents/plugins --sparse harness/plugins/cadre
-codex plugin add cadre@cadre
+npm install -g cadre-ai
+cadre install
 ```
 
 Start with the [Cadre documentation source](docs/content/overview.md) for

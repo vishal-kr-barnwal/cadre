@@ -4,6 +4,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
@@ -142,29 +143,25 @@ test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
   for (const file of [
     ".codex-plugin/plugin.json",
     ".mcp.json",
-    "scripts/mcp/cadre-server.js",
     "skills/cadre/SKILL.md",
-    "assets/cadre/skill.json",
-    "assets/cadre/templates/manifest.json",
-    "assets/cadre/references/mcp-contract.json",
-    "assets/cadre/protocols/cadre-setup.json",
   ]) {
     assert.ok(codexFiles.includes(file), `missing Codex plugin file ${file}`);
   }
   for (const file of [
     ".claude-plugin/plugin.json",
     "mcp-config.json",
-    "scripts/mcp/cadre-server.js",
     "skills/cadre/SKILL.md",
-    "agents/cadre-worker.md",
-    "assets/cadre/skill.json",
-    "assets/cadre/templates/manifest.json",
-    "assets/cadre/references/mcp-contract.json",
-    "assets/cadre/protocols/cadre-setup.json",
   ]) {
     assert.ok(claudeFiles.includes(file), `missing Claude plugin file ${file}`);
   }
-  for (const file of ["references/mcp-contract.json", "templates/manifest.json", "skills/cadre/skill.json"]) {
+  for (const file of [
+    "references/mcp-contract.json",
+    "templates/manifest.json",
+    "skills/cadre/skill.json",
+    "assets/cadre/skill.json",
+    "agents/cadre-worker.md",
+    "scripts/mcp/cadre-server.js",
+  ]) {
     assert.equal(codexFiles.includes(file), false, `unexpected Codex plugin file ${file}`);
     assert.equal(claudeFiles.includes(file), false, `unexpected Claude plugin file ${file}`);
   }
@@ -318,7 +315,6 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
     "mcp-config.json",
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
-    "agents/cadre-worker.md",
   ]);
 
   const codexFiles = new Set(collectFiles(codexPlugin));
@@ -348,9 +344,11 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
   assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
-  assert.equal(codexMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
+  assert.equal(codexMcp.mcpServers.cadre.command, "cadre-mcp");
+  assert.deepEqual(codexMcp.mcpServers.cadre.args, []);
   assert.equal(codexMcp.mcpServers.cadre.cwd, ".");
-  assert.equal(claudeMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
+  assert.equal(claudeMcp.mcpServers.cadre.command, "cadre-mcp");
+  assert.deepEqual(claudeMcp.mcpServers.cadre.args, []);
   assert.equal(claudeMcp.mcpServers.cadre.cwd, ".");
 
   assert.deepEqual(failures, []);
@@ -366,13 +364,10 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "protocols")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "references")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "templates")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "skill.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "protocols", "cadre-setup.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "references", "mcp-contract.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "templates", "manifest.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "agents")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "README.md")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "cadre-core.js")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "mcp", "cadre-server.js")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts")), false);
 
   const claudeManifest = readJson(path.join(root, "plugins", "cadre-claude", ".claude-plugin", "plugin.json"));
   assert.equal(claudeManifest.skills, "./skills/");
@@ -384,16 +379,16 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "protocols")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "references")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "templates")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "skill.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "protocols", "cadre-setup.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "references", "mcp-contract.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "templates", "manifest.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "README.md")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts", "cadre-core.js")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts", "mcp", "cadre-server.js")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts")), false);
   const codexMcp = readJson(path.join(root, "plugins", "cadre", ".mcp.json"));
   const claudeMcp = readJson(path.join(root, "plugins", "cadre-claude", "mcp-config.json"));
+  assert.equal(codexMcp.mcpServers.cadre.command, "cadre-mcp");
+  assert.deepEqual(codexMcp.mcpServers.cadre.args, []);
+  assert.equal(claudeMcp.mcpServers.cadre.command, "cadre-mcp");
+  assert.deepEqual(claudeMcp.mcpServers.cadre.args, []);
   assert.equal(codexMcp.mcpServers.cadre.cwd, ".");
   assert.equal(claudeMcp.mcpServers.cadre.cwd, ".");
 
@@ -408,25 +403,51 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(rootClaudeMarketplace.plugins[0].source, "./harness/plugins/cadre-claude");
 });
 
-test("Generated plugin MCP server stays small and loads external assets", () => {
+test("Generated plugins are thin MCP entrypoints", () => {
   for (const pluginDir of [
     path.join(root, "plugins", "cadre"),
     path.join(root, "plugins", "cadre-claude"),
   ]) {
-    const server = path.join(pluginDir, "scripts", "mcp", "cadre-server.js");
-    const text = fs.readFileSync(server, "utf8");
-    assert.ok(fs.statSync(server).size < 500 * 1024, `${path.relative(root, server)} should stay below 500 KB`);
-    assert.equal(/__CADRE_EMBEDDED_ASSETS__\s*=\s*\{/.test(text), false, `${path.relative(root, server)} should not embed Cadre assets`);
-    assert.equal(fs.existsSync(path.join(pluginDir, "assets", "cadre", "skill.json")), true);
-    assert.equal(fs.existsSync(path.join(pluginDir, "assets", "cadre", "templates", "manifest.json")), true);
+    assert.equal(fs.existsSync(path.join(pluginDir, "assets")), false, `${path.relative(root, pluginDir)} should not ship assets`);
+    assert.equal(fs.existsSync(path.join(pluginDir, "agents")), false, `${path.relative(root, pluginDir)} should not ship platform worker agents`);
+    assert.equal(fs.existsSync(path.join(pluginDir, "scripts")), false, `${path.relative(root, pluginDir)} should not copy MCP runtime`);
+  }
+  const server = path.join(root, "scripts", "mcp", "cadre-server.js");
+  const text = fs.readFileSync(server, "utf8");
+  assert.ok(fs.statSync(server).size > 500 * 1024, "global cadre-mcp should embed Cadre assets");
+  assert.equal(/__CADRE_EMBEDDED_ASSETS__\s*=\s*\{/.test(text), true, "global cadre-mcp should embed Cadre assets");
+});
+
+test("Install docs use the npm-first Cadre AI path", () => {
+  for (const file of [path.join(repoRoot, "README.md"), path.join(publicDocsRoot, "getting-started.md")]) {
+    const text = fs.readFileSync(file, "utf8");
+    assert.match(text, /npm install -g cadre-ai/);
+    assert.match(text, /cadre install/);
   }
 });
 
-test("Install docs use the repo-root Codex sparse plugin path", () => {
-  for (const file of [path.join(repoRoot, "README.md"), path.join(publicDocsRoot, "getting-started.md")]) {
-    const text = fs.readFileSync(file, "utf8");
-    assert.match(text, /--sparse harness\/plugins\/cadre/);
-    assert.doesNotMatch(text, /--sparse plugins\/cadre(?!-)/);
+test("NPM packlist contains only publishable runtime files", () => {
+  const result = spawnSync("pnpm", ["pack", "--dry-run", "--json"], { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.name, "cadre-ai");
+  const files = parsed.files.map((entry) => entry.path).sort();
+  for (const file of [
+    "LICENSE",
+    "README.md",
+    "package.json",
+    "scripts/cadre-cli.js",
+    "scripts/cadre-core.js",
+    "scripts/cadre-job-runner.js",
+    "scripts/cadre-lsp-daemon.js",
+    "scripts/cadre-lsp-review.js",
+    "scripts/cadre-lsp-setup.js",
+    "scripts/mcp/cadre-server.js",
+  ]) {
+    assert.ok(files.includes(file), `packlist missing ${file}`);
+  }
+  for (const prefix of ["src/", "plugins/", ".agents/", ".claude/", "templates/", "skills/", "scripts/mcp/cadre-server.external.js"]) {
+    assert.equal(files.some((file) => file === prefix || file.startsWith(prefix)), false, `packlist should exclude ${prefix}`);
   }
 });
 

@@ -263,19 +263,19 @@ test("LSP setup JSON and daemon status/shutdown smoke", async () => {
   }
 });
 
-test("Generated plugin MCP runtime writes setup and newtrack artifacts from external assets", async () => {
+test("Global embedded MCP runtime writes setup and newtrack artifacts while plugins stay thin", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plugin-embedded-test-"));
   const pluginRoot = path.resolve(__dirname, "..", "..", "plugins", "cadre");
-  const serverPath = path.join(pluginRoot, "scripts", "mcp", "cadre-server.js");
+  const serverPath = path.join(__dirname, "cadre-server.js");
   assert.equal(fs.existsSync(path.join(pluginRoot, "templates")), false);
   assert.equal(fs.existsSync(path.join(pluginRoot, "references")), false);
   assert.equal(fs.existsSync(path.join(pluginRoot, "skills", "cadre", "skill.json")), false);
-  assert.equal(fs.existsSync(path.join(pluginRoot, "assets", "cadre", "templates", "manifest.json")), true);
-  assert.equal(fs.existsSync(path.join(pluginRoot, "assets", "cadre", "references", "mcp-contract.json")), true);
-  assert.equal(fs.existsSync(path.join(pluginRoot, "assets", "cadre", "protocols", "cadre-setup.json")), true);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "assets")), false);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "agents")), false);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "scripts")), false);
   const { server, request } = startServer({
     serverPath,
-    cwd: pluginRoot,
+    cwd: path.resolve(__dirname, "..", ".."),
     env: { PATH: `${installFakeBd(root)}:${process.env.PATH || ""}` },
   });
   try {
