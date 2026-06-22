@@ -7,6 +7,8 @@ runtime, protocols, skill shim, templates, and tests live
 under [`harness/`](harness/). The public documentation website lives under
 [`docs/`](docs/), with Markdown source in [`docs/content/`](docs/content/).
 
+Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
+
 Root files are intentionally thin:
 
 - `AGENTS.md` and `CLAUDE.md` describe how agents should work on this harness.
@@ -31,6 +33,6 @@ npm install -g cadre-ai
 cadre install
 ```
 
-Start with the [Cadre documentation source](docs/content/overview.md) for
+Start with the [Cadre documentation](https://cadre-docs.pages.dev/) for
 installation, workflow, architecture, team, polyrepo, and troubleshooting
 details, or run the docs website locally from `docs/`.

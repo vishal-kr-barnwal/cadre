@@ -9,6 +9,8 @@ spec-first tracks, Beads-backed durable task memory, review gates, team boards,
 parallel worker orchestration, and mono/polyrepo delivery into one packet-owned
 workflow.
 
+Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
+
 ## What Cadre Provides
 
 - **Structured work:** setup, new track, implementation, review, ship/land,

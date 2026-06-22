@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.0.1] - 2026-06-22
+## [1.0.0] - 2026-06-22
 
-Initial public `cadre-ai` package release after the npm bootstrap package.
+Stable public `cadre-ai` package release.
 
 ### Added
 

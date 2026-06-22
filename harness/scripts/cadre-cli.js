@@ -116,7 +116,7 @@ function readPackageMetadata(runtimeRoot) {
     return {
       version: typeof json.version === "string" ? json.version : "0.0.0",
       description: typeof json.description === "string" ? json.description : "MCP-first Cadre workflows.",
-      homepage: typeof json.homepage === "string" ? json.homepage : "https://github.com/vishal-kr-barnwal/cadre",
+      homepage: typeof json.homepage === "string" ? json.homepage : "https://cadre-docs.pages.dev/",
       repository: typeof json.repository === "string" ? json.repository : "https://github.com/vishal-kr-barnwal/cadre",
       license: typeof json.license === "string" ? json.license : "Apache-2.0"
     };
@@ -124,7 +124,7 @@ function readPackageMetadata(runtimeRoot) {
     return {
       version: "0.0.0",
       description: "MCP-first Cadre workflows.",
-      homepage: "https://github.com/vishal-kr-barnwal/cadre",
+      homepage: "https://cadre-docs.pages.dev/",
       repository: "https://github.com/vishal-kr-barnwal/cadre",
       license: "Apache-2.0"
     };

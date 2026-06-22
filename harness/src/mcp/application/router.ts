@@ -65,7 +65,7 @@ export function createMcpRuntime(deps: RuntimeDependencies) {
       return {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { resources: { listChanged: false }, tools: { listChanged: false } },
-        serverInfo: { name: "cadre", version: "0.0.1" },
+        serverInfo: { name: "cadre", version: "1.0.0" },
         instructions: SERVER_INSTRUCTIONS,
       };
     }
