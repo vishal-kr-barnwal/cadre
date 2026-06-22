@@ -39,7 +39,7 @@ export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): Relea
   const releaseJson = path.join(releaseDir, `${releaseSlug}.json`);
   const notes = asOptionalString(args.releaseNotes || args.release_notes)
     || [
-      `# Release ${version}`,
+      `# Release - ${version}`,
       "",
       `Generated: ${generatedAt}`,
       "",

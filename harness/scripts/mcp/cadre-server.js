@@ -6722,7 +6722,7 @@ function artifactDefinitions(root, args = {}) {
   for (const file of safeReadDir(releasesDir)) {
     if (!file.endsWith(".json")) continue;
     const version = import_node_path27.default.basename(file, ".json");
-    defs.push({ id: `release:${version}`, title: `Release ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
+    defs.push({ id: `release:${version}`, title: `Release - ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
   }
   const jobsDir = import_node_path27.default.join(root, "cadre", "jobs");
   for (const file of safeReadDir(jobsDir)) {
@@ -6839,7 +6839,7 @@ function renderArtifact(root, def, args = {}) {
 }
 function releaseMarkdownFromMetadata(metadata) {
   const version = asOptionalString(metadata.version) || "release";
-  const parts = [`# Release ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
+  const parts = [`# Release - ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
   for (const rawTrack of asArray(metadata.completed_tracks)) {
     const track = asJsonObject(rawTrack);
     parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
@@ -9118,7 +9118,7 @@ function releaseArtifactPlan(root, args = {}) {
   const releaseMd = import_node_path38.default.join(releaseDir, `${releaseSlug}.md`);
   const releaseJson = import_node_path38.default.join(releaseDir, `${releaseSlug}.json`);
   const notes = asOptionalString(args.releaseNotes || args.release_notes) || [
-    `# Release ${version}`,
+    `# Release - ${version}`,
     "",
     `Generated: ${generatedAt}`,
     "",

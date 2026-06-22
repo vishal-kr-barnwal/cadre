@@ -194,7 +194,7 @@ export function artifactDefinitions(root: string, args: RuntimeArgs = {}): Artif
   for (const file of safeReadDir(releasesDir)) {
     if (!file.endsWith(".json")) continue;
     const version = path.basename(file, ".json");
-    defs.push({ id: `release:${version}`, title: `Release ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
+    defs.push({ id: `release:${version}`, title: `Release - ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
   }
   const jobsDir = path.join(root, "cadre", "jobs");
   for (const file of safeReadDir(jobsDir)) {

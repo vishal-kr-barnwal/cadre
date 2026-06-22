@@ -107,7 +107,7 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
 
 export function releaseMarkdownFromMetadata(metadata: JsonObject): string {
   const version = asOptionalString(metadata.version) || "release";
-  const parts = [`# Release ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
+  const parts = [`# Release - ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
   for (const rawTrack of asArray(metadata.completed_tracks)) {
     const track = asJsonObject(rawTrack);
     parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
