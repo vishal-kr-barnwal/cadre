@@ -8608,6 +8608,9 @@ function beadsOperationMutates(operation) {
 
 // src/mcp/domain/resource-catalog.ts
 var RESOURCE_DEFINITIONS = [
+  { uri: "cadre://agent-references", name: "Cadre agent references", description: "Packaged Cadre agent reference catalog. Read without a project root." },
+  { uri: "cadre://agent-reference", name: "Cadre agent reference", description: "Packaged Cadre agent reference JSON. Read with ?name=<reference-id>." },
+  { uri: "cadre://template-inventory", name: "Cadre template inventory", description: "Packaged target-project template manifest. Read without a project root." },
   { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project." },
   { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path." },
   { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path." },
@@ -8640,6 +8643,9 @@ var RESOURCE_DEFINITIONS = [
   { uri: "cadre://styleguide-selection", name: "Cadre styleguide selection", description: "Selected style guidance for a track or file list. Read with ?root=/path&trackId=<id>&files=a,b." }
 ];
 var RESOURCE_CONTRACTS = {
+  "cadre://agent-references": { required: [] },
+  "cadre://agent-reference": { required: ["name"] },
+  "cadre://template-inventory": { required: [] },
   "cadre://team-board": { required: ["root"] },
   "cadre://fleet-board": { required: ["root"] },
   "cadre://beads-summary": { required: ["root"] },
@@ -8708,6 +8714,7 @@ function parseResourceUri(uri) {
     trackId: params.get("trackId"),
     symbol: params.get("symbol"),
     workflow: params.get("workflow"),
+    name: params.get("name"),
     artifact: params.get("artifact"),
     scope: params.get("scope"),
     jobId: params.get("jobId"),
@@ -8999,6 +9006,7 @@ var TOOLS = [
 ];
 
 // src/mcp/application/resources-service.ts
+var import_node_fs20 = __toESM(require("node:fs"));
 var import_node_path37 = __toESM(require("node:path"));
 function normalizeResourceArgs(resource) {
   const args = {
@@ -9030,104 +9038,172 @@ function workspaceHealth2(root, args = {}) {
 function integrations(root, args = {}) {
   return asJsonObject(integrationInventory(root, args));
 }
+function safeAssetName(name) {
+  const normalized = name.trim();
+  return /^[a-z0-9-]+$/.test(normalized) ? normalized : null;
+}
+function packageAssetPath(kind, relativePath) {
+  const candidates = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (candidate) => {
+    if (seen.has(candidate)) return;
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+  let dir = __dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (kind === "references") {
+      add(import_node_path37.default.join(dir, "references", relativePath));
+      add(import_node_path37.default.join(dir, "scripts", "agent-refs", relativePath));
+      add(import_node_path37.default.join(dir, "skills", "cadre", "references", relativePath));
+    } else {
+      add(import_node_path37.default.join(dir, "templates", relativePath));
+      add(import_node_path37.default.join(dir, "skills", "cadre", "templates", relativePath));
+    }
+    const parent = import_node_path37.default.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  for (const candidate of candidates) {
+    if (import_node_fs20.default.existsSync(candidate) && import_node_fs20.default.statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+function packageAssetDir(kind) {
+  const manifest = packageAssetPath(kind, kind === "references" ? "mcp-contract.json" : "manifest.json");
+  return manifest ? import_node_path37.default.dirname(manifest) : null;
+}
+function readPackageJson(file) {
+  return asJsonObject(JSON.parse(import_node_fs20.default.readFileSync(file, "utf8")));
+}
+function agentReferenceCatalog() {
+  const dir = packageAssetDir("references");
+  const references = dir ? import_node_fs20.default.readdirSync(dir).filter((file) => file.endsWith(".json")).sort().map((file) => {
+    const reference = readPackageJson(import_node_path37.default.join(dir, file));
+    const id = asOptionalString(reference.id) || file.replace(/\.json$/, "");
+    return {
+      id,
+      title: asOptionalString(reference.title) || id,
+      uri: `cadre://agent-reference?name=${encodeURIComponent(id)}`
+    };
+  }) : [];
+  return { ok: true, references };
+}
+function agentReference(name) {
+  const safeName2 = name ? safeAssetName(name) : null;
+  if (!safeName2) return { ok: false, error: "name is required and must be a reference id" };
+  const file = packageAssetPath("references", `${safeName2}.json`);
+  if (!file) return { ok: false, error: `Unknown agent reference: ${safeName2}` };
+  return { ok: true, reference: readPackageJson(file) };
+}
+function templateInventory() {
+  const file = packageAssetPath("templates", "manifest.json");
+  if (!file) return { ok: false, error: "Template manifest not found" };
+  return { ok: true, templates: readPackageJson(file) };
+}
 function resourceRead(uri, deps) {
   const resource = parseResourceUri(uri);
   const normalizedResource = normalizeResourceArgs(resource);
-  const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
   let value;
-  if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
-  else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
-  else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
-  else if (resource.base === "cadre://workspace-health") value = workspaceHealth2(root, normalizedResource);
-  else if (resource.base === "cadre://integrations") value = integrations(root, normalizedResource);
-  else if (resource.base === "cadre://track-context") value = deps.core.trackContext(root, resource.trackId);
-  else if (resource.base === "cadre://review-evidence") value = deps.core.reviewEvidence(root, resource.trackId);
-  else if (resource.base === "cadre://collisions") value = deps.core.collisionScan(root);
-  else if (resource.base === "cadre://repo-map") value = deps.core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
-  else if (resource.base === "cadre://workspace-diagnostics") value = deps.core.workspaceDiagnostics(root);
-  else if (resource.base === "cadre://lsp-status") value = { ok: true, status: deps.core.lspConfigStatus(root), setup: deps.core.lspSetup(root, { execute: false }) };
-  else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: deps.core.loadTopology(root) };
-  else if (resource.base === "cadre://ship-plan") value = deps.core.workflowPacket(root, { workflow: "ship", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://land-plan") value = deps.core.workflowPacket(root, { workflow: "land", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://release-plan") value = deps.core.workflowPacket(root, { workflow: "release" });
-  else if (resource.base === "cadre://my-next-actions") {
-    const mine = deps.core.teamBoard(root, { mine: true });
-    const available = deps.core.availableWork(root);
-    value = {
-      ok: mine.ok !== false && available.ok !== false,
-      mine: {
-        wip: Array.isArray(mine.wip) ? mine.wip : [],
-        incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
-        review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : []
-      },
-      available: Array.isArray(available.available) ? available.available : [],
-      reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : []
-    };
-  } else if (resource.base === "cadre://review-queue") {
-    const board = deps.core.teamBoard(root);
-    value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
-  } else if (resource.base === "cadre://handoff-inbox") {
-    const board = deps.core.teamBoard(root, { mine: true });
-    value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
-  } else if (resource.base === "cadre://parallel-state") value = deps.core.parallelWorkflow(root, { action: "plan", trackId: resource.trackId || void 0 });
-  else if (resource.base === "cadre://quality-gate") {
-    if (!resource.trackId) value = { ok: false, error: "trackId is required" };
-    else value = {
-      ok: true,
-      track_id: resource.trackId,
-      integrity: deps.core.planIntegrity(root, resource.trackId),
-      review_gate: deps.core.reviewGate(root, resource.trackId, {}),
-      collisions: deps.core.collisionScan(root)
-    };
-  } else if (resource.base === "cadre://test-impact") value = deps.core.testImpact(root, {
-    files: resource.files,
-    base: resource.baseRef || void 0,
-    head: resource.headRef || void 0
-  });
-  else if (resource.base === "cadre://track-plan") {
-    const context = deps.core.trackContext(root, resource.trackId);
-    const track = asJsonObject(asJsonObject(context).track);
-    const planPath = asOptionalString(track.plan_json_path);
-    value = context.ok === false || !planPath ? context : deps.core.parsePlanFile(import_node_path37.default.resolve(root, planPath));
-  } else if (resource.base === "cadre://track-spec") {
-    value = resource.trackId ? deps.core.artifactRender(root, { artifact: `track:${resource.trackId}:spec` }) : { ok: false, error: "trackId is required" };
-  } else if (resource.base === "cadre://job-result") {
-    const persisted = deps.jobs.loadPersisted(root, resource.jobId);
-    value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
-  } else if (resource.base === "cadre://provider-actions") {
-    const workflow = resource.workflow === "land" ? "land" : "ship";
-    const plan = asJsonObject(deps.core.workflowPacket(root, { workflow, trackId: resource.trackId || void 0 }));
-    value = {
-      ok: plan.ok !== false,
-      workflow,
-      track_id: resource.trackId,
-      phase_state: plan.phase_state,
-      provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
-      required_provider_mcp: plan.required_provider_mcp || null,
-      required_evidence: plan.required_evidence || null,
-      continuation_token: plan.continuation_token || null
-    };
-  } else if (resource.base === "cadre://artifact-catalog") {
-    value = deps.core.artifactCatalog(root, normalizedResource);
-  } else if (resource.base === "cadre://artifact-schema") {
-    value = deps.core.artifactSchema(resource.artifact || normalizedResource.artifact || "catalog");
-  } else if (resource.base === "cadre://artifact-preview") {
-    value = resource.artifact ? deps.core.artifactRender(root, normalizedResource) : { ok: false, error: "artifact is required" };
-  } else if (resource.base === "cadre://artifact-sync-plan") {
-    value = deps.core.artifactSync(root, { ...normalizedResource, execute: false });
-  } else if (resource.base === "cadre://styleguide-selection") {
-    value = {
-      ok: true,
-      track_id: resource.trackId,
+  if (resource.base === "cadre://agent-references") value = agentReferenceCatalog();
+  else if (resource.base === "cadre://agent-reference") value = agentReference(resource.name);
+  else if (resource.base === "cadre://template-inventory") value = templateInventory();
+  else {
+    const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
+    if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
+    else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
+    else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
+    else if (resource.base === "cadre://workspace-health") value = workspaceHealth2(root, normalizedResource);
+    else if (resource.base === "cadre://integrations") value = integrations(root, normalizedResource);
+    else if (resource.base === "cadre://track-context") value = deps.core.trackContext(root, resource.trackId);
+    else if (resource.base === "cadre://review-evidence") value = deps.core.reviewEvidence(root, resource.trackId);
+    else if (resource.base === "cadre://collisions") value = deps.core.collisionScan(root);
+    else if (resource.base === "cadre://repo-map") value = deps.core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
+    else if (resource.base === "cadre://workspace-diagnostics") value = deps.core.workspaceDiagnostics(root);
+    else if (resource.base === "cadre://lsp-status") value = { ok: true, status: deps.core.lspConfigStatus(root), setup: deps.core.lspSetup(root, { execute: false }) };
+    else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: deps.core.loadTopology(root) };
+    else if (resource.base === "cadre://ship-plan") value = deps.core.workflowPacket(root, { workflow: "ship", trackId: resource.trackId || void 0 });
+    else if (resource.base === "cadre://land-plan") value = deps.core.workflowPacket(root, { workflow: "land", trackId: resource.trackId || void 0 });
+    else if (resource.base === "cadre://release-plan") value = deps.core.workflowPacket(root, { workflow: "release" });
+    else if (resource.base === "cadre://my-next-actions") {
+      const mine = deps.core.teamBoard(root, { mine: true });
+      const available = deps.core.availableWork(root);
+      value = {
+        ok: mine.ok !== false && available.ok !== false,
+        mine: {
+          wip: Array.isArray(mine.wip) ? mine.wip : [],
+          incoming_handoffs: Array.isArray(mine.incoming_handoffs) ? mine.incoming_handoffs : [],
+          review_queue: Array.isArray(mine.review_queue) ? mine.review_queue : []
+        },
+        available: Array.isArray(available.available) ? available.available : [],
+        reclaimable: Array.isArray(available.reclaimable) ? available.reclaimable : []
+      };
+    } else if (resource.base === "cadre://review-queue") {
+      const board = deps.core.teamBoard(root);
+      value = { ok: board.ok !== false, review_queue: Array.isArray(board.review_queue) ? board.review_queue : [] };
+    } else if (resource.base === "cadre://handoff-inbox") {
+      const board = deps.core.teamBoard(root, { mine: true });
+      value = { ok: board.ok !== false, incoming_handoffs: Array.isArray(board.incoming_handoffs) ? board.incoming_handoffs : [] };
+    } else if (resource.base === "cadre://parallel-state") value = deps.core.parallelWorkflow(root, { action: "plan", trackId: resource.trackId || void 0 });
+    else if (resource.base === "cadre://quality-gate") {
+      if (!resource.trackId) value = { ok: false, error: "trackId is required" };
+      else value = {
+        ok: true,
+        track_id: resource.trackId,
+        integrity: deps.core.planIntegrity(root, resource.trackId),
+        review_gate: deps.core.reviewGate(root, resource.trackId, {}),
+        collisions: deps.core.collisionScan(root)
+      };
+    } else if (resource.base === "cadre://test-impact") value = deps.core.testImpact(root, {
       files: resource.files,
-      catalog: deps.core.artifactCatalog(root, { ...normalizedResource, scope: "styleguides" })
-    };
-  } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
+      base: resource.baseRef || void 0,
+      head: resource.headRef || void 0
+    });
+    else if (resource.base === "cadre://track-plan") {
+      const context = deps.core.trackContext(root, resource.trackId);
+      const track = asJsonObject(asJsonObject(context).track);
+      const planPath = asOptionalString(track.plan_json_path);
+      value = context.ok === false || !planPath ? context : deps.core.parsePlanFile(import_node_path37.default.resolve(root, planPath));
+    } else if (resource.base === "cadre://track-spec") {
+      value = resource.trackId ? deps.core.artifactRender(root, { artifact: `track:${resource.trackId}:spec` }) : { ok: false, error: "trackId is required" };
+    } else if (resource.base === "cadre://job-result") {
+      const persisted = deps.jobs.loadPersisted(root, resource.jobId);
+      value = persisted || { ok: false, error: `Job not found: ${resource.jobId}` };
+    } else if (resource.base === "cadre://provider-actions") {
+      const workflow = resource.workflow === "land" ? "land" : "ship";
+      const plan = asJsonObject(deps.core.workflowPacket(root, { workflow, trackId: resource.trackId || void 0 }));
+      value = {
+        ok: plan.ok !== false,
+        workflow,
+        track_id: resource.trackId,
+        phase_state: plan.phase_state,
+        provider_actions: Array.isArray(plan.provider_actions) ? plan.provider_actions : [],
+        required_provider_mcp: plan.required_provider_mcp || null,
+        required_evidence: plan.required_evidence || null,
+        continuation_token: plan.continuation_token || null
+      };
+    } else if (resource.base === "cadre://artifact-catalog") {
+      value = deps.core.artifactCatalog(root, normalizedResource);
+    } else if (resource.base === "cadre://artifact-schema") {
+      value = deps.core.artifactSchema(resource.artifact || normalizedResource.artifact || "catalog");
+    } else if (resource.base === "cadre://artifact-preview") {
+      value = resource.artifact ? deps.core.artifactRender(root, normalizedResource) : { ok: false, error: "artifact is required" };
+    } else if (resource.base === "cadre://artifact-sync-plan") {
+      value = deps.core.artifactSync(root, { ...normalizedResource, execute: false });
+    } else if (resource.base === "cadre://styleguide-selection") {
+      value = {
+        ok: true,
+        track_id: resource.trackId,
+        files: resource.files,
+        catalog: deps.core.artifactCatalog(root, { ...normalizedResource, scope: "styleguides" })
+      };
+    } else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
+  }
   return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
 }
 
 // src/mcp/application/review-support.ts
-var import_node_fs20 = __toESM(require("node:fs"));
+var import_node_fs21 = __toESM(require("node:fs"));
 var import_node_path38 = __toESM(require("node:path"));
 function selectedRepos(args) {
   const values = [
@@ -9196,7 +9272,7 @@ async function warmLspReview(deps, root, args) {
   const repos = await Promise.all(targets.map(async (target) => {
     const cwd = asOptionalString(target.cwd) || root;
     const repo = asOptionalString(target.repo) || ".";
-    if (!import_node_fs20.default.existsSync(cwd)) {
+    if (!import_node_fs21.default.existsSync(cwd)) {
       const result2 = {
         available: false,
         reason: `Repo working root is missing: ${cwd}`,
@@ -9516,7 +9592,7 @@ function createMcpRuntime(deps) {
 }
 
 // src/mcp/infrastructure/job-manager.ts
-var import_node_fs21 = __toESM(require("node:fs"));
+var import_node_fs22 = __toESM(require("node:fs"));
 var import_node_path40 = __toESM(require("node:path"));
 var import_node_crypto3 = __toESM(require("node:crypto"));
 var import_node_child_process4 = require("node:child_process");
@@ -9552,10 +9628,10 @@ var JobManager = class {
   }
   persist(job) {
     try {
-      import_node_fs21.default.mkdirSync(this.jobDir(job.root), { recursive: true });
+      import_node_fs22.default.mkdirSync(this.jobDir(job.root), { recursive: true });
       const artifactPath = this.jobPath(job.root, job.id);
       job.artifact_path = import_node_path40.default.relative(job.root, artifactPath);
-      import_node_fs21.default.writeFileSync(artifactPath, `${JSON.stringify(this.serialize(job), null, 2)}
+      import_node_fs22.default.writeFileSync(artifactPath, `${JSON.stringify(this.serialize(job), null, 2)}
 `);
     } catch {
     }
@@ -9564,7 +9640,7 @@ var JobManager = class {
     if (!id) return null;
     const file = this.jobPath(root, id);
     try {
-      const parsed = asJsonObject(JSON.parse(import_node_fs21.default.readFileSync(file, "utf8")));
+      const parsed = asJsonObject(JSON.parse(import_node_fs22.default.readFileSync(file, "utf8")));
       return {
         ...parsed,
         persisted: true,
@@ -9604,7 +9680,7 @@ var JobManager = class {
   }
   persistedJobIds(root) {
     try {
-      return import_node_fs21.default.readdirSync(this.jobDir(root)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5));
+      return import_node_fs22.default.readdirSync(this.jobDir(root)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5));
     } catch {
       return [];
     }
@@ -9784,12 +9860,12 @@ var LspDaemonClient = class {
 };
 
 // src/mcp/infrastructure/root-resolution.ts
-var import_node_fs22 = __toESM(require("node:fs"));
+var import_node_fs23 = __toESM(require("node:fs"));
 var import_node_path42 = __toESM(require("node:path"));
 var import_node_url = require("node:url");
 function isDirectory(file) {
   try {
-    return import_node_fs22.default.statSync(file).isDirectory();
+    return import_node_fs23.default.statSync(file).isDirectory();
   } catch {
     return false;
   }
@@ -9807,7 +9883,7 @@ function isCadreStateDirectory(dir) {
     "beads.json",
     "config.json",
     "repos.json"
-  ].some((name) => import_node_fs22.default.existsSync(import_node_path42.default.join(dir, name))) || isDirectory(import_node_path42.default.join(dir, "tracks"));
+  ].some((name) => import_node_fs23.default.existsSync(import_node_path42.default.join(dir, name))) || isDirectory(import_node_path42.default.join(dir, "tracks"));
 }
 function hasCadreProjectState(dir) {
   return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path42.default.join(dir, "cadre"));
@@ -9824,7 +9900,7 @@ function normalizePathCandidate(value) {
   }
   candidate = import_node_path42.default.resolve(candidate);
   try {
-    if (import_node_fs22.default.existsSync(candidate) && !import_node_fs22.default.statSync(candidate).isDirectory()) candidate = import_node_path42.default.dirname(candidate);
+    if (import_node_fs23.default.existsSync(candidate) && !import_node_fs23.default.statSync(candidate).isDirectory()) candidate = import_node_path42.default.dirname(candidate);
   } catch {
     return null;
   }

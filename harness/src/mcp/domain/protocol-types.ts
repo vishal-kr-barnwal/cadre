@@ -43,6 +43,7 @@ export interface ResourceQuery extends JsonObject {
   trackId: string | null;
   symbol: string | null;
   workflow: string | null;
+  name: string | null;
   artifact: string | null;
   scope: string | null;
   jobId: string | null;

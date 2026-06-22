@@ -2,9 +2,11 @@
 
 # Cadre Claude Code Plugin
 
-This generated plugin packages the Cadre skill, workflow protocols, templates,
-and MCP server for Claude Code. Edit the master workflow sources under
-`skills/cadre/protocols/`, runtime TypeScript under `src/`, then run:
+This generated plugin packages the Cadre skill, workflow protocols, MCP-served
+references and template inventory, and MCP server for Claude Code. Edit the master
+workflow sources under `skills/cadre/protocols/`, reference masters under
+`scripts/agent-refs/`, templates under `templates/`, and runtime TypeScript
+under `src/`, then run:
 
 ```bash
 pnpm generate

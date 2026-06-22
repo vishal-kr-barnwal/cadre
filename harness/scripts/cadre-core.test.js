@@ -462,6 +462,8 @@ test("build emits every required runtime bundle path", () => {
     "templates/scripts/cadre-lsp-setup.js",
     "templates/scripts/cadre-lsp-review.js",
     "templates/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre/templates/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-claude/templates/scripts/cadre-lsp-review.js",
     "plugins/cadre/skills/cadre/templates/scripts/cadre-lsp-setup.js",
     "plugins/cadre-claude/skills/cadre/templates/scripts/cadre-lsp-review.js",
   ]) {

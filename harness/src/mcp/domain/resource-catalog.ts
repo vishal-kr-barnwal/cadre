@@ -14,6 +14,9 @@ type ResourceContract = {
 };
 
 const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
+  { uri: "cadre://agent-references", name: "Cadre agent references", description: "Packaged Cadre agent reference catalog. Read without a project root." },
+  { uri: "cadre://agent-reference", name: "Cadre agent reference", description: "Packaged Cadre agent reference JSON. Read with ?name=<reference-id>." },
+  { uri: "cadre://template-inventory", name: "Cadre template inventory", description: "Packaged target-project template manifest. Read without a project root." },
   { uri: "cadre://team-board", name: "Cadre team board", description: "Rich team board. Read with ?root=/path/to/project." },
   { uri: "cadre://fleet-board", name: "Cadre fleet board", description: "Mono/polyrepo fleet status. Read with ?root=/path." },
   { uri: "cadre://beads-summary", name: "Cadre Beads summary", description: "Beads ready/WIP/review summary. Read with ?root=/path." },
@@ -47,6 +50,9 @@ const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
 ];
 
 const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
+  "cadre://agent-references": { required: [] },
+  "cadre://agent-reference": { required: ["name"] },
+  "cadre://template-inventory": { required: [] },
   "cadre://team-board": { required: ["root"] },
   "cadre://fleet-board": { required: ["root"] },
   "cadre://beads-summary": { required: ["root"] },
@@ -119,6 +125,7 @@ export function parseResourceUri(uri: string): ResourceQuery {
     trackId: params.get("trackId"),
     symbol: params.get("symbol"),
     workflow: params.get("workflow"),
+    name: params.get("name"),
     artifact: params.get("artifact"),
     scope: params.get("scope"),
     jobId: params.get("jobId"),

@@ -18,10 +18,8 @@ const protocolDirs = [
 ];
 const referenceDirs = [
   path.join(root, "scripts", "agent-refs"),
-  path.join(root, ".agents", "skills", "cadre", "references"),
-  path.join(root, ".claude", "skills", "cadre", "references"),
-  path.join(root, "plugins", "cadre", "skills", "cadre", "references"),
-  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "references"),
+  path.join(root, "plugins", "cadre", "references"),
+  path.join(root, "plugins", "cadre-claude", "references"),
 ];
 const skillDirs = [
   path.join(root, "skills", "cadre"),
@@ -32,10 +30,8 @@ const skillDirs = [
 ];
 const workflowJsonFiles = [
   path.join(root, "templates", "workflow.json"),
-  path.join(root, ".agents", "skills", "cadre", "templates", "workflow.json"),
-  path.join(root, ".claude", "skills", "cadre", "templates", "workflow.json"),
-  path.join(root, "plugins", "cadre", "skills", "cadre", "templates", "workflow.json"),
-  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "templates", "workflow.json"),
+  path.join(root, "plugins", "cadre", "templates", "workflow.json"),
+  path.join(root, "plugins", "cadre-claude", "templates", "workflow.json"),
 ];
 
 function jsonFiles(dir) {
@@ -131,8 +127,22 @@ test("Skill JSON is the authoritative workflow and reference router", () => {
       assert.match(workflow.protocol, /^protocols\/cadre-[a-z-]+\.json$/);
     }
     for (const reference of Object.values(skill.references)) {
-      assert.match(reference.path, /^references\/[a-z-]+\.json$/);
+      assert.equal(Object.prototype.hasOwnProperty.call(reference, "path"), false);
+      assert.match(reference.uri, /^cadre:\/\/agent-reference\?name=[a-z-]+$/);
     }
+  }
+});
+
+test("Generated skill bundles omit MCP-owned reference and template assets", () => {
+  const generatedSkillDirs = skillDirs.filter((dir) => dir !== path.join(root, "skills", "cadre"));
+  for (const dir of generatedSkillDirs) {
+    assert.equal(fs.existsSync(path.join(dir, "references")), false, path.relative(root, dir));
+    assert.equal(fs.existsSync(path.join(dir, "templates")), false, path.relative(root, dir));
+  }
+  for (const pluginDir of [path.join(root, "plugins", "cadre"), path.join(root, "plugins", "cadre-claude")]) {
+    assert.equal(fs.existsSync(path.join(pluginDir, "references", "mcp-contract.json")), true);
+    assert.equal(fs.existsSync(path.join(pluginDir, "templates", "manifest.json")), true);
+    assert.equal(fs.existsSync(path.join(pluginDir, "templates", "styleguides", "general.json")), true);
   }
 });
 
@@ -336,6 +346,8 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", ".mcp.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "skill.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "references", "mcp-contract.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "templates", "manifest.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "mcp", "cadre-server.js")), true);
 
   const claudeManifest = readJson(path.join(root, "plugins", "cadre-claude", ".claude-plugin", "plugin.json"));
@@ -345,6 +357,8 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "mcp-config.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "skill.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "references", "mcp-contract.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "templates", "manifest.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
   const codexMcp = readJson(path.join(root, "plugins", "cadre", ".mcp.json"));
   const claudeMcp = readJson(path.join(root, "plugins", "cadre-claude", "mcp-config.json"));

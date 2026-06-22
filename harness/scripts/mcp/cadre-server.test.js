@@ -302,6 +302,9 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(statusActions.includes("beads_summary"));
     const resources = await request("resources/list", {});
     const uris = resources.resources.map((resource) => resource.uri);
+    assert.ok(uris.includes("cadre://agent-references"));
+    assert.ok(uris.includes("cadre://agent-reference"));
+    assert.ok(uris.includes("cadre://template-inventory"));
     assert.ok(uris.includes("cadre://fleet-board"));
     assert.ok(uris.includes("cadre://beads-summary"));
     assert.ok(uris.includes("cadre://workspace-health"));
@@ -326,8 +329,13 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://styleguide-selection"));
     const templates = await request("resources/templates/list", {});
     const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
+    assert.ok(templateUris.includes("cadre://agent-references"));
+    assert.ok(templateUris.includes("cadre://template-inventory"));
     assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
     const templateByUri = new Map(templates.resourceTemplates.map((template) => [template.uriTemplate.split("{")[0], template]));
+    assert.deepEqual(templateByUri.get("cadre://agent-references").required, []);
+    assert.deepEqual(templateByUri.get("cadre://agent-reference").required, ["name"]);
+    assert.deepEqual(templateByUri.get("cadre://template-inventory").required, []);
     assert.deepEqual(templateByUri.get("cadre://provider-actions").required, ["root", "trackId", "workflow"]);
     assert.deepEqual(templateByUri.get("cadre://workspace-health").optional, ["responseMode", "detail", "compact"]);
     assert.deepEqual(templateByUri.get("cadre://integrations").optional, ["responseMode", "detail", "compact"]);
@@ -341,6 +349,22 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://artifact-preview").required, ["root", "artifact"]);
     assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
     assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
+
+    const agentReferences = await request("resources/read", { uri: "cadre://agent-references" });
+    const parsedAgentReferences = JSON.parse(agentReferences.contents[0].text);
+    assert.equal(parsedAgentReferences.ok, true);
+    assert.ok(parsedAgentReferences.data.references.some((reference) => reference.id === "mcp-contract"));
+
+    const mcpContract = await request("resources/read", { uri: "cadre://agent-reference?name=mcp-contract" });
+    const parsedMcpContract = JSON.parse(mcpContract.contents[0].text);
+    assert.equal(parsedMcpContract.ok, true);
+    assert.equal(parsedMcpContract.data.reference.id, "mcp-contract");
+    assert.equal(parsedMcpContract.data.reference.schema, "cadre.reference.v1");
+
+    const templateInventory = await request("resources/read", { uri: "cadre://template-inventory" });
+    const parsedTemplateInventory = JSON.parse(templateInventory.contents[0].text);
+    assert.equal(parsedTemplateInventory.ok, true);
+    assert.ok(parsedTemplateInventory.data.templates.templates.some((template) => template.id === "product"));
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(

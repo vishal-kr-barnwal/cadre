@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import * as core from "../../cadre-core";
@@ -78,12 +79,91 @@ function integrations(root: string, args: RuntimeArgs = {}): JsonObject {
   return asJsonObject(core.integrationInventory(root, args));
 }
 
+function safeAssetName(name: string): string | null {
+  const normalized = name.trim();
+  return /^[a-z0-9-]+$/.test(normalized) ? normalized : null;
+}
+
+function packageAssetPath(kind: "references" | "templates", relativePath: string): string | null {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: string): void => {
+    if (seen.has(candidate)) return;
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+  let dir = __dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (kind === "references") {
+      add(path.join(dir, "references", relativePath));
+      add(path.join(dir, "scripts", "agent-refs", relativePath));
+      add(path.join(dir, "skills", "cadre", "references", relativePath));
+    } else {
+      add(path.join(dir, "templates", relativePath));
+      add(path.join(dir, "skills", "cadre", "templates", relativePath));
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+function packageAssetDir(kind: "references" | "templates"): string | null {
+  const manifest = packageAssetPath(kind, kind === "references" ? "mcp-contract.json" : "manifest.json");
+  return manifest ? path.dirname(manifest) : null;
+}
+
+function readPackageJson(file: string): JsonObject {
+  return asJsonObject(JSON.parse(fs.readFileSync(file, "utf8")));
+}
+
+function agentReferenceCatalog(): JsonObject {
+  const dir = packageAssetDir("references");
+  const references = dir
+    ? fs.readdirSync(dir)
+      .filter((file) => file.endsWith(".json"))
+      .sort()
+      .map((file) => {
+        const reference = readPackageJson(path.join(dir, file));
+        const id = asOptionalString(reference.id) || file.replace(/\.json$/, "");
+        return {
+          id,
+          title: asOptionalString(reference.title) || id,
+          uri: `cadre://agent-reference?name=${encodeURIComponent(id)}`,
+        };
+      })
+    : [];
+  return { ok: true, references };
+}
+
+function agentReference(name: string | null): JsonObject {
+  const safeName = name ? safeAssetName(name) : null;
+  if (!safeName) return { ok: false, error: "name is required and must be a reference id" };
+  const file = packageAssetPath("references", `${safeName}.json`);
+  if (!file) return { ok: false, error: `Unknown agent reference: ${safeName}` };
+  return { ok: true, reference: readPackageJson(file) };
+}
+
+function templateInventory(): JsonObject {
+  const file = packageAssetPath("templates", "manifest.json");
+  if (!file) return { ok: false, error: "Template manifest not found" };
+  return { ok: true, templates: readPackageJson(file) };
+}
+
 export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core" | "jobs" | "rootResolver">): JsonObject {
   const resource = parseResourceUri(uri);
   const normalizedResource = normalizeResourceArgs(resource);
-  const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
   let value: unknown;
-  if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
+  if (resource.base === "cadre://agent-references") value = agentReferenceCatalog();
+  else if (resource.base === "cadre://agent-reference") value = agentReference(resource.name);
+  else if (resource.base === "cadre://template-inventory") value = templateInventory();
+  else {
+    const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
+    if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
   else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
   else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
   else if (resource.base === "cadre://workspace-health") value = workspaceHealth(root, normalizedResource);
@@ -190,5 +270,6 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
     };
   }
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
+  }
   return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(envelope(value), null, 2) }] };
 }

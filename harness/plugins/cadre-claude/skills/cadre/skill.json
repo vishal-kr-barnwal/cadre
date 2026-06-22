@@ -129,34 +129,34 @@
   },
   "references": {
     "mcp-contract": {
-      "path": "references/mcp-contract.json"
+      "uri": "cadre://agent-reference?name=mcp-contract"
     },
     "provider-evidence": {
-      "path": "references/provider-evidence.json"
+      "uri": "cadre://agent-reference?name=provider-evidence"
     },
     "team-ops": {
-      "path": "references/team-ops.json"
+      "uri": "cadre://agent-reference?name=team-ops"
     },
     "beads-integration": {
-      "path": "references/beads-integration.json"
+      "uri": "cadre://agent-reference?name=beads-integration"
     },
     "beads-error-handler": {
-      "path": "references/beads-error-handler.json"
+      "uri": "cadre://agent-reference?name=beads-error-handler"
     },
     "cadre-sync": {
-      "path": "references/cadre-sync.json"
+      "uri": "cadre://agent-reference?name=cadre-sync"
     },
     "ownership-guard": {
-      "path": "references/ownership-guard.json"
+      "uri": "cadre://agent-reference?name=ownership-guard"
     },
     "parallel-execution": {
-      "path": "references/parallel-execution.json"
+      "uri": "cadre://agent-reference?name=parallel-execution"
     },
     "polyrepo-git": {
-      "path": "references/polyrepo-git.json"
+      "uri": "cadre://agent-reference?name=polyrepo-git"
     },
     "template-locator": {
-      "path": "references/template-locator.json"
+      "uri": "cadre://agent-reference?name=template-locator"
     }
   },
   "operatingDefaults": [

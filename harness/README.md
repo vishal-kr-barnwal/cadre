@@ -20,8 +20,8 @@ workflow.
 - **Polyglot intelligence:** repo maps, dependency graphs, test impact,
   workspace diagnostics, LSP setup, warm LSP review, and async job artifacts.
 - **Two agent surfaces:** Claude Code and OpenAI Codex plugins are generated from
-  the same master skill, protocols, references, templates, and TypeScript
-  runtime.
+  the same master skill, protocols, MCP-served references, MCP-owned templates,
+  and TypeScript runtime.
 
 ## Install
 

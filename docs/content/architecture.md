@@ -45,9 +45,9 @@ Edit master sources, then regenerate generated output.
 
 | Source | Owns |
 |--------|------|
-| `harness/skills/cadre/SKILL.md` | Cadre skill activation contract, workflow routing, lazy context, and required references. |
+| `harness/skills/cadre/SKILL.md` | Cadre skill activation contract, workflow routing, and MCP reference routing. |
 | `harness/skills/cadre/protocols/` | Master workflow protocol bodies for all `cadre-*` workflows. |
-| `harness/scripts/agent-refs/` | Reference material bundled with plugin skills. Some files are platform-sliced. |
+| `harness/scripts/agent-refs/` | Reference material copied into plugin-level MCP assets. |
 | `harness/templates/` | Files copied into target projects by `cadre-setup`. |
 | `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
 | `docs/` | Public Next.js/shadcn documentation website. |
@@ -79,9 +79,8 @@ The generator:
 - Copies the master skill into each platform bundle.
 - Adds generated protocol preambles that require Cadre MCP.
 - Substitutes the platform-specific worker dispatch sentence.
-- Slices multi-platform references for Claude and Codex.
-- Copies agnostic references such as Beads error handling and Beads integration.
-- Copies templates into each plugin skill.
+- Copies agent references into plugin-level MCP assets.
+- Copies target-project templates into plugin-level MCP assets.
 - Copies built JavaScript runtime files into each plugin.
 - Rewrites marketplace shims for root and harness development paths.
 
