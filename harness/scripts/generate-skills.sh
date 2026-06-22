@@ -67,6 +67,9 @@ CLAUDE_PROTOCOL_DIR="$CLAUDE_SKILL_DIR/protocols"
 CODEX_PROTOCOL_DIR="$CODEX_SKILL_DIR/protocols"
 
 MODE="${1:-generate}"
+if [[ "${1:-}" == "--" && "${2:-}" == "--check" ]]; then
+  MODE="--check"
+fi
 GEN_ROOT=""
 if [[ "$MODE" == "--check" ]]; then
   GEN_ROOT="$(mktemp -d)"
@@ -212,23 +215,31 @@ copy_skill_tree() {
 }
 
 copy_plugin_assets() {
-  local plugin_dir="$1" ref_dest template_dest ref
-  ref_dest="$(out_path "$plugin_dir/references")"
-  template_dest="$(out_path "$plugin_dir/templates")"
-  rm -rf "$ref_dest" "$template_dest"
-  mkdir -p "$ref_dest"
-  for ref in "${JSON_REFS[@]}"; do
-    cp -p "$REPO_ROOT/$ref" "$ref_dest/$(basename "$ref")"
+  local plugin_dir="$1" asset_dest ref src name
+  asset_dest="$(out_path "$plugin_dir/assets/cadre")"
+  rm -rf "$asset_dest"
+  mkdir -p "$asset_dest/references" "$asset_dest/protocols"
+  cp -p "$REPO_ROOT/skills/cadre/skill.json" "$asset_dest/skill.json"
+  for src in "$SOURCE_PROTOCOL_DIR"/cadre-*.json; do
+    name="$(basename "$src" .json)"
+    cp -p "$src" "$asset_dest/protocols/$name.json"
   done
-  copy_tree_with_links "$REPO_ROOT/$TEMPLATES_SRC" "$template_dest"
+  for ref in "${JSON_REFS[@]}"; do
+    cp -p "$REPO_ROOT/$ref" "$asset_dest/references/$(basename "$ref")"
+  done
+  copy_tree_with_links "$REPO_ROOT/$TEMPLATES_SRC" "$asset_dest/templates"
 }
 
 copy_plugin_scripts() {
-  local plugin_dir="$1" source_dir="$2" dest
+  local plugin_dir="$1" source_dir="$2" dest source
   dest="$(out_path "$plugin_dir/scripts")"
   rm -rf "$dest"
   mkdir -p "$dest/mcp"
-  cp -p "$source_dir/mcp/cadre-server.js" "$dest/mcp/cadre-server.js"
+  source="$source_dir/mcp/cadre-server.external.js"
+  if [[ ! -f "$source" ]]; then
+    source="$source_dir/mcp/cadre-server.js"
+  fi
+  cp -p "$source" "$dest/mcp/cadre-server.js"
   chmod +x "$dest/mcp/cadre-server.js"
 }
 
@@ -556,8 +567,17 @@ if (rootClaudeMarketplace.plugins?.[0]?.source !== "./harness/plugins/cadre-clau
 for (const rel of [
   "plugins/cadre/skills/cadre/SKILL.md",
   "plugins/cadre/scripts/mcp/cadre-server.js",
+  "plugins/cadre/assets/cadre/skill.json",
+  "plugins/cadre/assets/cadre/protocols",
+  "plugins/cadre/assets/cadre/references",
+  "plugins/cadre/assets/cadre/templates",
   "plugins/cadre-claude/skills/cadre/SKILL.md",
   "plugins/cadre-claude/scripts/mcp/cadre-server.js",
+  "plugins/cadre-claude/assets/cadre/skill.json",
+  "plugins/cadre-claude/assets/cadre/protocols",
+  "plugins/cadre-claude/assets/cadre/references",
+  "plugins/cadre-claude/assets/cadre/templates",
+  "plugins/cadre-claude/agents/cadre-worker.md",
 ]) {
   if (!fs.existsSync(path.join(root, rel))) throw new Error(`missing ${rel}`);
 }
@@ -565,6 +585,7 @@ for (const rel of [
   "plugins/cadre/README.md",
   "plugins/cadre/references",
   "plugins/cadre/templates",
+  "plugins/cadre/agents",
   "plugins/cadre/scripts/cadre-core.js",
   "plugins/cadre/scripts/cadre-job-runner.js",
   "plugins/cadre/scripts/cadre-lsp-setup.js",
@@ -573,7 +594,6 @@ for (const rel of [
   "plugins/cadre/skills/cadre/skill.json",
   "plugins/cadre/skills/cadre/protocols",
   "plugins/cadre-claude/README.md",
-  "plugins/cadre-claude/agents",
   "plugins/cadre-claude/references",
   "plugins/cadre-claude/templates",
   "plugins/cadre-claude/scripts/cadre-core.js",
@@ -610,6 +630,7 @@ generate_plugins() {
     local skill_dir="$1" plugin_dir="$2" script_source="$3" script_mode="${4:-copy}"
     copy_skill_tree "$skill_dir" "$plugin_dir/skills/cadre"
     copy_plugin_scripts "$plugin_dir" "$script_source" "$script_mode"
+    copy_plugin_assets "$plugin_dir"
   }
 
   generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR" "$REPO_ROOT/scripts" "copy"
@@ -619,6 +640,7 @@ generate_plugins() {
   write_plugin_mcp_config_for_platform "codex" "$CODEX_PLUGIN_DIR"
   write_plugin_manifest "claude" "$CLAUDE_PLUGIN_DIR"
   write_plugin_mcp_config_for_platform "claude" "$CLAUDE_PLUGIN_DIR"
+  write_claude_worker_agent
   write_marketplaces
   write_root_marketplaces
   if [[ -z "$GEN_ROOT" ]]; then
@@ -703,7 +725,7 @@ main() {
   else
     echo "✓ Embedded $count workflow protocols into the Cadre MCP runtime."
     echo "  .claude/skills/cadre/ .agents/skills/cadre/ contain SKILL.md only"
-    echo "  plugins/cadre-claude/ plugins/cadre/ contain SKILL.md plus scripts/mcp/cadre-server.js"
+    echo "  plugins/cadre-claude/ plugins/cadre/ contain SKILL.md, external assets/cadre/, and scripts/mcp/cadre-server.js"
   fi
 }
 

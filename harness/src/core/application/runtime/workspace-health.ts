@@ -31,6 +31,19 @@ export function workspaceHealth(root: string, args: RuntimeArgs = {}): CoreResul
   const lspCoverage = summarizeLspCoverage(root, args);
   const availableWorkResult = availableWork(root);
   const integrations = integrationInventory(root, { ...args, responseMode: mode });
+  const compactIntegrations = {
+    ok: integrations.ok !== false,
+    provider: asJsonObject(integrations.provider),
+    mcp_readiness: isRecord(integrations.mcp_readiness)
+      ? {
+        ok: asJsonObject(integrations.mcp_readiness).ok !== false,
+        provider: asJsonObject(asJsonObject(integrations.mcp_readiness).provider),
+        summary: asJsonObject(asJsonObject(integrations.mcp_readiness).summary),
+      }
+      : null,
+    optional_mcps: Array.isArray(integrations.optional_mcps) ? integrations.optional_mcps : [],
+    summary: asJsonObject(integrations.summary),
+  };
   const detailResources = workspaceHealthDetailResources(root);
   if (mode === "detail") {
     return {
@@ -96,7 +109,7 @@ export function workspaceHealth(root: string, args: RuntimeArgs = {}): CoreResul
       configured: lspCoverage.configured,
     },
     lsp: lspCoverage,
-    integrations,
+    integrations: compactIntegrations,
     detail_resources: detailResources,
   };
 }
@@ -110,6 +123,12 @@ export function lspConfigStatus(root: string): CoreResult {
       path: path.relative(root, configPath),
       servers: [],
       missing: [],
+      daemon: {
+        status_packet: "cadre_intel action lsp_daemon_status",
+        shutdown_packet: "cadre_intel action lsp_daemon_shutdown",
+        max_clients_default: 8,
+        idle_eviction_ms_default: 600000,
+      },
     };
   }
   const configObject = asJsonObject(config);
@@ -131,6 +150,12 @@ export function lspConfigStatus(root: string): CoreResult {
         return !command || !commandExists(command, root);
       })
       .map((server) => asOptionalString(server.id) || asOptionalString(server.command) || "unknown"),
+    daemon: {
+      status_packet: "cadre_intel action lsp_daemon_status",
+      shutdown_packet: "cadre_intel action lsp_daemon_shutdown",
+      max_clients_default: 8,
+      idle_eviction_ms_default: 600000,
+    },
   };
 }
 

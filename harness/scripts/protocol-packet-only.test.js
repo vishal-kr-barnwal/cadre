@@ -139,18 +139,35 @@ test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
   }
   const codexFiles = collectFiles(path.join(root, "plugins", "cadre")).sort();
   const claudeFiles = collectFiles(path.join(root, "plugins", "cadre-claude")).sort();
-  assert.deepEqual(codexFiles, [
+  for (const file of [
     ".codex-plugin/plugin.json",
     ".mcp.json",
     "scripts/mcp/cadre-server.js",
     "skills/cadre/SKILL.md",
-  ]);
-  assert.deepEqual(claudeFiles, [
+    "assets/cadre/skill.json",
+    "assets/cadre/templates/manifest.json",
+    "assets/cadre/references/mcp-contract.json",
+    "assets/cadre/protocols/cadre-setup.json",
+  ]) {
+    assert.ok(codexFiles.includes(file), `missing Codex plugin file ${file}`);
+  }
+  for (const file of [
     ".claude-plugin/plugin.json",
     "mcp-config.json",
     "scripts/mcp/cadre-server.js",
     "skills/cadre/SKILL.md",
-  ]);
+    "agents/cadre-worker.md",
+    "assets/cadre/skill.json",
+    "assets/cadre/templates/manifest.json",
+    "assets/cadre/references/mcp-contract.json",
+    "assets/cadre/protocols/cadre-setup.json",
+  ]) {
+    assert.ok(claudeFiles.includes(file), `missing Claude plugin file ${file}`);
+  }
+  for (const file of ["references/mcp-contract.json", "templates/manifest.json", "skills/cadre/skill.json"]) {
+    assert.equal(codexFiles.includes(file), false, `unexpected Codex plugin file ${file}`);
+    assert.equal(claudeFiles.includes(file), false, `unexpected Claude plugin file ${file}`);
+  }
 });
 
 test("Protocol files are structured JSON workflow definitions", () => {
@@ -301,6 +318,7 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
     "mcp-config.json",
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
+    "agents/cadre-worker.md",
   ]);
 
   const codexFiles = new Set(collectFiles(codexPlugin));
@@ -348,6 +366,10 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "protocols")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "references")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "templates")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "skill.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "protocols", "cadre-setup.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "references", "mcp-contract.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "assets", "cadre", "templates", "manifest.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "README.md")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "cadre-core.js")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "mcp", "cadre-server.js")), true);
@@ -362,7 +384,11 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "protocols")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "references")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "templates")), false);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "skill.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "protocols", "cadre-setup.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "references", "mcp-contract.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "assets", "cadre", "templates", "manifest.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "README.md")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts", "cadre-core.js")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts", "mcp", "cadre-server.js")), true);
@@ -380,6 +406,20 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(rootCodexMarketplace.plugins[0].source.path, "./harness/plugins/cadre");
   const rootClaudeMarketplace = readJson(path.join(repoRoot, ".claude-plugin", "marketplace.json"));
   assert.equal(rootClaudeMarketplace.plugins[0].source, "./harness/plugins/cadre-claude");
+});
+
+test("Generated plugin MCP server stays small and loads external assets", () => {
+  for (const pluginDir of [
+    path.join(root, "plugins", "cadre"),
+    path.join(root, "plugins", "cadre-claude"),
+  ]) {
+    const server = path.join(pluginDir, "scripts", "mcp", "cadre-server.js");
+    const text = fs.readFileSync(server, "utf8");
+    assert.ok(fs.statSync(server).size < 500 * 1024, `${path.relative(root, server)} should stay below 500 KB`);
+    assert.equal(/__CADRE_EMBEDDED_ASSETS__\s*=\s*\{/.test(text), false, `${path.relative(root, server)} should not embed Cadre assets`);
+    assert.equal(fs.existsSync(path.join(pluginDir, "assets", "cadre", "skill.json")), true);
+    assert.equal(fs.existsSync(path.join(pluginDir, "assets", "cadre", "templates", "manifest.json")), true);
+  }
 });
 
 test("Install docs use the repo-root Codex sparse plugin path", () => {

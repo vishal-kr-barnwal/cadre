@@ -852,6 +852,8 @@ async function runReview(options = {}) {
     }));
     if (availability.state !== "available") {
       serverReport.skipped = true;
+      serverReport.degraded = true;
+      serverReport.fallback = "text_scan";
       findings.push(skipFinding(
         server,
         availability.state === "invalid" ? "server_invalid" : "server_missing",
@@ -949,6 +951,8 @@ async function runReview(options = {}) {
       }
     } catch (error) {
       serverReport.skipped = true;
+      serverReport.degraded = true;
+      serverReport.fallback = "text_scan";
       findings.push(skipFinding(server, "server_unavailable", `LSP scan skipped: ${errorMessage(error)}`));
       if (clientPool && pooled) await clientPool.drop(root, server);
       for (const candidate of allCandidates.values()) {
@@ -967,6 +971,8 @@ async function runReview(options = {}) {
     base: args.base,
     head: args.head,
     config: args.config,
+    degraded: serverReports.some((report) => report.degraded === true),
+    fallback: serverReports.some((report) => report.fallback === "text_scan") ? "text_scan" : null,
     changedFiles: files,
     changedEntries: entries,
     fileHints: nearbyFileHints(root, files),

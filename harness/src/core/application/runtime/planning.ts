@@ -34,6 +34,54 @@ export function likelyTestCandidatesForFile(root: string, file: string): string[
   return Array.from(new Set(candidates.filter((candidate) => fileExists(path.join(root, candidate)))));
 }
 
+function taskSearchTokens(task: PlanTask): string[] {
+  return Array.from(new Set(String(task.title || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4)
+    .slice(0, 8)));
+}
+
+function suggestedRepoForFile(topology: Topology, file: string): string | null {
+  if (!topology.polyrepo) return ".";
+  const repos = Array.isArray(topology.repos.repos) ? topology.repos.repos : [];
+  const match = repos.find((repo) => {
+    const name = asOptionalString(repo.name);
+    const submodule = asOptionalString(repo.submodule_path);
+    return Boolean((submodule && file.startsWith(`${normalizeClaimPath(submodule)}/`)) || (name && file.startsWith(`${name}/`)));
+  });
+  return asOptionalString(match?.name) || asOptionalString(topology.repos.default_repo) || null;
+}
+
+function missingClaimSuggestions(root: string, topology: Topology, tasks: PlanTask[], limit: number): JsonObject[] {
+  const workspaceFiles = listWorkspaceFiles(root)
+    .filter((file) => languageForFile(file) !== "markdown")
+    .slice(0, 5000);
+  return tasks
+    .filter((task) => asStringArray(task.files).length === 0 || (topology.polyrepo && !task.repo && !topology.repos.default_repo))
+    .map((task) => {
+      const tokens = taskSearchTokens(task);
+      const proposedFiles = workspaceFiles
+        .filter((file) => {
+          const lower = file.toLowerCase();
+          return tokens.some((token) => lower.includes(token));
+        })
+        .slice(0, limit);
+      return {
+        phase_index: task.phase_index,
+        task_index: task.task_index,
+        task_key: task.task_key,
+        title: task.title,
+        missing_files: asStringArray(task.files).length === 0,
+        missing_repo: topology.polyrepo && !task.repo && !topology.repos.default_repo,
+        proposed_repo: task.repo || (proposedFiles[0] ? suggestedRepoForFile(topology, proposedFiles[0]) : asOptionalString(topology.repos.default_repo) || null),
+        proposed_files: proposedFiles,
+        likely_tests: proposedFiles.flatMap((file) => likelyTestCandidatesForFile(root, file)).slice(0, limit),
+        evidence: proposedFiles.length > 0 ? "workspace_file_name_match" : "no_workspace_filename_match",
+      };
+    });
+}
+
 export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
   const markdownError = markdownPayloadError(args);
   if (markdownError) return markdownError;
@@ -94,6 +142,7 @@ export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
   const files = Array.from(new Set(Object.values(fileClaims).flat())).slice(0, Number(args.limit || 50));
   const semanticImpact = files.length > 0 ? lspImpact(root, { files, limit: args.limit || 50 }) : null;
   const schedule = track ? phaseSchedule(root, { ...args, trackId: track.track_id }) : null;
+  const limit = Number(args.limit || 50);
   return {
     ok: repoErrors.length === 0 && plan.ok !== false,
     root,
@@ -109,6 +158,7 @@ export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
     phases,
     schedule,
     semantic_impact: semanticImpact,
+    missing_claim_suggestions: missingClaimSuggestions(root, topology, plan.tasks || [], Math.min(limit, 25)),
     errors: [...(plan.errors || []), ...repoErrors],
     warnings: plan.warnings || [],
   };

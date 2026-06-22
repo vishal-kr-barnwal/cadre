@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "beads-integration",
+  "title": "Cadre And Beads Integration",
+  "markdownUse": "human_projection_only",
+  "rules": [
+    "`cadre_workflow` coordinates setup, new-track creation, implementation,",
+    "`cadre_track` exposes track context, plan parsing, implementation prep,",
+    "`cadre_parallel` owns worker-wave planning, worker setup, finish records,",
+    "`cadre_complete_task` owns task completion, coverage gates, commit evidence,",
+    "`cadre_beads` is the low-level packet used only when another Cadre packet or",
+    "`cadre_project` owns doctor, topology, control-plane sync, and polyrepo"
+  ],
+  "sections": [
+    {
+      "heading": "Overview",
+      "body": "Cadre integrates with Beads through Cadre MCP packets. Agents never operate the\nBeads store directly from workflow prompts. Beads remains the durable task graph;\nCadre MCP owns every read, write, claim, dependency, note, close, sync, and\nrepair operation that touches that graph."
+    },
+    {
+      "heading": "Design Principles",
+      "body": "1. Cadre owns planning, specs, workflow policy, and human-readable context.\n2. Beads owns durable task graph state and cross-session task memory.\n3. Cadre MCP is the only workflow-facing integration layer.\n4. If a required packet returns `ok:false`, the workflow halts with the packet\n   error.\n5. In polyrepo projects, the control repo owns the single shared Beads graph for\n   all product repos."
+    },
+    {
+      "heading": "Packet Responsibilities",
+      "body": "- `cadre_workflow` coordinates setup, new-track creation, implementation,\n  status, review, validation, handoff, ship, land, archive, release, revise,\n  refresh, flag, revert, and formula flows.\n- `cadre_track` exposes track context, plan parsing, implementation prep,\n  phase scheduling, Beads tree creation, and worktree plans.\n- `cadre_parallel` owns worker-wave planning, worker setup, finish records,\n  merge-back, and cleanup.\n- `cadre_complete_task` owns task completion, coverage gates, commit evidence,\n  plan progress, metadata updates, and Beads completion notes.\n- `cadre_beads` is the low-level packet used only when another Cadre packet or\n  implementation code explicitly needs a Beads operation.\n- `cadre_project` owns doctor, topology, control-plane sync, and polyrepo\n  preflight checks."
+    },
+    {
+      "heading": "Workflow Mapping",
+      "body": "Setup initializes Cadre context and Beads configuration through\n`cadre_workflow`. The setup packet copies bundled templates, writes selected code\nstyle guides, and reports any missing payload or style guide ids.\n\nNew-track creation uses `cadre_workflow` to preview and then create the track,\nincluding track files, Beads task mapping, dependency previews, and index\nrefresh.\n\nImplementation uses `cadre_workflow` for preparation, `cadre_parallel` for\nparallel worker orchestration, and `cadre_complete_task` for task completion\nevidence. Product code commands may run inside worker scope; Cadre state changes\nremain packet-owned.\n\nStatus, review, validation, handoff, ship, land, archive, release, revise,\nrefresh, flag, revert, and formula workflows use their corresponding\n`cadre_workflow` packet routes. Agents summarize packet results and stop when\nthe packet blocks."
+    },
+    {
+      "heading": "Session Memory",
+      "body": "Structured implementation notes, blockers, decisions, review evidence, and\nhandoff context are recorded by packets. This keeps state durable across\nconversation compaction while preserving Cadre's human-readable project context."
+    },
+    {
+      "heading": "Failure Policy",
+      "body": "There is no prompt-side degraded mode. Missing MCP, unavailable Beads support,\nsync failures, ownership conflicts, dependency gates, provider gates, and\nvalidation failures are surfaced through packet results. Agents may retry only\nwhen the packet marks the operation retryable or idempotent; otherwise they halt\nand report the packet error."
+    }
+  ]
+}

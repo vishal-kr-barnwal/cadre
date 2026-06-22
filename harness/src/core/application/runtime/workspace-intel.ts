@@ -20,6 +20,7 @@ import { diffSurface } from "./quality-gates";
 import { extractRepoSymbols, intelRepoRoots, isIgnoredRepoMapFile, repoMap } from "./repo-map";
 import { asArray } from "./status";
 import { commandExists, runCommand } from "../../infrastructure/runtime/system";
+import { cachedWorkspaceValue } from "./workspace-cache";
 
 export function lspImpact(root: string, args: RuntimeArgs = {}): CoreResult {
   const limit = Number(args.limit || 50);
@@ -123,6 +124,11 @@ export function detectWorkspaceAdapters(root: string): CoreResult[] {
 }
 
 export function workspaceDiagnostics(root: string, args: RuntimeArgs = {}): CoreResult {
+  if (args.execute !== true && (args as UnknownRecord).cacheBypass !== true) {
+    return cachedWorkspaceValue(root, "workspace-diagnostics", JSON.stringify({
+      repos: asStringArray(args.repos).concat(asOptionalString(args.repo) || []).filter(Boolean),
+    }), () => workspaceDiagnostics(root, { ...args, includeHeavy: false, cacheBypass: true }));
+  }
   const repoEntries = intelRepoRoots(root, args);
   const repoDiagnostics = repoEntries.map((entry) => {
     const adapters: JsonObject[] = detectWorkspaceAdapters(entry.root).map((rawAdapter): JsonObject => {
@@ -212,6 +218,11 @@ export function testImpact(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 export function dependencyGraph(root: string, args: RuntimeArgs = {}): CoreResult {
+  if ((args as UnknownRecord).cacheBypass !== true) {
+    return cachedWorkspaceValue(root, "dependency-graph", JSON.stringify({
+      repos: asStringArray(args.repos).concat(asOptionalString(args.repo) || []).filter(Boolean),
+    }), () => dependencyGraph(root, { ...args, cacheBypass: true }));
+  }
   const repoEntries = intelRepoRoots(root, args);
   const manifestPatterns = new Set([
     "package.json",

@@ -11,6 +11,7 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { CoreResult, DiffSurface, RepoExecutionEntry, TodoFinding, WorkingRootResolution } from "./contracts";
+import { providerReadiness } from "./mcp-readiness";
 import { runCoverage } from "../../infrastructure/runtime/coverage";
 import { fileExists, patchJsonFile, utcNow } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
@@ -217,6 +218,7 @@ export function providerFromConfig(root: string, args: RuntimeArgs = {}): string
 export function providerEvidenceRequirement(root: string, args: RuntimeArgs = {}): CoreResult {
   const providerInfo = configuredProvider(root, args);
   const provider = asOptionalString(providerInfo.provider_mode) || "local";
+  const readiness = providerReadiness(root, args);
   const track = args.trackId ? findTrack(root, args.trackId) : null;
   const branch = args.branch || (track && (track.metadata.git_branch || `track/${track.track_id}`)) || null;
   const target = args.pr || args.prNumber || args.mr || branch || null;
@@ -236,6 +238,9 @@ export function providerEvidenceRequirement(root: string, args: RuntimeArgs = {}
       server: provider,
       purpose: "Fetch provider evidence through the installed provider MCP. CLI fallback is intentionally disabled.",
     },
+    mcp_readiness: readiness,
+    detected_agent_capability_evidence: readiness.detected_agent_capability_evidence || null,
+    missing_evidence_fields: readiness.missing_evidence_fields || [],
     required_evidence: provider === "local" ? null : {
       kind,
       provider,
@@ -246,6 +251,15 @@ export function providerEvidenceRequirement(root: string, args: RuntimeArgs = {}
         tool: "cadre_review",
         action: "provider_evidence",
         trackId: args.trackId || args.track_id || null,
+      },
+    },
+    exact_write_back_packet: provider === "local" ? null : {
+      tool: "cadre_review",
+      arguments: {
+        root,
+        action: "provider_evidence",
+        trackId: args.trackId || args.track_id || null,
+        providerEvidence: `<${provider}-mcp-evidence>`,
       },
     },
     next_actions: provider === "local"
@@ -399,7 +413,7 @@ export function reviewAssist(root: string, args: RuntimeArgs = {}): CoreResult {
     blocking.push(`${machineBlockingCount} machine gate check(s) failed`);
   }
 
-  return {
+  const result: CoreResult = {
     ok: true,
     root,
     track_id: trackId,
@@ -416,5 +430,57 @@ export function reviewAssist(root: string, args: RuntimeArgs = {}): CoreResult {
     machine_gate: machineGate,
     suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
     blocking_reasons: blocking,
+  };
+  const mode = (asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null)) || "compact").toLowerCase();
+  if (["detail", "detailed", "full", "verbose"].includes(mode)) return result;
+  const lspSummary = asJsonObject(result.lsp);
+  const gateSummary = asJsonObject(result.machine_gate);
+  const diffSummary = asJsonObject(diff);
+  const diffFiles = Array.isArray(diffSummary.files) ? diffSummary.files : [];
+  return {
+    ok: true,
+    root,
+    track_id: trackId,
+    base,
+    head,
+    task_counts: context.task_counts,
+    diff: {
+      repo: diffSummary.repo || ".",
+      file_count: diffFiles.length,
+      stat: asOptionalString(diffSummary.stat) || "",
+    },
+    repo_diffs: repoDiffs.slice(0, 20).map((entry) => ({
+      repo: entry.repo,
+      path: entry.path,
+      files: Array.isArray(entry.files) ? entry.files.slice(0, 50) : [],
+      file_count: Array.isArray(entry.files) ? entry.files.length : 0,
+      stat: entry.stat,
+    })),
+    repo_diffs_count: repoDiffs.length,
+    incomplete_tasks: incompleteTasks.slice(0, 20),
+    incomplete_tasks_count: incompleteTasks.length,
+    coverage: track.metadata.last_coverage ?? null,
+    todos: todos.slice(0, 20),
+    todos_count: todos.length,
+    lsp: lsp
+      ? {
+        available: lspSummary.available !== false,
+        degraded: lspSummary.degraded === true || lspSummary.fallback === "text_scan",
+        findings_count: Array.isArray(lspSummary.findings) ? lspSummary.findings.length : 0,
+        server_count: Array.isArray(lspSummary.servers) ? lspSummary.servers.length : 0,
+        polyrepo: lspSummary.polyrepo === true,
+      }
+      : null,
+    machine_gate: machineGate
+      ? {
+        ok: gateSummary.ok !== false,
+        available: gateSummary.available !== false,
+        blocking_count: Number(gateSummary.blocking_count || 0),
+        result_count: Array.isArray(gateSummary.results) ? gateSummary.results.length : 0,
+      }
+      : null,
+    suggested_verdict: result.suggested_verdict,
+    blocking_reasons: blocking,
+    detail_available: true,
   };
 }

@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "schema": "cadre.styleguide.v1",
+  "kind": "styleguide",
+  "id": "typescript",
+  "title": "Google TypeScript Style Guide Summary",
+  "summary": "This document summarizes key rules and best practices from the Google TypeScript Style Guide, which is enforced by the `gts` tool.",
+  "sections": [
+    {
+      "heading": "1. Language Features",
+      "body": "- **Variable Declarations:** Always use `const` or `let`. **`var` is forbidden.** Use `const` by default.\n- **Modules:** Use ES6 modules (`import`/`export`). **Do not use `namespace`.**\n- **Exports:** Use named exports (`export {MyClass};`). **Do not use default exports.**\n- **Classes:**\n  - **Do not use `#private` fields.** Use TypeScript's `private` visibility modifier.\n  - Mark properties never reassigned outside the constructor with `readonly`.\n  - **Never use the `public` modifier** (it's the default). Restrict visibility with `private` or `protected` where possible.\n- **Functions:** Prefer function declarations for named functions. Use arrow functions for anonymous functions/callbacks.\n- **String Literals:** Use single quotes (`'`). Use template literals (`` ` ``) for interpolation and multi-line strings.\n- **Equality Checks:** Always use triple equals (`===`) and not equals (`!==`).\n- **Type Assertions:** **Avoid type assertions (`x as SomeType`) and non-nullability assertions (`y!`)**. If you must use them, provide a clear justification."
+    },
+    {
+      "heading": "2. Disallowed Features",
+      "body": "- **`any` Type:** **Avoid `any`**. Prefer `unknown` or a more specific type.\n- **Wrapper Objects:** Do not instantiate `String`, `Boolean`, or `Number` wrapper classes.\n- **Automatic Semicolon Insertion (ASI):** Do not rely on it. **Explicitly end all statements with a semicolon.**\n- **`const enum`:** Do not use `const enum`. Use plain `enum` instead.\n- **`eval()` and `Function(...string)`:** Forbidden."
+    },
+    {
+      "heading": "3. Naming",
+      "body": "- **`UpperCamelCase`:** For classes, interfaces, types, enums, and decorators.\n- **`lowerCamelCase`:** For variables, parameters, functions, methods, and properties.\n- **`CONSTANT_CASE`:** For global constant values, including enum values.\n- **`_` Prefix/Suffix:** **Do not use `_` as a prefix or suffix** for identifiers, including for private properties."
+    },
+    {
+      "heading": "4. Type System",
+      "body": "- **Type Inference:** Rely on type inference for simple, obvious types. Be explicit for complex types.\n- **`undefined` and `null`:** Both are supported. Be consistent within your project.\n- **Optional vs. `|undefined`:** Prefer optional parameters and fields (`?`) over adding `|undefined` to the type.\n- **`Array<T>` Type:** Use `T[]` for simple types. Use `Array<T>` for more complex union types (e.g., `Array<string | number>`).\n- **`{}` Type:** **Do not use `{}`**. Prefer `unknown`, `Record<string, unknown>`, or `object`."
+    },
+    {
+      "heading": "5. Comments and Documentation",
+      "body": "- **JSDoc:** Use `/** JSDoc */` for documentation, `//` for implementation comments.\n- **Redundancy:** **Do not declare types in `@param` or `@return` blocks** (e.g., `/** @param {string} user */`). This is redundant in TypeScript.\n- **Add Information:** Comments must add information, not just restate the code.\n\n*Source: [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html)*"
+    }
+  ],
+  "languages": [
+    "typescript"
+  ],
+  "frameworks": [],
+  "file_patterns": [],
+  "applies_to": [
+    "planning",
+    "implementation",
+    "review",
+    "tests"
+  ],
+  "rules": [
+    {
+      "id": "typescript-rule-1",
+      "severity": "guidance",
+      "summary": "**Variable Declarations:** Always use `const` or `let`. **`var` is forbidden.** Use `const` by default."
+    },
+    {
+      "id": "typescript-rule-2",
+      "severity": "guidance",
+      "summary": "**Modules:** Use ES6 modules (`import`/`export`). **Do not use `namespace`.**"
+    },
+    {
+      "id": "typescript-rule-3",
+      "severity": "guidance",
+      "summary": "**Exports:** Use named exports (`export {MyClass};`). **Do not use default exports.**"
+    },
+    {
+      "id": "typescript-rule-4",
+      "severity": "guidance",
+      "summary": "**Classes:**"
+    },
+    {
+      "id": "typescript-rule-5",
+      "severity": "guidance",
+      "summary": "**Do not use `#private` fields.** Use TypeScript's `private` visibility modifier."
+    },
+    {
+      "id": "typescript-rule-6",
+      "severity": "guidance",
+      "summary": "Mark properties never reassigned outside the constructor with `readonly`."
+    },
+    {
+      "id": "typescript-rule-7",
+      "severity": "guidance",
+      "summary": "**Never use the `public` modifier** (it's the default). Restrict visibility with `private` or `protected` where possible."
+    },
+    {
+      "id": "typescript-rule-8",
+      "severity": "guidance",
+      "summary": "**Functions:** Prefer function declarations for named functions. Use arrow functions for anonymous functions/callbacks."
+    },
+    {
+      "id": "typescript-rule-9",
+      "severity": "guidance",
+      "summary": "**String Literals:** Use single quotes (`'`). Use template literals (`` ` ``) for interpolation and multi-line strings."
+    },
+    {
+      "id": "typescript-rule-10",
+      "severity": "guidance",
+      "summary": "**Equality Checks:** Always use triple equals (`===`) and not equals (`!==`)."
+    },
+    {
+      "id": "typescript-rule-11",
+      "severity": "guidance",
+      "summary": "**Type Assertions:** **Avoid type assertions (`x as SomeType`) and non-nullability assertions (`y!`)**. If you must use them, provide a clear justification."
+    },
+    {
+      "id": "typescript-rule-12",
+      "severity": "guidance",
+      "summary": "**`any` Type:** **Avoid `any`**. Prefer `unknown` or a more specific type."
+    },
+    {
+      "id": "typescript-rule-13",
+      "severity": "guidance",
+      "summary": "**Wrapper Objects:** Do not instantiate `String`, `Boolean`, or `Number` wrapper classes."
+    },
+    {
+      "id": "typescript-rule-14",
+      "severity": "guidance",
+      "summary": "**Automatic Semicolon Insertion (ASI):** Do not rely on it. **Explicitly end all statements with a semicolon.**"
+    },
+    {
+      "id": "typescript-rule-15",
+      "severity": "guidance",
+      "summary": "**`const enum`:** Do not use `const enum`. Use plain `enum` instead."
+    },
+    {
+      "id": "typescript-rule-16",
+      "severity": "guidance",
+      "summary": "**`eval()` and `Function(...string)`:** Forbidden."
+    },
+    {
+      "id": "typescript-rule-17",
+      "severity": "guidance",
+      "summary": "**`UpperCamelCase`:** For classes, interfaces, types, enums, and decorators."
+    },
+    {
+      "id": "typescript-rule-18",
+      "severity": "guidance",
+      "summary": "**`lowerCamelCase`:** For variables, parameters, functions, methods, and properties."
+    },
+    {
+      "id": "typescript-rule-19",
+      "severity": "guidance",
+      "summary": "**`CONSTANT_CASE`:** For global constant values, including enum values."
+    },
+    {
+      "id": "typescript-rule-20",
+      "severity": "guidance",
+      "summary": "**`_` Prefix/Suffix:** **Do not use `_` as a prefix or suffix** for identifiers, including for private properties."
+    },
+    {
+      "id": "typescript-rule-21",
+      "severity": "guidance",
+      "summary": "**Type Inference:** Rely on type inference for simple, obvious types. Be explicit for complex types."
+    },
+    {
+      "id": "typescript-rule-22",
+      "severity": "guidance",
+      "summary": "**`undefined` and `null`:** Both are supported. Be consistent within your project."
+    },
+    {
+      "id": "typescript-rule-23",
+      "severity": "guidance",
+      "summary": "**Optional vs. `|undefined`:** Prefer optional parameters and fields (`?`) over adding `|undefined` to the type."
+    },
+    {
+      "id": "typescript-rule-24",
+      "severity": "guidance",
+      "summary": "**`Array<T>` Type:** Use `T[]` for simple types. Use `Array<T>` for more complex union types (e.g., `Array<string | number>`)."
+    },
+    {
+      "id": "typescript-rule-25",
+      "severity": "guidance",
+      "summary": "**`{}` Type:** **Do not use `{}`**. Prefer `unknown`, `Record<string, unknown>`, or `object`."
+    },
+    {
+      "id": "typescript-rule-26",
+      "severity": "guidance",
+      "summary": "**JSDoc:** Use `/** JSDoc */` for documentation, `//` for implementation comments."
+    },
+    {
+      "id": "typescript-rule-27",
+      "severity": "guidance",
+      "summary": "**Redundancy:** **Do not declare types in `@param` or `@return` blocks** (e.g., `/** @param {string} user */`). This is redundant in TypeScript."
+    },
+    {
+      "id": "typescript-rule-28",
+      "severity": "guidance",
+      "summary": "**Add Information:** Comments must add information, not just restate the code."
+    }
+  ],
+  "source": "bundled_template"
+}

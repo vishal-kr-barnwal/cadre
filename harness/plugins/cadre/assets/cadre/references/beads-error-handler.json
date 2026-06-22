@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "beads-error-handler",
+  "title": "Beads Packet Error Handling",
+  "markdownUse": "human_projection_only",
+  "rules": [
+    "Use `cadre_beads` only when a Cadre packet result explicitly asks for a Beads",
+    "Use `cadre_workflow`, `cadre_mutate`, `cadre_complete_task`, `cadre_parallel`,",
+    "Product implementation commands may still run when they are part of the target"
+  ],
+  "sections": [
+    {
+      "heading": "Standard Response",
+      "body": "When a required Cadre packet reports a Beads-related error:\n\n1. Summarize the packet name, requested action, and packet error.\n2. If the packet result marks the operation as retryable or idempotent, retry the\n   same packet once with the same inputs.\n3. If the retry fails, halt and ask the user to restore the Cadre MCP or Beads\n   prerequisite named by the packet."
+    },
+    {
+      "heading": "No Degraded Mode",
+      "body": "Do not continue in a file-only mode. Durable task graph state, ownership claims,\nhandoff routing, review labels, and compaction survival are packet-owned. If the\npacket cannot update them, the workflow is blocked."
+    },
+    {
+      "heading": "Packet Routing",
+      "body": "- Use `cadre_beads` only when a Cadre packet result explicitly asks for a Beads\n  operation.\n- Use `cadre_workflow`, `cadre_mutate`, `cadre_complete_task`, `cadre_parallel`,\n  or `cadre_project` for higher-level workflows instead of reconstructing Beads\n  state.\n- Product implementation commands may still run when they are part of the target\n  project work and not Cadre orchestration."
+    }
+  ]
+}

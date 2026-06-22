@@ -38,6 +38,10 @@ The generated plugins bundle a dependency-free stdio MCP server:
 node scripts/mcp/cadre-server.js
 ```
 
+Plugin runtimes load packaged Cadre contracts, workflow protocols, references,
+and target-project templates from `assets/cadre/`. The standalone harness
+runtime keeps an embedded asset copy for direct local use.
+
 The server exposes workflow tools and compact resources. Important tool groups
 include:
 

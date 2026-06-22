@@ -276,6 +276,8 @@ export interface RuntimeArgs extends JsonObject {
   claim?: boolean;
   threshold?: number;
   limit?: number;
+  maxWorkers?: number;
+  includeHeavy?: boolean;
   epicId?: string;
   assignee?: string;
   taskId?: string | null;
@@ -305,6 +307,12 @@ export interface RuntimeArgs extends JsonObject {
   evidence?: JsonObject | string;
   providerEvidence?: JsonObject | string;
   provider_evidence?: JsonObject | string;
+  mcpCapabilities?: JsonObject;
+  mcp_capabilities?: JsonObject;
+  filesChanged?: string[];
+  files_changed?: string[];
+  tests?: JsonValue[];
+  blockers?: string[];
   fetch?: boolean;
   responseMode?: string;
   response_mode?: string;

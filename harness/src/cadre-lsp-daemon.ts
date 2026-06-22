@@ -30,9 +30,13 @@ interface DaemonMessage extends JsonObject {
 
 export class ClientPool {
   clients: Map<string, ClientPoolEntry>;
+  maxClients: number;
+  idleEvictionMs: number;
 
-  constructor() {
+  constructor(options: { maxClients?: number; idleEvictionMs?: number } = {}) {
     this.clients = new Map();
+    this.maxClients = Math.max(1, Math.min(32, Number(options.maxClients || process.env.CADRE_LSP_MAX_CLIENTS || 8)));
+    this.idleEvictionMs = Math.max(30_000, Number(options.idleEvictionMs || process.env.CADRE_LSP_IDLE_EVICTION_MS || 10 * 60 * 1000));
   }
 
   key(root: string, server: DaemonServer): string {
@@ -45,6 +49,7 @@ export class ClientPool {
   }
 
   async get(root: string, server: DaemonServer): Promise<ClientPoolEntry> {
+    await this.evictIdle();
     const key = this.key(root, server);
     const existing = this.clients.get(key);
     if (existing) {
@@ -52,6 +57,7 @@ export class ClientPool {
       existing.uses += 1;
       return existing;
     }
+    await this.evictOverflow(this.maxClients - 1);
     const client = new LspClient(root, server);
     await client.start();
     await client.initialize();
@@ -69,6 +75,32 @@ export class ClientPool {
     return entry;
   }
 
+  async evictIdle(now = Date.now()): Promise<number> {
+    const stale = Array.from(this.clients.values()).filter((entry) => {
+      const lastUsed = Date.parse(entry.last_used_at);
+      return Number.isFinite(lastUsed) && now - lastUsed > this.idleEvictionMs;
+    });
+    for (const entry of stale) {
+      this.clients.delete(entry.key);
+      await entry.client.shutdown();
+    }
+    return stale.length;
+  }
+
+  async evictOverflow(maxRemaining: number): Promise<number> {
+    const entries = Array.from(this.clients.values())
+      .sort((left, right) => Date.parse(left.last_used_at) - Date.parse(right.last_used_at));
+    let evicted = 0;
+    while (this.clients.size > maxRemaining && entries.length > 0) {
+      const entry = entries.shift();
+      if (!entry) break;
+      this.clients.delete(entry.key);
+      await entry.client.shutdown();
+      evicted += 1;
+    }
+    return evicted;
+  }
+
   async drop(root: string, server: DaemonServer): Promise<boolean> {
     const key = this.key(root, server);
     const existing = this.clients.get(key);
@@ -78,16 +110,21 @@ export class ClientPool {
     return true;
   }
 
-  status(): JsonObject[] {
-    return Array.from(this.clients.values()).map((entry) => ({
-      root: entry.root,
-      server_id: entry.server_id,
-      command: entry.command,
-      started_at: entry.started_at,
-      last_used_at: entry.last_used_at,
-      uses: entry.uses,
-      open_documents: entry.client.opened ? entry.client.opened.size : 0,
-    }));
+  status(): JsonObject {
+    return {
+      client_count: this.clients.size,
+      max_clients: this.maxClients,
+      idle_eviction_ms: this.idleEvictionMs,
+      servers: Array.from(this.clients.values()).map((entry) => ({
+        root: entry.root,
+        server_id: entry.server_id,
+        command: entry.command,
+        started_at: entry.started_at,
+        last_used_at: entry.last_used_at,
+        uses: entry.uses,
+        open_documents: entry.client.opened ? entry.client.opened.size : 0,
+      })),
+    };
   }
 
   async shutdownAll(): Promise<number> {
@@ -106,7 +143,8 @@ function send(id: string | number | null | undefined, result: unknown, error: Js
 
 export async function handleDaemonMessage(message: DaemonMessage): Promise<unknown> {
   if (message.method === "status") {
-    return { ok: true, servers: pool.status() };
+    const evicted_idle = await pool.evictIdle();
+    return { ok: true, evicted_idle, ...pool.status() };
   }
   if (message.method === "review") {
     const params = asJsonObject(message.params) as RuntimeArgs;

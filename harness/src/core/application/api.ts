@@ -4,6 +4,7 @@ export { beadsTaskWrite } from "./runtime/beads-task-write";
 export { createBeadsTree } from "./runtime/beads-tree";
 export { collisionScan } from "./runtime/collision";
 export { integrationInventory } from "./runtime/integrations";
+export { mcpReadiness } from "./runtime/mcp-readiness";
 export { recordParallelWorker } from "./runtime/parallel-state";
 export { parallelWorkflow } from "./runtime/parallel-workflow";
 export { planAssist, planIntegrity, worktreePlan } from "./runtime/planning";

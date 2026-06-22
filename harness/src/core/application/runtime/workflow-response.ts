@@ -19,6 +19,7 @@ import { normalizedSpecFromRaw } from "./spec-docs";
 import { asArray } from "./status";
 import { gitIdentity } from "../../infrastructure/runtime/system";
 import { packagedTemplateJson, packagedTemplatePath, packagedTemplatePaths, packagedTemplateSource, packagedTemplateText } from "./packaged-assets";
+import { compactWorkflowResponse } from "./response-compaction";
 
 export function workflowResponseMode(args: RuntimeArgs = {}): "compact" | "detail" {
   const raw = asOptionalString(args.responseMode || args.response_mode
@@ -127,6 +128,7 @@ export function workflowResourceUris(root: string, workflow: string, result: Cor
     || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
   const uris = [
     `cadre://workspace-health?root=${encodedRoot}`,
+    `cadre://mcp-readiness?root=${encodedRoot}`,
     `cadre://team-board?root=${encodedRoot}`,
     `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
   ];
@@ -159,6 +161,8 @@ export function shapeWorkflowResponse(root: string, workflow: string, args: Runt
     resource_uris: workflowResourceUris(root, workflow, result),
   };
   if (mode === "detail") return enriched;
+  const workflowSpecific = compactWorkflowResponse(workflow, enriched);
+  if (workflowSpecific) return workflowSpecific;
   return compactObject(enriched) as CoreResult;
 }
 

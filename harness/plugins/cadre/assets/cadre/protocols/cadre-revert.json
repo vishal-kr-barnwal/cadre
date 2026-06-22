@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "schema": "cadre.protocol.v1",
+  "id": "cadre-revert",
+  "description": "Revert tracks, phases, or tasks through Cadre packets",
+  "workflow": "revert",
+  "markdownUse": "human_projection_only",
+  "preconditions": [
+    {
+      "tool": "cadre_project",
+      "arguments": {
+        "action": "ping"
+      },
+      "requirement": "Cadre MCP must be available"
+    },
+    {
+      "requirement": "Every project-scoped packet call includes root"
+    },
+    {
+      "requirement": "If a required packet returns ok:false, halt and report the packet error"
+    }
+  ],
+  "packetFlow": [
+    {
+      "step": 1,
+      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
+    },
+    {
+      "step": 2,
+      "instruction": "Call `cadre_workflow` with `workflow: \"revert\"` and the requested `trackId`, commit, repo, or scope arguments as structured JSON fields."
+    },
+    {
+      "step": 3,
+      "instruction": "Present the packet dry-run revert scope, planned git actions, affected canonical JSON artifacts, generated projections, warnings, and review_bundle manifest/path list."
+    },
+    {
+      "step": 4,
+      "instruction": "To execute an approved revert, call `cadre_workflow` again with `workflow: \"revert\"`, `execute: true`, and `humanConfirmed: true`."
+    },
+    {
+      "step": 5,
+      "instruction": "Summarize reverted scope, tests requested or run, changed canonical JSON/JSONL artifacts, generated human projections, packet warnings, and follow-up packets."
+    }
+  ],
+  "confirmation": {
+    "requiredForMutation": true,
+    "dryRunFirst": true,
+    "executeArgument": "execute",
+    "humanConfirmationArgument": "humanConfirmed"
+  },
+  "forbiddenActions": [
+    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not read or write Markdown projections as canonical state",
+    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
+  ],
+  "responseSummary": [
+    "packet ok/error state",
+    "selected track or scope",
+    "warnings and blockers",
+    "changed canonical JSON/JSONL artifacts",
+    "generated human projections when relevant",
+    "next recommended packet"
+  ],
+  "references": [
+    "mcp-contract"
+  ]
+}

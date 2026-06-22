@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "schema": "cadre.skill.v1",
+  "id": "cadre",
+  "name": "Cadre",
+  "markdownUse": "human_projection_only",
+  "description": "Context-driven development methodology for organized, spec-first coding. JSON is the authoritative agent/runtime contract; Markdown exists only as platform shim or generated human projection.",
+  "activation": {
+    "triggers": [
+      "project has cadre/",
+      "user mentions specs, plans, tracks, or context-driven development",
+      "user asks for cadre-* workflow",
+      "user asks about Cadre project status, track management, review, ship, land, release, archive, setup, or artifact sync",
+      "project is a polyrepo control repo with cadre/repos.json"
+    ],
+    "requiredRuntime": "Cadre MCP",
+    "startup": [
+      {
+        "tool": "cadre_project",
+        "arguments": {
+          "action": "ping"
+        },
+        "purpose": "Verify Cadre MCP availability before every Cadre workflow"
+      },
+      {
+        "rule": "Every project-scoped Cadre MCP call must include a per-call root argument pointing at the project root or a path inside it"
+      },
+      {
+        "rule": "If Cadre MCP tools are unavailable, halt and ask the user to install, enable, or restart the Cadre plugin"
+      }
+    ]
+  },
+  "lazyContext": {
+    "defaultResponseMode": "compact",
+    "detailMode": "Use responseMode=detail only for full plans, code-intelligence evidence, or long style-guide content",
+    "canonicalArtifacts": [
+      "cadre/product.json",
+      "cadre/product_guidelines.json",
+      "cadre/tech-stack.json",
+      "cadre/workflow.json",
+      "cadre/patterns.jsonl",
+      "cadre/tracks.json",
+      "track metadata.json/spec.json/plan.json/learnings.jsonl/handoff.json",
+      "cadre/styleguides/*.json"
+    ],
+    "humanProjections": [
+      "cadre/product.md",
+      "cadre/product_guidelines.md",
+      "cadre/workflow.md",
+      "cadre/patterns.md",
+      "track spec.md/plan.md/learnings.md/HANDOFF.md",
+      "cadre/code_styleguides/*.md"
+    ],
+    "rules": [
+      "Do not read Markdown projections as canonical truth",
+      "Do not eagerly read the whole cadre/ tree on activation",
+      "Resolve live status from MCP packets and track metadata, not generated indexes"
+    ]
+  },
+  "workflows": {
+    "setup": {
+      "intent": "Setup project",
+      "protocol": "cadre://workflow-protocol?workflow=setup"
+    },
+    "newtrack": {
+      "intent": "Create work",
+      "protocol": "cadre://workflow-protocol?workflow=newtrack"
+    },
+    "implement": {
+      "intent": "Start or resume implementation",
+      "protocol": "cadre://workflow-protocol?workflow=implement"
+    },
+    "status": {
+      "intent": "Status, team board, or fleet board",
+      "protocol": "cadre://workflow-protocol?workflow=status"
+    },
+    "validate": {
+      "intent": "Validate project state",
+      "protocol": "cadre://workflow-protocol?workflow=validate"
+    },
+    "flag": {
+      "intent": "Flag blocked or skipped work",
+      "protocol": "cadre://workflow-protocol?workflow=flag"
+    },
+    "revise": {
+      "intent": "Revise spec or plan",
+      "protocol": "cadre://workflow-protocol?workflow=revise"
+    },
+    "review": {
+      "intent": "Review quality gate",
+      "protocol": "cadre://workflow-protocol?workflow=review"
+    },
+    "ship": {
+      "intent": "Ship monorepo work",
+      "protocol": "cadre://workflow-protocol?workflow=ship"
+    },
+    "land": {
+      "intent": "Land polyrepo work",
+      "protocol": "cadre://workflow-protocol?workflow=land"
+    },
+    "handoff": {
+      "intent": "Handoff context",
+      "protocol": "cadre://workflow-protocol?workflow=handoff"
+    },
+    "archive": {
+      "intent": "Archive completed tracks",
+      "protocol": "cadre://workflow-protocol?workflow=archive"
+    },
+    "release": {
+      "intent": "Release summary or version",
+      "protocol": "cadre://workflow-protocol?workflow=release"
+    },
+    "refresh": {
+      "intent": "Refresh stale context",
+      "protocol": "cadre://workflow-protocol?workflow=refresh"
+    },
+    "revert": {
+      "intent": "Revert tracked commits",
+      "protocol": "cadre://workflow-protocol?workflow=revert"
+    },
+    "formula": {
+      "intent": "Formula or template operations",
+      "protocol": "cadre://workflow-protocol?workflow=formula"
+    },
+    "artifacts": {
+      "intent": "Sync canonical artifacts",
+      "protocol": "cadre://workflow-protocol?workflow=artifacts"
+    }
+  },
+  "references": {
+    "mcp-contract": {
+      "uri": "cadre://agent-reference?name=mcp-contract"
+    },
+    "provider-evidence": {
+      "uri": "cadre://agent-reference?name=provider-evidence"
+    },
+    "team-ops": {
+      "uri": "cadre://agent-reference?name=team-ops"
+    },
+    "beads-integration": {
+      "uri": "cadre://agent-reference?name=beads-integration"
+    },
+    "beads-error-handler": {
+      "uri": "cadre://agent-reference?name=beads-error-handler"
+    },
+    "cadre-sync": {
+      "uri": "cadre://agent-reference?name=cadre-sync"
+    },
+    "ownership-guard": {
+      "uri": "cadre://agent-reference?name=ownership-guard"
+    },
+    "parallel-execution": {
+      "uri": "cadre://agent-reference?name=parallel-execution"
+    },
+    "polyrepo-git": {
+      "uri": "cadre://agent-reference?name=polyrepo-git"
+    },
+    "template-locator": {
+      "uri": "cadre://agent-reference?name=template-locator"
+    }
+  },
+  "operatingDefaults": [
+    "Setup requires Beads and writes cadre/beads.json through packets",
+    "Shared sync is recommended for teams and packet-owned",
+    "Hosted provider evidence must come through official provider MCPs and be written back through Cadre packets",
+    "LSP/code-intelligence packets should be used for repo maps, impact checks, review assistance, diagnostics, and test-impact hints"
+  ],
+  "forbidden": [
+    "Do not mutate cadre/, Beads, provider state, indexes, worker state, or merge/cleanup state outside Cadre packets",
+    "Do not use Markdown as alternate input, legacy import source, or runtime state",
+    "Do not manually edit generated Markdown projections as workflow state"
+  ]
+}

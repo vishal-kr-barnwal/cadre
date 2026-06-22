@@ -263,13 +263,16 @@ test("LSP setup JSON and daemon status/shutdown smoke", async () => {
   }
 });
 
-test("Generated plugin MCP runtime writes setup and newtrack artifacts from embedded templates", async () => {
+test("Generated plugin MCP runtime writes setup and newtrack artifacts from external assets", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plugin-embedded-test-"));
   const pluginRoot = path.resolve(__dirname, "..", "..", "plugins", "cadre");
   const serverPath = path.join(pluginRoot, "scripts", "mcp", "cadre-server.js");
   assert.equal(fs.existsSync(path.join(pluginRoot, "templates")), false);
   assert.equal(fs.existsSync(path.join(pluginRoot, "references")), false);
   assert.equal(fs.existsSync(path.join(pluginRoot, "skills", "cadre", "skill.json")), false);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "assets", "cadre", "templates", "manifest.json")), true);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "assets", "cadre", "references", "mcp-contract.json")), true);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "assets", "cadre", "protocols", "cadre-setup.json")), true);
   const { server, request } = startServer({
     serverPath,
     cwd: pluginRoot,
@@ -349,6 +352,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
     for (const name of [
+      "cadre_resource",
       "cadre_workflow",
       "cadre_project",
       "cadre_status",
@@ -401,6 +405,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(intelActions.includes("workspace_diagnostics"));
     assert.ok(intelActions.includes("test_impact"));
     assert.ok(intelActions.includes("dependency_graph"));
+    assert.ok(intelActions.includes("mcp_readiness"));
     const statusTool = tools.tools.find((tool) => tool.name === "cadre_status");
     const statusActions = statusTool.inputSchema.properties.action.enum;
     assert.ok(statusActions.includes("fleet"));
@@ -417,6 +422,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://beads-summary"));
     assert.ok(uris.includes("cadre://workspace-health"));
     assert.ok(uris.includes("cadre://integrations"));
+    assert.ok(uris.includes("cadre://mcp-readiness"));
     assert.ok(uris.includes("cadre://review-evidence"));
     assert.ok(uris.includes("cadre://workspace-diagnostics"));
     assert.ok(uris.includes("cadre://lsp-status"));
@@ -452,6 +458,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://provider-actions").required, ["root", "trackId", "workflow"]);
     assert.deepEqual(templateByUri.get("cadre://workspace-health").optional, ["responseMode", "detail", "compact"]);
     assert.deepEqual(templateByUri.get("cadre://integrations").optional, ["responseMode", "detail", "compact"]);
+    assert.deepEqual(templateByUri.get("cadre://mcp-readiness").required, ["root"]);
     assert.ok(templateByUri.get("cadre://workspace-health").uriTemplate.includes("responseMode"));
     assert.ok(templateByUri.get("cadre://repo-map").optional.includes("symbol"));
     assert.deepEqual(templateByUri.get("cadre://ship-plan").required, ["root", "trackId"]);
@@ -464,6 +471,12 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
 
     const skillContract = await request("resources/read", { uri: "cadre://skill-contract" });
+    const skillContractTool = parseTextJson(await request("tools/call", {
+      name: "cadre_resource",
+      arguments: { uri: "cadre://skill-contract" },
+    }));
+    assert.equal(skillContractTool.contents[0].text, skillContract.contents[0].text);
+
     const parsedSkillContract = JSON.parse(skillContract.contents[0].text);
     assert.equal(parsedSkillContract.ok, true);
     assert.equal(parsedSkillContract.data.skill.schema, "cadre.skill.v1");
@@ -772,6 +785,13 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     }));
     assert.equal(wave.data.ok, true);
     assert.equal(wave.data.workers.length, 2);
+
+    const readiness = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { root, action: "mcp_readiness", providerMode: "github", mcpCapabilities: { github: { available: true } } },
+    }));
+    assert.equal(readiness.data.provider.available, true);
+    assert.equal(readiness.data.summary.packet_owned_evidence_only, true);
 
     const fleet = parseTextJson(await request("tools/call", {
       name: "cadre_status",

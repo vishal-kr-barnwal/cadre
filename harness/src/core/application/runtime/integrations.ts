@@ -12,6 +12,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 
 import { CoreResult } from "./contracts";
 import { summarizeLspCoverage, workspaceHealthDetailResources } from "./health-summaries";
+import { mcpReadiness } from "./mcp-readiness";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
 import { lspSetup } from "./setup-infrastructure";
 import { workflowResponseMode } from "./workflow-response";
@@ -104,6 +105,7 @@ export function integrationStatus(root: string, args: RuntimeArgs, kind: string,
 export function integrationInventory(root: string, args: RuntimeArgs = {}): CoreResult {
   const mode = workflowResponseMode(args);
   const provider = providerMcpAvailability(root, args);
+  const readiness = mcpReadiness(root, args);
   const lsp = summarizeLspCoverage(root, args);
   const optionalMcps = [
     integrationStatus(root, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
@@ -135,6 +137,7 @@ export function integrationInventory(root: string, args: RuntimeArgs = {}): Core
       response_mode: mode,
       detail_available: true,
       provider,
+      mcp_readiness: readiness,
       optional_mcps: optionalMcps,
       lsp: {
         coverage: lsp,
@@ -158,6 +161,12 @@ export function integrationInventory(root: string, args: RuntimeArgs = {}): Core
       source: provider.source || null,
       remote_host: provider.remote_host || null,
       requires_confirmation: provider.requires_confirmation === true,
+    },
+    mcp_readiness: {
+      ok: readiness.ok !== false,
+      provider: asJsonObject(readiness.provider),
+      summary: asJsonObject(readiness.summary),
+      recommendations: Array.isArray(readiness.recommendations) ? readiness.recommendations : [],
     },
     optional_mcps: optionalMcps.map((entry) => ({
       kind: entry.kind,

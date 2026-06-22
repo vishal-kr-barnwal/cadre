@@ -116,6 +116,8 @@ export interface ServerReport extends JsonObject {
   files: JsonObject[];
   candidates: JsonObject[];
   skipped: boolean;
+  degraded?: boolean;
+  fallback?: string | null;
   warm?: boolean;
   diagnostics?: JsonObject[];
   symbolEvidence?: JsonObject[];

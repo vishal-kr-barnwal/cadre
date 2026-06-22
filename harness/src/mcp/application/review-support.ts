@@ -71,9 +71,24 @@ function annotateRepoFindings(result: JsonObject, target: JsonObject): JsonObjec
   }));
 }
 
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index] as T);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 async function warmLspReview(deps: Pick<RuntimeDependencies, "core" | "lspDaemon">, root: string, args: RuntimeArgs): Promise<JsonObject> {
   const targets = repoReviewTargets(deps, root, args);
   const timeoutMs = Number(args.timeoutMs || 120000);
+  const maxWorkers = Math.max(1, Math.min(12, Number(args.maxWorkers || args.limit || 4)));
   const rawConfig = asOptionalString(args.config) || path.join(root, "cadre", "lsp.json");
   const config = path.isAbsolute(rawConfig) ? rawConfig : path.resolve(root, rawConfig);
   if (targets.length <= 1 && targets[0]?.repo === ".") {
@@ -83,7 +98,7 @@ async function warmLspReview(deps: Pick<RuntimeDependencies, "core" | "lspDaemon
       timeoutMs
     ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
   }
-  const repos = await Promise.all(targets.map(async (target) => {
+  const repos = await mapWithConcurrency(targets, maxWorkers, async (target) => {
     const cwd = asOptionalString(target.cwd) || root;
     const repo = asOptionalString(target.repo) || ".";
     if (!fs.existsSync(cwd)) {
@@ -112,11 +127,14 @@ async function warmLspReview(deps: Pick<RuntimeDependencies, "core" | "lspDaemon
       result: { ...result, findings },
       findings,
     };
-  }));
+  });
   const findings = repos.flatMap((entry) => Array.isArray(entry.findings) ? entry.findings : []);
   return {
     available: repos.some((entry) => asJsonObject(entry.result).available !== false),
     polyrepo: true,
+    max_workers: maxWorkers,
+    target_count: targets.length,
+    bounded_concurrency: true,
     config,
     repos,
     findings,

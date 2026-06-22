@@ -855,6 +855,8 @@ async function runReview(options = {}) {
     }));
     if (availability.state !== "available") {
       serverReport.skipped = true;
+      serverReport.degraded = true;
+      serverReport.fallback = "text_scan";
       findings.push(skipFinding(
         server,
         availability.state === "invalid" ? "server_invalid" : "server_missing",
@@ -952,6 +954,8 @@ async function runReview(options = {}) {
       }
     } catch (error) {
       serverReport.skipped = true;
+      serverReport.degraded = true;
+      serverReport.fallback = "text_scan";
       findings.push(skipFinding(server, "server_unavailable", `LSP scan skipped: ${errorMessage(error)}`));
       if (clientPool && pooled) await clientPool.drop(root, server);
       for (const candidate of allCandidates.values()) {
@@ -970,6 +974,8 @@ async function runReview(options = {}) {
     base: args.base,
     head: args.head,
     config: args.config,
+    degraded: serverReports.some((report) => report.degraded === true),
+    fallback: serverReports.some((report) => report.fallback === "text_scan") ? "text_scan" : null,
     changedFiles: files,
     changedEntries: entries,
     fileHints: nearbyFileHints(root, files),
@@ -1056,8 +1062,12 @@ if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path7.de
 // src/cadre-lsp-daemon.ts
 var ClientPool = class {
   clients;
-  constructor() {
+  maxClients;
+  idleEvictionMs;
+  constructor(options = {}) {
     this.clients = /* @__PURE__ */ new Map();
+    this.maxClients = Math.max(1, Math.min(32, Number(options.maxClients || process.env.CADRE_LSP_MAX_CLIENTS || 8)));
+    this.idleEvictionMs = Math.max(3e4, Number(options.idleEvictionMs || process.env.CADRE_LSP_IDLE_EVICTION_MS || 10 * 60 * 1e3));
   }
   key(root, server) {
     return JSON.stringify({
@@ -1068,6 +1078,7 @@ var ClientPool = class {
     });
   }
   async get(root, server) {
+    await this.evictIdle();
     const key = this.key(root, server);
     const existing = this.clients.get(key);
     if (existing) {
@@ -1075,6 +1086,7 @@ var ClientPool = class {
       existing.uses += 1;
       return existing;
     }
+    await this.evictOverflow(this.maxClients - 1);
     const client = new LspClient(root, server);
     await client.start();
     await client.initialize();
@@ -1091,6 +1103,29 @@ var ClientPool = class {
     this.clients.set(key, entry);
     return entry;
   }
+  async evictIdle(now = Date.now()) {
+    const stale = Array.from(this.clients.values()).filter((entry) => {
+      const lastUsed = Date.parse(entry.last_used_at);
+      return Number.isFinite(lastUsed) && now - lastUsed > this.idleEvictionMs;
+    });
+    for (const entry of stale) {
+      this.clients.delete(entry.key);
+      await entry.client.shutdown();
+    }
+    return stale.length;
+  }
+  async evictOverflow(maxRemaining) {
+    const entries = Array.from(this.clients.values()).sort((left, right) => Date.parse(left.last_used_at) - Date.parse(right.last_used_at));
+    let evicted = 0;
+    while (this.clients.size > maxRemaining && entries.length > 0) {
+      const entry = entries.shift();
+      if (!entry) break;
+      this.clients.delete(entry.key);
+      await entry.client.shutdown();
+      evicted += 1;
+    }
+    return evicted;
+  }
   async drop(root, server) {
     const key = this.key(root, server);
     const existing = this.clients.get(key);
@@ -1100,15 +1135,20 @@ var ClientPool = class {
     return true;
   }
   status() {
-    return Array.from(this.clients.values()).map((entry) => ({
-      root: entry.root,
-      server_id: entry.server_id,
-      command: entry.command,
-      started_at: entry.started_at,
-      last_used_at: entry.last_used_at,
-      uses: entry.uses,
-      open_documents: entry.client.opened ? entry.client.opened.size : 0
-    }));
+    return {
+      client_count: this.clients.size,
+      max_clients: this.maxClients,
+      idle_eviction_ms: this.idleEvictionMs,
+      servers: Array.from(this.clients.values()).map((entry) => ({
+        root: entry.root,
+        server_id: entry.server_id,
+        command: entry.command,
+        started_at: entry.started_at,
+        last_used_at: entry.last_used_at,
+        uses: entry.uses,
+        open_documents: entry.client.opened ? entry.client.opened.size : 0
+      }))
+    };
   }
   async shutdownAll() {
     const entries = Array.from(this.clients.values());
@@ -1124,7 +1164,8 @@ function send(id, result, error = null) {
 }
 async function handleDaemonMessage(message) {
   if (message.method === "status") {
-    return { ok: true, servers: pool.status() };
+    const evicted_idle = await pool.evictIdle();
+    return { ok: true, evicted_idle, ...pool.status() };
   }
   if (message.method === "review") {
     const params = asJsonObject(message.params);

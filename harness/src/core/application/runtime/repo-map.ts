@@ -15,6 +15,7 @@ import { fileExists } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { asArray } from "./status";
 import { runCommand } from "../../infrastructure/runtime/system";
+import { cachedWorkspaceValue } from "./workspace-cache";
 
 export function isIgnoredRepoMapFile(file: unknown): boolean {
   const normalized = String(file || "").replace(/\\/g, "/");
@@ -151,6 +152,7 @@ export function repoMap(root: string, args: RuntimeArgs = {}): CoreResult {
     const matches = repoResults.flatMap((entry) => asArray(entry.matches)).slice(0, limit);
     return { ok: repoResults.some((entry) => entry.ok) || matches.length > 0, root, symbol, matches, repos: repoResults, truncated: matches.length >= limit };
   }
+  return cachedWorkspaceValue(root, "repo-map", JSON.stringify({ limit, repos: repos.map((entry) => entry.repo) }), () => {
   const repoResults = repos.map((entry) => {
     const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
     const byLanguage: Record<string, number> = {};
@@ -186,4 +188,5 @@ export function repoMap(root: string, args: RuntimeArgs = {}): CoreResult {
     repos: repoResults,
     truncated: symbols.length >= limit,
   };
+  });
 }

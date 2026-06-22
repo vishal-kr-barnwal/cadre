@@ -12,7 +12,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 
 import { collisionScan } from "./collision";
 import { BdJsonResult, CoreResult, TrackSummary } from "./contracts";
-import { fileExists, utcNow } from "../../infrastructure/runtime/json-store";
+import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
 import { trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
 import { commandExists, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
@@ -117,6 +117,36 @@ export function metadataTrackSummary(track: CadreTrack): TrackSummary {
     reviewer: track.metadata.reviewer || null,
     beads_epic: track.metadata.beads_epic || null,
     review: track.metadata.review ? asJsonObject(track.metadata.review) : null,
+  };
+}
+
+export function lspRuntimeSummary(root: string): CoreResult {
+  const configPath = path.join(root, "cadre", "lsp.json");
+  const config = readJson<JsonObject | null>(configPath, null);
+  const servers = isRecord(config) && Array.isArray(config.servers)
+    ? config.servers.map((server) => asJsonObject(server))
+    : [];
+  const entries = servers.map((server) => {
+    const command = asOptionalString(server.command);
+    return {
+      id: asOptionalString(server.id) || command || "unknown",
+      command: command || null,
+      available: command ? commandExists(command, root) : false,
+    };
+  });
+  return {
+    configured: Boolean(config),
+    path: path.relative(root, configPath),
+    server_count: entries.length,
+    available_count: entries.filter((entry) => entry.available === true).length,
+    missing_count: entries.filter((entry) => entry.available !== true).length,
+    missing: entries.filter((entry) => entry.available !== true).map((entry) => entry.id),
+    daemon: {
+      status_packet: "cadre_intel action lsp_daemon_status",
+      shutdown_packet: "cadre_intel action lsp_daemon_shutdown",
+      max_clients_default: 8,
+      idle_eviction_ms_default: 600000,
+    },
   };
 }
 
@@ -272,6 +302,7 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
     review_queue: Array.from(dedupReview.values()),
     blockers,
     beads,
+    lsp: lspRuntimeSummary(root),
   };
 }
 
@@ -321,6 +352,7 @@ export function fleetStatus(root: string, args: RuntimeArgs = {}): CoreResult {
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     repos,
     provider: providerMcpAvailability(root, args),
+    lsp: lspRuntimeSummary(root),
     beads_available: commandExists("bd", root),
     collisions: args.includeCollisions === false ? null : collisionScan(root),
   };

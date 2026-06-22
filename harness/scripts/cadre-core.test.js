@@ -453,6 +453,7 @@ test("build emits every required runtime bundle path", () => {
     "scripts/cadre-lsp-review.js",
     "scripts/cadre-lsp-daemon.js",
     "scripts/mcp/cadre-server.js",
+    "scripts/mcp/cadre-server.external.js",
     "plugins/cadre/scripts/mcp/cadre-server.js",
     "plugins/cadre-claude/scripts/mcp/cadre-server.js",
   ]) {
@@ -560,7 +561,22 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     });
     assert.equal(dryRecord.ok, true);
     assert.equal(dryRecord.dry_run, true);
+    assert.equal(dryRecord.evidence_validation.checked, false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "parallel_20260617", "parallel_state.json")), false);
+
+    const rejected = core.parallelWorkflow(root, {
+      action: "record_finish",
+      execute: true,
+      trackId: "parallel_20260617",
+      workerId: "worker-bad",
+      status: "awaiting_merge",
+      phaseIndex: 1,
+      taskIndex: 1,
+      commitSha: "bad1234",
+      filesChanged: ["src/unowned.js"],
+    });
+    assert.equal(rejected.ok, false);
+    assert.deepEqual(rejected.unowned_files_changed, ["src/unowned.js"]);
 
     const recorded = core.parallelWorkflow(root, {
       action: "record_finish",
@@ -574,9 +590,16 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
       branch: "track/parallel-worker-one",
       worktree: ".worktrees/parallel_20260617/worker-one",
       repo: ".",
+      filesChanged: ["src/core.js"],
+      tests: [{ command: "node --test", cwd: ".", ok: true, status: 0 }],
+      summary: "Updated core worker path",
+      blockers: [],
     });
     assert.equal(recorded.ok, true);
     assert.equal(recorded.summary.completed_workers, 1);
+    assert.deepEqual(recorded.worker.files_changed, ["src/core.js"]);
+    assert.equal(recorded.worker.tests[0].command, "node --test");
+    assert.equal(recorded.worker.summary, "Updated core worker path");
 
     const merge = core.parallelWorkflow(root, { action: "merge_back", trackId: "parallel_20260617" });
     assert.equal(merge.ok, true);
@@ -587,6 +610,38 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.equal(cleanup.ok, true);
     assert.equal(cleanup.commands.length, 0);
     assert.equal(cleanup.skipped[0].status, "awaiting_merge");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP readiness records provider capability evidence without making optional MCPs mandatory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-mcp-readiness-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ provider_mode: "github" }, null, 2));
+
+    const missing = core.mcpReadiness(root, { providerMode: "github" });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.provider.required, true);
+    assert.ok(missing.provider.missing_evidence_fields.includes("mcpCapabilities"));
+    assert.equal(missing.summary.optional_recommended_count > 0, true);
+
+    const ready = core.mcpReadiness(root, {
+      providerMode: "github",
+      mcpCapabilities: { github: { available: true, server: "github" }, sourcegraph: { available: true } },
+    });
+    assert.equal(ready.ok, true);
+    assert.equal(ready.provider.available, true);
+    assert.equal(ready.optional_mcps.find((entry) => entry.kind === "code_search").available, true);
+
+    const ci = core.prCiStatus(root, {
+      providerMode: "github",
+      mcpCapabilities: { github: { available: true } },
+    });
+    assert.equal(ci.ok, false);
+    assert.deepEqual(ci.missing_evidence_fields, []);
+    assert.equal(ci.exact_write_back_packet.tool, "cadre_review");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

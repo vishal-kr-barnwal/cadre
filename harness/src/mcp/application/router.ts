@@ -17,8 +17,18 @@ import { artifactPacket } from "./packets/artifact";
 import type { McpMessage, RuntimeEnvelope } from "../domain/protocol-types";
 import type { RuntimeDependencies } from "./ports";
 
+function resourceUriFromToolArgs(args: RuntimeArgs): string {
+  const uri = asOptionalString(args.uri);
+  if (!uri) throw Object.assign(new Error("cadre_resource requires uri"), { code: -32602 });
+  const responseMode = asOptionalString(args.responseMode || args.response_mode);
+  if (!responseMode || /[?&](responseMode|response_mode)=/.test(uri)) return uri;
+  const separator = uri.includes("?") ? "&" : "?";
+  return `${uri}${separator}responseMode=${encodeURIComponent(responseMode)}`;
+}
+
 function createToolCall(deps: RuntimeDependencies) {
   return async function toolCall(name: string, args: RuntimeArgs = {}): Promise<TextJsonResult> {
+    if (name === "cadre_resource") return asTextJson(resourceRead(resourceUriFromToolArgs(args), deps));
     if (name === "cadre_workflow") return asTextJson(await workflowPacket(deps, args));
     if (name === "cadre_project") return asTextJson(await projectPacket(deps, args));
     if (name === "cadre_status") return asTextJson(statusPacket(deps, args));

@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "schema": "cadre.protocol.v1",
+  "id": "cadre-archive",
+  "description": "Archive completed tracks",
+  "workflow": "archive",
+  "markdownUse": "human_projection_only",
+  "preconditions": [
+    {
+      "tool": "cadre_project",
+      "arguments": {
+        "action": "ping"
+      },
+      "requirement": "Cadre MCP must be available"
+    },
+    {
+      "requirement": "Every project-scoped packet call includes root"
+    },
+    {
+      "requirement": "If a required packet returns ok:false, halt and report the packet error"
+    }
+  ],
+  "packetFlow": [
+    {
+      "step": 1,
+      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
+    },
+    {
+      "step": 2,
+      "instruction": "Call `cadre_workflow` with `workflow: \"archive\"` and the resolved root. Pass `trackId`, cutoff, or scope arguments as structured JSON fields only."
+    },
+    {
+      "step": 3,
+      "instruction": "Present the dry-run `tracks` list, packet warnings, cleanup scope, and any review_bundle manifest/path list without inlining large artifact contents into model context."
+    },
+    {
+      "step": 4,
+      "instruction": "To archive reviewed work, call `cadre_workflow` again with `workflow: \"archive\"`, `execute: true`, and `humanConfirmed: true`."
+    },
+    {
+      "step": 5,
+      "instruction": "Summarize archived track ids, packet warnings, changed canonical JSON/JSONL artifacts, generated human projections, and any packet errors."
+    }
+  ],
+  "confirmation": {
+    "requiredForMutation": true,
+    "dryRunFirst": true,
+    "executeArgument": "execute",
+    "humanConfirmationArgument": "humanConfirmed"
+  },
+  "forbiddenActions": [
+    "Do not recreate Cadre control-plane, Beads, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not read or write Markdown projections as canonical state",
+    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
+  ],
+  "responseSummary": [
+    "packet ok/error state",
+    "selected track or scope",
+    "warnings and blockers",
+    "changed canonical JSON/JSONL artifacts",
+    "generated human projections when relevant",
+    "next recommended packet"
+  ],
+  "references": [
+    "mcp-contract"
+  ]
+}

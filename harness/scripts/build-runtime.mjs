@@ -12,7 +12,8 @@ const entries = [
   ["src/cadre-lsp-setup.ts", "scripts/cadre-lsp-setup.js"],
   ["src/cadre-lsp-review.ts", "scripts/cadre-lsp-review.js"],
   ["src/cadre-lsp-daemon.ts", "scripts/cadre-lsp-daemon.js"],
-  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.js"]
+  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.js", "embedded"],
+  ["src/mcp/cadre-server.ts", "scripts/mcp/cadre-server.external.js", "external"]
 ];
 
 const banner = [
@@ -64,8 +65,8 @@ for (const [, outfile] of entries) {
 }
 
 await Promise.all(
-  entries.map(([entry, outfile]) => {
-    const entryBanner = outfile === "scripts/mcp/cadre-server.js"
+  entries.map(([entry, outfile, assetMode]) => {
+    const entryBanner = assetMode === "embedded"
       ? `${banner}\nconst __CADRE_EMBEDDED_ASSETS__ = ${JSON.stringify(embeddedAssets)};`
       : banner;
     return (
@@ -77,6 +78,7 @@ await Promise.all(
       target: "node18",
       format: "cjs",
       legalComments: "none",
+      minify: assetMode === "external",
       banner: { js: entryBanner },
       logLevel: "silent"
     })

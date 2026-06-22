@@ -94,6 +94,7 @@ function walkTemplateFiles(dir: string, base = dir): string[] {
 
 function referenceDirs(): string[] {
   return walkingCandidates((dir) => [
+    path.join(dir, "assets", "cadre", "references"),
     path.join(dir, "references"),
     path.join(dir, "scripts", "agent-refs"),
     path.join(dir, "skills", "cadre", "references"),
@@ -102,6 +103,7 @@ function referenceDirs(): string[] {
 
 function protocolDirs(): string[] {
   return walkingCandidates((dir) => [
+    path.join(dir, "assets", "cadre", "protocols"),
     path.join(dir, "skills", "cadre", "protocols"),
     path.join(dir, "protocols"),
   ]).filter(isDir);
@@ -111,6 +113,7 @@ export function packagedSkillContract(): JsonObject | null {
   const embedded = embeddedAssets()?.skill;
   if (embedded) return embedded;
   const file = findFile(walkingCandidates((dir) => [
+    path.join(dir, "assets", "cadre", "skill.json"),
     path.join(dir, "skills", "cadre", "skill.json"),
     path.join(dir, "skill.json"),
   ]));
@@ -166,6 +169,7 @@ export function packagedAgentReference(id: string | null | undefined): JsonObjec
   const embedded = embeddedAssets()?.references?.[wanted];
   if (embedded) return embedded;
   const file = findFile(walkingCandidates((dir) => [
+    path.join(dir, "assets", "cadre", "references", `${wanted}.json`),
     path.join(dir, "references", `${wanted}.json`),
     path.join(dir, "scripts", "agent-refs", `${wanted}.json`),
     path.join(dir, "skills", "cadre", "references", `${wanted}.json`),
@@ -176,6 +180,7 @@ export function packagedAgentReference(id: string | null | undefined): JsonObjec
 export function packagedTemplatePath(relativePath: string): string | null {
   const normalized = normalizeRelativePath(relativePath);
   return findFile(walkingCandidates((dir) => [
+    path.join(dir, "assets", "cadre", "templates", normalized),
     path.join(dir, "templates", normalized),
     path.join(dir, "skills", "cadre", "templates", normalized),
   ]));

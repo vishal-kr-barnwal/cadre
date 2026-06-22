@@ -27,6 +27,7 @@ export function workspaceHealthDetailResources(root: string): string[] {
     `cadre://repo-map?root=${encodedRoot}`,
     `cadre://lsp-status?root=${encodedRoot}`,
     `cadre://integrations?root=${encodedRoot}`,
+    `cadre://mcp-readiness?root=${encodedRoot}`,
   ];
 }
 

@@ -17,6 +17,7 @@ export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs):
   if (action === "workspace_diagnostics") return envelope(deps.core.workspaceDiagnostics(root));
   if (action === "test_impact") return envelope(deps.core.testImpact(root, args));
   if (action === "dependency_graph") return envelope(deps.core.dependencyGraph(root));
+  if (action === "mcp_readiness") return envelope(deps.core.mcpReadiness(root, args));
   if (action === "lsp_impact") {
     let lspResult: JsonObject | null = null;
     if ((args.base || args.head) && args.includeLsp !== false) {

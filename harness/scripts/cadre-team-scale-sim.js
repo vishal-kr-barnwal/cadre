@@ -290,9 +290,13 @@ async function main() {
   const setupDetailBytes = Buffer.byteLength(JSON.stringify(setupDetail), "utf8");
   const workspaceCompactBytes = Buffer.byteLength(JSON.stringify(workspaceCompact), "utf8");
   const workspaceDetailBytes = Buffer.byteLength(JSON.stringify(workspaceDetail), "utf8");
+  const reviewCompactBytes = Buffer.byteLength(JSON.stringify(workflowReview), "utf8");
 
   assert(setupCompactBytes < setupDetailBytes, `expected compact setup payload to be smaller than detail (${setupCompactBytes} < ${setupDetailBytes})`);
   assert(workspaceCompactBytes < workspaceDetailBytes, `expected compact workspace payload to be smaller than detail (${workspaceCompactBytes} < ${workspaceDetailBytes})`);
+  assert(setupCompactBytes < 12 * 1024, `expected compact setup payload under 12KB, got ${setupCompactBytes}`);
+  assert(workspaceCompactBytes < 5 * 1024, `expected compact workspace payload under 5KB, got ${workspaceCompactBytes}`);
+  assert(reviewCompactBytes < 15 * 1024, `expected compact review payload under 15KB, got ${reviewCompactBytes}`);
 
   assert(status.total_tracks === 20, `expected 20 tracks, got ${status.total_tracks}`);
   assert(status.by_status.in_progress === 12, "expected 12 in-progress tracks");
@@ -342,6 +346,7 @@ async function main() {
     setup_detail_bytes: setupDetailBytes,
     workspace_compact_bytes: workspaceCompactBytes,
     workspace_detail_bytes: workspaceDetailBytes,
+    review_compact_bytes: reviewCompactBytes,
     setup_compact_reduction_pct: Math.round((1 - setupCompactBytes / setupDetailBytes) * 100),
     workspace_compact_reduction_pct: Math.round((1 - workspaceCompactBytes / workspaceDetailBytes) * 100),
   };

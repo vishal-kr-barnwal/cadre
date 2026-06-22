@@ -72,6 +72,12 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
     commit_sha: args.commitSha || existingWorker?.commit_sha || null,
     coverage: typeof args.coverage === "number" ? args.coverage : existingWorker?.coverage ?? null,
     evidence: args.evidence || existingWorker?.evidence || null,
+    files_changed: asStringArray(args.filesChanged || args.files_changed || existingWorker?.files_changed),
+    tests: Array.isArray(args.tests)
+      ? args.tests.map((test) => asJsonObject(test))
+      : (Array.isArray(existingWorker?.tests) ? existingWorker.tests : []),
+    summary: asOptionalString(args.summary) || asOptionalString(existingWorker?.summary) || null,
+    blockers: asStringArray(args.blockers || existingWorker?.blockers),
     updated_at: now,
   };
   if (status === "awaiting_merge" && !nextWorker.completed_at) nextWorker.completed_at = now;

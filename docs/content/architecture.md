@@ -46,10 +46,10 @@ Edit master sources, then regenerate generated output.
 | Source | Owns |
 |--------|------|
 | `harness/skills/cadre/SKILL.md` | Cadre skill activation shim that points agents at MCP contract resources. |
-| `harness/skills/cadre/skill.json` | Master `cadre.skill.v1` contract embedded into the MCP runtime. |
-| `harness/skills/cadre/protocols/` | Master workflow protocol bodies embedded into MCP resources for all `cadre-*` workflows. |
-| `harness/scripts/agent-refs/` | Reference material embedded into MCP reference resources. |
-| `harness/templates/` | Target-project templates embedded into the MCP runtime and written by `cadre-setup`. |
+| `harness/skills/cadre/skill.json` | Master `cadre.skill.v1` contract served by MCP resources and copied into plugin `assets/cadre/`. |
+| `harness/skills/cadre/protocols/` | Master workflow protocol bodies served by MCP resources and copied into plugin `assets/cadre/protocols/`. |
+| `harness/scripts/agent-refs/` | Reference material served by MCP reference resources and copied into plugin `assets/cadre/references/`. |
+| `harness/templates/` | Target-project templates copied into plugin `assets/cadre/templates/` and written by `cadre-setup`. |
 | `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
 | `docs/` | Public Next.js/shadcn documentation website. |
 | `docs/content/` | Markdown source for generated documentation routes. |
@@ -78,9 +78,13 @@ source of truth.
 The generator:
 
 - Copies the master `SKILL.md` shim into each platform bundle.
-- Embeds the skill contract, workflow protocols, references, templates, worker
-  guidance, jobs, and LSP helpers into `scripts/mcp/cadre-server.js`.
-- Copies only `scripts/mcp/cadre-server.js` as the Cadre-owned plugin runtime.
+- Copies the skill contract, workflow protocols, references, and templates into
+  plugin `assets/cadre/` so clients can inspect packaged assets directly.
+- Copies a small `scripts/mcp/cadre-server.js` plugin runtime that loads those
+  external assets. The standalone harness runtime keeps embedded assets for
+  direct local use.
+- Adds the Claude-only `agents/cadre-worker.md` overlay while Codex uses
+  multi-agent tool discovery from the parallel execution reference.
 - Rewrites marketplace shims for root and harness development paths.
 
 ## Runtime Build

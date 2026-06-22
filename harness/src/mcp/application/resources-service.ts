@@ -154,6 +154,7 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
   else if (resource.base === "cadre://beads-summary") value = deps.core.beadsSummary(root);
   else if (resource.base === "cadre://workspace-health") value = workspaceHealth(root, normalizedResource);
   else if (resource.base === "cadre://integrations") value = integrations(root, normalizedResource);
+  else if (resource.base === "cadre://mcp-readiness") value = deps.core.mcpReadiness(root, normalizedResource);
   else if (resource.base === "cadre://track-context") value = deps.core.trackContext(root, resource.trackId);
   else if (resource.base === "cadre://review-evidence") value = deps.core.reviewEvidence(root, resource.trackId);
   else if (resource.base === "cadre://collisions") value = deps.core.collisionScan(root);

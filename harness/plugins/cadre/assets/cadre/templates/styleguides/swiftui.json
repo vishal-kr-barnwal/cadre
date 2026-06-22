@@ -1,0 +1,339 @@
+{
+  "version": 1,
+  "schema": "cadre.styleguide.v1",
+  "kind": "styleguide",
+  "id": "swiftui",
+  "title": "Effective SwiftUI Style Guide Summary",
+  "summary": "This document summarizes key rules and best practices for writing idiomatic SwiftUI code, building on Swift API Design Guidelines with SwiftUI-specific view, state, and composition conventions.",
+  "sections": [
+    {
+      "heading": "1. Formatting and Tooling",
+      "body": "- **SwiftFormat:** Format all SwiftUI code with `swiftformat`. Add `.swiftformat` config to the repo.\n- **SwiftLint:** Enforce with `.swiftlint.yml`. Treat all errors as CI failures.\n- **Trailing closures and `ViewBuilder`:** Use trailing closure syntax for all `ViewBuilder` content parameters — this is the SwiftUI idiom.\n- **`// MARK:` sections:** Organize view files with `// MARK: - Body`, `// MARK: - Subviews`, `// MARK: - View Model` sections for long files."
+    },
+    {
+      "heading": "2. View Design",
+      "body": "- **Small, composable views:** Decompose complex `body` implementations into private child views or separate `View` structs. A `body` over ~30 lines should be split.\n- **`some View` return type:** Always use `some View` as the return type of `body`. Do not erase to `AnyView` without a concrete reason.\n- **`AnyView` avoidance:** `AnyView` disables SwiftUI's diff engine. Use conditional views, `Group`, or `@ViewBuilder` functions instead. If `AnyView` is unavoidable, contain it to a single call site.\n- **`@ViewBuilder` functions:** Extract reusable sub-trees into `@ViewBuilder` private methods or standalone `View` structs. Prefer structs for views reused across files.\n- **Previews:** Every view **must** have a `#Preview` (or `PreviewProvider`). Include multiple preview variants: light/dark, different data states (empty, loaded, error), and different device sizes."
+    },
+    {
+      "heading": "3. State Management",
+      "body": "- **Choose the right property wrapper:**\n  - `@State`: Local, view-owned, value-type state. Keep it minimal and view-specific.\n  - `@Binding`: Pass mutable state down from a parent. Never derive a `@Binding` from a computed property.\n  - `@StateObject`: Own a reference-type observable object for the lifetime of this view subtree.\n  - `@ObservedObject`: Receive an observable object from a parent. The parent owns its lifetime.\n  - `@EnvironmentObject`: Inject a shared object through the view hierarchy. Use for app-wide state (user session, theme, router).\n  - `@Environment`: Read system values (`\\.colorScheme`, `\\.dismiss`, `\\.locale`) and custom environment keys.\n- **Observation (`@Observable`):** In iOS 17+, prefer `@Observable` macro over `ObservableObject`/`@Published` — it is more efficient (only the accessed properties trigger redraws).\n- **Minimize `@State`:** Lift state up to the smallest common ancestor that needs it. Do not put everything in the root view.\n- **No logic in `body`:** Move business logic, data transformations, and side effects into the ViewModel or a computed property. `body` should be pure view construction."
+    },
+    {
+      "heading": "4. ViewModel Pattern",
+      "body": "- **`@Observable` / `ObservableObject` ViewModel:** Each screen has a ViewModel that is `@Observable` (iOS 17+) or `ObservableObject`. The view is a thin rendering layer.\n- **`@StateObject` for injection:** Create the ViewModel in the view that owns it with `@StateObject var vm = MyViewModel()`. Pass to children via `@ObservedObject` or `@EnvironmentObject`.\n- **`@MainActor` on ViewModels:** Annotate the ViewModel class with `@MainActor` to ensure all published property updates occur on the main thread.\n- **Async tasks via `Task`:** Trigger async operations from `.task { }` modifier (cancelled automatically on view disappearance) or `Task { }` in response to user actions.\n- **`.onAppear` vs `.task`:** Prefer `.task { }` for async work (auto-cancels). Use `.onAppear` only for synchronous side effects."
+    },
+    {
+      "heading": "5. Layout and Composition",
+      "body": "- **Use modifiers in the right order:** Modifier order matters in SwiftUI. Background and border go before padding; padding before frame.\n  ```swift\n  Text(\"Hello\")\n      .background(Color.blue)  // applies to text bounds\n      .padding()               // then pads\n      .border(Color.red)       // border around padded area\n  ```\n- **`Group` for applying modifiers to multiple views:** Use `Group { }` to apply the same modifier to several views without a container.\n- **`ViewThatFits`:** Use for adaptive layouts that switch between compact and expanded presentations.\n- **`LazyVStack` / `LazyHStack` / `LazyVGrid`:** Use lazy containers for long or dynamically-loaded lists. Use eager `VStack`/`HStack` only for short, fixed-count content.\n- **`GeometryReader` sparingly:** `GeometryReader` takes all available space and can break layouts. Prefer `containerRelativeFrame` (iOS 17+), `frame(maxWidth: .infinity)`, or `Layout` protocol instead.\n- **`Spacer()` vs fixed spacing:** Use `Spacer()` to push views apart in a stack. Use `.padding()` or `.frame(height: 8)` for fixed spacing."
+    },
+    {
+      "heading": "6. Navigation",
+      "body": "- **`NavigationStack`:** Use `NavigationStack` (iOS 16+) over `NavigationView`. Use path-based navigation for programmatic control: `NavigationStack(path: $path)`.\n- **`navigationDestination(for:)`:** Register destinations with `.navigationDestination(for: MyType.self)` and drive navigation by appending to the path.\n- **`NavigationPath`:** Use for heterogeneous navigation stacks. Use typed `[MyRoute]` arrays when all destinations are the same type.\n- **`.sheet`, `.fullScreenCover`, `.popover`:** Control presentation with `@State var isPresented = false` and `item:`-based variants for associated data.\n- **Avoid `NavigationLink(isActive:)`:** Deprecated in iOS 16+. Use path-based navigation instead."
+    },
+    {
+      "heading": "7. Animation",
+      "body": "- **`withAnimation { }`:** Wrap state changes that should animate in `withAnimation`. Prefer this over `.animation(_:value:)` on views.\n- **`.animation(_:value:)`:** Use on a view when only that view should animate in response to a specific state value changing.\n- **Explicit animations over implicit:** Prefer `withAnimation(.spring())` triggered by state changes over `.animation(.spring())` on views — explicit animations are more predictable.\n- **`matchedGeometryEffect`:** Use for hero animations between views. Always pair with a shared `@Namespace`.\n- **`Animatable` and `AnimatableModifier`:** Implement for custom animations on non-standard properties."
+    },
+    {
+      "heading": "8. Performance",
+      "body": "- **`Equatable` views:** Make views `Equatable` and use `.equatable()` to skip redraws when input is unchanged.\n- **Stable identities in `ForEach`:** Pass stable `Identifiable` models or explicit `id:` parameters. Avoid `ForEach(items, id: \\.self)` for complex objects — use a proper `id` property.\n- **Avoid heavy computation in `body`:** Any expensive computation in `body` runs on every redraw. Move to a stored property or the ViewModel.\n- **`@Observable` over `ObservableObject`:** `@Observable` tracks property access precisely — only views that read a changed property redraw. `@Published` triggers redraws for all observers of any property change.\n- **`task(id:)`:** Use `task(id: someValue) { }` to restart async work when a value changes, instead of `onChange(of:) { Task { ... } }`."
+    },
+    {
+      "heading": "9. Accessibility",
+      "body": "- **`.accessibilityLabel`:** Every interactive element and image must have an accessibility label.\n- **`.accessibilityHint`:** Add hints for non-obvious actions: `.accessibilityHint(\"Double-tap to expand details\")`.\n- **`.accessibilityElement(children: .combine)`:** Group visually related elements into a single accessible element.\n- **Dynamic Type:** Use semantic text styles (`.font(.headline)`) not fixed sizes. Test with the largest and smallest Dynamic Type sizes.\n- **Color contrast:** Do not convey information with color alone. Use labels, icons, or patterns as secondary indicators."
+    },
+    {
+      "heading": "10. File and Code Organization",
+      "body": "- **One view per file:** Each top-level `View` struct lives in its own file.\n- **File naming:** File name matches the type name: `UserProfileView.swift`.\n- **Extension for subviews:** Place private subviews in an `extension` at the bottom of the same file:\n  ```swift\n  // MARK: - Subviews\n  private extension UserProfileView {\n      var headerSection: some View { ... }\n  }\n  ```\n- **Feature folder structure:** `Features/Auth/`, `Features/Home/` — group screens, ViewModels, and models by feature.\n- **Shared components:** Place reusable design-system components in `Components/` or a dedicated Swift package.\n\n*Sources: [SwiftUI Documentation](https://developer.apple.com/documentation/swiftui) · [Swift API Design Guidelines](https://swift.org/documentation/api-design-guidelines/) · [Observation framework](https://developer.apple.com/documentation/observation)*"
+    }
+  ],
+  "languages": [
+    "swiftui"
+  ],
+  "frameworks": [],
+  "file_patterns": [],
+  "applies_to": [
+    "planning",
+    "implementation",
+    "review",
+    "tests"
+  ],
+  "rules": [
+    {
+      "id": "swiftui-rule-1",
+      "severity": "guidance",
+      "summary": "**SwiftFormat:** Format all SwiftUI code with `swiftformat`. Add `.swiftformat` config to the repo."
+    },
+    {
+      "id": "swiftui-rule-2",
+      "severity": "guidance",
+      "summary": "**SwiftLint:** Enforce with `.swiftlint.yml`. Treat all errors as CI failures."
+    },
+    {
+      "id": "swiftui-rule-3",
+      "severity": "guidance",
+      "summary": "**Trailing closures and `ViewBuilder`:** Use trailing closure syntax for all `ViewBuilder` content parameters — this is the SwiftUI idiom."
+    },
+    {
+      "id": "swiftui-rule-4",
+      "severity": "guidance",
+      "summary": "**`// MARK:` sections:** Organize view files with `// MARK: - Body`, `// MARK: - Subviews`, `// MARK: - View Model` sections for long files."
+    },
+    {
+      "id": "swiftui-rule-5",
+      "severity": "guidance",
+      "summary": "**Small, composable views:** Decompose complex `body` implementations into private child views or separate `View` structs. A `body` over ~30 lines should be split."
+    },
+    {
+      "id": "swiftui-rule-6",
+      "severity": "guidance",
+      "summary": "**`some View` return type:** Always use `some View` as the return type of `body`. Do not erase to `AnyView` without a concrete reason."
+    },
+    {
+      "id": "swiftui-rule-7",
+      "severity": "guidance",
+      "summary": "**`AnyView` avoidance:** `AnyView` disables SwiftUI's diff engine. Use conditional views, `Group`, or `@ViewBuilder` functions instead. If `AnyView` is unavoidable, contain it to a single call site."
+    },
+    {
+      "id": "swiftui-rule-8",
+      "severity": "guidance",
+      "summary": "**`@ViewBuilder` functions:** Extract reusable sub-trees into `@ViewBuilder` private methods or standalone `View` structs. Prefer structs for views reused across files."
+    },
+    {
+      "id": "swiftui-rule-9",
+      "severity": "guidance",
+      "summary": "**Previews:** Every view **must** have a `#Preview` (or `PreviewProvider`). Include multiple preview variants: light/dark, different data states (empty, loaded, error), and different device sizes."
+    },
+    {
+      "id": "swiftui-rule-10",
+      "severity": "guidance",
+      "summary": "**Choose the right property wrapper:**"
+    },
+    {
+      "id": "swiftui-rule-11",
+      "severity": "guidance",
+      "summary": "`@State`: Local, view-owned, value-type state. Keep it minimal and view-specific."
+    },
+    {
+      "id": "swiftui-rule-12",
+      "severity": "guidance",
+      "summary": "`@Binding`: Pass mutable state down from a parent. Never derive a `@Binding` from a computed property."
+    },
+    {
+      "id": "swiftui-rule-13",
+      "severity": "guidance",
+      "summary": "`@StateObject`: Own a reference-type observable object for the lifetime of this view subtree."
+    },
+    {
+      "id": "swiftui-rule-14",
+      "severity": "guidance",
+      "summary": "`@ObservedObject`: Receive an observable object from a parent. The parent owns its lifetime."
+    },
+    {
+      "id": "swiftui-rule-15",
+      "severity": "guidance",
+      "summary": "`@EnvironmentObject`: Inject a shared object through the view hierarchy. Use for app-wide state (user session, theme, router)."
+    },
+    {
+      "id": "swiftui-rule-16",
+      "severity": "guidance",
+      "summary": "`@Environment`: Read system values (`\\.colorScheme`, `\\.dismiss`, `\\.locale`) and custom environment keys."
+    },
+    {
+      "id": "swiftui-rule-17",
+      "severity": "guidance",
+      "summary": "**Observation (`@Observable`):** In iOS 17+, prefer `@Observable` macro over `ObservableObject`/`@Published` — it is more efficient (only the accessed properties trigger redraws)."
+    },
+    {
+      "id": "swiftui-rule-18",
+      "severity": "guidance",
+      "summary": "**Minimize `@State`:** Lift state up to the smallest common ancestor that needs it. Do not put everything in the root view."
+    },
+    {
+      "id": "swiftui-rule-19",
+      "severity": "guidance",
+      "summary": "**No logic in `body`:** Move business logic, data transformations, and side effects into the ViewModel or a computed property. `body` should be pure view construction."
+    },
+    {
+      "id": "swiftui-rule-20",
+      "severity": "guidance",
+      "summary": "**`@Observable` / `ObservableObject` ViewModel:** Each screen has a ViewModel that is `@Observable` (iOS 17+) or `ObservableObject`. The view is a thin rendering layer."
+    },
+    {
+      "id": "swiftui-rule-21",
+      "severity": "guidance",
+      "summary": "**`@StateObject` for injection:** Create the ViewModel in the view that owns it with `@StateObject var vm = MyViewModel()`. Pass to children via `@ObservedObject` or `@EnvironmentObject`."
+    },
+    {
+      "id": "swiftui-rule-22",
+      "severity": "guidance",
+      "summary": "**`@MainActor` on ViewModels:** Annotate the ViewModel class with `@MainActor` to ensure all published property updates occur on the main thread."
+    },
+    {
+      "id": "swiftui-rule-23",
+      "severity": "guidance",
+      "summary": "**Async tasks via `Task`:** Trigger async operations from `.task { }` modifier (cancelled automatically on view disappearance) or `Task { }` in response to user actions."
+    },
+    {
+      "id": "swiftui-rule-24",
+      "severity": "guidance",
+      "summary": "**`.onAppear` vs `.task`:** Prefer `.task { }` for async work (auto-cancels). Use `.onAppear` only for synchronous side effects."
+    },
+    {
+      "id": "swiftui-rule-25",
+      "severity": "guidance",
+      "summary": "**Use modifiers in the right order:** Modifier order matters in SwiftUI. Background and border go before padding; padding before frame."
+    },
+    {
+      "id": "swiftui-rule-26",
+      "severity": "guidance",
+      "summary": "**`Group` for applying modifiers to multiple views:** Use `Group { }` to apply the same modifier to several views without a container."
+    },
+    {
+      "id": "swiftui-rule-27",
+      "severity": "guidance",
+      "summary": "**`ViewThatFits`:** Use for adaptive layouts that switch between compact and expanded presentations."
+    },
+    {
+      "id": "swiftui-rule-28",
+      "severity": "guidance",
+      "summary": "**`LazyVStack` / `LazyHStack` / `LazyVGrid`:** Use lazy containers for long or dynamically-loaded lists. Use eager `VStack`/`HStack` only for short, fixed-count content."
+    },
+    {
+      "id": "swiftui-rule-29",
+      "severity": "guidance",
+      "summary": "**`GeometryReader` sparingly:** `GeometryReader` takes all available space and can break layouts. Prefer `containerRelativeFrame` (iOS 17+), `frame(maxWidth: .infinity)`, or `Layout` protocol instead."
+    },
+    {
+      "id": "swiftui-rule-30",
+      "severity": "guidance",
+      "summary": "**`Spacer()` vs fixed spacing:** Use `Spacer()` to push views apart in a stack. Use `.padding()` or `.frame(height: 8)` for fixed spacing."
+    },
+    {
+      "id": "swiftui-rule-31",
+      "severity": "guidance",
+      "summary": "**`NavigationStack`:** Use `NavigationStack` (iOS 16+) over `NavigationView`. Use path-based navigation for programmatic control: `NavigationStack(path: $path)`."
+    },
+    {
+      "id": "swiftui-rule-32",
+      "severity": "guidance",
+      "summary": "**`navigationDestination(for:)`:** Register destinations with `.navigationDestination(for: MyType.self)` and drive navigation by appending to the path."
+    },
+    {
+      "id": "swiftui-rule-33",
+      "severity": "guidance",
+      "summary": "**`NavigationPath`:** Use for heterogeneous navigation stacks. Use typed `[MyRoute]` arrays when all destinations are the same type."
+    },
+    {
+      "id": "swiftui-rule-34",
+      "severity": "guidance",
+      "summary": "**`.sheet`, `.fullScreenCover`, `.popover`:** Control presentation with `@State var isPresented = false` and `item:`-based variants for associated data."
+    },
+    {
+      "id": "swiftui-rule-35",
+      "severity": "guidance",
+      "summary": "**Avoid `NavigationLink(isActive:)`:** Deprecated in iOS 16+. Use path-based navigation instead."
+    },
+    {
+      "id": "swiftui-rule-36",
+      "severity": "guidance",
+      "summary": "**`withAnimation { }`:** Wrap state changes that should animate in `withAnimation`. Prefer this over `.animation(_:value:)` on views."
+    },
+    {
+      "id": "swiftui-rule-37",
+      "severity": "guidance",
+      "summary": "**`.animation(_:value:)`:** Use on a view when only that view should animate in response to a specific state value changing."
+    },
+    {
+      "id": "swiftui-rule-38",
+      "severity": "guidance",
+      "summary": "**Explicit animations over implicit:** Prefer `withAnimation(.spring())` triggered by state changes over `.animation(.spring())` on views — explicit animations are more predictable."
+    },
+    {
+      "id": "swiftui-rule-39",
+      "severity": "guidance",
+      "summary": "**`matchedGeometryEffect`:** Use for hero animations between views. Always pair with a shared `@Namespace`."
+    },
+    {
+      "id": "swiftui-rule-40",
+      "severity": "guidance",
+      "summary": "**`Animatable` and `AnimatableModifier`:** Implement for custom animations on non-standard properties."
+    },
+    {
+      "id": "swiftui-rule-41",
+      "severity": "guidance",
+      "summary": "**`Equatable` views:** Make views `Equatable` and use `.equatable()` to skip redraws when input is unchanged."
+    },
+    {
+      "id": "swiftui-rule-42",
+      "severity": "guidance",
+      "summary": "**Stable identities in `ForEach`:** Pass stable `Identifiable` models or explicit `id:` parameters. Avoid `ForEach(items, id: \\.self)` for complex objects — use a proper `id` property."
+    },
+    {
+      "id": "swiftui-rule-43",
+      "severity": "guidance",
+      "summary": "**Avoid heavy computation in `body`:** Any expensive computation in `body` runs on every redraw. Move to a stored property or the ViewModel."
+    },
+    {
+      "id": "swiftui-rule-44",
+      "severity": "guidance",
+      "summary": "**`@Observable` over `ObservableObject`:** `@Observable` tracks property access precisely — only views that read a changed property redraw. `@Published` triggers redraws for all observers of any property change."
+    },
+    {
+      "id": "swiftui-rule-45",
+      "severity": "guidance",
+      "summary": "**`task(id:)`:** Use `task(id: someValue) { }` to restart async work when a value changes, instead of `onChange(of:) { Task { ... } }`."
+    },
+    {
+      "id": "swiftui-rule-46",
+      "severity": "guidance",
+      "summary": "**`.accessibilityLabel`:** Every interactive element and image must have an accessibility label."
+    },
+    {
+      "id": "swiftui-rule-47",
+      "severity": "guidance",
+      "summary": "**`.accessibilityHint`:** Add hints for non-obvious actions: `.accessibilityHint(\"Double-tap to expand details\")`."
+    },
+    {
+      "id": "swiftui-rule-48",
+      "severity": "guidance",
+      "summary": "**`.accessibilityElement(children: .combine)`:** Group visually related elements into a single accessible element."
+    },
+    {
+      "id": "swiftui-rule-49",
+      "severity": "guidance",
+      "summary": "**Dynamic Type:** Use semantic text styles (`.font(.headline)`) not fixed sizes. Test with the largest and smallest Dynamic Type sizes."
+    },
+    {
+      "id": "swiftui-rule-50",
+      "severity": "guidance",
+      "summary": "**Color contrast:** Do not convey information with color alone. Use labels, icons, or patterns as secondary indicators."
+    },
+    {
+      "id": "swiftui-rule-51",
+      "severity": "guidance",
+      "summary": "**One view per file:** Each top-level `View` struct lives in its own file."
+    },
+    {
+      "id": "swiftui-rule-52",
+      "severity": "guidance",
+      "summary": "**File naming:** File name matches the type name: `UserProfileView.swift`."
+    },
+    {
+      "id": "swiftui-rule-53",
+      "severity": "guidance",
+      "summary": "**Extension for subviews:** Place private subviews in an `extension` at the bottom of the same file:"
+    },
+    {
+      "id": "swiftui-rule-54",
+      "severity": "guidance",
+      "summary": "**Feature folder structure:** `Features/Auth/`, `Features/Home/` — group screens, ViewModels, and models by feature."
+    },
+    {
+      "id": "swiftui-rule-55",
+      "severity": "guidance",
+      "summary": "**Shared components:** Place reusable design-system components in `Components/` or a dedicated Swift package."
+    }
+  ],
+  "source": "bundled_template"
+}

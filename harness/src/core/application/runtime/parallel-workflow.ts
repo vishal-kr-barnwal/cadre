@@ -13,6 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { claimsOverlap, normalizeClaimPath } from "./collision";
 import { CoreResult, ParallelWorker } from "./contracts";
 import { safeName } from "../../infrastructure/runtime/json-store";
+import { likelyTestCandidatesForFile } from "./planning";
 import { readParallelState, recordParallelWorker } from "./parallel-state";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
@@ -21,6 +22,110 @@ import { runCommand } from "../../infrastructure/runtime/system";
 import { findTrack } from "./track-context";
 import { parsePlanFile, phaseSchedule } from "./track-schedule";
 import { withSharedControlPlaneSync } from "./workflow-response";
+
+function positiveInt(value: unknown, fallback: number, max = 20): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.max(1, Math.min(max, Math.floor(parsed)));
+}
+
+function humanConfirmed(args: RuntimeArgs): boolean {
+  return args.humanConfirmed === true || args.human_confirmed === true;
+}
+
+function changedFilesFromArgs(args: RuntimeArgs): string[] {
+  return asStringArray(args.filesChanged || args.files_changed || args.files);
+}
+
+function isManifestChange(file: string): boolean {
+  const base = path.basename(file).toLowerCase();
+  return [
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "pyproject.toml",
+    "poetry.lock",
+    "requirements.txt",
+    "cargo.toml",
+    "cargo.lock",
+    "go.mod",
+    "go.sum",
+    "pom.xml",
+    "build.gradle",
+    "settings.gradle",
+    "tsconfig.json",
+  ].includes(base);
+}
+
+function fileStem(file: string): string {
+  return path.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
+}
+
+function isNarrowTestChange(file: string, ownedFiles: string[]): boolean {
+  const normalized = normalizeClaimPath(file);
+  if (!/\b(test|tests|spec|specs|__tests__)\b|[._-](test|spec)\.[^.]+$/i.test(normalized)) return false;
+  const stem = fileStem(normalized);
+  return ownedFiles.some((owned) => {
+    const ownedStem = fileStem(normalizeClaimPath(owned));
+    return stem === ownedStem || stem.includes(ownedStem) || ownedStem.includes(stem);
+  });
+}
+
+function planTaskForWorker(track: CadreTrack, args: RuntimeArgs): PlanTask | null {
+  const plan = parsePlanFile(track.plan_path);
+  const phaseIndex = Number(args.phaseIndex ?? args.phase_index ?? 0);
+  const taskIndex = Number(args.taskIndex ?? args.task_index ?? 0);
+  const workerId = asOptionalString(args.workerId || args.worker_id);
+  for (const phase of plan.phases) {
+    for (const task of phase.tasks) {
+      if (phaseIndex && taskIndex && phase.phase_index === phaseIndex && task.task_index === taskIndex) return task;
+      if (workerId && `${track.track_id}_${task.task_key}` === workerId) return task;
+      if (workerId && task.task_key === workerId) return task;
+    }
+  }
+  return null;
+}
+
+export function validateWorkerFinishEvidence(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
+  const changed = changedFilesFromArgs(args).map(normalizeClaimPath).filter(Boolean);
+  if (changed.length === 0) {
+    return {
+      ok: true,
+      checked: false,
+      reason: "filesChanged was not supplied; compatibility mode accepted the worker record without file evidence validation",
+    };
+  }
+  const task = planTaskForWorker(track, args);
+  const ownedFiles = asStringArray(task?.files).map(normalizeClaimPath).filter(Boolean);
+  const likelyTests = Array.from(new Set(ownedFiles.flatMap((file) => likelyTestCandidatesForFile(root, file)).map(normalizeClaimPath)));
+  const allowed = changed.filter((file) =>
+    ownedFiles.some((owned) => claimsOverlap(file, owned))
+    || likelyTests.includes(file)
+    || isNarrowTestChange(file, ownedFiles)
+    || isManifestChange(file)
+  );
+  const violations = changed.filter((file) => !allowed.includes(file));
+  const forceAccepted = violations.length > 0 && args.force === true && humanConfirmed(args);
+  return {
+    ok: violations.length === 0 || forceAccepted,
+    checked: true,
+    force_accepted: forceAccepted,
+    worker_id: args.workerId || args.worker_id || null,
+    task_key: task?.task_key || null,
+    owned_files: ownedFiles,
+    likely_tests: likelyTests,
+    files_changed: changed,
+    allowed_files_changed: allowed,
+    unowned_files_changed: violations,
+    reason: violations.length === 0
+      ? "All changed files are owned, likely related tests, or narrow manifest changes"
+      : (forceAccepted
+        ? "Unowned changed files accepted because force and humanConfirmed were supplied"
+        : "Changed files include paths outside the worker ownership claim"),
+  };
+}
 
 export function parallelWorkersForWave(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
@@ -33,6 +138,9 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
   const activeWorkers = state.workers.filter((worker) =>
     ["in_progress", "awaiting_merge", "merged"].includes(worker.status)
   );
+  const maxWorkers = positiveInt(args.maxWorkers || args.limit, 8);
+  const activeSlotCount = activeWorkers.filter((worker) => ["in_progress", "awaiting_merge"].includes(worker.status)).length;
+  const availableSlots = Math.max(0, maxWorkers - activeSlotCount);
   const activeTaskKeys = new Set(activeWorkers.map((worker) => asOptionalString(worker.task_key)).filter(Boolean));
   const completeTaskKeys = new Set(
     plan.tasks
@@ -80,7 +188,7 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
     return firstOpen && taskIsReady(phase, firstOpen) ? [firstOpen] : [];
   };
   const phases = plan.phases.filter((phase) => phaseIds.includes(`phase${phase.phase_index}`));
-  const workers = phases
+  const candidateWorkers = phases
     .flatMap((phase) => readyTasksForPhase(phase).map((task) => ({
       worker_id: `${track.track_id}_${asString(task.task_key)}`,
       phase_id: `phase${phase.phase_index}`,
@@ -94,6 +202,7 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
       branch: `${track.metadata.git_branch || `track/${track.track_id}`}-${safeName(task.task_key)}`,
     })))
     .filter((worker) => !["x", "-"].includes(worker.marker));
+  const workers = candidateWorkers.slice(0, availableSlots);
   return {
     ok: true,
     track_id: track.track_id,
@@ -101,6 +210,11 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
     state,
     group_index: groupIndex,
     phase_ids: phaseIds,
+    max_workers: maxWorkers,
+    active_worker_slots: activeSlotCount,
+    available_worker_slots: availableSlots,
+    candidate_workers_count: candidateWorkers.length,
+    limited: workers.length < candidateWorkers.length,
     workers,
   };
 }
@@ -171,6 +285,10 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
         repo,
         commitSha: "<commit-sha>",
         coverage: "<coverage-number-or-null>",
+        filesChanged: ["<changed-file>"],
+        tests: [{ command: "<test-command>", cwd: worktree, ok: true, status: 0 }],
+        summary: "<worker-summary>",
+        blockers: [],
       },
     },
   };
@@ -335,21 +453,28 @@ export function parallelWorkflow(root: string, args: RuntimeArgs = {}): CoreResu
   if (action === "next_wave") return parallelWorkersForWave(root, track, args);
   if (action === "setup_workers") return parallelSetupWorkers(root, track, args);
   if (action === "record_finish") {
+    const evidenceValidation = validateWorkerFinishEvidence(root, track, args);
     if (args.execute !== true) {
       return {
         ok: true,
         track_id: track.track_id,
         action,
         dry_run: true,
+        evidence_validation: evidenceValidation,
         planned_record: {
           worker_id: args.workerId || args.worker_id,
           status: args.status || "awaiting_merge",
           phase_index: args.phaseIndex ?? null,
           task_index: args.taskIndex ?? null,
           commit_sha: args.commitSha || null,
+          files_changed: changedFilesFromArgs(args),
+          tests: Array.isArray(args.tests) ? args.tests : [],
+          summary: asOptionalString(args.summary) || null,
+          blockers: asStringArray(args.blockers),
         },
       };
     }
+    if (evidenceValidation.ok === false) return evidenceValidation;
     return recordParallelWorker(root, { ...args, trackId: track.track_id, status: args.status || "awaiting_merge" });
   }
   if (action === "merge_back") return parallelMergeBack(root, track, args);

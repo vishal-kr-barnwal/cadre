@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "schema": "cadre.patterns_seed.v1",
+  "id": "initial",
+  "kind": "patterns_seed",
+  "text": "# Codebase Patterns\n\nReusable patterns discovered during development. **Read this before starting new work.**\n\nThis file is the project's institutional knowledge - learnings extracted from completed tracks that help future development.\n\n---\n\n## Code Conventions\n\n<!-- Patterns related to code style, naming, imports -->\n\n## Architecture\n\n<!-- Patterns related to architecture decisions, module structure -->\n\n## Gotchas\n\n<!-- Common mistakes to avoid, things that are easy to forget -->\n\n## Testing\n\n<!-- Patterns for testing approaches -->\n\n## Context\n\n<!-- Useful context about where things are located -->\n\n---\n\nLast refreshed: YYYY-MM-DD\n"
+}
