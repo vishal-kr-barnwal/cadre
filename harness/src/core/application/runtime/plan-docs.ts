@@ -257,10 +257,12 @@ export function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
       const taskKey = asOptionalString(task.task_key) || `phase${phaseIndex}_task${taskIndex}`;
       const files = asStringArray(task.files);
       const depends = asStringArray(task.depends_on || task.depends);
+      const labels = asStringArray(task.labels);
       const taskAnnotations: JsonObject = {
         ...asJsonObject(task.annotations),
         ...(files.length > 0 ? { files: files.join(", ") } : {}),
         ...(depends.length > 0 ? { depends: depends.join(",") } : {}),
+        ...(labels.length > 0 ? { labels: labels.join(",") } : {}),
         ...(asOptionalString(task.repo) ? { repo: asOptionalString(task.repo) } : {}),
       };
       return {
@@ -271,6 +273,7 @@ export function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
         annotations: taskAnnotations,
         files,
         depends,
+        labels,
         repo: asOptionalString(task.repo) || null,
         line: Number(task.line || phaseIndex * 100 + taskIndex),
         phase_index: phaseIndex,
@@ -311,6 +314,7 @@ export function renderPlanMarkdown(raw: JsonObject): string {
       if (task.repo) parts.push(`  <!-- repo: ${task.repo} -->`);
       if (task.files.length > 0) parts.push(`  <!-- files: ${task.files.join(", ")} -->`);
       if (task.depends.length > 0) parts.push(`  <!-- depends: ${task.depends.join(", ")} -->`);
+      if (task.labels && task.labels.length > 0) parts.push(`  <!-- labels: ${task.labels.join(", ")} -->`);
       if (task.commit_shas && task.commit_shas.length > 0) parts.push(`  <!-- commits: ${task.commit_shas.join(", ")} -->`);
       if (task.task_type) parts.push(`  <!-- task-type: ${task.task_type} -->`);
       if (task.manual_verification) {

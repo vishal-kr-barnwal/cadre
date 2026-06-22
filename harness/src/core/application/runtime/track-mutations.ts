@@ -14,6 +14,7 @@ import { CoreResult } from "./contracts";
 import { fileExists, patchJsonFile, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { trackLockName, withTrackLock } from "../../infrastructure/runtime/locking";
 import { withGeneratedMarker } from "./markdown-docs";
+import { appendCadreEvent } from "./native-state";
 import { renderPlanMarkdown, trackPlanJsonPath } from "./plan-docs";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { regenIndex } from "./project-maintenance";
@@ -91,6 +92,14 @@ export function metadataPatch(root: string, args: RuntimeArgs = {}): CoreResult 
     metadata_path: path.relative(root, track.metadata_path),
     patch_keys: Object.keys(patch).sort(),
     result,
+    event: result.ok ? appendCadreEvent(root, {
+      kind: "metadata_updated",
+      workflow: "metadata_patch",
+      track_id: track.track_id,
+      patch_keys: Object.keys(patch).sort(),
+      tags: asStringArray(asJsonObject(patch).tags),
+      depends_on: asStringArray(asJsonObject(patch).depends_on),
+    }) : null,
   };
 }
 
@@ -177,6 +186,13 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
     track_id: track.track_id,
     last_updated: now,
   });
+  const event = appendCadreEvent(root, {
+    kind: "track_claimed",
+    workflow: "claim",
+    track_id: track.track_id,
+    owner: identity,
+    previous_owner: heldBy || null,
+  });
   return {
     ok: true,
     claimed: true,
@@ -184,6 +200,7 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
     owner: identity,
     previous_hold: hold,
     metadata: metadataResult,
+    event,
   };
 }
 
@@ -208,12 +225,19 @@ export function setTrackStatus(root: string, trackId: string, status: string): C
       return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
     }
     const regen = regenIndex(root);
+    const event = appendCadreEvent(root, {
+      kind: "status_changed",
+      workflow: "set_status",
+      track_id: trackId,
+      status,
+    });
     return {
       ok: Boolean(regen.ok),
       track_id: trackId,
       status,
       metadata,
       regen,
+      event,
     };
   });
 }
@@ -299,6 +323,17 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
       line: task.line,
       status: args.status || "completed",
       commit_sha: commitSha || null,
+      event: appendCadreEvent(root, {
+        kind: "task_result_recorded",
+        workflow: "record_task_result",
+        track_id: track.track_id,
+        phase_index: phaseIndex,
+        task_index: taskIndex,
+        task_key: task.task_key,
+        status: args.status || "completed",
+        commit_sha: commitSha || null,
+        repo: args.repo || task.repo || null,
+      }),
       metadata,
       plan_json: planPatch,
     };

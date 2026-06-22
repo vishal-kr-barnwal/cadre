@@ -13,6 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { CoreResult, ReviewFile } from "./contracts";
 import { safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { withGeneratedMarker } from "./markdown-docs";
+import { appendCadreEvent } from "./native-state";
 import { renderPlanMarkdown } from "./plan-docs";
 import { planAssist, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
@@ -162,6 +163,13 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   fs.writeFileSync(path.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}\n`);
   fs.writeFileSync(path.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);
+  const event = appendCadreEvent(root, {
+    kind: "track_created",
+    workflow: "newtrack",
+    track_id: String(trackId),
+    status: metadata.status,
+    tags: metadata.tags || [],
+  });
   return {
     ...summary,
     ok: regen.ok !== false,
@@ -169,6 +177,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     track_id: trackId,
     metadata_path: path.relative(root, path.join(dir, "metadata.json")),
     regen,
+    event,
     human_review: humanReview,
     worktree_plan: worktreePlan(root, { trackId }),
   };

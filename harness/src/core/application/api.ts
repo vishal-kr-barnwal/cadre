@@ -3,6 +3,7 @@ export { artifactSchema } from "./runtime/artifact-catalog";
 export { collisionScan } from "./runtime/collision";
 export { integrationInventory } from "./runtime/integrations";
 export { mcpReadiness } from "./runtime/mcp-readiness";
+export { appendCadreEvent, appendCadreMessage, ensureNativeState, nativeStateSummary, readCadreEvents, readCadreMessages } from "./runtime/native-state";
 export { recordParallelWorker } from "./runtime/parallel-state";
 export { parallelWorkflow } from "./runtime/parallel-workflow";
 export { planAssist, planIntegrity, worktreePlan } from "./runtime/planning";

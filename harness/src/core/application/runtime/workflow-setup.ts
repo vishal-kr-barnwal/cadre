@@ -15,6 +15,7 @@ import { CoreResult } from "./contracts";
 import { summarizeLspSetupResult } from "./health-summaries";
 import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { appendCadreEvent, ensureNativeState } from "./native-state";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { appendLspReviewArtifacts, humanReviewState, setupReviewArtifacts, setupReviewBundle, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
 import { configuredCiProvider, lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
@@ -161,6 +162,9 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
 
   fs.mkdirSync(path.join(cadreDir, "tracks"), { recursive: true });
   fs.mkdirSync(path.join(cadreDir, "archive"), { recursive: true });
+  const nativeState = ensureNativeState(root);
+  const nativeIgnorePath = asOptionalString(nativeState.ignore_path);
+  if (nativeIgnorePath) written.push(nativeIgnorePath);
   writeProjectDoc(
     "product.md",
     "product",
@@ -266,6 +270,15 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       submodules: setupSubmodulePlan(root, repos, args),
     }
     : null;
+  const setupEvent = appendCadreEvent(root, {
+    kind: "setup_completed",
+    workflow: "setup",
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
+    sync_mode: syncModeRecommendation,
+    provider_mode: providerMode || "local",
+    written_count: written.length,
+    skipped_count: skipped.length,
+  });
   return {
     ...result,
     ok: true,
@@ -280,6 +293,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       skipped: skipped.slice(beforeStyleSkipped),
     },
     lsp_setup: lspSetupResult,
+    native_state: nativeState,
+    event: setupEvent,
     gitattributes,
     ci_setup: ciSetup,
     polyrepo_setup: polyrepoSetup,

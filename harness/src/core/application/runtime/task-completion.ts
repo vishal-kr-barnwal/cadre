@@ -15,6 +15,7 @@ import { coverageThreshold, runCoverage } from "../../infrastructure/runtime/cov
 import { utcNow } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
 import { patchCompletionJournal, prepareManualVerificationCompletion } from "./manual-verification";
+import { appendCadreEvent } from "./native-state";
 import { isManualVerificationTaskObject } from "./plan-docs";
 import { isWorkingRootError, resolveTaskWorkingRoot } from "./repo-resolution";
 import { findTrack } from "./track-context";
@@ -171,6 +172,19 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
   const completedJournal = args.lock === false
     ? markComplete()
     : withTrackLock(root, track.track_id, markComplete);
+  const event = appendCadreEvent(root, {
+    kind: "task_completed",
+    workflow: "complete_task",
+    track_id: track.track_id,
+    phase_index: phaseIndex,
+    task_index: taskIndex,
+    task_key: stateTaskResult.task_key,
+    status: args.status || "completed",
+    commit_sha: sha,
+    coverage: coverage.coverage ?? null,
+    summary: args.summary || null,
+    journal_key: journalKey,
+  });
 
   return {
     ok: true,
@@ -180,6 +194,7 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     threshold,
     coverage,
     task_result: stateTaskResult,
+    event,
     journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal,
   };
 }

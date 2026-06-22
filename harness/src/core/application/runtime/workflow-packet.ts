@@ -13,6 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { artifactPacket } from "./artifact-actions";
 import { CoreResult } from "./contracts";
 import { utcNow } from "../../infrastructure/runtime/json-store";
+import { appendCadreEvent } from "./native-state";
 import { humanReviewState, packetReviewArtifact } from "./review-bundles";
 import { selectedTrackId } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
@@ -142,6 +143,13 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
             last_status_at: utcNow(),
           },
         });
+        const event = appendCadreEvent(root, {
+          kind: "status_changed",
+          workflow: "flag",
+          track_id: trackId,
+          status,
+          reason,
+        });
         return {
           ...summary,
           ok: patch.ok !== false,
@@ -149,6 +157,7 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
           track_context: context,
           status_result: statusResult,
           metadata_patch: patch,
+          event,
           human_review: humanReview,
           review_artifacts: reviewArtifacts,
         };

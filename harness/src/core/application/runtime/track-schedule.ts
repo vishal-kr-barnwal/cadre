@@ -322,6 +322,7 @@ export function phaseSchedule(root: string, args: RuntimeArgs = {}): CoreResult 
         repo: task.repo || (topology.polyrepo ? topology.defaultRepo : "."),
         files: task.files || [],
         depends: task.depends || [],
+        labels: task.labels || [],
       })),
     };
   });

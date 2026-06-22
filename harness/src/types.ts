@@ -103,6 +103,7 @@ export interface PlanTask {
   annotations: JsonObject;
   files: string[];
   depends: string[];
+  labels?: string[];
   repo?: string | null;
   commit?: string | null;
   commit_shas?: string[];

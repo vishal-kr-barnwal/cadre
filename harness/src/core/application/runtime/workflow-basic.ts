@@ -14,6 +14,7 @@ import { collisionScan } from "./collision";
 import { CoreResult } from "./contracts";
 import { fileExists, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
 import { markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { appendCadreEvent, appendCadreMessage, nativeStateSummary } from "./native-state";
 import { trackHandoffJsonPath } from "./plan-docs";
 import { planIntegrity } from "./planning";
 import { regenIndex } from "./project-maintenance";
@@ -88,6 +89,7 @@ export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResu
     integrity: planIntegrity(root, args.trackId || args.track_id || null),
     collisions: collisionScan(root),
     fleet: fleetStatus(root, { includeCollisions: false }),
+    native_state: nativeStateSummary(root),
   };
 }
 
@@ -221,10 +223,32 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     writeJsonEnsured(handoffJsonPath, handoffJson);
     fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
   }
+  const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
+  const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
+  const message = appendCadreMessage(root, "outbox", {
+    kind: "handoff",
+    workflow: "handoff",
+    track_id: trackId,
+    to: recipient,
+    subject,
+    body: asOptionalString(args.body) || text,
+    handoff_path: path.relative(root, handoffPath),
+    handoff_json_path: path.relative(root, handoffJsonPath),
+  });
+  const event = appendCadreEvent(root, {
+    kind: "handoff_created",
+    workflow: "handoff",
+    track_id: trackId,
+    to: recipient,
+    subject,
+    handoff_path: path.relative(root, handoffPath),
+  });
   return {
     ...base,
     ok: true,
     dry_run: args.execute !== true,
     phase_state: "executed",
+    message,
+    event,
   };
 }

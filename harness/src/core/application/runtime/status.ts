@@ -13,6 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { collisionScan } from "./collision";
 import { CoreResult, TrackSummary } from "./contracts";
 import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { nativeStateSummary, readCadreMessages } from "./native-state";
 import { trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
 import { commandExists, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
@@ -177,6 +178,7 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
   const reviewQueue: CoreResult[] = [];
   const blockers: CoreResult[] = [];
   const handoffs: CoreResult[] = [];
+  const outgoingHandoffs: CoreResult[] = [];
 
   for (const track of tracks) {
     const summary = metadataTrackSummary(track);
@@ -227,6 +229,37 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
     }
   }
 
+  for (const message of readCadreMessages(root, "inbox", 200)) {
+    if (asOptionalString(message.kind) !== "handoff") continue;
+    const recipient = asOptionalString(message.to || message.recipient) || null;
+    if (scope === "mine" && recipient && recipient !== identity) continue;
+    handoffs.push({
+      source: "message_inbox",
+      message_id: asOptionalString(message.id) || null,
+      track_id: asOptionalString(message.track_id) || null,
+      from: asOptionalString(message.from) || null,
+      to: recipient,
+      subject: asOptionalString(message.subject) || null,
+      status: asOptionalString(message.status) || "pending",
+      recorded_at: asOptionalString(message.recorded_at) || null,
+    });
+  }
+  for (const message of readCadreMessages(root, "outbox", 200)) {
+    if (asOptionalString(message.kind) !== "handoff") continue;
+    const sender = asOptionalString(message.from) || null;
+    if (scope === "mine" && sender && sender !== identity) continue;
+    outgoingHandoffs.push({
+      source: "message_outbox",
+      message_id: asOptionalString(message.id) || null,
+      track_id: asOptionalString(message.track_id) || null,
+      from: sender,
+      to: asOptionalString(message.to || message.recipient) || null,
+      subject: asOptionalString(message.subject) || null,
+      status: asOptionalString(message.status) || "pending",
+      recorded_at: asOptionalString(message.recorded_at) || null,
+    });
+  }
+
   const dedupReview = new Map();
   for (const item of reviewQueue) {
     const key = `${item.track_id}:${item.review_state || ""}`;
@@ -242,8 +275,10 @@ export function teamBoard(root: string, args: RuntimeArgs = {}): CoreResult {
     summary: teamStatus(root),
     wip,
     incoming_handoffs: handoffs,
+    outgoing_handoffs: outgoingHandoffs,
     review_queue: Array.from(dedupReview.values()),
     blockers,
+    native_state: nativeStateSummary(root),
     lsp: lspRuntimeSummary(root),
   };
 }

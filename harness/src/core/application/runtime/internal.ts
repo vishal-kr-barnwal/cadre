@@ -9,6 +9,7 @@ export * from "../../infrastructure/runtime/json-store";
 export * from "../../infrastructure/runtime/locking";
 export * from "./manual-verification";
 export * from "./markdown-docs";
+export * from "./native-state";
 export * from "./parallel-state";
 export * from "./parallel-workflow";
 export * from "./plan-docs";
