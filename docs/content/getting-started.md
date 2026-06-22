@@ -41,8 +41,8 @@ plane.
 ## Install The Plugin
 
 Cadre ships as generated plugins for Claude Code and OpenAI Codex. Both plugin
-bundles are generated from the same master skill, protocols, MCP-served
-references, MCP-owned templates, and TypeScript runtime.
+bundles are generated from the same master skill, MCP-served protocols,
+references, embedded templates, and TypeScript runtime.
 
 ### Claude Code
 
@@ -55,12 +55,10 @@ Claude reads the repository marketplace at `.claude-plugin/marketplace.json`.
 
 The installed Claude plugin contains:
 
-- `skills/cadre/` with the Cadre skill and workflow protocols.
-- `references/` and `templates/` as MCP-owned package assets exposed through
-  Cadre resources.
+- `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
 - `mcp-config.json` for the Cadre MCP server.
-- `scripts/` with the MCP runtime and helper scripts.
-- `agents/cadre-worker.md` for worker dispatch when parallel phases are ready.
+- `scripts/mcp/cadre-server.js`, the single Cadre runtime with embedded
+  protocols, references, templates, worker guidance, jobs, and LSP helpers.
 
 ### OpenAI Codex
 
@@ -75,8 +73,9 @@ The installed Codex plugin contains:
 
 - `.codex-plugin/plugin.json`.
 - `.mcp.json` for the Cadre MCP server.
-- `skills/cadre/` with the generated Codex-facing skill bundle.
-- `scripts/` with the MCP runtime and helper scripts.
+- `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
+- `scripts/mcp/cadre-server.js`, the single Cadre runtime with embedded
+  protocols, references, templates, worker guidance, jobs, and LSP helpers.
 
 ## First Project Setup
 

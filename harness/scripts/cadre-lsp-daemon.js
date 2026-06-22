@@ -33,9 +33,12 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/cadre-lsp-daemon.ts
 var cadre_lsp_daemon_exports = {};
 __export(cadre_lsp_daemon_exports, {
-  ClientPool: () => ClientPool
+  ClientPool: () => ClientPool,
+  handleDaemonMessage: () => handleDaemonMessage,
+  runLspDaemon: () => runLspDaemon
 });
 module.exports = __toCommonJS(cadre_lsp_daemon_exports);
+var import_node_path8 = __toESM(require("node:path"));
 var import_node_readline = __toESM(require("node:readline"));
 
 // src/cadre-lsp-review.ts
@@ -1119,7 +1122,7 @@ function send(id, result, error = null) {
   process.stdout.write(`${JSON.stringify({ id, result, error })}
 `);
 }
-async function handle(message) {
+async function handleDaemonMessage(message) {
   if (message.method === "status") {
     return { ok: true, servers: pool.status() };
   }
@@ -1134,25 +1137,32 @@ async function handle(message) {
   }
   throw new Error(`Unknown LSP daemon method: ${message.method}`);
 }
-var rl = import_node_readline.default.createInterface({ input: process.stdin });
-rl.on("line", async (line) => {
-  if (!line.trim()) return;
-  let message;
-  try {
-    message = asJsonObject(JSON.parse(line));
-    const result = await handle(message);
-    send(message.id || null, result);
-  } catch (error) {
-    send(message && message.id ? message.id : null, null, {
-      message: errorMessage(error),
-      stack: error instanceof Error ? error.stack : void 0
-    });
-  }
-});
-process.on("SIGTERM", () => {
-  pool.shutdownAll().finally(() => process.exit(0));
-});
+function runLspDaemon() {
+  const rl = import_node_readline.default.createInterface({ input: process.stdin });
+  rl.on("line", async (line) => {
+    if (!line.trim()) return;
+    let message = null;
+    try {
+      message = asJsonObject(JSON.parse(line));
+      const result = await handleDaemonMessage(message);
+      send(message.id || null, result);
+    } catch (error) {
+      send(message && message.id ? message.id : null, null, {
+        message: errorMessage(error),
+        stack: error instanceof Error ? error.stack : void 0
+      });
+    }
+  });
+  process.on("SIGTERM", () => {
+    pool.shutdownAll().finally(() => process.exit(0));
+  });
+}
+if (["cadre-lsp-daemon.js", "cadre-lsp-daemon.ts"].includes(import_node_path8.default.basename(process.argv[1] || ""))) {
+  runLspDaemon();
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  ClientPool
+  ClientPool,
+  handleDaemonMessage,
+  runLspDaemon
 });

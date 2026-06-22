@@ -18,6 +18,5 @@
     "mcp"
   ],
   "skills": "./skills/",
-  "agents": "./agents/",
   "mcpServers": "./mcp-config.json"
 }

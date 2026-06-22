@@ -23,6 +23,33 @@ function git(root, args) {
   return result;
 }
 
+function installFakeBd(root) {
+  const bin = path.join(root, "bin");
+  const bd = path.join(bin, "bd");
+  write(bd, `#!/bin/sh
+case "$1" in
+  init)
+    mkdir -p "$PWD/.beads"
+    printf '{"ok":true}\\n'
+    ;;
+  create)
+    printf '{"id":"bd-fake"}\\n'
+    ;;
+  show)
+    exit 1
+    ;;
+  note|dep|label|ready|close|list|update|mail|formula|admin|rules|dolt|sql|worktree)
+    printf '{"ok":true}\\n'
+    ;;
+  *)
+    printf '{"ok":true}\\n'
+    ;;
+esac
+`);
+  fs.chmodSync(bd, 0o755);
+  return bin;
+}
+
 function sampleSpec(id) {
   return {
     version: 1,
@@ -87,9 +114,10 @@ function writeTrack(root, id, plan, metadata = {}) {
   write(path.join(dir, "spec.md"), `<!-- cadre:generated from="cadre/tracks/${id}/spec.json" schema="cadre.spec.v1" hash="test" -->\n# Spec: ${id}\n`);
 }
 
-function startServer() {
-  const server = spawn(process.execPath, [path.join(__dirname, "cadre-server.js")], {
-    cwd: path.resolve(__dirname, "..", ".."),
+function startServer(options = {}) {
+  const server = spawn(process.execPath, [options.serverPath || path.join(__dirname, "cadre-server.js")], {
+    cwd: options.cwd || path.resolve(__dirname, "..", ".."),
+    env: { ...process.env, ...(options.env || {}) },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let buffer = Buffer.alloc(0);
@@ -179,7 +207,8 @@ async function waitForJob(request, jobId) {
 
 test("LSP setup JSON and daemon status/shutdown smoke", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-smoke-"));
-  const daemon = spawn(process.execPath, [path.join(__dirname, "..", "cadre-lsp-daemon.js")], {
+  const serverPath = path.join(__dirname, "cadre-server.js");
+  const daemon = spawn(process.execPath, [serverPath, "--cadre-lsp-daemon"], {
     cwd: path.resolve(__dirname, "..", ".."),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -203,7 +232,8 @@ test("LSP setup JSON and daemon status/shutdown smoke", async () => {
     write(path.join(root, "Dockerfile"), "FROM alpine\n");
     write(path.join(root, "deploy", "service.yaml"), "name: smoke\n");
     const setup = spawnSync(process.execPath, [
-      path.join(__dirname, "..", "cadre-lsp-setup.js"),
+      serverPath,
+      "--cadre-lsp-setup",
       "--root",
       root,
       "--write",
@@ -229,6 +259,81 @@ test("LSP setup JSON and daemon status/shutdown smoke", async () => {
     assert.equal(shutdown.ok, true);
   } finally {
     daemon.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Generated plugin MCP runtime writes setup and newtrack artifacts from embedded templates", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plugin-embedded-test-"));
+  const pluginRoot = path.resolve(__dirname, "..", "..", "plugins", "cadre");
+  const serverPath = path.join(pluginRoot, "scripts", "mcp", "cadre-server.js");
+  assert.equal(fs.existsSync(path.join(pluginRoot, "templates")), false);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "references")), false);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "skills", "cadre", "skill.json")), false);
+  const { server, request } = startServer({
+    serverPath,
+    cwd: pluginRoot,
+    env: { PATH: `${installFakeBd(root)}:${process.env.PATH || ""}` },
+  });
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "reviewer@example.com"]);
+    git(root, ["config", "user.name", "Reviewer"]);
+    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
+
+    const setup = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "setup",
+        execute: true,
+        humanConfirmed: true,
+        providerMode: "github",
+        ciProvider: "github",
+        product: { title: "Embedded Product", summary: "Validate bundled setup templates." },
+        productGuidelines: { title: "Guidelines", summary: "Keep packet ownership intact." },
+        workflowPolicy: { title: "Workflow", summary: "Use Cadre packets." },
+        techStack: { languages: ["TypeScript"], frameworks: ["React"] },
+      },
+    }));
+    assert.equal(setup.data.ok, true);
+    assert.ok(setup.data.written.includes("cadre/product.json"));
+    assert.ok(setup.data.written.includes("cadre/workflow.json"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), true);
+    assert.equal(fs.existsSync(path.join(root, ".github", "workflows", "cadre-monorepo-check.yml")), true);
+
+    const trackId = "embedded_20260622";
+    const created = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "newtrack",
+        execute: true,
+        humanConfirmed: true,
+        trackId,
+        spec: sampleSpec(trackId),
+        plan: {
+          version: 1,
+          schema: "cadre.plan.v1",
+          track_id: trackId,
+          title: `Plan: ${trackId}`,
+          phases: [{
+            phase_index: 1,
+            title: "Phase 1: Build",
+            execution_mode: "sequential",
+            depends_on: [],
+            tasks: [planTask(1, 1, "Implement embedded template path", ["src/index.ts"])],
+          }],
+        },
+      },
+    }));
+    assert.equal(created.data.ok, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", trackId, "learnings.jsonl")), true);
+    const learnings = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "learnings.jsonl"), "utf8").trim());
+    assert.equal(learnings.kind, "learnings_seed");
+    assert.equal(learnings.track_id, trackId);
+  } finally {
+    server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -302,6 +407,9 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(statusActions.includes("beads_summary"));
     const resources = await request("resources/list", {});
     const uris = resources.resources.map((resource) => resource.uri);
+    assert.ok(uris.includes("cadre://skill-contract"));
+    assert.ok(uris.includes("cadre://workflow-protocols"));
+    assert.ok(uris.includes("cadre://workflow-protocol"));
     assert.ok(uris.includes("cadre://agent-references"));
     assert.ok(uris.includes("cadre://agent-reference"));
     assert.ok(uris.includes("cadre://template-inventory"));
@@ -329,10 +437,15 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://styleguide-selection"));
     const templates = await request("resources/templates/list", {});
     const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
+    assert.ok(templateUris.includes("cadre://skill-contract"));
+    assert.ok(templateUris.includes("cadre://workflow-protocols"));
     assert.ok(templateUris.includes("cadre://agent-references"));
     assert.ok(templateUris.includes("cadre://template-inventory"));
     assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
     const templateByUri = new Map(templates.resourceTemplates.map((template) => [template.uriTemplate.split("{")[0], template]));
+    assert.deepEqual(templateByUri.get("cadre://skill-contract").required, []);
+    assert.deepEqual(templateByUri.get("cadre://workflow-protocols").required, []);
+    assert.deepEqual(templateByUri.get("cadre://workflow-protocol").required, ["workflow"]);
     assert.deepEqual(templateByUri.get("cadre://agent-references").required, []);
     assert.deepEqual(templateByUri.get("cadre://agent-reference").required, ["name"]);
     assert.deepEqual(templateByUri.get("cadre://template-inventory").required, []);
@@ -349,6 +462,23 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://artifact-preview").required, ["root", "artifact"]);
     assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
     assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
+
+    const skillContract = await request("resources/read", { uri: "cadre://skill-contract" });
+    const parsedSkillContract = JSON.parse(skillContract.contents[0].text);
+    assert.equal(parsedSkillContract.ok, true);
+    assert.equal(parsedSkillContract.data.skill.schema, "cadre.skill.v1");
+    assert.equal(parsedSkillContract.data.skill.workflows.setup.protocol, "cadre://workflow-protocol?workflow=setup");
+
+    const workflowProtocols = await request("resources/read", { uri: "cadre://workflow-protocols" });
+    const parsedWorkflowProtocols = JSON.parse(workflowProtocols.contents[0].text);
+    assert.equal(parsedWorkflowProtocols.ok, true);
+    assert.ok(parsedWorkflowProtocols.data.workflows.some((workflow) => workflow.workflow === "setup" && workflow.uri === "cadre://workflow-protocol?workflow=setup"));
+
+    const setupProtocol = await request("resources/read", { uri: "cadre://workflow-protocol?workflow=setup" });
+    const parsedSetupProtocol = JSON.parse(setupProtocol.contents[0].text);
+    assert.equal(parsedSetupProtocol.ok, true);
+    assert.equal(parsedSetupProtocol.data.protocol.schema, "cadre.protocol.v1");
+    assert.equal(parsedSetupProtocol.data.protocol.workflow, "setup");
 
     const agentReferences = await request("resources/read", { uri: "cadre://agent-references" });
     const parsedAgentReferences = JSON.parse(agentReferences.contents[0].text);

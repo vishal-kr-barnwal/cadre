@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 
 import * as core from "../../cadre-core";
@@ -7,6 +6,7 @@ import { asJsonObject, asOptionalString } from "../../guards";
 import { envelope } from "./envelope";
 import { parseResourceUri } from "../domain/resource-catalog";
 import type { RuntimeDependencies } from "./ports";
+import { packagedAgentReference, packagedAgentReferences, packagedSkillContract, packagedTemplateJson, packagedWorkflowProtocol, packagedWorkflowProtocols } from "../../core/application/runtime/packaged-assets";
 
 function summarizeRecords(records: unknown, limit = 8): JsonObject[] {
   if (!Array.isArray(records)) return [];
@@ -84,81 +84,67 @@ function safeAssetName(name: string): string | null {
   return /^[a-z0-9-]+$/.test(normalized) ? normalized : null;
 }
 
-function packageAssetPath(kind: "references" | "templates", relativePath: string): string | null {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const add = (candidate: string): void => {
-    if (seen.has(candidate)) return;
-    seen.add(candidate);
-    candidates.push(candidate);
-  };
-  let dir = __dirname;
-  for (let depth = 0; depth < 8; depth += 1) {
-    if (kind === "references") {
-      add(path.join(dir, "references", relativePath));
-      add(path.join(dir, "scripts", "agent-refs", relativePath));
-      add(path.join(dir, "skills", "cadre", "references", relativePath));
-    } else {
-      add(path.join(dir, "templates", relativePath));
-      add(path.join(dir, "skills", "cadre", "templates", relativePath));
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
-  }
-  return null;
+function skillContract(): JsonObject {
+  const skill = packagedSkillContract();
+  return skill ? { ok: true, skill } : { ok: false, error: "Skill contract not found" };
 }
 
-function packageAssetDir(kind: "references" | "templates"): string | null {
-  const manifest = packageAssetPath(kind, kind === "references" ? "mcp-contract.json" : "manifest.json");
-  return manifest ? path.dirname(manifest) : null;
+function workflowProtocolCatalog(): JsonObject {
+  const skill = packagedSkillContract() || {};
+  const skillWorkflows = asJsonObject(skill.workflows);
+  const workflows = packagedWorkflowProtocols().map((protocol) => {
+    const workflow = asOptionalString(protocol.workflow) || asOptionalString(protocol.id)?.replace(/^cadre-/, "") || "";
+    const skillWorkflow = asJsonObject(skillWorkflows[workflow]);
+    return {
+      workflow,
+      id: asOptionalString(protocol.id) || `cadre-${workflow}`,
+      title: asOptionalString(protocol.title) || asOptionalString(skillWorkflow.intent) || workflow,
+      uri: `cadre://workflow-protocol?workflow=${encodeURIComponent(workflow)}`,
+    };
+  });
+  return { ok: true, workflows };
 }
 
-function readPackageJson(file: string): JsonObject {
-  return asJsonObject(JSON.parse(fs.readFileSync(file, "utf8")));
+function workflowProtocol(workflow: string | null): JsonObject {
+  const protocol = packagedWorkflowProtocol(workflow);
+  if (!protocol) return { ok: false, error: "workflow is required and must match a packaged protocol" };
+  return { ok: true, protocol };
 }
 
 function agentReferenceCatalog(): JsonObject {
-  const dir = packageAssetDir("references");
-  const references = dir
-    ? fs.readdirSync(dir)
-      .filter((file) => file.endsWith(".json"))
-      .sort()
-      .map((file) => {
-        const reference = readPackageJson(path.join(dir, file));
-        const id = asOptionalString(reference.id) || file.replace(/\.json$/, "");
-        return {
-          id,
-          title: asOptionalString(reference.title) || id,
-          uri: `cadre://agent-reference?name=${encodeURIComponent(id)}`,
-        };
-      })
-    : [];
+  const references = packagedAgentReferences().map((reference) => {
+    const id = asOptionalString(reference.id) || "unknown";
+    return {
+      id,
+      title: asOptionalString(reference.title) || id,
+      uri: `cadre://agent-reference?name=${encodeURIComponent(id)}`,
+    };
+  });
   return { ok: true, references };
 }
 
 function agentReference(name: string | null): JsonObject {
   const safeName = name ? safeAssetName(name) : null;
   if (!safeName) return { ok: false, error: "name is required and must be a reference id" };
-  const file = packageAssetPath("references", `${safeName}.json`);
-  if (!file) return { ok: false, error: `Unknown agent reference: ${safeName}` };
-  return { ok: true, reference: readPackageJson(file) };
+  const reference = packagedAgentReference(safeName);
+  if (!reference) return { ok: false, error: `Unknown agent reference: ${safeName}` };
+  return { ok: true, reference };
 }
 
 function templateInventory(): JsonObject {
-  const file = packageAssetPath("templates", "manifest.json");
-  if (!file) return { ok: false, error: "Template manifest not found" };
-  return { ok: true, templates: readPackageJson(file) };
+  const templates = packagedTemplateJson("manifest.json");
+  if (!templates) return { ok: false, error: "Template manifest not found" };
+  return { ok: true, templates };
 }
 
 export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core" | "jobs" | "rootResolver">): JsonObject {
   const resource = parseResourceUri(uri);
   const normalizedResource = normalizeResourceArgs(resource);
   let value: unknown;
-  if (resource.base === "cadre://agent-references") value = agentReferenceCatalog();
+  if (resource.base === "cadre://skill-contract") value = skillContract();
+  else if (resource.base === "cadre://workflow-protocols") value = workflowProtocolCatalog();
+  else if (resource.base === "cadre://workflow-protocol") value = workflowProtocol(resource.workflow);
+  else if (resource.base === "cadre://agent-references") value = agentReferenceCatalog();
   else if (resource.base === "cadre://agent-reference") value = agentReference(resource.name);
   else if (resource.base === "cadre://template-inventory") value = templateInventory();
   else {

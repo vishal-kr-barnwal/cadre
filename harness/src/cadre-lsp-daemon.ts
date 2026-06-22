@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import path from "node:path";
 import readline from "node:readline";
 import { LspClient, runReview } from "./cadre-lsp-review";
 import type { JsonObject, RuntimeArgs } from "./types";
@@ -103,7 +104,7 @@ function send(id: string | number | null | undefined, result: unknown, error: Js
   process.stdout.write(`${JSON.stringify({ id, result, error })}\n`);
 }
 
-async function handle(message: DaemonMessage): Promise<unknown> {
+export async function handleDaemonMessage(message: DaemonMessage): Promise<unknown> {
   if (message.method === "status") {
     return { ok: true, servers: pool.status() };
   }
@@ -119,22 +120,28 @@ async function handle(message: DaemonMessage): Promise<unknown> {
   throw new Error(`Unknown LSP daemon method: ${message.method}`);
 }
 
-const rl = readline.createInterface({ input: process.stdin });
-rl.on("line", async (line) => {
-  if (!line.trim()) return;
-  let message;
-  try {
-    message = asJsonObject(JSON.parse(line)) as DaemonMessage;
-    const result = await handle(message);
-    send(message.id || null, result);
-  } catch (error) {
-    send(message && message.id ? message.id : null, null, {
-      message: errorMessage(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-  }
-});
+export function runLspDaemon(): void {
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on("line", async (line) => {
+    if (!line.trim()) return;
+    let message: DaemonMessage | null = null;
+    try {
+      message = asJsonObject(JSON.parse(line)) as DaemonMessage;
+      const result = await handleDaemonMessage(message);
+      send(message.id || null, result);
+    } catch (error) {
+      send(message && message.id ? message.id : null, null, {
+        message: errorMessage(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+  });
 
-process.on("SIGTERM", () => {
-  pool.shutdownAll().finally(() => process.exit(0));
-});
+  process.on("SIGTERM", () => {
+    pool.shutdownAll().finally(() => process.exit(0));
+  });
+}
+
+if (["cadre-lsp-daemon.js", "cadre-lsp-daemon.ts"].includes(path.basename(process.argv[1] || ""))) {
+  runLspDaemon();
+}

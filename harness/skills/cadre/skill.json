@@ -60,71 +60,71 @@
   "workflows": {
     "setup": {
       "intent": "Setup project",
-      "protocol": "protocols/cadre-setup.json"
+      "protocol": "cadre://workflow-protocol?workflow=setup"
     },
     "newtrack": {
       "intent": "Create work",
-      "protocol": "protocols/cadre-newtrack.json"
+      "protocol": "cadre://workflow-protocol?workflow=newtrack"
     },
     "implement": {
       "intent": "Start or resume implementation",
-      "protocol": "protocols/cadre-implement.json"
+      "protocol": "cadre://workflow-protocol?workflow=implement"
     },
     "status": {
       "intent": "Status, team board, or fleet board",
-      "protocol": "protocols/cadre-status.json"
+      "protocol": "cadre://workflow-protocol?workflow=status"
     },
     "validate": {
       "intent": "Validate project state",
-      "protocol": "protocols/cadre-validate.json"
+      "protocol": "cadre://workflow-protocol?workflow=validate"
     },
     "flag": {
       "intent": "Flag blocked or skipped work",
-      "protocol": "protocols/cadre-flag.json"
+      "protocol": "cadre://workflow-protocol?workflow=flag"
     },
     "revise": {
       "intent": "Revise spec or plan",
-      "protocol": "protocols/cadre-revise.json"
+      "protocol": "cadre://workflow-protocol?workflow=revise"
     },
     "review": {
       "intent": "Review quality gate",
-      "protocol": "protocols/cadre-review.json"
+      "protocol": "cadre://workflow-protocol?workflow=review"
     },
     "ship": {
       "intent": "Ship monorepo work",
-      "protocol": "protocols/cadre-ship.json"
+      "protocol": "cadre://workflow-protocol?workflow=ship"
     },
     "land": {
       "intent": "Land polyrepo work",
-      "protocol": "protocols/cadre-land.json"
+      "protocol": "cadre://workflow-protocol?workflow=land"
     },
     "handoff": {
       "intent": "Handoff context",
-      "protocol": "protocols/cadre-handoff.json"
+      "protocol": "cadre://workflow-protocol?workflow=handoff"
     },
     "archive": {
       "intent": "Archive completed tracks",
-      "protocol": "protocols/cadre-archive.json"
+      "protocol": "cadre://workflow-protocol?workflow=archive"
     },
     "release": {
       "intent": "Release summary or version",
-      "protocol": "protocols/cadre-release.json"
+      "protocol": "cadre://workflow-protocol?workflow=release"
     },
     "refresh": {
       "intent": "Refresh stale context",
-      "protocol": "protocols/cadre-refresh.json"
+      "protocol": "cadre://workflow-protocol?workflow=refresh"
     },
     "revert": {
       "intent": "Revert tracked commits",
-      "protocol": "protocols/cadre-revert.json"
+      "protocol": "cadre://workflow-protocol?workflow=revert"
     },
     "formula": {
       "intent": "Formula or template operations",
-      "protocol": "protocols/cadre-formula.json"
+      "protocol": "cadre://workflow-protocol?workflow=formula"
     },
     "artifacts": {
       "intent": "Sync canonical artifacts",
-      "protocol": "protocols/cadre-artifacts.json"
+      "protocol": "cadre://workflow-protocol?workflow=artifacts"
     }
   },
   "references": {

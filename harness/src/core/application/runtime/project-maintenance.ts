@@ -18,18 +18,13 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { trackIndexPayload } from "./status";
 import { runCommand } from "../../infrastructure/runtime/system";
 import { listTracks } from "./track-schedule";
+import { mcpServerPathCandidates } from "../../../runtime-paths";
 
 export function lspReview(root: string, args: RuntimeArgs = {}): CoreResult {
-  const candidates = [
-    path.join(__dirname, "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "scripts", "cadre-lsp-review.js"),
-    path.join(__dirname, "..", "..", "scripts", "cadre-lsp-review.js"),
-    path.join(root, "cadre", "scripts", "cadre-lsp-review.js"),
-  ];
+  const candidates = mcpServerPathCandidates(root);
   const helper = candidates.find(fileExists);
-  if (!helper) return { available: false, reason: "No cadre-lsp-review.js helper found", checked: candidates };
-  const commandArgs = [helper, "--base", args.base || "main", "--head", args.head || "HEAD", "--json"];
+  if (!helper) return { available: false, reason: "No Cadre MCP runtime found for LSP review", checked: candidates };
+  const commandArgs = [helper, "--cadre-lsp-review", "--base", args.base || "main", "--head", args.head || "HEAD", "--json"];
   if (args.config) commandArgs.push("--config", args.config);
   const result = runCommand("node", commandArgs, { cwd: root });
   if (!result.ok) {

@@ -12,20 +12,13 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 
 import { CoreResult } from "./contracts";
 import { readJson } from "../../infrastructure/runtime/json-store";
-import { templatePath } from "./workflow-response";
+import { templateRelativePaths } from "./workflow-response";
 
 export function availableStyleGuideIds(): string[] {
-  const dir = templatePath("styleguides/general.json");
-  if (!dir) return [];
-  const styleDir = path.dirname(dir);
-  try {
-    return fs.readdirSync(styleDir)
-      .filter((file) => file.endsWith(".json"))
-      .map((file) => path.basename(file, ".json"))
-      .sort();
-  } catch {
-    return [];
-  }
+  return templateRelativePaths("styleguides")
+    .filter((file) => file.endsWith(".json"))
+    .map((file) => path.basename(file, ".json"))
+    .sort();
 }
 
 export function normalizeStyleGuideId(value: string): string {

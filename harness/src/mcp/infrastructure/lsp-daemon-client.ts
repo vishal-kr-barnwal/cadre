@@ -1,9 +1,9 @@
-import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import type { JsonObject, RuntimeArgs } from "../../types";
 import { asJsonObject, asOptionalString } from "../../guards";
 import type { PendingRequest } from "../domain/protocol-types";
+import { currentMcpServerPath, mcpRuntimeRoot } from "../../runtime-paths";
 
 export class LspDaemonClient {
   proc: ChildProcessWithoutNullStreams | null;
@@ -20,9 +20,10 @@ export class LspDaemonClient {
 
   ensure(): void {
     if (this.proc && !this.proc.killed) return;
-    const daemon = path.resolve(__dirname, "..", "..", "scripts", "cadre-lsp-daemon.js");
-    this.proc = spawn(process.execPath, [daemon], {
-      cwd: path.resolve(__dirname, "..", ".."),
+    const daemon = currentMcpServerPath();
+    if (!daemon) throw new Error("Cadre MCP runtime not found for LSP daemon");
+    this.proc = spawn(process.execPath, [daemon, "--cadre-lsp-daemon"], {
+      cwd: mcpRuntimeRoot(daemon),
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.proc.stdout.on("data", (chunk: Buffer) => this.read(chunk));

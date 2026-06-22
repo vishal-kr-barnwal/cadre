@@ -9,29 +9,25 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(root, "..");
 const publicDocsRoot = path.join(repoRoot, "docs", "content");
-const protocolDirs = [
-  path.join(root, "skills", "cadre", "protocols"),
-  path.join(root, ".agents", "skills", "cadre", "protocols"),
-  path.join(root, ".claude", "skills", "cadre", "protocols"),
-  path.join(root, "plugins", "cadre", "skills", "cadre", "protocols"),
-  path.join(root, "plugins", "cadre-claude", "skills", "cadre", "protocols"),
-];
-const referenceDirs = [
-  path.join(root, "scripts", "agent-refs"),
-  path.join(root, "plugins", "cadre", "references"),
-  path.join(root, "plugins", "cadre-claude", "references"),
-];
-const skillDirs = [
-  path.join(root, "skills", "cadre"),
+const masterSkillDir = path.join(root, "skills", "cadre");
+const generatedSkillDirs = [
   path.join(root, ".agents", "skills", "cadre"),
   path.join(root, ".claude", "skills", "cadre"),
   path.join(root, "plugins", "cadre", "skills", "cadre"),
   path.join(root, "plugins", "cadre-claude", "skills", "cadre"),
 ];
+const protocolDirs = [
+  path.join(masterSkillDir, "protocols"),
+];
+const referenceDirs = [
+  path.join(root, "scripts", "agent-refs"),
+];
+const skillDirs = [
+  masterSkillDir,
+  ...generatedSkillDirs,
+];
 const workflowJsonFiles = [
   path.join(root, "templates", "workflow.json"),
-  path.join(root, "plugins", "cadre", "templates", "workflow.json"),
-  path.join(root, "plugins", "cadre-claude", "templates", "workflow.json"),
 ];
 
 function jsonFiles(dir) {
@@ -61,7 +57,7 @@ function collectFiles(dir, relativeDir = "") {
 const jsonContractFiles = Array.from(new Set([
   ...protocolDirs.flatMap(jsonFiles),
   ...referenceDirs.flatMap(jsonFiles),
-  ...skillDirs.map((dir) => path.join(dir, "skill.json")),
+  path.join(masterSkillDir, "skill.json"),
   ...workflowJsonFiles,
 ]));
 
@@ -103,47 +99,58 @@ test("Cadre JSON contracts stay packet-only", () => {
   assert.deepEqual(failures, []);
 });
 
-test("Skill shim is minimal and points at skill.json", () => {
+test("Skill shim is minimal and points at MCP contract resources", () => {
   for (const dir of skillDirs) {
     const shim = path.join(dir, "SKILL.md");
     const text = fs.readFileSync(shim, "utf8");
-    assert.match(text, /Load `skill\.json`/);
-    assert.match(text, /authoritative agent and runtime contract/);
+    assert.match(text, /cadre:\/\/skill-contract/);
+    assert.match(text, /cadre:\/\/workflow-protocols/);
+    assert.match(text, /cadre:\/\/workflow-protocol\?workflow=<name>/);
     assert.match(text, /human\s+review only/i);
-    assert.equal(fs.existsSync(path.join(dir, "skill.json")), true);
-    assert.ok(text.length < 1600, path.relative(root, shim));
+    assert.doesNotMatch(text, /Load `skill\.json`/);
+    assert.ok(text.length < 2200, path.relative(root, shim));
   }
-});
-
-test("Skill JSON is the authoritative workflow and reference router", () => {
-  for (const dir of skillDirs) {
-    const file = path.join(dir, "skill.json");
-    const skill = readJson(file);
-    assert.equal(skill.schema, "cadre.skill.v1");
-    assert.equal(skill.markdownUse, "human_projection_only");
-    assert.equal(skill.activation.requiredRuntime, "Cadre MCP");
-    assert.ok(skill.forbidden.some((rule) => /Markdown as alternate input/.test(rule)));
-    for (const workflow of Object.values(skill.workflows)) {
-      assert.match(workflow.protocol, /^protocols\/cadre-[a-z-]+\.json$/);
-    }
-    for (const reference of Object.values(skill.references)) {
-      assert.equal(Object.prototype.hasOwnProperty.call(reference, "path"), false);
-      assert.match(reference.uri, /^cadre:\/\/agent-reference\?name=[a-z-]+$/);
-    }
-  }
-});
-
-test("Generated skill bundles omit MCP-owned reference and template assets", () => {
-  const generatedSkillDirs = skillDirs.filter((dir) => dir !== path.join(root, "skills", "cadre"));
+  assert.equal(fs.existsSync(path.join(masterSkillDir, "skill.json")), true);
   for (const dir of generatedSkillDirs) {
+    assert.equal(fs.existsSync(path.join(dir, "skill.json")), false, path.relative(root, dir));
+  }
+});
+
+test("Master skill JSON routes workflows and references through MCP resources", () => {
+  const skill = readJson(path.join(masterSkillDir, "skill.json"));
+  assert.equal(skill.schema, "cadre.skill.v1");
+  assert.equal(skill.markdownUse, "human_projection_only");
+  assert.equal(skill.activation.requiredRuntime, "Cadre MCP");
+  assert.ok(skill.forbidden.some((rule) => /Markdown as alternate input/.test(rule)));
+  for (const [workflowName, workflow] of Object.entries(skill.workflows)) {
+    assert.equal(workflow.protocol, `cadre://workflow-protocol?workflow=${workflowName}`);
+  }
+  for (const reference of Object.values(skill.references)) {
+    assert.equal(Object.prototype.hasOwnProperty.call(reference, "path"), false);
+    assert.match(reference.uri, /^cadre:\/\/agent-reference\?name=[a-z-]+$/);
+  }
+});
+
+test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
+  for (const dir of generatedSkillDirs) {
+    assert.deepEqual(collectFiles(dir).sort(), ["SKILL.md"], path.relative(root, dir));
     assert.equal(fs.existsSync(path.join(dir, "references")), false, path.relative(root, dir));
     assert.equal(fs.existsSync(path.join(dir, "templates")), false, path.relative(root, dir));
   }
-  for (const pluginDir of [path.join(root, "plugins", "cadre"), path.join(root, "plugins", "cadre-claude")]) {
-    assert.equal(fs.existsSync(path.join(pluginDir, "references", "mcp-contract.json")), true);
-    assert.equal(fs.existsSync(path.join(pluginDir, "templates", "manifest.json")), true);
-    assert.equal(fs.existsSync(path.join(pluginDir, "templates", "styleguides", "general.json")), true);
-  }
+  const codexFiles = collectFiles(path.join(root, "plugins", "cadre")).sort();
+  const claudeFiles = collectFiles(path.join(root, "plugins", "cadre-claude")).sort();
+  assert.deepEqual(codexFiles, [
+    ".codex-plugin/plugin.json",
+    ".mcp.json",
+    "scripts/mcp/cadre-server.js",
+    "skills/cadre/SKILL.md",
+  ]);
+  assert.deepEqual(claudeFiles, [
+    ".claude-plugin/plugin.json",
+    "mcp-config.json",
+    "scripts/mcp/cadre-server.js",
+    "skills/cadre/SKILL.md",
+  ]);
 });
 
 test("Protocol files are structured JSON workflow definitions", () => {
@@ -290,12 +297,10 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
   const codexPlugin = path.join(root, "plugins", "cadre");
   const claudePlugin = path.join(root, "plugins", "cadre-claude");
   const intentionalDifferences = new Set([
-    "README.md",
     ".mcp.json",
     "mcp-config.json",
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
-    "agents/cadre-worker.md",
   ]);
 
   const codexFiles = new Set(collectFiles(codexPlugin));
@@ -318,19 +323,13 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
     if (codexText !== claudeText) failures.push(`unexpected plugin diff: ${rel}`);
   }
 
-  assert.equal(fs.existsSync(path.join(codexPlugin, "agents", "cadre-worker.md")), false);
-  assert.equal(fs.existsSync(path.join(claudePlugin, "agents", "cadre-worker.md")), true);
-  assert.notEqual(
-    fs.readFileSync(path.join(codexPlugin, "README.md"), "utf8"),
-    fs.readFileSync(path.join(claudePlugin, "README.md"), "utf8")
-  );
-
   const codexManifest = readJson(path.join(codexPlugin, ".codex-plugin", "plugin.json"));
   const claudeManifest = readJson(path.join(claudePlugin, ".claude-plugin", "plugin.json"));
   const codexMcp = readJson(path.join(codexPlugin, ".mcp.json"));
   const claudeMcp = readJson(path.join(claudePlugin, "mcp-config.json"));
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
+  assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
   assert.equal(codexMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
   assert.equal(codexMcp.mcpServers.cadre.cwd, ".");
   assert.equal(claudeMcp.mcpServers.cadre.args[0], "./scripts/mcp/cadre-server.js");
@@ -345,21 +344,28 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", ".mcp.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "SKILL.md")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "skill.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "references", "mcp-contract.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "templates", "manifest.json")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "skill.json")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "skills", "cadre", "protocols")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "references")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "templates")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "README.md")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "cadre-core.js")), false);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre", "scripts", "mcp", "cadre-server.js")), true);
 
   const claudeManifest = readJson(path.join(root, "plugins", "cadre-claude", ".claude-plugin", "plugin.json"));
   assert.equal(claudeManifest.skills, "./skills/");
-  assert.equal(claudeManifest.agents, "./agents/");
+  assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "mcp-config.json")), true);
   assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "skill.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "references", "mcp-contract.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "templates", "manifest.json")), true);
-  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents", "cadre-worker.md")), true);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "skill.json")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "skills", "cadre", "protocols")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "references")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "templates")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "agents")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "README.md")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts", "cadre-core.js")), false);
+  assert.equal(fs.existsSync(path.join(root, "plugins", "cadre-claude", "scripts", "mcp", "cadre-server.js")), true);
   const codexMcp = readJson(path.join(root, "plugins", "cadre", ".mcp.json"));
   const claudeMcp = readJson(path.join(root, "plugins", "cadre-claude", "mcp-config.json"));
   assert.equal(codexMcp.mcpServers.cadre.cwd, ".");

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -20,12 +20,55 @@ const banner = [
   "// Edit TypeScript sources under src/ instead."
 ].join("\n");
 
+function readJson(relativePath) {
+  return JSON.parse(readFileSync(path.join(repoRoot, relativePath), "utf8"));
+}
+
+function walkFiles(dir, relativeDir = "") {
+  const fullDir = path.join(repoRoot, dir, relativeDir);
+  return readdirSync(fullDir, { withFileTypes: true }).flatMap((entry) => {
+    const rel = path.join(relativeDir, entry.name).split(path.sep).join("/");
+    const full = path.join(fullDir, entry.name);
+    if (entry.isDirectory()) return walkFiles(dir, rel);
+    return entry.isFile() ? [rel] : [];
+  });
+}
+
+function collectJsonDirectory(relativeDir, keyFor) {
+  const entries = {};
+  for (const file of readdirSync(path.join(repoRoot, relativeDir)).filter((name) => name.endsWith(".json")).sort()) {
+    const json = readJson(path.join(relativeDir, file));
+    entries[keyFor(json, file)] = json;
+  }
+  return entries;
+}
+
+function collectTemplates() {
+  const templates = {};
+  for (const file of walkFiles("templates")) {
+    const full = path.join(repoRoot, "templates", file);
+    if (statSync(full).isFile()) templates[file] = readFileSync(full, "utf8");
+  }
+  return templates;
+}
+
+const embeddedAssets = {
+  skill: readJson("skills/cadre/skill.json"),
+  protocols: collectJsonDirectory("skills/cadre/protocols", (json, file) => json.workflow || path.basename(file, ".json")),
+  references: collectJsonDirectory("scripts/agent-refs", (json, file) => json.id || path.basename(file, ".json")),
+  templates: collectTemplates()
+};
+
 for (const [, outfile] of entries) {
   mkdirSync(path.dirname(path.join(repoRoot, outfile)), { recursive: true });
 }
 
 await Promise.all(
-  entries.map(([entry, outfile]) =>
+  entries.map(([entry, outfile]) => {
+    const entryBanner = outfile === "scripts/mcp/cadre-server.js"
+      ? `${banner}\nconst __CADRE_EMBEDDED_ASSETS__ = ${JSON.stringify(embeddedAssets)};`
+      : banner;
+    return (
     build({
       entryPoints: [path.join(repoRoot, entry)],
       outfile: path.join(repoRoot, outfile),
@@ -34,10 +77,11 @@ await Promise.all(
       target: "node18",
       format: "cjs",
       legalComments: "none",
-      banner: { js: banner },
+      banner: { js: entryBanner },
       logLevel: "silent"
     })
-  )
+    );
+  })
 );
 
 for (const [, outfile] of entries) {

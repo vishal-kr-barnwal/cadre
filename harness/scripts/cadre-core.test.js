@@ -453,12 +453,26 @@ test("build emits every required runtime bundle path", () => {
     "scripts/cadre-lsp-review.js",
     "scripts/cadre-lsp-daemon.js",
     "scripts/mcp/cadre-server.js",
-    "plugins/cadre/scripts/cadre-lsp-review.js",
-    "plugins/cadre-claude/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre/scripts/mcp/cadre-server.js",
+    "plugins/cadre-claude/scripts/mcp/cadre-server.js",
   ]) {
     assert.equal(fs.existsSync(path.join(__dirname, "..", file)), true, `missing ${file}`);
   }
   for (const file of [
+    "plugins/cadre/scripts/cadre-core.js",
+    "plugins/cadre/scripts/cadre-job-runner.js",
+    "plugins/cadre/scripts/cadre-lsp-setup.js",
+    "plugins/cadre/scripts/cadre-lsp-review.js",
+    "plugins/cadre/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre-claude/scripts/cadre-core.js",
+    "plugins/cadre-claude/scripts/cadre-job-runner.js",
+    "plugins/cadre-claude/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-claude/scripts/cadre-lsp-review.js",
+    "plugins/cadre-claude/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre/references",
+    "plugins/cadre/templates",
+    "plugins/cadre-claude/references",
+    "plugins/cadre-claude/templates",
     "templates/scripts/cadre-lsp-setup.js",
     "templates/scripts/cadre-lsp-review.js",
     "templates/scripts/cadre-lsp-daemon.js",
@@ -1230,16 +1244,15 @@ test("workflow setup writes detected and requested style guides from templates",
   }
 });
 
-test("generated plugin setup resolves skill templates and writes default LSP config", () => {
+test("workflow setup resolves bundled templates and writes default LSP config", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plugin-template-test-"));
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
     process.env.PATH = `${installTrackCreationFakeBd(root)}:${oldPath}`;
     write(path.join(root, "src", "lib.rs"), "pub fn plugin_template_smoke() -> bool { true }\n");
-    const pluginCore = require(path.join(__dirname, "..", "plugins", "cadre", "scripts", "cadre-core.js"));
 
-    const setup = pluginCore.workflowPacket(root, {
+    const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
       humanConfirmed: true,

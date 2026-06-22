@@ -17,9 +17,10 @@ spec-first tracks, Beads-backed task memory, review gates, team boards,
 parallel worker orchestration, and mono/polyrepo delivery.
 
 Cadre is not a prompt collection that asks agents to edit state by hand. The
-installed plugin bundles a Cadre MCP runtime, workflow protocols, templates,
-and helper scripts. Agents call Cadre packets, and those packets own Cadre
-state, Beads writes, review records, provider evidence, and derived indexes.
+installed plugin bundles one Cadre MCP runtime plus `SKILL.md`; the runtime
+serves workflow protocols, references, template inventory, jobs, and LSP helper
+modes through MCP. Agents call Cadre packets, and those packets own Cadre state,
+Beads writes, review records, provider evidence, and derived indexes.
 
 ## Why Cadre Exists
 

@@ -7,6 +7,7 @@ import type { JsonObject, RuntimeArgs } from "../../types";
 import { asJsonObject } from "../../guards";
 import type { JobRecord } from "../domain/protocol-types";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { currentMcpServerPath, mcpRuntimeRoot } from "../../runtime-paths";
 
 interface ManagedJobRecord extends JobRecord {
   proc: ChildProcessWithoutNullStreams | null;
@@ -132,9 +133,10 @@ export class JobManager {
   start(type: string, root: string, args: RuntimeArgs = {}) {
     this.cleanup();
     const id = `job_${crypto.randomUUID()}`;
-    const runner = path.resolve(__dirname, "..", "..", "scripts", "cadre-job-runner.js");
-    const proc = spawn(process.execPath, [runner], {
-      cwd: path.resolve(__dirname, "..", ".."),
+    const runner = currentMcpServerPath();
+    if (!runner) throw new Error("Cadre MCP runtime not found for async job runner");
+    const proc = spawn(process.execPath, [runner, "--cadre-job-runner"], {
+      cwd: mcpRuntimeRoot(runner),
       stdio: ["pipe", "pipe", "pipe"],
     });
     const job: ManagedJobRecord = {

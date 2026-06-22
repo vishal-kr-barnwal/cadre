@@ -14,6 +14,9 @@ type ResourceContract = {
 };
 
 const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
+  { uri: "cadre://skill-contract", name: "Cadre skill contract", description: "Packaged cadre.skill.v1 contract. Read without a project root." },
+  { uri: "cadre://workflow-protocols", name: "Cadre workflow protocols", description: "Packaged workflow protocol catalog. Read without a project root." },
+  { uri: "cadre://workflow-protocol", name: "Cadre workflow protocol", description: "Packaged cadre.protocol.v1 body. Read with ?workflow=<name>." },
   { uri: "cadre://agent-references", name: "Cadre agent references", description: "Packaged Cadre agent reference catalog. Read without a project root." },
   { uri: "cadre://agent-reference", name: "Cadre agent reference", description: "Packaged Cadre agent reference JSON. Read with ?name=<reference-id>." },
   { uri: "cadre://template-inventory", name: "Cadre template inventory", description: "Packaged target-project template manifest. Read without a project root." },
@@ -50,6 +53,9 @@ const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
 ];
 
 const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
+  "cadre://skill-contract": { required: [] },
+  "cadre://workflow-protocols": { required: [] },
+  "cadre://workflow-protocol": { required: ["workflow"] },
   "cadre://agent-references": { required: [] },
   "cadre://agent-reference": { required: ["name"] },
   "cadre://template-inventory": { required: [] },

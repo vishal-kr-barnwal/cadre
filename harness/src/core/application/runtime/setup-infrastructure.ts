@@ -14,7 +14,8 @@ import { CoreResult, PlannedGitAction } from "./contracts";
 import { fileExists, safeName } from "../../infrastructure/runtime/json-store";
 import { loadTopology, normalizeProviderMode } from "../../infrastructure/runtime/project-config";
 import { actionResultsOk, commandExists, plannedGitAction, runCommand, runPlannedGitActions } from "../../infrastructure/runtime/system";
-import { templatePath } from "./workflow-response";
+import { templateSourceLabel, templateText } from "./workflow-response";
+import { mcpServerPathCandidates } from "../../../runtime-paths";
 
 export function configuredCiProvider(root: string, args: RuntimeArgs = {}): "github" | "gitlab" | null {
   const raw = asOptionalString(args.ciProvider || args.ci_provider)
@@ -106,17 +107,18 @@ export function setupCiTemplates(root: string, provider: "github" | "gitlab" | n
   const template = polyrepo
     ? (provider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml")
     : (provider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml");
-  const source = templatePath(template);
-  if (!source) return { ok: false, error: `Missing CI template ${template}` };
+  const sourceText = templateText(template, "");
+  const source = templateSourceLabel(template) || template;
+  if (!sourceText) return { ok: false, error: `Missing CI template ${template}` };
   const target = provider === "github"
     ? path.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml")
     : path.join(root, ".gitlab-ci.yml");
   if (fileExists(target) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source: path.relative(root, source), path: path.relative(root, target) };
+    return { ok: true, skipped: true, provider, source, path: path.relative(root, target) };
   }
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.copyFileSync(source, target);
-  return { ok: true, provider, source: path.relative(root, source), path: path.relative(root, target), written: true };
+  fs.writeFileSync(target, sourceText);
+  return { ok: true, provider, source, path: path.relative(root, target), written: true };
 }
 
 export function setupSubmodulePlan(root: string, repos: JsonObject, args: RuntimeArgs = {}): CoreResult {
@@ -149,12 +151,7 @@ export function setupSubmodulePlan(root: string, repos: JsonObject, args: Runtim
 }
 
 export function lspSetupHelperCandidates(root: string): string[] {
-  return [
-    path.join(__dirname, "cadre-lsp-setup.js"),
-    path.join(__dirname, "..", "cadre-lsp-setup.js"),
-    path.join(__dirname, "..", "..", "scripts", "cadre-lsp-setup.js"),
-    path.join(root, "cadre", "scripts", "cadre-lsp-setup.js"),
-  ];
+  return mcpServerPathCandidates(root);
 }
 
 export function redactRuntimeHelperPaths(text: string): string {
@@ -181,12 +178,12 @@ export function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
     return {
       ok: false,
       available: false,
-      reason: "Cadre LSP setup helper was not found",
+      reason: "Cadre MCP runtime was not found for LSP setup",
       checked_count: lspSetupHelperCandidates(root).length,
     };
   }
   const config = asOptionalString(args.config) || "cadre/lsp.json";
-  const commandArgs = [helper, "--root", root, "--config", config, "--json"];
+  const commandArgs = [helper, "--cadre-lsp-setup", "--root", root, "--config", config, "--json"];
   if (args.execute === true) commandArgs.push("--write");
   const result = runCommand("node", commandArgs, { cwd: root, maxBuffer: 20 * 1024 * 1024 });
   if (!result.ok) {

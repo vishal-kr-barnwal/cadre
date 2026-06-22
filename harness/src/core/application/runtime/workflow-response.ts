@@ -11,13 +11,14 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { CoreResult } from "./contracts";
-import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { utcNow } from "../../infrastructure/runtime/json-store";
 import { normalizePlanManualVerification } from "./plan-docs";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { syncControlPlane } from "./review-records";
 import { normalizedSpecFromRaw } from "./spec-docs";
 import { asArray } from "./status";
 import { gitIdentity } from "../../infrastructure/runtime/system";
+import { packagedTemplateJson, packagedTemplatePath, packagedTemplatePaths, packagedTemplateSource, packagedTemplateText } from "./packaged-assets";
 
 export function workflowResponseMode(args: RuntimeArgs = {}): "compact" | "detail" {
   const raw = asOptionalString(args.responseMode || args.response_mode
@@ -162,31 +163,19 @@ export function shapeWorkflowResponse(root: string, workflow: string, args: Runt
 }
 
 export function templatePath(relativePath: string): string | null {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const add = (candidate: string): void => {
-    if (seen.has(candidate)) return;
-    seen.add(candidate);
-    candidates.push(candidate);
-  };
-  let dir = __dirname;
-  for (let depth = 0; depth < 8; depth += 1) {
-    add(path.join(dir, "templates", relativePath));
-    add(path.join(dir, "skills", "cadre", "templates", relativePath));
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  for (const candidate of candidates) {
-    if (fileExists(candidate)) return candidate;
-  }
-  return null;
+  return packagedTemplatePath(relativePath);
 }
 
 export function templateText(relativePath: string, fallback: string): string {
-  const found = templatePath(relativePath);
-  if (found) return fs.readFileSync(found, "utf8");
-  return fallback;
+  return packagedTemplateText(relativePath) ?? fallback;
+}
+
+export function templateSourceLabel(relativePath: string): string | null {
+  return packagedTemplateSource(relativePath);
+}
+
+export function templateRelativePaths(prefix = ""): string[] {
+  return packagedTemplatePaths(prefix);
 }
 
 export function packetText(value: unknown, fallback: string): string {
@@ -279,7 +268,7 @@ export function normalizePlanJson(trackId: string, raw: unknown, specJson?: Json
 }
 
 export function templateJson(relativePath: string, fallback: JsonObject): JsonObject {
-  return readJson<JsonObject>(templatePath(relativePath) || "", fallback);
+  return packagedTemplateJson(relativePath) || fallback;
 }
 
 export function templateManifest(): JsonObject {

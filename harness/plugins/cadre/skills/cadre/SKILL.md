@@ -19,10 +19,18 @@ description: |
 
 # Cadre Skill Shim
 
-Load `skill.json` before running any Cadre workflow. The JSON file is the
-authoritative agent and runtime contract.
+Cadre MCP is required for every Cadre workflow. Before acting, verify the MCP
+runtime with `cadre_project` using `{"action":"ping"}`. If Cadre MCP tools or
+resources are unavailable, halt and ask the user to install, enable, or restart
+the Cadre plugin.
 
-Markdown in this file exists only because current skill packaging requires a
-`SKILL.md` entrypoint. Markdown projections elsewhere in Cadre are for human
-review only; do not use them as workflow input, fallback state, or canonical
-truth.
+Load `cadre://skill-contract` for the authoritative `cadre.skill.v1` contract.
+Use `cadre://workflow-protocols` to discover workflow protocol resources, then
+load `cadre://workflow-protocol?workflow=<name>` for the active workflow.
+References and template inventory are also MCP-served through Cadre resources.
+
+Do not depend on local `skill.json`, `protocols/`, `references/`, or
+`templates/` files. Markdown in this file exists only because current skill
+packaging requires a `SKILL.md` entrypoint. Markdown projections elsewhere in
+Cadre are for human review only; do not use them as workflow input, fallback
+state, or canonical truth.

@@ -8,8 +8,8 @@ order: 5
 # Architecture
 
 This repository is the Cadre harness/package repository. It builds the runtime,
-skills, references, templates, tests, and generated plugin bundles that users
-install into Claude Code and OpenAI Codex.
+skill shim, MCP-served contracts, references, templates, tests, and generated
+plugin bundles that users install into Claude Code and OpenAI Codex.
 
 ## Repository Shape
 
@@ -45,10 +45,11 @@ Edit master sources, then regenerate generated output.
 
 | Source | Owns |
 |--------|------|
-| `harness/skills/cadre/SKILL.md` | Cadre skill activation contract, workflow routing, and MCP reference routing. |
-| `harness/skills/cadre/protocols/` | Master workflow protocol bodies for all `cadre-*` workflows. |
-| `harness/scripts/agent-refs/` | Reference material copied into plugin-level MCP assets. |
-| `harness/templates/` | Files copied into target projects by `cadre-setup`. |
+| `harness/skills/cadre/SKILL.md` | Cadre skill activation shim that points agents at MCP contract resources. |
+| `harness/skills/cadre/skill.json` | Master `cadre.skill.v1` contract embedded into the MCP runtime. |
+| `harness/skills/cadre/protocols/` | Master workflow protocol bodies embedded into MCP resources for all `cadre-*` workflows. |
+| `harness/scripts/agent-refs/` | Reference material embedded into MCP reference resources. |
+| `harness/templates/` | Target-project templates embedded into the MCP runtime and written by `cadre-setup`. |
 | `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
 | `docs/` | Public Next.js/shadcn documentation website. |
 | `docs/content/` | Markdown source for generated documentation routes. |
@@ -76,12 +77,10 @@ source of truth.
 
 The generator:
 
-- Copies the master skill into each platform bundle.
-- Adds generated protocol preambles that require Cadre MCP.
-- Substitutes the platform-specific worker dispatch sentence.
-- Copies agent references into plugin-level MCP assets.
-- Copies target-project templates into plugin-level MCP assets.
-- Copies built JavaScript runtime files into each plugin.
+- Copies the master `SKILL.md` shim into each platform bundle.
+- Embeds the skill contract, workflow protocols, references, templates, worker
+  guidance, jobs, and LSP helpers into `scripts/mcp/cadre-server.js`.
+- Copies only `scripts/mcp/cadre-server.js` as the Cadre-owned plugin runtime.
 - Rewrites marketplace shims for root and harness development paths.
 
 ## Runtime Build

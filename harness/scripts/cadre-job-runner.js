@@ -8,6 +8,10 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -24,6 +28,17 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// src/cadre-job-runner.ts
+var cadre_job_runner_exports = {};
+__export(cadre_job_runner_exports, {
+  readStdin: () => readStdin,
+  runJob: () => runJob,
+  runJobRunner: () => runJobRunner
+});
+module.exports = __toCommonJS(cadre_job_runner_exports);
+var import_node_path17 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -624,19 +639,32 @@ function trackContext(root, trackId) {
 var import_node_fs7 = __toESM(require("node:fs"));
 var import_node_path11 = __toESM(require("node:path"));
 
-// src/core/application/runtime/project-maintenance.ts
+// src/runtime-paths.ts
 var import_node_path6 = __toESM(require("node:path"));
+function unique(values) {
+  return Array.from(new Set(values));
+}
+function mcpServerPathCandidates(root) {
+  const candidates = [];
+  let dir = __dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    candidates.push(import_node_path6.default.join(dir, "cadre-server.js"));
+    candidates.push(import_node_path6.default.join(dir, "mcp", "cadre-server.js"));
+    candidates.push(import_node_path6.default.join(dir, "scripts", "mcp", "cadre-server.js"));
+    const parent = import_node_path6.default.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  if (root) candidates.push(import_node_path6.default.join(root, "cadre", "scripts", "mcp", "cadre-server.js"));
+  return unique(candidates);
+}
+
+// src/core/application/runtime/project-maintenance.ts
 function lspReview(root, args = {}) {
-  const candidates = [
-    import_node_path6.default.join(__dirname, "cadre-lsp-review.js"),
-    import_node_path6.default.join(__dirname, "..", "cadre-lsp-review.js"),
-    import_node_path6.default.join(__dirname, "..", "scripts", "cadre-lsp-review.js"),
-    import_node_path6.default.join(__dirname, "..", "..", "scripts", "cadre-lsp-review.js"),
-    import_node_path6.default.join(root, "cadre", "scripts", "cadre-lsp-review.js")
-  ];
+  const candidates = mcpServerPathCandidates(root);
   const helper = candidates.find(fileExists);
-  if (!helper) return { available: false, reason: "No cadre-lsp-review.js helper found", checked: candidates };
-  const commandArgs = [helper, "--base", args.base || "main", "--head", args.head || "HEAD", "--json"];
+  if (!helper) return { available: false, reason: "No Cadre MCP runtime found for LSP review", checked: candidates };
+  const commandArgs = [helper, "--cadre-lsp-review", "--base", args.base || "main", "--head", args.head || "HEAD", "--json"];
   if (args.config) commandArgs.push("--config", args.config);
   const result = runCommand("node", commandArgs, { cwd: root });
   if (!result.ok) {
@@ -2509,15 +2537,23 @@ function runJob(payload) {
       return { ok: false, error: `Unsupported job type: ${payload.type}` };
   }
 }
-async function main() {
+async function runJobRunner() {
   const input = await readStdin();
   const payload = asJsonObject(JSON.parse(input || "{}"));
   const result = runJob(payload);
   process.stdout.write(`${JSON.stringify(result, null, 2)}
 `);
 }
-main().catch((error) => {
-  process.stdout.write(`${JSON.stringify({ ok: false, error: errorMessage(error), stack: error instanceof Error ? error.stack : void 0 }, null, 2)}
+if (["cadre-job-runner.js", "cadre-job-runner.ts"].includes(import_node_path17.default.basename(process.argv[1] || ""))) {
+  runJobRunner().catch((error) => {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: errorMessage(error), stack: error instanceof Error ? error.stack : void 0 }, null, 2)}
 `);
-  process.exit(1);
+    process.exit(1);
+  });
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  readStdin,
+  runJob,
+  runJobRunner
 });
