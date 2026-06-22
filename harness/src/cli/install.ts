@@ -131,16 +131,16 @@ function readPackageMetadata(runtimeRoot: string): Record<string, string> {
     return {
       version: typeof json.version === "string" ? json.version : "0.0.0",
       description: typeof json.description === "string" ? json.description : "MCP-first Cadre workflows.",
-      homepage: typeof json.homepage === "string" ? json.homepage : "https://github.com/vishal-kr-barnwal/Cadre",
-      repository: typeof json.repository === "string" ? json.repository : "https://github.com/vishal-kr-barnwal/Cadre",
+      homepage: typeof json.homepage === "string" ? json.homepage : "https://github.com/vishal-kr-barnwal/cadre",
+      repository: typeof json.repository === "string" ? json.repository : "https://github.com/vishal-kr-barnwal/cadre",
       license: typeof json.license === "string" ? json.license : "Apache-2.0",
     };
   } catch {
     return {
       version: "0.0.0",
       description: "MCP-first Cadre workflows.",
-      homepage: "https://github.com/vishal-kr-barnwal/Cadre",
-      repository: "https://github.com/vishal-kr-barnwal/Cadre",
+      homepage: "https://github.com/vishal-kr-barnwal/cadre",
+      repository: "https://github.com/vishal-kr-barnwal/cadre",
       license: "Apache-2.0",
     };
   }

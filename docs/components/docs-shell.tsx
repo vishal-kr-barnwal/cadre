@@ -81,7 +81,7 @@ export function DocsShell({ docs, headings = [], children }: DocsShellProps) {
               className="sm:hidden"
               enableShortcut={false}
             />
-            <Button variant="ghost" size="icon" render={<Link href="https://github.com/vishal-kr-barnwal/Cadre" />}>
+            <Button variant="ghost" size="icon" render={<Link href="https://github.com/vishal-kr-barnwal/cadre" />}>
               <ExternalLinkIcon />
               <span className="sr-only">GitHub</span>
             </Button>

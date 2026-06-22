@@ -60,7 +60,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
             <Link className="hover:text-foreground" href="/architecture">
               Architecture
             </Link>
-            <Link className="hover:text-foreground" href="https://github.com/vishal-kr-barnwal/Cadre">
+            <Link className="hover:text-foreground" href="https://github.com/vishal-kr-barnwal/cadre">
               GitHub
             </Link>
           </nav>

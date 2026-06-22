@@ -1,15 +1,15 @@
 {
   "name": "cadre-ai",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "MCP-first Cadre workflows for context-driven development.",
   "author": {
     "name": "Vishal Kumar",
     "url": "https://github.com/vishal-kr-barnwal"
   },
-  "homepage": "https://github.com/vishal-kr-barnwal/Cadre",
+  "homepage": "https://github.com/vishal-kr-barnwal/cadre",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vishal-kr-barnwal/Cadre.git",
+    "url": "https://github.com/vishal-kr-barnwal/cadre.git",
     "directory": "harness"
   },
   "license": "Apache-2.0",
