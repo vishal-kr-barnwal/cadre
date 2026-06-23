@@ -74,8 +74,10 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  const codexPlugin = path.join(cadreHome, "plugins", "codex", "cadre");
-  const claudePlugin = path.join(cadreHome, "plugins", "claude", "cadre");
+  const codexMarketplace = path.join(cadreHome, "marketplaces", "codex");
+  const claudeMarketplace = path.join(cadreHome, "marketplaces", "claude");
+  const codexPlugin = path.join(codexMarketplace, "plugins", "cadre");
+  const claudePlugin = path.join(claudeMarketplace, "plugins", "cadre");
   for (const plugin of [codexPlugin, claudePlugin]) {
     assert.equal(fs.existsSync(path.join(plugin, "skills", "cadre", "SKILL.md")), true);
     assert.equal(fs.existsSync(path.join(plugin, "assets")), false);
@@ -92,6 +94,10 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   }
   const claudeManifest = readJson(path.join(claudePlugin, ".claude-plugin", "plugin.json"));
   assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
+  const codexMarketplaceManifest = readJson(path.join(codexMarketplace, ".agents", "plugins", "marketplace.json"));
+  assert.equal(codexMarketplaceManifest.plugins[0].source.path, "./plugins/cadre");
+  const claudeMarketplaceManifest = readJson(path.join(claudeMarketplace, ".claude-plugin", "marketplace.json"));
+  assert.equal(claudeMarketplaceManifest.plugins[0].source, "./plugins/cadre");
 
   const commandLog = fs.readFileSync(log, "utf8");
   assert.match(commandLog, /codex plugin marketplace add/);

@@ -39,6 +39,7 @@ interface TargetPaths {
 
 const PACKAGE_PLUGIN_NAME = "cadre";
 const PACKAGE_DISPLAY_NAME = "Cadre";
+const MARKETPLACE_PLUGIN_SOURCE = "./plugins/cadre";
 
 function usage(): string {
   return [
@@ -114,10 +115,9 @@ function selectedTargets(options: ParsedInstall): Target[] {
 }
 
 function targetPaths(home: string, target: Target): TargetPaths {
-  const pluginRoot = path.join(home, "plugins", target, PACKAGE_PLUGIN_NAME);
   const marketplaceRoot = path.join(home, "marketplaces", target);
   return {
-    pluginRoot,
+    pluginRoot: path.join(marketplaceRoot, "plugins", PACKAGE_PLUGIN_NAME),
     marketplaceRoot,
     marketplaceFile: target === "codex"
       ? path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json")
@@ -190,7 +190,7 @@ function mcpConfig(runtime: RuntimePaths): Record<string, unknown> {
   };
 }
 
-function marketplace(target: Target, pluginRoot: string, runtime: RuntimePaths): Record<string, unknown> {
+function marketplace(target: Target, runtime: RuntimePaths): Record<string, unknown> {
   const metadata = readPackageMetadata(runtime.runtimeRoot);
   if (target === "codex") {
     return {
@@ -198,7 +198,7 @@ function marketplace(target: Target, pluginRoot: string, runtime: RuntimePaths):
       interface: { displayName: PACKAGE_DISPLAY_NAME },
       plugins: [{
         name: PACKAGE_PLUGIN_NAME,
-        source: { source: "local", path: pluginRoot },
+        source: { source: "local", path: MARKETPLACE_PLUGIN_SOURCE },
         policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
         category: "Productivity",
       }],
@@ -210,7 +210,7 @@ function marketplace(target: Target, pluginRoot: string, runtime: RuntimePaths):
     description: "Cadre MCP-first workflows for Claude Code.",
     plugins: [{
       name: PACKAGE_PLUGIN_NAME,
-      source: pluginRoot,
+      source: MARKETPLACE_PLUGIN_SOURCE,
       description: metadata.description,
       version: metadata.version,
       author: { name: "Vishal Kumar" },
@@ -240,7 +240,7 @@ function writeThinPlugin(target: Target, paths: TargetPaths, runtime: RuntimePat
     writeJson(path.join(paths.pluginRoot, ".claude-plugin", "plugin.json"), pluginManifest(target, runtime));
     writeJson(path.join(paths.pluginRoot, "mcp-config.json"), mcpConfig(runtime));
   }
-  writeJson(paths.marketplaceFile, marketplace(target, paths.pluginRoot, runtime));
+  writeJson(paths.marketplaceFile, marketplace(target, runtime));
 }
 
 function installCommands(target: Target, paths: TargetPaths, scope: Scope): CommandPlan[] {

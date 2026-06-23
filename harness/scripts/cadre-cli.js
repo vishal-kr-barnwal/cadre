@@ -33,6 +33,7 @@ var import_node_path = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
 var PACKAGE_PLUGIN_NAME = "cadre";
 var PACKAGE_DISPLAY_NAME = "Cadre";
+var MARKETPLACE_PLUGIN_SOURCE = "./plugins/cadre";
 function usage() {
   return [
     "Cadre CLI",
@@ -102,10 +103,9 @@ function selectedTargets(options) {
   return ["codex", "claude"].filter((target) => commandExists(target));
 }
 function targetPaths(home, target) {
-  const pluginRoot = import_node_path.default.join(home, "plugins", target, PACKAGE_PLUGIN_NAME);
   const marketplaceRoot = import_node_path.default.join(home, "marketplaces", target);
   return {
-    pluginRoot,
+    pluginRoot: import_node_path.default.join(marketplaceRoot, "plugins", PACKAGE_PLUGIN_NAME),
     marketplaceRoot,
     marketplaceFile: target === "codex" ? import_node_path.default.join(marketplaceRoot, ".agents", "plugins", "marketplace.json") : import_node_path.default.join(marketplaceRoot, ".claude-plugin", "marketplace.json")
   };
@@ -172,7 +172,7 @@ function mcpConfig(runtime) {
     }
   };
 }
-function marketplace(target, pluginRoot, runtime) {
+function marketplace(target, runtime) {
   const metadata = readPackageMetadata(runtime.runtimeRoot);
   if (target === "codex") {
     return {
@@ -180,7 +180,7 @@ function marketplace(target, pluginRoot, runtime) {
       interface: { displayName: PACKAGE_DISPLAY_NAME },
       plugins: [{
         name: PACKAGE_PLUGIN_NAME,
-        source: { source: "local", path: pluginRoot },
+        source: { source: "local", path: MARKETPLACE_PLUGIN_SOURCE },
         policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
         category: "Productivity"
       }]
@@ -192,7 +192,7 @@ function marketplace(target, pluginRoot, runtime) {
     description: "Cadre MCP-first workflows for Claude Code.",
     plugins: [{
       name: PACKAGE_PLUGIN_NAME,
-      source: pluginRoot,
+      source: MARKETPLACE_PLUGIN_SOURCE,
       description: metadata.description,
       version: metadata.version,
       author: { name: "Vishal Kumar" },
@@ -221,7 +221,7 @@ function writeThinPlugin(target, paths, runtime, skillShim) {
     writeJson(import_node_path.default.join(paths.pluginRoot, ".claude-plugin", "plugin.json"), pluginManifest(target, runtime));
     writeJson(import_node_path.default.join(paths.pluginRoot, "mcp-config.json"), mcpConfig(runtime));
   }
-  writeJson(paths.marketplaceFile, marketplace(target, paths.pluginRoot, runtime));
+  writeJson(paths.marketplaceFile, marketplace(target, runtime));
 }
 function installCommands(target, paths, scope) {
   if (target === "codex") {

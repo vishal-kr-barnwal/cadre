@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1] - 2026-06-23
+
+Prepared patch release for docs rendering and install-time plugin registration.
+
+### Fixed
+
+- Fixed Mermaid diagrams in the public Next.js docs site so fenced `mermaid`
+  blocks render as diagrams instead of code blocks.
+- Fixed `cadre install` marketplace layout so Codex and Claude resolve the
+  locally written Cadre plugin from relative `./plugins/cadre` marketplace
+  sources.
+
 ## [1.1.0] - 2026-06-23
 
 Native Cadre state and traceability release.

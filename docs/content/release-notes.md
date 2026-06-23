@@ -7,6 +7,18 @@ order: 9
 
 # Release Notes
 
+## 1.1.1 - 2026-06-23
+
+Cadre 1.1.1 is prepared as a patch release for docs rendering and install-time
+plugin registration.
+
+### Compared With 1.1.0
+
+| Area | What changed |
+|------|--------------|
+| Docs rendering | Fenced `mermaid` diagrams in the Next.js docs render as SVG diagrams. |
+| Installer | Codex and Claude marketplaces now reference the locally written Cadre plugin with relative `./plugins/cadre` sources. |
+
 ## 1.1.0 - 2026-06-23
 
 Cadre 1.1.0 moves task memory and operational history into Cadre-owned packet

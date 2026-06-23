@@ -205,6 +205,30 @@
     @apply bg-transparent p-0 text-inherit;
   }
 
+  .docs-prose .mermaid-diagram {
+    @apply overflow-x-auto rounded-xl border bg-background p-4 shadow-sm;
+  }
+
+  .docs-prose .mermaid-diagram svg {
+    @apply mx-auto h-auto max-w-full;
+  }
+
+  .docs-prose .mermaid-diagram-loading {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .docs-prose .mermaid-diagram-error {
+    @apply border-destructive/40 bg-destructive/5;
+  }
+
+  .docs-prose .mermaid-diagram-error figcaption {
+    @apply mb-3 flex items-center gap-2 text-sm font-medium text-destructive;
+  }
+
+  .docs-prose .mermaid-diagram-error svg {
+    @apply m-0 size-4;
+  }
+
   .docs-prose table {
     @apply w-full overflow-hidden rounded-xl border text-sm;
   }
