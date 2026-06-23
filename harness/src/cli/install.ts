@@ -100,11 +100,9 @@ function runtimePaths(): RuntimePaths {
 }
 
 function commandExists(command: string): boolean {
-  const result = spawnSync(process.platform === "win32" ? "where" : "command", process.platform === "win32" ? [command] : ["-v", command], {
-    encoding: "utf8",
-    shell: process.platform !== "win32",
-    stdio: "ignore",
-  });
+  const result = process.platform === "win32"
+    ? spawnSync("where", [command], { stdio: "ignore" })
+    : spawnSync("which", [command], { stdio: "ignore" });
   return result.status === 0;
 }
 

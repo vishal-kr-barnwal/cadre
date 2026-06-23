@@ -90,11 +90,7 @@ function runtimePaths() {
   };
 }
 function commandExists(command) {
-  const result = (0, import_node_child_process.spawnSync)(process.platform === "win32" ? "where" : "command", process.platform === "win32" ? [command] : ["-v", command], {
-    encoding: "utf8",
-    shell: process.platform !== "win32",
-    stdio: "ignore"
-  });
+  const result = process.platform === "win32" ? (0, import_node_child_process.spawnSync)("where", [command], { stdio: "ignore" }) : (0, import_node_child_process.spawnSync)("which", [command], { stdio: "ignore" });
   return result.status === 0;
 }
 function selectedTargets(options) {

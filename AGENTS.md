@@ -78,6 +78,24 @@ When the user asks for implementation commits, use small local commits with
 clear messages. Do not push unless explicitly requested. Preserve unrelated
 worktree changes and never rewrite existing user work without instruction.
 
+## Release Validation
+
+Before creating or publishing any Cadre release, validate the native plugin
+installer against both Codex and Claude from the local build:
+
+```bash
+pnpm --filter cadre-ai build
+node harness/scripts/cadre-cli.js install --target all --scope user
+node harness/scripts/cadre-cli.js install --target all --scope user --check
+codex plugin list | rg -A3 -B2 'Marketplace `cadre`|cadre@cadre'
+claude plugin list --json
+```
+
+Both clients must show `cadre@cadre` installed and enabled at the candidate
+version, and both generated MCP configs must point at
+`harness/scripts/mcp/cadre-server.js`. If either native installer or listing
+check fails, stop and fix that before creating the release.
+
 ## Testing
 
 Before reporting completion for harness changes, prefer:
