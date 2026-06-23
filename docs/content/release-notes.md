@@ -9,15 +9,29 @@ order: 9
 
 ## 1.1.1 - 2026-06-23
 
-Cadre 1.1.1 is prepared as a patch release for docs rendering and install-time
-plugin registration.
+Cadre 1.1.1 is a patch release for docs rendering, install-time plugin
+registration, and native release validation.
 
 ### Compared With 1.1.0
 
 | Area | What changed |
 |------|--------------|
-| Docs rendering | Fenced `mermaid` diagrams in the Next.js docs render as SVG diagrams. |
+| Docs rendering | Fenced `mermaid` diagrams in the Next.js docs render as SVG diagrams, with top-to-bottom flow on mobile. |
 | Installer | Codex and Claude marketplaces now reference the locally written Cadre plugin with relative `./plugins/cadre` sources. |
+| Release validation | Release instructions now require real native installs for both Codex and Claude before publishing. |
+| CLI polish | Install-time client detection no longer emits the Node 26 child-process deprecation warning. |
+
+### Upgrade Notes
+
+Existing installs can update with the normal npm path:
+
+```bash
+npm install -g cadre-ai@1.1.1
+cadre install
+```
+
+The GitHub release for `release-1.1.1` publishes `cadre-ai@1.1.1` through npm
+Trusted Publishing after the release workflow validates the harness package.
 
 ## 1.1.0 - 2026-06-23
 

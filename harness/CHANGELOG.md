@@ -2,7 +2,19 @@
 
 ## [1.1.1] - 2026-06-23
 
-Prepared patch release for docs rendering and install-time plugin registration.
+Patch release for docs rendering, install-time plugin registration, and native
+release validation.
+
+### Added
+
+- Added a repository release gate requiring real Codex and Claude native plugin
+  installs before creating or publishing a release.
+
+### Changed
+
+- Changed Mermaid diagrams in the public Next.js docs site to render
+  top-to-bottom on mobile while preserving the wider left-to-right layout on
+  desktop.
 
 ### Fixed
 
@@ -11,6 +23,7 @@ Prepared patch release for docs rendering and install-time plugin registration.
 - Fixed `cadre install` marketplace layout so Codex and Claude resolve the
   locally written Cadre plugin from relative `./plugins/cadre` marketplace
   sources.
+- Fixed install-time client detection to avoid Node 26 deprecation warnings.
 
 ## [1.1.0] - 2026-06-23
 
