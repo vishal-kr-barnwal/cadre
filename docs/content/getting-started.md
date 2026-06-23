@@ -30,6 +30,10 @@ The installed plugins contain only platform wiring:
 The plugin does not copy Cadre assets, worker agents, or MCP runtime scripts.
 The global `cadre-mcp` binary embeds the skill contract, protocols, references,
 target-project templates, resources, packet tools, jobs, and LSP helper modes.
+`cadre install` also bootstraps narrow client approval rules for Cadre's own MCP
+tools so `cadre-setup` and later packet workflows do not prompt on every Cadre
+tool call. It does not bypass approval for shell commands, file edits, other
+plugins, or non-Cadre MCP servers.
 
 To target one client explicitly:
 
@@ -56,6 +60,8 @@ quality gate, optional CI templates, and LSP setup. When language-server
 recommendations are detected, setup writes `cadre/lsp.json` by default unless
 you opt out. The workflow is packet-owned: the agent should call Cadre MCP, and
 Cadre MCP writes the control plane.
+If Cadre MCP tool calls still ask for repeated approval, rerun `cadre install`;
+it refreshes the Codex and Claude Cadre-only MCP approval bootstrap.
 
 Successful setup creates:
 

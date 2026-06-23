@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { approvalSummary, bootstrapClientApprovals, checkClientApprovals } from "./client-approvals";
 
 type Target = "codex" | "claude";
 type Scope = "user" | "project" | "local";
@@ -251,6 +252,7 @@ function installCommands(target: Target, paths: TargetPaths, scope: Scope): Comm
   return [
     { command: "claude", args: ["plugin", "marketplace", "add", "--scope", scope, paths.marketplaceRoot] },
     { command: "claude", args: ["plugin", "install", "--scope", scope, "cadre@cadre"] },
+    { command: "claude", args: ["plugin", "update", "--scope", scope, "cadre@cadre"] },
   ];
 }
 
@@ -338,10 +340,17 @@ function runInstall(argv: string[], context: CliContext): number {
     const commands = installCommands(target, paths, options.scope);
     if (options.dryRun) {
       printPlan(target, paths, commands);
+      process.stdout.write(`Would configure: ${approvalSummary(target)}\n`);
       continue;
     }
     if (!options.check) writeThinPlugin(target, paths, runtime, context.skillShim);
     const errors = checkTarget(target, paths, runtime);
+    if (!options.check) {
+      const approvals = bootstrapClientApprovals(target);
+      if (!approvals.ok) errors.push(`${target} approval bootstrap failed: ${approvals.error || approvals.path}`);
+    }
+    const approvalCheck = checkClientApprovals(target);
+    if (!approvalCheck.ok) errors.push(`${target} approval check failed: ${approvalCheck.error || approvalCheck.path}`);
     if (errors.length > 0) {
       ok = false;
       for (const error of errors) process.stderr.write(`${error}\n`);
@@ -349,6 +358,7 @@ function runInstall(argv: string[], context: CliContext): number {
     }
     if (options.check) {
       process.stdout.write(`Cadre ${target} plugin is installed and points at ${runtime.mcpServer}\n`);
+      process.stdout.write(`Cadre ${target} MCP tool approvals are configured in ${approvalCheck.path}\n`);
       continue;
     }
     if (!commandExists(target)) {
@@ -363,7 +373,7 @@ function runInstall(argv: string[], context: CliContext): number {
         process.stderr.write(`${command.command} ${command.args.join(" ")} failed: ${result.stderr}\n`);
       }
     }
-    if (ok) process.stdout.write(`Installed Cadre ${target} plugin through ${paths.marketplaceRoot}\n`);
+    if (ok) process.stdout.write(`Installed Cadre ${target} plugin through ${paths.marketplaceRoot}; MCP tool approvals configured in ${approvalCheck.path}\n`);
   }
   return ok ? 0 : 1;
 }

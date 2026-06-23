@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.1.2] - 2026-06-23
+
+### Added
+
+- Added Codex and Claude Cadre-only MCP approval bootstrap during `cadre install`
+  so `cadre-setup` and later Cadre packet workflows do not prompt for each Cadre
+  tool call.
+- Added `cadre install --check` validation for the Codex and Claude approval
+  bootstrap so release checks catch noisy Cadre MCP permission prompts before
+  publishing.
+
+### Changed
+
+- Updated setup guidance to send users back through `cadre install` when Cadre
+  MCP approvals are still being requested.
+
+### Fixed
+
+- Fixed `cadre install` for existing Claude Code installs by refreshing the
+  cached native plugin after rewriting the local Cadre marketplace, so Claude
+  reports the candidate Cadre version during release validation.
+
+### Security
+
+- Kept the approval bootstrap scoped to Cadre MCP packet tools only; it does not
+  approve shell commands, file edits, other plugins, or non-Cadre MCP servers.
+
 ## [1.1.1] - 2026-06-23
 
 Patch release for docs rendering, install-time plugin registration, and native

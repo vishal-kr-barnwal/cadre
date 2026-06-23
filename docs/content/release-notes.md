@@ -7,6 +7,34 @@ order: 9
 
 # Release Notes
 
+## 1.1.2 - 2026-06-23
+
+Cadre 1.1.2 bootstraps Cadre-only MCP tool approvals for Codex and Claude so
+`cadre-setup` and later packet workflows can run without repeated Cadre MCP
+permission prompts.
+
+### Compared With 1.1.1
+
+| Area | What changed |
+|------|--------------|
+| Client approvals | `cadre install` configures Codex and Claude to allow Cadre MCP packet tools without repeated prompts. |
+| Claude refresh | Existing Claude Code installs now refresh the cached `cadre@cadre` plugin after the local marketplace is rewritten. |
+| Install checks | `cadre install --check` validates the approval bootstrap for both native clients. |
+| Setup flow | `cadre-setup` guidance now points users back to `cadre install` when Cadre MCP approvals are still noisy. |
+| Safety boundary | The bootstrap is Cadre-only and does not approve shell commands, edits, other plugins, or non-Cadre MCP servers. |
+
+### Upgrade Notes
+
+Existing installs can update with the normal npm path:
+
+```bash
+npm install -g cadre-ai@1.1.2
+cadre install
+```
+
+The GitHub release for `release-1.1.2` publishes `cadre-ai@1.1.2` through npm
+Trusted Publishing after the release workflow validates the harness package.
+
 ## 1.1.1 - 2026-06-23
 
 Cadre 1.1.1 is a patch release for docs rendering, install-time plugin

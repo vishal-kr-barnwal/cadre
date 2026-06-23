@@ -23,7 +23,7 @@
   "packetFlow": [
     {
       "step": 1,
-      "instruction": "Call `cadre_project` with `action: \"ping\"` to confirm MCP availability."
+      "instruction": "Call `cadre_project` with `action: \"ping\"` to confirm MCP availability. If the client asks for repeated approval on Cadre MCP tools, tell the user to rerun `cadre install`; the installer bootstraps Cadre-only MCP approval rules for Codex and Claude without approving shell commands or non-Cadre tools."
     },
     {
       "step": 2,
