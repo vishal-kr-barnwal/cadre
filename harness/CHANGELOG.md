@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.1.0] - 2026-06-23
+
+Native Cadre state and traceability release.
+
+### Added
+
+- Added packet-owned native event and message state for setup, track creation,
+  task completion, handoffs, status views, and team boards.
+- Added the `cadre-formula` workflow for reusable Cadre formulas and
+  git-ignored local wisp runs.
+- Added automatic Cadre commit tracing for task completions, product commits,
+  control-plane commits, publication evidence, and git notes under
+  `refs/notes/cadre`.
+- Added native state defaults and merge attributes to generated setup
+  templates.
+
+### Changed
+
+- Changed Cadre task memory from Beads runtime integration to native
+  packet-owned JSON and JSONL state.
+- Changed task completion and publication flows so product commits,
+  control-plane commits, journals, review records, events, and trace notes are
+  recorded through one packet-owned path.
+- Changed status, team, and fleet outputs to include native events, messages,
+  formula state, ownership and lease context, and review evidence.
+- Updated docs, workflow protocols, templates, and agent references for native
+  memory, formula workflows, local wisps, and commit tracing.
+
+### Fixed
+
+- Fixed generated runtime bundles and tests to align with the native state
+  schema and formula workflow.
+- Fixed architecture checks and packet tests for the native Cadre state module
+  split.
+
+### Removed
+
+- Removed Beads runtime modules, templates, agent references, readiness output,
+  and legacy task-memory surfaces.
+- Removed the stale migration helper for the pre-native state layout.
+
 ## [1.0.0] - 2026-06-22
 
 Stable public `cadre-ai` package release.

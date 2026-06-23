@@ -101,6 +101,8 @@ not manually reconstruct Cadre state.
   file claims, merge-back, and recovery.
 - [Troubleshooting](troubleshooting.md): common install, MCP, provider,
   LSP, and plugin-generation failures.
+- [Release Notes](release-notes.md): current package changes and upgrade
+  notes.
 
 ## Repository Roles
 
