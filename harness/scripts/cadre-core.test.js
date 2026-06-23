@@ -21,6 +21,8 @@ function git(root, args) {
   if (args[0] === "init") {
     spawnSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, encoding: "utf8" });
     spawnSync("git", ["config", "tag.gpgsign", "false"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["config", "user.name", "Cadre Test"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["config", "user.email", "cadre-test@example.invalid"], { cwd: root, encoding: "utf8" });
   }
   return result;
 }
