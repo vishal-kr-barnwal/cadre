@@ -15,6 +15,7 @@ import { coverageThreshold } from "../../infrastructure/runtime/coverage";
 import { readJson, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
 import { completeTask } from "./task-completion";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { withSharedControlPlaneSync } from "./workflow-response";
 
@@ -29,6 +30,7 @@ export function recordParallelWorkerInner(root: string, args: RuntimeArgs = {}):
 }
 
 export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
+  const traceBefore = beginTrace(root);
   const workerId = args.workerId || args.worker_id;
   if (!workerId) return { ok: false, error: "workerId is required" };
   const status = args.status || "awaiting_merge";
@@ -111,12 +113,35 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
   }
 
   writeJson(statePath, state as JsonObject);
+  const shouldTrace = status !== "in_progress";
+  const controlCommit = shouldTrace
+    ? commitTrace(root, args, {
+      kind: "control",
+      workflow: "parallel",
+      action: status,
+      subject: `record ${workerId}`,
+      before: traceBefore,
+      files: [
+        path.relative(root, statePath),
+      ],
+      trackId: track.track_id,
+      repo: nextWorker.repo || null,
+      note: {
+        worker_id: workerId,
+        status,
+        phase_index: nextWorker.phase_index ?? null,
+        task_index: nextWorker.task_index ?? null,
+        commit_sha: nextWorker.commit_sha || null,
+      },
+    })
+    : { ok: true, skipped: true, reason: "parallel worker setup is transient" };
   return {
-    ok: true,
+    ok: controlCommit.ok !== false,
     track_id: track.track_id,
     state_path: path.relative(root, statePath),
     worker: nextWorker,
     completion,
+    control_commit: controlCommit,
     summary: {
       total_workers: state.workers.length,
       completed_workers: state.completed_workers,

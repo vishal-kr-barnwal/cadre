@@ -15,7 +15,7 @@ export function mutatePacket(deps: RuntimeDependencies, args: RuntimeArgs): Runt
   if (action === "set_status") {
     const trackId = args.trackId || args.track_id;
     if (!trackId || !args.status) return envelope({ ok: false, error: "trackId and status are required" });
-    return syncedEnvelope(root, "mutate:set_status", () => deps.core.setTrackStatus(root, String(trackId), String(args.status)));
+    return syncedEnvelope(root, "mutate:set_status", () => deps.core.setTrackStatus(root, String(trackId), String(args.status), args));
   }
   if (action === "metadata_patch") return syncedEnvelope(root, "mutate:metadata_patch", () => deps.core.metadataPatch(root, args));
   if (action === "record_review") return syncedEnvelope(root, "mutate:record_review", () => deps.core.recordReview(root, args));

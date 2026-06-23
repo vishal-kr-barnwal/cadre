@@ -18,6 +18,7 @@ import { providerEvidenceRequirement, providerFromConfig } from "./quality-gates
 import { gitRevParse, reviewedShasForTrack } from "./repo-resolution";
 import { asArray } from "./status";
 import { controlPlaneSyncSafety, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { reviewGate } from "./track-mutations";
 
@@ -28,6 +29,7 @@ export function recordReview(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 export function recordReviewUnlocked(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
+  const traceBefore = beginTrace(root);
   const verdict = args.verdict || "";
   if (!["approved", "changes_requested"].includes(verdict)) {
     return { ok: false, error: `Invalid review verdict: ${verdict}` };
@@ -73,7 +75,21 @@ export function recordReviewUnlocked(root: string, track: CadreTrack, args: Runt
     };
   }
   const gate = reviewGate(root, track.track_id, args);
-  return { ok: true, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate };
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "review",
+    subject: `record ${track.track_id} review`,
+    before: traceBefore,
+    files: [
+      path.relative(root, track.metadata_path),
+    ],
+    trackId: track.track_id,
+    note: {
+      verdict,
+      blocking_count: Number(args.blockingCount || 0),
+    },
+  });
+  return { ok: controlCommit.ok !== false, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate, control_commit: controlCommit };
 }
 
 export function reviewEvidencePath(track: CadreTrack): string {
@@ -103,6 +119,7 @@ export function providerEvidence(root: string, args: RuntimeArgs = {}): CoreResu
 }
 
 export function providerEvidenceUnlocked(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
+  const traceBefore = beginTrace(root);
   const evidencePath = reviewEvidencePath(track);
   const existing = readJson<JsonObject>(evidencePath, {
     track_id: track.track_id,
@@ -157,12 +174,32 @@ export function providerEvidenceUnlocked(root: string, track: CadreTrack, args: 
     return current;
   }, { lock: false });
   if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "review",
+    action: "provider_evidence",
+    subject: `record ${track.track_id} evidence`,
+    before: traceBefore,
+    files: [
+      path.relative(root, evidencePath),
+      path.relative(root, path.join(track.dir, "review-evidence.jsonl")),
+      path.relative(root, track.metadata_path),
+    ],
+    trackId: track.track_id,
+    note: {
+      provider,
+      evidence_id: entry.id,
+      blocking_count: entry.blocking_count,
+      reviewed_sha: entry.reviewed_sha,
+    },
+  });
   return {
-    ok: true,
+    ok: controlCommit.ok !== false,
     track_id: track.track_id,
     path: path.relative(root, evidencePath),
     entry,
     metadata,
+    control_commit: controlCommit,
   };
 }
 

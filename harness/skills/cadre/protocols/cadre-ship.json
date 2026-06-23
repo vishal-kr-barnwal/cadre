@@ -43,7 +43,7 @@
     },
     {
       "step": 6,
-      "instruction": "Summarize branch, review gate, provider artifact, CI state, changed canonical JSON artifacts, generated human projections, and next packet."
+      "instruction": "Summarize branch, review gate, provider artifact, CI state, publication ledger path, control commit, git-note push state, changed canonical JSON artifacts, generated human projections, and next packet."
     }
   ],
   "confirmation": {

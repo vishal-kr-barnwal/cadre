@@ -19,6 +19,7 @@ import { humanReviewState, reviewArtifactsFromFiles, textReviewFile, workflowRev
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -168,6 +169,7 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
   const skipped: string[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
+  const traceBefore = execute && humanReviewConfirmed(args) ? beginTrace(root) : null;
   for (const def of defs) {
     const rendered = renderArtifact(root, def, args);
     artifacts.push({
@@ -215,15 +217,31 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       error: "Human confirmation is required before syncing artifacts",
     };
   }
+  const controlCommit = execute
+    ? commitTrace(root, args, {
+      kind: "control",
+      workflow: "artifacts",
+      subject: "sync projections",
+      before: traceBefore,
+      files: written,
+      note: {
+        scope: args.scope || "all",
+        artifact: args.artifact || null,
+        written,
+        skipped,
+      },
+    })
+    : null;
   return {
-    ok: errors.length === 0,
+    ok: errors.length === 0 && (!controlCommit || controlCommit.ok !== false),
     dry_run: !execute,
-    phase_state: execute ? "executed" : "dry_run",
+    phase_state: execute ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
     artifacts,
     review_bundle: reviewBundle,
     human_review: humanReview,
     written,
     skipped,
+    control_commit: controlCommit,
     warnings,
     errors,
   };

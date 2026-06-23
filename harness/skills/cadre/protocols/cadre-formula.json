@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use `pour` for reviewed persistent output; it routes generated spec and plan JSON through normal `cadre-newtrack` creation. Local wisps remain under `cadre/local/wisps/` until squashed or burned."
+      "instruction": "Use `pour` for reviewed persistent output; it routes generated spec and plan JSON through normal `cadre-newtrack` creation with formula trace fields. Local wisps remain under `cadre/local/wisps/` until squashed or burned; `wisp_squash` records a durable digest and control commit."
     },
     {
       "step": 4,

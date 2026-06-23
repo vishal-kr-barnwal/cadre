@@ -21,6 +21,7 @@ import { humanReviewState, jsonReviewFile, plainReviewFile, reviewArtifactsFromF
 import { renderSpecMarkdown } from "./spec-docs";
 import { gitIdentity } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
 
@@ -145,6 +146,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       error: "Human confirmation is required before creating track artifacts",
     };
   }
+  const traceBefore = beginTrace(root);
   const dir = path.join(root, "cadre", "tracks", safeName(trackId));
   const learningsEntry: JsonObject = {
     ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
@@ -170,14 +172,28 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     status: metadata.status,
     tags: metadata.tags || [],
   });
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "newtrack",
+    subject: `create ${trackId}`,
+    before: traceBefore,
+    trackId: String(trackId),
+    note: {
+      event_id: asOptionalString(asJsonObject(event.event).id) || null,
+      formula_id: asOptionalString(args.formulaId || args.formula_id) || null,
+      wisp_id: asOptionalString(args.wispId || args.wisp_id) || null,
+    },
+  });
   return {
     ...summary,
-    ok: regen.ok !== false,
+    ok: regen.ok !== false && controlCommit.ok !== false,
     dry_run: false,
     track_id: trackId,
     metadata_path: path.relative(root, path.join(dir, "metadata.json")),
     regen,
     event,
+    control_commit: controlCommit,
+    phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
     human_review: humanReview,
     worktree_plan: worktreePlan(root, { trackId }),
   };

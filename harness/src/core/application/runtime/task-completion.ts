@@ -14,13 +14,14 @@ import { CoreResult, CoverageResult } from "./contracts";
 import { coverageThreshold, runCoverage } from "../../infrastructure/runtime/coverage";
 import { utcNow } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
-import { patchCompletionJournal, prepareManualVerificationCompletion } from "./manual-verification";
+import { completionJournalPath, patchCompletionJournal, prepareManualVerificationCompletion } from "./manual-verification";
 import { appendCadreEvent } from "./native-state";
-import { isManualVerificationTaskObject } from "./plan-docs";
+import { isManualVerificationTaskObject, trackPlanJsonPath } from "./plan-docs";
 import { isWorkingRootError, resolveTaskWorkingRoot } from "./repo-resolution";
 import { findTrack } from "./track-context";
 import { recordTaskResultUnlocked } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { withSharedControlPlaneSync } from "./workflow-response";
 
 export function completeTask(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -98,6 +99,34 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     };
   }
 
+  let resolvedCommitSha = args.commitSha ? String(args.commitSha).trim() : "";
+  let productCommit: CoreResult | null = null;
+  if (!resolvedCommitSha && args.allowNoCommit !== true) {
+    const productBefore = beginTrace(workingRoot.path);
+    productCommit = commitTrace(root, args, {
+      kind: "product",
+      workflow: "complete_task",
+      subject: task.title.replace(/^Task\s+\d+:\s*/i, ""),
+      scope: asOptionalString(workingRoot.repo) && workingRoot.repo !== "." ? asOptionalString(workingRoot.repo) || "task" : "task",
+      cwd: workingRoot.path,
+      before: productBefore,
+      files: asStringArray(args.filesChanged || args.files_changed || args.files).length > 0
+        ? asStringArray(args.filesChanged || args.files_changed || args.files)
+        : task.files,
+      allowDirty: true,
+      trackId: track.track_id,
+      repo: workingRoot.repo,
+      note: {
+        phase_index: phaseIndex,
+        task_index: taskIndex,
+        task_key: task.task_key,
+        coverage: coverage.coverage ?? null,
+      },
+    });
+    if (productCommit.ok === false) return { ...productCommit, stage: "product_commit", working_root: workingRoot };
+    resolvedCommitSha = asOptionalString(productCommit.commit_sha) || "";
+  }
+
   const lastTestRun = manualVerificationTask ? null : {
     command: coverage.command,
     cwd: coverage.cwd || workingRoot.path,
@@ -110,9 +139,10 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     allow_missing_coverage: allowMissingCoverage,
     allow_low_coverage: allowLowCoverage,
   };
-  const sha = args.commitSha ? String(args.commitSha).slice(0, 12) : "unknown";
+  const sha = resolvedCommitSha ? resolvedCommitSha.slice(0, 12) : "unknown";
   const dedupKey = `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha.slice(0, 7)}`;
   const journalKey = `${phaseIndex}:${taskIndex}:${sha}`;
+  const controlBefore = beginTrace(root);
   const recordState = (): CoreResult => {
     const entry = patchCompletionJournal(track, journalKey, (current) => ({
       ...current,
@@ -130,7 +160,7 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
       phaseIndex,
       taskIndex,
       status: args.status || "completed",
-      commitSha: args.commitSha,
+      commitSha: resolvedCommitSha || args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
       workingRoot: path.relative(root, workingRoot.path) || ".",
@@ -185,14 +215,40 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     summary: args.summary || null,
     journal_key: journalKey,
   });
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "complete",
+    subject: `record ${track.track_id} phase ${phaseIndex} task ${taskIndex}`,
+    before: controlBefore,
+    files: [
+      path.relative(root, track.metadata_path),
+      path.relative(root, track.plan_path),
+      path.relative(root, trackPlanJsonPath(track)),
+      path.relative(root, completionJournalPath(track)),
+      path.relative(root, `${completionJournalPath(track)}l`),
+      "cadre/events.jsonl",
+    ],
+    trackId: track.track_id,
+    repo: ".",
+    note: {
+      event_id: asOptionalString(asJsonObject(event.event).id) || null,
+      phase_index: phaseIndex,
+      task_index: taskIndex,
+      task_key: stateTaskResult.task_key,
+      product_commit_sha: asOptionalString(productCommit?.commit_sha) || resolvedCommitSha || null,
+      coverage: coverage.coverage ?? null,
+    },
+  });
 
   return {
-    ok: true,
+    ok: controlCommit.ok !== false,
     track_id: track.track_id,
     task_key: stateTaskResult.task_key,
     working_root: workingRoot,
     threshold,
     coverage,
+    product_commit: productCommit,
+    control_commit: controlCommit,
     task_result: stateTaskResult,
     event,
     journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal,

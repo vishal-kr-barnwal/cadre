@@ -24,6 +24,7 @@ import { humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifacts
 import { syncControlPlane } from "./review-records";
 import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
 import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
@@ -133,6 +134,7 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
   }
   const syncPre = syncControlPlane(root, { mode: "pre" });
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
+  const traceBefore = beginTrace(root);
   const archived: CoreResult[] = [];
   const archiveRoot = path.join(root, "cadre", "archive");
   fs.mkdirSync(archiveRoot, { recursive: true });
@@ -146,14 +148,26 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
     archived.push({ track_id: track.track_id, ok: true, path: path.relative(root, target) });
   }
   const regen = regenIndex(root);
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "archive",
+    subject: tracks.length === 1 ? `archive ${tracks[0]?.track_id || "track"}` : `archive ${tracks.length} tracks`,
+    before: traceBefore,
+    trackId: tracks.length === 1 ? tracks[0]?.track_id || null : null,
+    note: {
+      tracks: tracks.map((track) => track.track_id),
+      archived: archived.map(asJsonObject),
+    },
+  });
   const syncPost = syncControlPlane(root, { mode: "post" });
   return {
     ...summary,
-    ok: archived.every((item) => item.ok !== false) && regen.ok !== false && syncPost.ok !== false,
-    phase_state: syncPost.ok === false ? "recovery_required" : "executed",
+    ok: archived.every((item) => item.ok !== false) && regen.ok !== false && controlCommit.ok !== false && syncPost.ok !== false,
+    phase_state: syncPost.ok === false || controlCommit.ok === false ? "recovery_required" : "executed",
     dry_run: false,
     archived,
     regen,
+    control_commit: controlCommit,
     sync_pre: syncPre,
     sync_post: syncPost,
   };
@@ -219,6 +233,7 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
       error: "Human confirmation is required before writing handoff artifacts",
     };
   }
+  const traceBefore = beginTrace(root);
   if (args.execute === true) {
     writeJsonEnsured(handoffJsonPath, handoffJson);
     fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
@@ -243,12 +258,25 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     subject,
     handoff_path: path.relative(root, handoffPath),
   });
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "handoff",
+    subject: `record ${trackId} handoff`,
+    before: traceBefore,
+    trackId,
+    note: {
+      event_id: asOptionalString(asJsonObject(event.event).id) || null,
+      message_id: asOptionalString(asJsonObject(message.message).id) || null,
+      to: recipient,
+    },
+  });
   return {
     ...base,
-    ok: true,
+    ok: controlCommit.ok !== false,
     dry_run: args.execute !== true,
-    phase_state: "executed",
+    phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
     message,
     event,
+    control_commit: controlCommit,
   };
 }

@@ -38,7 +38,7 @@ __export(cadre_job_runner_exports, {
   runJobRunner: () => runJobRunner
 });
 module.exports = __toCommonJS(cadre_job_runner_exports);
-var import_node_path19 = __toESM(require("node:path"));
+var import_node_path20 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -391,7 +391,7 @@ function appendJsonl(file, value) {
 }
 
 // src/core/application/runtime/plan-docs.ts
-var import_node_path16 = __toESM(require("node:path"));
+var import_node_path17 = __toESM(require("node:path"));
 
 // src/core/infrastructure/runtime/project-config.ts
 var import_node_path3 = __toESM(require("node:path"));
@@ -454,7 +454,7 @@ function parseCoveragePercent(text) {
 
 // src/core/application/runtime/track-schedule.ts
 var import_node_fs9 = __toESM(require("node:fs"));
-var import_node_path15 = __toESM(require("node:path"));
+var import_node_path16 = __toESM(require("node:path"));
 
 // src/core/infrastructure/runtime/coverage.ts
 var import_node_fs3 = __toESM(require("node:fs"));
@@ -552,7 +552,7 @@ function staleInfo(value, now = Date.now()) {
 }
 
 // src/core/application/runtime/repo-resolution.ts
-var import_node_path14 = __toESM(require("node:path"));
+var import_node_path15 = __toESM(require("node:path"));
 
 // src/lsp/language-registry.ts
 var import_node_fs4 = __toESM(require("node:fs"));
@@ -811,7 +811,7 @@ function trackContext(root, trackId) {
 
 // src/core/application/runtime/quality-gates.ts
 var import_node_fs8 = __toESM(require("node:fs"));
-var import_node_path13 = __toESM(require("node:path"));
+var import_node_path14 = __toESM(require("node:path"));
 
 // src/runtime-paths.ts
 var import_node_path8 = __toESM(require("node:path"));
@@ -1052,7 +1052,7 @@ function repoMap(root, args = {}) {
 
 // src/core/application/runtime/track-mutations.ts
 var import_node_fs7 = __toESM(require("node:fs"));
-var import_node_path12 = __toESM(require("node:path"));
+var import_node_path13 = __toESM(require("node:path"));
 
 // src/core/domain/track-status.ts
 var STATUS_MARKERS = {
@@ -1141,6 +1141,190 @@ function appendCadreEvent(root, event) {
   return { ok: true, path: import_node_path11.default.relative(root, file), event: entry };
 }
 
+// src/core/application/runtime/commit-trace.ts
+var import_node_path12 = __toESM(require("node:path"));
+var DEFAULT_NOTES_REF = "refs/notes/cadre";
+function configured(root) {
+  return fileExists(import_node_path12.default.join(root, "cadre", "config.json"));
+}
+function traceability(root) {
+  return asJsonObject(loadTopology(root).config.traceability);
+}
+function traceEnabled(root, kind, args, force = false) {
+  const mode = asOptionalString(args.commitMode || args.commit_mode)?.toLowerCase();
+  if (["off", "none", "manual", "false"].includes(mode || "")) return false;
+  if (force) return true;
+  if (!configured(root)) return false;
+  const trace = traceability(root);
+  if (Object.keys(trace).length === 0) return false;
+  if (trace.enabled === false) return false;
+  if (kind === "product") return trace.auto_product_commits !== false;
+  if (kind === "control") return trace.auto_control_commits !== false;
+  return trace.auto_automation_commits !== false;
+}
+function notesRef(root, args = {}) {
+  return asOptionalString(args.notesRef || args.notes_ref) || asOptionalString(traceability(root).notes_ref) || DEFAULT_NOTES_REF;
+}
+function notesEnabled(root) {
+  const trace = traceability(root);
+  return trace.git_notes !== false && trace.notes !== false;
+}
+function statusEntries(cwd) {
+  const result = runCommand("git", ["status", "--porcelain", "--untracked-files=all"], { cwd });
+  if (!result.ok) return {};
+  const entries = {};
+  for (const line of result.stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const status = line.slice(0, 2);
+    const rawPath = line.slice(3).trim();
+    const file = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() || "" : rawPath;
+    const normalized = file.replace(/^"|"$/g, "");
+    if (normalized) entries[normalized] = status;
+  }
+  return entries;
+}
+function beginTrace(cwd) {
+  const gitRoot = runCommand("git", ["rev-parse", "--show-toplevel"], { cwd });
+  if (!gitRoot.ok) {
+    return {
+      ok: true,
+      cwd,
+      entries: {},
+      dirty_files: [],
+      skipped: true,
+      reason: "not a git repository"
+    };
+  }
+  const root = gitRoot.stdout.trim() || cwd;
+  const entries = statusEntries(root);
+  return {
+    ok: true,
+    cwd: root,
+    git_root: root,
+    entries,
+    dirty_files: Object.keys(entries).sort()
+  };
+}
+function isControlPlaneFile2(file) {
+  const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (normalized.startsWith("cadre/local/")) return false;
+  if (normalized.startsWith("cadre/.locks/")) return false;
+  if (normalized.includes(".tmp")) return false;
+  return normalized.startsWith("cadre/") || normalized === ".gitattributes" || normalized === ".gitmodules" || normalized === ".gitlab-ci.yml" || normalized === "cadre-merge-train.gitlab-ci.yml" || normalized.startsWith(".github/workflows/cadre-");
+}
+function changedAfter(before, after) {
+  const beforeEntries = asJsonObject(before?.entries);
+  return Object.entries(after).filter(([file, status]) => beforeEntries[file] !== status).map(([file]) => file).sort();
+}
+function uniqueFiles(files) {
+  return Array.from(new Set(files.map((file) => file.replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean))).sort();
+}
+function conventionalSubject(type, scope, subject) {
+  const cleanType = type.replace(/[^a-z0-9-]/gi, "").toLowerCase() || "cadre";
+  const cleanScope = scope.replace(/[^a-z0-9_.-]/gi, "-").toLowerCase() || "trace";
+  return `${cleanType}(${cleanScope}): ${subject.trim() || "record trace"}`;
+}
+function messageBody(body, footers) {
+  const footerText = Object.entries(footers).filter((entry) => Boolean(entry[1])).map(([key, value]) => `${key}: ${value}`).join("\n");
+  return [body?.trim() || "", footerText].filter(Boolean).join("\n\n");
+}
+function commandOk(result) {
+  return result.ok === true;
+}
+function commitSha(cwd) {
+  const result = runCommand("git", ["rev-parse", "HEAD"], { cwd });
+  return result.ok ? result.stdout.trim() || null : null;
+}
+function writeNote(cwd, ref, sha, note) {
+  return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}
+`, sha], { cwd });
+}
+function commitTrace(root, args, options) {
+  if (!traceEnabled(root, options.kind, args, options.forceEnabled === true)) {
+    return { ok: true, skipped: true, reason: "traceability disabled or unconfigured" };
+  }
+  const cwd = options.cwd || root;
+  const snapshot = options.before || beginTrace(cwd);
+  if (snapshot.skipped) return { ok: true, skipped: true, reason: snapshot.reason || "git unavailable" };
+  const gitRoot = asOptionalString(snapshot.git_root) || cwd;
+  const after = statusEntries(gitRoot);
+  const requestedFiles = options.files ? uniqueFiles(options.files) : changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile2(file) : isControlPlaneFile2(file));
+  const files = requestedFiles.filter((file) => after[file]);
+  if (files.length === 0) return { ok: true, skipped: true, reason: "no changed files to commit" };
+  const beforeEntries = asJsonObject(snapshot.entries);
+  const preexisting = files.filter((file) => beforeEntries[file]);
+  const allowDirty = options.allowDirty === true || args.allowDirty === true || args.allow_dirty === true;
+  if (preexisting.length > 0 && !allowDirty) {
+    return {
+      ok: false,
+      stage: "preexisting_dirty_files",
+      reason: "Refusing to commit files that were dirty before this packet",
+      files,
+      preexisting_dirty_files: preexisting
+    };
+  }
+  const add = runCommand("git", ["add", "-A", "--", ...files], { cwd: gitRoot });
+  if (!add.ok) return { ok: false, stage: "git_add", files, add };
+  const staged = runCommand("git", ["diff", "--cached", "--quiet"], { cwd: gitRoot });
+  if (staged.status === 0) return { ok: true, skipped: true, reason: "no staged changes", files };
+  const traceId = `trace_${textHash(JSON.stringify({ root, files, now: utcNow(), workflow: options.workflow })).slice(0, 16)}`;
+  const type = asOptionalString(args.commitType || args.commit_type) || options.type || (options.kind === "product" ? "feat" : "cadre");
+  const scope = asOptionalString(args.commitScope || args.commit_scope) || options.scope || options.workflow;
+  const subject = asOptionalString(args.commitSubject || args.commit_subject) || options.subject;
+  const fullSubject = conventionalSubject(type, scope, subject);
+  const body = asOptionalString(args.commitBody || args.commit_body) || options.body;
+  const commitBody = messageBody(body, {
+    "Cadre-Trace-Id": traceId,
+    "Cadre-Workflow": options.workflow,
+    "Cadre-Track": options.trackId || null,
+    "Cadre-Repo": options.repo || null
+  });
+  const commit = runCommand("git", [
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "user.name=Cadre",
+    "-c",
+    "user.email=cadre@local.invalid",
+    "commit",
+    "-m",
+    fullSubject,
+    "-m",
+    commitBody
+  ], { cwd: gitRoot });
+  if (!commit.ok) return { ok: false, stage: "git_commit", files, commit };
+  const sha = commitSha(gitRoot);
+  const notePayload = {
+    version: 1,
+    schema: "cadre.commit_trace.v1",
+    trace_id: traceId,
+    kind: options.kind,
+    workflow: options.workflow,
+    action: options.action || null,
+    track_id: options.trackId || null,
+    repo: options.repo || null,
+    files,
+    commit_sha: sha,
+    recorded_at: utcNow(),
+    ...asJsonObject(options.note)
+  };
+  if (options.kind === "product") notePayload.product_commit_sha = sha;
+  if (options.kind === "control") notePayload.control_commit_sha = sha;
+  const ref = notesRef(root, args);
+  const note = sha && notesEnabled(root) ? writeNote(gitRoot, ref, sha, notePayload) : null;
+  return {
+    ok: !note || commandOk(note),
+    trace_id: traceId,
+    kind: options.kind,
+    workflow: options.workflow,
+    commit_sha: sha,
+    subject: fullSubject,
+    files,
+    notes_ref: ref,
+    note
+  };
+}
+
 // src/core/application/runtime/track-mutations.ts
 function recordTaskResultUnlocked(root, args = {}) {
   const track = findTrack(root, args.trackId);
@@ -1152,14 +1336,14 @@ function recordTaskResultUnlocked(root, args = {}) {
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
   const planJsonPath = trackPlanJsonPath(track);
-  const commitSha = args.commitSha ? String(args.commitSha).trim() : "";
+  const commitSha2 = args.commitSha ? String(args.commitSha).trim() : "";
   const recordedAt = utcNow();
   const lastTaskResult = {
     phase_index: phaseIndex,
     task_index: taskIndex,
     task_key: task.task_key,
     status: args.status || "completed",
-    commit_sha: commitSha || null,
+    commit_sha: commitSha2 || null,
     repo: args.repo || task.repo || null,
     working_root: args.workingRoot || null,
     recorded_at: recordedAt
@@ -1186,7 +1370,7 @@ function recordTaskResultUnlocked(root, args = {}) {
             if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
             const commitShas = Array.from(/* @__PURE__ */ new Set([
               ...asStringArray(currentTask.commit_shas),
-              ...commitSha ? [commitSha.slice(0, 12)] : []
+              ...commitSha2 ? [commitSha2.slice(0, 12)] : []
             ]));
             return {
               ...currentTask,
@@ -1194,7 +1378,7 @@ function recordTaskResultUnlocked(root, args = {}) {
               commit_shas: commitShas,
               completion_evidence: {
                 ...asJsonObject(currentTask.completion_evidence),
-                commit_sha: commitSha || null,
+                commit_sha: commitSha2 || null,
                 repo: args.repo || task.repo || null,
                 working_root: args.workingRoot || null,
                 coverage: typeof args.coverage === "number" ? args.coverage : null,
@@ -1213,7 +1397,7 @@ function recordTaskResultUnlocked(root, args = {}) {
     const nextPlan = asJsonObject(planPatch.value);
     import_node_fs7.default.writeFileSync(
       track.plan_path,
-      withGeneratedMarker(import_node_path12.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+      withGeneratedMarker(import_node_path13.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
     );
     return {
       ok: true,
@@ -1221,7 +1405,7 @@ function recordTaskResultUnlocked(root, args = {}) {
       task_key: task.task_key,
       line: task.line,
       status: args.status || "completed",
-      commit_sha: commitSha || null,
+      commit_sha: commitSha2 || null,
       event: appendCadreEvent(root, {
         kind: "task_result_recorded",
         workflow: "record_task_result",
@@ -1230,7 +1414,7 @@ function recordTaskResultUnlocked(root, args = {}) {
         task_index: taskIndex,
         task_key: task.task_key,
         status: args.status || "completed",
-        commit_sha: commitSha || null,
+        commit_sha: commitSha2 || null,
         repo: args.repo || task.repo || null
       }),
       metadata,
@@ -1258,7 +1442,7 @@ function testCoverage(root, args = {}) {
   let task = null;
   let workingRoot = {
     repo: args.repo || ".",
-    path: args.workingRoot ? import_node_path13.default.resolve(root, args.workingRoot) : root,
+    path: args.workingRoot ? import_node_path14.default.resolve(root, args.workingRoot) : root,
     source: args.workingRoot ? "argument.workingRoot" : "project-root"
   };
   if (args.trackId) {
@@ -1319,7 +1503,7 @@ function testCoverage(root, args = {}) {
         commitSha: args.commitSha,
         coverage,
         repo: workingRoot.repo,
-        workingRoot: import_node_path13.default.relative(root, workingRoot.path) || "."
+        workingRoot: import_node_path14.default.relative(root, workingRoot.path) || "."
       });
     }
   }
@@ -1359,8 +1543,8 @@ function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
   if (Object.keys(scripts).length > 0) {
     for (const name of ["typecheck", "check", "build", "lint"]) {
       if (scripts[name]) {
-        if (fileExists(import_node_path13.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
-        if (fileExists(import_node_path13.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
+        if (fileExists(import_node_path14.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(import_node_path14.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
         return `npm run ${name}`;
       }
     }
@@ -1410,7 +1594,7 @@ function reviewMachineGate(root, args = {}) {
   }
   const entries = track ? repoEntriesForTrack(root, track, args) : [{
     repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path13.default.resolve(root, args.workingRoot) : root,
+    root: args.workingRoot ? import_node_path14.default.resolve(root, args.workingRoot) : root,
     path: args.workingRoot || ".",
     source: args.workingRoot ? "argument.workingRoot" : "project-root"
   }];
@@ -1455,7 +1639,7 @@ function scanReviewTodos(root, files, limit = 100) {
   ];
   for (const file of files || []) {
     if (isIgnoredRepoMapFile(file)) continue;
-    const abs = import_node_path13.default.join(root, file);
+    const abs = import_node_path14.default.join(root, file);
     if (!fileExists(abs)) continue;
     let stat;
     try {
@@ -1795,7 +1979,7 @@ function repoEntriesError(root, track, args = {}) {
 }
 function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
   if (args.workingRoot) {
-    const candidate = import_node_path14.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path14.default.resolve(root, args.workingRoot);
+    const candidate = import_node_path15.default.isAbsolute(args.workingRoot) ? args.workingRoot : import_node_path15.default.resolve(root, args.workingRoot);
     return { repo: args.repo || task?.repo || ".", path: candidate, source: "argument.workingRoot" };
   }
   const topology = loadTopology(root);
@@ -1806,14 +1990,14 @@ function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         repo,
-        path: rel ? import_node_path14.default.resolve(root, rel) : root,
+        path: rel ? import_node_path15.default.resolve(root, rel) : root,
         source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path"
       };
     }
     return unresolvedWorkingRoot(root, track, String(repo || ""), task);
   }
   if (track.metadata.worktree_path) {
-    const candidate = import_node_path14.default.resolve(root, track.metadata.worktree_path);
+    const candidate = import_node_path15.default.resolve(root, track.metadata.worktree_path);
     if (fileExists(candidate)) {
       return { repo: ".", path: candidate, source: "metadata.worktree_path" };
     }
@@ -1829,7 +2013,7 @@ function repoEntriesForTrack(root, track, args = {}) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         repo,
-        root: rel ? import_node_path14.default.resolve(root, rel) : root,
+        root: rel ? import_node_path15.default.resolve(root, rel) : root,
         path: rel,
         base: args.base || info.base_branch || "main",
         head: args.head || info.git_branch || track.metadata.git_branch || `track/${track.track_id}`,
@@ -1839,7 +2023,7 @@ function repoEntriesForTrack(root, track, args = {}) {
   }
   return [{
     repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path14.default.resolve(root, args.workingRoot) : root,
+    root: args.workingRoot ? import_node_path15.default.resolve(root, args.workingRoot) : root,
     path: args.workingRoot || ".",
     base: args.base || "main",
     head: args.head || track.metadata.git_branch || `track/${track.track_id}`,
@@ -1849,7 +2033,7 @@ function repoEntriesForTrack(root, track, args = {}) {
 
 // src/core/application/runtime/track-schedule.ts
 function workStateForTrack(track) {
-  const statePath = import_node_path15.default.join(track.dir, "implement_state.json");
+  const statePath = import_node_path16.default.join(track.dir, "implement_state.json");
   return readJson(statePath, null);
 }
 function holdInfo(track, now = Date.now()) {
@@ -1891,27 +2075,27 @@ function taskCounts(plan) {
   return counts;
 }
 function listTrackDirs(root) {
-  const tracksDir = import_node_path15.default.join(root, "cadre", "tracks");
+  const tracksDir = import_node_path16.default.join(root, "cadre", "tracks");
   if (!fileExists(tracksDir)) return [];
-  return import_node_fs9.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path15.default.join(tracksDir, entry.name)).sort();
+  return import_node_fs9.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path16.default.join(tracksDir, entry.name)).sort();
 }
 function listTracks(root) {
   const tracks = [];
   for (const dir of listTrackDirs(root)) {
-    const metadataPath = import_node_path15.default.join(dir, "metadata.json");
+    const metadataPath = import_node_path16.default.join(dir, "metadata.json");
     const metadata = readJson(metadataPath, null);
     if (!metadata) continue;
-    const trackId = metadata.track_id || import_node_path15.default.basename(dir);
+    const trackId = metadata.track_id || import_node_path16.default.basename(dir);
     tracks.push({
       track_id: trackId,
       dir,
       metadata_path: metadataPath,
-      plan_path: import_node_path15.default.join(dir, "plan.md"),
-      spec_path: import_node_path15.default.join(dir, "spec.md"),
-      plan_json_path: import_node_path15.default.join(dir, "plan.json"),
-      spec_json_path: import_node_path15.default.join(dir, "spec.json"),
-      learnings_jsonl_path: import_node_path15.default.join(dir, "learnings.jsonl"),
-      handoff_json_path: import_node_path15.default.join(dir, "handoff.json"),
+      plan_path: import_node_path16.default.join(dir, "plan.md"),
+      spec_path: import_node_path16.default.join(dir, "spec.md"),
+      plan_json_path: import_node_path16.default.join(dir, "plan.json"),
+      spec_json_path: import_node_path16.default.join(dir, "spec.json"),
+      learnings_jsonl_path: import_node_path16.default.join(dir, "learnings.jsonl"),
+      handoff_json_path: import_node_path16.default.join(dir, "handoff.json"),
       metadata
     });
   }
@@ -1968,11 +2152,11 @@ function markerForPlanStatus(status) {
 // src/core/application/runtime/plan-docs.ts
 var MANUAL_VERIFICATION_TASK_TYPE = "user_manual_verification";
 function trackPlanJsonPath(track) {
-  return track.plan_json_path || import_node_path16.default.join(track.dir, "plan.json");
+  return track.plan_json_path || import_node_path17.default.join(track.dir, "plan.json");
 }
 function planJsonPathForPlanPath(file) {
   if (file.endsWith(".json")) return file;
-  return import_node_path16.default.join(import_node_path16.default.dirname(file), "plan.json");
+  return import_node_path17.default.join(import_node_path17.default.dirname(file), "plan.json");
 }
 function manualVerificationScope(value) {
   const task = asJsonObject(value);
@@ -2081,12 +2265,12 @@ function renderPlanMarkdown(raw) {
 }
 
 // src/core/application/runtime/task-completion.ts
-var import_node_path18 = __toESM(require("node:path"));
+var import_node_path19 = __toESM(require("node:path"));
 
 // src/core/application/runtime/manual-verification.ts
-var import_node_path17 = __toESM(require("node:path"));
+var import_node_path18 = __toESM(require("node:path"));
 function completionJournalPath(track) {
-  return import_node_path17.default.join(track.dir, "completion_journal.json");
+  return import_node_path18.default.join(track.dir, "completion_journal.json");
 }
 function readCompletionJournal(track) {
   const value = readJson(completionJournalPath(track), { entries: {} });
@@ -2106,7 +2290,7 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
-  appendJsonl(import_node_path17.default.join(track.dir, "completion_journal.jsonl"), {
+  appendJsonl(import_node_path18.default.join(track.dir, "completion_journal.jsonl"), {
     key,
     recorded_at: journal.updated_at,
     entry: journal.entries[key]
@@ -2323,6 +2507,31 @@ function completeTaskInner(root, args = {}) {
       reason: `Coverage ${coverage.coverage}% is below required ${threshold}%; task was not marked complete`
     };
   }
+  let resolvedCommitSha = args.commitSha ? String(args.commitSha).trim() : "";
+  let productCommit = null;
+  if (!resolvedCommitSha && args.allowNoCommit !== true) {
+    const productBefore = beginTrace(workingRoot.path);
+    productCommit = commitTrace(root, args, {
+      kind: "product",
+      workflow: "complete_task",
+      subject: task.title.replace(/^Task\s+\d+:\s*/i, ""),
+      scope: asOptionalString(workingRoot.repo) && workingRoot.repo !== "." ? asOptionalString(workingRoot.repo) || "task" : "task",
+      cwd: workingRoot.path,
+      before: productBefore,
+      files: asStringArray(args.filesChanged || args.files_changed || args.files).length > 0 ? asStringArray(args.filesChanged || args.files_changed || args.files) : task.files,
+      allowDirty: true,
+      trackId: track.track_id,
+      repo: workingRoot.repo,
+      note: {
+        phase_index: phaseIndex,
+        task_index: taskIndex,
+        task_key: task.task_key,
+        coverage: coverage.coverage ?? null
+      }
+    });
+    if (productCommit.ok === false) return { ...productCommit, stage: "product_commit", working_root: workingRoot };
+    resolvedCommitSha = asOptionalString(productCommit.commit_sha) || "";
+  }
   const lastTestRun = manualVerificationTask ? null : {
     command: coverage.command,
     cwd: coverage.cwd || workingRoot.path,
@@ -2335,9 +2544,10 @@ function completeTaskInner(root, args = {}) {
     allow_missing_coverage: allowMissingCoverage,
     allow_low_coverage: allowLowCoverage
   };
-  const sha = args.commitSha ? String(args.commitSha).slice(0, 12) : "unknown";
+  const sha = resolvedCommitSha ? resolvedCommitSha.slice(0, 12) : "unknown";
   const dedupKey = `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha.slice(0, 7)}`;
   const journalKey = `${phaseIndex}:${taskIndex}:${sha}`;
+  const controlBefore = beginTrace(root);
   const recordState = () => {
     const entry = patchCompletionJournal(track, journalKey, (current) => ({
       ...current,
@@ -2355,10 +2565,10 @@ function completeTaskInner(root, args = {}) {
       phaseIndex,
       taskIndex,
       status: args.status || "completed",
-      commitSha: args.commitSha,
+      commitSha: resolvedCommitSha || args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path18.default.relative(root, workingRoot.path) || ".",
+      workingRoot: import_node_path19.default.relative(root, workingRoot.path) || ".",
       ...lastTestRun ? { lastTestRun } : {},
       ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
@@ -2405,13 +2615,39 @@ function completeTaskInner(root, args = {}) {
     summary: args.summary || null,
     journal_key: journalKey
   });
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "complete",
+    subject: `record ${track.track_id} phase ${phaseIndex} task ${taskIndex}`,
+    before: controlBefore,
+    files: [
+      import_node_path19.default.relative(root, track.metadata_path),
+      import_node_path19.default.relative(root, track.plan_path),
+      import_node_path19.default.relative(root, trackPlanJsonPath(track)),
+      import_node_path19.default.relative(root, completionJournalPath(track)),
+      import_node_path19.default.relative(root, `${completionJournalPath(track)}l`),
+      "cadre/events.jsonl"
+    ],
+    trackId: track.track_id,
+    repo: ".",
+    note: {
+      event_id: asOptionalString(asJsonObject(event.event).id) || null,
+      phase_index: phaseIndex,
+      task_index: taskIndex,
+      task_key: stateTaskResult.task_key,
+      product_commit_sha: asOptionalString(productCommit?.commit_sha) || resolvedCommitSha || null,
+      coverage: coverage.coverage ?? null
+    }
+  });
   return {
-    ok: true,
+    ok: controlCommit.ok !== false,
     track_id: track.track_id,
     task_key: stateTaskResult.task_key,
     working_root: workingRoot,
     threshold,
     coverage,
+    product_commit: productCommit,
+    control_commit: controlCommit,
     task_result: stateTaskResult,
     event,
     journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal
@@ -2457,7 +2693,7 @@ async function runJobRunner() {
   process.stdout.write(`${JSON.stringify(result, null, 2)}
 `);
 }
-if (["cadre-job-runner.js", "cadre-job-runner.ts"].includes(import_node_path19.default.basename(process.argv[1] || ""))) {
+if (["cadre-job-runner.js", "cadre-job-runner.ts"].includes(import_node_path20.default.basename(process.argv[1] || ""))) {
   runJobRunner().catch((error) => {
     process.stdout.write(`${JSON.stringify({ ok: false, error: errorMessage(error), stack: error instanceof Error ? error.stack : void 0 }, null, 2)}
 `);

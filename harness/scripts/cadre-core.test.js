@@ -248,6 +248,35 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function gitSubject(root, ref = "HEAD") {
+  return git(root, ["log", "-1", "--pretty=%s", ref]).stdout.trim();
+}
+
+function gitNote(root, sha) {
+  return JSON.parse(git(root, ["notes", "--ref", "refs/notes/cadre", "show", sha]).stdout);
+}
+
+function setupTraceableProject(root) {
+  git(root, ["init"]);
+  git(root, ["config", "user.email", "trace@example.com"]);
+  git(root, ["config", "user.name", "Trace Test"]);
+  const setup = core.workflowPacket(root, {
+    workflow: "setup",
+    execute: true,
+    humanConfirmed: true,
+    responseMode: "detail",
+    providerMode: "local",
+    product: { title: "Trace Product", summary: "Traceable workflow test." },
+    productGuidelines: { title: "Guidelines", summary: "Keep state traceable." },
+    workflowPolicy: { title: "Workflow", summary: "Use Cadre trace commits." },
+    techStack: { languages: ["javascript"] },
+  });
+  assert.equal(setup.ok, true);
+  assert.equal(gitSubject(root, setup.control_commit.commit_sha), "cadre(setup): initialize control plane");
+  assert.equal(gitNote(root, setup.control_commit.commit_sha).schema, "cadre.commit_trace.v1");
+  return setup;
+}
+
 test("repoMap filters generated bundles and local variable noise", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-core-test-"));
   try {
@@ -282,6 +311,115 @@ test("repoMap filters generated bundles and local variable noise", () => {
 
     const matches = core.repoMap(root, { symbol: "generatedFunction" });
     assert.deepEqual(matches.matches, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("commit trace records setup, newtrack, and task completion commits", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-trace-task-test-"));
+  try {
+    setupTraceableProject(root);
+    const trackId = "trace_task_20260623";
+    const plan = planFromPhases(trackId, [
+      { phase_index: 1, title: "Phase 1: Build", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement traceable core", ["src/core.js"])] },
+    ]);
+    const created = core.workflowPacket(root, {
+      workflow: "newtrack",
+      execute: true,
+      humanConfirmed: true,
+      responseMode: "detail",
+      trackId,
+      spec: sampleSpec(trackId),
+      plan,
+    });
+    assert.equal(created.ok, true);
+    assert.equal(gitSubject(root, created.control_commit.commit_sha), `cadre(newtrack): create ${trackId}`);
+    assert.equal(gitNote(root, created.control_commit.commit_sha).track_id, trackId);
+
+    write(path.join(root, "src", "core.js"), "module.exports = function core() { return 'trace'; };\n");
+    const completed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      command: "printf '%s\\n' 'Statements : 91%'",
+      coverageThreshold: 80,
+    });
+    assert.equal(completed.ok, true);
+    assert.ok(completed.product_commit.commit_sha);
+    assert.ok(completed.control_commit.commit_sha);
+    assert.equal(gitSubject(root, completed.product_commit.commit_sha), "feat(task): Implement traceable core");
+    assert.equal(gitSubject(root, completed.control_commit.commit_sha), `cadre(complete): record ${trackId} phase 1 task 1`);
+    assert.equal(gitNote(root, completed.product_commit.commit_sha).kind, "product");
+    assert.equal(gitNote(root, completed.control_commit.commit_sha).product_commit_sha, completed.product_commit.commit_sha);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("commit trace records ship publication evidence without git publication actions", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-trace-ship-test-"));
+  try {
+    setupTraceableProject(root);
+    const trackId = "trace_ship_20260623";
+    writeTrack(root, trackId, planFromPhases(trackId, [
+      { phase_index: 1, title: "Phase 1: Ship", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Already done", ["src/ship.js"], { status: "completed", commit_shas: ["abc1234"] })] },
+    ]), {
+      status: "completed",
+      review: {
+        verdict: "approved",
+        blocking_count: 0,
+        reviewed_sha: git(root, ["rev-parse", "HEAD"]).stdout.trim(),
+      },
+    });
+    git(root, ["add", "cadre/tracks.json", "cadre/tracks"]);
+    git(root, ["commit", "-m", "cadre(test): seed shipped track"]);
+
+    const shipped = core.workflowPacket(root, {
+      workflow: "ship",
+      execute: true,
+      responseMode: "detail",
+      trackId,
+      evidence: { provider: "local", url: "local://trace-ship", status: "ready" },
+    });
+    assert.equal(shipped.ok, true);
+    assert.equal(shipped.publication.entry.workflow, "ship");
+    assert.equal(gitSubject(root, shipped.publication.control_commit.commit_sha), `cadre(ship): publish ${trackId}`);
+    assert.equal(gitNote(root, shipped.publication.control_commit.commit_sha).workflow, "ship");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("commit trace keeps local wisps uncommitted until squash", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-trace-wisp-test-"));
+  try {
+    setupTraceableProject(root);
+    write(path.join(root, "cadre", "formulas", "sample.json"), JSON.stringify({
+      id: "sample",
+      title: "Sample",
+      steps: [{ id: "step_one", title: "Do one thing", files: ["src/one.js"] }],
+    }, null, 2));
+    git(root, ["add", "cadre/formulas/sample.json"]);
+    git(root, ["commit", "-m", "cadre(formula): add sample"]);
+    const before = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const created = core.workflowPacket(root, { workflow: "formula", action: "wisp_create", execute: true, responseMode: "detail", id: "sample" });
+    assert.equal(created.ok, true);
+    assert.equal(git(root, ["rev-parse", "HEAD"]).stdout.trim(), before);
+
+    const squashed = core.workflowPacket(root, {
+      workflow: "formula",
+      action: "wisp_squash",
+      execute: true,
+      responseMode: "detail",
+      wispId: created.wisp_id,
+      summary: "ready",
+    });
+    assert.equal(squashed.ok, true);
+    assert.equal(gitSubject(root, squashed.control_commit.commit_sha), `cadre(wisp): squash ${created.wisp_id}`);
+    assert.equal(gitNote(root, squashed.control_commit.commit_sha).wisp_id, created.wisp_id);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -21,6 +21,7 @@ import { renderSpecMarkdown } from "./spec-docs";
 import { metadataTrackSummary, selectedTrackId } from "./status";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
@@ -127,6 +128,7 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
       error: "Human confirmation is required before writing release artifacts",
     };
   }
+  const traceBefore = beginTrace(root);
   fs.mkdirSync(plan.releaseDir, { recursive: true });
   fs.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}\n`);
   writeJson(plan.releaseJson, plan.metadata);
@@ -141,15 +143,26 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     current.updated_at = utcNow();
     return current;
   }, { lock: false });
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "release",
+    subject: `prepare ${plan.version}`,
+    before: traceBefore,
+    note: {
+      release_version: plan.version,
+      completed_tracks: plan.completed.map((track) => asOptionalString(track.track_id)).filter((trackId): trackId is string => Boolean(trackId)),
+    },
+  });
   const gitResults = runPlannedGitActions(plan.gitActions);
   const gitOk = actionResultsOk(gitResults);
   return {
     ...base,
-    ok: indexPatch.ok !== false && gitOk,
-    phase_state: gitOk ? "executed" : "recovery_required",
+    ok: indexPatch.ok !== false && controlCommit.ok !== false && gitOk,
+    phase_state: gitOk && controlCommit.ok !== false ? "executed" : "recovery_required",
     dry_run: args.execute !== true,
     bump: args.bump || args.mode || "patch",
     setup_state: indexPatch,
+    control_commit: controlCommit,
     git_results: gitResults,
   };
 }
@@ -244,6 +257,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       error: "Human confirmation is required before revising track artifacts",
     };
   }
+  const traceBefore = beginTrace(root);
   const writeResult = withTrackLock(root, track.track_id, () => {
     const written: string[] = [];
     if (revisedSpec) {
@@ -261,12 +275,26 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     return { ok: true, written, revised_at: utcNow() };
   });
   const regen = writeResult.ok !== false ? regenIndex(root) : null;
+  const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false)
+    ? commitTrace(root, args, {
+      kind: "control",
+      workflow: "revise",
+      subject: `update ${trackId}`,
+      before: traceBefore,
+      trackId,
+      note: {
+        revised_spec: Boolean(revisedSpec),
+        revised_plan: Boolean(revisedPlan),
+      },
+    })
+    : null;
   return {
     ...base,
-    ok: writeResult.ok !== false && (!regen || regen.ok !== false),
+    ok: writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false),
     dry_run: false,
-    phase_state: writeResult.ok === false || (regen && regen.ok === false) ? "recovery_required" : "executed",
+    phase_state: writeResult.ok === false || (regen && regen.ok === false) || (controlCommit && controlCommit.ok === false) ? "recovery_required" : "executed",
     write: writeResult,
     regen,
+    control_commit: controlCommit,
   };
 }

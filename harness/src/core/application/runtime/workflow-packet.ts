@@ -15,6 +15,7 @@ import { CoreResult } from "./contracts";
 import { workflowFormula } from "./formula-workflow";
 import { utcNow } from "../../infrastructure/runtime/json-store";
 import { appendCadreEvent } from "./native-state";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { humanReviewState, packetReviewArtifact } from "./review-bundles";
 import { selectedTrackId } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
@@ -136,7 +137,8 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
             error: "Human confirmation is required before flagging track status",
           };
         }
-        const statusResult = setTrackStatus(root, trackId, status);
+        const traceBefore = beginTrace(root);
+        const statusResult = setTrackStatus(root, trackId, status, { ...args, commitMode: "off" });
         if (statusResult.ok === false) return { ...summary, ok: false, track_context: context, status_result: statusResult };
         const patch = metadataPatch(root, {
           trackId,
@@ -152,14 +154,32 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
           status,
           reason,
         });
+        const controlCommit = commitTrace(root, args, {
+          kind: "control",
+          workflow: "flag",
+          subject: `mark ${trackId} ${status}`,
+          before: traceBefore,
+          files: [
+            asOptionalString(asJsonObject(context.track).metadata_path) || `cadre/tracks/${trackId}/metadata.json`,
+            "cadre/tracks.json",
+            "cadre/events.jsonl",
+          ],
+          trackId,
+          note: {
+            event_id: asOptionalString(asJsonObject(event.event).id) || null,
+            status,
+            reason,
+          },
+        });
         return {
           ...summary,
-          ok: patch.ok !== false,
+          ok: patch.ok !== false && controlCommit.ok !== false,
           dry_run: false,
           track_context: context,
           status_result: statusResult,
           metadata_patch: patch,
           event,
+          control_commit: controlCommit,
           human_review: humanReview,
           review_artifacts: reviewArtifacts,
         };

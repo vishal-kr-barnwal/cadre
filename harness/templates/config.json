@@ -11,6 +11,15 @@
   "control_branch": "main",
   "pull_on_command_start": true,
   "coverage_command": "",
+  "traceability": {
+    "auto_product_commits": true,
+    "auto_control_commits": true,
+    "auto_automation_commits": true,
+    "commit_local_wisps": false,
+    "git_notes": true,
+    "notes_ref": "refs/notes/cadre",
+    "push_notes": true
+  },
   "merge_train": {
     "enabled": true,
     "auto_fire": true,

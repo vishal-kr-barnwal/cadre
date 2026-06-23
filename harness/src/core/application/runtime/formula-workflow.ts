@@ -6,6 +6,7 @@ import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../.
 import type { CoreResult } from "./contracts";
 import { appendJsonl, fileExists, readJson, safeName, textHash, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { workflowNewTrack } from "./workflow-new-track";
 import { workflowSummary } from "./workflow-response";
 
@@ -309,6 +310,7 @@ function squashWisp(root: string, args: RuntimeArgs): CoreResult {
   const file = wispPath(root, id);
   const wisp = readJson<JsonObject | null>(file, null);
   if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: path.relative(root, file) };
+  const traceBefore = beginTrace(root);
   const digest: JsonObject = {
     version: 1,
     schema: "cadre.wisp_digest.v1",
@@ -324,7 +326,23 @@ function squashWisp(root: string, args: RuntimeArgs): CoreResult {
   const digestPath = path.join(root, "cadre", "operations", "wisp-digests.jsonl");
   appendJsonl(digestPath, digest);
   const event = appendCadreEvent(root, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
-  return { ok: true, wisp_id: id, digest, path: path.relative(root, digestPath), event };
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "wisp",
+    action: "wisp_squash",
+    subject: `squash ${id}`,
+    before: traceBefore,
+    files: [
+      path.relative(root, digestPath),
+    ],
+    note: {
+      event_id: asOptionalString(asJsonObject(event.event).id) || null,
+      wisp_id: id,
+      digest_id: digest.id,
+      formula_id: digest.formula_id,
+    },
+  });
+  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: path.relative(root, digestPath), event, control_commit: controlCommit };
 }
 
 function burnWisp(root: string, args: RuntimeArgs): CoreResult {
@@ -357,6 +375,8 @@ function pourFormula(root: string, args: RuntimeArgs): CoreResult {
     workflow: "newtrack",
     action: "newtrack",
     trackId,
+    formulaId: formula_id,
+    wispId: id || undefined,
     spec: asJsonObject(cooked.spec),
     plan: asJsonObject(cooked.plan),
     description: asOptionalString(args.description) || `Formula output: ${formula_id}`,
@@ -365,8 +385,12 @@ function pourFormula(root: string, args: RuntimeArgs): CoreResult {
       tags,
     },
   });
+  const pourTraceBefore = result.ok === false ? null : beginTrace(root);
   const event = result.ok === false ? null : appendCadreEvent(root, { kind: "formula_poured", workflow: "formula", formula_id, wisp_id: id || null, track_id: trackId });
-  return { ...result, formula_id, wisp_id: id || null, pour_event: event };
+  const controlCommit = result.ok === false || !event
+    ? null
+    : { ok: true, skipped: true, reason: "formula pour is traced by the newtrack commit", trace_before: pourTraceBefore };
+  return { ...result, ok: result.ok !== false && (!controlCommit || controlCommit.ok !== false), formula_id, wisp_id: id || null, pour_event: event, pour_commit: controlCommit };
 }
 
 export function workflowFormula(root: string, args: RuntimeArgs = {}): CoreResult {

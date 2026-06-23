@@ -51,7 +51,7 @@ include:
 | `cadre_project` | Runtime ping, doctor output, root resolution, integrations inventory, shared sync, and polyrepo preflight. |
 | `cadre_track` | Track context, plan parsing, phase scheduling, integrity checks, and worktree planning. |
 | `cadre_mutate` | Controlled state updates such as claim, heartbeat, metadata patch, review record, task result, worker state, status, and index regeneration. |
-| `cadre_complete_task` | Verification, coverage gate, plan progress, metadata, journals, and native events in one path. |
+| `cadre_complete_task` | Verification, coverage gate, product commit, plan progress, metadata, journals, native events, and commit trace notes in one path. |
 | `cadre_parallel` | Worker waves, setup, finish records, merge-back, and cleanup. |
 | `cadre_review` | Review assist, machine gate, provider evidence, PR/CI status, and final gate evaluation. |
 | `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, and warm review. |
@@ -79,6 +79,12 @@ Cadre writes the spec, plan, metadata, learnings, generated projections, and an
 event record. During implementation and review, packets record notes, blockers,
 completion, tags, labels, handoffs, and operational details in native JSON/JSONL
 files.
+
+Durable packet writes also create Conventional Commit history. Product work uses
+task-level product commits, while Cadre control-plane changes use
+`cadre(workflow): subject` commits plus structured git notes under
+`refs/notes/cadre`. Local wisps stay private until they are squashed or poured
+into durable Cadre state.
 
 This gives Cadre three useful properties:
 

@@ -22,6 +22,7 @@ import { lspSetup } from "./setup-infrastructure";
 import { selectedTrackId } from "./status";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
 import { metadataPatch } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
@@ -129,6 +130,7 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
   }
   const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
   const gitOk = actionResultsOk(gitResults);
+  const traceBefore = args.execute === true && gitOk ? beginTrace(root) : null;
   const statusResult = args.execute === true && gitOk
     ? metadataPatch(root, {
       trackId,
@@ -142,15 +144,29 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
       },
     })
     : null;
+  const controlCommit = args.execute === true && gitOk && statusResult && statusResult.ok !== false
+    ? commitTrace(root, args, {
+      kind: "control",
+      workflow: "revert",
+      subject: `record ${trackId} revert`,
+      before: traceBefore,
+      trackId,
+      note: {
+        git_results: gitResults.map(asJsonObject),
+        reason: args.reason || null,
+      },
+    })
+    : null;
   return {
     ...summary,
-    ok: args.execute === true ? gitOk && (!statusResult || statusResult.ok !== false) : true,
-    phase_state: args.execute !== true ? "dry_run" : (gitOk ? "executed" : "recovery_required"),
+    ok: args.execute === true ? gitOk && (!statusResult || statusResult.ok !== false) && (!controlCommit || controlCommit.ok !== false) : true,
+    phase_state: args.execute !== true ? "dry_run" : (gitOk && (!controlCommit || controlCommit.ok !== false) ? "executed" : "recovery_required"),
     dry_run: args.execute !== true,
     track_context: trackContext(root, trackId),
     git_actions: gitActions,
     git_results: gitResults,
     metadata_patch: statusResult,
+    control_commit: controlCommit,
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
   };
@@ -166,6 +182,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
   const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
   const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
   const lspRequested = args.execute === true && !awaitingDocumentReview && setupLspWriteRequested(args);
+  const traceBefore = args.execute === true && !awaitingDocumentReview ? beginTrace(root) : null;
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
   if (awaitingDocumentReview) {
     return {
@@ -201,10 +218,22 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       };
     }
   }
+  const controlCommit = args.execute === true
+    ? commitTrace(root, args, {
+      kind: "control",
+      workflow: "refresh",
+      subject: "refresh project context",
+      before: traceBefore,
+      note: {
+        patterns: patterns ? asJsonObject(patterns) : null,
+        lsp_setup: asJsonObject(lsp),
+      },
+    })
+    : null;
   return {
     ...summary,
-    ok: (!regen || regen.ok !== false) && lsp.ok !== false,
-    phase_state: args.execute === true ? "executed" : "dry_run",
+    ok: (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
+    phase_state: args.execute === true ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
     doctor: doctor(root, { hasCadreProject: true }),
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),
@@ -212,6 +241,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     lsp_setup: lsp,
     regen,
     patterns,
+    control_commit: controlCommit,
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,

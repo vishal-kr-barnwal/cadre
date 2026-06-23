@@ -23,6 +23,7 @@ import { renderStyleGuideMarkdown } from "./spec-docs";
 import { trackIndexPayload } from "./status";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed, setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
 
@@ -123,6 +124,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       error: "Human confirmation is required before writing setup artifacts",
     };
   }
+  const traceBefore = beginTrace(root);
   const written: string[] = [];
   const skipped: string[] = [];
   const writeText = (relativePath: string, text: string): void => {
@@ -279,11 +281,24 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     written_count: written.length,
     skipped_count: skipped.length,
   });
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "setup",
+    subject: "initialize control plane",
+    before: traceBefore,
+    forceEnabled: true,
+    note: {
+      event_id: asOptionalString(asJsonObject(setupEvent.event).id) || null,
+      topology: polyrepoRequested ? "polyrepo" : "monorepo",
+      sync_mode: syncModeRecommendation,
+      provider_mode: providerMode || "local",
+    },
+  });
   return {
     ...result,
-    ok: true,
+    ok: controlCommit.ok !== false,
     scaffolded: true,
-    phase_state: "executed",
+    phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
     topology: polyrepoRequested ? "polyrepo" : "monorepo",
     written,
     skipped,
@@ -295,6 +310,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     lsp_setup: lspSetupResult,
     native_state: nativeState,
     event: setupEvent,
+    control_commit: controlCommit,
     gitattributes,
     ci_setup: ciSetup,
     polyrepo_setup: polyrepoSetup,

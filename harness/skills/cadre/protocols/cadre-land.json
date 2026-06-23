@@ -43,7 +43,7 @@
     },
     {
       "step": 6,
-      "instruction": "Summarize every repo result, linked review artifact, CI state, packet warnings, changed canonical JSON artifacts, generated human projections, and remaining blockers."
+      "instruction": "Summarize every repo result, linked review artifact, CI state, publication ledger path, control commit, git-note push state, packet warnings, changed canonical JSON artifacts, generated human projections, and remaining blockers."
     }
   ],
   "confirmation": {

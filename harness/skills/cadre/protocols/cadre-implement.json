@@ -43,7 +43,7 @@
     },
     {
       "step": 6,
-      "instruction": "After each task, call `cadre_complete_task` with coverage, commit, verification, and summary evidence as structured JSON fields."
+      "instruction": "After each task, call `cadre_complete_task` with coverage, verification, changed files, and summary evidence as structured JSON fields. If no commit SHA is supplied, Cadre creates the task product commit, records the Cadre control-plane commit, and writes `refs/notes/cadre` trace notes."
     },
     {
       "step": 7,

@@ -20,6 +20,7 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { regenIndex } from "./project-maintenance";
 import { asArray } from "./status";
 import { gitIdentity } from "../../infrastructure/runtime/system";
+import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { holdInfo, listTracks, parsePlanFile } from "./track-schedule";
 
@@ -204,7 +205,7 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
   };
 }
 
-export function setTrackStatus(root: string, trackId: string, status: string): CoreResult {
+export function setTrackStatus(root: string, trackId: string, status: string, args: RuntimeArgs = {}): CoreResult {
   if (!VALID_STATUSES.has(status)) {
     return {
       ok: false,
@@ -217,6 +218,7 @@ export function setTrackStatus(root: string, trackId: string, status: string): C
     return { ok: false, error: `Track not found: ${trackId}` };
   }
   return withTrackLock(root, trackId, () => {
+    const traceBefore = beginTrace(root);
     const metadata = patchJsonFile(track.metadata_path, (current) => ({
       ...current,
       status,
@@ -231,13 +233,30 @@ export function setTrackStatus(root: string, trackId: string, status: string): C
       track_id: trackId,
       status,
     });
+    const controlCommit = commitTrace(root, args, {
+      kind: "control",
+      workflow: "status",
+      subject: `mark ${trackId} ${status}`,
+      before: traceBefore,
+      files: [
+        path.relative(root, track.metadata_path),
+        "cadre/tracks.json",
+        "cadre/events.jsonl",
+      ],
+      trackId,
+      note: {
+        event_id: asOptionalString(asJsonObject(event.event).id) || null,
+        status,
+      },
+    });
     return {
-      ok: Boolean(regen.ok),
+      ok: Boolean(regen.ok) && controlCommit.ok !== false,
       track_id: trackId,
       status,
       metadata,
       regen,
       event,
+      control_commit: controlCommit,
     };
   });
 }

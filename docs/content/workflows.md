@@ -103,7 +103,10 @@ only tasks whose phase dependencies, task dependencies, worker state, and file
 claims are ready.
 
 Task completion should use `cadre_complete_task` so verification, coverage,
-plan progress, metadata, journals, and events are recorded consistently.
+product commits, plan progress, metadata, journals, events, and git notes are
+recorded consistently. When no `commitSha` is supplied, Cadre creates the
+task-owned product commit automatically using a Conventional Commit subject,
+then writes a separate control-plane commit for the Cadre state update.
 
 ## `cadre-status`
 
@@ -150,6 +153,10 @@ actions, checks required hosted evidence, and records publication evidence. In
 hosted modes, provider actions are executed through official provider MCPs and
 then written back to Cadre.
 
+Successful ship execution writes `cadre/operations/publication.jsonl`, commits
+that ledger as `cadre(ship): publish <trackId>`, and pushes `refs/notes/cadre`
+when note pushing is enabled.
+
 Use `cadre-land` for polyrepo projects.
 
 ## `cadre-land`
@@ -162,6 +169,8 @@ repo plus a control-repo PR/MR, links them with a shared `cadre-track:<id>`
 label, and records provider evidence.
 
 The generated merge train lands product repos first and the control repo last.
+Land records the same publication ledger as ship, commits it as
+`cadre(land): publish <trackId>`, and pushes Cadre git notes for affected repos.
 
 ## `cadre-handoff`
 
