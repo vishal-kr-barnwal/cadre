@@ -17,7 +17,7 @@ control-plane commits.
 
 | Area | What changed |
 |------|--------------|
-| Task memory | Beads-backed runtime state was replaced with native Cadre JSON and JSONL files written by Cadre packets. |
+| Task memory | The external task-memory runtime was replaced with native Cadre JSON and JSONL files written by Cadre packets. |
 | Formula workflows | `cadre-formula` now supports reusable formulas and git-ignored local wisps. |
 | Traceability | Task completion, product commits, Cadre control-plane commits, publication records, and git notes are linked through Cadre commit traces. |
 | Team status | Status, team, and fleet views now include native events, messages, formula state, ownership, leases, and review evidence. |
