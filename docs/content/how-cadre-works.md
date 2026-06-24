@@ -47,14 +47,14 @@ include:
 
 | Surface | What it owns |
 |---------|--------------|
-| `cadre_workflow` | High-level setup, newtrack, implement, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, and artifact-sync aliases. |
+| `cadre_workflow` | High-level setup, newtrack, implement, debug, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, and artifact-sync aliases. |
 | `cadre_project` | Runtime ping, doctor output, root resolution, integrations inventory, shared sync, and polyrepo preflight. |
 | `cadre_track` | Track context, plan parsing, phase scheduling, integrity checks, and worktree planning. |
 | `cadre_mutate` | Controlled state updates such as claim, heartbeat, metadata patch, review record, task result, worker state, status, and index regeneration. |
 | `cadre_complete_task` | Verification, coverage gate, product commit, plan progress, metadata, journals, native events, and commit trace notes in one path. |
 | `cadre_parallel` | Worker waves, setup, finish records, merge-back, and cleanup. |
 | `cadre_review` | Review assist, machine gate, provider evidence, PR/CI status, and final gate evaluation. |
-| `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, and warm review. |
+| `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, warm review, DAP setup/status, and bounded DAP snapshots. |
 | `cadre_artifact` | Canonical artifact catalog, schema, validation, projection rendering, diff, and sync. |
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
@@ -62,7 +62,8 @@ Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`
 `cadre://parallel-state`, `cadre://track-spec`, `cadre://artifact-catalog`,
 `cadre://artifact-preview`, `cadre://artifact-sync-plan`,
 `cadre://styleguide-selection`, `cadre://repo-map`, `cadre://repo-topology`,
-`cadre://workspace-health`, and `cadre://integrations`.
+`cadre://workspace-health`, `cadre://lsp-status`, `cadre://dap-status`, and
+`cadre://integrations`.
 
 `cadre://workspace-health` is compact by default. Use
 `responseMode=detail` when you need the full workspace, dependency graph, and
@@ -169,7 +170,7 @@ required evidence and next actions.
 
 Local mode skips hosted provider evidence and keeps delivery local.
 
-## Code Intelligence And LSP
+## Code Intelligence, LSP, And DAP
 
 Cadre uses code intelligence to reduce blind spots:
 
@@ -179,12 +180,21 @@ Cadre uses code intelligence to reduce blind spots:
 - `dependency_graph` reports repo-qualified dependency edges.
 - `lsp_setup` recommends language servers and can write `cadre/lsp.json`.
 - `lsp_warm_review` reuses initialized language servers for repeated reviews.
+- `dap_setup` recommends conservative debug adapter entries and can write
+  `cadre/dap.json`.
+- `dap_snapshot` launches or attaches through a configured Debug Adapter
+  Protocol adapter, applies breakpoints, captures stack/variable/output
+  evidence, then disconnects.
 - `cadre://integrations` summarizes optional MCP availability and LSP
-  coverage, so teams can see provider, code-search, issue, CI, logging, and
-  knowledge-base support in one place.
+  and DAP coverage, so teams can see provider, code-search, issue, CI, logging,
+  knowledge-base, language-server, and debugger support in one place.
 
 LSP is optional. If `cadre/lsp.json` is absent, Cadre records that code
 intelligence was skipped instead of blocking ordinary work.
+
+DAP is also optional and adapter-driven. Cadre can speak DAP to any configured
+adapter, but language support depends on the adapter command installed for the
+project. V1 snapshots are bounded diagnostics, not a full interactive debugger.
 
 ## Failure Model
 

@@ -7,7 +7,7 @@ description: |
   - Files like `cadre/tracks.json`, `cadre/product.json`, or `cadre/workflow.json` exist
   - User asks about project status, implementation progress, or track management
   - User wants to organize development work with TDD practices
-  - User asks for a `cadre-*` workflow (setup, newtrack, implement, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula, artifacts)
+  - User asks for a `cadre-*` workflow (setup, newtrack, implement, debug, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula, artifacts)
   - User mentions documentation is outdated or wants to sync context with codebase changes
   - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
 

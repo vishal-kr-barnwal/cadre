@@ -17,7 +17,7 @@ export function readStdin(): Promise<string> {
   });
 }
 
-export function runJob(payload: RuntimeArgs) {
+export async function runJob(payload: RuntimeArgs) {
   const root = payload.root || process.cwd();
   const args = asJsonObject(payload.args) as RuntimeArgs;
   switch (asOptionalString(payload.type)) {
@@ -33,6 +33,8 @@ export function runJob(payload: RuntimeArgs) {
       return core.lspReview(root, args);
     case "lsp_impact":
       return core.lspImpact(root, args);
+    case "dap_snapshot":
+      return core.dapSnapshot(root, args);
     default:
       return { ok: false, error: `Unsupported job type: ${payload.type}` };
   }
@@ -41,7 +43,7 @@ export function runJob(payload: RuntimeArgs) {
 export async function runJobRunner(): Promise<void> {
   const input = await readStdin();
   const payload = asJsonObject(JSON.parse(input || "{}")) as RuntimeArgs;
-  const result = runJob(payload);
+  const result = await runJob(payload);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 

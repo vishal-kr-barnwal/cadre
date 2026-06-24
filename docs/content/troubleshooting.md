@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Common install, MCP, provider, LSP, and plugin-generation failures.
+description: Common install, MCP, provider, LSP, DAP, and plugin-generation failures.
 section: Support
 order: 8
 ---
@@ -8,7 +8,7 @@ order: 8
 # Troubleshooting
 
 Use this guide when Cadre setup, workflows, provider evidence, plugin
-generation, or code intelligence do not behave as expected.
+generation, code intelligence, or assisted debugging do not behave as expected.
 
 ## Native State Looks Stale
 
@@ -154,6 +154,27 @@ Install any recommended language-server commands, then allow Cadre to write or
 append `cadre/lsp.json`.
 
 LSP is optional unless your team's review policy explicitly requires it.
+
+## DAP Debugging Is Skipped
+
+Symptoms:
+
+- `cadre-debug` reports that no DAP configuration is available.
+- `cadre://dap-status` shows missing adapter commands.
+- A snapshot times out before a stopped or terminated event.
+
+Fix:
+
+```text
+cadre_intel action: "dap_setup"
+```
+
+Review the recommended adapter entries, install missing adapter commands, then
+allow Cadre to write or append `cadre/dap.json` when appropriate.
+
+DAP is adapter-driven. Cadre can run a bounded snapshot for any configured
+adapter, but it does not install debugger adapters automatically and v1 does not
+provide a full interactive stepping session.
 
 ## Parallel Work Does Not Dispatch
 

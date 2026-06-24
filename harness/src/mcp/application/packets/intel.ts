@@ -14,6 +14,9 @@ export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs):
   if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args, deps);
   if (action === "repo_map") return envelope(deps.core.repoMap(root, args));
   if (action === "lsp_setup") return envelope(deps.core.lspSetup(root, args));
+  if (action === "dap_setup") return envelope(deps.core.dapSetup(root, args));
+  if (action === "dap_status") return envelope(deps.core.dapStatus(root, args));
+  if (action === "dap_snapshot") return envelope(await deps.core.dapSnapshot(root, args));
   if (action === "workspace_diagnostics") return envelope(deps.core.workspaceDiagnostics(root));
   if (action === "test_impact") return envelope(deps.core.testImpact(root, args));
   if (action === "dependency_graph") return envelope(deps.core.dependencyGraph(root));

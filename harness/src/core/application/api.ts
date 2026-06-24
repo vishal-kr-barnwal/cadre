@@ -1,6 +1,8 @@
 export { artifactCatalog, artifactPacket, artifactRender, artifactSync } from "./runtime/artifact-actions";
 export { artifactSchema } from "./runtime/artifact-catalog";
 export { collisionScan } from "./runtime/collision";
+export { dapSetup, dapStatus } from "../../dap/config";
+export { dapSnapshot } from "../../dap/snapshot";
 export { integrationInventory } from "./runtime/integrations";
 export { mcpReadiness } from "./runtime/mcp-readiness";
 export { workflowFormula } from "./runtime/formula-workflow";

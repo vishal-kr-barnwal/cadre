@@ -44,6 +44,9 @@ __export(cadre_core_exports, {
   claimTrack: () => claimTrack,
   collisionScan: () => collisionScan,
   completeTask: () => completeTask,
+  dapSetup: () => dapSetup,
+  dapSnapshot: () => dapSnapshot,
+  dapStatus: () => dapStatus,
   dependencyGraph: () => dependencyGraph,
   doctor: () => doctor,
   ensureNativeState: () => ensureNativeState,
@@ -534,9 +537,9 @@ var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
 // src/core/infrastructure/runtime/project-config.ts
 function loadTopology(root) {
   const reposPath = import_node_path4.default.join(root, "cadre", "repos.json");
-  const configPath = import_node_path4.default.join(root, "cadre", "config.json");
+  const configPath2 = import_node_path4.default.join(root, "cadre", "config.json");
   const repos = readJson(reposPath, null);
-  const config = readJson(configPath, {});
+  const config = readJson(configPath2, {});
   const polyrepo = Boolean(repos && repos.mode === "polyrepo");
   return {
     polyrepo,
@@ -5422,8 +5425,8 @@ function metadataTrackSummary(track) {
   };
 }
 function lspRuntimeSummary(root) {
-  const configPath = import_node_path25.default.join(root, "cadre", "lsp.json");
-  const config = readJson(configPath, null);
+  const configPath2 = import_node_path25.default.join(root, "cadre", "lsp.json");
+  const config = readJson(configPath2, null);
   const servers = isRecord(config) && Array.isArray(config.servers) ? config.servers.map((server) => asJsonObject(server)) : [];
   const entries = servers.map((server) => {
     const command = asOptionalString(server.command);
@@ -5435,7 +5438,7 @@ function lspRuntimeSummary(root) {
   });
   return {
     configured: Boolean(config),
-    path: import_node_path25.default.relative(root, configPath),
+    path: import_node_path25.default.relative(root, configPath2),
     server_count: entries.length,
     available_count: entries.filter((entry) => entry.available === true).length,
     missing_count: entries.filter((entry) => entry.available !== true).length,
@@ -6489,20 +6492,582 @@ function artifactPacket(root, args = {}) {
   return { ok: false, error: `Unknown artifact action: ${action}` };
 }
 
-// src/core/application/runtime/setup-infrastructure.ts
+// src/dap/config.ts
 var import_node_fs15 = __toESM(require("node:fs"));
 var import_node_path29 = __toESM(require("node:path"));
+var import_node_child_process5 = require("node:child_process");
+function commandExists2(command, cwd) {
+  const result = (0, import_node_child_process5.spawnSync)("sh", ["-lc", `command -v '${command.replace(/'/g, "'\\''")}'`], { cwd, encoding: "utf8" });
+  return result.status === 0;
+}
+function pythonCommand(root) {
+  return ["python3", "python"].find((command) => commandExists2(command, root)) || null;
+}
+function pythonDebugpyAvailable(root, command) {
+  const result = (0, import_node_child_process5.spawnSync)(command, ["-c", "import debugpy.adapter"], { cwd: root, encoding: "utf8" });
+  return result.status === 0;
+}
+function configPath(root, config) {
+  const rel = config || "cadre/dap.json";
+  return import_node_path29.default.isAbsolute(rel) ? rel : import_node_path29.default.join(root, rel);
+}
+function readConfig(file) {
+  try {
+    return asJsonObject(JSON.parse(import_node_fs15.default.readFileSync(file, "utf8")));
+  } catch {
+    return {};
+  }
+}
+function writeConfig(file, value) {
+  import_node_fs15.default.mkdirSync(import_node_path29.default.dirname(file), { recursive: true });
+  import_node_fs15.default.writeFileSync(file, `${JSON.stringify(value, null, 2)}
+`);
+}
+function scanLanguages(root) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const file of listWorkspaceFiles(root)) {
+    const language = languageForFile(file);
+    if (!language) continue;
+    const entry = counts.get(language) || { files: 0, samples: [] };
+    entry.files += 1;
+    if (entry.samples.length < 5) entry.samples.push(file);
+    counts.set(language, entry);
+  }
+  return Array.from(counts.entries()).map(([language, entry]) => ({ language, files: entry.files, samples: entry.samples })).sort((left, right) => String(left.language).localeCompare(String(right.language)));
+}
+function dapRecommendations(root) {
+  const detected = scanLanguages(root);
+  const languageSet = new Set(detected.map((entry) => String(entry.language)));
+  const recommended = [];
+  const py = pythonCommand(root);
+  if (languageSet.has("python") && py) {
+    recommended.push({
+      id: "python-debugpy",
+      label: "Python debugpy",
+      command: py,
+      args: ["-m", "debugpy.adapter"],
+      languages: ["python"],
+      install: "python3 -m pip install debugpy",
+      available: pythonDebugpyAvailable(root, py)
+    });
+  }
+  if (languageSet.has("go")) {
+    recommended.push({
+      id: "go-delve",
+      label: "Go Delve",
+      command: "dlv",
+      args: ["dap"],
+      languages: ["go"],
+      install: "go install github.com/go-delve/delve/cmd/dlv@latest",
+      available: commandExists2("dlv", root)
+    });
+  }
+  const covered = new Set(recommended.flatMap((entry) => asStringArray(entry.languages)));
+  const manual = detected.filter((entry) => !covered.has(String(entry.language))).map((entry) => ({
+    ...entry,
+    requires_manual_adapter: true,
+    note: "Add an adapter entry to cadre/dap.json for this language."
+  }));
+  return { recommended, manual, detected };
+}
+function adapterKey(adapter) {
+  return asOptionalString(adapter.id) || asOptionalString(adapter.command) || "";
+}
+function dapSetup(root, args = {}) {
+  const file = configPath(root, args.config);
+  const existing = readConfig(file);
+  const adapters = Array.isArray(existing.adapters) ? existing.adapters.map(asJsonObject) : [];
+  const configurations = Array.isArray(existing.configurations) ? existing.configurations.map(asJsonObject) : [];
+  const { recommended, manual, detected } = dapRecommendations(root);
+  const existingKeys = new Set(adapters.map(adapterKey).filter(Boolean));
+  const missingFromConfig = recommended.filter((adapter) => !existingKeys.has(adapterKey(adapter)));
+  const added = args.execute === true ? missingFromConfig : [];
+  if (args.execute === true) {
+    writeConfig(file, {
+      version: 1,
+      schema: "cadre.dap.v1",
+      ...existing,
+      adapters: [...adapters, ...added],
+      configurations
+    });
+  }
+  return {
+    ok: true,
+    root,
+    config: import_node_path29.default.relative(root, file),
+    execute: args.execute === true,
+    dry_run: args.execute !== true,
+    recommended,
+    manual,
+    detected,
+    missingFromConfig: missingFromConfig.map((entry) => adapterKey(entry)),
+    written: args.execute === true,
+    added: added.map((entry) => adapterKey(entry))
+  };
+}
+function dapStatus(root, args = {}) {
+  const file = configPath(root, args.config);
+  const config = readConfig(file);
+  const adapters = Array.isArray(config.adapters) ? config.adapters.map(asJsonObject) : [];
+  const configurations = Array.isArray(config.configurations) ? config.configurations.map(asJsonObject) : [];
+  const { recommended, manual, detected } = dapRecommendations(root);
+  const summarizedAdapters = adapters.map((adapter) => {
+    const command = asOptionalString(adapter.command);
+    return {
+      id: asOptionalString(adapter.id) || command || "unknown",
+      label: asOptionalString(adapter.label) || null,
+      command: command || null,
+      languages: asStringArray(adapter.languages),
+      available: command ? commandExists2(command, root) : false
+    };
+  });
+  return {
+    ok: true,
+    configured: Object.keys(config).length > 0,
+    path: import_node_path29.default.relative(root, file),
+    adapters: summarizedAdapters,
+    configurations: configurations.map((entry) => ({
+      id: asOptionalString(entry.id) || "unknown",
+      adapterId: asOptionalString(entry.adapterId) || asOptionalString(entry.adapter_id) || null,
+      request: asOptionalString(entry.request) || null,
+      name: asOptionalString(entry.name) || null
+    })),
+    missing: summarizedAdapters.filter((entry) => entry.available !== true).map((entry) => entry.id),
+    detected,
+    recommended,
+    manual,
+    setup_packet: "cadre_intel action dap_setup",
+    snapshot_packet: "cadre_intel action dap_snapshot"
+  };
+}
+function substitute(value, tokens) {
+  if (typeof value === "string") {
+    return Object.entries(tokens).reduce((text, [token, replacement]) => text.split(token).join(replacement), value);
+  }
+  if (Array.isArray(value)) return value.map((entry) => substitute(entry, tokens));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substitute(entry, tokens)]));
+}
+function normalizeBreakpoints(root, raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(asJsonObject).flatMap((entry) => {
+    const file = asOptionalString(entry.file) || asOptionalString(entry.path);
+    const line = asNumber(entry.line);
+    if (!file || line < 1) return [];
+    const abs = import_node_path29.default.isAbsolute(file) ? file : import_node_path29.default.join(root, file);
+    return [{
+      ...entry,
+      file: import_node_path29.default.relative(root, abs).split(import_node_path29.default.sep).join("/"),
+      line
+    }];
+  });
+}
+function normalizeDapSession(root, args = {}) {
+  const file = configPath(root, args.config);
+  const loaded = readConfig(file);
+  const inlineConfiguration = asJsonObject(args.configuration);
+  const configurationId = asOptionalString(args.configurationId || args.configuration_id || args.id);
+  const configurations = Array.isArray(loaded.configurations) ? loaded.configurations.map(asJsonObject) : [];
+  const configuration = Object.keys(inlineConfiguration).length > 0 ? inlineConfiguration : configurations.find((entry) => asOptionalString(entry.id) === configurationId) || configurations[0] || {};
+  if (Object.keys(configuration).length === 0) return { ok: false, error: "DAP configuration is required" };
+  const adapters = Array.isArray(loaded.adapters) ? loaded.adapters.map(asJsonObject) : [];
+  const adapterId = asOptionalString(configuration.adapterId) || asOptionalString(configuration.adapter_id);
+  const inlineAdapter = asJsonObject(configuration.adapter);
+  const adapter = Object.keys(inlineAdapter).length > 0 ? inlineAdapter : adapters.find((entry) => asOptionalString(entry.id) === adapterId) || {};
+  const command = asOptionalString(adapter.command);
+  if (!command) return { ok: false, error: "DAP adapter command is required" };
+  const request = asOptionalString(configuration.request);
+  if (request !== "launch" && request !== "attach") return { ok: false, error: "DAP configuration request must be launch or attach" };
+  const tokens = {
+    "${workspaceFolder}": root,
+    "${root}": root,
+    "${cwd}": root,
+    "${testCommand}": asOptionalString(args.testCommand || args.test_command) || ""
+  };
+  return {
+    adapter: substitute(adapter, tokens),
+    configuration: substitute(configuration, tokens),
+    request,
+    arguments: substitute(configuration.arguments || configuration.args || {}, tokens),
+    breakpoints: normalizeBreakpoints(root, args.breakpoints || configuration.breakpoints),
+    timeoutMs: Math.max(1e3, Math.min(10 * 60 * 1e3, asNumber(args.timeoutMs, 12e4)))
+  };
+}
+function redactDapValue(value) {
+  if (Array.isArray(value)) return value.map(redactDapValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
+    const sensitive = /token|password|secret|credential|apikey|api_key|authorization/i.test(key);
+    return [key, sensitive ? "<redacted>" : redactDapValue(entry)];
+  }));
+}
+
+// src/dap/snapshot.ts
+var import_node_path30 = __toESM(require("node:path"));
+
+// src/dap/client.ts
+var import_node_child_process6 = require("node:child_process");
+
+// src/dap/protocol.ts
+function encodeDapMessage(message) {
+  const body = JSON.stringify(message);
+  return Buffer.from(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
+\r
+${body}`, "utf8");
+}
+var DapMessageBuffer = class {
+  buffer = Buffer.alloc(0);
+  push(chunk) {
+    this.buffer = Buffer.concat([this.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8")]);
+    const messages = [];
+    while (true) {
+      const headerEnd = this.buffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) return messages;
+      const header = this.buffer.slice(0, headerEnd).toString("utf8");
+      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
+      if (!lengthMatch) {
+        this.buffer = this.buffer.slice(headerEnd + 4);
+        continue;
+      }
+      const length = Number(lengthMatch[1]);
+      const bodyStart = headerEnd + 4;
+      const bodyEnd = bodyStart + length;
+      if (this.buffer.length < bodyEnd) return messages;
+      const rawBody = this.buffer.slice(bodyStart, bodyEnd).toString("utf8");
+      this.buffer = this.buffer.slice(bodyEnd);
+      try {
+        messages.push(asJsonObject(JSON.parse(rawBody)));
+      } catch {
+      }
+    }
+  }
+};
+
+// src/dap/client.ts
+var DapClient = class {
+  constructor(options) {
+    this.options = options;
+  }
+  proc = null;
+  nextSeq = 1;
+  pending = /* @__PURE__ */ new Map();
+  waiters = [];
+  reader = new DapMessageBuffer();
+  stderr = "";
+  events = [];
+  outputs = [];
+  start() {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      };
+      this.proc = (0, import_node_child_process6.spawn)(this.options.command, this.options.args || [], {
+        cwd: this.options.cwd,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      this.proc.once("spawn", () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
+      this.proc.once("error", (error) => fail(new Error(`Unable to start DAP adapter ${this.options.command}: ${errorMessage(error)}`)));
+      this.proc.stdout.on("data", (chunk) => this.read(chunk));
+      this.proc.stderr.on("data", (chunk) => {
+        this.stderr = `${this.stderr}${chunk.toString("utf8")}`.slice(-(this.options.outputLimit || 8e3));
+      });
+      this.proc.on("exit", (code, signal) => this.rejectAll(signal ? `DAP adapter exited with signal ${signal}` : `DAP adapter exited with code ${code}`));
+    });
+  }
+  read(chunk) {
+    for (const message of this.reader.push(chunk)) this.handleMessage(message);
+  }
+  handleMessage(message) {
+    if (message.type === "response") {
+      const requestSeq = Number(message.request_seq);
+      const pending = this.pending.get(requestSeq);
+      if (!pending) return;
+      this.pending.delete(requestSeq);
+      clearTimeout(pending.timer);
+      if (message.success === false) {
+        pending.reject(new Error(asOptionalString(message.message) || `${message.command || "request"} failed`));
+      } else {
+        pending.resolve(asJsonObject(message.body));
+      }
+      return;
+    }
+    if (message.type === "event") {
+      this.events.push(message);
+      if (message.event === "output") this.outputs.push(message);
+      this.resolveWaiters(message);
+    }
+  }
+  resolveWaiters(message) {
+    const eventName = asOptionalString(message.event);
+    if (!eventName) return;
+    const ready = this.waiters.filter((waiter) => waiter.events.includes(eventName));
+    this.waiters = this.waiters.filter((waiter) => !waiter.events.includes(eventName));
+    for (const waiter of ready) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(message);
+    }
+  }
+  rejectAll(message) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(message));
+    }
+    this.pending.clear();
+    for (const waiter of this.waiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(null);
+    }
+    this.waiters = [];
+  }
+  request(command, args = {}, timeoutMs = this.options.requestTimeoutMs || 1e4) {
+    if (!this.proc) return Promise.reject(new Error("DAP adapter is not running"));
+    const seq = this.nextSeq++;
+    const message = { seq, type: "request", command, arguments: args };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(seq);
+        reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(seq, { resolve, reject, timer });
+      this.proc?.stdin.write(encodeDapMessage(message));
+    });
+  }
+  waitForAny(events, timeoutMs) {
+    const existing = this.events.find((message) => events.includes(asOptionalString(message.event) || ""));
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((waiter) => waiter.resolve !== resolve);
+        resolve(null);
+      }, timeoutMs);
+      this.waiters.push({ events, resolve, timer });
+    });
+  }
+  stderrTail() {
+    return this.stderr;
+  }
+  async shutdown() {
+    try {
+      await this.request("disconnect", { terminateDebuggee: true, restart: false }, 2e3);
+    } catch {
+    }
+    if (this.proc && !this.proc.killed) this.proc.kill("SIGTERM");
+  }
+};
+
+// src/dap/snapshot.ts
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function redactText(value) {
+  return value.replace(/(token|password|secret|api[_-]?key|authorization)(\s*[=:]\s*)\S+/gi, "$1$2<redacted>").slice(-8e3);
+}
+function outputEvents(client) {
+  return client.outputs.slice(-50).map((event) => {
+    const body = asJsonObject(event.body);
+    return {
+      category: asOptionalString(body.category) || "console",
+      output: redactText(asOptionalString(body.output) || "")
+    };
+  });
+}
+async function requestOptional(client, command, args, timeoutMs = 3e3) {
+  try {
+    return await client.request(command, args, timeoutMs);
+  } catch {
+    return null;
+  }
+}
+async function collectVariables(client, variablesReference, limit) {
+  if (variablesReference <= 0) return [];
+  const result = await requestOptional(client, "variables", { variablesReference, start: 0, count: limit });
+  const variables = Array.isArray(result?.variables) ? result.variables.map(asJsonObject) : [];
+  return variables.slice(0, limit).map((variable) => ({
+    name: asOptionalString(variable.name) || "",
+    type: asOptionalString(variable.type) || null,
+    value: redactText(asOptionalString(variable.value) || ""),
+    variablesReference: asNumber(variable.variablesReference)
+  }));
+}
+async function collectScopes(client, frameId, variableLimit) {
+  const scopesResult = await requestOptional(client, "scopes", { frameId });
+  const scopes = Array.isArray(scopesResult?.scopes) ? scopesResult.scopes.map(asJsonObject) : [];
+  const collected = [];
+  for (const scope of scopes.slice(0, 6)) {
+    const variablesReference = asNumber(scope.variablesReference);
+    collected.push({
+      name: asOptionalString(scope.name) || "scope",
+      expensive: scope.expensive === true,
+      variables: await collectVariables(client, variablesReference, variableLimit)
+    });
+  }
+  return collected;
+}
+async function collectStoppedSnapshot(client, event, args) {
+  const body = asJsonObject(event.body);
+  const frameLimit = Math.max(1, Math.min(50, asNumber(args.limit, 20)));
+  const variableLimit = Math.max(1, Math.min(100, asNumber(args.variableLimit || args.variable_limit, 25)));
+  const threadsResult = await requestOptional(client, "threads", {});
+  const threadIds = asNumber(body.threadId) > 0 ? [asNumber(body.threadId)] : Array.isArray(threadsResult?.threads) ? threadsResult.threads.map(asJsonObject).map((thread) => asNumber(thread.id)).filter(Boolean) : [];
+  const threads = [];
+  for (const threadId of threadIds.slice(0, 8)) {
+    const stack = await requestOptional(client, "stackTrace", { threadId, startFrame: 0, levels: frameLimit });
+    const frames = Array.isArray(stack?.stackFrames) ? stack.stackFrames.map(asJsonObject) : [];
+    const summarizedFrames = [];
+    for (const frame of frames.slice(0, frameLimit)) {
+      const source = asJsonObject(frame.source);
+      const frameId = asNumber(frame.id);
+      summarizedFrames.push({
+        id: frameId,
+        name: asOptionalString(frame.name) || "",
+        file: asOptionalString(source.path) || asOptionalString(source.name) || null,
+        line: asNumber(frame.line),
+        column: asNumber(frame.column),
+        scopes: summarizedFrames.length === 0 ? await collectScopes(client, frameId, variableLimit) : []
+      });
+    }
+    threads.push({ threadId, frames: summarizedFrames });
+  }
+  return {
+    event: "stopped",
+    reason: asOptionalString(body.reason) || null,
+    description: asOptionalString(body.description) || null,
+    thread_id: asNumber(body.threadId) || null,
+    threads
+  };
+}
+async function setBreakpoints(client, root, breakpoints) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const breakpoint of breakpoints) {
+    const file = asOptionalString(breakpoint.file);
+    if (!file) continue;
+    const entries = groups.get(file) || [];
+    entries.push(breakpoint);
+    groups.set(file, entries);
+  }
+  const results = [];
+  for (const [file, entries] of groups.entries()) {
+    const abs = import_node_path30.default.isAbsolute(file) ? file : import_node_path30.default.join(root, file);
+    const response = await requestOptional(client, "setBreakpoints", {
+      source: { path: abs },
+      breakpoints: entries.map((entry) => ({
+        line: asNumber(entry.line),
+        condition: asOptionalString(entry.condition),
+        hitCondition: asOptionalString(entry.hitCondition || entry.hit_condition),
+        logMessage: asOptionalString(entry.logMessage || entry.log_message)
+      }))
+    });
+    results.push({
+      file,
+      breakpoints: Array.isArray(response?.breakpoints) ? response.breakpoints.map(asJsonObject) : []
+    });
+  }
+  return results;
+}
+async function dapSnapshot(root, args = {}) {
+  const normalized = normalizeDapSession(root, args);
+  if ("ok" in normalized && normalized.ok === false) return normalized;
+  const session = normalized;
+  const command = asOptionalString(session.adapter.command) || "";
+  const adapterArgs = asStringArray(session.adapter.args);
+  const client = new DapClient({
+    command,
+    args: adapterArgs,
+    cwd: root,
+    requestTimeoutMs: asNumber(session.adapter.requestTimeoutMs, 1e4),
+    outputLimit: 8e3
+  });
+  let launchResponse = null;
+  let launchError = null;
+  const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    await client.start();
+    const initialize = await client.request("initialize", {
+      adapterID: asOptionalString(session.adapter.id) || command,
+      clientID: "cadre",
+      clientName: "Cadre",
+      pathFormat: "path",
+      linesStartAt1: true,
+      columnsStartAt1: true,
+      supportsVariableType: true,
+      supportsVariablePaging: true
+    });
+    const initialized = client.waitForAny(["initialized"], Math.min(5e3, session.timeoutMs));
+    const launch = client.request(session.request, session.arguments, session.timeoutMs).then((body) => {
+      launchResponse = body;
+    }).catch((error) => {
+      launchError = errorMessage(error);
+    });
+    await initialized;
+    const breakpointResults = await setBreakpoints(client, root, session.breakpoints);
+    await requestOptional(client, "configurationDone", {}, 3e3);
+    await Promise.race([launch, delay(250)]);
+    if (launchError) throw new Error(launchError);
+    const finalEvent = await client.waitForAny(["stopped", "terminated", "exited"], session.timeoutMs);
+    const snapshot = finalEvent?.event === "stopped" ? await collectStoppedSnapshot(client, finalEvent, args) : {
+      event: asOptionalString(finalEvent?.event) || "timeout",
+      body: finalEvent ? asJsonObject(redactDapValue(asJsonObject(finalEvent.body))) : null
+    };
+    return {
+      ok: finalEvent !== null,
+      root,
+      started_at: startedAt,
+      finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+      adapter: {
+        id: asOptionalString(session.adapter.id) || command,
+        command,
+        args: adapterArgs
+      },
+      request: session.request,
+      configuration: redactDapValue(session.configuration),
+      initialize,
+      launch_response: launchResponse,
+      breakpoints: breakpointResults,
+      snapshot,
+      output: outputEvents(client),
+      adapter_stderr_tail: redactText(client.stderrTail()),
+      error: finalEvent ? void 0 : `DAP snapshot timed out after ${session.timeoutMs}ms`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      root,
+      started_at: startedAt,
+      finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+      adapter: { command, args: adapterArgs },
+      configuration: redactDapValue(session.configuration),
+      output: outputEvents(client),
+      adapter_stderr_tail: redactText(client.stderrTail()),
+      error: errorMessage(error)
+    };
+  } finally {
+    await client.shutdown();
+  }
+}
+
+// src/core/application/runtime/setup-infrastructure.ts
+var import_node_fs16 = __toESM(require("node:fs"));
+var import_node_path31 = __toESM(require("node:path"));
 function configuredCiProvider(root, args = {}) {
   const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root).config.provider_mode);
   const provider = normalizeProviderMode(raw);
   return provider === "github" || provider === "gitlab" ? provider : null;
 }
 function setupGitattributes(root) {
-  const file = import_node_path29.default.join(root, ".gitattributes");
+  const file = import_node_path31.default.join(root, ".gitattributes");
   const required = [
     "cadre/tracks/**/parallel_state.json merge=ours"
   ];
-  const existing = fileExists(file) ? import_node_fs15.default.readFileSync(file, "utf8") : "";
+  const existing = fileExists(file) ? import_node_fs16.default.readFileSync(file, "utf8") : "";
   const lines = existing.split(/\r?\n/).filter(Boolean);
   let changed = false;
   for (const line of required) {
@@ -6512,13 +7077,13 @@ function setupGitattributes(root) {
     }
   }
   if (changed || !fileExists(file)) {
-    import_node_fs15.default.writeFileSync(file, `${lines.join("\n")}
+    import_node_fs16.default.writeFileSync(file, `${lines.join("\n")}
 `);
   }
   const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root });
   return {
     ok: mergeDriver.ok,
-    path: import_node_path29.default.relative(root, file),
+    path: import_node_path31.default.relative(root, file),
     changed,
     merge_driver: mergeDriver
   };
@@ -6534,13 +7099,13 @@ function setupCiTemplates(root, provider, args = {}) {
   const sourceText = templateText(template, "");
   const source = templateSourceLabel(template) || template;
   if (!sourceText) return { ok: false, error: `Missing CI template ${template}` };
-  const target = provider === "github" ? import_node_path29.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path29.default.join(root, ".gitlab-ci.yml");
+  const target = provider === "github" ? import_node_path31.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path31.default.join(root, ".gitlab-ci.yml");
   if (fileExists(target) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source, path: import_node_path29.default.relative(root, target) };
+    return { ok: true, skipped: true, provider, source, path: import_node_path31.default.relative(root, target) };
   }
-  import_node_fs15.default.mkdirSync(import_node_path29.default.dirname(target), { recursive: true });
-  import_node_fs15.default.writeFileSync(target, sourceText);
-  return { ok: true, provider, source, path: import_node_path29.default.relative(root, target), written: true };
+  import_node_fs16.default.mkdirSync(import_node_path31.default.dirname(target), { recursive: true });
+  import_node_fs16.default.writeFileSync(target, sourceText);
+  return { ok: true, provider, source, path: import_node_path31.default.relative(root, target), written: true };
 }
 function setupSubmodulePlan(root, repos, args = {}) {
   const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
@@ -6550,7 +7115,7 @@ function setupSubmodulePlan(root, repos, args = {}) {
     const url = asOptionalString(repo.url);
     const submodulePath = asOptionalString(repo.submodule_path);
     if (!name || !url || !submodulePath || repo.enabled === false) continue;
-    if (fileExists(import_node_path29.default.join(root, submodulePath))) continue;
+    if (fileExists(import_node_path31.default.join(root, submodulePath))) continue;
     commands.push(plannedGitAction(
       `submodule-${safeName(name)}`,
       "submodule_add",
@@ -6618,7 +7183,7 @@ function lspSetup(root, args = {}) {
 }
 
 // src/core/application/runtime/workspace-health.ts
-var import_node_path30 = __toESM(require("node:path"));
+var import_node_path32 = __toESM(require("node:path"));
 function workspaceHealth(root, args = {}) {
   const mode = workflowResponseMode(args);
   const topology = loadTopology(root);
@@ -6626,6 +7191,7 @@ function workspaceHealth(root, args = {}) {
   const workspace = workspaceDiagnostics(root, { execute: false });
   const dependencyGraphResult = dependencyGraph(root);
   const lspCoverage = summarizeLspCoverage(root, args);
+  const dapCoverage = summarizeDapCoverage(root, args);
   const availableWorkResult = availableWork(root);
   const integrations = integrationInventory(root, { ...args, responseMode: mode });
   const compactIntegrations = {
@@ -6665,6 +7231,11 @@ function workspaceHealth(root, args = {}) {
         status: lspConfigStatus(root),
         setup: lspSetup(root, { ...args, execute: false })
       },
+      dap: {
+        coverage: dapCoverage,
+        status: dapStatus(root, args),
+        setup: dapSetup(root, { ...args, execute: false })
+      },
       integrations,
       detail_resources: detailResources
     };
@@ -6700,17 +7271,18 @@ function workspaceHealth(root, args = {}) {
       configured: lspCoverage.configured
     },
     lsp: lspCoverage,
+    dap: dapCoverage,
     integrations: compactIntegrations,
     detail_resources: detailResources
   };
 }
 function lspConfigStatus(root) {
-  const configPath = import_node_path30.default.join(root, "cadre", "lsp.json");
-  const config = readJson(configPath, null);
+  const configPath2 = import_node_path32.default.join(root, "cadre", "lsp.json");
+  const config = readJson(configPath2, null);
   if (!config) {
     return {
       configured: false,
-      path: import_node_path30.default.relative(root, configPath),
+      path: import_node_path32.default.relative(root, configPath2),
       servers: [],
       missing: [],
       daemon: {
@@ -6725,7 +7297,7 @@ function lspConfigStatus(root) {
   const servers = Array.isArray(configObject.servers) ? configObject.servers.map((server) => asJsonObject(server)) : [];
   return {
     configured: true,
-    path: import_node_path30.default.relative(root, configPath),
+    path: import_node_path32.default.relative(root, configPath2),
     servers: servers.map((server) => {
       const command = asOptionalString(server.command);
       return {
@@ -6754,10 +7326,12 @@ function mergeDriverStatus(root) {
   };
 }
 function doctor(root, options = {}) {
-  const candidateRoot = import_node_path30.default.resolve(root || process.cwd());
-  const generatedCheck = import_node_path30.default.join(candidateRoot, "scripts", "generate-skills.sh");
+  const candidateRoot = import_node_path32.default.resolve(root || process.cwd());
+  const generatedCheck = import_node_path32.default.join(candidateRoot, "scripts", "generate-skills.sh");
   const lspStatus = lspConfigStatus(candidateRoot);
   const lspMissing = asStringArray(lspStatus.missing);
+  const dapConfig = dapStatus(candidateRoot, options);
+  const dapMissing = asStringArray(dapConfig.missing);
   const checks = {
     mcp_runtime: { ok: true, server: "cadre" },
     cadre_project: {
@@ -6769,7 +7343,7 @@ function doctor(root, options = {}) {
         "cadre/product.json",
         "cadre/config.json",
         "cadre/lsp.json"
-      ].filter((name) => fileExists(import_node_path30.default.join(candidateRoot, name)))
+      ].filter((name) => fileExists(import_node_path32.default.join(candidateRoot, name)))
     },
     git: {
       available: commandExists("git", candidateRoot),
@@ -6777,6 +7351,7 @@ function doctor(root, options = {}) {
       merge_ours: mergeDriverStatus(candidateRoot)
     },
     lsp: lspStatus,
+    dap: dapConfig,
     provider: providerMcpAvailability(candidateRoot, options),
     generated_bundles: {
       check_available: fileExists(generatedCheck),
@@ -6789,6 +7364,9 @@ function doctor(root, options = {}) {
   }
   if (checks.lsp.configured && lspMissing.length > 0) {
     warnings.push(`LSP config exists but missing server commands: ${lspMissing.join(", ")}`);
+  }
+  if (dapConfig.configured && dapMissing.length > 0) {
+    warnings.push(`DAP config exists but missing adapter commands: ${dapMissing.join(", ")}`);
   }
   return {
     ok: warnings.length === 0,
@@ -6810,6 +7388,7 @@ function workspaceHealthDetailResources(root) {
     `cadre://repo-topology?root=${encodedRoot}`,
     `cadre://repo-map?root=${encodedRoot}`,
     `cadre://lsp-status?root=${encodedRoot}`,
+    `cadre://dap-status?root=${encodedRoot}`,
     `cadre://integrations?root=${encodedRoot}`,
     `cadre://mcp-readiness?root=${encodedRoot}`
   ];
@@ -6858,6 +7437,27 @@ function summarizeLspCoverage(root, args = {}) {
     recommended_count: recommended.length,
     covered_count: covered.length,
     missing_count: missing.length,
+    coverage: recommended.length > 0 ? Math.round(covered.length / recommended.length * 100) : null,
+    configured: configured2.slice(0, 10),
+    recommended: recommended.slice(0, 10),
+    missing: missing.slice(0, 10)
+  };
+}
+function summarizeDapCoverage(root, args = {}) {
+  const status = asJsonObject(dapStatus(root, args));
+  const setup = asJsonObject(dapSetup(root, { ...args, execute: false }));
+  const configured2 = Array.isArray(status.adapters) ? status.adapters.map((adapter) => asJsonObject(adapter).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
+  const recommended = Array.isArray(setup.recommended) ? setup.recommended.map((entry) => asJsonObject(entry).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
+  const missing = recommended.filter((id) => !configured2.includes(id));
+  const covered = recommended.filter((id) => configured2.includes(id));
+  return {
+    ok: status.ok !== false && setup.ok !== false,
+    status_configured: status.configured === true,
+    configured_count: configured2.length,
+    recommended_count: recommended.length,
+    covered_count: covered.length,
+    missing_count: missing.length,
+    manual_count: countRecords(setup.manual),
     coverage: recommended.length > 0 ? Math.round(covered.length / recommended.length * 100) : null,
     configured: configured2.slice(0, 10),
     recommended: recommended.slice(0, 10),
@@ -6946,6 +7546,7 @@ function integrationInventory(root, args = {}) {
   const provider = providerMcpAvailability(root, args);
   const readiness = mcpReadiness(root, args);
   const lsp = summarizeLspCoverage(root, args);
+  const dap = summarizeDapCoverage(root, args);
   const optionalMcps = [
     integrationStatus(root, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
     integrationStatus(root, args, "issue_tracker", "Issue tracker", ["issue_tracker", "issueTracker", "jira", "jira_mcp", "jiraMcp", "linear", "linear_mcp", "linearMcp"], mode),
@@ -6967,7 +7568,12 @@ function integrationInventory(root, args = {}) {
     lsp_recommended_count: asOptionalNumber(lsp.recommended_count),
     lsp_covered_count: asOptionalNumber(lsp.covered_count),
     lsp_missing_count: asOptionalNumber(lsp.missing_count),
-    lsp_coverage: asOptionalNumber(lsp.coverage)
+    lsp_coverage: asOptionalNumber(lsp.coverage),
+    dap_configured_count: asOptionalNumber(dap.configured_count),
+    dap_recommended_count: asOptionalNumber(dap.recommended_count),
+    dap_covered_count: asOptionalNumber(dap.covered_count),
+    dap_missing_count: asOptionalNumber(dap.missing_count),
+    dap_coverage: asOptionalNumber(dap.coverage)
   };
   if (mode === "detail") {
     return {
@@ -6982,6 +7588,11 @@ function integrationInventory(root, args = {}) {
         coverage: lsp,
         status: lspConfigStatus(root),
         setup: lspSetup(root, { ...args, execute: false })
+      },
+      dap: {
+        coverage: dap,
+        status: dapStatus(root, args),
+        setup: dapSetup(root, { ...args, execute: false })
       },
       summary,
       detail_resources: detailResources
@@ -7015,18 +7626,19 @@ function integrationInventory(root, args = {}) {
       source: entry.source
     })),
     lsp,
+    dap,
     summary,
     detail_resources: detailResources
   };
 }
 
 // src/core/application/runtime/formula-workflow.ts
-var import_node_fs17 = __toESM(require("node:fs"));
-var import_node_path32 = __toESM(require("node:path"));
+var import_node_fs18 = __toESM(require("node:fs"));
+var import_node_path34 = __toESM(require("node:path"));
 
 // src/core/application/runtime/workflow-new-track.ts
-var import_node_fs16 = __toESM(require("node:fs"));
-var import_node_path31 = __toESM(require("node:path"));
+var import_node_fs17 = __toESM(require("node:fs"));
+var import_node_path33 = __toESM(require("node:path"));
 function newTrackReviewFiles(trackId, spec, plan, metadata) {
   const safeTrack = safeName(trackId);
   const specJson = normalizeSpecJson(trackId, spec);
@@ -7149,7 +7761,7 @@ function workflowNewTrack(root, args = {}) {
     };
   }
   const traceBefore = beginTrace(root);
-  const dir = import_node_path31.default.join(root, "cadre", "tracks", safeName(trackId));
+  const dir = import_node_path33.default.join(root, "cadre", "tracks", safeName(trackId));
   const learningsEntry = {
     ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
     id: "initial",
@@ -7158,15 +7770,15 @@ function workflowNewTrack(root, args = {}) {
     recorded_at: utcNow(),
     text: trackLearningsText(String(trackId))
   };
-  import_node_fs16.default.mkdirSync(dir, { recursive: true });
-  writeJson(import_node_path31.default.join(dir, "metadata.json"), metadata);
-  writeJson(import_node_path31.default.join(dir, "spec.json"), specJson);
-  writeJson(import_node_path31.default.join(dir, "plan.json"), planJson);
-  import_node_fs16.default.writeFileSync(import_node_path31.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
-  import_node_fs16.default.writeFileSync(import_node_path31.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
-  import_node_fs16.default.writeFileSync(import_node_path31.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
+  import_node_fs17.default.mkdirSync(dir, { recursive: true });
+  writeJson(import_node_path33.default.join(dir, "metadata.json"), metadata);
+  writeJson(import_node_path33.default.join(dir, "spec.json"), specJson);
+  writeJson(import_node_path33.default.join(dir, "plan.json"), planJson);
+  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
+  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
+  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
 `);
-  import_node_fs16.default.writeFileSync(import_node_path31.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
+  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);
   const event = appendCadreEvent(root, {
     kind: "track_created",
@@ -7192,7 +7804,7 @@ function workflowNewTrack(root, args = {}) {
     ok: regen.ok !== false && controlCommit.ok !== false,
     dry_run: false,
     track_id: trackId,
-    metadata_path: import_node_path31.default.relative(root, import_node_path31.default.join(dir, "metadata.json")),
+    metadata_path: import_node_path33.default.relative(root, import_node_path33.default.join(dir, "metadata.json")),
     regen,
     event,
     control_commit: controlCommit,
@@ -7227,10 +7839,10 @@ function formulaAction(args) {
   ].includes(normalized) ? normalized : "list";
 }
 function formulaDir(root) {
-  return import_node_path32.default.join(root, "cadre", "formulas");
+  return import_node_path34.default.join(root, "cadre", "formulas");
 }
 function wispDir(root) {
-  return import_node_path32.default.join(root, "cadre", "local", "wisps");
+  return import_node_path34.default.join(root, "cadre", "local", "wisps");
 }
 function formulaId(args) {
   const rawArgs = args;
@@ -7241,17 +7853,17 @@ function wispId(args) {
   return asOptionalString(args.id) || asOptionalString(rawArgs.wispId || rawArgs.wisp_id) || null;
 }
 function formulaPath(root, id) {
-  return import_node_path32.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
+  return import_node_path34.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
 }
 function wispPath(root, id) {
-  return import_node_path32.default.join(wispDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
+  return import_node_path34.default.join(wispDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
 }
 function loadFormula(root, id) {
   if (!id) return { ok: false, error: "formula id is required" };
   const file = formulaPath(root, id);
   const formula = readJson(file, null);
-  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path32.default.relative(root, file) };
-  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path32.default.relative(root, file), formula };
+  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path34.default.relative(root, file) };
+  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path34.default.relative(root, file), formula };
 }
 function variablesFromArgs(formula, args) {
   const rawArgs = args;
@@ -7340,14 +7952,14 @@ function cookFormula(root, args) {
 function listFormulas(root) {
   ensureNativeState(root);
   const dir = formulaDir(root);
-  const items = fileExists(dir) ? import_node_fs17.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
-    const file = import_node_path32.default.join(dir, name);
+  const items = fileExists(dir) ? import_node_fs18.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
+    const file = import_node_path34.default.join(dir, name);
     const formula = readJson(file, {});
     return {
       id: asOptionalString(formula.id) || name.replace(/\.json$/i, ""),
       title: asOptionalString(formula.title) || asOptionalString(formula.id) || name,
       recommended_phase: asOptionalString(formula.recommended_phase) || null,
-      path: import_node_path32.default.relative(root, file)
+      path: import_node_path34.default.relative(root, file)
     };
   }) : [];
   return { ok: true, formulas: items, count: items.length };
@@ -7393,13 +8005,13 @@ function createWisp(root, args) {
   const file = wispPath(root, id);
   writeJsonEnsured(file, wisp);
   const event = appendCadreEvent(root, { kind: "wisp_created", workflow: "formula", formula_id, wisp_id: id });
-  return { ok: true, wisp_id: id, path: import_node_path32.default.relative(root, file), wisp, event };
+  return { ok: true, wisp_id: id, path: import_node_path34.default.relative(root, file), wisp, event };
 }
 function listWisps(root) {
   ensureNativeState(root);
   const dir = wispDir(root);
-  const wisps = fileExists(dir) ? import_node_fs17.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
-    const file = import_node_path32.default.join(dir, name);
+  const wisps = fileExists(dir) ? import_node_fs18.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
+    const file = import_node_path34.default.join(dir, name);
     const wisp = readJson(file, {});
     return {
       id: asOptionalString(wisp.id) || name.replace(/\.json$/i, ""),
@@ -7407,7 +8019,7 @@ function listWisps(root) {
       status: asOptionalString(wisp.status) || null,
       owner: asOptionalString(wisp.owner) || null,
       updated_at: asOptionalString(wisp.updated_at) || null,
-      path: import_node_path32.default.relative(root, file)
+      path: import_node_path34.default.relative(root, file)
     };
   }) : [];
   return { ok: true, wisps, count: wisps.length };
@@ -7417,7 +8029,7 @@ function updateWispStep(root, args) {
   if (!id) return { ok: false, error: "wisp id is required" };
   const file = wispPath(root, id);
   const wisp = readJson(file, null);
-  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path32.default.relative(root, file) };
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path34.default.relative(root, file) };
   const rawArgs = args;
   const stepId = asOptionalString(rawArgs.stepId || rawArgs.step_id || rawArgs.taskKey || rawArgs.task_key);
   const stepIndex = Number(rawArgs.stepIndex || rawArgs.step_index || args.taskIndex || 0);
@@ -7439,14 +8051,14 @@ function updateWispStep(root, args) {
   const next = { ...wisp, steps, status: asOptionalString(wisp.status) || "active", updated_at: now };
   writeJsonEnsured(file, next);
   const event = appendCadreEvent(root, { kind: "wisp_step_updated", workflow: "formula", wisp_id: id, step_id: asOptionalString(steps[index].step_id) || null, status });
-  return { ok: true, wisp_id: id, path: import_node_path32.default.relative(root, file), step: steps[index], wisp: next, event };
+  return { ok: true, wisp_id: id, path: import_node_path34.default.relative(root, file), step: steps[index], wisp: next, event };
 }
 function squashWisp(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
   const file = wispPath(root, id);
   const wisp = readJson(file, null);
-  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path32.default.relative(root, file) };
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path34.default.relative(root, file) };
   const traceBefore = beginTrace(root);
   const digest = {
     version: 1,
@@ -7460,7 +8072,7 @@ function squashWisp(root, args) {
     steps: Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [],
     evidence: Array.isArray(wisp.evidence) ? wisp.evidence.map(asJsonObject) : []
   };
-  const digestPath = import_node_path32.default.join(root, "cadre", "operations", "wisp-digests.jsonl");
+  const digestPath = import_node_path34.default.join(root, "cadre", "operations", "wisp-digests.jsonl");
   appendJsonl(digestPath, digest);
   const event = appendCadreEvent(root, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
   const controlCommit = commitTrace(root, args, {
@@ -7470,7 +8082,7 @@ function squashWisp(root, args) {
     subject: `squash ${id}`,
     before: traceBefore,
     files: [
-      import_node_path32.default.relative(root, digestPath)
+      import_node_path34.default.relative(root, digestPath)
     ],
     note: {
       event_id: asOptionalString(asJsonObject(event.event).id) || null,
@@ -7479,16 +8091,16 @@ function squashWisp(root, args) {
       formula_id: digest.formula_id
     }
   });
-  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: import_node_path32.default.relative(root, digestPath), event, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: import_node_path34.default.relative(root, digestPath), event, control_commit: controlCommit };
 }
 function burnWisp(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
   const file = wispPath(root, id);
   const existed = fileExists(file);
-  if (existed) import_node_fs17.default.rmSync(file, { force: true });
+  if (existed) import_node_fs18.default.rmSync(file, { force: true });
   const event = appendCadreEvent(root, { kind: "wisp_burned", workflow: "formula", wisp_id: id, existed });
-  return { ok: true, wisp_id: id, existed, path: import_node_path32.default.relative(root, file), event };
+  return { ok: true, wisp_id: id, existed, path: import_node_path34.default.relative(root, file), event };
 }
 function pourFormula(root, args) {
   const id = wispId(args);
@@ -7548,15 +8160,15 @@ function workflowFormula(root, args = {}) {
 }
 
 // src/core/application/runtime/parallel-state.ts
-var import_node_path35 = __toESM(require("node:path"));
+var import_node_path37 = __toESM(require("node:path"));
 
 // src/core/application/runtime/task-completion.ts
-var import_node_path34 = __toESM(require("node:path"));
+var import_node_path36 = __toESM(require("node:path"));
 
 // src/core/application/runtime/manual-verification.ts
-var import_node_path33 = __toESM(require("node:path"));
+var import_node_path35 = __toESM(require("node:path"));
 function completionJournalPath(track) {
-  return import_node_path33.default.join(track.dir, "completion_journal.json");
+  return import_node_path35.default.join(track.dir, "completion_journal.json");
 }
 function readCompletionJournal(track) {
   const value = readJson(completionJournalPath(track), { entries: {} });
@@ -7576,7 +8188,7 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
-  appendJsonl(import_node_path33.default.join(track.dir, "completion_journal.jsonl"), {
+  appendJsonl(import_node_path35.default.join(track.dir, "completion_journal.jsonl"), {
     key,
     recorded_at: journal.updated_at,
     entry: journal.entries[key]
@@ -7854,7 +8466,7 @@ function completeTaskInner(root, args = {}) {
       commitSha: resolvedCommitSha || args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path34.default.relative(root, workingRoot.path) || ".",
+      workingRoot: import_node_path36.default.relative(root, workingRoot.path) || ".",
       ...lastTestRun ? { lastTestRun } : {},
       ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
@@ -7907,11 +8519,11 @@ function completeTaskInner(root, args = {}) {
     subject: `record ${track.track_id} phase ${phaseIndex} task ${taskIndex}`,
     before: controlBefore,
     files: [
-      import_node_path34.default.relative(root, track.metadata_path),
-      import_node_path34.default.relative(root, track.plan_path),
-      import_node_path34.default.relative(root, trackPlanJsonPath(track)),
-      import_node_path34.default.relative(root, completionJournalPath(track)),
-      import_node_path34.default.relative(root, `${completionJournalPath(track)}l`),
+      import_node_path36.default.relative(root, track.metadata_path),
+      import_node_path36.default.relative(root, track.plan_path),
+      import_node_path36.default.relative(root, trackPlanJsonPath(track)),
+      import_node_path36.default.relative(root, completionJournalPath(track)),
+      import_node_path36.default.relative(root, `${completionJournalPath(track)}l`),
       "cadre/events.jsonl"
     ],
     trackId: track.track_id,
@@ -7959,7 +8571,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
     return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };
   }
-  const statePath = import_node_path35.default.join(track.dir, "parallel_state.json");
+  const statePath = import_node_path37.default.join(track.dir, "parallel_state.json");
   const existing = readJson(statePath, {
     track_id: track.track_id,
     execution_mode: "parallel",
@@ -8034,7 +8646,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
     subject: `record ${workerId}`,
     before: traceBefore,
     files: [
-      import_node_path35.default.relative(root, statePath)
+      import_node_path37.default.relative(root, statePath)
     ],
     trackId: track.track_id,
     repo: nextWorker.repo || null,
@@ -8049,7 +8661,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   return {
     ok: controlCommit.ok !== false,
     track_id: track.track_id,
-    state_path: import_node_path35.default.relative(root, statePath),
+    state_path: import_node_path37.default.relative(root, statePath),
     worker: nextWorker,
     completion,
     control_commit: controlCommit,
@@ -8062,7 +8674,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   };
 }
 function parallelStatePath(track) {
-  return import_node_path35.default.join(track.dir, "parallel_state.json");
+  return import_node_path37.default.join(track.dir, "parallel_state.json");
 }
 function readParallelState(track) {
   const existing = readJson(parallelStatePath(track), {
@@ -8082,7 +8694,7 @@ function readParallelState(track) {
 }
 
 // src/core/application/runtime/parallel-workflow.ts
-var import_node_path36 = __toESM(require("node:path"));
+var import_node_path38 = __toESM(require("node:path"));
 
 // src/core/application/runtime/dispatch-adapters.ts
 var AGENT_IDENTIFIERS = ["claude", "codex", "copilot", "antigravity"];
@@ -8128,7 +8740,7 @@ function changedFilesFromArgs(args) {
   return asStringArray(args.filesChanged || args.files_changed || args.files);
 }
 function isManifestChange(file) {
-  const base = import_node_path36.default.basename(file).toLowerCase();
+  const base = import_node_path38.default.basename(file).toLowerCase();
   return [
     "package.json",
     "package-lock.json",
@@ -8149,7 +8761,7 @@ function isManifestChange(file) {
   ].includes(base);
 }
 function fileStem(file) {
-  return import_node_path36.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
+  return import_node_path38.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
 }
 function isNarrowTestChange(file, ownedFiles) {
   const normalized = normalizeClaimPath(file);
@@ -8377,7 +8989,7 @@ function parallelSetupWorkers(root, track, args = {}) {
     const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
-    const worktree = import_node_path36.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    const worktree = import_node_path38.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
     const sourceRoot = asString(entry.root || root);
     commands.push(plannedCommand(
       "git",
@@ -8546,8 +9158,8 @@ function parallelWorkflow(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-basic.ts
-var import_node_fs18 = __toESM(require("node:fs"));
-var import_node_path37 = __toESM(require("node:path"));
+var import_node_fs19 = __toESM(require("node:fs"));
+var import_node_path39 = __toESM(require("node:path"));
 function workflowImplement(root, args = {}) {
   const prep = implementationPrep(root, {
     ...args,
@@ -8647,16 +9259,16 @@ function workflowArchive(root, args = {}) {
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
   const traceBefore = beginTrace(root);
   const archived = [];
-  const archiveRoot = import_node_path37.default.join(root, "cadre", "archive");
-  import_node_fs18.default.mkdirSync(archiveRoot, { recursive: true });
+  const archiveRoot = import_node_path39.default.join(root, "cadre", "archive");
+  import_node_fs19.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target = import_node_path37.default.join(archiveRoot, track.track_id);
+    const target = import_node_path39.default.join(archiveRoot, track.track_id);
     if (fileExists(target)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs18.default.renameSync(track.dir, target);
-    archived.push({ track_id: track.track_id, ok: true, path: import_node_path37.default.relative(root, target) });
+    import_node_fs19.default.renameSync(track.dir, target);
+    archived.push({ track_id: track.track_id, ok: true, path: import_node_path39.default.relative(root, target) });
   }
   const regen = regenIndex(root);
   const controlCommit = commitTrace(root, args, {
@@ -8698,16 +9310,16 @@ function workflowHandoff(root, args = {}) {
     "",
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
-  const handoffPath = import_node_path37.default.join(track.dir, "HANDOFF.md");
+  const handoffPath = import_node_path39.default.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
   const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
   const reviewFiles = [
-    jsonReviewFile(import_node_path37.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    jsonReviewFile(import_node_path39.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
     textReviewFile(
-      import_node_path37.default.relative(root, handoffPath),
+      import_node_path39.default.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(import_node_path37.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+      withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
     )
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -8718,7 +9330,7 @@ function workflowHandoff(root, args = {}) {
     ...summary,
     track_id: trackId,
     track_context: context,
-    handoff_path: import_node_path37.default.relative(root, handoffPath),
+    handoff_path: import_node_path39.default.relative(root, handoffPath),
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,
@@ -8745,7 +9357,7 @@ function workflowHandoff(root, args = {}) {
   const traceBefore = beginTrace(root);
   if (args.execute === true) {
     writeJsonEnsured(handoffJsonPath, handoffJson);
-    import_node_fs18.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path37.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
+    import_node_fs19.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
   const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
@@ -8756,8 +9368,8 @@ function workflowHandoff(root, args = {}) {
     to: recipient,
     subject,
     body: asOptionalString(args.body) || text,
-    handoff_path: import_node_path37.default.relative(root, handoffPath),
-    handoff_json_path: import_node_path37.default.relative(root, handoffJsonPath)
+    handoff_path: import_node_path39.default.relative(root, handoffPath),
+    handoff_json_path: import_node_path39.default.relative(root, handoffJsonPath)
   });
   const event = appendCadreEvent(root, {
     kind: "handoff_created",
@@ -8765,7 +9377,7 @@ function workflowHandoff(root, args = {}) {
     track_id: trackId,
     to: recipient,
     subject,
-    handoff_path: import_node_path37.default.relative(root, handoffPath)
+    handoff_path: import_node_path39.default.relative(root, handoffPath)
   });
   const controlCommit = commitTrace(root, args, {
     kind: "control",
@@ -8791,8 +9403,8 @@ function workflowHandoff(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-refresh-revert.ts
-var import_node_fs19 = __toESM(require("node:fs"));
-var import_node_path38 = __toESM(require("node:path"));
+var import_node_fs20 = __toESM(require("node:fs"));
+var import_node_path40 = __toESM(require("node:path"));
 function refreshedPatternsText(text, now = utcNow()) {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
   const next = /Last refreshed:\s*.*/.test(text) ? text.replace(/Last refreshed:\s*.*/, stamp) : `${text.replace(/\n*$/, "\n\n")}${stamp}
@@ -8800,7 +9412,7 @@ function refreshedPatternsText(text, now = utcNow()) {
   return { text: next, stamp };
 }
 function refreshedPatternsArtifacts(root) {
-  const jsonlPath = import_node_path38.default.join(root, "cadre", "patterns.jsonl");
+  const jsonlPath = import_node_path40.default.join(root, "cadre", "patterns.jsonl");
   if (!fileExists(jsonlPath)) return null;
   const entries = readJsonl(jsonlPath);
   const seed = entries[0] || templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
@@ -8809,11 +9421,11 @@ function refreshedPatternsArtifacts(root) {
   const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
   const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
   const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries));
-  const projectionPath = import_node_path38.default.join(root, "cadre", "patterns.md");
+  const projectionPath = import_node_path40.default.join(root, "cadre", "patterns.md");
   return {
     files: [
-      plainReviewFile(import_node_path38.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
-      textReviewFile(import_node_path38.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
+      plainReviewFile(import_node_path40.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
+      textReviewFile(import_node_path40.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
     ],
     jsonlPath,
     projectionPath,
@@ -8959,12 +9571,12 @@ function workflowRefresh(root, args = {}) {
   if (args.execute === true) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
-      import_node_fs19.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      import_node_fs19.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      import_node_fs20.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      import_node_fs20.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
       patterns = {
         ok: true,
-        path: import_node_path38.default.relative(root, refreshed.jsonlPath),
-        projection: import_node_path38.default.relative(root, refreshed.projectionPath),
+        path: import_node_path40.default.relative(root, refreshed.jsonlPath),
+        projection: import_node_path40.default.relative(root, refreshed.projectionPath),
         refreshed_at: refreshed.stamp
       };
     }
@@ -8999,17 +9611,17 @@ function workflowRefresh(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-release-revise.ts
-var import_node_fs20 = __toESM(require("node:fs"));
-var import_node_path39 = __toESM(require("node:path"));
+var import_node_fs21 = __toESM(require("node:fs"));
+var import_node_path41 = __toESM(require("node:path"));
 function releaseArtifactPlan(root, args = {}) {
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
   const rawArgs = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
   const generatedAt = asOptionalString(rawArgs.generatedAt || rawArgs.generated_at) || utcNow();
-  const releaseDir = import_node_path39.default.join(root, "cadre", "releases");
+  const releaseDir = import_node_path41.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
-  const releaseMd = import_node_path39.default.join(releaseDir, `${releaseSlug}.md`);
-  const releaseJson = import_node_path39.default.join(releaseDir, `${releaseSlug}.json`);
+  const releaseMd = import_node_path41.default.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = import_node_path41.default.join(releaseDir, `${releaseSlug}.json`);
   const notes = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release - ${version}`,
     "",
@@ -9040,14 +9652,14 @@ function releaseArtifactPlan(root, args = {}) {
 function releaseReviewFiles(root, plan) {
   return [
     textReviewFile(
-      import_node_path39.default.relative(root, plan.releaseMd),
+      import_node_path41.default.relative(root, plan.releaseMd),
       "Release notes",
       "releaseNotes",
       plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `
     ),
     jsonReviewFile(
-      import_node_path39.default.relative(root, plan.releaseJson),
+      import_node_path41.default.relative(root, plan.releaseJson),
       "Release metadata",
       "releaseMetadata",
       plan.metadata
@@ -9071,7 +9683,7 @@ function workflowRelease(root, args = {}) {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
-    release_artifacts: [import_node_path39.default.relative(root, plan.releaseMd), import_node_path39.default.relative(root, plan.releaseJson)],
+    release_artifacts: [import_node_path41.default.relative(root, plan.releaseMd), import_node_path41.default.relative(root, plan.releaseJson)],
     git_actions: plan.gitActions,
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
@@ -9097,15 +9709,15 @@ function workflowRelease(root, args = {}) {
     };
   }
   const traceBefore = beginTrace(root);
-  import_node_fs20.default.mkdirSync(plan.releaseDir, { recursive: true });
-  import_node_fs20.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+  import_node_fs21.default.mkdirSync(plan.releaseDir, { recursive: true });
+  import_node_fs21.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `);
   writeJson(plan.releaseJson, plan.metadata);
-  const indexPatch = patchJsonFile(import_node_path39.default.join(root, "cadre", "setup_state.json"), (current) => {
+  const indexPatch = patchJsonFile(import_node_path41.default.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: plan.version,
-      path: import_node_path39.default.relative(root, plan.releaseMd),
-      metadata: import_node_path39.default.relative(root, plan.releaseJson),
+      path: import_node_path41.default.relative(root, plan.releaseMd),
+      metadata: import_node_path41.default.relative(root, plan.releaseJson),
       completed_tracks: plan.completed.length,
       released_at: plan.generatedAt
     };
@@ -9159,21 +9771,21 @@ function workflowRevise(root, args = {}) {
     };
   }
   if (track && revisedSpec) {
-    reviewFiles.push(jsonReviewFile(import_node_path39.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
+    reviewFiles.push(jsonReviewFile(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
     reviewFiles.push(textReviewFile(
-      import_node_path39.default.relative(root, track.spec_path),
+      import_node_path41.default.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(import_node_path39.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec))
+      withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec))
     ));
   }
   if (track && revisedPlan) {
-    reviewFiles.push(jsonReviewFile(import_node_path39.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
+    reviewFiles.push(jsonReviewFile(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
     reviewFiles.push(textReviewFile(
-      import_node_path39.default.relative(root, track.plan_path),
+      import_node_path41.default.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(import_node_path39.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan))
+      withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan))
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -9230,15 +9842,15 @@ function workflowRevise(root, args = {}) {
     const written = [];
     if (revisedSpec) {
       writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      import_node_fs20.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path39.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
-      written.push(import_node_path39.default.relative(root, trackSpecJsonPath(track)));
-      written.push(import_node_path39.default.relative(root, track.spec_path));
+      import_node_fs21.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
+      written.push(import_node_path41.default.relative(root, trackSpecJsonPath(track)));
+      written.push(import_node_path41.default.relative(root, track.spec_path));
     }
     if (revisedPlan) {
       writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      import_node_fs20.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path39.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
-      written.push(import_node_path39.default.relative(root, trackPlanJsonPath(track)));
-      written.push(import_node_path39.default.relative(root, track.plan_path));
+      import_node_fs21.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
+      written.push(import_node_path41.default.relative(root, trackPlanJsonPath(track)));
+      written.push(import_node_path41.default.relative(root, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
   });
@@ -9266,8 +9878,8 @@ function workflowRevise(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-setup.ts
-var import_node_fs21 = __toESM(require("node:fs"));
-var import_node_path40 = __toESM(require("node:path"));
+var import_node_fs22 = __toESM(require("node:fs"));
+var import_node_path42 = __toESM(require("node:path"));
 function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
@@ -9329,7 +9941,7 @@ function workflowSetup(root, args = {}) {
     ]
   };
   if (args.execute !== true) return result;
-  const cadreDir = import_node_path40.default.join(root, "cadre");
+  const cadreDir = import_node_path42.default.join(root, "cadre");
   const force = asBoolean(rawArgs.force, false);
   const missingPayload = [
     ...!isRecord(rawArgs.product) ? ["product"] : [],
@@ -9358,41 +9970,41 @@ function workflowSetup(root, args = {}) {
   const written = [];
   const skipped = [];
   const writeText = (relativePath, text) => {
-    const file = import_node_path40.default.join(cadreDir, relativePath);
+    const file = import_node_path42.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path40.default.relative(root, file));
+      skipped.push(import_node_path42.default.relative(root, file));
       return;
     }
-    import_node_fs21.default.mkdirSync(import_node_path40.default.dirname(file), { recursive: true });
-    import_node_fs21.default.writeFileSync(file, text);
-    written.push(import_node_path40.default.relative(root, file));
+    import_node_fs22.default.mkdirSync(import_node_path42.default.dirname(file), { recursive: true });
+    import_node_fs22.default.writeFileSync(file, text);
+    written.push(import_node_path42.default.relative(root, file));
   };
   const writeSetupJson = (relativePath, value) => {
-    const file = import_node_path40.default.join(cadreDir, relativePath);
+    const file = import_node_path42.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path40.default.relative(root, file));
+      skipped.push(import_node_path42.default.relative(root, file));
       return;
     }
-    import_node_fs21.default.mkdirSync(import_node_path40.default.dirname(file), { recursive: true });
+    import_node_fs22.default.mkdirSync(import_node_path42.default.dirname(file), { recursive: true });
     writeJson(file, value);
-    written.push(import_node_path40.default.relative(root, file));
+    written.push(import_node_path42.default.relative(root, file));
   };
   const writeSetupJsonlEntry = (relativePath, value) => {
-    const file = import_node_path40.default.join(cadreDir, relativePath);
+    const file = import_node_path42.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path40.default.relative(root, file));
+      skipped.push(import_node_path42.default.relative(root, file));
       return;
     }
     appendJsonl(file, value);
-    written.push(import_node_path40.default.relative(root, file));
+    written.push(import_node_path42.default.relative(root, file));
   };
   const writeProjectDoc = (relativePath, kind, value, title) => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
     writeSetupJson(jsonPath, value);
     writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
   };
-  import_node_fs21.default.mkdirSync(import_node_path40.default.join(cadreDir, "tracks"), { recursive: true });
-  import_node_fs21.default.mkdirSync(import_node_path40.default.join(cadreDir, "archive"), { recursive: true });
+  import_node_fs22.default.mkdirSync(import_node_path42.default.join(cadreDir, "tracks"), { recursive: true });
+  import_node_fs22.default.mkdirSync(import_node_path42.default.join(cadreDir, "archive"), { recursive: true });
   const nativeState = ensureNativeState(root);
   const nativeIgnorePath = asOptionalString(nativeState.ignore_path);
   if (nativeIgnorePath) written.push(nativeIgnorePath);
@@ -9544,7 +10156,7 @@ function workflowSetup(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-ship-land.ts
-var import_node_path41 = __toESM(require("node:path"));
+var import_node_path43 = __toESM(require("node:path"));
 function providerActionKind(workflow, provider) {
   if (provider === "gitlab") return workflow === "land" ? "open_merge_request_group" : "open_merge_request";
   return workflow === "land" ? "open_pull_request_group" : "open_pull_request";
@@ -9623,7 +10235,7 @@ function publicationLedger(root, workflow, track, args, data) {
     continuation_token: asOptionalString(data.continuation_token) || null,
     ...data
   };
-  const file = import_node_path41.default.join(root, "cadre", "operations", "publication.jsonl");
+  const file = import_node_path43.default.join(root, "cadre", "operations", "publication.jsonl");
   appendJsonl(file, entry);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
@@ -9631,12 +10243,12 @@ function publicationLedger(root, workflow, track, args, data) {
     subject: `publish ${track.track_id}`,
     before,
     files: [
-      import_node_path41.default.relative(root, file)
+      import_node_path43.default.relative(root, file)
     ],
     trackId: track.track_id,
     note: entry
   });
-  return { ok: controlCommit.ok !== false, path: import_node_path41.default.relative(root, file), entry, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, path: import_node_path43.default.relative(root, file), entry, control_commit: controlCommit };
 }
 function runPublicationGit(root, workflow, track, args, gitActions, providerActions) {
   const remote = asOptionalString(args.remote) || "origin";
@@ -9806,6 +10418,29 @@ function workflowPacket(root, args = {}) {
         return workflowReview(root, args);
       case "validate":
         return workflowValidate(root, args);
+      case "debug": {
+        const summary = workflowSummary(root, "debug", args);
+        return {
+          ...summary,
+          ok: true,
+          dry_run: true,
+          phase_state: args.execute === true ? "ready_for_snapshot" : "ready",
+          dap_status: dapStatus(root, args),
+          dap_setup: dapSetup(root, { ...args, execute: false }),
+          snapshot_packet: {
+            tool: "cadre_intel",
+            arguments: {
+              root,
+              action: "dap_snapshot",
+              trackId: args.trackId || args.track_id,
+              config: args.config,
+              configurationId: args.configurationId || args.configuration_id || args.id,
+              async: args.async === true,
+              execute: args.execute === true
+            }
+          }
+        };
+      }
       case "archive":
         return workflowArchive(root, args);
       case "handoff":
@@ -9946,6 +10581,9 @@ function workflowPacket(root, args = {}) {
   claimTrack,
   collisionScan,
   completeTask,
+  dapSetup,
+  dapSnapshot,
+  dapStatus,
   dependencyGraph,
   doctor,
   ensureNativeState,

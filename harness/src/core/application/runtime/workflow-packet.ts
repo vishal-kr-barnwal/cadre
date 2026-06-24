@@ -28,6 +28,7 @@ import { workflowRelease, workflowRevise } from "./workflow-release-revise";
 import { markdownPayloadError, shapeWorkflowResponse, withSharedControlPlaneSync, workflowSummary } from "./workflow-response";
 import { workflowSetup } from "./workflow-setup";
 import { workflowLand, workflowShip } from "./workflow-ship-land";
+import { dapSetup, dapStatus } from "../../../dap/config";
 
 export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
@@ -69,6 +70,30 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
       return workflowReview(root, args);
     case "validate":
       return workflowValidate(root, args);
+    case "debug":
+      {
+        const summary = workflowSummary(root, "debug", args);
+        return {
+          ...summary,
+          ok: true,
+          dry_run: true,
+          phase_state: args.execute === true ? "ready_for_snapshot" : "ready",
+          dap_status: dapStatus(root, args),
+          dap_setup: dapSetup(root, { ...args, execute: false }),
+          snapshot_packet: {
+            tool: "cadre_intel",
+            arguments: {
+              root,
+              action: "dap_snapshot",
+              trackId: args.trackId || args.track_id,
+              config: args.config,
+              configurationId: args.configurationId || args.configuration_id || args.id,
+              async: args.async === true,
+              execute: args.execute === true,
+            },
+          },
+        };
+      }
     case "archive":
       return workflowArchive(root, args);
     case "handoff":

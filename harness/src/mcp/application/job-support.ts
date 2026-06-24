@@ -9,6 +9,7 @@ export function jobTypeForPacket(name: string, args: RuntimeArgs): string | null
   if (name === "cadre_review" && args.action === "machine_gate") return "machine_gate";
   if (name === "cadre_intel" && args.action === "lsp_review") return "lsp_review";
   if (name === "cadre_intel" && args.action === "lsp_impact") return "lsp_impact";
+  if (name === "cadre_intel" && args.action === "dap_snapshot") return "dap_snapshot";
   return args.type || null;
 }
 

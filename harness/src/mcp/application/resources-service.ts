@@ -160,6 +160,7 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
   else if (resource.base === "cadre://repo-map") value = deps.core.repoMap(root, resource.symbol ? { symbol: resource.symbol } : {});
   else if (resource.base === "cadre://workspace-diagnostics") value = deps.core.workspaceDiagnostics(root);
   else if (resource.base === "cadre://lsp-status") value = { ok: true, status: deps.core.lspConfigStatus(root), setup: deps.core.lspSetup(root, { execute: false }) };
+  else if (resource.base === "cadre://dap-status") value = { ok: true, status: deps.core.dapStatus(root, normalizedResource), setup: deps.core.dapSetup(root, { ...normalizedResource, execute: false }) };
   else if (resource.base === "cadre://repo-topology") value = { ok: true, root, topology: deps.core.loadTopology(root) };
   else if (resource.base === "cadre://ship-plan") value = deps.core.workflowPacket(root, { workflow: "ship", trackId: resource.trackId || undefined });
   else if (resource.base === "cadre://land-plan") value = deps.core.workflowPacket(root, { workflow: "land", trackId: resource.trackId || undefined });

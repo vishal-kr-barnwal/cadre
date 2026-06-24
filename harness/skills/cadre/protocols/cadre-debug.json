@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "schema": "cadre.protocol.v1",
+  "id": "cadre-debug",
+  "description": "Run a bounded assisted debugging snapshot through Debug Adapter Protocol",
+  "workflow": "debug",
+  "markdownUse": "human_projection_only",
+  "preconditions": [
+    {
+      "tool": "cadre_project",
+      "arguments": {
+        "action": "ping"
+      },
+      "requirement": "Cadre MCP must be available"
+    },
+    {
+      "requirement": "Every project-scoped packet call includes root"
+    },
+    {
+      "requirement": "If a required packet returns ok:false, halt and report the packet error"
+    }
+  ],
+  "packetFlow": [
+    {
+      "step": 1,
+      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
+    },
+    {
+      "step": 2,
+      "instruction": "Call `cadre_intel` with `action: \"dap_status\"` to inspect `cadre/dap.json`, configured adapters, missing commands, and conservative setup recommendations."
+    },
+    {
+      "step": 3,
+      "instruction": "If no suitable adapter/configuration exists, call `cadre_intel` with `action: \"dap_setup\"` for a dry-run. Only write `cadre/dap.json` with `execute:true` when the user approves the proposed adapter entries."
+    },
+    {
+      "step": 4,
+      "instruction": "Call `cadre_workflow` with `workflow: \"debug\"` for a workflow-level dry-run summary, or with `execute:true` to run the bounded DAP snapshot. Use `async:true` for long-running launches."
+    },
+    {
+      "step": 5,
+      "instruction": "For direct code-intelligence use, call `cadre_intel` with `action: \"dap_snapshot\"`, the selected configuration id or inline configuration, optional breakpoints, and timeout limits."
+    },
+    {
+      "step": 6,
+      "instruction": "Summarize the stopped/terminated state, stack frames, variables, output tail, missing adapters, and next implementation or review packet. Do not manually edit Cadre state from debugger output."
+    }
+  ],
+  "confirmation": {
+    "requiredForMutation": true,
+    "dryRunFirst": true,
+    "executeArgument": "execute",
+    "humanConfirmationArgument": "humanConfirmed"
+  },
+  "forbiddenActions": [
+    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
+    "Do not read or write Markdown projections as canonical state",
+    "Do not manually run debugger adapters to mutate Cadre state; use `cadre_intel` or `cadre_workflow` packets"
+  ],
+  "responseSummary": [
+    "packet ok/error state",
+    "DAP adapter/configuration readiness",
+    "breakpoints and stopped/terminated snapshot",
+    "stack frames, variables, and output tail",
+    "changed canonical JSON/JSONL artifacts",
+    "generated human projections when relevant",
+    "warnings, missing adapter commands, and next recommended packet"
+  ],
+  "references": [
+    "mcp-contract"
+  ]
+}

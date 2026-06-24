@@ -10,7 +10,7 @@
       "project has cadre/",
       "user mentions specs, plans, tracks, or context-driven development",
       "user asks for cadre-* workflow",
-      "user asks about Cadre project status, track management, review, ship, land, release, archive, setup, or artifact sync",
+      "user asks about Cadre project status, track management, debugging, review, ship, land, release, archive, setup, or artifact sync",
       "project is a polyrepo control repo with cadre/repos.json"
     ],
     "requiredRuntime": "Cadre MCP",
@@ -69,6 +69,10 @@
     "implement": {
       "intent": "Start or resume implementation",
       "protocol": "cadre://workflow-protocol?workflow=implement"
+    },
+    "debug": {
+      "intent": "Run assisted DAP debugging snapshot",
+      "protocol": "cadre://workflow-protocol?workflow=debug"
     },
     "status": {
       "intent": "Status, team board, or fleet board",
@@ -157,7 +161,7 @@
     "Setup writes native Cadre event, message, formula, and local wisp state through packets",
     "Shared sync is recommended for teams and packet-owned",
     "Hosted provider evidence must come through official provider MCPs and be written back through Cadre packets",
-    "LSP/code-intelligence packets should be used for repo maps, impact checks, review assistance, diagnostics, and test-impact hints"
+    "LSP/code-intelligence packets should be used for repo maps, impact checks, review assistance, diagnostics, test-impact hints, and bounded DAP debugging snapshots"
   ],
   "forbidden": [
     "Do not mutate cadre/, provider state, indexes, worker state, event/message state, or merge/cleanup state outside Cadre packets",

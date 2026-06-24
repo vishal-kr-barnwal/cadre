@@ -5,7 +5,7 @@
   "title": "Cadre MCP Contract",
   "markdownUse": "human_projection_only",
   "rules": [
-    "`cadre_workflow` coordinates setup, newtrack, implement, status, validate,",
+    "`cadre_workflow` coordinates setup, newtrack, implement, debug, status, validate,",
     "`cadre_project` handles ping, doctor, root, topology, tech-stack summary,",
     "`cadre_status` returns live, team, mine, available, collision, fleet, and",
     "`cadre_track` returns bounded track context, parsed plans, integrity checks,",
@@ -13,7 +13,7 @@
     "`cadre_mutate` owns control-plane writes such as claim, heartbeat, status,",
     "`cadre_complete_task` performs the journaled task-completion transaction.",
     "`cadre_review` owns review assistance, machine gates, review gates,",
-    "`cadre_intel` owns repo maps, LSP setup/review/impact, workspace diagnostics,",
+    "`cadre_intel` owns repo maps, LSP setup/review/impact, DAP setup/status/snapshot, workspace diagnostics,",
     "`cadre_artifact` owns canonical artifact catalog/schema/import/validation,",
     "`cadre_project action: integrations` and `cadre://integrations` report",
     "`cadre_job` starts, lists, cancels, and reads async job artifacts.",
@@ -34,6 +34,7 @@
     "`cadre://workspace-diagnostics?root=...`",
     "`cadre://test-impact?root=...&files=...`",
     "`cadre://lsp-status?root=...`",
+    "`cadre://dap-status?root=...`",
     "`cadre://repo-topology?root=...`",
     "`cadre://provider-actions?root=...&trackId=...&workflow=ship|land`",
     "`cadre://ship-plan?root=...&trackId=...`",
@@ -49,7 +50,7 @@
   "sections": [
     {
       "heading": "Primary Packets",
-      "body": "- `cadre_workflow` coordinates setup, newtrack, implement, status, validate,\n  review, ship, land, archive, release, handoff, refresh, flag, revert, revise,\n  and formula flows.\n- `cadre_project` handles ping, doctor, root, topology, tech-stack summary,\n  shared sync, and polyrepo preflight.\n- `cadre_status` returns live, team, mine, available, collision, fleet, and\n  native state summary views.\n- `cadre_track` returns bounded track context, parsed plans, integrity checks,\n  phase schedules, implementation prep, planning evidence, and worktree plans.\n- `cadre_parallel` plans task waves, sets up workers, records worker finish\n  state, merges safe workers, and cleans merged workers.\n- `cadre_mutate` owns control-plane writes such as claim, heartbeat, status,\n  metadata, review, worker state, task result, and index regeneration.\n- `cadre_complete_task` performs the journaled task-completion transaction.\n- `cadre_review` owns review assistance, machine gates, review gates,\n  provider-evidence writes, and PR/MR/CI status normalization.\n- `cadre_intel` owns repo maps, LSP setup/review/impact, workspace diagnostics,\n  test impact, dependency graphs, and daemon lifecycle.\n- `cadre_artifact` owns canonical artifact catalog/schema/import/validation,\n  deterministic projection rendering, diffing, and sync review bundles.\n- `cadre_project action: integrations` and `cadre://integrations` report\n  configured optional MCPs plus LSP coverage in one bounded view.\n- `cadre_job` starts, lists, cancels, and reads async job artifacts."
+      "body": "- `cadre_workflow` coordinates setup, newtrack, implement, debug, status,\n  validate, review, ship, land, archive, release, handoff, refresh, flag,\n  revert, revise, and formula flows.\n- `cadre_project` handles ping, doctor, root, topology, tech-stack summary,\n  shared sync, and polyrepo preflight.\n- `cadre_status` returns live, team, mine, available, collision, fleet, and\n  native state summary views.\n- `cadre_track` returns bounded track context, parsed plans, integrity checks,\n  phase schedules, implementation prep, planning evidence, and worktree plans.\n- `cadre_parallel` plans task waves, sets up workers, records worker finish\n  state, merges safe workers, and cleans merged workers.\n- `cadre_mutate` owns control-plane writes such as claim, heartbeat, status,\n  metadata, review, worker state, task result, and index regeneration.\n- `cadre_complete_task` performs the journaled task-completion transaction.\n- `cadre_review` owns review assistance, machine gates, review gates,\n  provider-evidence writes, and PR/MR/CI status normalization.\n- `cadre_intel` owns repo maps, LSP setup/review/impact, DAP setup/status,\n  bounded DAP snapshots, workspace diagnostics, test impact, dependency graphs,\n  and daemon lifecycle.\n- `cadre_artifact` owns canonical artifact catalog/schema/import/validation,\n  deterministic projection rendering, diffing, and sync review bundles.\n- `cadre_project action: integrations` and `cadre://integrations` report\n  configured optional MCPs plus LSP/DAP coverage in one bounded view.\n- `cadre_job` starts, lists, cancels, and reads async job artifacts."
     },
     {
       "heading": "Response Modes",
@@ -57,7 +58,7 @@
     },
     {
       "heading": "Compact Resources",
-      "body": "Use MCP resources for bounded dashboards:\n\n- `cadre://team-board?root=...`\n- `cadre://fleet-board?root=...`\n- `cadre://my-next-actions?root=...`\n- `cadre://review-queue?root=...`\n- `cadre://handoff-inbox?root=...`\n- `cadre://track-context?root=...&trackId=...`\n- `cadre://review-evidence?root=...&trackId=...`\n- `cadre://track-plan?root=...&trackId=...`\n- `cadre://track-spec?root=...&trackId=...`\n- `cadre://parallel-state?root=...&trackId=...`\n- `cadre://quality-gate?root=...&trackId=...`\n- `cadre://repo-map?root=...`\n- `cadre://integrations?root=...`\n- `cadre://workspace-health?root=...`\n- `cadre://workspace-diagnostics?root=...`\n- `cadre://test-impact?root=...&files=...`\n- `cadre://lsp-status?root=...`\n- `cadre://repo-topology?root=...`\n- `cadre://provider-actions?root=...&trackId=...&workflow=ship|land`\n- `cadre://ship-plan?root=...&trackId=...`\n- `cadre://land-plan?root=...&trackId=...`\n- `cadre://release-plan?root=...`\n- `cadre://job-result?root=...&jobId=...`\n- `cadre://artifact-catalog?root=...`\n- `cadre://artifact-schema?root=...&artifact=...`\n- `cadre://artifact-preview?root=...&artifact=...`\n- `cadre://artifact-sync-plan?root=...&scope=...`\n- `cadre://styleguide-selection?root=...&trackId=...`\n\nResource templates are discoverable through MCP, so clients should prefer\ntemplate discovery when available."
+      "body": "Use MCP resources for bounded dashboards:\n\n- `cadre://team-board?root=...`\n- `cadre://fleet-board?root=...`\n- `cadre://my-next-actions?root=...`\n- `cadre://review-queue?root=...`\n- `cadre://handoff-inbox?root=...`\n- `cadre://track-context?root=...&trackId=...`\n- `cadre://review-evidence?root=...&trackId=...`\n- `cadre://track-plan?root=...&trackId=...`\n- `cadre://track-spec?root=...&trackId=...`\n- `cadre://parallel-state?root=...&trackId=...`\n- `cadre://quality-gate?root=...&trackId=...`\n- `cadre://repo-map?root=...`\n- `cadre://integrations?root=...`\n- `cadre://workspace-health?root=...`\n- `cadre://workspace-diagnostics?root=...`\n- `cadre://test-impact?root=...&files=...`\n- `cadre://lsp-status?root=...`\n- `cadre://dap-status?root=...`\n- `cadre://repo-topology?root=...`\n- `cadre://provider-actions?root=...&trackId=...&workflow=ship|land`\n- `cadre://ship-plan?root=...&trackId=...`\n- `cadre://land-plan?root=...&trackId=...`\n- `cadre://release-plan?root=...`\n- `cadre://job-result?root=...&jobId=...`\n- `cadre://artifact-catalog?root=...`\n- `cadre://artifact-schema?root=...&artifact=...`\n- `cadre://artifact-preview?root=...&artifact=...`\n- `cadre://artifact-sync-plan?root=...&scope=...`\n- `cadre://styleguide-selection?root=...&trackId=...`\n\nResource templates are discoverable through MCP, so clients should prefer\ntemplate discovery when available."
     }
   ]
 }

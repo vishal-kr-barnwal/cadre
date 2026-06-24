@@ -23,7 +23,7 @@ setup -> newtrack -> implement -> review -> ship/land -> archive -> release
 Support workflows can happen along the way:
 
 ```text
-status, validate, handoff, refresh, revise, revert, flag, formula, artifacts
+status, debug, validate, handoff, refresh, revise, revert, flag, formula, artifacts
 ```
 
 ## `cadre-setup`
@@ -107,6 +107,27 @@ product commits, plan progress, metadata, journals, events, and git notes are
 recorded consistently. When no `commitSha` is supplied, Cadre creates the
 task-owned product commit automatically using a Conventional Commit subject,
 then writes a separate control-plane commit for the Cadre state update.
+
+## `cadre-debug`
+
+Runs a bounded assisted debugging snapshot through Debug Adapter Protocol.
+
+The debug workflow:
+
+- Reads `cadre/dap.json` for configured debug adapters and launch/attach
+  configurations.
+- Uses `cadre_intel action: "dap_status"` to report configured adapters,
+  missing commands, and detected languages that need manual adapter setup.
+- Uses `cadre_intel action: "dap_setup"` to recommend conservative adapter
+  entries and optionally write `cadre/dap.json`.
+- Uses `cadre_intel action: "dap_snapshot"` or `cadre_workflow` with
+  `workflow: "debug"` and `execute:true` to launch or attach, set breakpoints,
+  capture stack frames, variables, and output, then disconnect.
+
+DAP support is adapter-driven. Cadre can speak the protocol for any configured
+adapter, but language support depends on the debugger command installed in the
+project. V1 snapshots are evidence for implementation and review; they are not
+an interactive stepping session.
 
 ## `cadre-status`
 

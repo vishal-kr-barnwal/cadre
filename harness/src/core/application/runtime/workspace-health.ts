@@ -11,9 +11,10 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { CoreResult } from "./contracts";
-import { countRecords, summarizeDependencyGraphResult, summarizeLspCoverage, summarizeWorkspaceDiagnosticsResult, workspaceHealthDetailResources } from "./health-summaries";
+import { countRecords, summarizeDapCoverage, summarizeDependencyGraphResult, summarizeLspCoverage, summarizeWorkspaceDiagnosticsResult, workspaceHealthDetailResources } from "./health-summaries";
 import { integrationInventory } from "./integrations";
 import { fileExists, readJson } from "../../infrastructure/runtime/json-store";
+import { dapSetup, dapStatus } from "../../../dap/config";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
 import { lspSetup } from "./setup-infrastructure";
 import { availableWork } from "./status";
@@ -29,6 +30,7 @@ export function workspaceHealth(root: string, args: RuntimeArgs = {}): CoreResul
   const workspace = workspaceDiagnostics(root, { execute: false });
   const dependencyGraphResult = dependencyGraph(root);
   const lspCoverage = summarizeLspCoverage(root, args);
+  const dapCoverage = summarizeDapCoverage(root, args);
   const availableWorkResult = availableWork(root);
   const integrations = integrationInventory(root, { ...args, responseMode: mode });
   const compactIntegrations = {
@@ -70,6 +72,11 @@ export function workspaceHealth(root: string, args: RuntimeArgs = {}): CoreResul
         status: lspConfigStatus(root),
         setup: lspSetup(root, { ...args, execute: false }),
       },
+      dap: {
+        coverage: dapCoverage,
+        status: dapStatus(root, args),
+        setup: dapSetup(root, { ...args, execute: false }),
+      },
       integrations,
       detail_resources: detailResources,
     };
@@ -109,9 +116,14 @@ export function workspaceHealth(root: string, args: RuntimeArgs = {}): CoreResul
       configured: lspCoverage.configured,
     },
     lsp: lspCoverage,
+    dap: dapCoverage,
     integrations: compactIntegrations,
     detail_resources: detailResources,
   };
+}
+
+export function dapConfigStatus(root: string, args: RuntimeArgs = {}): CoreResult {
+  return dapStatus(root, args) as CoreResult;
 }
 
 export function lspConfigStatus(root: string): CoreResult {
@@ -172,6 +184,8 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
   const generatedCheck = path.join(candidateRoot, "scripts", "generate-skills.sh");
   const lspStatus = lspConfigStatus(candidateRoot);
   const lspMissing = asStringArray(lspStatus.missing);
+  const dapConfig = dapStatus(candidateRoot, options);
+  const dapMissing = asStringArray(dapConfig.missing);
   const checks = {
     mcp_runtime: { ok: true, server: "cadre" },
     cadre_project: {
@@ -191,6 +205,7 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
       merge_ours: mergeDriverStatus(candidateRoot),
     },
     lsp: lspStatus,
+    dap: dapConfig,
     provider: providerMcpAvailability(candidateRoot, options),
     generated_bundles: {
       check_available: fileExists(generatedCheck),
@@ -203,6 +218,9 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
   }
   if (checks.lsp.configured && lspMissing.length > 0) {
     warnings.push(`LSP config exists but missing server commands: ${lspMissing.join(", ")}`);
+  }
+  if (dapConfig.configured && dapMissing.length > 0) {
+    warnings.push(`DAP config exists but missing adapter commands: ${dapMissing.join(", ")}`);
   }
   return {
     ok: warnings.length === 0,

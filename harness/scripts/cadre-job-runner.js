@@ -38,7 +38,7 @@ __export(cadre_job_runner_exports, {
   runJobRunner: () => runJobRunner
 });
 module.exports = __toCommonJS(cadre_job_runner_exports);
-var import_node_path20 = __toESM(require("node:path"));
+var import_node_path22 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -397,9 +397,9 @@ var import_node_path17 = __toESM(require("node:path"));
 var import_node_path3 = __toESM(require("node:path"));
 function loadTopology(root) {
   const reposPath = import_node_path3.default.join(root, "cadre", "repos.json");
-  const configPath = import_node_path3.default.join(root, "cadre", "config.json");
+  const configPath2 = import_node_path3.default.join(root, "cadre", "config.json");
   const repos = readJson(reposPath, null);
-  const config = readJson(configPath, {});
+  const config = readJson(configPath2, {});
   const polyrepo = Boolean(repos && repos.mode === "polyrepo");
   return {
     polyrepo,
@@ -2272,13 +2272,441 @@ function renderPlanMarkdown(raw) {
   return normalizedText(parts.join("\n"));
 }
 
-// src/core/application/runtime/task-completion.ts
+// src/dap/config.ts
+var import_node_fs10 = __toESM(require("node:fs"));
+var import_node_path18 = __toESM(require("node:path"));
+function configPath(root, config) {
+  const rel = config || "cadre/dap.json";
+  return import_node_path18.default.isAbsolute(rel) ? rel : import_node_path18.default.join(root, rel);
+}
+function readConfig(file) {
+  try {
+    return asJsonObject(JSON.parse(import_node_fs10.default.readFileSync(file, "utf8")));
+  } catch {
+    return {};
+  }
+}
+function substitute(value, tokens) {
+  if (typeof value === "string") {
+    return Object.entries(tokens).reduce((text, [token, replacement]) => text.split(token).join(replacement), value);
+  }
+  if (Array.isArray(value)) return value.map((entry) => substitute(entry, tokens));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substitute(entry, tokens)]));
+}
+function normalizeBreakpoints(root, raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(asJsonObject).flatMap((entry) => {
+    const file = asOptionalString(entry.file) || asOptionalString(entry.path);
+    const line = asNumber(entry.line);
+    if (!file || line < 1) return [];
+    const abs = import_node_path18.default.isAbsolute(file) ? file : import_node_path18.default.join(root, file);
+    return [{
+      ...entry,
+      file: import_node_path18.default.relative(root, abs).split(import_node_path18.default.sep).join("/"),
+      line
+    }];
+  });
+}
+function normalizeDapSession(root, args = {}) {
+  const file = configPath(root, args.config);
+  const loaded = readConfig(file);
+  const inlineConfiguration = asJsonObject(args.configuration);
+  const configurationId = asOptionalString(args.configurationId || args.configuration_id || args.id);
+  const configurations = Array.isArray(loaded.configurations) ? loaded.configurations.map(asJsonObject) : [];
+  const configuration = Object.keys(inlineConfiguration).length > 0 ? inlineConfiguration : configurations.find((entry) => asOptionalString(entry.id) === configurationId) || configurations[0] || {};
+  if (Object.keys(configuration).length === 0) return { ok: false, error: "DAP configuration is required" };
+  const adapters = Array.isArray(loaded.adapters) ? loaded.adapters.map(asJsonObject) : [];
+  const adapterId = asOptionalString(configuration.adapterId) || asOptionalString(configuration.adapter_id);
+  const inlineAdapter = asJsonObject(configuration.adapter);
+  const adapter = Object.keys(inlineAdapter).length > 0 ? inlineAdapter : adapters.find((entry) => asOptionalString(entry.id) === adapterId) || {};
+  const command = asOptionalString(adapter.command);
+  if (!command) return { ok: false, error: "DAP adapter command is required" };
+  const request = asOptionalString(configuration.request);
+  if (request !== "launch" && request !== "attach") return { ok: false, error: "DAP configuration request must be launch or attach" };
+  const tokens = {
+    "${workspaceFolder}": root,
+    "${root}": root,
+    "${cwd}": root,
+    "${testCommand}": asOptionalString(args.testCommand || args.test_command) || ""
+  };
+  return {
+    adapter: substitute(adapter, tokens),
+    configuration: substitute(configuration, tokens),
+    request,
+    arguments: substitute(configuration.arguments || configuration.args || {}, tokens),
+    breakpoints: normalizeBreakpoints(root, args.breakpoints || configuration.breakpoints),
+    timeoutMs: Math.max(1e3, Math.min(10 * 60 * 1e3, asNumber(args.timeoutMs, 12e4)))
+  };
+}
+function redactDapValue(value) {
+  if (Array.isArray(value)) return value.map(redactDapValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
+    const sensitive = /token|password|secret|credential|apikey|api_key|authorization/i.test(key);
+    return [key, sensitive ? "<redacted>" : redactDapValue(entry)];
+  }));
+}
+
+// src/dap/snapshot.ts
 var import_node_path19 = __toESM(require("node:path"));
 
+// src/dap/client.ts
+var import_node_child_process4 = require("node:child_process");
+
+// src/dap/protocol.ts
+function encodeDapMessage(message) {
+  const body = JSON.stringify(message);
+  return Buffer.from(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
+\r
+${body}`, "utf8");
+}
+var DapMessageBuffer = class {
+  buffer = Buffer.alloc(0);
+  push(chunk) {
+    this.buffer = Buffer.concat([this.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8")]);
+    const messages = [];
+    while (true) {
+      const headerEnd = this.buffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) return messages;
+      const header = this.buffer.slice(0, headerEnd).toString("utf8");
+      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
+      if (!lengthMatch) {
+        this.buffer = this.buffer.slice(headerEnd + 4);
+        continue;
+      }
+      const length = Number(lengthMatch[1]);
+      const bodyStart = headerEnd + 4;
+      const bodyEnd = bodyStart + length;
+      if (this.buffer.length < bodyEnd) return messages;
+      const rawBody = this.buffer.slice(bodyStart, bodyEnd).toString("utf8");
+      this.buffer = this.buffer.slice(bodyEnd);
+      try {
+        messages.push(asJsonObject(JSON.parse(rawBody)));
+      } catch {
+      }
+    }
+  }
+};
+
+// src/dap/client.ts
+var DapClient = class {
+  constructor(options) {
+    this.options = options;
+  }
+  proc = null;
+  nextSeq = 1;
+  pending = /* @__PURE__ */ new Map();
+  waiters = [];
+  reader = new DapMessageBuffer();
+  stderr = "";
+  events = [];
+  outputs = [];
+  start() {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      };
+      this.proc = (0, import_node_child_process4.spawn)(this.options.command, this.options.args || [], {
+        cwd: this.options.cwd,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      this.proc.once("spawn", () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
+      this.proc.once("error", (error) => fail(new Error(`Unable to start DAP adapter ${this.options.command}: ${errorMessage(error)}`)));
+      this.proc.stdout.on("data", (chunk) => this.read(chunk));
+      this.proc.stderr.on("data", (chunk) => {
+        this.stderr = `${this.stderr}${chunk.toString("utf8")}`.slice(-(this.options.outputLimit || 8e3));
+      });
+      this.proc.on("exit", (code, signal) => this.rejectAll(signal ? `DAP adapter exited with signal ${signal}` : `DAP adapter exited with code ${code}`));
+    });
+  }
+  read(chunk) {
+    for (const message of this.reader.push(chunk)) this.handleMessage(message);
+  }
+  handleMessage(message) {
+    if (message.type === "response") {
+      const requestSeq = Number(message.request_seq);
+      const pending = this.pending.get(requestSeq);
+      if (!pending) return;
+      this.pending.delete(requestSeq);
+      clearTimeout(pending.timer);
+      if (message.success === false) {
+        pending.reject(new Error(asOptionalString(message.message) || `${message.command || "request"} failed`));
+      } else {
+        pending.resolve(asJsonObject(message.body));
+      }
+      return;
+    }
+    if (message.type === "event") {
+      this.events.push(message);
+      if (message.event === "output") this.outputs.push(message);
+      this.resolveWaiters(message);
+    }
+  }
+  resolveWaiters(message) {
+    const eventName = asOptionalString(message.event);
+    if (!eventName) return;
+    const ready = this.waiters.filter((waiter) => waiter.events.includes(eventName));
+    this.waiters = this.waiters.filter((waiter) => !waiter.events.includes(eventName));
+    for (const waiter of ready) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(message);
+    }
+  }
+  rejectAll(message) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(message));
+    }
+    this.pending.clear();
+    for (const waiter of this.waiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(null);
+    }
+    this.waiters = [];
+  }
+  request(command, args = {}, timeoutMs = this.options.requestTimeoutMs || 1e4) {
+    if (!this.proc) return Promise.reject(new Error("DAP adapter is not running"));
+    const seq = this.nextSeq++;
+    const message = { seq, type: "request", command, arguments: args };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(seq);
+        reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(seq, { resolve, reject, timer });
+      this.proc?.stdin.write(encodeDapMessage(message));
+    });
+  }
+  waitForAny(events, timeoutMs) {
+    const existing = this.events.find((message) => events.includes(asOptionalString(message.event) || ""));
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((waiter) => waiter.resolve !== resolve);
+        resolve(null);
+      }, timeoutMs);
+      this.waiters.push({ events, resolve, timer });
+    });
+  }
+  stderrTail() {
+    return this.stderr;
+  }
+  async shutdown() {
+    try {
+      await this.request("disconnect", { terminateDebuggee: true, restart: false }, 2e3);
+    } catch {
+    }
+    if (this.proc && !this.proc.killed) this.proc.kill("SIGTERM");
+  }
+};
+
+// src/dap/snapshot.ts
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function redactText(value) {
+  return value.replace(/(token|password|secret|api[_-]?key|authorization)(\s*[=:]\s*)\S+/gi, "$1$2<redacted>").slice(-8e3);
+}
+function outputEvents(client) {
+  return client.outputs.slice(-50).map((event) => {
+    const body = asJsonObject(event.body);
+    return {
+      category: asOptionalString(body.category) || "console",
+      output: redactText(asOptionalString(body.output) || "")
+    };
+  });
+}
+async function requestOptional(client, command, args, timeoutMs = 3e3) {
+  try {
+    return await client.request(command, args, timeoutMs);
+  } catch {
+    return null;
+  }
+}
+async function collectVariables(client, variablesReference, limit) {
+  if (variablesReference <= 0) return [];
+  const result = await requestOptional(client, "variables", { variablesReference, start: 0, count: limit });
+  const variables = Array.isArray(result?.variables) ? result.variables.map(asJsonObject) : [];
+  return variables.slice(0, limit).map((variable) => ({
+    name: asOptionalString(variable.name) || "",
+    type: asOptionalString(variable.type) || null,
+    value: redactText(asOptionalString(variable.value) || ""),
+    variablesReference: asNumber(variable.variablesReference)
+  }));
+}
+async function collectScopes(client, frameId, variableLimit) {
+  const scopesResult = await requestOptional(client, "scopes", { frameId });
+  const scopes = Array.isArray(scopesResult?.scopes) ? scopesResult.scopes.map(asJsonObject) : [];
+  const collected = [];
+  for (const scope of scopes.slice(0, 6)) {
+    const variablesReference = asNumber(scope.variablesReference);
+    collected.push({
+      name: asOptionalString(scope.name) || "scope",
+      expensive: scope.expensive === true,
+      variables: await collectVariables(client, variablesReference, variableLimit)
+    });
+  }
+  return collected;
+}
+async function collectStoppedSnapshot(client, event, args) {
+  const body = asJsonObject(event.body);
+  const frameLimit = Math.max(1, Math.min(50, asNumber(args.limit, 20)));
+  const variableLimit = Math.max(1, Math.min(100, asNumber(args.variableLimit || args.variable_limit, 25)));
+  const threadsResult = await requestOptional(client, "threads", {});
+  const threadIds = asNumber(body.threadId) > 0 ? [asNumber(body.threadId)] : Array.isArray(threadsResult?.threads) ? threadsResult.threads.map(asJsonObject).map((thread) => asNumber(thread.id)).filter(Boolean) : [];
+  const threads = [];
+  for (const threadId of threadIds.slice(0, 8)) {
+    const stack = await requestOptional(client, "stackTrace", { threadId, startFrame: 0, levels: frameLimit });
+    const frames = Array.isArray(stack?.stackFrames) ? stack.stackFrames.map(asJsonObject) : [];
+    const summarizedFrames = [];
+    for (const frame of frames.slice(0, frameLimit)) {
+      const source = asJsonObject(frame.source);
+      const frameId = asNumber(frame.id);
+      summarizedFrames.push({
+        id: frameId,
+        name: asOptionalString(frame.name) || "",
+        file: asOptionalString(source.path) || asOptionalString(source.name) || null,
+        line: asNumber(frame.line),
+        column: asNumber(frame.column),
+        scopes: summarizedFrames.length === 0 ? await collectScopes(client, frameId, variableLimit) : []
+      });
+    }
+    threads.push({ threadId, frames: summarizedFrames });
+  }
+  return {
+    event: "stopped",
+    reason: asOptionalString(body.reason) || null,
+    description: asOptionalString(body.description) || null,
+    thread_id: asNumber(body.threadId) || null,
+    threads
+  };
+}
+async function setBreakpoints(client, root, breakpoints) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const breakpoint of breakpoints) {
+    const file = asOptionalString(breakpoint.file);
+    if (!file) continue;
+    const entries = groups.get(file) || [];
+    entries.push(breakpoint);
+    groups.set(file, entries);
+  }
+  const results = [];
+  for (const [file, entries] of groups.entries()) {
+    const abs = import_node_path19.default.isAbsolute(file) ? file : import_node_path19.default.join(root, file);
+    const response = await requestOptional(client, "setBreakpoints", {
+      source: { path: abs },
+      breakpoints: entries.map((entry) => ({
+        line: asNumber(entry.line),
+        condition: asOptionalString(entry.condition),
+        hitCondition: asOptionalString(entry.hitCondition || entry.hit_condition),
+        logMessage: asOptionalString(entry.logMessage || entry.log_message)
+      }))
+    });
+    results.push({
+      file,
+      breakpoints: Array.isArray(response?.breakpoints) ? response.breakpoints.map(asJsonObject) : []
+    });
+  }
+  return results;
+}
+async function dapSnapshot(root, args = {}) {
+  const normalized = normalizeDapSession(root, args);
+  if ("ok" in normalized && normalized.ok === false) return normalized;
+  const session = normalized;
+  const command = asOptionalString(session.adapter.command) || "";
+  const adapterArgs = asStringArray(session.adapter.args);
+  const client = new DapClient({
+    command,
+    args: adapterArgs,
+    cwd: root,
+    requestTimeoutMs: asNumber(session.adapter.requestTimeoutMs, 1e4),
+    outputLimit: 8e3
+  });
+  let launchResponse = null;
+  let launchError = null;
+  const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    await client.start();
+    const initialize = await client.request("initialize", {
+      adapterID: asOptionalString(session.adapter.id) || command,
+      clientID: "cadre",
+      clientName: "Cadre",
+      pathFormat: "path",
+      linesStartAt1: true,
+      columnsStartAt1: true,
+      supportsVariableType: true,
+      supportsVariablePaging: true
+    });
+    const initialized = client.waitForAny(["initialized"], Math.min(5e3, session.timeoutMs));
+    const launch = client.request(session.request, session.arguments, session.timeoutMs).then((body) => {
+      launchResponse = body;
+    }).catch((error) => {
+      launchError = errorMessage(error);
+    });
+    await initialized;
+    const breakpointResults = await setBreakpoints(client, root, session.breakpoints);
+    await requestOptional(client, "configurationDone", {}, 3e3);
+    await Promise.race([launch, delay(250)]);
+    if (launchError) throw new Error(launchError);
+    const finalEvent = await client.waitForAny(["stopped", "terminated", "exited"], session.timeoutMs);
+    const snapshot = finalEvent?.event === "stopped" ? await collectStoppedSnapshot(client, finalEvent, args) : {
+      event: asOptionalString(finalEvent?.event) || "timeout",
+      body: finalEvent ? asJsonObject(redactDapValue(asJsonObject(finalEvent.body))) : null
+    };
+    return {
+      ok: finalEvent !== null,
+      root,
+      started_at: startedAt,
+      finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+      adapter: {
+        id: asOptionalString(session.adapter.id) || command,
+        command,
+        args: adapterArgs
+      },
+      request: session.request,
+      configuration: redactDapValue(session.configuration),
+      initialize,
+      launch_response: launchResponse,
+      breakpoints: breakpointResults,
+      snapshot,
+      output: outputEvents(client),
+      adapter_stderr_tail: redactText(client.stderrTail()),
+      error: finalEvent ? void 0 : `DAP snapshot timed out after ${session.timeoutMs}ms`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      root,
+      started_at: startedAt,
+      finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+      adapter: { command, args: adapterArgs },
+      configuration: redactDapValue(session.configuration),
+      output: outputEvents(client),
+      adapter_stderr_tail: redactText(client.stderrTail()),
+      error: errorMessage(error)
+    };
+  } finally {
+    await client.shutdown();
+  }
+}
+
+// src/core/application/runtime/task-completion.ts
+var import_node_path21 = __toESM(require("node:path"));
+
 // src/core/application/runtime/manual-verification.ts
-var import_node_path18 = __toESM(require("node:path"));
+var import_node_path20 = __toESM(require("node:path"));
 function completionJournalPath(track) {
-  return import_node_path18.default.join(track.dir, "completion_journal.json");
+  return import_node_path20.default.join(track.dir, "completion_journal.json");
 }
 function readCompletionJournal(track) {
   const value = readJson(completionJournalPath(track), { entries: {} });
@@ -2298,7 +2726,7 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
-  appendJsonl(import_node_path18.default.join(track.dir, "completion_journal.jsonl"), {
+  appendJsonl(import_node_path20.default.join(track.dir, "completion_journal.jsonl"), {
     key,
     recorded_at: journal.updated_at,
     entry: journal.entries[key]
@@ -2576,7 +3004,7 @@ function completeTaskInner(root, args = {}) {
       commitSha: resolvedCommitSha || args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path19.default.relative(root, workingRoot.path) || ".",
+      workingRoot: import_node_path21.default.relative(root, workingRoot.path) || ".",
       ...lastTestRun ? { lastTestRun } : {},
       ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
@@ -2629,11 +3057,11 @@ function completeTaskInner(root, args = {}) {
     subject: `record ${track.track_id} phase ${phaseIndex} task ${taskIndex}`,
     before: controlBefore,
     files: [
-      import_node_path19.default.relative(root, track.metadata_path),
-      import_node_path19.default.relative(root, track.plan_path),
-      import_node_path19.default.relative(root, trackPlanJsonPath(track)),
-      import_node_path19.default.relative(root, completionJournalPath(track)),
-      import_node_path19.default.relative(root, `${completionJournalPath(track)}l`),
+      import_node_path21.default.relative(root, track.metadata_path),
+      import_node_path21.default.relative(root, track.plan_path),
+      import_node_path21.default.relative(root, trackPlanJsonPath(track)),
+      import_node_path21.default.relative(root, completionJournalPath(track)),
+      import_node_path21.default.relative(root, `${completionJournalPath(track)}l`),
       "cadre/events.jsonl"
     ],
     trackId: track.track_id,
@@ -2674,7 +3102,7 @@ function readStdin() {
     process.stdin.on("error", reject);
   });
 }
-function runJob(payload) {
+async function runJob(payload) {
   const root = payload.root || process.cwd();
   const args = asJsonObject(payload.args);
   switch (asOptionalString(payload.type)) {
@@ -2690,6 +3118,8 @@ function runJob(payload) {
       return lspReview(root, args);
     case "lsp_impact":
       return lspImpact(root, args);
+    case "dap_snapshot":
+      return dapSnapshot(root, args);
     default:
       return { ok: false, error: `Unsupported job type: ${payload.type}` };
   }
@@ -2697,11 +3127,11 @@ function runJob(payload) {
 async function runJobRunner() {
   const input = await readStdin();
   const payload = asJsonObject(JSON.parse(input || "{}"));
-  const result = runJob(payload);
+  const result = await runJob(payload);
   process.stdout.write(`${JSON.stringify(result, null, 2)}
 `);
 }
-if (["cadre-job-runner.js", "cadre-job-runner.ts"].includes(import_node_path20.default.basename(process.argv[1] || ""))) {
+if (["cadre-job-runner.js", "cadre-job-runner.ts"].includes(import_node_path22.default.basename(process.argv[1] || ""))) {
   runJobRunner().catch((error) => {
     process.stdout.write(`${JSON.stringify({ ok: false, error: errorMessage(error), stack: error instanceof Error ? error.stack : void 0 }, null, 2)}
 `);

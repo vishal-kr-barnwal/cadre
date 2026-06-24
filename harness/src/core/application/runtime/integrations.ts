@@ -11,9 +11,10 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { CoreResult } from "./contracts";
-import { summarizeLspCoverage, workspaceHealthDetailResources } from "./health-summaries";
+import { summarizeDapCoverage, summarizeLspCoverage, workspaceHealthDetailResources } from "./health-summaries";
 import { mcpReadiness } from "./mcp-readiness";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
+import { dapSetup, dapStatus } from "../../../dap/config";
 import { lspSetup } from "./setup-infrastructure";
 import { workflowResponseMode } from "./workflow-response";
 import { lspConfigStatus } from "./workspace-health";
@@ -107,6 +108,7 @@ export function integrationInventory(root: string, args: RuntimeArgs = {}): Core
   const provider = providerMcpAvailability(root, args);
   const readiness = mcpReadiness(root, args);
   const lsp = summarizeLspCoverage(root, args);
+  const dap = summarizeDapCoverage(root, args);
   const optionalMcps = [
     integrationStatus(root, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
     integrationStatus(root, args, "issue_tracker", "Issue tracker", ["issue_tracker", "issueTracker", "jira", "jira_mcp", "jiraMcp", "linear", "linear_mcp", "linearMcp"], mode),
@@ -129,6 +131,11 @@ export function integrationInventory(root: string, args: RuntimeArgs = {}): Core
     lsp_covered_count: asOptionalNumber(lsp.covered_count),
     lsp_missing_count: asOptionalNumber(lsp.missing_count),
     lsp_coverage: asOptionalNumber(lsp.coverage),
+    dap_configured_count: asOptionalNumber(dap.configured_count),
+    dap_recommended_count: asOptionalNumber(dap.recommended_count),
+    dap_covered_count: asOptionalNumber(dap.covered_count),
+    dap_missing_count: asOptionalNumber(dap.missing_count),
+    dap_coverage: asOptionalNumber(dap.coverage),
   };
   if (mode === "detail") {
     return {
@@ -143,6 +150,11 @@ export function integrationInventory(root: string, args: RuntimeArgs = {}): Core
         coverage: lsp,
         status: lspConfigStatus(root),
         setup: lspSetup(root, { ...args, execute: false }),
+      },
+      dap: {
+        coverage: dap,
+        status: dapStatus(root, args),
+        setup: dapSetup(root, { ...args, execute: false }),
       },
       summary,
       detail_resources: detailResources,
@@ -176,6 +188,7 @@ export function integrationInventory(root: string, args: RuntimeArgs = {}): Core
       source: entry.source,
     })),
     lsp,
+    dap,
     summary,
     detail_resources: detailResources,
   };

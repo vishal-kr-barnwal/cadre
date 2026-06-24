@@ -178,6 +178,61 @@ async function waitForJob(request, jobId) {
   throw new Error(`Timed out waiting for ${jobId}`);
 }
 
+function fakeDapAdapterSource() {
+  return `
+let seq = 1;
+let buffer = Buffer.alloc(0);
+function send(message) {
+  message.seq = seq++;
+  const body = JSON.stringify(message);
+  process.stdout.write("Content-Length: " + Buffer.byteLength(body) + "\\r\\n\\r\\n" + body);
+}
+function response(request, body = {}) {
+  send({ type: "response", request_seq: request.seq, command: request.command, success: true, body });
+}
+function event(name, body = {}) {
+  send({ type: "event", event: name, body });
+}
+function handle(request) {
+  if (request.command === "initialize") response(request, { supportsConfigurationDoneRequest: true });
+  else if (request.command === "launch" || request.command === "attach") {
+    response(request, {});
+    event("initialized", {});
+  } else if (request.command === "setBreakpoints") {
+    const bps = (request.arguments.breakpoints || []).map((bp, index) => ({ id: index + 1, verified: true, line: bp.line }));
+    response(request, { breakpoints: bps });
+  } else if (request.command === "configurationDone") {
+    response(request, {});
+    setTimeout(() => event("stopped", { reason: "breakpoint", threadId: 1, allThreadsStopped: true }), 10);
+  } else if (request.command === "threads") response(request, { threads: [{ id: 1, name: "main" }] });
+  else if (request.command === "stackTrace") response(request, { stackFrames: [{ id: 11, name: "main", source: { path: process.cwd() + "/src/app.py" }, line: 2, column: 1 }] });
+  else if (request.command === "scopes") response(request, { scopes: [{ name: "locals", variablesReference: 21, expensive: false }] });
+  else if (request.command === "variables") response(request, { variables: [{ name: "result", value: "42", variablesReference: 0 }, { name: "password", value: "password=opensesame", variablesReference: 0 }] });
+  else if (request.command === "disconnect") {
+    response(request, {});
+    event("terminated", {});
+    setTimeout(() => process.exit(0), 5);
+  } else response(request, {});
+}
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (true) {
+    const headerEnd = buffer.indexOf("\\r\\n\\r\\n");
+    if (headerEnd === -1) return;
+    const header = buffer.slice(0, headerEnd).toString("utf8");
+    const match = header.match(/Content-Length:\\s*(\\d+)/i);
+    if (!match) return;
+    const start = headerEnd + 4;
+    const end = start + Number(match[1]);
+    if (buffer.length < end) return;
+    const body = buffer.slice(start, end).toString("utf8");
+    buffer = buffer.slice(end);
+    handle(JSON.parse(body));
+  }
+});
+`;
+}
+
 test("LSP setup JSON and daemon status/shutdown smoke", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-smoke-"));
   const serverPath = path.join(__dirname, "cadre-server.js");
@@ -393,12 +448,14 @@ test("MCP root resolution rejects harness skill directories without project stat
       }
     }
     const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
-    assert.ok(fieldsFor("cadre_workflow").length <= 30, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
-    assert.ok(advertisedFieldCount <= 150, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
+    assert.ok(fieldsFor("cadre_workflow").length <= 40, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
+    assert.ok(advertisedFieldCount <= 165, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
     const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
-    for (const action of ["setup", "newtrack", "implement", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
+    for (const action of ["setup", "newtrack", "implement", "debug", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
       assert.ok(workflowActions.includes(action), `expected ${action} workflow`);
     }
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "configurationId"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "breakpoints"), true);
     const artifactTool = tools.tools.find((tool) => tool.name === "cadre_artifact");
     const artifactActions = artifactTool.inputSchema.properties.action.enum;
     for (const action of ["catalog", "schema", "validate", "render", "diff", "sync"]) {
@@ -443,6 +500,9 @@ test("MCP root resolution rejects harness skill directories without project stat
     const intelActions = intelTool.inputSchema.properties.action.enum;
     assert.ok(intelActions.includes("lsp_setup"));
     assert.ok(intelActions.includes("workspace_diagnostics"));
+    assert.ok(intelActions.includes("dap_setup"));
+    assert.ok(intelActions.includes("dap_status"));
+    assert.ok(intelActions.includes("dap_snapshot"));
     assert.ok(intelActions.includes("test_impact"));
     assert.ok(intelActions.includes("dependency_graph"));
     assert.ok(intelActions.includes("mcp_readiness"));
@@ -464,6 +524,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://review-evidence"));
     assert.ok(uris.includes("cadre://workspace-diagnostics"));
     assert.ok(uris.includes("cadre://lsp-status"));
+    assert.ok(uris.includes("cadre://dap-status"));
     assert.ok(uris.includes("cadre://repo-topology"));
     assert.ok(uris.includes("cadre://provider-actions"));
     assert.ok(uris.includes("cadre://ship-plan"));
@@ -504,6 +565,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://job-result").required, ["root", "jobId"]);
     assert.deepEqual(templateByUri.get("cadre://test-impact").required, ["root"]);
     assert.deepEqual(templateByUri.get("cadre://test-impact").requiredAny, [["files"], ["base", "head"]]);
+    assert.deepEqual(templateByUri.get("cadre://dap-status").required, ["root"]);
     assert.deepEqual(templateByUri.get("cadre://artifact-preview").required, ["root", "artifact"]);
     assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
     assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
@@ -775,6 +837,101 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
       name: "cadre_intel",
       arguments: { action: "lsp_daemon_shutdown" },
     });
+  } finally {
+    server.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-dap-test-"));
+  const { server, request } = startServer();
+  try {
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    write(path.join(root, "src", "app.py"), "def main():\n    return 42\n");
+    const adapterPath = path.join(root, "fake-dap-adapter.js");
+    write(adapterPath, fakeDapAdapterSource());
+    write(path.join(root, "cadre", "dap.json"), JSON.stringify({
+      version: 1,
+      schema: "cadre.dap.v1",
+      adapters: [{
+        id: "fake",
+        label: "Fake DAP",
+        command: process.execPath,
+        args: [adapterPath],
+        languages: ["python"],
+      }],
+      configurations: [{
+        id: "fake-launch",
+        adapterId: "fake",
+        request: "launch",
+        name: "Fake launch",
+        arguments: { program: "${workspaceFolder}/src/app.py", token: "secret-value" },
+      }],
+    }, null, 2));
+
+    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
+
+    const setup = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { root, action: "dap_setup" },
+    }));
+    assert.equal(setup.data.ok, true);
+    assert.equal(setup.data.dry_run, true);
+    assert.ok(setup.data.recommended.some((entry) => entry.id === "python-debugpy"));
+
+    const status = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { root, action: "dap_status" },
+    }));
+    assert.equal(status.data.configured, true);
+    assert.equal(status.data.adapters[0].available, true);
+
+    const dryRun = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { root, workflow: "debug", configurationId: "fake-launch" },
+    }));
+    assert.equal(dryRun.data.ok, true);
+    assert.equal(dryRun.data.snapshot_packet.tool, "cadre_intel");
+
+    const snapshotArgs = {
+      root,
+      action: "dap_snapshot",
+      configurationId: "fake-launch",
+      breakpoints: [{ file: "src/app.py", line: 2 }],
+      timeoutMs: 5000,
+    };
+    const snapshot = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: snapshotArgs,
+    }));
+    assert.equal(snapshot.data.ok, true);
+    assert.equal(snapshot.data.snapshot.event, "stopped");
+    assert.equal(snapshot.data.breakpoints[0].breakpoints[0].verified, true);
+    assert.equal(snapshot.data.configuration.arguments.token, "<redacted>");
+    assert.match(snapshot.data.snapshot.threads[0].frames[0].scopes[0].variables[1].value, /<redacted>/);
+
+    const workflowSnapshot = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { ...snapshotArgs, workflow: "debug", action: undefined, execute: true },
+    }));
+    assert.equal(workflowSnapshot.data.ok, true);
+    assert.equal(workflowSnapshot.data.snapshot.event, "stopped");
+
+    const asyncStart = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { ...snapshotArgs, workflow: "debug", action: undefined, execute: true, async: true },
+    }));
+    const jobId = asyncStart.data.job.id;
+    const completed = await waitForJob(request, jobId);
+    assert.equal(completed.ok, true);
+    assert.equal(completed.data.result.snapshot.event, "stopped");
+
+    const resource = await request("resources/read", {
+      uri: `cadre://dap-status?root=${encodeURIComponent(root)}`,
+    });
+    const parsedResource = JSON.parse(resource.contents[0].text);
+    assert.equal(parsedResource.data.status.configured, true);
   } finally {
     server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });

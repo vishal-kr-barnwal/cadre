@@ -8,13 +8,13 @@
     "`cadre_workflow` with reviewable dry-runs reports review artifacts and a",
     "`cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes",
     "`cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including",
-    "`cadre_intel` owns LSP setup, warm review, cold review, and daemon status",
+    "`cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks",
     "`cadre_mutate` owns derived index refreshes and other Cadre state mutations."
   ],
   "sections": [
     {
       "heading": "Packet Ownership",
-      "body": "- `cadre_workflow` with reviewable dry-runs reports review artifacts and a\n  token-safe `review_bundle` with full proposed files on disk. Setup, new-track,\n  revise, refresh document updates, release artifacts, and handoff artifacts use\n  this pattern.\n- `cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes\n  the setup scaffold from bundled templates and confirmed setup payload.\n- `cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including\n  template-backed track learnings.\n- `cadre_intel` owns LSP setup, warm review, cold review, and daemon status\n  checks.\n- `cadre_mutate` owns derived index refreshes and other Cadre state mutations."
+      "body": "- `cadre_workflow` with reviewable dry-runs reports review artifacts and a\n  token-safe `review_bundle` with full proposed files on disk. Setup, new-track,\n  revise, refresh document updates, release artifacts, and handoff artifacts use\n  this pattern.\n- `cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes\n  the setup scaffold from bundled templates and confirmed setup payload.\n- `cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including\n  template-backed track learnings.\n- `cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks.\n- `cadre_mutate` owns derived index refreshes and other Cadre state mutations."
     },
     {
       "heading": "Style Guides",

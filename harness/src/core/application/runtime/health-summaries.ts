@@ -11,6 +11,7 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { CoreResult } from "./contracts";
+import { dapSetup, dapStatus } from "../../../dap/config";
 import { lspSetup } from "./setup-infrastructure";
 import { lspConfigStatus } from "./workspace-health";
 
@@ -26,6 +27,7 @@ export function workspaceHealthDetailResources(root: string): string[] {
     `cadre://repo-topology?root=${encodedRoot}`,
     `cadre://repo-map?root=${encodedRoot}`,
     `cadre://lsp-status?root=${encodedRoot}`,
+    `cadre://dap-status?root=${encodedRoot}`,
     `cadre://integrations?root=${encodedRoot}`,
     `cadre://mcp-readiness?root=${encodedRoot}`,
   ];
@@ -86,6 +88,36 @@ export function summarizeLspCoverage(root: string, args: RuntimeArgs = {}): Core
     recommended_count: recommended.length,
     covered_count: covered.length,
     missing_count: missing.length,
+    coverage: recommended.length > 0 ? Math.round((covered.length / recommended.length) * 100) : null,
+    configured: configured.slice(0, 10),
+    recommended: recommended.slice(0, 10),
+    missing: missing.slice(0, 10),
+  };
+}
+
+export function summarizeDapCoverage(root: string, args: RuntimeArgs = {}): CoreResult {
+  const status = asJsonObject(dapStatus(root, args));
+  const setup = asJsonObject(dapSetup(root, { ...args, execute: false }));
+  const configured = Array.isArray(status.adapters)
+    ? status.adapters
+      .map((adapter) => asJsonObject(adapter).id || null)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+  const recommended = Array.isArray(setup.recommended)
+    ? setup.recommended
+      .map((entry) => asJsonObject(entry).id || null)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+  const missing = recommended.filter((id) => !configured.includes(id));
+  const covered = recommended.filter((id) => configured.includes(id));
+  return {
+    ok: status.ok !== false && setup.ok !== false,
+    status_configured: status.configured === true,
+    configured_count: configured.length,
+    recommended_count: recommended.length,
+    covered_count: covered.length,
+    missing_count: missing.length,
+    manual_count: countRecords(setup.manual),
     coverage: recommended.length > 0 ? Math.round((covered.length / recommended.length) * 100) : null,
     configured: configured.slice(0, 10),
     recommended: recommended.slice(0, 10),
