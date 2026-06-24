@@ -11775,7 +11775,7 @@ function props(names, actionEnum, workflowEnum) {
   return picked;
 }
 function trackIdAnyOf() {
-  return [{ required: ["trackId"] }, { required: ["track_id"] }];
+  return [{ required: ["trackId"] }];
 }
 function requireTrackForActions(actions) {
   return {
@@ -11858,7 +11858,7 @@ var TOOLS = [
   packetSchema({
     name: "cadre_resource",
     description: "Tool fallback for Cadre MCP resources/read. Prefer resources when available; use this when a client exposes tools more reliably than resources.",
-    fields: ["uri", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["uri"],
     required: ["uri"]
   }),
   packetSchema({
@@ -11866,7 +11866,7 @@ var TOOLS = [
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: [...WORKFLOWS, ...FORMULA_ACTIONS],
-    fields: ["workflow", "action", "operation", "id", "formulaId", "formula_id", "variables", "vars", "wispId", "wisp_id", "stepId", "step_id", "stepIndex", "step_index", "execute", "humanConfirmed", "human_confirmed", "trackId", "track_id", "responseMode", "response_mode", "detail", "compact", "limit", "includeHeavy", "providerMode", "provider_mode", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "continuationToken", "continuation_token", "product", "productGuidelines", "product_guidelines", "workflowPolicy", "workflow_policy", "techStack", "styleGuideIds", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "spec", "plan", "description", "artifact", "artifactAction", "artifact_action", "scope", "force", "includeArchive", "include_archive", "status", "summary", "evidence", "commitMode", "commitType", "commitScope", "commitSubject", "commitBody", "notesRef", "allowDirty"],
+    fields: ["workflow", "action", "id", "formulaId", "variables", "wispId", "stepId", "stepIndex", "execute", "humanConfirmed", "trackId", "detail", "providerMode", "providerEvidence", "mcpCapabilities", "product", "productGuidelines", "workflowPolicy", "techStack", "spec", "plan", "description", "artifact", "scope", "status", "summary", "evidence"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -11878,7 +11878,7 @@ var TOOLS = [
     name: "cadre_project",
     description: "Cadre project packet: ping, doctor, root, topology/config, tech-stack summary, integrations, sync, and polyrepo preflight.",
     actionEnum: ["ping", "doctor", "root", "topology", "tech_stack_summary", "integrations", "sync_control_plane", "polyrepo_preflight"],
-    fields: ["action", "execute", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["action", "execute", "detail"],
     required: ["action"],
     allOf: [requireRootForActions(["root", "topology", "tech_stack_summary", "integrations", "sync_control_plane", "polyrepo_preflight"])]
   }),
@@ -11886,25 +11886,25 @@ var TOOLS = [
     name: "cadre_status",
     description: "Cadre status packet: live, team, mine, available, collisions, fleet, and team board.",
     actionEnum: ["live", "team", "mine", "available", "collisions", "board", "fleet"],
-    fields: ["action", "identity", "view", "limit", "includeHeavy", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["action", "identity", "view", "limit", "detail"],
     required: ["root", "action"]
   }),
   packetSchema({
     name: "cadre_track",
     description: "Cadre track packet: context, JSON plan parsing, integrity, phase scheduling, implementation prep, planning evidence, and worktree planning.",
     actionEnum: ["context", "parse_plan", "integrity", "phase_schedule", "prepare_implementation", "plan_assist", "worktree_plan"],
-    fields: ["action", "trackId", "track_id", "plan", "execute", "identity", "takeover", "base", "head", "limit", "includeHeavy", "styleGuideIds", "styleGuideMaxChars", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["action", "trackId", "plan", "execute", "identity", "base", "head", "limit", "styleGuideIds", "detail"],
     required: ["root", "action"],
     allOf: [
       requireTrackForActions(["context", "phase_schedule", "prepare_implementation", "worktree_plan"]),
-      { if: { properties: { action: { enum: ["parse_plan"] } }, required: ["action"] }, then: { anyOf: [{ required: ["plan"] }, { required: ["trackId"] }, { required: ["track_id"] }] } }
+      { if: { properties: { action: { enum: ["parse_plan"] } }, required: ["action"] }, then: { anyOf: [{ required: ["plan"] }, { required: ["trackId"] }] } }
     ]
   }),
   packetSchema({
     name: "cadre_parallel",
     description: "Cadre parallel packet: plan worker waves, setup workers, record finishes, merge back, and cleanup.",
     actionEnum: ["plan", "next_wave", "setup_workers", "record_finish", "merge_back", "cleanup"],
-    fields: ["action", "trackId", "track_id", "execute", "phaseIndex", "taskIndex", "workerId", "worker_id", "status", "commitSha", "repo", "command", "timeoutMs", "limit", "maxWorkers", "includeHeavy", "agentIdentifier", "filesChanged", "files_changed", "tests", "summary", "blockers", "force", "allowNoCommit", "completeTask", "humanConfirmed", "human_confirmed", "responseMode", "response_mode", "detail", "compact", "commitMode", "commitType", "commitScope", "commitSubject", "commitBody", "notesRef", "allowDirty"],
+    fields: ["action", "trackId", "execute", "phaseIndex", "taskIndex", "workerId", "status", "commitSha", "repo", "maxWorkers", "agentIdentifier", "filesChanged", "tests", "summary", "blockers", "coverage", "force", "humanConfirmed"],
     required: ["root", "action"],
     anyOf: trackIdAnyOf(),
     allOf: [{ if: { properties: { action: { enum: ["setup_workers"] } }, required: ["action"] }, then: { required: ["agentIdentifier"] } }]
@@ -11913,14 +11913,14 @@ var TOOLS = [
     name: "cadre_mutate",
     description: "Cadre mutation packet: claim, heartbeat, status, metadata, review, worker, task-result, and index writes.",
     actionEnum: ["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result", "regen_index"],
-    fields: ["action", "trackId", "track_id", "execute", "status", "patch", "identity", "workerId", "worker_id", "phaseIndex", "taskIndex", "commitSha", "repo", "coverage", "command", "timeoutMs", "force", "commitMode", "commitType", "commitScope", "commitSubject", "commitBody", "notesRef", "allowDirty"],
+    fields: ["action", "trackId", "execute", "status", "patch", "identity", "workerId", "phaseIndex", "taskIndex", "commitSha", "repo", "coverage", "force"],
     required: ["root", "action"],
     allOf: [requireTrackForActions(["claim", "heartbeat", "set_status", "metadata_patch", "record_review", "record_worker", "record_task_result"])]
   }),
   packetSchema({
     name: "cadre_complete_task",
     description: "Journaled task completion: coverage gate plus locked plan, metadata, and completion journal writes.",
-    fields: ["trackId", "track_id", "phaseIndex", "taskIndex", "commitSha", "repo", "command", "timeoutMs", "coverage", "force", "allowNoCommit", "humanConfirmed", "human_confirmed", "manualVerificationMode", "manual_verification_mode", "manualVerificationSummary", "manual_verification_summary", "manualVerificationChecks", "manual_verification_checks", "manualVerificationCommand", "manual_verification_command", "manualVerificationResult", "manual_verification_result", "async", "commitMode", "commitType", "commitScope", "commitSubject", "commitBody", "notesRef", "allowDirty"],
+    fields: ["trackId", "phaseIndex", "taskIndex", "commitSha", "repo", "coverage", "filesChanged", "summary", "force", "allowNoCommit", "humanConfirmed", "manualVerificationMode", "manualVerificationSummary", "manualVerificationChecks", "manualVerificationCommand", "manualVerificationResult", "async"],
     required: ["root", "phaseIndex", "taskIndex"],
     anyOf: trackIdAnyOf()
   }),
@@ -11928,18 +11928,18 @@ var TOOLS = [
     name: "cadre_job",
     description: "Cadre job packet: start, status, result, cancel, and list process-local or persisted long-running jobs.",
     actionEnum: ["start", "status", "result", "cancel", "list"],
-    fields: ["action", "type", "jobId", "id", "args", "timeoutMs"],
+    fields: ["action", "type", "jobId", "args", "timeoutMs"],
     required: ["action"],
     allOf: [
       requireRootForActions(["start"]),
-      { if: { properties: { action: { enum: ["status", "result", "cancel"] } }, required: ["action"] }, then: { anyOf: [{ required: ["jobId"] }, { required: ["id"] }] } }
+      { if: { properties: { action: { enum: ["status", "result", "cancel"] } }, required: ["action"] }, then: { required: ["jobId"] } }
     ]
   }),
   packetSchema({
     name: "cadre_review",
     description: "Cadre review packet: review assist, machine gate, review gate, provider evidence, and PR/MR/CI status.",
     actionEnum: ["assist", "machine_gate", "gate", "pr_ci_status", "provider_evidence"],
-    fields: ["action", "trackId", "track_id", "base", "head", "config", "machineCommand", "command", "providerEvidence", "provider_evidence", "mcpCapabilities", "mcp_capabilities", "includeLsp", "includeMachine", "async", "timeoutMs", "limit", "includeHeavy", "responseMode", "response_mode", "detail", "compact", "commitMode", "commitType", "commitScope", "commitSubject", "commitBody", "notesRef", "allowDirty"],
+    fields: ["action", "trackId", "base", "head", "config", "machineCommand", "providerEvidence", "mcpCapabilities", "includeLsp", "includeMachine", "async", "timeoutMs", "limit", "detail"],
     required: ["root", "action"],
     allOf: [requireTrackForActions(["assist", "gate", "provider_evidence"])]
   }),
@@ -11947,7 +11947,7 @@ var TOOLS = [
     name: "cadre_intel",
     description: "Cadre code intelligence packet: repo map, LSP setup/impact/review, workspace diagnostics, test impact, dependency graph, and daemon lifecycle.",
     actionEnum: ["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "lsp_daemon_status", "lsp_daemon_shutdown", "workspace_diagnostics", "test_impact", "dependency_graph", "mcp_readiness"],
-    fields: ["action", "trackId", "track_id", "base", "head", "config", "files", "symbol", "symbols", "repo", "repos", "execute", "async", "timeoutMs", "limit", "includeHeavy", "mcpCapabilities", "mcp_capabilities", "responseMode", "response_mode", "detail", "compact"],
+    fields: ["action", "trackId", "base", "head", "config", "files", "symbol", "symbols", "repo", "repos", "execute", "async", "timeoutMs", "limit", "mcpCapabilities", "detail"],
     required: ["action"],
     allOf: [requireRootForActions(["repo_map", "lsp_setup", "lsp_impact", "lsp_review", "lsp_warm_review", "workspace_diagnostics", "test_impact", "dependency_graph", "mcp_readiness"])]
   }),
@@ -11955,7 +11955,7 @@ var TOOLS = [
     name: "cadre_artifact",
     description: "Cadre artifact packet: catalog, schema, validate JSON canonicals, render human projections, diff, and sync generated artifacts.",
     actionEnum: ["catalog", "schema", "validate", "render", "diff", "sync"],
-    fields: ["action", "artifact", "id", "scope", "trackId", "track_id", "execute", "humanConfirmed", "human_confirmed", "force", "includeArchive", "include_archive", "reviewBundle", "reviewFiles", "reviewBundleDir", "review_bundle_dir", "commitMode", "commitType", "commitScope", "commitSubject", "commitBody", "notesRef", "allowDirty"],
+    fields: ["action", "artifact", "id", "scope", "trackId", "execute", "humanConfirmed", "force", "includeArchive"],
     required: ["root", "action"]
   })
 ];

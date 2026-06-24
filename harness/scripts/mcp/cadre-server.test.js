@@ -339,7 +339,62 @@ test("MCP root resolution rejects harness skill directories without project stat
     ]) {
       assert.ok(names.includes(name), `expected ${name} in tools/list`);
     }
+    const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
+    const fieldsFor = (name) => Object.keys(byName.get(name).inputSchema.properties).sort();
+    const hiddenFields = [
+      "allowDirty",
+      "artifact_action",
+      "artifactAction",
+      "command",
+      "commitBody",
+      "commitMode",
+      "commitScope",
+      "commitSubject",
+      "commitType",
+      "compact",
+      "continuationToken",
+      "continuation_token",
+      "files_changed",
+      "formula_id",
+      "human_confirmed",
+      "includeHeavy",
+      "include_archive",
+      "manual_verification_checks",
+      "manual_verification_command",
+      "manual_verification_mode",
+      "manual_verification_result",
+      "manual_verification_summary",
+      "mcp_capabilities",
+      "notesRef",
+      "operation",
+      "product_guidelines",
+      "provider_evidence",
+      "provider_mode",
+      "responseMode",
+      "response_mode",
+      "reviewBundle",
+      "reviewBundleDir",
+      "reviewFiles",
+      "review_bundle_dir",
+      "step_id",
+      "step_index",
+      "track_id",
+      "wisp_id",
+      "worker_id",
+      "workflow_policy",
+    ];
+    let advertisedFieldCount = 0;
+    for (const tool of tools.tools) {
+      assert.equal(tool.inputSchema.additionalProperties, true, `${tool.name} should preserve hidden field compatibility`);
+      const fields = Object.keys(tool.inputSchema.properties);
+      advertisedFieldCount += fields.length;
+      for (const field of hiddenFields) {
+        assert.equal(fields.includes(field), false, `${tool.name} should not advertise ${field}`);
+      }
+    }
     const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
+    assert.ok(fieldsFor("cadre_workflow").length <= 30, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
+    assert.ok(advertisedFieldCount <= 150, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
     const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
     for (const action of ["setup", "newtrack", "implement", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
       assert.ok(workflowActions.includes(action), `expected ${action} workflow`);
@@ -353,6 +408,10 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(workflowTool.inputSchema.allOf.some((entry) => entry.not?.anyOf?.some((item) => item.required?.includes("planText"))));
     assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "formulaId"), true);
     assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "wispId"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "productGuidelines"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "workflowPolicy"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "providerEvidence"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "mcpCapabilities"), true);
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
     assert.ok(projectActions.includes("tech_stack_summary"));
@@ -366,10 +425,16 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(parallelActions.includes("next_wave"));
     assert.ok(parallelActions.includes("setup_workers"));
     assert.deepEqual(parallelTool.inputSchema.properties.agentIdentifier.enum, ["claude", "codex", "copilot", "antigravity"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(parallelTool.inputSchema.properties, "coverage"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(parallelTool.inputSchema.properties, "filesChanged"), true);
     assert.ok(parallelTool.inputSchema.required.includes("root"));
     assert.ok(parallelTool.inputSchema.required.includes("action"));
     assert.ok(parallelTool.inputSchema.anyOf.some((entry) => entry.required.includes("trackId")));
     assert.ok(parallelTool.inputSchema.allOf.some((entry) => entry.then?.required?.includes("agentIdentifier")));
+    const completeTaskTool = tools.tools.find((tool) => tool.name === "cadre_complete_task");
+    assert.equal(Object.prototype.hasOwnProperty.call(completeTaskTool.inputSchema.properties, "filesChanged"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(completeTaskTool.inputSchema.properties, "summary"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(completeTaskTool.inputSchema.properties, "manualVerificationMode"), true);
     const reviewTool = tools.tools.find((tool) => tool.name === "cadre_review");
     const reviewActions = reviewTool.inputSchema.properties.action.enum;
     assert.ok(reviewActions.includes("provider_evidence"));
