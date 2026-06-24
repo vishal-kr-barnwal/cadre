@@ -795,7 +795,9 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".claude",
   ".cache",
   ".codex",
+  ".copilot",
   ".dart_tool",
+  ".gemini",
   ".gradle",
   ".mypy_cache",
   ".pytest_cache",
@@ -830,7 +832,9 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
 ]);
 var DEFAULT_IGNORE_PATHS = [
   "plugins/cadre",
-  "plugins/cadre-claude"
+  "plugins/cadre-claude",
+  "plugins/cadre-copilot",
+  "plugins/cadre-antigravity"
 ];
 function normalizeRel(file) {
   return file.split(import_node_path6.default.sep).join("/");
@@ -1423,8 +1427,12 @@ function isIgnoredRepoMapFile(file) {
   if (normalized.startsWith(".agents/")) return true;
   if (normalized.startsWith(".claude/")) return true;
   if (normalized.startsWith(".claude-plugin/")) return true;
+  if (normalized.startsWith(".copilot/")) return true;
+  if (normalized.startsWith(".gemini/")) return true;
   if (normalized.startsWith("plugins/cadre/")) return true;
   if (normalized.startsWith("plugins/cadre-claude/")) return true;
+  if (normalized.startsWith("plugins/cadre-copilot/")) return true;
+  if (normalized.startsWith("plugins/cadre-antigravity/")) return true;
   return normalized.split("/").some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
 }
 function selectedRepoNames(args = {}) {
@@ -8075,6 +8083,39 @@ function readParallelState(track) {
 
 // src/core/application/runtime/parallel-workflow.ts
 var import_node_path36 = __toESM(require("node:path"));
+
+// src/core/application/runtime/dispatch-adapters.ts
+var AGENT_IDENTIFIERS = ["claude", "codex", "copilot", "antigravity"];
+var DISPATCH_ADAPTERS = {
+  claude: {
+    agent_identifier: "claude",
+    mechanism: "Task",
+    instruction: "Call the Task tool once for this prompt and dispatch payload. Return the result JSON to the coordinator."
+  },
+  codex: {
+    agent_identifier: "codex",
+    mechanism: "multi_agent_v1.spawn_agent",
+    instruction: "Use tool discovery for multi_agent_v1.spawn_agent, pass this prompt and dispatch payload, then wait for completion."
+  },
+  copilot: {
+    agent_identifier: "copilot",
+    mechanism: "copilot_cli.custom_agent",
+    instruction: "Invoke the installed Cadre worker custom agent with this prompt and dispatch payload. For multiple ready workers, Copilot /fleet may be used when it preserves the returned Cadre record_finish contract."
+  },
+  antigravity: {
+    agent_identifier: "antigravity",
+    mechanism: "invoke_subagent",
+    instruction: "Use invoke_subagent, or define and invoke a Cadre worker subagent, with this prompt and dispatch payload. Return the result JSON to the coordinator."
+  }
+};
+function isAgentIdentifier(value) {
+  return typeof value === "string" && AGENT_IDENTIFIERS.includes(value);
+}
+function dispatchAdapterFor(agentIdentifier) {
+  return DISPATCH_ADAPTERS[agentIdentifier];
+}
+
+// src/core/application/runtime/parallel-workflow.ts
 function positiveInt(value, fallback, max = 20) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -8258,7 +8299,6 @@ function workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentI
   const taskKey = asString(worker.task_key);
   const repo = asString(worker.repo, ".");
   const ownedFiles = asStringArray(worker.files);
-  const selectedDispatch = agentIdentifier === "claude" ? { agent_identifier: "claude", mechanism: "Task", instruction: "Call the Task tool once for this prompt and dispatch payload. Return the result JSON to the coordinator." } : { agent_identifier: "codex", mechanism: "multi_agent_v1.spawn_agent", instruction: "Use tool discovery for multi_agent_v1.spawn_agent, pass this prompt and dispatch payload, then wait for completion." };
   const prompt = [
     `You are a Cadre parallel worker for track ${track.track_id}.`,
     `Worker: ${workerId}`,
@@ -8296,7 +8336,7 @@ function workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentI
     source_root: sourceRoot,
     owned_files: ownedFiles,
     agent_identifier: agentIdentifier,
-    selected_dispatch: selectedDispatch,
+    selected_dispatch: dispatchAdapterFor(agentIdentifier),
     expected_result_schema: {
       type: "object",
       required: ["worker_id", "task_key", "repo", "status", "summary", "files_changed", "tests", "commit_sha"],
@@ -8327,7 +8367,7 @@ function workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentI
 }
 function parallelSetupWorkers(root, track, args = {}) {
   const agentIdentifier = asOptionalString(args.agentIdentifier);
-  if (agentIdentifier !== "claude" && agentIdentifier !== "codex") return { ok: false, action: "setup_workers", error: 'cadre_parallel setup_workers requires agentIdentifier "claude" or "codex"', accepted_agent_identifiers: ["claude", "codex"] };
+  if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_parallel setup_workers requires agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
   const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
   const topology = loadTopology(root);

@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { antigravityCliHome } from "./install-targets";
 
-export type ApprovalTarget = "codex" | "claude";
+export type ApprovalTarget = "codex" | "claude" | "copilot" | "antigravity";
 
 export interface ApprovalResult {
   ok: boolean;
@@ -34,25 +35,41 @@ const CLAUDE_CADRE_ALLOW_RULES = [
   "mcp__cadre__*",
 ];
 
+const ANTIGRAVITY_CADRE_ALLOW_RULES = [
+  "mcp(cadre/*)",
+];
+
 export function approvalConfigPath(target: ApprovalTarget): string {
   if (target === "codex") {
     return path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "config.toml");
   }
-  return path.join(process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "settings.json");
+  if (target === "claude") {
+    return path.join(process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "settings.json");
+  }
+  if (target === "antigravity") return path.join(antigravityCliHome(), "settings.json");
+  return path.join(process.env.COPILOT_HOME || path.join(os.homedir(), ".copilot"), "permissions-config.json");
 }
 
 export function bootstrapClientApprovals(target: ApprovalTarget): ApprovalResult {
-  return target === "codex" ? bootstrapCodexApprovals() : bootstrapClaudeApprovals();
+  if (target === "codex") return bootstrapCodexApprovals();
+  if (target === "claude") return bootstrapClaudeApprovals();
+  if (target === "antigravity") return bootstrapAntigravityApprovals();
+  return copilotPromptResult();
 }
 
 export function checkClientApprovals(target: ApprovalTarget): ApprovalResult {
-  return target === "codex" ? checkCodexApprovals() : checkClaudeApprovals();
+  if (target === "codex") return checkCodexApprovals();
+  if (target === "claude") return checkClaudeApprovals();
+  if (target === "antigravity") return checkAntigravityApprovals();
+  return copilotPromptResult();
 }
 
 export function approvalSummary(target: ApprovalTarget): string {
   const file = approvalConfigPath(target);
   if (target === "codex") return `Cadre codex MCP tool approvals: ${file}`;
-  return `Cadre claude MCP tool approvals: ${file}`;
+  if (target === "claude") return `Cadre claude MCP tool approvals: ${file}`;
+  if (target === "antigravity") return `Cadre antigravity CLI MCP allow rule: ${file}`;
+  return "Cadre copilot MCP tools may prompt on first use; no approval file is edited";
 }
 
 function codexToolSection(tool: string): string {
@@ -177,25 +194,83 @@ function checkClaudeApprovals(): ApprovalResult {
   return result;
 }
 
+function bootstrapAntigravityApprovals(): ApprovalResult {
+  const file = approvalConfigPath("antigravity");
+  const parsed = readJsonSettings(file, "antigravity", ANTIGRAVITY_CADRE_ALLOW_RULES);
+  if (!parsed.ok) return parsed.result;
+  const settings = parsed.settings;
+  const permissions = isRecord(settings.permissions) ? settings.permissions : {};
+  const currentAllow = Array.isArray(permissions.allow)
+    ? permissions.allow.filter((item): item is string => typeof item === "string")
+    : [];
+  const nextAllow = [...currentAllow];
+  for (const rule of ANTIGRAVITY_CADRE_ALLOW_RULES) {
+    if (!nextAllow.includes(rule)) nextAllow.push(rule);
+  }
+  const changed = nextAllow.length !== currentAllow.length || !isRecord(settings.permissions) || !Array.isArray(permissions.allow);
+  if (changed) {
+    settings.permissions = { ...permissions, allow: nextAllow };
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
+  }
+  return { ok: true, target: "antigravity", path: file, changed, configured: true, rules: [...ANTIGRAVITY_CADRE_ALLOW_RULES] };
+}
+
+function checkAntigravityApprovals(): ApprovalResult {
+  const file = approvalConfigPath("antigravity");
+  const parsed = readJsonSettings(file, "antigravity", ANTIGRAVITY_CADRE_ALLOW_RULES);
+  if (!parsed.ok) return parsed.result;
+  const permissions = isRecord(parsed.settings.permissions) ? parsed.settings.permissions : {};
+  const allow = Array.isArray(permissions.allow)
+    ? permissions.allow.filter((item): item is string => typeof item === "string")
+    : [];
+  const missing = ANTIGRAVITY_CADRE_ALLOW_RULES.filter((rule) => !allow.includes(rule));
+  const result: ApprovalResult = {
+    ok: missing.length === 0,
+    target: "antigravity",
+    path: file,
+    changed: false,
+    configured: missing.length === 0,
+    rules: missing.length === 0 ? [...ANTIGRAVITY_CADRE_ALLOW_RULES] : missing,
+  };
+  if (missing.length > 0) result.error = `missing Antigravity Cadre tool allow rules: ${missing.join(", ")}`;
+  return result;
+}
+
+function copilotPromptResult(): ApprovalResult {
+  return {
+    ok: true,
+    target: "copilot",
+    path: approvalConfigPath("copilot"),
+    changed: false,
+    configured: false,
+    rules: [],
+  };
+}
+
 function readClaudeSettings(file: string): { ok: true; settings: Record<string, unknown> } | { ok: false; result: ApprovalResult } {
+  return readJsonSettings(file, "claude", CLAUDE_CADRE_ALLOW_RULES);
+}
+
+function readJsonSettings(file: string, target: ApprovalTarget, rules: string[]): { ok: true; settings: Record<string, unknown> } | { ok: false; result: ApprovalResult } {
   if (!fs.existsSync(file)) return { ok: true, settings: {} };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
     if (isRecord(parsed)) return { ok: true, settings: parsed };
     return {
       ok: false,
-      result: { ok: false, target: "claude", path: file, changed: false, configured: false, rules: [...CLAUDE_CADRE_ALLOW_RULES], error: `${file} must contain a JSON object` },
+      result: { ok: false, target, path: file, changed: false, configured: false, rules: [...rules], error: `${file} must contain a JSON object` },
     };
   } catch (error) {
     return {
       ok: false,
       result: {
         ok: false,
-        target: "claude",
+        target,
         path: file,
         changed: false,
         configured: false,
-        rules: [...CLAUDE_CADRE_ALLOW_RULES],
+        rules: [...rules],
         error: error instanceof Error ? error.message : String(error),
       },
     };

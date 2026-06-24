@@ -73,7 +73,9 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".claude",
   ".cache",
   ".codex",
+  ".copilot",
   ".dart_tool",
+  ".gemini",
   ".gradle",
   ".mypy_cache",
   ".pytest_cache",
@@ -108,7 +110,9 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
 ]);
 var DEFAULT_IGNORE_PATHS = [
   "plugins/cadre",
-  "plugins/cadre-claude"
+  "plugins/cadre-claude",
+  "plugins/cadre-copilot",
+  "plugins/cadre-antigravity"
 ];
 function normalizeRel(file) {
   return file.split(import_node_path.default.sep).join("/");

@@ -80,7 +80,17 @@ cadre_parallel { action: "cleanup", execute: true }
 Cadre returns ready groups only when dependencies, file claims, repo routing,
 worker state, and plan integrity are safe.
 `setup_workers` requires `agentIdentifier` and returns a single
-`selected_dispatch` adapter for that caller.
+`selected_dispatch` adapter for that caller. Valid identifiers are `codex`,
+`claude`, `copilot`, and `antigravity`.
+
+Dispatch adapters are client-specific:
+
+| Client | Adapter |
+|--------|---------|
+| Codex | `multi_agent_v1.spawn_agent` |
+| Claude | `Task` |
+| Copilot | Copilot CLI custom agent; `/fleet` is allowed only when each worker still returns Cadre evidence. |
+| Antigravity | `invoke_subagent` or a dynamically defined Cadre worker subagent. |
 
 ## Worker Payloads
 

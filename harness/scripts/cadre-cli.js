@@ -27,15 +27,100 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/cli/install.ts
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_os2 = __toESM(require("node:os"));
-var import_node_path2 = __toESM(require("node:path"));
-var import_node_child_process = require("node:child_process");
+var import_node_os3 = __toESM(require("node:os"));
+var import_node_path5 = __toESM(require("node:path"));
 
 // src/cli/client-approvals.ts
 var import_node_fs = __toESM(require("node:fs"));
+var import_node_os2 = __toESM(require("node:os"));
+var import_node_path2 = __toESM(require("node:path"));
+
+// src/cli/install-targets.ts
 var import_node_os = __toESM(require("node:os"));
 var import_node_path = __toESM(require("node:path"));
+var import_node_child_process = require("node:child_process");
+var INSTALL_TARGETS = ["codex", "claude", "copilot", "antigravity"];
+var TARGET_COMMANDS = {
+  codex: "codex",
+  claude: "claude",
+  copilot: "copilot",
+  antigravity: "agy"
+};
+var PACKAGE_PLUGIN_NAME = "cadre";
+var PACKAGE_DISPLAY_NAME = "Cadre";
+function runtimePaths() {
+  const runtimeRoot = import_node_path.default.resolve(__dirname, "..");
+  return {
+    runtimeRoot,
+    nodePath: process.execPath,
+    mcpServer: import_node_path.default.join(runtimeRoot, "scripts", "mcp", "cadre-server.js")
+  };
+}
+function commandExists(command) {
+  const result = process.platform === "win32" ? (0, import_node_child_process.spawnSync)("where", [command], { stdio: "ignore" }) : (0, import_node_child_process.spawnSync)("which", [command], { stdio: "ignore" });
+  return result.status === 0;
+}
+function selectedTargets(options) {
+  if (options.target !== "auto" && options.target !== "all") return [options.target];
+  if (options.target === "all") return [...INSTALL_TARGETS];
+  return INSTALL_TARGETS.filter((target) => commandExists(TARGET_COMMANDS[target]));
+}
+function antigravityCliHome() {
+  return process.env.ANTIGRAVITY_CLI_HOME || import_node_path.default.join(process.env.GEMINI_HOME || import_node_path.default.join(import_node_os.default.homedir(), ".gemini"), "antigravity-cli");
+}
+function antigravityIdeHome() {
+  return process.env.ANTIGRAVITY_IDE_HOME || import_node_path.default.join(process.env.GEMINI_HOME || import_node_path.default.join(import_node_os.default.homedir(), ".gemini"), "config");
+}
+function targetPaths(home, target, scope, cwd = process.cwd()) {
+  if (target === "copilot" && scope !== "user") {
+    const skillRoot = import_node_path.default.join(cwd, ".github", "skills", PACKAGE_PLUGIN_NAME);
+    return { primaryRoot: skillRoot, pluginRoots: [], skillRoots: [skillRoot] };
+  }
+  if (target === "antigravity") {
+    if (scope !== "user") {
+      const pluginRoot2 = import_node_path.default.join(cwd, ".agents", "plugins", PACKAGE_PLUGIN_NAME);
+      return { primaryRoot: pluginRoot2, pluginRoots: [pluginRoot2], skillRoots: [] };
+    }
+    const cliPlugin = import_node_path.default.join(antigravityCliHome(), "plugins", PACKAGE_PLUGIN_NAME);
+    const idePlugin = import_node_path.default.join(antigravityIdeHome(), "plugins", PACKAGE_PLUGIN_NAME);
+    return { primaryRoot: cliPlugin, pluginRoots: [cliPlugin, idePlugin], skillRoots: [] };
+  }
+  const marketplaceRoot = import_node_path.default.join(home, "marketplaces", target);
+  const pluginRoot = import_node_path.default.join(marketplaceRoot, "plugins", PACKAGE_PLUGIN_NAME);
+  const marketplaceFile = target === "codex" ? import_node_path.default.join(marketplaceRoot, ".agents", "plugins", "marketplace.json") : target === "claude" ? import_node_path.default.join(marketplaceRoot, ".claude-plugin", "marketplace.json") : void 0;
+  const paths = {
+    primaryRoot: pluginRoot,
+    marketplaceRoot,
+    pluginRoots: [pluginRoot],
+    skillRoots: []
+  };
+  if (marketplaceFile) paths.marketplaceFile = marketplaceFile;
+  return paths;
+}
+function installCommands(target, paths, scope) {
+  if (target === "codex") {
+    return [
+      { command: "codex", args: ["plugin", "marketplace", "add", paths.marketplaceRoot || ""] },
+      { command: "codex", args: ["plugin", "add", "cadre@cadre"] }
+    ];
+  }
+  if (target === "claude") {
+    return [
+      { command: "claude", args: ["plugin", "marketplace", "add", "--scope", scope, paths.marketplaceRoot || ""] },
+      { command: "claude", args: ["plugin", "install", "--scope", scope, "cadre@cadre"] },
+      { command: "claude", args: ["plugin", "update", "--scope", scope, "cadre@cadre"] }
+    ];
+  }
+  if (target === "copilot" && scope === "user") {
+    return [{ command: "copilot", args: ["plugin", "install", paths.primaryRoot] }];
+  }
+  if (target === "antigravity" && scope === "user") {
+    return [{ command: "agy", args: ["plugin", "install", paths.primaryRoot], optional: true }];
+  }
+  return [];
+}
+
+// src/cli/client-approvals.ts
 var CADRE_MCP_TOOLS = [
   "cadre_resource",
   "cadre_workflow",
@@ -54,22 +139,37 @@ var CLAUDE_CADRE_ALLOW_RULES = [
   "mcp__plugin_cadre_cadre__*",
   "mcp__cadre__*"
 ];
+var ANTIGRAVITY_CADRE_ALLOW_RULES = [
+  "mcp(cadre/*)"
+];
 function approvalConfigPath(target) {
   if (target === "codex") {
-    return import_node_path.default.join(process.env.CODEX_HOME || import_node_path.default.join(import_node_os.default.homedir(), ".codex"), "config.toml");
+    return import_node_path2.default.join(process.env.CODEX_HOME || import_node_path2.default.join(import_node_os2.default.homedir(), ".codex"), "config.toml");
   }
-  return import_node_path.default.join(process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || import_node_path.default.join(import_node_os.default.homedir(), ".claude"), "settings.json");
+  if (target === "claude") {
+    return import_node_path2.default.join(process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || import_node_path2.default.join(import_node_os2.default.homedir(), ".claude"), "settings.json");
+  }
+  if (target === "antigravity") return import_node_path2.default.join(antigravityCliHome(), "settings.json");
+  return import_node_path2.default.join(process.env.COPILOT_HOME || import_node_path2.default.join(import_node_os2.default.homedir(), ".copilot"), "permissions-config.json");
 }
 function bootstrapClientApprovals(target) {
-  return target === "codex" ? bootstrapCodexApprovals() : bootstrapClaudeApprovals();
+  if (target === "codex") return bootstrapCodexApprovals();
+  if (target === "claude") return bootstrapClaudeApprovals();
+  if (target === "antigravity") return bootstrapAntigravityApprovals();
+  return copilotPromptResult();
 }
 function checkClientApprovals(target) {
-  return target === "codex" ? checkCodexApprovals() : checkClaudeApprovals();
+  if (target === "codex") return checkCodexApprovals();
+  if (target === "claude") return checkClaudeApprovals();
+  if (target === "antigravity") return checkAntigravityApprovals();
+  return copilotPromptResult();
 }
 function approvalSummary(target) {
   const file = approvalConfigPath(target);
   if (target === "codex") return `Cadre codex MCP tool approvals: ${file}`;
-  return `Cadre claude MCP tool approvals: ${file}`;
+  if (target === "claude") return `Cadre claude MCP tool approvals: ${file}`;
+  if (target === "antigravity") return `Cadre antigravity CLI MCP allow rule: ${file}`;
+  return "Cadre copilot MCP tools may prompt on first use; no approval file is edited";
 }
 function codexToolSection(tool) {
   return `[plugins."cadre@cadre".mcp_servers.cadre.tools.${tool}]`;
@@ -86,7 +186,7 @@ function bootstrapCodexApprovals() {
   const before = text;
   for (const tool of CADRE_MCP_TOOLS) text = upsertCodexApproval(text, tool);
   if (text !== before) {
-    import_node_fs.default.mkdirSync(import_node_path.default.dirname(file), { recursive: true });
+    import_node_fs.default.mkdirSync(import_node_path2.default.dirname(file), { recursive: true });
     import_node_fs.default.writeFileSync(file, text);
   }
   return { ok: true, target: "codex", path: file, changed: text !== before, configured: true, rules: [...CADRE_MCP_TOOLS] };
@@ -161,7 +261,7 @@ function bootstrapClaudeApprovals() {
   const changed = nextAllow.length !== currentAllow.length || !isRecord(settings.permissions) || !Array.isArray(permissions.allow);
   if (changed) {
     settings.permissions = { ...permissions, allow: nextAllow };
-    import_node_fs.default.mkdirSync(import_node_path.default.dirname(file), { recursive: true });
+    import_node_fs.default.mkdirSync(import_node_path2.default.dirname(file), { recursive: true });
     import_node_fs.default.writeFileSync(file, `${JSON.stringify(settings, null, 2)}
 `);
   }
@@ -185,25 +285,76 @@ function checkClaudeApprovals() {
   if (missing.length > 0) result.error = `missing Claude Cadre tool allow rules: ${missing.join(", ")}`;
   return result;
 }
+function bootstrapAntigravityApprovals() {
+  const file = approvalConfigPath("antigravity");
+  const parsed = readJsonSettings(file, "antigravity", ANTIGRAVITY_CADRE_ALLOW_RULES);
+  if (!parsed.ok) return parsed.result;
+  const settings = parsed.settings;
+  const permissions = isRecord(settings.permissions) ? settings.permissions : {};
+  const currentAllow = Array.isArray(permissions.allow) ? permissions.allow.filter((item) => typeof item === "string") : [];
+  const nextAllow = [...currentAllow];
+  for (const rule of ANTIGRAVITY_CADRE_ALLOW_RULES) {
+    if (!nextAllow.includes(rule)) nextAllow.push(rule);
+  }
+  const changed = nextAllow.length !== currentAllow.length || !isRecord(settings.permissions) || !Array.isArray(permissions.allow);
+  if (changed) {
+    settings.permissions = { ...permissions, allow: nextAllow };
+    import_node_fs.default.mkdirSync(import_node_path2.default.dirname(file), { recursive: true });
+    import_node_fs.default.writeFileSync(file, `${JSON.stringify(settings, null, 2)}
+`);
+  }
+  return { ok: true, target: "antigravity", path: file, changed, configured: true, rules: [...ANTIGRAVITY_CADRE_ALLOW_RULES] };
+}
+function checkAntigravityApprovals() {
+  const file = approvalConfigPath("antigravity");
+  const parsed = readJsonSettings(file, "antigravity", ANTIGRAVITY_CADRE_ALLOW_RULES);
+  if (!parsed.ok) return parsed.result;
+  const permissions = isRecord(parsed.settings.permissions) ? parsed.settings.permissions : {};
+  const allow = Array.isArray(permissions.allow) ? permissions.allow.filter((item) => typeof item === "string") : [];
+  const missing = ANTIGRAVITY_CADRE_ALLOW_RULES.filter((rule) => !allow.includes(rule));
+  const result = {
+    ok: missing.length === 0,
+    target: "antigravity",
+    path: file,
+    changed: false,
+    configured: missing.length === 0,
+    rules: missing.length === 0 ? [...ANTIGRAVITY_CADRE_ALLOW_RULES] : missing
+  };
+  if (missing.length > 0) result.error = `missing Antigravity Cadre tool allow rules: ${missing.join(", ")}`;
+  return result;
+}
+function copilotPromptResult() {
+  return {
+    ok: true,
+    target: "copilot",
+    path: approvalConfigPath("copilot"),
+    changed: false,
+    configured: false,
+    rules: []
+  };
+}
 function readClaudeSettings(file) {
+  return readJsonSettings(file, "claude", CLAUDE_CADRE_ALLOW_RULES);
+}
+function readJsonSettings(file, target, rules) {
   if (!import_node_fs.default.existsSync(file)) return { ok: true, settings: {} };
   try {
     const parsed = JSON.parse(import_node_fs.default.readFileSync(file, "utf8"));
     if (isRecord(parsed)) return { ok: true, settings: parsed };
     return {
       ok: false,
-      result: { ok: false, target: "claude", path: file, changed: false, configured: false, rules: [...CLAUDE_CADRE_ALLOW_RULES], error: `${file} must contain a JSON object` }
+      result: { ok: false, target, path: file, changed: false, configured: false, rules: [...rules], error: `${file} must contain a JSON object` }
     };
   } catch (error) {
     return {
       ok: false,
       result: {
         ok: false,
-        target: "claude",
+        target,
         path: file,
         changed: false,
         configured: false,
-        rules: [...CLAUDE_CADRE_ALLOW_RULES],
+        rules: [...rules],
         error: error instanceof Error ? error.message : String(error)
       }
     };
@@ -213,85 +364,106 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/cli/install.ts
-var PACKAGE_PLUGIN_NAME = "cadre";
-var PACKAGE_DISPLAY_NAME = "Cadre";
-var MARKETPLACE_PLUGIN_SOURCE = "./plugins/cadre";
-function usage() {
-  return [
-    "Cadre CLI",
-    "",
-    "Usage:",
-    "  cadre install [--target codex|claude|all] [--scope user|project|local] [--dry-run] [--check] [--force] [--yes]",
-    "  cadre doctor",
-    "  cadre help"
-  ].join("\n");
+// src/cli/install-checks.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path3 = __toESM(require("node:path"));
+var import_node_child_process2 = require("node:child_process");
+function runCommand(plan) {
+  const result = (0, import_node_child_process2.spawnSync)(plan.command, plan.args, { encoding: "utf8" });
+  return { ok: result.status === 0, status: result.status, stderr: result.stderr || "" };
 }
-function parseInstall(argv) {
-  const parsed = {
-    target: "auto",
-    scope: "user",
-    dryRun: false,
-    check: false,
-    force: false,
-    yes: false,
-    cadreHome: process.env.CADRE_HOME || import_node_path2.default.join(import_node_os2.default.homedir(), ".cadre")
+function pingMcp(runtime) {
+  if (!import_node_fs2.default.existsSync(runtime.mcpServer)) return { ok: false, reason: `missing MCP server: ${runtime.mcpServer}` };
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "cadre_project", arguments: { action: "ping" } }
   };
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--dry-run") parsed.dryRun = true;
-    else if (arg === "--check") parsed.check = true;
-    else if (arg === "--force") parsed.force = true;
-    else if (arg === "--yes" || arg === "-y") parsed.yes = true;
-    else if (arg === "--target") {
-      const value = argv[index + 1];
-      if (value !== "codex" && value !== "claude" && value !== "all") throw new Error("--target must be codex, claude, or all");
-      parsed.target = value;
-      index += 1;
-    } else if (arg === "--scope") {
-      const value = argv[index + 1];
-      if (value !== "user" && value !== "project" && value !== "local") throw new Error("--scope must be user, project, or local");
-      parsed.scope = value;
-      index += 1;
-    } else if (arg === "--home") {
-      const value = argv[index + 1];
-      if (!value) throw new Error("--home requires a path");
-      parsed.cadreHome = import_node_path2.default.resolve(value);
-      index += 1;
-    } else {
-      throw new Error(`Unknown install option: ${arg}`);
-    }
+  const result = (0, import_node_child_process2.spawnSync)(runtime.nodePath, [runtime.mcpServer], {
+    cwd: runtime.runtimeRoot,
+    input: `${JSON.stringify(request)}
+`,
+    encoding: "utf8",
+    timeout: 3e3
+  });
+  if (result.status !== 0 && !result.stdout.trim()) return { ok: false, reason: result.stderr || `MCP exited with ${result.status}` };
+  const line = result.stdout.split(/\r?\n/).find((entry) => entry.trim());
+  if (!line) return { ok: false, reason: "MCP returned no JSON-RPC response" };
+  try {
+    const parsed = JSON.parse(line);
+    if (parsed.error) return { ok: false, reason: parsed.error.message || "MCP returned an error" };
+    const text = parsed.result?.content?.[0]?.text;
+    const body = text ? JSON.parse(text) : null;
+    return body?.data?.ok === true ? { ok: true } : { ok: false, reason: "MCP ping did not return ok:true" };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
-  return parsed;
 }
-function runtimePaths() {
-  const runtimeRoot = import_node_path2.default.resolve(__dirname, "..");
-  return {
-    runtimeRoot,
-    nodePath: process.execPath,
-    mcpServer: import_node_path2.default.join(runtimeRoot, "scripts", "mcp", "cadre-server.js")
-  };
+function forbiddenThinPayload(root) {
+  return ["assets", "agents", "scripts", "references", "templates"].filter((name) => import_node_fs2.default.existsSync(import_node_path3.default.join(root, name))).map((name) => `${root}/${name}`);
 }
-function commandExists(command) {
-  const result = process.platform === "win32" ? (0, import_node_child_process.spawnSync)("where", [command], { stdio: "ignore" }) : (0, import_node_child_process.spawnSync)("which", [command], { stdio: "ignore" });
-  return result.status === 0;
+function pluginConfigFiles(target, pluginRoot) {
+  if (target === "codex") {
+    return { manifest: import_node_path3.default.join(pluginRoot, ".codex-plugin", "plugin.json"), mcp: import_node_path3.default.join(pluginRoot, ".mcp.json") };
+  }
+  if (target === "claude") {
+    return { manifest: import_node_path3.default.join(pluginRoot, ".claude-plugin", "plugin.json"), mcp: import_node_path3.default.join(pluginRoot, "mcp-config.json") };
+  }
+  if (target === "copilot") {
+    return { manifest: import_node_path3.default.join(pluginRoot, "plugin.json"), mcp: import_node_path3.default.join(pluginRoot, ".mcp.json") };
+  }
+  return { manifest: import_node_path3.default.join(pluginRoot, "plugin.json"), mcp: import_node_path3.default.join(pluginRoot, "mcp_config.json") };
 }
-function selectedTargets(options) {
-  if (options.target === "codex" || options.target === "claude") return [options.target];
-  if (options.target === "all") return ["codex", "claude"];
-  return ["codex", "claude"].filter((target) => commandExists(target));
+function checkMcpConfig(target, file, runtime) {
+  const errors = [];
+  const config = JSON.parse(import_node_fs2.default.readFileSync(file, "utf8"));
+  const server = config.mcpServers?.cadre;
+  if (server?.command !== runtime.nodePath) errors.push(`${file} does not point at the current Node runtime`);
+  if (server?.args?.[0] !== runtime.mcpServer) errors.push(`${file} does not point at ${runtime.mcpServer}`);
+  if (server?.cwd !== runtime.runtimeRoot) errors.push(`${file} has wrong cwd`);
+  if (target === "copilot") {
+    if (server?.type !== "local") errors.push(`${file} must declare Copilot local MCP type`);
+    if (!server?.tools?.includes("*")) errors.push(`${file} must allow Copilot MCP tools`);
+  }
+  return errors;
 }
-function targetPaths(home, target) {
-  const marketplaceRoot = import_node_path2.default.join(home, "marketplaces", target);
-  return {
-    pluginRoot: import_node_path2.default.join(marketplaceRoot, "plugins", PACKAGE_PLUGIN_NAME),
-    marketplaceRoot,
-    marketplaceFile: target === "codex" ? import_node_path2.default.join(marketplaceRoot, ".agents", "plugins", "marketplace.json") : import_node_path2.default.join(marketplaceRoot, ".claude-plugin", "marketplace.json")
-  };
+function checkTarget(target, paths, runtime) {
+  const errors = [];
+  for (const skillRoot of paths.skillRoots) {
+    const skill = import_node_path3.default.join(skillRoot, "SKILL.md");
+    if (!import_node_fs2.default.existsSync(skill)) errors.push(`missing ${skill}`);
+  }
+  for (const pluginRoot of paths.pluginRoots) {
+    const skill = import_node_path3.default.join(pluginRoot, "skills", "cadre", "SKILL.md");
+    if (!import_node_fs2.default.existsSync(skill)) errors.push(`missing ${skill}`);
+    const files = pluginConfigFiles(target, pluginRoot);
+    if (!import_node_fs2.default.existsSync(files.manifest)) errors.push(`missing ${files.manifest}`);
+    if (!import_node_fs2.default.existsSync(files.mcp)) errors.push(`missing ${files.mcp}`);
+    errors.push(...forbiddenThinPayload(pluginRoot).map((entry) => `thin plugin contains forbidden payload ${entry}`));
+    if (import_node_fs2.default.existsSync(files.mcp)) errors.push(...checkMcpConfig(target, files.mcp, runtime));
+  }
+  if (paths.marketplaceFile && !import_node_fs2.default.existsSync(paths.marketplaceFile)) errors.push(`missing ${paths.marketplaceFile}`);
+  return errors;
 }
+function printPlan(target, paths, commands) {
+  if (paths.pluginRoots.length > 0) process.stdout.write(`Cadre ${target} plugin: ${paths.pluginRoots.join(", ")}
+`);
+  if (paths.skillRoots.length > 0) process.stdout.write(`Cadre ${target} skill: ${paths.skillRoots.join(", ")}
+`);
+  if (paths.marketplaceRoot) process.stdout.write(`Cadre ${target} marketplace: ${paths.marketplaceRoot}
+`);
+  for (const command of commands) process.stdout.write(`Would run: ${command.command} ${command.args.join(" ")}
+`);
+}
+
+// src/cli/install-writers.ts
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
+var MARKETPLACE_PLUGIN_SOURCE = "./plugins/cadre";
 function readPackageMetadata(runtimeRoot) {
   try {
-    const json = JSON.parse(import_node_fs2.default.readFileSync(import_node_path2.default.join(runtimeRoot, "package.json"), "utf8"));
+    const json = JSON.parse(import_node_fs3.default.readFileSync(import_node_path4.default.join(runtimeRoot, "package.json"), "utf8"));
     return {
       version: typeof json.version === "string" ? json.version : "0.0.0",
       description: typeof json.description === "string" ? json.description : "MCP-first Cadre workflows.",
@@ -309,9 +481,9 @@ function readPackageMetadata(runtimeRoot) {
     };
   }
 }
-function pluginManifest(target, runtime) {
+function baseManifest(runtime) {
   const metadata = readPackageMetadata(runtime.runtimeRoot);
-  const base = {
+  return {
     name: PACKAGE_PLUGIN_NAME,
     version: metadata.version,
     description: metadata.description,
@@ -322,34 +494,42 @@ function pluginManifest(target, runtime) {
     keywords: ["cadre", "context-driven-development", "skills", "mcp"],
     skills: "./skills/"
   };
-  if (target === "claude") {
-    return { ...base, displayName: PACKAGE_DISPLAY_NAME, mcpServers: "./mcp-config.json" };
-  }
-  return {
-    ...base,
-    mcpServers: "./.mcp.json",
-    interface: {
-      displayName: PACKAGE_DISPLAY_NAME,
-      shortDescription: "MCP-first planning, tracks, reviews, and packet tools.",
-      longDescription: "Cadre packages context-driven development workflows for Codex through one global MCP runtime.",
-      developerName: "Vishal Kumar",
-      category: "Productivity",
-      capabilities: ["Read", "Write", "Interactive"],
-      defaultPrompt: ["Set up this repo with Cadre.", "Show Cadre team status.", "Review the current Cadre track."],
-      brandColor: "#10A37F"
-    }
-  };
 }
-function mcpConfig(runtime) {
-  return {
-    mcpServers: {
-      cadre: {
-        command: runtime.nodePath,
-        args: [runtime.mcpServer],
-        cwd: runtime.runtimeRoot
-      }
-    }
+function pluginManifest(target, runtime) {
+  const base = baseManifest(runtime);
+  if (target === "claude") return { ...base, displayName: PACKAGE_DISPLAY_NAME, mcpServers: "./mcp-config.json" };
+  if (target === "antigravity") {
+    return {
+      $schema: "https://antigravity.google/schemas/v1/plugin.json",
+      name: PACKAGE_PLUGIN_NAME,
+      description: base.description,
+      version: base.version
+    };
+  }
+  const mcpServers = "./.mcp.json";
+  const codexInterface = {
+    displayName: PACKAGE_DISPLAY_NAME,
+    shortDescription: "MCP-first planning, tracks, reviews, and packet tools.",
+    longDescription: "Cadre packages context-driven development workflows through one global MCP runtime.",
+    developerName: "Vishal Kumar",
+    category: "Productivity",
+    capabilities: ["Read", "Write", "Interactive"],
+    defaultPrompt: ["Set up this repo with Cadre.", "Show Cadre team status.", "Review the current Cadre track."],
+    brandColor: "#10A37F"
   };
+  return target === "copilot" ? { ...base, mcpServers } : { ...base, mcpServers, interface: codexInterface };
+}
+function mcpConfig(target, runtime) {
+  const server = {
+    command: runtime.nodePath,
+    args: [runtime.mcpServer],
+    cwd: runtime.runtimeRoot
+  };
+  if (target === "copilot") {
+    server.type = "local";
+    server.tools = ["*"];
+  }
+  return { mcpServers: { cadre: server } };
 }
 function marketplace(target, runtime) {
   const metadata = readPackageMetadata(runtime.runtimeRoot);
@@ -381,108 +561,115 @@ function marketplace(target, runtime) {
   };
 }
 function writeJson(file, value) {
-  import_node_fs2.default.mkdirSync(import_node_path2.default.dirname(file), { recursive: true });
-  import_node_fs2.default.writeFileSync(file, `${JSON.stringify(value, null, 2)}
+  import_node_fs3.default.mkdirSync(import_node_path4.default.dirname(file), { recursive: true });
+  import_node_fs3.default.writeFileSync(file, `${JSON.stringify(value, null, 2)}
 `);
 }
 function writeText(file, text) {
-  import_node_fs2.default.mkdirSync(import_node_path2.default.dirname(file), { recursive: true });
-  import_node_fs2.default.writeFileSync(file, text.endsWith("\n") ? text : `${text}
+  import_node_fs3.default.mkdirSync(import_node_path4.default.dirname(file), { recursive: true });
+  import_node_fs3.default.writeFileSync(file, text.endsWith("\n") ? text : `${text}
 `);
 }
-function writeThinPlugin(target, paths, runtime, skillShim) {
-  import_node_fs2.default.rmSync(paths.pluginRoot, { recursive: true, force: true });
-  writeText(import_node_path2.default.join(paths.pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
+function writePluginRoot(target, pluginRoot, runtime, skillShim) {
+  import_node_fs3.default.rmSync(pluginRoot, { recursive: true, force: true });
+  writeText(import_node_path4.default.join(pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
   if (target === "codex") {
-    writeJson(import_node_path2.default.join(paths.pluginRoot, ".codex-plugin", "plugin.json"), pluginManifest(target, runtime));
-    writeJson(import_node_path2.default.join(paths.pluginRoot, ".mcp.json"), mcpConfig(runtime));
+    writeJson(import_node_path4.default.join(pluginRoot, ".codex-plugin", "plugin.json"), pluginManifest(target, runtime));
+    writeJson(import_node_path4.default.join(pluginRoot, ".mcp.json"), mcpConfig(target, runtime));
+  } else if (target === "claude") {
+    writeJson(import_node_path4.default.join(pluginRoot, ".claude-plugin", "plugin.json"), pluginManifest(target, runtime));
+    writeJson(import_node_path4.default.join(pluginRoot, "mcp-config.json"), mcpConfig(target, runtime));
+  } else if (target === "copilot") {
+    writeJson(import_node_path4.default.join(pluginRoot, "plugin.json"), pluginManifest(target, runtime));
+    writeJson(import_node_path4.default.join(pluginRoot, ".mcp.json"), mcpConfig(target, runtime));
   } else {
-    writeJson(import_node_path2.default.join(paths.pluginRoot, ".claude-plugin", "plugin.json"), pluginManifest(target, runtime));
-    writeJson(import_node_path2.default.join(paths.pluginRoot, "mcp-config.json"), mcpConfig(runtime));
+    writeJson(import_node_path4.default.join(pluginRoot, "plugin.json"), pluginManifest(target, runtime));
+    writeJson(import_node_path4.default.join(pluginRoot, "mcp_config.json"), mcpConfig(target, runtime));
   }
-  writeJson(paths.marketplaceFile, marketplace(target, runtime));
 }
-function installCommands(target, paths, scope) {
-  if (target === "codex") {
-    return [
-      { command: "codex", args: ["plugin", "marketplace", "add", paths.marketplaceRoot] },
-      { command: "codex", args: ["plugin", "add", "cadre@cadre"] }
-    ];
+function writeTarget(target, paths, runtime, skillShim) {
+  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim);
+  for (const skillRoot of paths.skillRoots) {
+    import_node_fs3.default.rmSync(skillRoot, { recursive: true, force: true });
+    writeText(import_node_path4.default.join(skillRoot, "SKILL.md"), skillShim);
   }
+  if (paths.marketplaceFile && (target === "codex" || target === "claude")) {
+    writeJson(paths.marketplaceFile, marketplace(target, runtime));
+  }
+}
+
+// src/cli/install.ts
+function usage() {
   return [
-    { command: "claude", args: ["plugin", "marketplace", "add", "--scope", scope, paths.marketplaceRoot] },
-    { command: "claude", args: ["plugin", "install", "--scope", scope, "cadre@cadre"] },
-    { command: "claude", args: ["plugin", "update", "--scope", scope, "cadre@cadre"] }
-  ];
+    "Cadre CLI",
+    "",
+    "Usage:",
+    "  cadre install [--target codex|claude|copilot|antigravity|all] [--scope user|project|local] [--dry-run] [--check] [--force] [--yes]",
+    "  cadre doctor",
+    "  cadre help"
+  ].join("\n");
 }
-function runCommand(plan) {
-  const result = (0, import_node_child_process.spawnSync)(plan.command, plan.args, { encoding: "utf8" });
-  return { ok: result.status === 0, status: result.status, stderr: result.stderr || "" };
+function parseTarget(value) {
+  if (!value) throw new Error("--target requires a value");
+  if (value === "all") return value;
+  if (INSTALL_TARGETS.includes(value)) return value;
+  throw new Error("--target must be codex, claude, copilot, antigravity, or all");
 }
-function assertNoThinPluginPayload(paths) {
-  const forbidden = ["assets", "agents", "scripts"].filter((name) => import_node_fs2.default.existsSync(import_node_path2.default.join(paths.pluginRoot, name)));
-  return forbidden.map((name) => `${paths.pluginRoot}/${name}`);
+function parseScope(value) {
+  if (value === "user" || value === "project" || value === "local") return value;
+  throw new Error("--scope must be user, project, or local");
 }
-function pingMcp(runtime) {
-  if (!import_node_fs2.default.existsSync(runtime.mcpServer)) return { ok: false, reason: `missing MCP server: ${runtime.mcpServer}` };
-  const request = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    params: { name: "cadre_project", arguments: { action: "ping" } }
+function parseInstall(argv) {
+  const parsed = {
+    target: "auto",
+    scope: "user",
+    dryRun: false,
+    check: false,
+    force: false,
+    yes: false,
+    cadreHome: process.env.CADRE_HOME || import_node_path5.default.join(import_node_os3.default.homedir(), ".cadre")
   };
-  const result = (0, import_node_child_process.spawnSync)(runtime.nodePath, [runtime.mcpServer], {
-    cwd: runtime.runtimeRoot,
-    input: `${JSON.stringify(request)}
-`,
-    encoding: "utf8",
-    timeout: 3e3
-  });
-  if (result.status !== 0 && !result.stdout.trim()) return { ok: false, reason: result.stderr || `MCP exited with ${result.status}` };
-  const line = result.stdout.split(/\r?\n/).find((entry) => entry.trim());
-  if (!line) return { ok: false, reason: "MCP returned no JSON-RPC response" };
-  try {
-    const parsed = JSON.parse(line);
-    if (parsed.error) return { ok: false, reason: parsed.error.message || "MCP returned an error" };
-    const text = parsed.result?.content?.[0]?.text;
-    const body = text ? JSON.parse(text) : null;
-    return body?.data?.ok === true ? { ok: true } : { ok: false, reason: "MCP ping did not return ok:true" };
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--dry-run") parsed.dryRun = true;
+    else if (arg === "--check") parsed.check = true;
+    else if (arg === "--force") parsed.force = true;
+    else if (arg === "--yes" || arg === "-y") parsed.yes = true;
+    else if (arg === "--target") {
+      parsed.target = parseTarget(argv[index + 1]);
+      index += 1;
+    } else if (arg === "--scope") {
+      parsed.scope = parseScope(argv[index + 1]);
+      index += 1;
+    } else if (arg === "--home") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--home requires a path");
+      parsed.cadreHome = import_node_path5.default.resolve(value);
+      index += 1;
+    } else {
+      throw new Error(`Unknown install option: ${arg}`);
+    }
+  }
+  return parsed;
+}
+function printApprovalResult(target, path6, configured) {
+  if (configured) {
+    process.stdout.write(`Cadre ${target} MCP tool approvals are configured in ${path6}
+`);
+  } else {
+    process.stdout.write(`Cadre ${target} MCP tools may prompt on first use; no approval file was changed.
+`);
   }
 }
-function checkTarget(target, paths, runtime) {
-  const errors = [];
-  const skill = import_node_path2.default.join(paths.pluginRoot, "skills", "cadre", "SKILL.md");
-  if (!import_node_fs2.default.existsSync(skill)) errors.push(`missing ${skill}`);
-  const manifest = target === "codex" ? import_node_path2.default.join(paths.pluginRoot, ".codex-plugin", "plugin.json") : import_node_path2.default.join(paths.pluginRoot, ".claude-plugin", "plugin.json");
-  const mcp = target === "codex" ? import_node_path2.default.join(paths.pluginRoot, ".mcp.json") : import_node_path2.default.join(paths.pluginRoot, "mcp-config.json");
-  if (!import_node_fs2.default.existsSync(manifest)) errors.push(`missing ${manifest}`);
-  if (!import_node_fs2.default.existsSync(mcp)) errors.push(`missing ${mcp}`);
-  errors.push(...assertNoThinPluginPayload(paths).map((entry) => `thin plugin contains forbidden payload ${entry}`));
-  if (import_node_fs2.default.existsSync(mcp)) {
-    const config = JSON.parse(import_node_fs2.default.readFileSync(mcp, "utf8"));
-    const server = config.mcpServers?.cadre;
-    if (server?.command !== runtime.nodePath) errors.push(`${mcp} does not point at the current Node runtime`);
-    if (server?.args?.[0] !== runtime.mcpServer) errors.push(`${mcp} does not point at ${runtime.mcpServer}`);
-    if (server?.cwd !== runtime.runtimeRoot) errors.push(`${mcp} has wrong cwd`);
-  }
-  return errors;
-}
-function printPlan(target, paths, commands) {
-  process.stdout.write(`Cadre ${target} plugin: ${paths.pluginRoot}
-`);
-  process.stdout.write(`Cadre ${target} marketplace: ${paths.marketplaceRoot}
-`);
-  for (const command of commands) process.stdout.write(`Would run: ${command.command} ${command.args.join(" ")}
-`);
+function installedNoun(paths) {
+  return paths.pluginRoots.length > 0 ? "plugin" : "skill";
 }
 function runInstall(argv, context) {
   const options = parseInstall(argv);
   const runtime = runtimePaths();
   const targets = selectedTargets(options);
   if (targets.length === 0) {
-    process.stderr.write("No supported client detected. Install Codex or Claude, or pass --target codex|claude.\n");
+    process.stderr.write("No supported client detected. Install Codex, Claude, Copilot, or Antigravity, or pass --target codex|claude|copilot|antigravity.\n");
     return 1;
   }
   const ping = pingMcp(runtime);
@@ -493,7 +680,8 @@ function runInstall(argv, context) {
   }
   let ok = true;
   for (const target of targets) {
-    const paths = targetPaths(options.cadreHome, target);
+    let targetOk = true;
+    const paths = targetPaths(options.cadreHome, target, options.scope);
     const commands = installCommands(target, paths, options.scope);
     if (options.dryRun) {
       printPlan(target, paths, commands);
@@ -501,7 +689,7 @@ function runInstall(argv, context) {
 `);
       continue;
     }
-    if (!options.check) writeThinPlugin(target, paths, runtime, context.skillShim);
+    if (!options.check) writeTarget(target, paths, runtime, context.skillShim);
     const errors = checkTarget(target, paths, runtime);
     if (!options.check) {
       const approvals = bootstrapClientApprovals(target);
@@ -511,33 +699,42 @@ function runInstall(argv, context) {
     if (!approvalCheck.ok) errors.push(`${target} approval check failed: ${approvalCheck.error || approvalCheck.path}`);
     if (errors.length > 0) {
       ok = false;
+      targetOk = false;
       for (const error of errors) process.stderr.write(`${error}
 `);
       continue;
     }
     if (options.check) {
-      process.stdout.write(`Cadre ${target} plugin is installed and points at ${runtime.mcpServer}
+      process.stdout.write(`Cadre ${target} ${installedNoun(paths)} is installed and points at ${runtime.mcpServer}
 `);
-      process.stdout.write(`Cadre ${target} MCP tool approvals are configured in ${approvalCheck.path}
-`);
-      continue;
-    }
-    if (!commandExists(target)) {
-      ok = false;
-      process.stderr.write(`${target} command not found; plugin files were written but native registration was skipped.
-`);
+      printApprovalResult(target, approvalCheck.path, approvalCheck.configured);
       continue;
     }
     for (const command of commands) {
+      if (!commandExists(command.command)) {
+        const message = `${command.command} command not found; plugin files were written but native registration was skipped.
+`;
+        if (command.optional) process.stderr.write(message);
+        else {
+          targetOk = false;
+          ok = false;
+          process.stderr.write(message);
+        }
+        continue;
+      }
       const result = runCommand(command);
       if (!result.ok) {
+        targetOk = false;
         ok = false;
         process.stderr.write(`${command.command} ${command.args.join(" ")} failed: ${result.stderr}
 `);
       }
     }
-    if (ok) process.stdout.write(`Installed Cadre ${target} plugin through ${paths.marketplaceRoot}; MCP tool approvals configured in ${approvalCheck.path}
+    if (targetOk) {
+      process.stdout.write(`Installed Cadre ${target} ${installedNoun(paths)} through ${paths.primaryRoot}
 `);
+      printApprovalResult(target, approvalCheck.path, approvalCheck.configured);
+    }
   }
   return ok ? 0 : 1;
 }

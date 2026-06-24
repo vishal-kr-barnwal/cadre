@@ -19,7 +19,9 @@
     "context-driven-development",
     "mcp",
     "codex",
-    "claude"
+    "claude",
+    "copilot",
+    "antigravity"
   ],
   "type": "commonjs",
   "packageManager": "pnpm@11.4.0",

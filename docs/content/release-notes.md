@@ -7,6 +7,13 @@ order: 9
 
 # Release Notes
 
+## Unreleased
+
+Cadre adds install-time support for GitHub Copilot and Google Antigravity
+alongside Codex and Claude. The new bundles stay thin MCP entrypoints, Copilot
+project scope writes `.github/skills/cadre/SKILL.md`, and Antigravity CLI gets
+the Cadre-only `mcp(cadre/*)` allow rule.
+
 ## 1.1.2 - 2026-06-23
 
 Cadre 1.1.2 bootstraps Cadre-only MCP tool approvals for Codex and Claude so

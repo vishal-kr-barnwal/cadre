@@ -55,7 +55,7 @@ const PROPS: Record<string, JsonObject> = {
   limit: { type: "number" },
   maxWorkers: { type: "number" },
   includeHeavy: { type: "boolean" },
-  agentIdentifier: { type: "string", enum: ["claude", "codex"], description: "Calling agent platform used to select the worker dispatch adapter." },
+  agentIdentifier: { type: "string", enum: ["claude", "codex", "copilot", "antigravity"], description: "Calling agent platform used to select the worker dispatch adapter." },
   provider: { type: "string" },
   providerMode: { type: "string", enum: ["local", "github", "gitlab"] },
   provider_mode: { type: "string", enum: ["local", "github", "gitlab"] },

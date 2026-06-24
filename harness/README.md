@@ -21,9 +21,10 @@ Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
   shared sync, and compact MCP dashboard resources.
 - **Polyglot intelligence:** repo maps, dependency graphs, test impact,
   workspace diagnostics, LSP setup, warm LSP review, and async job artifacts.
-- **Two agent surfaces:** Claude Code and OpenAI Codex plugins are thin MCP
-  entrypoints. The global `cadre-mcp` runtime owns the skill contract,
-  protocols, references, templates, and packet tools.
+- **Four agent surfaces:** Claude Code, OpenAI Codex, GitHub Copilot, and
+  Google Antigravity plugins are thin MCP entrypoints. The global `cadre-mcp`
+  runtime owns the skill contract, protocols, references, templates, and packet
+  tools.
 
 ## Install
 

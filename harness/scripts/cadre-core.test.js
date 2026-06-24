@@ -544,6 +544,12 @@ test("build emits every required runtime bundle path", () => {
     "plugins/cadre-claude/assets",
     "plugins/cadre-claude/agents",
     "plugins/cadre-claude/scripts",
+    "plugins/cadre-copilot/assets",
+    "plugins/cadre-copilot/agents",
+    "plugins/cadre-copilot/scripts",
+    "plugins/cadre-antigravity/assets",
+    "plugins/cadre-antigravity/agents",
+    "plugins/cadre-antigravity/scripts",
     "plugins/cadre/scripts/cadre-core.js",
     "plugins/cadre/scripts/cadre-job-runner.js",
     "plugins/cadre/scripts/cadre-lsp-setup.js",
@@ -554,17 +560,35 @@ test("build emits every required runtime bundle path", () => {
     "plugins/cadre-claude/scripts/cadre-lsp-setup.js",
     "plugins/cadre-claude/scripts/cadre-lsp-review.js",
     "plugins/cadre-claude/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre-copilot/scripts/cadre-core.js",
+    "plugins/cadre-copilot/scripts/cadre-job-runner.js",
+    "plugins/cadre-copilot/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-copilot/scripts/cadre-lsp-review.js",
+    "plugins/cadre-copilot/scripts/cadre-lsp-daemon.js",
+    "plugins/cadre-antigravity/scripts/cadre-core.js",
+    "plugins/cadre-antigravity/scripts/cadre-job-runner.js",
+    "plugins/cadre-antigravity/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-antigravity/scripts/cadre-lsp-review.js",
+    "plugins/cadre-antigravity/scripts/cadre-lsp-daemon.js",
     "plugins/cadre/references",
     "plugins/cadre/templates",
     "plugins/cadre-claude/references",
     "plugins/cadre-claude/templates",
+    "plugins/cadre-copilot/references",
+    "plugins/cadre-copilot/templates",
+    "plugins/cadre-antigravity/references",
+    "plugins/cadre-antigravity/templates",
     "templates/scripts/cadre-lsp-setup.js",
     "templates/scripts/cadre-lsp-review.js",
     "templates/scripts/cadre-lsp-daemon.js",
     "plugins/cadre/templates/scripts/cadre-lsp-setup.js",
     "plugins/cadre-claude/templates/scripts/cadre-lsp-review.js",
+    "plugins/cadre-copilot/templates/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-antigravity/templates/scripts/cadre-lsp-review.js",
     "plugins/cadre/skills/cadre/templates/scripts/cadre-lsp-setup.js",
     "plugins/cadre-claude/skills/cadre/templates/scripts/cadre-lsp-review.js",
+    "plugins/cadre-copilot/skills/cadre/templates/scripts/cadre-lsp-setup.js",
+    "plugins/cadre-antigravity/skills/cadre/templates/scripts/cadre-lsp-review.js",
   ]) {
     assert.equal(fs.existsSync(path.join(__dirname, "..", file)), false, `duplicate helper should not be bundled: ${file}`);
   }
@@ -627,6 +651,7 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     const missingAgent = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617" });
     assert.equal(missingAgent.ok, false);
     assert.match(missingAgent.error, /agentIdentifier/);
+    assert.deepEqual(missingAgent.accepted_agent_identifiers, ["claude", "codex", "copilot", "antigravity"]);
 
     const setup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "codex" });
     assert.equal(setup.ok, true);
@@ -649,6 +674,14 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     const claudeSetup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "claude" });
     assert.equal(claudeSetup.workers[0].dispatch.selected_dispatch.agent_identifier, "claude");
     assert.equal(claudeSetup.workers[0].dispatch.selected_dispatch.mechanism, "Task");
+
+    const copilotSetup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "copilot" });
+    assert.equal(copilotSetup.workers[0].dispatch.selected_dispatch.agent_identifier, "copilot");
+    assert.equal(copilotSetup.workers[0].dispatch.selected_dispatch.mechanism, "copilot_cli.custom_agent");
+
+    const antigravitySetup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "antigravity" });
+    assert.equal(antigravitySetup.workers[0].dispatch.selected_dispatch.agent_identifier, "antigravity");
+    assert.equal(antigravitySetup.workers[0].dispatch.selected_dispatch.mechanism, "invoke_subagent");
 
     const dryRecord = core.parallelWorkflow(root, {
       action: "record_finish",

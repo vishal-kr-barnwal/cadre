@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# generate-skills.sh — Build the Claude and Codex plugin bundles from the
+# generate-skills.sh — Build the Claude, Codex, Copilot, and Antigravity plugin bundles from the
 # master Cadre skill protocol sources.
 #
 # One source of truth is transformed into ignored local/install-time artifacts:
@@ -8,6 +8,8 @@
 #   - Codex skill build artifact  -> .agents/skills/cadre/SKILL.md
 #   - Claude plugin marketplace -> .claude-plugin/marketplace.json + plugins/cadre-claude/
 #   - Codex plugin marketplace  -> .agents/plugins/marketplace.json + plugins/cadre/
+#   - Copilot plugin fixture     -> plugins/cadre-copilot/
+#   - Antigravity plugin fixture -> plugins/cadre-antigravity/
 #
 # Edit the source skill in `skills/cadre/SKILL.md`, protocol sources in
 # `skills/cadre/protocols/cadre-*.json`, reference masters in
@@ -49,6 +51,8 @@ CLAUDE_SKILL_DIR=".claude/skills/cadre"
 CODEX_SKILL_DIR=".agents/skills/cadre"
 CLAUDE_PLUGIN_DIR="plugins/cadre-claude"
 CODEX_PLUGIN_DIR="plugins/cadre"
+COPILOT_PLUGIN_DIR="plugins/cadre-copilot"
+ANTIGRAVITY_PLUGIN_DIR="plugins/cadre-antigravity"
 CLAUDE_PLUGIN_MARKETPLACE=".claude-plugin/marketplace.json"
 CODEX_PLUGIN_MARKETPLACE=".agents/plugins/marketplace.json"
 ROOT_CLAUDE_PLUGIN_MARKETPLACE=".claude-plugin/marketplace.json"
@@ -263,6 +267,30 @@ plugin_manifest_json() {
 }
 JSON
       ;;
+    copilot)
+      cat <<JSON
+{
+  "name": "$PLUGIN_NAME",
+  "version": "$PLUGIN_VERSION",
+  "description": "$PLUGIN_DESCRIPTION",
+  "author": {
+    "name": "$PLUGIN_AUTHOR_NAME",
+    "url": "$PLUGIN_AUTHOR_URL"
+  },
+  "homepage": "$PLUGIN_HOMEPAGE",
+  "repository": "$PLUGIN_REPOSITORY",
+  "license": "$PLUGIN_LICENSE",
+  "keywords": [
+    "cadre",
+    "context-driven-development",
+    "skills",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
+JSON
+      ;;
     claude)
       cat <<JSON
 {
@@ -288,6 +316,16 @@ JSON
 }
 JSON
       ;;
+    antigravity)
+      cat <<JSON
+{
+  "\$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "$PLUGIN_NAME",
+  "description": "$PLUGIN_DESCRIPTION",
+  "version": "$PLUGIN_VERSION"
+}
+JSON
+      ;;
   esac
 }
 
@@ -296,13 +334,32 @@ write_plugin_manifest() {
   case "$platform" in
     codex) manifest_dir="$(out_path "$plugin_dir/.codex-plugin")" ;;
     claude) manifest_dir="$(out_path "$plugin_dir/.claude-plugin")" ;;
+    copilot|antigravity) manifest_dir="$(out_path "$plugin_dir")" ;;
   esac
   mkdir -p "$manifest_dir"
   plugin_manifest_json "$platform" > "$manifest_dir/plugin.json"
 }
 
 write_plugin_mcp_config() {
-  local target="$1"
+  local target="$1" platform="${2:-generic}"
+  if [[ "$platform" == "copilot" ]]; then
+    cat > "$(out_path "$target")" <<'JSON'
+{
+  "mcpServers": {
+    "cadre": {
+      "type": "local",
+      "command": "cadre-mcp",
+      "args": [],
+      "cwd": ".",
+      "tools": [
+        "*"
+      ]
+    }
+  }
+}
+JSON
+    return
+  fi
   cat > "$(out_path "$target")" <<'JSON'
 {
   "mcpServers": {
@@ -319,8 +376,10 @@ JSON
 write_plugin_mcp_config_for_platform() {
   local platform="$1" plugin_dir="$2"
   case "$platform" in
-    codex) write_plugin_mcp_config "$plugin_dir/.mcp.json" ;;
-    claude) write_plugin_mcp_config "$plugin_dir/mcp-config.json" ;;
+    codex) write_plugin_mcp_config "$plugin_dir/.mcp.json" "$platform" ;;
+    claude) write_plugin_mcp_config "$plugin_dir/mcp-config.json" "$platform" ;;
+    copilot) write_plugin_mcp_config "$plugin_dir/.mcp.json" "$platform" ;;
+    antigravity) write_plugin_mcp_config "$plugin_dir/mcp_config.json" "$platform" ;;
   esac
 }
 
@@ -427,6 +486,10 @@ const checks = [
   ["plugins/cadre/.mcp.json", ["mcpServers"]],
   ["plugins/cadre-claude/.claude-plugin/plugin.json", ["name", "version", "skills", "mcpServers"]],
   ["plugins/cadre-claude/mcp-config.json", ["mcpServers"]],
+  ["plugins/cadre-copilot/plugin.json", ["name", "version", "skills", "mcpServers"]],
+  ["plugins/cadre-copilot/.mcp.json", ["mcpServers"]],
+  ["plugins/cadre-antigravity/plugin.json", ["name", "version", "description"]],
+  ["plugins/cadre-antigravity/mcp_config.json", ["mcpServers"]],
 ];
 
 for (const [rel, keys] of checks) {
@@ -452,16 +515,44 @@ const claudeMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-clau
 if (claudeMcp.mcpServers?.cadre?.command !== "cadre-mcp" || claudeMcp.mcpServers?.cadre?.args?.length !== 0) {
   throw new Error("Claude MCP config must point at global cadre-mcp");
 }
+const copilotManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-copilot/plugin.json"), "utf8"));
+if (copilotManifest.skills !== "./skills/") throw new Error("Copilot plugin manifest has wrong skills path");
+if (copilotManifest.mcpServers !== "./.mcp.json") throw new Error("Copilot plugin manifest has wrong MCP path");
+const copilotMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-copilot/.mcp.json"), "utf8"));
+if (copilotMcp.mcpServers?.cadre?.command !== "cadre-mcp" || copilotMcp.mcpServers?.cadre?.args?.length !== 0) {
+  throw new Error("Copilot MCP config must point at global cadre-mcp");
+}
+if (copilotMcp.mcpServers?.cadre?.type !== "local" || !copilotMcp.mcpServers?.cadre?.tools?.includes("*")) {
+  throw new Error("Copilot MCP config must declare a local server with tools");
+}
+const antigravityManifest = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-antigravity/plugin.json"), "utf8"));
+if (antigravityManifest.name !== "cadre") throw new Error("Antigravity plugin manifest has wrong name");
+if (antigravityManifest.$schema !== "https://antigravity.google/schemas/v1/plugin.json") {
+  throw new Error("Antigravity plugin manifest has wrong schema");
+}
+const antigravityMcp = JSON.parse(fs.readFileSync(path.join(root, "plugins/cadre-antigravity/mcp_config.json"), "utf8"));
+if (antigravityMcp.mcpServers?.cadre?.command !== "cadre-mcp" || antigravityMcp.mcpServers?.cadre?.args?.length !== 0) {
+  throw new Error("Antigravity MCP config must point at global cadre-mcp");
+}
 for (const field of ["name", "version", "description", "homepage", "repository", "license"]) {
   if (codexManifest[field] !== claudeManifest[field]) {
     throw new Error(`Plugin manifests diverged on ${field}`);
+  }
+  if (codexManifest[field] !== copilotManifest[field]) {
+    throw new Error(`Copilot plugin manifest diverged on ${field}`);
   }
 }
 if (JSON.stringify(codexManifest.keywords) !== JSON.stringify(claudeManifest.keywords)) {
   throw new Error("Plugin manifests diverged on keywords");
 }
+if (JSON.stringify(codexManifest.keywords) !== JSON.stringify(copilotManifest.keywords)) {
+  throw new Error("Copilot plugin manifest diverged on keywords");
+}
 if (codexManifest.author?.name !== claudeManifest.author?.name) {
   throw new Error("Plugin manifests diverged on author name");
+}
+if (codexManifest.author?.name !== copilotManifest.author?.name) {
+  throw new Error("Copilot plugin manifest diverged on author name");
 }
 if (codexManifest.interface?.displayName !== "Cadre") {
   throw new Error("Codex plugin manifest missing interface display name");
@@ -475,7 +566,7 @@ if (!claudeManifest.displayName || claudeManifest.displayName !== "Cadre") {
 if ("agents" in claudeManifest) {
   throw new Error("Claude plugin manifest should not declare generated agents");
 }
-for (const text of [JSON.stringify(codexMcp), JSON.stringify(claudeMcp)]) {
+for (const text of [JSON.stringify(codexMcp), JSON.stringify(claudeMcp), JSON.stringify(copilotMcp), JSON.stringify(antigravityMcp)]) {
   if (text.includes("${PLUGIN_ROOT}") || text.includes("${CLAUDE_PLUGIN_ROOT}")) {
     throw new Error("Generated MCP config still contains placeholder paths");
   }
@@ -501,6 +592,8 @@ if (rootClaudeMarketplace.plugins?.[0]?.source !== "./harness/plugins/cadre-clau
 for (const rel of [
   "plugins/cadre/skills/cadre/SKILL.md",
   "plugins/cadre-claude/skills/cadre/SKILL.md",
+  "plugins/cadre-copilot/skills/cadre/SKILL.md",
+  "plugins/cadre-antigravity/skills/cadre/SKILL.md",
 ]) {
   if (!fs.existsSync(path.join(root, rel))) throw new Error(`missing ${rel}`);
 }
@@ -531,6 +624,32 @@ for (const rel of [
   "plugins/cadre-claude/scripts/cadre-lsp-daemon.js",
   "plugins/cadre-claude/skills/cadre/skill.json",
   "plugins/cadre-claude/skills/cadre/protocols",
+  "plugins/cadre-copilot/README.md",
+  "plugins/cadre-copilot/assets",
+  "plugins/cadre-copilot/references",
+  "plugins/cadre-copilot/templates",
+  "plugins/cadre-copilot/agents",
+  "plugins/cadre-copilot/scripts",
+  "plugins/cadre-copilot/scripts/cadre-core.js",
+  "plugins/cadre-copilot/scripts/cadre-job-runner.js",
+  "plugins/cadre-copilot/scripts/cadre-lsp-setup.js",
+  "plugins/cadre-copilot/scripts/cadre-lsp-review.js",
+  "plugins/cadre-copilot/scripts/cadre-lsp-daemon.js",
+  "plugins/cadre-copilot/skills/cadre/skill.json",
+  "plugins/cadre-copilot/skills/cadre/protocols",
+  "plugins/cadre-antigravity/README.md",
+  "plugins/cadre-antigravity/assets",
+  "plugins/cadre-antigravity/references",
+  "plugins/cadre-antigravity/templates",
+  "plugins/cadre-antigravity/agents",
+  "plugins/cadre-antigravity/scripts",
+  "plugins/cadre-antigravity/scripts/cadre-core.js",
+  "plugins/cadre-antigravity/scripts/cadre-job-runner.js",
+  "plugins/cadre-antigravity/scripts/cadre-lsp-setup.js",
+  "plugins/cadre-antigravity/scripts/cadre-lsp-review.js",
+  "plugins/cadre-antigravity/scripts/cadre-lsp-daemon.js",
+  "plugins/cadre-antigravity/skills/cadre/skill.json",
+  "plugins/cadre-antigravity/skills/cadre/protocols",
 ]) {
   if (fs.existsSync(path.join(root, rel))) throw new Error(`unexpected generated file: ${rel}`);
 }
@@ -552,7 +671,7 @@ write_root_marketplaces() {
 }
 
 generate_plugins() {
-  rm -rf "$(out_path "$CODEX_PLUGIN_DIR")" "$(out_path "$CLAUDE_PLUGIN_DIR")"
+  rm -rf "$(out_path "$CODEX_PLUGIN_DIR")" "$(out_path "$CLAUDE_PLUGIN_DIR")" "$(out_path "$COPILOT_PLUGIN_DIR")" "$(out_path "$ANTIGRAVITY_PLUGIN_DIR")"
 
   generate_plugin_bundle() {
     local skill_dir="$1" plugin_dir="$2"
@@ -561,11 +680,17 @@ generate_plugins() {
 
   generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR"
   generate_plugin_bundle "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR"
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$COPILOT_PLUGIN_DIR"
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$ANTIGRAVITY_PLUGIN_DIR"
 
   write_plugin_manifest "codex" "$CODEX_PLUGIN_DIR"
   write_plugin_mcp_config_for_platform "codex" "$CODEX_PLUGIN_DIR"
   write_plugin_manifest "claude" "$CLAUDE_PLUGIN_DIR"
   write_plugin_mcp_config_for_platform "claude" "$CLAUDE_PLUGIN_DIR"
+  write_plugin_manifest "copilot" "$COPILOT_PLUGIN_DIR"
+  write_plugin_mcp_config_for_platform "copilot" "$COPILOT_PLUGIN_DIR"
+  write_plugin_manifest "antigravity" "$ANTIGRAVITY_PLUGIN_DIR"
+  write_plugin_mcp_config_for_platform "antigravity" "$ANTIGRAVITY_PLUGIN_DIR"
   write_marketplaces
   write_root_marketplaces
   validate_generated_plugins
@@ -607,11 +732,11 @@ main() {
 
   if [[ "$MODE" == "--check" ]]; then
     echo "✓ Generated plugin bundles can be produced from source."
-    echo "  Checked thin Codex/Claude plugin manifests, MCP configs, and marketplaces."
+    echo "  Checked thin Codex/Claude/Copilot/Antigravity plugin manifests, MCP configs, and marketplaces."
   else
     echo "✓ Embedded $count workflow protocols into the Cadre MCP runtime."
     echo "  .claude/skills/cadre/ .agents/skills/cadre/ contain SKILL.md only"
-    echo "  plugins/cadre-claude/ plugins/cadre/ are thin MCP entrypoints for global cadre-mcp"
+    echo "  plugins/cadre-claude/ plugins/cadre/ plugins/cadre-copilot/ plugins/cadre-antigravity/ are thin MCP entrypoints for global cadre-mcp"
   fi
 }
 

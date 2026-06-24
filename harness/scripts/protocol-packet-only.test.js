@@ -35,6 +35,8 @@ const generatedSkillDirs = [
   path.join(generatedRoot, ".claude", "skills", "cadre"),
   path.join(generatedRoot, "plugins", "cadre", "skills", "cadre"),
   path.join(generatedRoot, "plugins", "cadre-claude", "skills", "cadre"),
+  path.join(generatedRoot, "plugins", "cadre-copilot", "skills", "cadre"),
+  path.join(generatedRoot, "plugins", "cadre-antigravity", "skills", "cadre"),
 ];
 const protocolDirs = [
   path.join(masterSkillDir, "protocols"),
@@ -154,6 +156,8 @@ test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
   }
   const codexFiles = collectFiles(path.join(generatedRoot, "plugins", "cadre")).sort();
   const claudeFiles = collectFiles(path.join(generatedRoot, "plugins", "cadre-claude")).sort();
+  const copilotFiles = collectFiles(path.join(generatedRoot, "plugins", "cadre-copilot")).sort();
+  const antigravityFiles = collectFiles(path.join(generatedRoot, "plugins", "cadre-antigravity")).sort();
   for (const file of [
     ".codex-plugin/plugin.json",
     ".mcp.json",
@@ -169,6 +173,20 @@ test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
     assert.ok(claudeFiles.includes(file), `missing Claude plugin file ${file}`);
   }
   for (const file of [
+    "plugin.json",
+    ".mcp.json",
+    "skills/cadre/SKILL.md",
+  ]) {
+    assert.ok(copilotFiles.includes(file), `missing Copilot plugin file ${file}`);
+  }
+  for (const file of [
+    "plugin.json",
+    "mcp_config.json",
+    "skills/cadre/SKILL.md",
+  ]) {
+    assert.ok(antigravityFiles.includes(file), `missing Antigravity plugin file ${file}`);
+  }
+  for (const file of [
     "references/mcp-contract.json",
     "templates/manifest.json",
     "skills/cadre/skill.json",
@@ -178,6 +196,8 @@ test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
   ]) {
     assert.equal(codexFiles.includes(file), false, `unexpected Codex plugin file ${file}`);
     assert.equal(claudeFiles.includes(file), false, `unexpected Claude plugin file ${file}`);
+    assert.equal(copilotFiles.includes(file), false, `unexpected Copilot plugin file ${file}`);
+    assert.equal(antigravityFiles.includes(file), false, `unexpected Antigravity plugin file ${file}`);
   }
 });
 
@@ -227,8 +247,12 @@ test("Reference files are structured JSON and carry agent dispatch in JSON", () 
       if (reference.id === "parallel-execution") {
         assert.equal(reference.platforms.codex.agentIdentifier, "codex");
         assert.equal(reference.platforms.claude.agentIdentifier, "claude");
+        assert.equal(reference.platforms.copilot.agentIdentifier, "copilot");
+        assert.equal(reference.platforms.antigravity.agentIdentifier, "antigravity");
         assert.equal(typeof reference.platforms.codex.dispatch, "string");
         assert.equal(typeof reference.platforms.claude.dispatch, "string");
+        assert.equal(typeof reference.platforms.copilot.dispatch, "string");
+        assert.equal(typeof reference.platforms.antigravity.dispatch, "string");
       }
     }
   }
@@ -401,12 +425,49 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-claude", "scripts")), false);
   const codexMcp = readJson(path.join(generatedRoot, "plugins", "cadre", ".mcp.json"));
   const claudeMcp = readJson(path.join(generatedRoot, "plugins", "cadre-claude", "mcp-config.json"));
+  const copilotManifest = readJson(path.join(generatedRoot, "plugins", "cadre-copilot", "plugin.json"));
+  assert.equal(copilotManifest.skills, "./skills/");
+  assert.equal(copilotManifest.mcpServers, "./.mcp.json");
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", ".mcp.json")), true);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "skills", "cadre", "SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "skills", "cadre", "skill.json")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "skills", "cadre", "protocols")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "references")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "templates")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "assets")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "agents")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "README.md")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", "scripts")), false);
+  const copilotMcp = readJson(path.join(generatedRoot, "plugins", "cadre-copilot", ".mcp.json"));
+  assert.equal(copilotMcp.mcpServers.cadre.type, "local");
+  assert.deepEqual(copilotMcp.mcpServers.cadre.tools, ["*"]);
+
+  const antigravityManifest = readJson(path.join(generatedRoot, "plugins", "cadre-antigravity", "plugin.json"));
+  assert.equal(antigravityManifest.$schema, "https://antigravity.google/schemas/v1/plugin.json");
+  assert.equal(antigravityManifest.name, "cadre");
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "mcp_config.json")), true);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "skills", "cadre", "SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "skills", "cadre", "skill.json")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "skills", "cadre", "protocols")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "references")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "templates")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "assets")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "agents")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "README.md")), false);
+  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "scripts")), false);
+  const antigravityMcp = readJson(path.join(generatedRoot, "plugins", "cadre-antigravity", "mcp_config.json"));
   assert.equal(codexMcp.mcpServers.cadre.command, "cadre-mcp");
   assert.deepEqual(codexMcp.mcpServers.cadre.args, []);
   assert.equal(claudeMcp.mcpServers.cadre.command, "cadre-mcp");
   assert.deepEqual(claudeMcp.mcpServers.cadre.args, []);
+  assert.equal(copilotMcp.mcpServers.cadre.command, "cadre-mcp");
+  assert.deepEqual(copilotMcp.mcpServers.cadre.args, []);
+  assert.equal(antigravityMcp.mcpServers.cadre.command, "cadre-mcp");
+  assert.deepEqual(antigravityMcp.mcpServers.cadre.args, []);
   assert.equal(codexMcp.mcpServers.cadre.cwd, ".");
   assert.equal(claudeMcp.mcpServers.cadre.cwd, ".");
+  assert.equal(copilotMcp.mcpServers.cadre.cwd, ".");
+  assert.equal(antigravityMcp.mcpServers.cadre.cwd, ".");
 
   const harnessCodexMarketplace = readJson(path.join(generatedRoot, ".agents", "plugins", "marketplace.json"));
   assert.equal(harnessCodexMarketplace.plugins[0].source.path, "./plugins/cadre");
@@ -423,6 +484,8 @@ test("Generated plugins are thin MCP entrypoints", () => {
   for (const pluginDir of [
     path.join(generatedRoot, "plugins", "cadre"),
     path.join(generatedRoot, "plugins", "cadre-claude"),
+    path.join(generatedRoot, "plugins", "cadre-copilot"),
+    path.join(generatedRoot, "plugins", "cadre-antigravity"),
   ]) {
     assert.equal(fs.existsSync(path.join(pluginDir, "assets")), false, `${path.relative(root, pluginDir)} should not ship assets`);
     assert.equal(fs.existsSync(path.join(pluginDir, "agents")), false, `${path.relative(root, pluginDir)} should not ship platform worker agents`);

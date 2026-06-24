@@ -570,7 +570,9 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".claude",
   ".cache",
   ".codex",
+  ".copilot",
   ".dart_tool",
+  ".gemini",
   ".gradle",
   ".mypy_cache",
   ".pytest_cache",
@@ -605,7 +607,9 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
 ]);
 var DEFAULT_IGNORE_PATHS = [
   "plugins/cadre",
-  "plugins/cadre-claude"
+  "plugins/cadre-claude",
+  "plugins/cadre-copilot",
+  "plugins/cadre-antigravity"
 ];
 function normalizeRel(file) {
   return file.split(import_node_path5.default.sep).join("/");
@@ -897,8 +901,12 @@ function isIgnoredRepoMapFile(file) {
   if (normalized.startsWith(".agents/")) return true;
   if (normalized.startsWith(".claude/")) return true;
   if (normalized.startsWith(".claude-plugin/")) return true;
+  if (normalized.startsWith(".copilot/")) return true;
+  if (normalized.startsWith(".gemini/")) return true;
   if (normalized.startsWith("plugins/cadre/")) return true;
   if (normalized.startsWith("plugins/cadre-claude/")) return true;
+  if (normalized.startsWith("plugins/cadre-copilot/")) return true;
+  if (normalized.startsWith("plugins/cadre-antigravity/")) return true;
   return normalized.split("/").some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
 }
 function selectedRepoNames(args = {}) {

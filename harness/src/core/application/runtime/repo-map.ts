@@ -23,8 +23,12 @@ export function isIgnoredRepoMapFile(file: unknown): boolean {
   if (normalized.startsWith(".agents/")) return true;
   if (normalized.startsWith(".claude/")) return true;
   if (normalized.startsWith(".claude-plugin/")) return true;
+  if (normalized.startsWith(".copilot/")) return true;
+  if (normalized.startsWith(".gemini/")) return true;
   if (normalized.startsWith("plugins/cadre/")) return true;
   if (normalized.startsWith("plugins/cadre-claude/")) return true;
+  if (normalized.startsWith("plugins/cadre-copilot/")) return true;
+  if (normalized.startsWith("plugins/cadre-antigravity/")) return true;
   return normalized
     .split("/")
     .some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));

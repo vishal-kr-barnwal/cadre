@@ -292,7 +292,7 @@ export interface RuntimeArgs extends JsonObject {
   limit?: number;
   maxWorkers?: number;
   includeHeavy?: boolean;
-  agentIdentifier?: "claude" | "codex";
+  agentIdentifier?: "claude" | "codex" | "copilot" | "antigravity";
   epicId?: string;
   assignee?: string;
   taskId?: string | null;

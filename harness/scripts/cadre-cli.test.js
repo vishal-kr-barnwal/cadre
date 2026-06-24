@@ -40,6 +40,10 @@ function installEnv(home, bin, extra = {}) {
     CADRE_HOME: path.join(home, ".cadre"),
     CODEX_HOME: path.join(home, ".codex"),
     CLAUDE_HOME: path.join(home, ".claude"),
+    COPILOT_HOME: path.join(home, ".copilot"),
+    GEMINI_HOME: path.join(home, ".gemini"),
+    ANTIGRAVITY_CLI_HOME: path.join(home, ".gemini", "antigravity-cli"),
+    ANTIGRAVITY_IDE_HOME: path.join(home, ".gemini", "config"),
     PATH: `${bin}${path.delimiter}${process.env.PATH || ""}`,
     ...extra,
   };
@@ -56,17 +60,25 @@ test("cadre install --dry-run plans detected clients without mutating", () => {
   fs.mkdirSync(bin, { recursive: true });
   installFakeClient(bin, "codex", log);
   installFakeClient(bin, "claude", log);
+  installFakeClient(bin, "copilot", log);
+  installFakeClient(bin, "agy", log);
 
   const result = runCli(["install", "--dry-run"], installEnv(home, bin));
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Would run: codex plugin marketplace add/);
   assert.match(result.stdout, /Would run: claude plugin marketplace add/);
+  assert.match(result.stdout, /Would run: copilot plugin install/);
+  assert.match(result.stdout, /Would run: agy plugin install/);
   assert.match(result.stdout, /Would configure: Cadre codex MCP tool approvals/);
   assert.match(result.stdout, /Would configure: Cadre claude MCP tool approvals/);
+  assert.match(result.stdout, /Would configure: Cadre copilot MCP tools may prompt/);
+  assert.match(result.stdout, /Would configure: Cadre antigravity CLI MCP allow rule/);
   assert.equal(fs.existsSync(path.join(home, ".cadre")), false);
   assert.equal(fs.existsSync(path.join(home, ".codex")), false);
   assert.equal(fs.existsSync(path.join(home, ".claude")), false);
+  assert.equal(fs.existsSync(path.join(home, ".copilot")), false);
+  assert.equal(fs.existsSync(path.join(home, ".gemini")), false);
   assert.equal(fs.existsSync(log), false);
 });
 
@@ -78,30 +90,47 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   fs.mkdirSync(bin, { recursive: true });
   installFakeClient(bin, "codex", log);
   installFakeClient(bin, "claude", log);
+  installFakeClient(bin, "copilot", log);
+  installFakeClient(bin, "agy", log);
 
   const result = runCli(["install", "--target", "all", "--scope", "user", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const codexMarketplace = path.join(cadreHome, "marketplaces", "codex");
   const claudeMarketplace = path.join(cadreHome, "marketplaces", "claude");
+  const copilotMarketplace = path.join(cadreHome, "marketplaces", "copilot");
   const codexPlugin = path.join(codexMarketplace, "plugins", "cadre");
   const claudePlugin = path.join(claudeMarketplace, "plugins", "cadre");
-  for (const plugin of [codexPlugin, claudePlugin]) {
+  const copilotPlugin = path.join(copilotMarketplace, "plugins", "cadre");
+  const antigravityCliPlugin = path.join(home, ".gemini", "antigravity-cli", "plugins", "cadre");
+  const antigravityIdePlugin = path.join(home, ".gemini", "config", "plugins", "cadre");
+  for (const plugin of [codexPlugin, claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
     assert.equal(fs.existsSync(path.join(plugin, "skills", "cadre", "SKILL.md")), true);
     assert.equal(fs.existsSync(path.join(plugin, "assets")), false);
     assert.equal(fs.existsSync(path.join(plugin, "agents")), false);
     assert.equal(fs.existsSync(path.join(plugin, "scripts")), false);
+    assert.equal(fs.existsSync(path.join(plugin, "references")), false);
+    assert.equal(fs.existsSync(path.join(plugin, "templates")), false);
   }
 
   const codexMcp = readJson(path.join(codexPlugin, ".mcp.json"));
   const claudeMcp = readJson(path.join(claudePlugin, "mcp-config.json"));
-  for (const config of [codexMcp, claudeMcp]) {
+  const copilotMcp = readJson(path.join(copilotPlugin, ".mcp.json"));
+  const antigravityCliMcp = readJson(path.join(antigravityCliPlugin, "mcp_config.json"));
+  const antigravityIdeMcp = readJson(path.join(antigravityIdePlugin, "mcp_config.json"));
+  for (const config of [codexMcp, claudeMcp, copilotMcp, antigravityCliMcp, antigravityIdeMcp]) {
     assert.equal(config.mcpServers.cadre.command, process.execPath);
     assert.equal(config.mcpServers.cadre.args[0], mcpServer);
     assert.equal(config.mcpServers.cadre.cwd, root);
   }
+  assert.equal(copilotMcp.mcpServers.cadre.type, "local");
+  assert.deepEqual(copilotMcp.mcpServers.cadre.tools, ["*"]);
   const claudeManifest = readJson(path.join(claudePlugin, ".claude-plugin", "plugin.json"));
   assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
+  const copilotManifest = readJson(path.join(copilotPlugin, "plugin.json"));
+  assert.equal(copilotManifest.mcpServers, "./.mcp.json");
+  const antigravityManifest = readJson(path.join(antigravityCliPlugin, "plugin.json"));
+  assert.equal(antigravityManifest.$schema, "https://antigravity.google/schemas/v1/plugin.json");
   const codexMarketplaceManifest = readJson(path.join(codexMarketplace, ".agents", "plugins", "marketplace.json"));
   assert.equal(codexMarketplaceManifest.plugins[0].source.path, "./plugins/cadre");
   const claudeMarketplaceManifest = readJson(path.join(claudeMarketplace, ".claude-plugin", "marketplace.json"));
@@ -125,6 +154,8 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   }
   const claudeSettings = readJson(path.join(home, ".claude", "settings.json"));
   assert.deepEqual(claudeSettings.permissions.allow, ["mcp__plugin_cadre_cadre__*", "mcp__cadre__*"]);
+  const antigravitySettings = readJson(path.join(home, ".gemini", "antigravity-cli", "settings.json"));
+  assert.deepEqual(antigravitySettings.permissions.allow, ["mcp(cadre/*)"]);
 
   const commandLog = fs.readFileSync(log, "utf8");
   assert.match(commandLog, /codex plugin marketplace add/);
@@ -132,6 +163,8 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   assert.match(commandLog, /claude plugin marketplace add --scope user/);
   assert.match(commandLog, /claude plugin install --scope user cadre@cadre/);
   assert.match(commandLog, /claude plugin update --scope user cadre@cadre/);
+  assert.match(commandLog, /copilot plugin install/);
+  assert.match(commandLog, /agy plugin install/);
 });
 
 test("cadre install --check validates existing thin plugin", () => {
@@ -141,6 +174,8 @@ test("cadre install --check validates existing thin plugin", () => {
   const cadreHome = path.join(home, ".cadre");
   fs.mkdirSync(bin, { recursive: true });
   installFakeClient(bin, "codex", log);
+  installFakeClient(bin, "copilot", log);
+  installFakeClient(bin, "agy", log);
 
   const install = runCli(["install", "--target", "codex", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
   assert.equal(install.status, 0, install.stderr || install.stdout);
@@ -149,4 +184,44 @@ test("cadre install --check validates existing thin plugin", () => {
   assert.equal(check.status, 0, check.stderr || check.stdout);
   assert.match(check.stdout, /Cadre codex plugin is installed/);
   assert.match(check.stdout, /Cadre codex MCP tool approvals are configured/);
+
+  const copilotInstall = runCli(["install", "--target", "copilot", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(copilotInstall.status, 0, copilotInstall.stderr || copilotInstall.stdout);
+  const copilotCheck = runCli(["install", "--check", "--target", "copilot"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(copilotCheck.status, 0, copilotCheck.stderr || copilotCheck.stdout);
+  assert.match(copilotCheck.stdout, /Cadre copilot plugin is installed/);
+  assert.match(copilotCheck.stdout, /may prompt on first use/);
+
+  const antigravityInstall = runCli(["install", "--target", "antigravity", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(antigravityInstall.status, 0, antigravityInstall.stderr || antigravityInstall.stdout);
+  const antigravityCheck = runCli(["install", "--check", "--target", "antigravity"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(antigravityCheck.status, 0, antigravityCheck.stderr || antigravityCheck.stdout);
+  assert.match(antigravityCheck.stdout, /Cadre antigravity plugin is installed/);
+  assert.match(antigravityCheck.stdout, /MCP tool approvals are configured/);
+});
+
+test("cadre install writes project-scoped Copilot skill and Antigravity plugin", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-project-"));
+  const bin = path.join(home, "bin");
+  const project = path.join(home, "project");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(project, { recursive: true });
+
+  const copilot = spawnSync(process.execPath, [cli, "install", "--target", "copilot", "--scope", "project"], {
+    cwd: project,
+    env: { ...process.env, ...installEnv(home, bin) },
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  assert.equal(copilot.status, 0, copilot.stderr || copilot.stdout);
+  assert.equal(fs.existsSync(path.join(project, ".github", "skills", "cadre", "SKILL.md")), true);
+
+  const antigravity = spawnSync(process.execPath, [cli, "install", "--target", "antigravity", "--scope", "project"], {
+    cwd: project,
+    env: { ...process.env, ...installEnv(home, bin) },
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  assert.equal(antigravity.status, 0, antigravity.stderr || antigravity.stdout);
+  assert.equal(fs.existsSync(path.join(project, ".agents", "plugins", "cadre", "mcp_config.json")), true);
 });

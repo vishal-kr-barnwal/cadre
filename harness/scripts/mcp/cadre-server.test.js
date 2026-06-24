@@ -365,7 +365,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const parallelActions = parallelTool.inputSchema.properties.action.enum;
     assert.ok(parallelActions.includes("next_wave"));
     assert.ok(parallelActions.includes("setup_workers"));
-    assert.deepEqual(parallelTool.inputSchema.properties.agentIdentifier.enum, ["claude", "codex"]);
+    assert.deepEqual(parallelTool.inputSchema.properties.agentIdentifier.enum, ["claude", "codex", "copilot", "antigravity"]);
     assert.ok(parallelTool.inputSchema.required.includes("root"));
     assert.ok(parallelTool.inputSchema.required.includes("action"));
     assert.ok(parallelTool.inputSchema.anyOf.some((entry) => entry.required.includes("trackId")));

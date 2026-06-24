@@ -7,14 +7,15 @@ order: 2
 
 # Getting Started
 
-This guide gets Cadre installed in Claude Code or OpenAI Codex and initializes
-the first target project.
+This guide gets Cadre installed in Claude Code, OpenAI Codex, GitHub Copilot,
+or Google Antigravity and initializes the first target project.
 
 ## Install Cadre
 
 Cadre ships as the `cadre-ai` npm package. The package installs the global
 `cadre` CLI and `cadre-mcp` runtime, then `cadre install` writes thin client
-plugins for detected Claude Code and OpenAI Codex installations.
+plugins for detected Claude Code, OpenAI Codex, Copilot CLI, and Antigravity
+installations.
 
 ```bash
 npm install -g cadre-ai
@@ -25,7 +26,8 @@ cadre doctor
 The installed plugins contain only platform wiring:
 
 - `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
-- `.mcp.json` for Codex or `mcp-config.json` for Claude.
+- `.mcp.json` for Codex and Copilot, `mcp-config.json` for Claude, or
+  `mcp_config.json` for Antigravity.
 
 The plugin does not copy Cadre assets, worker agents, or MCP runtime scripts.
 The global `cadre-mcp` binary embeds the skill contract, protocols, references,
@@ -33,14 +35,30 @@ target-project templates, resources, packet tools, jobs, and LSP helper modes.
 `cadre install` also bootstraps narrow client approval rules for Cadre's own MCP
 tools so `cadre-setup` and later packet workflows do not prompt on every Cadre
 tool call. It does not bypass approval for shell commands, file edits, other
-plugins, or non-Cadre MCP servers.
+plugins, or non-Cadre MCP servers. Copilot and Antigravity IDE may still prompt
+on first Cadre MCP tool use; Antigravity CLI receives an automatic
+`mcp(cadre/*)` allow rule.
 
 To target one client explicitly:
 
 ```bash
 cadre install --target codex
 cadre install --target claude
+cadre install --target copilot
+cadre install --target antigravity
 ```
+
+For project-scoped client wiring:
+
+```bash
+cadre install --target copilot --scope project
+cadre install --target antigravity --scope project
+```
+
+Copilot project scope writes `.github/skills/cadre/SKILL.md`. GitHub.com
+repository MCP settings are configured in GitHub settings by a repository
+admin; Cadre documents the Cadre MCP JSON but does not mutate repository
+settings locally. Antigravity project scope writes `.agents/plugins/cadre/`.
 
 For source development, keep using the npm-first install path. Harness
 contributors can run `pnpm --filter cadre-ai generate` to create ignored local
@@ -61,7 +79,8 @@ recommendations are detected, setup writes `cadre/lsp.json` by default unless
 you opt out. The workflow is packet-owned: the agent should call Cadre MCP, and
 Cadre MCP writes the control plane.
 If Cadre MCP tool calls still ask for repeated approval, rerun `cadre install`;
-it refreshes the Codex and Claude Cadre-only MCP approval bootstrap.
+it refreshes the Codex, Claude, and Antigravity CLI Cadre-only MCP approval
+bootstrap.
 
 Successful setup creates:
 

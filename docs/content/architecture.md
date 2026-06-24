@@ -66,6 +66,8 @@ the same thin plugin shape through `cadre install`.
 |--------|---------|
 | `harness/plugins/cadre/` | OpenAI Codex plugin bundle. |
 | `harness/plugins/cadre-claude/` | Claude Code plugin bundle. |
+| `harness/plugins/cadre-copilot/` | GitHub Copilot CLI plugin bundle. |
+| `harness/plugins/cadre-antigravity/` | Google Antigravity plugin bundle. |
 | `harness/.agents/skills/cadre/` | Harness-local Codex skill output. |
 | `harness/.claude/skills/cadre/` | Harness-local Claude skill output. |
 | `harness/.agents/plugins/marketplace.json` | Harness-local Codex marketplace. |
@@ -81,8 +83,8 @@ The generator:
 - Embeds the skill contract, workflow protocols, references, and templates into
   `scripts/mcp/cadre-server.js`.
 - Uses MCP-provided worker prompts for parallel dispatch; Claude uses `Task`,
-  and Codex uses multi-agent tool discovery from the parallel execution
-  reference.
+  Codex uses multi-agent tool discovery, Copilot uses its custom-agent flow, and
+  Antigravity uses subagent dispatch from the parallel execution reference.
 - Rewrites marketplace files in the selected generated or install location.
 
 ## Runtime Build

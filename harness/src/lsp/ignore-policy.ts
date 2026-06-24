@@ -9,7 +9,9 @@ const DEFAULT_IGNORES = new Set([
   ".claude",
   ".cache",
   ".codex",
+  ".copilot",
   ".dart_tool",
+  ".gemini",
   ".gradle",
   ".mypy_cache",
   ".pytest_cache",
@@ -46,6 +48,8 @@ const DEFAULT_IGNORES = new Set([
 const DEFAULT_IGNORE_PATHS = [
   "plugins/cadre",
   "plugins/cadre-claude",
+  "plugins/cadre-copilot",
+  "plugins/cadre-antigravity",
 ];
 
 export function normalizeRel(file: string): string {

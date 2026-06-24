@@ -22,6 +22,7 @@ import { runCommand } from "../../infrastructure/runtime/system";
 import { findTrack } from "./track-context";
 import { parsePlanFile, phaseSchedule } from "./track-schedule";
 import { withSharedControlPlaneSync } from "./workflow-response";
+import { AGENT_IDENTIFIERS, AgentIdentifier, dispatchAdapterFor, isAgentIdentifier } from "./dispatch-adapters";
 
 function positiveInt(value: unknown, fallback: number, max = 20): number {
   const parsed = Number(value);
@@ -227,14 +228,11 @@ export function runPlannedCommands(commands: CoreResult[]): CommandResult[] {
   return commands.map((entry) => runCommand(asString(entry.command), asStringArray(entry.args), { cwd: asString(entry.cwd) }));
 }
 
-export function workerDispatchPayload(root: string, track: CadreTrack, worker: JsonObject, worktree: string, sourceRoot: string, agentIdentifier: "claude" | "codex"): JsonObject {
+export function workerDispatchPayload(root: string, track: CadreTrack, worker: JsonObject, worktree: string, sourceRoot: string, agentIdentifier: AgentIdentifier): JsonObject {
   const workerId = asString(worker.worker_id);
   const taskKey = asString(worker.task_key);
   const repo = asString(worker.repo, ".");
   const ownedFiles = asStringArray(worker.files);
-  const selectedDispatch = agentIdentifier === "claude"
-    ? { agent_identifier: "claude", mechanism: "Task", instruction: "Call the Task tool once for this prompt and dispatch payload. Return the result JSON to the coordinator." }
-    : { agent_identifier: "codex", mechanism: "multi_agent_v1.spawn_agent", instruction: "Use tool discovery for multi_agent_v1.spawn_agent, pass this prompt and dispatch payload, then wait for completion." };
   const prompt = [
     `You are a Cadre parallel worker for track ${track.track_id}.`,
     `Worker: ${workerId}`,
@@ -272,7 +270,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
     source_root: sourceRoot,
     owned_files: ownedFiles,
     agent_identifier: agentIdentifier,
-    selected_dispatch: selectedDispatch,
+    selected_dispatch: dispatchAdapterFor(agentIdentifier),
     expected_result_schema: {
       type: "object",
       required: ["worker_id", "task_key", "repo", "status", "summary", "files_changed", "tests", "commit_sha"],
@@ -304,7 +302,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
 
 export function parallelSetupWorkers(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const agentIdentifier = asOptionalString(args.agentIdentifier);
-  if (agentIdentifier !== "claude" && agentIdentifier !== "codex") return { ok: false, action: "setup_workers", error: 'cadre_parallel setup_workers requires agentIdentifier "claude" or "codex"', accepted_agent_identifiers: ["claude", "codex"] };
+  if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_parallel setup_workers requires agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
   const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
   const topology = loadTopology(root);
