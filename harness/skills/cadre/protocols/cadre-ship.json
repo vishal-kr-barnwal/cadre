@@ -68,6 +68,7 @@
   "references": [
     "provider-evidence",
     "polyrepo-git",
-    "mcp-contract"
+    "mcp-contract",
+    "approval-and-generation"
   ]
 }

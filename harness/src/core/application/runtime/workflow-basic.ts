@@ -30,7 +30,7 @@ import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
-import { handoffApprovalStages, stagedApprovalState } from "./staged-approval";
+import { handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const prep = implementationPrep(root, {
@@ -208,7 +208,11 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
   const base = {
     ...summary,
     track_id: trackId,
@@ -223,19 +227,20 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
   if (args.execute !== true) {
     return {
       ...base,
-      ok: true,
+      ok: !approvalError,
       dry_run: true,
       phase_state: "dry_run",
+      ...(approvalError ? { error: approvalError, stage: "staged_approval" } : {}),
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
-      error: "Staged approval is required before writing handoff artifacts",
+      stage: "staged_approval",
+      error: approvalError || "Staged approval is required before writing handoff artifacts",
     };
   }
   const traceBefore = beginTrace(root);

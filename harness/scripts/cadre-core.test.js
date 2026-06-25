@@ -258,14 +258,81 @@ function gitNote(root, sha) {
   return JSON.parse(git(root, ["notes", "--ref", "refs/notes/cadre", "show", sha]).stdout);
 }
 
+function approveWorkflow(root, args) {
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+  const base = { ...clone(args), execute: false };
+  delete base.approvalComplete;
+  delete base.approval_complete;
+  delete base.approvedStages;
+  delete base.approved_stages;
+  delete base.approvalStage;
+  delete base.approval_stage;
+  delete base.approvalSessionId;
+  delete base.approval_session_id;
+  let preview = core.workflowPacket(root, base);
+  assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.errors || preview.warnings || {}));
+  const approval = preview.approval;
+  if (!approval || approval.required !== true) return core.workflowPacket(root, { ...args, execute: true });
+  const approved = [];
+  for (const stage of approval.stages || []) {
+    approved.push(stage.id);
+    preview = core.workflowPacket(root, {
+      ...clone(base),
+      approvalSessionId: approval.session_id,
+      approvalStage: stage.id,
+      approvedStages: approved,
+    });
+    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.approval || {}));
+  }
+  return core.workflowPacket(root, {
+    ...clone(args),
+    execute: true,
+    approvalComplete: true,
+    approvalSessionId: approval.session_id,
+    approvedStages: approved,
+  });
+}
+
+function approveArtifact(root, args) {
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+  const base = { ...clone(args), execute: false };
+  delete base.approvalComplete;
+  delete base.approval_complete;
+  delete base.approvedStages;
+  delete base.approved_stages;
+  delete base.approvalStage;
+  delete base.approval_stage;
+  delete base.approvalSessionId;
+  delete base.approval_session_id;
+  let preview = core.artifactPacket(root, base);
+  assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.errors || preview.warnings || {}));
+  const approval = preview.approval;
+  const approved = [];
+  for (const stage of approval?.stages || []) {
+    approved.push(stage.id);
+    preview = core.artifactPacket(root, {
+      ...clone(base),
+      approvalSessionId: approval.session_id,
+      approvalStage: stage.id,
+      approvedStages: approved,
+    });
+    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.approval || {}));
+  }
+  return core.artifactPacket(root, {
+    ...clone(args),
+    execute: true,
+    approvalComplete: true,
+    approvalSessionId: approval?.session_id,
+    approvedStages: approved,
+  });
+}
+
 function setupTraceableProject(root) {
   git(root, ["init"]);
   git(root, ["config", "user.email", "trace@example.com"]);
   git(root, ["config", "user.name", "Trace Test"]);
-  const setup = core.workflowPacket(root, {
+  const setup = approveWorkflow(root, {
     workflow: "setup",
-    execute: true,
-    approvalComplete: true,
     responseMode: "detail",
     providerMode: "local",
     product: { title: "Trace Product", summary: "Traceable workflow test." },
@@ -326,7 +393,7 @@ test("commit trace records setup, newtrack, and task completion commits", () => 
     const plan = planFromPhases(trackId, [
       { phase_index: 1, title: "Phase 1: Build", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement traceable core", ["src/core.js"])] },
     ]);
-    const created = core.workflowPacket(root, {
+    const created = approveWorkflow(root, {
       workflow: "newtrack",
       execute: true,
       approvalComplete: true,
@@ -1277,7 +1344,7 @@ test("review-heavy workflows expose staged approval bundles", () => {
   try {
     setupTraceableProject(root);
     const trackId = "staged_review_20260625";
-    const created = core.workflowPacket(root, {
+    const created = approveWorkflow(root, {
       workflow: "newtrack",
       execute: true,
       approvalComplete: true,
@@ -1424,7 +1491,7 @@ test("workflow setup writes detected and requested style guides from templates",
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
     write(path.join(root, "src", "app.css"), ".app { color: black; }\n");
 
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1551,13 +1618,11 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
         },
       ]),
     });
-    assert.equal(detailedPlanWeakSpec.ok, false);
-    assert.equal(detailedPlanWeakSpec.phase_state, "awaiting_clarification");
-    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
-    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-outcome"));
-    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-acceptance"));
-    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
-    assert.equal(Object.prototype.hasOwnProperty.call(detailedPlanWeakSpec, "review_bundle"), false);
+    assert.equal(detailedPlanWeakSpec.ok, true);
+    assert.equal(detailedPlanWeakSpec.phase_state, "awaiting_staged_approval");
+    assert.ok(detailedPlanWeakSpec.warnings.some((warning) => /spec context is thin/.test(warning)));
+    assert.equal(detailedPlanWeakSpec.approval.current_stage, "spec");
+    assert.equal(detailedPlanWeakSpec.review_bundle.content_in_response, false);
 
     const schemaDrift = core.workflowPacket(root, {
       workflow: "newtrack",
@@ -1673,7 +1738,7 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
     git(root, ["init"]);
     write(path.join(root, "src", "lib.rs"), "pub fn plugin_template_smoke() -> bool { true }\n");
 
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1709,7 +1774,7 @@ test("workflow setup preserves baseline workflow quality gates with custom notes
   try {
     git(root, ["init"]);
 
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1742,7 +1807,7 @@ test("workflow setup preserves baseline product context with custom notes", () =
   try {
     git(root, ["init"]);
 
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1778,7 +1843,7 @@ test("workflow setup hydrates template JSON sections with structured setup detai
   try {
     git(root, ["init"]);
 
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1911,7 +1976,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
   try {
     git(githubRoot, ["init"]);
     git(githubRoot, ["remote", "add", "origin", "git@github.com:org/app.git"]);
-    const githubSetup = core.workflowPacket(githubRoot, {
+    const githubSetup = approveWorkflow(githubRoot, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1927,7 +1992,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
 
     git(gitlabRoot, ["init"]);
     git(gitlabRoot, ["remote", "add", "origin", "https://gitlab.com/org/app.git"]);
-    const gitlabSetup = core.workflowPacket(gitlabRoot, {
+    const gitlabSetup = approveWorkflow(gitlabRoot, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1941,7 +2006,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     assert.equal(gitlabConfig.provider_mcp_required, true);
 
     git(localRoot, ["init"]);
-    const localSetup = core.workflowPacket(localRoot, {
+    const localSetup = approveWorkflow(localRoot, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -1969,7 +2034,7 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
     git(root, ["init"]);
     write(path.join(root, "repos", "app", "src", "index.ts"), "export const app = true;\n");
 
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -2032,7 +2097,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
     assert.ok(blocked.missing_payload.includes("providerMode"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
 
-    const local = core.workflowPacket(root, {
+    const local = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -2066,7 +2131,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     assert.ok(blocked.missing_payload.includes("providerMode"));
     assert.equal(blocked.provider.detected.source, "unknown_remote");
 
-    const local = core.workflowPacket(root, {
+    const local = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -2113,7 +2178,7 @@ test("implementationPrep returns packet-selected style guides", () => {
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
     write(path.join(root, "src", "app.css"), ".app { color: black; }\n");
     write(path.join(root, "src", "worker.py"), "print('not in tech stack')\n");
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -2161,7 +2226,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
   const oldPath = process.env.PATH;
   try {
     git(root, ["init"]);
-    const setup = core.workflowPacket(root, {
+    const setup = approveWorkflow(root, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -2217,7 +2282,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
       ],
     });
 
-    const created = core.workflowPacket(root, {
+    const created = approveWorkflow(root, {
       workflow: "newtrack",
       execute: true,
       approvalComplete: true,
@@ -2282,7 +2347,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
     assert.match(plan, /Canonical data lives in `cadre\/tracks\/tmpl_20260618\/plan\.json`/);
     assert.doesNotMatch(plan, /"manual_verification"/);
     assert.doesNotMatch(plan, /"suggested_checks"/);
-    const idempotent = core.workflowPacket(root, {
+    const idempotent = approveWorkflow(root, {
       workflow: "revise",
       execute: true,
       approvalComplete: true,
@@ -2339,10 +2404,10 @@ test("artifact sync rejects legacy import and regenerates projections from canon
       execute: true,
     });
     assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "human_review");
+    assert.equal(blocked.stage, "staged_approval");
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
 
-    const written = core.artifactPacket(root, {
+    const written = approveArtifact(root, {
       action: "sync",
       scope: "track:legacy_20260618",
       execute: true,
@@ -2407,10 +2472,10 @@ test("workflow revise reviews proposed track files before writing", () => {
       plan: revisedPlan,
     });
     assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "human_review");
+    assert.equal(blocked.stage, "staged_approval");
     assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
 
-    const written = core.workflowPacket(root, {
+    const written = approveWorkflow(root, {
       workflow: "revise",
       execute: true,
       approvalComplete: true,
@@ -2443,7 +2508,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       status: "completed",
     });
 
-    const setup = core.workflowPacket(setupRoot, {
+    const setup = approveWorkflow(setupRoot, {
       workflow: "setup",
       execute: true,
       approvalComplete: true,
@@ -2497,7 +2562,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       reviewBundleDir: ".handoff-review",
     });
     assert.equal(handoffBlocked.ok, false);
-    assert.equal(handoffBlocked.stage, "human_review");
+    assert.equal(handoffBlocked.stage, "staged_approval");
     const handoffArtifact = handoffBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/workflow_20260618/HANDOFF.md");
     assert.ok(handoffArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(handoffArtifact, "content"), false);
@@ -2505,7 +2570,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     assert.ok(fs.existsSync(path.join(handoffBlocked.review_bundle.directory, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")));
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")), false);
 
-    const handoff = core.workflowPacket(root, {
+    const handoff = approveWorkflow(root, {
       workflow: "handoff",
       trackId: "workflow_20260618",
       handoffText: "# Handoff\n\nContinue with the next task.\n",
@@ -3149,7 +3214,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       reviewBundleDir: ".release-review",
     });
     assert.equal(releaseBlocked.ok, false);
-    assert.equal(releaseBlocked.stage, "human_review");
+    assert.equal(releaseBlocked.stage, "staged_approval");
     const releaseArtifact = releaseBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/releases/v1.2.3.md");
     assert.ok(releaseArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(releaseArtifact, "content"), false);
@@ -3158,7 +3223,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.md")), false);
     assert.equal(git(root, ["tag", "-l", "v1.2.3"]).stdout.trim(), "");
 
-    const release = core.workflowPacket(root, {
+    const release = approveWorkflow(root, {
       workflow: "release",
       execute: true,
       approvalComplete: true,
@@ -3181,7 +3246,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       reviewBundleDir: ".refresh-review",
     });
     assert.equal(refreshBlocked.ok, false);
-    assert.equal(refreshBlocked.stage, "human_review");
+    assert.equal(refreshBlocked.stage, "staged_approval");
     const patternsCanonicalArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.jsonl");
     assert.ok(patternsCanonicalArtifact);
     const patternsArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.md");
@@ -3190,7 +3255,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     assert.ok(fs.existsSync(path.join(refreshBlocked.review_bundle.directory, "cadre", "patterns.md")));
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: YYYY-MM-DD/);
 
-    const refresh = core.workflowPacket(root, {
+    const refresh = approveWorkflow(root, {
       workflow: "refresh",
       execute: true,
       approvalComplete: true,

@@ -138,6 +138,45 @@ function parseTextJson(result) {
   return JSON.parse(result.content[0].text);
 }
 
+async function callApprovedWorkflow(request, args) {
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+  const base = { ...clone(args), execute: false };
+  delete base.approvalComplete;
+  delete base.approvedStages;
+  delete base.approvalStage;
+  delete base.approvalSessionId;
+  let preview = parseTextJson(await request("tools/call", {
+    name: "cadre_workflow",
+    arguments: base,
+  }));
+  assert.equal(preview.data.ok, true, preview.data.error || JSON.stringify(preview.data.approval || {}));
+  const approval = preview.data.approval;
+  const approved = [];
+  for (const stage of approval?.stages || []) {
+    approved.push(stage.id);
+    preview = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        ...clone(base),
+        approvalSessionId: approval.session_id,
+        approvalStage: stage.id,
+        approvedStages: approved,
+      },
+    }));
+    assert.equal(preview.data.ok, true, preview.data.error || JSON.stringify(preview.data.approval || {}));
+  }
+  return parseTextJson(await request("tools/call", {
+    name: "cadre_workflow",
+    arguments: {
+      ...clone(args),
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: approval?.session_id,
+      approvedStages: approved,
+    },
+  }));
+}
+
 function requestDaemon(daemon, method, params = {}) {
   const id = requestDaemon.nextId++;
   daemon.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
@@ -314,9 +353,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
     git(root, ["config", "user.name", "Reviewer"]);
     await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
 
-    const setup = parseTextJson(await request("tools/call", {
-      name: "cadre_workflow",
-      arguments: {
+    const setup = await callApprovedWorkflow(request, {
         root,
         workflow: "setup",
         execute: true,
@@ -327,8 +364,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
         productGuidelines: { title: "Guidelines", summary: "Keep packet ownership intact." },
         workflowPolicy: { title: "Workflow", summary: "Use Cadre packets." },
         techStack: { languages: ["TypeScript"], frameworks: ["React"] },
-      },
-    }));
+    });
     assert.equal(setup.data.ok, true);
     assert.ok(setup.data.written.includes("cadre/product.json"));
     assert.ok(setup.data.written.includes("cadre/workflow.json"));
@@ -336,9 +372,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
     assert.equal(fs.existsSync(path.join(root, ".github", "workflows", "cadre-monorepo-check.yml")), true);
 
     const trackId = "embedded_20260622";
-    const created = parseTextJson(await request("tools/call", {
-      name: "cadre_workflow",
-      arguments: {
+    const created = await callApprovedWorkflow(request, {
         root,
         workflow: "newtrack",
         execute: true,
@@ -358,8 +392,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
             tasks: [planTask(1, 1, "Implement embedded template path", ["src/index.ts"])],
           }],
         },
-      },
-    }));
+    });
     assert.equal(created.data.ok, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", trackId, "learnings.jsonl")), true);
     const learnings = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "learnings.jsonl"), "utf8").trim());
@@ -452,7 +485,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     }
     const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
     assert.ok(fieldsFor("cadre_workflow").length <= 40, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
-    assert.ok(advertisedFieldCount <= 165, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
+    assert.ok(advertisedFieldCount <= 170, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
     const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
     for (const action of ["setup", "newtrack", "implement", "debug", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
       assert.ok(workflowActions.includes(action), `expected ${action} workflow`);

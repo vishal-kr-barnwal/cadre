@@ -20,14 +20,14 @@ import { humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifacts
 import { renderSpecMarkdown } from "./spec-docs";
 import { metadataTrackSummary, selectedTrackId } from "./status";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
-import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
 import { reviseIntentPrompts } from "./intent-prompts";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
-import { releaseApprovalStages, reviseApprovalStages, stagedApprovalState } from "./staged-approval";
+import { releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { trackGenerationWarnings } from "./generation-quality";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
   const completed = listTracks(root)
@@ -103,7 +103,11 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
   const base = {
     ...summary,
     release_version: plan.version,
@@ -119,19 +123,20 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
   if (args.execute !== true) {
     return {
       ...base,
-      ok: true,
+      ok: !approvalError,
       phase_state: "dry_run",
       dry_run: true,
+      ...(approvalError ? { error: approvalError, stage: "staged_approval" } : {}),
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...base,
       ok: false,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
+      stage: "staged_approval",
       dry_run: true,
-      error: "Staged approval is required before writing release artifacts",
+      error: approvalError || "Staged approval is required before writing release artifacts",
     };
   }
   const traceBefore = beginTrace(root);
@@ -174,11 +179,13 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
 }
 
 export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
+  const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "revise", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
-  const initialPrompts = reviseIntentPrompts(args, trackId || null);
+  const hasStructuredRevision = isRecord(args.spec) || isRecord(args.plan);
+  const initialPrompts = hasStructuredRevision ? [] : reviseIntentPrompts(args, trackId || null);
   if (initialPrompts.length > 0) {
     return {
       ...summary,
@@ -233,11 +240,21 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
-  const approval = stagedApprovalState(root, "revise", args, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const qualityWarnings = revisedPlan
+    ? trackGenerationWarnings(revisedSpec || existingSpec || {}, revisedPlan || {})
+    : revisedSpec
+      ? trackGenerationWarnings(revisedSpec, { phases: [{ tasks: [{ title: "context-only", files: ["context"], manual_verification: { scope: "revision" } }] }] })
+      : [];
+  const warnings = [
+    ...qualityWarnings,
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
   if (reviewFiles.length === 0) {
     return {
       ...summary,
@@ -269,19 +286,20 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   if (args.execute !== true) {
     return {
       ...base,
-      ok: true,
+      ok: !approvalError,
       dry_run: true,
       phase_state: "dry_run",
+      ...(approvalError ? { error: approvalError, stage: "staged_approval" } : {}),
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
-      error: "Staged approval is required before revising track artifacts",
+      stage: "staged_approval",
+      error: approvalError || "Staged approval is required before revising track artifacts",
     };
   }
   const traceBefore = beginTrace(root);

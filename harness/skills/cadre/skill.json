@@ -158,6 +158,9 @@
     },
     "template-locator": {
       "uri": "cadre://agent-reference?name=template-locator"
+    },
+    "approval-and-generation": {
+      "uri": "cadre://agent-reference?name=approval-and-generation"
     }
   },
   "operatingDefaults": [

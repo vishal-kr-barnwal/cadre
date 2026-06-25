@@ -30,7 +30,7 @@ import { parsePlanFile } from "./track-schedule";
 import { templateJson, workflowSummary } from "./workflow-response";
 import { doctor, lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
-import { refreshApprovalStages, stagedApprovalState } from "./staged-approval";
+import { refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 
 export function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
@@ -205,8 +205,12 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
-  const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
+  const awaitingDocumentReview = args.execute === true && reviewArtifacts.length > 0 && !stagedApprovalReady(approval);
   const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
   const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
@@ -216,7 +220,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
+      stage: "staged_approval",
       doctor: doctor(root, { hasCadreProject: true }),
       workspace: workspaceDiagnostics(root, { execute: false }),
       dependency_graph: dependencyGraph(root),
@@ -228,7 +232,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       review_artifacts: stageReviewArtifacts,
       review_bundle: stageReviewBundle,
       warnings,
-      error: "Staged approval is required before refreshing Cadre context documents",
+      error: approvalError || "Staged approval is required before refreshing Cadre context documents",
     };
   }
   const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
@@ -260,8 +264,9 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     : null;
   return {
     ...summary,
-    ok: (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
+    ok: (!approvalError || args.execute === true) && (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
     phase_state: args.execute === true ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
+    ...(approvalError && args.execute !== true ? { stage: "staged_approval", error: approvalError } : {}),
     scope: scopeIds,
     doctor: doctor(root, { hasCadreProject: true }),
     workspace: workspaceDiagnostics(root, { execute: false }),

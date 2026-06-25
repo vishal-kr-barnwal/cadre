@@ -3,39 +3,71 @@
   "schema": "cadre.product_guidelines.v1",
   "kind": "product_guidelines",
   "title": "Product Guidelines",
-  "summary": "Use this file to capture product rules that should shape implementation choices,\nreview decisions, and acceptance criteria.",
+  "summary": "Structured product rules for implementation and review decisions. Fill from product context, repo evidence, and user intent.",
   "sections": [
     {
+      "id": "principles",
       "heading": "Product Principles",
-      "body": "- Put the primary user workflow first.\n- Prefer changes that reduce ambiguity in the user's next action.\n- Keep product behavior explainable from the UI, docs, or API contract.\n- Preserve explicit product invariants unless a spec intentionally revises them."
+      "purpose": "State the product rules that should guide tradeoffs.",
+      "expectedFields": ["principles"],
+      "example": { "principles": ["Prefer explicit recovery over silent failure"] },
+      "body": "- Product principle:\n- Product principle:"
     },
     {
+      "id": "user_promises",
       "heading": "User Promises",
-      "body": "- Record promises the product must keep for users, teams, operators, or\n  integrators.\n- Note the situations where reliability, privacy, accessibility, or performance\n  matter more than feature breadth."
+      "purpose": "Record promises the product must keep for users, operators, and integrators.",
+      "expectedFields": ["userPromises", "promises", "qualityBar"],
+      "example": { "userPromises": ["Users can understand and recover from failed operations"] },
+      "body": "- Promise to users, teams, operators, or integrators:\n- Reliability, privacy, accessibility, or performance promise:"
     },
     {
+      "id": "trust_safety",
       "heading": "Trust And Safety Boundaries",
-      "body": "- Record authentication, authorization, tenancy, privacy, and audit guarantees.\n- Identify public trust boundaries and internal-only surfaces.\n- State which data must be redacted, encrypted, scoped, or excluded from logs."
+      "purpose": "Capture auth, tenancy, privacy, audit, and logging boundaries.",
+      "expectedFields": ["trustAndSafety", "boundaries", "privacyRules", "auditRules"],
+      "example": { "trustAndSafety": ["Sensitive tokens never appear in logs"] },
+      "body": "- Authentication, authorization, tenancy, privacy, or audit guarantee:\n- Data that must be redacted, encrypted, scoped, or excluded from logs:"
     },
     {
+      "id": "domain_rules",
       "heading": "Domain And Workflow Rules",
-      "body": "- List lifecycle, state-machine, ordering, idempotency, and concurrency rules.\n- Capture deterministic evaluation, attribution, or compatibility requirements.\n- Note workflows that require preview, rollback, migration, or audit support."
+      "purpose": "List lifecycle, ordering, idempotency, concurrency, and compatibility rules.",
+      "expectedFields": ["domainRules", "workflowRules", "rules", "stateMachines", "concurrencyRules"],
+      "example": { "domainRules": ["A retry must preserve the original request identity"] },
+      "body": "- Lifecycle, state-machine, ordering, idempotency, or concurrency rule:\n- Workflow that requires preview, rollback, migration, or audit support:"
     },
     {
+      "id": "data_ownership",
       "heading": "Data Ownership",
-      "body": "- Map major product data to its owning store, service, module, or external\n  provider.\n- Record generated artifacts, contracts, fixtures, migrations, or SDK assets that\n  must be updated alongside behavior changes."
+      "purpose": "Map important product data to owning stores, services, contracts, or generated artifacts.",
+      "expectedFields": ["dataOwnership", "dataStores", "schemaFiles", "contracts"],
+      "example": { "dataOwnership": ["Primary records are owned by the application database"] },
+      "body": "- Data owner:\n- Generated artifact, contract, fixture, migration, or SDK asset that must stay synchronized:"
     },
     {
+      "id": "non_goals",
       "heading": "Non-Goals",
-      "body": "- List behaviors, audiences, platforms, or workflows this project intentionally\n  does not serve yet.\n- Record tempting shortcuts or alternate architectures that should not be used\n  without revising product context first."
+      "purpose": "Record tempting but intentionally unsupported behavior.",
+      "expectedFields": ["nonGoals"],
+      "example": { "nonGoals": ["Do not build a second source of truth"] },
+      "body": "- Behavior, audience, platform, or workflow not served yet:\n- Shortcut or alternate architecture to avoid unless context is revised:"
     },
     {
+      "id": "decision_rules",
       "heading": "Decision Rules",
-      "body": "- When product tradeoffs appear, write the rule the team should use to choose.\n- Link decisions back to product context, usage evidence, support requests, or\n  explicit user feedback.\n- Prefer tests and review evidence around product invariants, trust boundaries,\n  tenancy, authorization, data ownership, and public contracts."
+      "purpose": "Give agents concrete rules for choosing between product tradeoffs.",
+      "expectedFields": ["decisionRules", "reviewFocus"],
+      "example": { "decisionRules": ["When reliability conflicts with feature breadth, preserve reliability"] },
+      "body": "- Decision rule:\n- Evidence source for product tradeoffs:"
     },
     {
+      "id": "review_checklist",
       "heading": "Review Checklist",
-      "body": "- Does the change preserve the product invariants in `cadre/product.json`?\n- Are user-visible behavior, docs, API contracts, SDK fixtures, generated\n  artifacts, and migrations updated together when needed?\n- Are privacy, audit, observability, and rollback implications covered?\n- Are non-goals and compatibility boundaries still respected?"
+      "purpose": "Define the product-specific checklist reviewers should apply.",
+      "expectedFields": ["reviewChecklist", "qualityBar", "reviewFocus"],
+      "example": { "reviewChecklist": ["Does the change preserve documented product invariants?"] },
+      "body": "- Product invariant preserved:\n- Public contract, docs, migration, rollback, privacy, audit, or observability implication covered:"
     }
   ]
 }

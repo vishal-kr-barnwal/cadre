@@ -231,6 +231,13 @@ function appendLines(lines: string[], heading: string, values: string[]): void {
   lines.push(`${heading}:`, bulletList(values));
 }
 
+function objectText(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  return Object.entries(asJsonObject(value))
+    .filter(([, entry]) => entry !== undefined && entry !== null && String(entry).trim() !== "")
+    .map(([key, entry]) => `- ${key}: ${Array.isArray(entry) ? asStringArray(entry).join(", ") : typeof entry === "object" ? JSON.stringify(entry) : String(entry)}`);
+}
+
 function productSectionBody(heading: string, provided: JsonObject, fallback: string): string {
   const lines: string[] = [];
   const name = firstString(provided.name, provided.productName, provided.product_name, provided.title);
@@ -239,28 +246,49 @@ function productSectionBody(heading: string, provided: JsonObject, fallback: str
     case "product summary":
       if (name) lines.push(`- What the product is: ${name}`);
       if (summary) lines.push(`- Primary value proposition: ${summary}`);
-      appendLines(lines, "Primary users", stringList(provided.users));
+      appendLines(lines, "Primary users", stringList(provided.users || provided.audience));
+      appendLines(lines, "Operating model", stringList(provided.operatingModel || provided.operating_model || provided.deploymentModel || provided.deployment_model));
       break;
     case "users and personas":
-      appendLines(lines, "Primary users", stringList(provided.users));
+      appendLines(lines, "Primary users", stringList(provided.users || provided.audience));
+      appendLines(lines, "Personas", stringList(provided.personas));
+      appendLines(lines, "Operators or integrators", stringList(provided.operators || provided.integrators));
+      appendLines(lines, "Access boundaries", stringList(provided.permissions || provided.accessBoundaries || provided.access_boundaries));
       break;
     case "core workflows":
       appendLines(lines, "Product goals", stringList(provided.goals));
       appendLines(lines, "Primary workflows", stringList(provided.workflows || provided.coreWorkflows || provided.core_workflows));
+      appendLines(lines, "Setup workflow", stringList(provided.setupWorkflow || provided.setup_workflow));
+      appendLines(lines, "Support workflow", stringList(provided.supportWorkflow || provided.support_workflow));
+      appendLines(lines, "Repo notes", stringList(provided.repoNotes || provided.repo_notes));
+      break;
+    case "domain model":
+      lines.push(...objectText(provided.domainModel || provided.domain_model));
+      appendLines(lines, "Core entities", stringList(provided.entities));
+      appendLines(lines, "Relationships", stringList(provided.relationships));
+      appendLines(lines, "State machines", stringList(provided.stateMachines || provided.state_machines || provided.lifecycleStages || provided.lifecycle_stages));
       break;
     case "product invariants":
       appendLines(lines, "Product invariants", stringList(provided.invariants || provided.productInvariants || provided.product_invariants));
       appendLines(lines, "Non-goals", stringList(provided.nonGoals || provided.non_goals));
+      appendLines(lines, "Compatibility or migration guarantees", stringList(provided.compatibility || provided.migrationGuarantees || provided.migration_guarantees));
       break;
     case "architecture boundaries":
       appendLines(lines, "Architecture boundaries", stringList(provided.boundaries || provided.architectureBoundaries || provided.architecture_boundaries));
+      appendLines(lines, "Entrypoints", stringList(provided.entrypoints));
+      appendLines(lines, "Source directories", stringList(provided.sourceDirectories || provided.source_directories));
+      appendLines(lines, "Contracts", stringList(provided.contracts || provided.schemaFiles || provided.schema_files));
       break;
     case "data and integrations":
       appendLines(lines, "Data stores", stringList(provided.dataStores || provided.data_stores || provided.datastores));
-      appendLines(lines, "Integrations", stringList(provided.integrations));
+      appendLines(lines, "Schema files", stringList(provided.schemaFiles || provided.schema_files));
+      appendLines(lines, "Integrations", stringList(provided.integrations || provided.keyDependencies || provided.key_dependencies));
+      appendLines(lines, "Observability", stringList(provided.observability));
       break;
     case "quality and release expectations":
       appendLines(lines, "Quality expectations", stringList(provided.qualityBar || provided.quality_bar || provided.qualityExpectations || provided.quality_expectations));
+      appendLines(lines, "Commands", stringList(provided.commands || provided.testCommand || provided.test_command || provided.formatCommand || provided.format_command));
+      appendLines(lines, "Review focus", stringList(provided.reviewFocus || provided.review_focus));
       break;
     case "open questions":
       appendLines(lines, "Open questions", stringList(provided.openQuestions || provided.open_questions));
@@ -278,16 +306,18 @@ function productGuidelinesSectionBody(heading: string, provided: JsonObject, fal
       appendLines(lines, "Principles", stringList(provided.principles));
       break;
     case "user promises":
-      appendLines(lines, "User promises", stringList(provided.userPromises || provided.user_promises || provided.promises));
+      appendLines(lines, "User promises", stringList(provided.userPromises || provided.user_promises || provided.promises || provided.qualityBar || provided.quality_bar));
       break;
     case "trust and safety boundaries":
       appendLines(lines, "Trust and safety boundaries", stringList(provided.trustAndSafety || provided.trust_and_safety || provided.safety || provided.boundaries));
       break;
     case "domain and workflow rules":
       appendLines(lines, "Domain and workflow rules", stringList(provided.rules || provided.domainRules || provided.domain_rules || provided.workflowRules || provided.workflow_rules));
+      appendLines(lines, "State and concurrency rules", stringList(provided.stateMachines || provided.state_machines || provided.concurrencyRules || provided.concurrency_rules));
       break;
     case "data ownership":
-      appendLines(lines, "Data ownership", stringList(provided.dataOwnership || provided.data_ownership));
+      appendLines(lines, "Data ownership", stringList(provided.dataOwnership || provided.data_ownership || provided.dataStores || provided.data_stores));
+      appendLines(lines, "Contracts and generated artifacts", stringList(provided.contracts || provided.schemaFiles || provided.schema_files));
       break;
     case "non-goals":
       appendLines(lines, "Non-goals", stringList(provided.nonGoals || provided.non_goals));
@@ -313,9 +343,13 @@ function workflowSectionBody(heading: string, provided: JsonObject, fallback: st
     case "quality gates":
       if (reviewGate) lines.push(`- Review gate: ${reviewGate}`);
       if (preferredTestCommand) lines.push(`- Preferred test command: \`${preferredTestCommand}\``);
+      appendLines(lines, "Review focus", stringList(provided.reviewFocus || provided.review_focus));
+      appendLines(lines, "Quality bar", stringList(provided.qualityBar || provided.quality_bar));
       break;
     case "development commands":
       if (preferredTestCommand) lines.push(`- Preferred test command: \`${preferredTestCommand}\``);
+      appendLines(lines, "Format command", stringList(provided.formatCommand || provided.format_command));
+      appendLines(lines, "Build command", stringList(provided.buildCommand || provided.build_command));
       appendLines(lines, "Additional commands", stringList(provided.commands || provided.developmentCommands || provided.development_commands));
       break;
     case "guiding principles":

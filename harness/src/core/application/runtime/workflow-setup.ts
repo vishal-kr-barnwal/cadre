@@ -28,7 +28,8 @@ import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-st
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
-import { approvalComplete, setupApprovalStages, stagedApprovalState } from "./staged-approval";
+import { setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { setupGenerationWarnings } from "./generation-quality";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "setup", args);
@@ -62,6 +63,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
+  const approvalError = stagedApprovalError(approval);
+  const qualityWarnings = setupGenerationWarnings(args as JsonObject);
   const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
   const nativePrompts = args.execute === true ? [] : setupNativePrompts({
     provider: asJsonObject(provider),
@@ -74,6 +77,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const warnings = [
     ...asStringArray(styleGuides.warnings),
     ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...qualityWarnings,
   ];
   const result: CoreResult = {
     ...summary,
@@ -101,7 +105,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     approval,
     review_artifacts: stageReviewArtifacts || reviewArtifacts,
     review_bundle: stageReviewBundle,
-    warnings,
+    warnings: approvalError ? [...warnings, approvalError] : warnings,
     required_payload: args.execute === true
       ? ["product", "techStack"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
@@ -123,6 +127,15 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
   };
+  if (args.execute !== true && approvalError) {
+    return {
+      ...result,
+      ok: false,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
+      error: approvalError,
+    };
+  }
   if (args.execute !== true) return result;
 
   const cadreDir = path.join(root, "cadre");
@@ -141,13 +154,13 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       missing_payload: missingPayload,
     };
   }
-  if (!approvalComplete(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...result,
       ok: false,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      error: "Staged approval is required before writing setup artifacts",
+      error: approvalError || "Staged approval is required before writing setup artifacts",
     };
   }
   const traceBefore = beginTrace(root);

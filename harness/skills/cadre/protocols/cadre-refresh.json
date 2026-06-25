@@ -39,6 +39,10 @@
     },
     {
       "step": 5,
+      "instruction": "For staged refresh review, approve patterns separately from lsp_config with approvalSessionId and one new approved stage. Refreshed patterns must be grounded in repo evidence, not placeholder text."
+    },
+    {
+      "step": 6,
       "instruction": "Summarize refreshed canonical context, regenerated human projections, stale areas, diagnostics, and packet warnings."
     }
   ],
@@ -64,6 +68,7 @@
   ],
   "references": [
     "mcp-contract",
-    "native-prompts"
+    "native-prompts",
+    "approval-and-generation"
   ]
 }

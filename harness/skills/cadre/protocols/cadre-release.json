@@ -39,6 +39,10 @@
     },
     {
       "step": 5,
+      "instruction": "For staged release review, approve release_notes, release_metadata, and optional git_actions one stage at a time with approvalSessionId. Release notes should cover highlights, fixes, migrations, risks, and validation evidence when known."
+    },
+    {
+      "step": 6,
       "instruction": "Summarize release scope, version intent, generated artifacts, changed canonical JSON/JSONL state, generated human projections, and remaining blockers."
     }
   ],
@@ -63,6 +67,7 @@
     "next recommended packet"
   ],
   "references": [
-    "mcp-contract"
+    "mcp-contract",
+    "approval-and-generation"
   ]
 }

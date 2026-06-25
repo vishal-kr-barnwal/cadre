@@ -3,42 +3,112 @@
   "schema": "cadre.product.v1",
   "kind": "product",
   "title": "Product Context",
-  "summary": "Use this file to keep product intent detailed enough for agents to make\nimplementation decisions without re-discovering the business model every time.",
+  "summary": "Structured product context for agents. Fill sections from repo evidence and user intent; do not leave examples as final content.",
   "sections": [
     {
+      "id": "summary",
       "heading": "Product Summary",
+      "purpose": "Name the product, who it serves, and the value it provides.",
+      "expectedFields": ["name", "summary", "users", "operatingModel"],
+      "example": {
+        "name": "Project name",
+        "summary": "A concise description of the product behavior this repo implements.",
+        "users": ["Primary user or integrator"],
+        "operatingModel": ["CLI, service, library, web app, or deployed worker"]
+      },
       "body": "- What the product is:\n- Who it serves:\n- Primary value proposition:\n- Deployment or operating model:"
     },
     {
+      "id": "users_personas",
       "heading": "Users And Personas",
-      "body": "- Primary users:\n- Secondary users:\n- Operators, administrators, or integrators:\n- Permissions, tenancy, or access boundaries that shape user workflows:"
+      "purpose": "Capture humans, systems, operators, and permission boundaries that shape workflows.",
+      "expectedFields": ["users", "personas", "operators", "integrators", "accessBoundaries"],
+      "example": {
+        "users": ["End user"],
+        "personas": ["Admin", "Operator"],
+        "accessBoundaries": ["Tenant, role, API key, or local-only boundary"]
+      },
+      "body": "- Primary users:\n- Secondary users:\n- Operators, administrators, or integrators:\n- Permissions, tenancy, or access boundaries:"
     },
     {
+      "id": "core_workflows",
       "heading": "Core Workflows",
-      "body": "- Workflow 1:\n- Workflow 2:\n- Workflow 3:\n- Setup, onboarding, or provisioning flow:\n- Review, audit, support, or recovery flow:"
+      "purpose": "List the product workflows agents must preserve when planning changes.",
+      "expectedFields": ["coreWorkflows", "setupWorkflow", "supportWorkflow", "goals"],
+      "example": {
+        "coreWorkflows": ["Create or ingest a domain object", "Process, review, or publish it"],
+        "setupWorkflow": ["Install, configure, migrate, or provision"],
+        "supportWorkflow": ["Debug, retry, audit, or recover"]
+      },
+      "body": "- Workflow 1:\n- Workflow 2:\n- Setup, onboarding, or provisioning flow:\n- Review, audit, support, or recovery flow:"
     },
     {
+      "id": "domain_model",
       "heading": "Domain Model",
+      "purpose": "Identify domain entities, relationships, lifecycles, and identifiers found in code/docs.",
+      "expectedFields": ["domainModel", "entities", "relationships", "stateMachines"],
+      "example": {
+        "entities": ["Account", "Job", "Event"],
+        "relationships": ["A job belongs to a queue"],
+        "stateMachines": ["pending -> running -> completed|failed"]
+      },
       "body": "- Core entities:\n- Important relationships:\n- State machines or lifecycle stages:\n- Identifiers, keys, scopes, or hierarchy rules:"
     },
     {
+      "id": "invariants",
       "heading": "Product Invariants",
+      "purpose": "Record stable behaviors, safety guarantees, and compatibility expectations.",
+      "expectedFields": ["invariants", "nonGoals", "compatibility", "migrationGuarantees"],
+      "example": {
+        "invariants": ["A completed record is not processed twice"],
+        "nonGoals": ["Do not replace the external system of record"]
+      },
       "body": "- Behaviors that must remain stable:\n- Security, privacy, or compliance guarantees:\n- Determinism, compatibility, or migration guarantees:\n- Performance or availability expectations:"
     },
     {
+      "id": "architecture_boundaries",
       "heading": "Architecture Boundaries",
+      "purpose": "Show module/service/API ownership and generated contracts that must stay synchronized.",
+      "expectedFields": ["boundaries", "entrypoints", "sourceDirectories", "contracts", "schemaFiles"],
+      "example": {
+        "entrypoints": ["src/main.*", "src/lib.*"],
+        "contracts": ["OpenAPI file, SQL schema, SDK fixture, generated artifact"]
+      },
       "body": "- Public trust boundaries:\n- Service or module ownership:\n- API, SDK, CLI, or UI responsibilities:\n- Generated artifacts or contracts that must stay in sync:"
     },
     {
+      "id": "data_integrations",
       "heading": "Data And Integrations",
+      "purpose": "Map data stores, schemas, external systems, and observability requirements.",
+      "expectedFields": ["dataStores", "schemaFiles", "integrations", "observability", "retention"],
+      "example": {
+        "dataStores": ["PostgreSQL", "SQLite", "Redis", "local files"],
+        "integrations": ["Payment provider, queue, auth service, SDK"],
+        "observability": ["Logs, metrics, traces, audit records"]
+      },
       "body": "- Primary data stores and ownership:\n- External services or provider dependencies:\n- Event, analytics, audit, or observability expectations:\n- Data retention, privacy, or redaction rules:"
     },
     {
+      "id": "quality_release",
       "heading": "Quality And Release Expectations",
+      "purpose": "Capture test surfaces, commands, docs, migrations, and rollback concerns.",
+      "expectedFields": ["qualityBar", "commands", "testCommand", "formatCommand", "reviewFocus"],
+      "example": {
+        "testCommand": "project test command",
+        "formatCommand": "project format command",
+        "reviewFocus": ["Concurrency", "schema compatibility", "accessibility"]
+      },
       "body": "- Test surfaces that protect product behavior:\n- Documentation, API contract, or SDK fixture expectations:\n- Rollout, migration, compatibility, or rollback requirements:"
     },
     {
+      "id": "open_questions",
       "heading": "Open Questions",
+      "purpose": "List assumptions that need human confirmation instead of inventing answers.",
+      "expectedFields": ["openQuestions", "risks"],
+      "example": {
+        "openQuestions": ["Which deployment environment is authoritative?"],
+        "risks": ["Unclear ownership of generated contract files"]
+      },
       "body": "- Product assumptions that still need confirmation:\n- Known risks or decisions to revisit:"
     }
   ]

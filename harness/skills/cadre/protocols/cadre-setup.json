@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields. Use the returned staged approval object, current review_bundle manifest/path list, setup review artifacts, and native state summary for the user review."
+      "instruction": "Before the first setup packet, scan repository evidence such as README/docs, manifests, source entrypoints, schemas, tests, and commands. Then call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, and full structured `product`, `productGuidelines`, `workflowPolicy`, and `techStack` JSON fields. Do not pass only summary/goals/repoNotes unless the user explicitly requested minimal setup."
     },
     {
       "step": 3,
@@ -35,11 +35,11 @@
     },
     {
       "step": 4,
-      "instruction": "After prompt answers have been mapped back to structured setup arguments, review the current `approval.current_stage` using the returned review_bundle manifest/path list so large generated Markdown projections do not enter model context. When the user approves a stage, call setup again with that stage included in `approvedStages` to advance to the next stage."
+      "instruction": "After prompt answers have been mapped back to structured setup arguments, review only `approval.current_stage` using the returned review_bundle manifest/path list. When the user approves that single stage, call setup again with `approvalSessionId`, `approvalStage` set to the current stage, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
     },
     {
       "step": 5,
-      "instruction": "When all setup stages are approved, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, and `approvalComplete: true` using the same structured payload."
+      "instruction": "When the packet reports all setup stages approved, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, `approvalComplete: true`, and the same `approvalSessionId` using the same structured payload."
     },
     {
       "step": 6,
@@ -69,6 +69,109 @@
   "references": [
     "template-locator",
     "mcp-contract",
-    "native-prompts"
-  ]
+    "native-prompts",
+    "approval-and-generation"
+  ],
+  "generationContract": {
+    "requiredEvidence": [
+      "README/docs",
+      "project manifests",
+      "source entrypoints",
+      "schemas/contracts",
+      "tests or configured commands"
+    ],
+    "expectedProductFields": [
+      "name",
+      "summary",
+      "users",
+      "personas",
+      "coreWorkflows",
+      "setupWorkflow",
+      "supportWorkflow",
+      "domainModel",
+      "entities",
+      "relationships",
+      "stateMachines",
+      "invariants",
+      "nonGoals",
+      "boundaries",
+      "dataStores",
+      "schemaFiles",
+      "integrations",
+      "observability",
+      "openQuestions"
+    ],
+    "expectedGuidelineFields": [
+      "principles",
+      "userPromises",
+      "trustAndSafety",
+      "domainRules",
+      "workflowRules",
+      "dataOwnership",
+      "nonGoals",
+      "decisionRules",
+      "reviewChecklist"
+    ],
+    "expectedWorkflowFields": [
+      "principles",
+      "taskLifecycle",
+      "commitPolicy",
+      "testCommand",
+      "formatCommand",
+      "buildCommand",
+      "commands",
+      "reviewFocus",
+      "qualityBar",
+      "manualVerification"
+    ],
+    "example": {
+      "product": {
+        "name": "Project name from repo evidence",
+        "summary": "Concrete product behavior implemented by this repository.",
+        "users": [
+          "Primary user or integrator"
+        ],
+        "coreWorkflows": [
+          "Create or ingest a domain object",
+          "Process, review, publish, or recover it"
+        ],
+        "domainModel": {
+          "entities": [
+            "Entity"
+          ],
+          "relationships": [
+            "Entity owns related record"
+          ]
+        },
+        "invariants": [
+          "Stable behavior that must not regress"
+        ],
+        "dataStores": [
+          "Detected database or storage layer"
+        ],
+        "openQuestions": [
+          "Unknown product assumption to confirm"
+        ]
+      },
+      "techStack": {
+        "languages": [
+          "Detected language"
+        ],
+        "frameworks": [
+          "Detected framework"
+        ],
+        "packageManagers": [
+          "Detected package manager"
+        ],
+        "testCommand": "repo test command when discoverable"
+      },
+      "workflowPolicy": {
+        "testCommand": "repo test command",
+        "formatCommand": "repo format command",
+        "reviewFocus": [
+          "Product-specific correctness concern"
+        ]
+      }
+    }
+  }
 }

@@ -85,15 +85,20 @@ function compactApproval(value: unknown): JsonObject | null {
   if (!value || !isRecord(value)) return null;
   const approval = asJsonObject(value);
   const stages = Array.isArray(approval.stages) ? approval.stages.map(asJsonObject) : [];
-  const artifacts = compactReviewArtifacts(approval.current_review_artifacts);
   const bundle = compactReviewBundle(approval.current_review_bundle);
   return {
     version: approval.version || 1,
     kind: asOptionalString(approval.kind) || "cadre.staged_approval.v1",
     workflow: asOptionalString(approval.workflow) || null,
     required: approval.required !== false,
+    session_id: asOptionalString(approval.session_id) || null,
+    payload_hash: asOptionalString(approval.payload_hash) || null,
+    current_stage_hash: asOptionalString(approval.current_stage_hash) || null,
+    approval_session_argument: asOptionalString(approval.approval_session_argument) || "approvalSessionId",
     approval_argument: asOptionalString(approval.approval_argument) || "approvalComplete",
     approval_complete: approval.approval_complete === true,
+    valid_for_execute: approval.valid_for_execute === true,
+    approval_error: asOptionalString(approval.approval_error) || null,
     current_stage: asOptionalString(approval.current_stage) || null,
     current_stage_title: asOptionalString(approval.current_stage_title) || null,
     approved_stages: asStringArray(approval.approved_stages),
@@ -104,11 +109,9 @@ function compactApproval(value: unknown): JsonObject | null {
       approved: stage.approved === true,
       file_count: Number(stage.file_count || 0),
     })),
-    current_review_artifacts: artifacts.files,
-    current_review_artifact_count: artifacts.count,
-    current_review_bundle: bundle,
     current_review_bundle_path: bundle?.manifest_path || null,
-    next_actions: Array.isArray(approval.next_actions) ? approval.next_actions : [],
+    current_review_bundle_file_count: bundle?.file_count || 0,
+    next_actions: Array.isArray(approval.next_actions) ? approval.next_actions.slice(0, 1) : [],
   };
 }
 

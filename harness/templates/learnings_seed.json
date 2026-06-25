@@ -1,7 +1,12 @@
 {
-  "version": 1,
-  "schema": "cadre.learnings_seed.v1",
   "id": "initial",
   "kind": "learnings_seed",
-  "text": "# Track Learnings: {{track_id}}\n\nPatterns, gotchas, and context discovered during implementation.\n\n## Codebase Patterns (Inherited)\n\n<!-- Patterns summarized from canonical cadre/patterns.jsonl events or archived track learnings -->\n\n---\n\n<!-- Learnings from implementation will be appended below -->\n<!-- Format for each entry:\n\n## [YYYY-MM-DD HH:MM] - Phase N Task M: <task_name>\nkey: <track_id>:p<i>:t<j>:<sha7>\nSession/thread ref if available\n- **Implemented:** <brief description of what was done>\n- **Files changed:** <list of files modified/created>\n- **Commit:** <sha_7chars>\n- **Learnings:**\n  - Patterns: <reusable patterns discovered>\n  - Gotchas: <things to watch out for>\n  - Context: <useful context for future>\n---\n\n-->\n"
+  "purpose": "Seed a track learnings journal with structure for future implementation notes.",
+  "expectedFields": ["track_id", "findings", "decisions", "gotchas", "followUps"],
+  "example": {
+    "findings": ["Important code path or dependency discovered during implementation"],
+    "decisions": ["Why a design choice was made"],
+    "gotchas": ["Unexpected behavior future agents should remember"]
+  },
+  "text": "# Track Learnings: {{track_id}}\n\n## Findings\n\n- \n\n## Decisions\n\n- \n\n## Gotchas\n\n- \n\n## Follow-ups\n\n- \n"
 }

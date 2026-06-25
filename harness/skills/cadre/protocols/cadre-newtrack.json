@@ -23,7 +23,7 @@
   "packetFlow": [
     {
       "step": 1,
-      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
+      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`. Include concrete examples in your draft: `spec.functional_requirements` and `spec.acceptance_criteria` should be arrays of `{ heading, body }`; `spec.out_of_scope` should state boundaries; `plan.phases[].tasks[]` should include specific titles, expected file claims, dependencies, and manual verification tasks when behavior is user-facing or integration-heavy."
     },
     {
       "step": 2,
@@ -31,11 +31,11 @@
     },
     {
       "step": 3,
-      "instruction": "Call `cadre_workflow` with `workflow: \"newtrack\"`, `trackId`, `spec`, `plan`, and any metadata as structured JSON fields. If the packet returns `stage:\"schema_validation\"`, load the returned `schema_resources`, fix the payload shape, and call newtrack again. If it returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`, load `native-prompts`, ask those questions first, and call newtrack again before generating review artifacts."
+      "instruction": "Review only `approval.current_stage` using the returned canonical JSON artifact, generated Markdown projection preview, plan assistance when relevant, and review_bundle manifest/path list. When the user approves that stage, call newtrack again with `approvalSessionId`, `approvalStage`, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
     },
     {
       "step": 4,
-      "instruction": "Review the current `approval.current_stage` using the returned canonical JSON artifact, generated Markdown projection preview, plan assistance when relevant, and review_bundle manifest/path list without inlining large artifacts into model context. Treat a valid dry run as `awaiting_staged_approval`: when the user approves a stage, call newtrack again with that stage included in `approvedStages` to advance to the next stage."
+      "instruction": "To create the track only after spec, plan, metadata, and learnings stages are approved, call `cadre_workflow` again with `workflow: \"newtrack\"`, `execute: true`, `approvalComplete: true`, and the same `approvalSessionId` using the same JSON payload."
     },
     {
       "step": 5,
@@ -68,6 +68,48 @@
   ],
   "references": [
     "mcp-contract",
-    "native-prompts"
-  ]
+    "native-prompts",
+    "approval-and-generation"
+  ],
+  "generationContract": {
+    "specExamples": {
+      "functional_requirements": [
+        {
+          "heading": "Concrete behavior",
+          "body": "What must change and who benefits."
+        }
+      ],
+      "acceptance_criteria": [
+        {
+          "heading": "Verifiable outcome",
+          "body": "Specific test, command, or manual check that proves completion."
+        }
+      ],
+      "out_of_scope": [
+        {
+          "heading": "Boundary",
+          "body": "Tempting related work intentionally excluded."
+        }
+      ]
+    },
+    "planExamples": {
+      "phases": [
+        {
+          "phase_index": 1,
+          "title": "Phase 1: Implement behavior",
+          "tasks": [
+            {
+              "task_index": 1,
+              "task_key": "phase1_task1",
+              "title": "Specific implementation task",
+              "files": [
+                "expected/file.ext"
+              ],
+              "depends_on": []
+            }
+          ]
+        }
+      ]
+    }
+  }
 }

@@ -24,7 +24,8 @@ import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
-import { approvalComplete, newTrackApprovalStages, stagedApprovalState } from "./staged-approval";
+import { newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { trackGenerationWarnings } from "./generation-quality";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
@@ -85,6 +86,7 @@ export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: Jso
 }
 
 export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+  const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
@@ -109,7 +111,8 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped.",
     };
   }
-  const intentPrompts = newTrackIntentPrompts(args);
+  const hasStructuredSpecAndPlan = isRecord(args.spec) && isRecord(args.plan);
+  const intentPrompts = hasStructuredSpecAndPlan ? [] : newTrackIntentPrompts(args);
   if (intentPrompts.length > 0) {
     return {
       ...summary,
@@ -145,16 +148,21 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   };
   const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const approval = stagedApprovalState(root, "newtrack", args, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
+  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...trackGenerationWarnings(specJson, planJson),
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, plan: planJson, trackId });
   if (dryRun) {
     return {
       ...summary,
-      ok: assist.ok !== false,
+      ok: assist.ok !== false && !approvalError,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
@@ -165,7 +173,8 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       review_artifacts: stageReviewArtifacts || reviewArtifacts,
       review_bundle: stageReviewBundle,
       warnings,
-      next_actions: [
+      error: approvalError || undefined,
+      next_actions: approvalError ? asStringArray(asJsonObject(approval).next_actions) : [
         "Approve newtrack one stage at a time with approvedStages.",
         "After spec, plan, metadata, and learnings are approved, call newtrack with execute:true and approvalComplete:true using the same structured payload.",
       ],
@@ -174,7 +183,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   if (findTrack(root, trackId)) {
     return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
   }
-  if (!approvalComplete(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...summary,
       ok: false,
@@ -192,7 +201,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
         "Review the current staged approval bundle.",
         "Call newtrack again with execute:true and approvalComplete:true only after every staged approval is complete.",
       ],
-      error: "Staged approval is required before creating track artifacts",
+      error: approvalError || "Staged approval is required before creating track artifacts",
     };
   }
   const traceBefore = beginTrace(root);

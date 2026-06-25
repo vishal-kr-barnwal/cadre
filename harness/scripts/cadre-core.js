@@ -101,8 +101,8 @@ __export(cadre_core_exports, {
 module.exports = __toCommonJS(cadre_core_exports);
 
 // src/core/application/runtime/artifact-actions.ts
-var import_node_fs14 = __toESM(require("node:fs"));
-var import_node_path28 = __toESM(require("node:path"));
+var import_node_fs15 = __toESM(require("node:fs"));
+var import_node_path29 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -231,8 +231,8 @@ function workflowPhaseState(args, blocked, pendingProvider = false) {
 function continuationToken(workflow, trackId, actions) {
   return textHash(JSON.stringify({ workflow, trackId, actions })).slice(0, 24);
 }
-function parsePorcelainFiles(text) {
-  return String(text || "").split(/\r?\n/).filter(Boolean).flatMap((line) => {
+function parsePorcelainFiles(text2) {
+  return String(text2 || "").split(/\r?\n/).filter(Boolean).flatMap((line) => {
     const raw = line.slice(3).trim();
     if (!raw) return [];
     if (raw.includes(" -> ")) return [raw.split(" -> ").pop() ?? ""];
@@ -440,8 +440,8 @@ function writeJson(file, value) {
 function safeName(value) {
   return String(value || "lock").replace(/[^A-Za-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 160) || "lock";
 }
-function textHash(text) {
-  return import_node_crypto.default.createHash("sha256").update(String(text || "")).digest("hex");
+function textHash(text2) {
+  return import_node_crypto.default.createHash("sha256").update(String(text2 || "")).digest("hex");
 }
 function patchJsonFileUnlocked(file, patcher, options = {}) {
   const retries = Number(options.retries || 5);
@@ -661,8 +661,8 @@ function configuredCoverageCommand(root, args = {}, workingRoot = root) {
   if (fileExists(import_node_path4.default.join(workingRoot, "go.mod"))) return "go test ./...";
   return null;
 }
-function parseCoveragePercent(text) {
-  const source = String(text || "");
+function parseCoveragePercent(text2) {
+  const source = String(text2 || "");
   const patterns = [
     /All files[^|\n]*(?:\|[^|\n]*){3,}\|\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\||$)/i,
     /\bStatements\s*:\s*([0-9]+(?:\.[0-9]+)?)%/i,
@@ -691,10 +691,10 @@ function parseLcovCoverage(root) {
   ];
   for (const file of candidates) {
     if (!fileExists(file)) continue;
-    const text = import_node_fs3.default.readFileSync(file, "utf8");
+    const text2 = import_node_fs3.default.readFileSync(file, "utf8");
     let found = 0;
     let hit = 0;
-    for (const line of text.split(/\r?\n/)) {
+    for (const line of text2.split(/\r?\n/)) {
       if (line.startsWith("LF:")) found += Number(line.slice(3)) || 0;
       if (line.startsWith("LH:")) hit += Number(line.slice(3)) || 0;
     }
@@ -712,8 +712,8 @@ function coverageThreshold(root) {
   const workflowPath = import_node_path5.default.join(root, "cadre", "workflow.json");
   const workflow = readJson(workflowPath, null);
   if (workflow) {
-    const text = JSON.stringify(workflow);
-    const match = text.match(/(?:coverage|test coverage)[^%]{0,120}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
+    const text2 = JSON.stringify(workflow);
+    const match = text2.match(/(?:coverage|test coverage)[^%]{0,120}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
     if (match?.[1]) return Number(match[1]);
   }
   return 80;
@@ -1518,13 +1518,13 @@ function extractRepoSymbols(root, file, limitPerFile = 40) {
   if (stat.size > 1024 * 1024) return [];
   const language = languageForFile(file);
   if (!language) return [];
-  const text = import_node_fs6.default.readFileSync(abs, "utf8");
+  const text2 = import_node_fs6.default.readFileSync(abs, "utf8");
   const patterns = symbolPatternsForLanguage(language);
   const symbols = [];
   for (const pattern of patterns) {
     let match;
-    while ((match = pattern.exec(text)) && symbols.length < limitPerFile) {
-      const prefix = text.slice(0, match.index);
+    while ((match = pattern.exec(text2)) && symbols.length < limitPerFile) {
+      const prefix = text2.slice(0, match.index);
       const line = prefix.split(/\r?\n/).length;
       const name = match[1];
       if (name) symbols.push({ name, file, line, language });
@@ -1839,9 +1839,9 @@ function commitSha(cwd) {
   const result = runCommand("git", ["rev-parse", "HEAD"], { cwd });
   return result.ok ? result.stdout.trim() || null : null;
 }
-function writeNote(cwd, ref, sha, note) {
+function writeNote(cwd, ref, sha2, note) {
   return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}
-`, sha], { cwd });
+`, sha2], { cwd });
 }
 function commitTrace(root, args, options) {
   if (!traceEnabled(root, options.kind, args, options.forceEnabled === true)) {
@@ -1897,7 +1897,7 @@ function commitTrace(root, args, options) {
     commitBody
   ], { cwd: gitRoot });
   if (!commit.ok) return { ok: false, stage: "git_commit", files, commit };
-  const sha = commitSha(gitRoot);
+  const sha2 = commitSha(gitRoot);
   const notePayload = {
     version: 1,
     schema: "cadre.commit_trace.v1",
@@ -1908,20 +1908,20 @@ function commitTrace(root, args, options) {
     track_id: options.trackId || null,
     repo: options.repo || null,
     files,
-    commit_sha: sha,
+    commit_sha: sha2,
     recorded_at: utcNow(),
     ...asJsonObject(options.note)
   };
-  if (options.kind === "product") notePayload.product_commit_sha = sha;
-  if (options.kind === "control") notePayload.control_commit_sha = sha;
+  if (options.kind === "product") notePayload.product_commit_sha = sha2;
+  if (options.kind === "control") notePayload.control_commit_sha = sha2;
   const ref = notesRef(root, args);
-  const note = sha && notesEnabled(root) ? writeNote(gitRoot, ref, sha, notePayload) : null;
+  const note = sha2 && notesEnabled(root) ? writeNote(gitRoot, ref, sha2, notePayload) : null;
   return {
     ok: !note || commandOk(note),
     trace_id: traceId,
     kind: options.kind,
     workflow: options.workflow,
-    commit_sha: sha,
+    commit_sha: sha2,
     subject: fullSubject,
     files,
     notes_ref: ref,
@@ -2965,12 +2965,12 @@ function cleanSpecItem(value) {
   return { heading: heading || "Item", body };
 }
 function parseSpecListItem(line) {
-  const text = line.trim();
-  const bold = text.match(/^\*\*(.+?)\*\*:?\s*(.*)$/);
-  const keyed = !bold ? text.match(/^(.+?)\s*(?::|\s+-\s+|\s+--\s+|\s+—\s+)\s*(.+)$/) : null;
+  const text2 = line.trim();
+  const bold = text2.match(/^\*\*(.+?)\*\*:?\s*(.*)$/);
+  const keyed = !bold ? text2.match(/^(.+?)\s*(?::|\s+-\s+|\s+--\s+|\s+—\s+)\s*(.+)$/) : null;
   if (bold?.[1]) return { heading: bold[1].trim(), body: (bold[2] || "").trim() };
   if (keyed?.[1]) return { heading: keyed[1].trim(), body: (keyed[2] || "").trim() };
-  return { heading: text, body: "" };
+  return { heading: text2, body: "" };
 }
 function parseSpecListItems(body, fallbackHeading) {
   const lines = normalizedText(body).split("\n");
@@ -2989,15 +2989,15 @@ function parseSpecListItems(body, fallbackHeading) {
       current = parseSpecListItem(bullet[1]);
       continue;
     }
-    const text = rawLine.trim();
-    if (!text) continue;
+    const text2 = rawLine.trim();
+    if (!text2) continue;
     if (!current) {
-      current = { heading: fallbackHeading, body: text };
+      current = { heading: fallbackHeading, body: text2 };
       continue;
     }
     const existing = asOptionalString(current.body) || "";
     current.body = existing ? `${existing}
-${text}` : text;
+${text2}` : text2;
   }
   pushCurrent();
   if (items.length > 0) return items;
@@ -3010,8 +3010,8 @@ function specItemsFromRaw(value) {
     return cleanSpecItem(asJsonObject(entry));
   }).filter((entry) => Boolean(entry));
 }
-function specJsonFromText(trackId, text) {
-  const parsed = splitMarkdownSections(text || `# Spec: ${trackId}
+function specJsonFromText(trackId, text2) {
+  const parsed = splitMarkdownSections(text2 || `# Spec: ${trackId}
 `);
   const descriptionParts = [parsed.body].filter(Boolean);
   const functionalRequirements = [];
@@ -3194,10 +3194,10 @@ function packagedTemplateText(relativePath) {
   return file ? import_node_fs10.default.readFileSync(file, "utf8") : null;
 }
 function packagedTemplateJson(relativePath) {
-  const text = packagedTemplateText(relativePath);
-  if (text === null) return null;
+  const text2 = packagedTemplateText(relativePath);
+  if (text2 === null) return null;
   try {
-    return asJsonObject(JSON.parse(text));
+    return asJsonObject(JSON.parse(text2));
   } catch {
     return null;
   }
@@ -3297,15 +3297,20 @@ function compactApproval(value) {
   if (!value || !isRecord(value)) return null;
   const approval = asJsonObject(value);
   const stages = Array.isArray(approval.stages) ? approval.stages.map(asJsonObject) : [];
-  const artifacts = compactReviewArtifacts(approval.current_review_artifacts);
   const bundle = compactReviewBundle(approval.current_review_bundle);
   return {
     version: approval.version || 1,
     kind: asOptionalString(approval.kind) || "cadre.staged_approval.v1",
     workflow: asOptionalString(approval.workflow) || null,
     required: approval.required !== false,
+    session_id: asOptionalString(approval.session_id) || null,
+    payload_hash: asOptionalString(approval.payload_hash) || null,
+    current_stage_hash: asOptionalString(approval.current_stage_hash) || null,
+    approval_session_argument: asOptionalString(approval.approval_session_argument) || "approvalSessionId",
     approval_argument: asOptionalString(approval.approval_argument) || "approvalComplete",
     approval_complete: approval.approval_complete === true,
+    valid_for_execute: approval.valid_for_execute === true,
+    approval_error: asOptionalString(approval.approval_error) || null,
     current_stage: asOptionalString(approval.current_stage) || null,
     current_stage_title: asOptionalString(approval.current_stage_title) || null,
     approved_stages: asStringArray(approval.approved_stages),
@@ -3316,11 +3321,9 @@ function compactApproval(value) {
       approved: stage.approved === true,
       file_count: Number(stage.file_count || 0)
     })),
-    current_review_artifacts: artifacts.files,
-    current_review_artifact_count: artifacts.count,
-    current_review_bundle: bundle,
     current_review_bundle_path: bundle?.manifest_path || null,
-    next_actions: Array.isArray(approval.next_actions) ? approval.next_actions : []
+    current_review_bundle_file_count: bundle?.file_count || 0,
+    next_actions: Array.isArray(approval.next_actions) ? approval.next_actions.slice(0, 1) : []
   };
 }
 function compactProvider(value) {
@@ -3813,8 +3816,8 @@ function stringList(value) {
 }
 function firstString(...values) {
   for (const value of values) {
-    const text = asOptionalString(value);
-    if (text) return text;
+    const text2 = asOptionalString(value);
+    if (text2) return text2;
   }
   return null;
 }
@@ -3822,6 +3825,10 @@ function appendLines(lines, heading, values) {
   if (values.length === 0) return;
   if (lines.length > 0) lines.push("");
   lines.push(`${heading}:`, bulletList(values));
+}
+function objectText(value) {
+  if (!isRecord(value)) return [];
+  return Object.entries(asJsonObject(value)).filter(([, entry]) => entry !== void 0 && entry !== null && String(entry).trim() !== "").map(([key, entry]) => `- ${key}: ${Array.isArray(entry) ? asStringArray(entry).join(", ") : typeof entry === "object" ? JSON.stringify(entry) : String(entry)}`);
 }
 function productSectionBody(heading, provided, fallback) {
   const lines = [];
@@ -3831,28 +3838,49 @@ function productSectionBody(heading, provided, fallback) {
     case "product summary":
       if (name) lines.push(`- What the product is: ${name}`);
       if (summary) lines.push(`- Primary value proposition: ${summary}`);
-      appendLines(lines, "Primary users", stringList(provided.users));
+      appendLines(lines, "Primary users", stringList(provided.users || provided.audience));
+      appendLines(lines, "Operating model", stringList(provided.operatingModel || provided.operating_model || provided.deploymentModel || provided.deployment_model));
       break;
     case "users and personas":
-      appendLines(lines, "Primary users", stringList(provided.users));
+      appendLines(lines, "Primary users", stringList(provided.users || provided.audience));
+      appendLines(lines, "Personas", stringList(provided.personas));
+      appendLines(lines, "Operators or integrators", stringList(provided.operators || provided.integrators));
+      appendLines(lines, "Access boundaries", stringList(provided.permissions || provided.accessBoundaries || provided.access_boundaries));
       break;
     case "core workflows":
       appendLines(lines, "Product goals", stringList(provided.goals));
       appendLines(lines, "Primary workflows", stringList(provided.workflows || provided.coreWorkflows || provided.core_workflows));
+      appendLines(lines, "Setup workflow", stringList(provided.setupWorkflow || provided.setup_workflow));
+      appendLines(lines, "Support workflow", stringList(provided.supportWorkflow || provided.support_workflow));
+      appendLines(lines, "Repo notes", stringList(provided.repoNotes || provided.repo_notes));
+      break;
+    case "domain model":
+      lines.push(...objectText(provided.domainModel || provided.domain_model));
+      appendLines(lines, "Core entities", stringList(provided.entities));
+      appendLines(lines, "Relationships", stringList(provided.relationships));
+      appendLines(lines, "State machines", stringList(provided.stateMachines || provided.state_machines || provided.lifecycleStages || provided.lifecycle_stages));
       break;
     case "product invariants":
       appendLines(lines, "Product invariants", stringList(provided.invariants || provided.productInvariants || provided.product_invariants));
       appendLines(lines, "Non-goals", stringList(provided.nonGoals || provided.non_goals));
+      appendLines(lines, "Compatibility or migration guarantees", stringList(provided.compatibility || provided.migrationGuarantees || provided.migration_guarantees));
       break;
     case "architecture boundaries":
       appendLines(lines, "Architecture boundaries", stringList(provided.boundaries || provided.architectureBoundaries || provided.architecture_boundaries));
+      appendLines(lines, "Entrypoints", stringList(provided.entrypoints));
+      appendLines(lines, "Source directories", stringList(provided.sourceDirectories || provided.source_directories));
+      appendLines(lines, "Contracts", stringList(provided.contracts || provided.schemaFiles || provided.schema_files));
       break;
     case "data and integrations":
       appendLines(lines, "Data stores", stringList(provided.dataStores || provided.data_stores || provided.datastores));
-      appendLines(lines, "Integrations", stringList(provided.integrations));
+      appendLines(lines, "Schema files", stringList(provided.schemaFiles || provided.schema_files));
+      appendLines(lines, "Integrations", stringList(provided.integrations || provided.keyDependencies || provided.key_dependencies));
+      appendLines(lines, "Observability", stringList(provided.observability));
       break;
     case "quality and release expectations":
       appendLines(lines, "Quality expectations", stringList(provided.qualityBar || provided.quality_bar || provided.qualityExpectations || provided.quality_expectations));
+      appendLines(lines, "Commands", stringList(provided.commands || provided.testCommand || provided.test_command || provided.formatCommand || provided.format_command));
+      appendLines(lines, "Review focus", stringList(provided.reviewFocus || provided.review_focus));
       break;
     case "open questions":
       appendLines(lines, "Open questions", stringList(provided.openQuestions || provided.open_questions));
@@ -3869,16 +3897,18 @@ function productGuidelinesSectionBody(heading, provided, fallback) {
       appendLines(lines, "Principles", stringList(provided.principles));
       break;
     case "user promises":
-      appendLines(lines, "User promises", stringList(provided.userPromises || provided.user_promises || provided.promises));
+      appendLines(lines, "User promises", stringList(provided.userPromises || provided.user_promises || provided.promises || provided.qualityBar || provided.quality_bar));
       break;
     case "trust and safety boundaries":
       appendLines(lines, "Trust and safety boundaries", stringList(provided.trustAndSafety || provided.trust_and_safety || provided.safety || provided.boundaries));
       break;
     case "domain and workflow rules":
       appendLines(lines, "Domain and workflow rules", stringList(provided.rules || provided.domainRules || provided.domain_rules || provided.workflowRules || provided.workflow_rules));
+      appendLines(lines, "State and concurrency rules", stringList(provided.stateMachines || provided.state_machines || provided.concurrencyRules || provided.concurrency_rules));
       break;
     case "data ownership":
-      appendLines(lines, "Data ownership", stringList(provided.dataOwnership || provided.data_ownership));
+      appendLines(lines, "Data ownership", stringList(provided.dataOwnership || provided.data_ownership || provided.dataStores || provided.data_stores));
+      appendLines(lines, "Contracts and generated artifacts", stringList(provided.contracts || provided.schemaFiles || provided.schema_files));
       break;
     case "non-goals":
       appendLines(lines, "Non-goals", stringList(provided.nonGoals || provided.non_goals));
@@ -3903,9 +3933,13 @@ function workflowSectionBody(heading, provided, fallback) {
     case "quality gates":
       if (reviewGate2) lines.push(`- Review gate: ${reviewGate2}`);
       if (preferredTestCommand) lines.push(`- Preferred test command: \`${preferredTestCommand}\``);
+      appendLines(lines, "Review focus", stringList(provided.reviewFocus || provided.review_focus));
+      appendLines(lines, "Quality bar", stringList(provided.qualityBar || provided.quality_bar));
       break;
     case "development commands":
       if (preferredTestCommand) lines.push(`- Preferred test command: \`${preferredTestCommand}\``);
+      appendLines(lines, "Format command", stringList(provided.formatCommand || provided.format_command));
+      appendLines(lines, "Build command", stringList(provided.buildCommand || provided.build_command));
       appendLines(lines, "Additional commands", stringList(provided.commands || provided.developmentCommands || provided.development_commands));
       break;
     case "guiding principles":
@@ -4566,34 +4600,34 @@ function humanReviewConfirmed(args = {}) {
 }
 
 // src/core/application/runtime/review-bundles.ts
-function reviewStats(text) {
-  const normalized = text.replace(/\n*$/, "\n");
+function reviewStats(text2) {
+  const normalized = text2.replace(/\n*$/, "\n");
   return {
     bytes: Buffer.byteLength(normalized, "utf8"),
     lines: normalized.split("\n").length - 1,
     sha256: import_node_crypto2.default.createHash("sha256").update(normalized).digest("hex")
   };
 }
-function textReviewFile(relativePath, title, source, text) {
+function textReviewFile(relativePath, title, source, text2) {
   return {
     path: relativePath,
     title,
     kind: "markdown",
     source,
-    content: text.replace(/\n*$/, "\n")
+    content: text2.replace(/\n*$/, "\n")
   };
 }
-function plainReviewFile(relativePath, title, source, text) {
+function plainReviewFile(relativePath, title, source, text2) {
   return {
     path: relativePath,
     title,
     kind: "text",
     source,
-    content: text.replace(/\n*$/, "\n")
+    content: text2.replace(/\n*$/, "\n")
   };
 }
 function jsonReviewFile(relativePath, title, source, value) {
-  const text = value ? `${JSON.stringify(value, null, 2)}
+  const text2 = value ? `${JSON.stringify(value, null, 2)}
 ` : "";
   return {
     path: relativePath,
@@ -4601,7 +4635,7 @@ function jsonReviewFile(relativePath, title, source, value) {
     kind: "json",
     source,
     missing: value == null,
-    content: text
+    content: text2
   };
 }
 function setupLspWriteRequested(args = {}) {
@@ -4897,14 +4931,14 @@ function implementationStyleGuides(root, trackId, args = {}) {
   const guides = selected.map((id) => {
     const file = import_node_path22.default.join(root, "cadre", "styleguides", `${id}.json`);
     const guide = readJson(file, null) || {};
-    const text = JSON.stringify(guide, null, 2);
+    const text2 = JSON.stringify(guide, null, 2);
     return {
       id,
       path: import_node_path22.default.relative(root, file),
       guide,
-      content: text.slice(0, maxChars),
-      truncated: text.length > maxChars,
-      bytes: Buffer.byteLength(text, "utf8"),
+      content: text2.slice(0, maxChars),
+      truncated: text2.length > maxChars,
+      bytes: Buffer.byteLength(text2, "utf8"),
       reasons: [
         id === "general" ? "general" : null,
         techStackIds.includes(id) ? "tech_stack" : null,
@@ -5883,8 +5917,8 @@ function selectedTrackId(root, args = {}) {
 }
 
 // src/core/application/runtime/markdown-docs.ts
-function normalizedText(text) {
-  return text.replace(/\r\n/g, "\n").replace(/\n*$/, "\n");
+function normalizedText(text2) {
+  return text2.replace(/\r\n/g, "\n").replace(/\n*$/, "\n");
 }
 function generatedMarker(source, schema, body) {
   return `<!-- cadre:generated from="${source}" schema="${schema}" hash="${textHash(body).slice(0, 16)}" -->`;
@@ -5898,11 +5932,11 @@ function appendCanonicalJsonReference(parts, source, heading = "Canonical Source
   const target2 = source ? `\`${source}\`` : "the canonical JSON file referenced by the generated marker";
   parts.push(`## ${heading}`, "", `Canonical data lives in ${target2}. This Markdown is a generated human-readable projection.`, "");
 }
-function hasGeneratedMarker(text) {
-  return /<!--\s*cadre:generated\b/.test(text);
+function hasGeneratedMarker(text2) {
+  return /<!--\s*cadre:generated\b/.test(text2);
 }
-function splitMarkdownSections(text) {
-  const lines = normalizedText(text).split("\n");
+function splitMarkdownSections(text2) {
+  const lines = normalizedText(text2).split("\n");
   const firstHeadingIndex = lines.findIndex((line) => /^#\s+/.test(line));
   const title = firstHeadingIndex >= 0 ? lines[firstHeadingIndex]?.replace(/^#\s+/, "").trim() || "Untitled" : "Untitled";
   const bodyStart = firstHeadingIndex >= 0 ? firstHeadingIndex + 1 : 0;
@@ -6551,6 +6585,10 @@ function artifactMatches(def, args = {}) {
 }
 
 // src/core/application/runtime/staged-approval.ts
+var import_node_fs14 = __toESM(require("node:fs"));
+var import_node_path28 = __toESM(require("node:path"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_os3 = __toESM(require("node:os"));
 function rawArgs(args) {
   return args;
 }
@@ -6560,18 +6598,165 @@ function approvalComplete(args = {}) {
 }
 function approvedStageIds(args = {}) {
   const raw = rawArgs(args);
-  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages))).sort();
+  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages)));
 }
 function requestedApprovalStage(args = {}) {
   const raw = rawArgs(args);
   return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
 }
+function requestedApprovalSessionId(args = {}) {
+  const raw = rawArgs(args);
+  return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
+}
 function filesForStage(files, stage) {
   if (stage.fileMatches.includes("*")) return files;
   return files.filter((file) => stage.fileMatches.some((needle) => file.path.includes(needle) || file.source.includes(needle)));
 }
+function stableJson(value) {
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+function sha(value) {
+  return import_node_crypto3.default.createHash("sha256").update(value).digest("hex");
+}
+function approvalSessionDir() {
+  return import_node_path28.default.join(import_node_os3.default.tmpdir(), "cadre-approval-sessions");
+}
+function approvalSessionFile(sessionId) {
+  return import_node_path28.default.join(approvalSessionDir(), `${sessionId}.json`);
+}
+function readApprovalSession(sessionId) {
+  try {
+    return JSON.parse(import_node_fs14.default.readFileSync(approvalSessionFile(sessionId), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeApprovalSession(session) {
+  import_node_fs14.default.mkdirSync(approvalSessionDir(), { recursive: true });
+  import_node_fs14.default.writeFileSync(approvalSessionFile(session.session_id), `${JSON.stringify(session, null, 2)}
+`);
+}
+function stageHash(workflow, stage, files, extras) {
+  return sha(stableJson({
+    workflow,
+    stage: stage.id,
+    files: filesForStage(files, stage).map((file) => ({
+      path: file.path,
+      source: file.source,
+      kind: file.kind,
+      missing: file.missing === true,
+      content: file.content
+    })),
+    extras
+  }));
+}
+function approvalPayload(args) {
+  const raw = rawArgs(args);
+  const ignored = /* @__PURE__ */ new Set([
+    "execute",
+    "approvalComplete",
+    "approval_complete",
+    "approvalStage",
+    "approval_stage",
+    "approvedStages",
+    "approved_stages",
+    "approvalSessionId",
+    "approval_session_id",
+    "reviewBundleDir",
+    "review_bundle_dir",
+    "reviewDir",
+    "review_dir",
+    "responseMode",
+    "response_mode",
+    "detail",
+    "compact"
+  ]);
+  const payload = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!ignored.has(key)) payload[key] = value;
+  }
+  return payload;
+}
+function approvalPayloadHash(workflow, stages, args, extras) {
+  return sha(stableJson({
+    workflow,
+    stages: stages.map((stage) => ({
+      id: stage.id,
+      title: stage.title,
+      description: stage.description
+    })),
+    payload: approvalPayload(args),
+    extras
+  }));
+}
+function approvalSessionId(workflow, root, payloadHash) {
+  return sha(`${workflow}
+${import_node_path28.default.resolve(root)}
+${payloadHash}`).slice(0, 24);
+}
+function approvalOrderError(stageIds, approved) {
+  const known = new Set(stageIds);
+  const unknown = approved.find((stage) => !known.has(stage));
+  if (unknown) return `Unknown approval stage: ${unknown}`;
+  for (let index = 0; index < approved.length; index += 1) {
+    if (approved[index] !== stageIds[index]) return `Approval stages must be approved in order; expected ${stageIds[index]} before ${approved[index]}.`;
+  }
+  return null;
+}
+function approvalTransitionError(args, workflow, sessionId, payloadHash, stageIds, approved) {
+  const raw = rawArgs(args);
+  if (stageIds.length === 0) return null;
+  const orderError = approvalOrderError(stageIds, approved);
+  if (orderError) return orderError;
+  const requestedSession = requestedApprovalSessionId(args);
+  const hasApprovalIntent = approved.length > 0 || approvalComplete(args) || raw.approvalStage !== void 0 || raw.approval_stage !== void 0;
+  if (!hasApprovalIntent) {
+    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, approved_stages: [], updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+    return null;
+  }
+  if (!requestedSession) return "approvalSessionId is required when approving staged workflow output.";
+  if (approvalComplete(args)) {
+    const requested = readApprovalSession(requestedSession);
+    if (requested && requested.workflow === workflow && approved.length === stageIds.length && requested.approved_stages.length === stageIds.length && requested.approved_stages.every((stage, index) => stage === stageIds[index] && approved[index] === stage)) {
+      return null;
+    }
+  }
+  if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
+  const session = readApprovalSession(sessionId);
+  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
+    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, approved_stages: [], updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+    return "Approval session was not found for this payload; review the current stage before approving.";
+  }
+  const previous = session.approved_stages || [];
+  const previousOrderError = approvalOrderError(stageIds, previous);
+  if (previousOrderError) return previousOrderError;
+  if (approved.length < previous.length || previous.some((stage, index) => approved[index] !== stage)) {
+    return "Approved stages must preserve the current approval session history.";
+  }
+  const delta = approved.slice(previous.length);
+  if (approvalComplete(args)) {
+    if (approved.length !== stageIds.length) return "approvalComplete requires every staged approval to be recorded first.";
+    if (delta.length > 0) return "Record the final stage approval in a dry-run call before using approvalComplete.";
+    return null;
+  }
+  if (delta.length !== 1) return "Approve exactly one new stage per packet call.";
+  const nextExpected = stageIds[previous.length];
+  if (delta[0] !== nextExpected) return `Next approval stage must be ${nextExpected}.`;
+  const requestedStage = requestedApprovalStage(args);
+  if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
+  writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, approved_stages: approved, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+  return null;
+}
 function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras = {}) {
-  const approved = new Set(approvedStageIds(args));
+  const stageIds = stages.map((stage) => stage.id);
+  const approvedIds = approvedStageIds(args);
+  const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
+  const sessionId = approvalSessionId(workflow, root, payloadHash);
+  const approvalError = approvalTransitionError(args, workflow, sessionId, payloadHash, stageIds, approvedIds);
+  const approved = new Set(approvedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));
   const requested = requestedApprovalStage(args);
   const active = stages.find((stage) => stage.id === requested) || pending[0] || stages[stages.length - 1] || null;
@@ -6583,15 +6768,24 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras =
     pending_stages: pending.map((stage) => stage.id)
   }) : null;
   const complete = approvalComplete(args);
+  const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, reviewFiles, extras)]));
+  const validForExecute = !approvalError && complete && approvedIds.length === stages.length;
   return {
     version: 1,
     kind: "cadre.staged_approval.v1",
     workflow,
     required: true,
+    session_id: sessionId,
+    payload_hash: payloadHash,
+    approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
     approval_complete: complete,
+    valid_for_execute: validForExecute,
+    approval_error: approvalError,
     current_stage: active?.id || null,
     current_stage_title: active?.title || null,
+    current_stage_hash: active ? stageHashes[active.id] : null,
+    stage_hashes: stageHashes,
     approved_stages: Array.from(approved),
     pending_stages: pending.map((stage) => stage.id),
     stages: stages.map((stage) => {
@@ -6606,12 +6800,19 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras =
     }),
     current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
     current_review_bundle: stageBundle,
-    next_actions: complete ? [`Call ${workflow} with execute:true and approvalComplete:true to apply the approved staged payload.`] : active ? [
+    next_actions: complete ? approvalError ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."] : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`] : active ? [
       `Review and approve the ${active.id} stage.`,
-      `Call ${workflow} again with approvedStages including ${active.id} to advance to the next stage.`,
-      "After all stages are approved, call the mutating packet with execute:true and approvalComplete:true."
+      `Call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
+      "After all stages are approved in dry-run calls, call the mutating packet with execute:true, approvalComplete:true, and the same approvalSessionId."
     ] : []
   };
+}
+function stagedApprovalReady(approval) {
+  const state = asJsonObject(approval);
+  return state.valid_for_execute === true;
+}
+function stagedApprovalError(approval) {
+  return asOptionalString(asJsonObject(approval).approval_error) || null;
 }
 function setupApprovalStages(polyrepoRequested) {
   return [
@@ -6766,8 +6967,8 @@ function handoffApprovalStages() {
 function artifactCatalog(root, args = {}) {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args)).map((def) => ({
     ...def,
-    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path28.default.join(root, "cadre", "tracks")) : fileExists(import_node_path28.default.join(root, def.canonical)),
-    projection_exists: def.projection ? fileExists(import_node_path28.default.join(root, def.projection)) : false
+    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path29.default.join(root, "cadre", "tracks")) : fileExists(import_node_path29.default.join(root, def.canonical)),
+    projection_exists: def.projection ? fileExists(import_node_path29.default.join(root, def.projection)) : false
   }));
   return { ok: true, root, artifacts };
 }
@@ -6781,7 +6982,7 @@ ${JSON.stringify(value, null, 2)}
 }
 function readJsonl(file) {
   if (!fileExists(file)) return [];
-  return import_node_fs14.default.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+  return import_node_fs15.default.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
     try {
       return asJsonObject(JSON.parse(line));
     } catch {
@@ -6791,21 +6992,21 @@ function readJsonl(file) {
 }
 function renderJsonlMarkdown(title, entries) {
   if (entries.length === 1) {
-    const text = asOptionalString(entries[0]?.text || entries[0]?.summary || entries[0]?.body);
-    if (text && /^#\s+/m.test(text.trimStart())) return normalizedText(text);
+    const text2 = asOptionalString(entries[0]?.text || entries[0]?.summary || entries[0]?.body);
+    if (text2 && /^#\s+/m.test(text2.trimStart())) return normalizedText(text2);
   }
   const parts = [`# ${title}`, ""];
   for (const entry of entries) {
     const heading = asOptionalString(entry.title || entry.kind || entry.id);
     if (heading) parts.push(`## ${heading}`, "");
-    const text = asOptionalString(entry.text || entry.summary || entry.body);
-    if (text) parts.push(text, "");
+    const text2 = asOptionalString(entry.text || entry.summary || entry.body);
+    if (text2) parts.push(text2, "");
   }
   return normalizedText(parts.join("\n"));
 }
 function renderArtifact(root, def, args = {}) {
-  const canonicalPath = import_node_path28.default.join(root, def.canonical);
-  const projectionPath = def.projection ? import_node_path28.default.join(root, def.projection) : void 0;
+  const canonicalPath = import_node_path29.default.join(root, def.canonical);
+  const projectionPath = def.projection ? import_node_path29.default.join(root, def.projection) : void 0;
   let raw = null;
   let body = "";
   let missingCanonical = false;
@@ -6829,7 +7030,7 @@ function renderArtifact(root, def, args = {}) {
   }
   if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
   const content = withGeneratedMarker(def.canonical, def.schema, body);
-  const existing = projectionPath && fileExists(projectionPath) ? import_node_fs14.default.readFileSync(projectionPath, "utf8") : "";
+  const existing = projectionPath && fileExists(projectionPath) ? import_node_fs15.default.readFileSync(projectionPath, "utf8") : "";
   return {
     ok: true,
     artifact_id: def.id,
@@ -6862,7 +7063,7 @@ function artifactRender(root, args = {}) {
 function artifactValidate(root, args = {}) {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
   const results = artifacts.map((def) => {
-    const file = import_node_path28.default.join(root, def.canonical);
+    const file = import_node_path29.default.join(root, def.canonical);
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
     if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
     const value = readJson(file, null);
@@ -6901,7 +7102,6 @@ function artifactSync(root, args = {}) {
   const skipped = [];
   const warnings = [];
   const errors = [];
-  const traceBefore = execute && humanReviewConfirmed(args) ? beginTrace(root) : null;
   for (const def of defs) {
     const rendered = renderArtifact(root, def, args);
     artifacts.push({
@@ -6917,18 +7117,6 @@ function artifactSync(root, args = {}) {
       continue;
     }
     reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
-    if (!execute) continue;
-    if (!humanReviewConfirmed(args)) continue;
-    const projectionFile = import_node_path28.default.join(root, def.projection);
-    const existing = fileExists(projectionFile) ? import_node_fs14.default.readFileSync(projectionFile, "utf8") : "";
-    if (existing && !hasGeneratedMarker(existing) && !force) {
-      skipped.push(def.projection);
-      warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
-      continue;
-    }
-    ensureParent(projectionFile);
-    import_node_fs14.default.writeFileSync(projectionFile, rendered.content);
-    written.push(def.projection);
   }
   const reviewBundle = workflowReviewBundle(root, "artifacts", args, reviewFiles, {
     scope: args.scope || "all",
@@ -6941,12 +7129,14 @@ function artifactSync(root, args = {}) {
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifactsFromFiles(reviewFiles);
   const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
-  if (execute && !humanReviewConfirmed(args)) {
+  const approvalError = stagedApprovalError(approval);
+  if (approvalError) warnings.push(approvalError);
+  if (execute && !stagedApprovalReady(approval)) {
     return {
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
+      stage: "staged_approval",
       artifacts,
       approval,
       human_review: humanReview,
@@ -6954,8 +7144,25 @@ function artifactSync(root, args = {}) {
       review_bundle: stageReviewBundle,
       warnings,
       errors: ["Staged approval is required before syncing artifacts"],
-      error: "Staged approval is required before syncing artifacts"
+      error: approvalError || "Staged approval is required before syncing artifacts"
     };
+  }
+  const traceBefore = execute ? beginTrace(root) : null;
+  if (execute) {
+    for (const def of defs) {
+      const rendered = renderArtifact(root, def, args);
+      if (rendered.ok === false || !rendered.content || !def.projection) continue;
+      const projectionFile = import_node_path29.default.join(root, def.projection);
+      const existing = fileExists(projectionFile) ? import_node_fs15.default.readFileSync(projectionFile, "utf8") : "";
+      if (existing && !hasGeneratedMarker(existing) && !force) {
+        skipped.push(def.projection);
+        warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
+        continue;
+      }
+      ensureParent(projectionFile);
+      import_node_fs15.default.writeFileSync(projectionFile, rendered.content);
+      written.push(def.projection);
+    }
   }
   const controlCommit = execute ? commitTrace(root, args, {
     kind: "control",
@@ -6971,9 +7178,10 @@ function artifactSync(root, args = {}) {
     }
   }) : null;
   return {
-    ok: errors.length === 0 && (!controlCommit || controlCommit.ok !== false),
+    ok: errors.length === 0 && !approvalError && (!controlCommit || controlCommit.ok !== false),
     dry_run: !execute,
     phase_state: execute ? controlCommit && controlCommit.ok === false ? "recovery_required" : "executed" : "dry_run",
+    ...approvalError && !execute ? { stage: "staged_approval", error: approvalError } : {},
     artifacts,
     approval,
     review_artifacts: stageReviewArtifacts,
@@ -7008,8 +7216,8 @@ function artifactPacket(root, args = {}) {
 }
 
 // src/dap/config.ts
-var import_node_fs15 = __toESM(require("node:fs"));
-var import_node_path29 = __toESM(require("node:path"));
+var import_node_fs16 = __toESM(require("node:fs"));
+var import_node_path30 = __toESM(require("node:path"));
 var import_node_child_process5 = require("node:child_process");
 function commandExists2(command, cwd) {
   const result = (0, import_node_child_process5.spawnSync)("sh", ["-lc", `command -v '${command.replace(/'/g, "'\\''")}'`], { cwd, encoding: "utf8" });
@@ -7024,18 +7232,18 @@ function pythonDebugpyAvailable(root, command) {
 }
 function configPath(root, config) {
   const rel = config || "cadre/dap.json";
-  return import_node_path29.default.isAbsolute(rel) ? rel : import_node_path29.default.join(root, rel);
+  return import_node_path30.default.isAbsolute(rel) ? rel : import_node_path30.default.join(root, rel);
 }
 function readConfig(file) {
   try {
-    return asJsonObject(JSON.parse(import_node_fs15.default.readFileSync(file, "utf8")));
+    return asJsonObject(JSON.parse(import_node_fs16.default.readFileSync(file, "utf8")));
   } catch {
     return {};
   }
 }
 function writeConfig(file, value) {
-  import_node_fs15.default.mkdirSync(import_node_path29.default.dirname(file), { recursive: true });
-  import_node_fs15.default.writeFileSync(file, `${JSON.stringify(value, null, 2)}
+  import_node_fs16.default.mkdirSync(import_node_path30.default.dirname(file), { recursive: true });
+  import_node_fs16.default.writeFileSync(file, `${JSON.stringify(value, null, 2)}
 `);
 }
 function scanLanguages(root) {
@@ -7109,7 +7317,7 @@ function dapSetup(root, args = {}) {
   return {
     ok: true,
     root,
-    config: import_node_path29.default.relative(root, file),
+    config: import_node_path30.default.relative(root, file),
     execute: args.execute === true,
     dry_run: args.execute !== true,
     recommended,
@@ -7139,7 +7347,7 @@ function dapStatus(root, args = {}) {
   return {
     ok: true,
     configured: Object.keys(config).length > 0,
-    path: import_node_path29.default.relative(root, file),
+    path: import_node_path30.default.relative(root, file),
     adapters: summarizedAdapters,
     configurations: configurations.map((entry) => ({
       id: asOptionalString(entry.id) || "unknown",
@@ -7157,7 +7365,7 @@ function dapStatus(root, args = {}) {
 }
 function substitute(value, tokens) {
   if (typeof value === "string") {
-    return Object.entries(tokens).reduce((text, [token, replacement]) => text.split(token).join(replacement), value);
+    return Object.entries(tokens).reduce((text2, [token, replacement]) => text2.split(token).join(replacement), value);
   }
   if (Array.isArray(value)) return value.map((entry) => substitute(entry, tokens));
   if (!isRecord(value)) return value;
@@ -7169,10 +7377,10 @@ function normalizeBreakpoints(root, raw) {
     const file = asOptionalString(entry.file) || asOptionalString(entry.path);
     const line = asNumber(entry.line);
     if (!file || line < 1) return [];
-    const abs = import_node_path29.default.isAbsolute(file) ? file : import_node_path29.default.join(root, file);
+    const abs = import_node_path30.default.isAbsolute(file) ? file : import_node_path30.default.join(root, file);
     return [{
       ...entry,
-      file: import_node_path29.default.relative(root, abs).split(import_node_path29.default.sep).join("/"),
+      file: import_node_path30.default.relative(root, abs).split(import_node_path30.default.sep).join("/"),
       line
     }];
   });
@@ -7218,7 +7426,7 @@ function redactDapValue(value) {
 }
 
 // src/dap/snapshot.ts
-var import_node_path30 = __toESM(require("node:path"));
+var import_node_path31 = __toESM(require("node:path"));
 
 // src/dap/client.ts
 var import_node_child_process6 = require("node:child_process");
@@ -7471,7 +7679,7 @@ async function setBreakpoints(client, root, breakpoints) {
   }
   const results = [];
   for (const [file, entries] of groups.entries()) {
-    const abs = import_node_path30.default.isAbsolute(file) ? file : import_node_path30.default.join(root, file);
+    const abs = import_node_path31.default.isAbsolute(file) ? file : import_node_path31.default.join(root, file);
     const response = await requestOptional(client, "setBreakpoints", {
       source: { path: abs },
       breakpoints: entries.map((entry) => ({
@@ -7570,19 +7778,19 @@ async function dapSnapshot(root, args = {}) {
 }
 
 // src/core/application/runtime/setup-infrastructure.ts
-var import_node_fs16 = __toESM(require("node:fs"));
-var import_node_path31 = __toESM(require("node:path"));
+var import_node_fs17 = __toESM(require("node:fs"));
+var import_node_path32 = __toESM(require("node:path"));
 function configuredCiProvider(root, args = {}) {
   const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root).config.provider_mode);
   const provider = normalizeProviderMode(raw);
   return provider === "github" || provider === "gitlab" ? provider : null;
 }
 function setupGitattributes(root) {
-  const file = import_node_path31.default.join(root, ".gitattributes");
+  const file = import_node_path32.default.join(root, ".gitattributes");
   const required = [
     "cadre/tracks/**/parallel_state.json merge=ours"
   ];
-  const existing = fileExists(file) ? import_node_fs16.default.readFileSync(file, "utf8") : "";
+  const existing = fileExists(file) ? import_node_fs17.default.readFileSync(file, "utf8") : "";
   const lines = existing.split(/\r?\n/).filter(Boolean);
   let changed = false;
   for (const line of required) {
@@ -7592,13 +7800,13 @@ function setupGitattributes(root) {
     }
   }
   if (changed || !fileExists(file)) {
-    import_node_fs16.default.writeFileSync(file, `${lines.join("\n")}
+    import_node_fs17.default.writeFileSync(file, `${lines.join("\n")}
 `);
   }
   const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root });
   return {
     ok: mergeDriver.ok,
-    path: import_node_path31.default.relative(root, file),
+    path: import_node_path32.default.relative(root, file),
     changed,
     merge_driver: mergeDriver
   };
@@ -7614,13 +7822,13 @@ function setupCiTemplates(root, provider, args = {}) {
   const sourceText = templateText(template, "");
   const source = templateSourceLabel(template) || template;
   if (!sourceText) return { ok: false, error: `Missing CI template ${template}` };
-  const target2 = provider === "github" ? import_node_path31.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path31.default.join(root, ".gitlab-ci.yml");
+  const target2 = provider === "github" ? import_node_path32.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path32.default.join(root, ".gitlab-ci.yml");
   if (fileExists(target2) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source, path: import_node_path31.default.relative(root, target2) };
+    return { ok: true, skipped: true, provider, source, path: import_node_path32.default.relative(root, target2) };
   }
-  import_node_fs16.default.mkdirSync(import_node_path31.default.dirname(target2), { recursive: true });
-  import_node_fs16.default.writeFileSync(target2, sourceText);
-  return { ok: true, provider, source, path: import_node_path31.default.relative(root, target2), written: true };
+  import_node_fs17.default.mkdirSync(import_node_path32.default.dirname(target2), { recursive: true });
+  import_node_fs17.default.writeFileSync(target2, sourceText);
+  return { ok: true, provider, source, path: import_node_path32.default.relative(root, target2), written: true };
 }
 function setupSubmodulePlan(root, repos, args = {}) {
   const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
@@ -7630,7 +7838,7 @@ function setupSubmodulePlan(root, repos, args = {}) {
     const url = asOptionalString(repo.url);
     const submodulePath = asOptionalString(repo.submodule_path);
     if (!name || !url || !submodulePath || repo.enabled === false) continue;
-    if (fileExists(import_node_path31.default.join(root, submodulePath))) continue;
+    if (fileExists(import_node_path32.default.join(root, submodulePath))) continue;
     commands.push(plannedGitAction(
       `submodule-${safeName(name)}`,
       "submodule_add",
@@ -7653,8 +7861,8 @@ function setupSubmodulePlan(root, repos, args = {}) {
 function lspSetupHelperCandidates(root) {
   return mcpServerPathCandidates(root);
 }
-function redactRuntimeHelperPaths(text) {
-  return text.replace(/[^\s"'`]*cadre-lsp-(?:setup|review|daemon)\.js/g, "<cadre-lsp-helper>").replace(/[^\s"'`]*cadre-server\.js/g, "<cadre-mcp-server>");
+function redactRuntimeHelperPaths(text2) {
+  return text2.replace(/[^\s"'`]*cadre-lsp-(?:setup|review|daemon)\.js/g, "<cadre-lsp-helper>").replace(/[^\s"'`]*cadre-server\.js/g, "<cadre-mcp-server>");
 }
 function summarizeRuntimeCommandResult(result) {
   return {
@@ -7698,7 +7906,7 @@ function lspSetup(root, args = {}) {
 }
 
 // src/core/application/runtime/workspace-health.ts
-var import_node_path32 = __toESM(require("node:path"));
+var import_node_path33 = __toESM(require("node:path"));
 function workspaceHealth(root, args = {}) {
   const mode = workflowResponseMode(args);
   const topology = loadTopology(root);
@@ -7792,12 +8000,12 @@ function workspaceHealth(root, args = {}) {
   };
 }
 function lspConfigStatus(root) {
-  const configPath2 = import_node_path32.default.join(root, "cadre", "lsp.json");
+  const configPath2 = import_node_path33.default.join(root, "cadre", "lsp.json");
   const config = readJson(configPath2, null);
   if (!config) {
     return {
       configured: false,
-      path: import_node_path32.default.relative(root, configPath2),
+      path: import_node_path33.default.relative(root, configPath2),
       servers: [],
       missing: [],
       daemon: {
@@ -7812,7 +8020,7 @@ function lspConfigStatus(root) {
   const servers = Array.isArray(configObject.servers) ? configObject.servers.map((server) => asJsonObject(server)) : [];
   return {
     configured: true,
-    path: import_node_path32.default.relative(root, configPath2),
+    path: import_node_path33.default.relative(root, configPath2),
     servers: servers.map((server) => {
       const command = asOptionalString(server.command);
       return {
@@ -7841,8 +8049,8 @@ function mergeDriverStatus(root) {
   };
 }
 function doctor(root, options = {}) {
-  const candidateRoot = import_node_path32.default.resolve(root || process.cwd());
-  const generatedCheck = import_node_path32.default.join(candidateRoot, "scripts", "generate-skills.sh");
+  const candidateRoot = import_node_path33.default.resolve(root || process.cwd());
+  const generatedCheck = import_node_path33.default.join(candidateRoot, "scripts", "generate-skills.sh");
   const lspStatus = lspConfigStatus(candidateRoot);
   const lspMissing = asStringArray(lspStatus.missing);
   const dapConfig = dapStatus(candidateRoot, options);
@@ -7858,7 +8066,7 @@ function doctor(root, options = {}) {
         "cadre/product.json",
         "cadre/config.json",
         "cadre/lsp.json"
-      ].filter((name) => fileExists(import_node_path32.default.join(candidateRoot, name)))
+      ].filter((name) => fileExists(import_node_path33.default.join(candidateRoot, name)))
     },
     git: {
       available: commandExists("git", candidateRoot),
@@ -7989,13 +8197,13 @@ function normalizeIntegrationValue(value) {
     return { configured: true, available: value };
   }
   if (typeof value === "string") {
-    const text = value.trim();
-    if (!text) return { configured: false, available: null };
-    const lower = text.toLowerCase();
+    const text2 = value.trim();
+    if (!text2) return { configured: false, available: null };
+    const lower = text2.toLowerCase();
     if (["false", "0", "no", "off", "disabled"].includes(lower)) {
-      return { configured: true, available: false, label: text };
+      return { configured: true, available: false, label: text2 };
     }
-    return { configured: true, available: true, label: text };
+    return { configured: true, available: true, label: text2 };
   }
   if (isRecord(value)) {
     const entry = asJsonObject(value);
@@ -8148,12 +8356,12 @@ function integrationInventory(root, args = {}) {
 }
 
 // src/core/application/runtime/formula-workflow.ts
-var import_node_fs18 = __toESM(require("node:fs"));
-var import_node_path34 = __toESM(require("node:path"));
+var import_node_fs19 = __toESM(require("node:fs"));
+var import_node_path35 = __toESM(require("node:path"));
 
 // src/core/application/runtime/workflow-new-track.ts
-var import_node_fs17 = __toESM(require("node:fs"));
-var import_node_path33 = __toESM(require("node:path"));
+var import_node_fs18 = __toESM(require("node:fs"));
+var import_node_path34 = __toESM(require("node:path"));
 
 // src/core/application/runtime/native-prompts.ts
 function choice(id, label, description, recommended = false) {
@@ -8352,8 +8560,8 @@ function normalizedPromptText(value) {
   return typeof value === "string" ? value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() : "";
 }
 function isGenericSpecText(value) {
-  const text = normalizedPromptText(value);
-  if (!text) return true;
+  const text2 = normalizedPromptText(value);
+  if (!text2) return true;
   return [
     "deliver behavior",
     "implement the requested behavior",
@@ -8362,13 +8570,13 @@ function isGenericSpecText(value) {
     "the planned work is complete and verified",
     "verify delivered outcome",
     "manually verify that the completed track delivers the intended behavior from the spec"
-  ].includes(text);
+  ].includes(text2);
 }
 function isTrackPlaceholderText(value, trackId) {
-  const text = normalizedPromptText(value);
+  const text2 = normalizedPromptText(value);
   const normalizedTrack = normalizedPromptText(trackId || "");
-  if (!text || !normalizedTrack) return false;
-  return text === normalizedTrack || text === `spec ${normalizedTrack}` || text === `spec for ${normalizedTrack}` || text === `plan ${normalizedTrack}` || text === `plan for ${normalizedTrack}`;
+  if (!text2 || !normalizedTrack) return false;
+  return text2 === normalizedTrack || text2 === `spec ${normalizedTrack}` || text2 === `spec for ${normalizedTrack}` || text2 === `plan ${normalizedTrack}` || text2 === `plan for ${normalizedTrack}`;
 }
 function meaningfulSpecText(value, trackId) {
   return textPresent(value) && !isGenericSpecText(value) && !isTrackPlaceholderText(value, trackId);
@@ -8731,6 +8939,105 @@ function refreshIntentPrompts(args = {}) {
   ];
 }
 
+// src/core/application/runtime/generation-quality.ts
+function text(value) {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return value.map(text).filter(Boolean).join(" ");
+  if (isRecord(value)) return Object.values(value).map(text).filter(Boolean).join(" ");
+  return "";
+}
+function hasAny(record, names) {
+  return names.some((name) => text(record[name]).length > 0);
+}
+function hasArray(record, names, min = 1) {
+  return names.some((name) => Array.isArray(record[name]) && record[name].length >= min);
+}
+function isGeneric(value) {
+  const normalized = text(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return true;
+  return [
+    "works",
+    "implement core",
+    "add tests",
+    "verify",
+    "done",
+    "deliver behavior",
+    "the work is complete",
+    "tests pass",
+    "use readme"
+  ].includes(normalized);
+}
+function sectionWarning(kind, section, expected) {
+  return `${kind} context is thin: ${section} should include ${expected}.`;
+}
+function setupGenerationWarnings(args) {
+  const product = isRecord(args.product) ? asJsonObject(args.product) : {};
+  const guidelines = isRecord(args.productGuidelines || args.product_guidelines) ? asJsonObject(args.productGuidelines || args.product_guidelines) : {};
+  const workflow = isRecord(args.workflowPolicy || args.workflow_policy) ? asJsonObject(args.workflowPolicy || args.workflow_policy) : {};
+  const techStack = isRecord(args.techStack || args.tech_stack) ? asJsonObject(args.techStack || args.tech_stack) : {};
+  const warnings = [];
+  if (!hasAny(product, ["name", "title"]) || !hasAny(product, ["summary", "description"])) {
+    warnings.push(sectionWarning("product", "summary", "name and a concrete product summary"));
+  }
+  if (!hasArray(product, ["users", "personas", "audience"])) {
+    warnings.push(sectionWarning("product", "users/personas", "primary users, operators, or integrators"));
+  }
+  if (!hasArray(product, ["coreWorkflows", "core_workflows", "workflows", "goals"], 2)) {
+    warnings.push(sectionWarning("product", "core workflows", "at least two repo-grounded workflows"));
+  }
+  if (!hasAny(product, ["domainModel", "domain_model", "entities", "stateMachines", "state_machines"])) {
+    warnings.push(sectionWarning("product", "domain model", "entities, relationships, or lifecycle states"));
+  }
+  if (!hasArray(product, ["invariants", "productInvariants", "product_invariants"])) {
+    warnings.push(sectionWarning("product", "invariants", "behaviors that must remain stable"));
+  }
+  if (!hasAny(product, ["dataStores", "data_stores", "schemaFiles", "schema_files", "integrations"])) {
+    warnings.push(sectionWarning("product", "data and integrations", "data stores, schemas, or external services"));
+  }
+  if (!hasArray(guidelines, ["principles", "userPromises", "user_promises", "promises"])) {
+    warnings.push(sectionWarning("product guidelines", "principles/promises", "product rules derived from observed behavior"));
+  }
+  if (!hasAny(guidelines, ["domainRules", "domain_rules", "workflowRules", "workflow_rules", "rules", "decisionRules", "decision_rules"])) {
+    warnings.push(sectionWarning("product guidelines", "domain and decision rules", "workflow, lifecycle, or tradeoff rules"));
+  }
+  if (!hasAny(techStack, ["languages", "language", "frameworks", "runtime", "database", "keyDependencies", "key_dependencies"])) {
+    warnings.push(sectionWarning("tech stack", "detected stack", "languages, frameworks, runtime, database, or dependencies"));
+  }
+  if (!hasAny(workflow, ["testCommand", "test_command", "defaultTestCommand", "default_test_command", "commands"])) {
+    warnings.push(sectionWarning("workflow", "commands", "test/build/format commands when discoverable"));
+  }
+  if (!hasArray(workflow, ["reviewFocus", "review_focus", "qualityBar", "quality_bar"])) {
+    warnings.push(sectionWarning("workflow", "quality gates", "review focus or quality bar"));
+  }
+  return warnings;
+}
+function trackGenerationWarnings(spec, plan) {
+  const warnings = [];
+  const functional = Array.isArray(spec.functional_requirements) ? spec.functional_requirements.map(asJsonObject) : [];
+  const acceptance = Array.isArray(spec.acceptance_criteria) ? spec.acceptance_criteria.map(asJsonObject) : [];
+  const outOfScope = Array.isArray(spec.out_of_scope) ? spec.out_of_scope.map(asJsonObject) : [];
+  if (isGeneric(spec.description) || functional.length === 0) {
+    warnings.push("spec context is thin: include concrete functional requirements grounded in the user request.");
+  }
+  if (acceptance.length === 0 || acceptance.some((entry) => isGeneric(entry.heading) && isGeneric(entry.body))) {
+    warnings.push("spec context is thin: acceptance criteria should be concrete and verifiable.");
+  }
+  if (outOfScope.length === 0) {
+    warnings.push("spec context is thin: out_of_scope should record meaningful boundaries.");
+  }
+  const phases = Array.isArray(plan.phases) ? plan.phases.map(asJsonObject) : [];
+  const tasks = phases.flatMap((phase) => Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : []);
+  if (tasks.length === 0) warnings.push("plan context is thin: add phase tasks under plan.phases[].tasks.");
+  if (tasks.some((task) => isGeneric(task.title))) warnings.push("plan context is thin: task titles should describe specific implementation work.");
+  const implementationTasks = tasks.filter((task) => asOptionalString(task.task_type) !== "user_manual_verification");
+  if (implementationTasks.some((task) => asStringArray(task.files).length === 0)) {
+    warnings.push("plan context is thin: implementation tasks should claim expected files where practical.");
+  }
+  const hasManualVerification = tasks.some((task) => asOptionalString(task.task_type) === "user_manual_verification" || isRecord(task.manual_verification));
+  if (!hasManualVerification) warnings.push("plan context is thin: include manual verification for user-facing or integration behavior.");
+  return warnings;
+}
+
 // src/core/application/runtime/workflow-new-track.ts
 function newTrackReviewFiles(trackId, spec, plan, metadata) {
   const safeTrack = safeName(trackId);
@@ -8791,6 +9098,7 @@ function newTrackReviewFiles(trackId, spec, plan, metadata) {
   ];
 }
 function workflowNewTrack(root, args = {}) {
+  const approvalArgs = JSON.parse(JSON.stringify(args));
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
@@ -8815,7 +9123,8 @@ function workflowNewTrack(root, args = {}) {
       error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped."
     };
   }
-  const intentPrompts = newTrackIntentPrompts(args);
+  const hasStructuredSpecAndPlan = isRecord(args.spec) && isRecord(args.plan);
+  const intentPrompts = hasStructuredSpecAndPlan ? [] : newTrackIntentPrompts(args);
   if (intentPrompts.length > 0) {
     return {
       ...summary,
@@ -8851,16 +9160,21 @@ function workflowNewTrack(root, args = {}) {
   };
   const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const approval = stagedApprovalState(root, "newtrack", args, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
+  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...trackGenerationWarnings(specJson, planJson),
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...approvalError ? [approvalError] : []
+  ];
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, plan: planJson, trackId });
   if (dryRun) {
     return {
       ...summary,
-      ok: assist.ok !== false,
+      ok: assist.ok !== false && !approvalError,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
@@ -8871,7 +9185,8 @@ function workflowNewTrack(root, args = {}) {
       review_artifacts: stageReviewArtifacts || reviewArtifacts,
       review_bundle: stageReviewBundle,
       warnings,
-      next_actions: [
+      error: approvalError || void 0,
+      next_actions: approvalError ? asStringArray(asJsonObject(approval).next_actions) : [
         "Approve newtrack one stage at a time with approvedStages.",
         "After spec, plan, metadata, and learnings are approved, call newtrack with execute:true and approvalComplete:true using the same structured payload."
       ]
@@ -8880,7 +9195,7 @@ function workflowNewTrack(root, args = {}) {
   if (findTrack(root, trackId)) {
     return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
   }
-  if (!approvalComplete(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...summary,
       ok: false,
@@ -8898,11 +9213,11 @@ function workflowNewTrack(root, args = {}) {
         "Review the current staged approval bundle.",
         "Call newtrack again with execute:true and approvalComplete:true only after every staged approval is complete."
       ],
-      error: "Staged approval is required before creating track artifacts"
+      error: approvalError || "Staged approval is required before creating track artifacts"
     };
   }
   const traceBefore = beginTrace(root);
-  const dir = import_node_path33.default.join(root, "cadre", "tracks", safeName(trackId));
+  const dir = import_node_path34.default.join(root, "cadre", "tracks", safeName(trackId));
   const learningsEntry = {
     ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
     id: "initial",
@@ -8911,15 +9226,15 @@ function workflowNewTrack(root, args = {}) {
     recorded_at: utcNow(),
     text: trackLearningsText(String(trackId))
   };
-  import_node_fs17.default.mkdirSync(dir, { recursive: true });
-  writeJson(import_node_path33.default.join(dir, "metadata.json"), metadata);
-  writeJson(import_node_path33.default.join(dir, "spec.json"), specJson);
-  writeJson(import_node_path33.default.join(dir, "plan.json"), planJson);
-  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
-  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
-  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
+  import_node_fs18.default.mkdirSync(dir, { recursive: true });
+  writeJson(import_node_path34.default.join(dir, "metadata.json"), metadata);
+  writeJson(import_node_path34.default.join(dir, "spec.json"), specJson);
+  writeJson(import_node_path34.default.join(dir, "plan.json"), planJson);
+  import_node_fs18.default.writeFileSync(import_node_path34.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
+  import_node_fs18.default.writeFileSync(import_node_path34.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
+  import_node_fs18.default.writeFileSync(import_node_path34.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
 `);
-  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
+  import_node_fs18.default.writeFileSync(import_node_path34.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);
   const event = appendCadreEvent(root, {
     kind: "track_created",
@@ -8945,7 +9260,7 @@ function workflowNewTrack(root, args = {}) {
     ok: regen.ok !== false && controlCommit.ok !== false,
     dry_run: false,
     track_id: trackId,
-    metadata_path: import_node_path33.default.relative(root, import_node_path33.default.join(dir, "metadata.json")),
+    metadata_path: import_node_path34.default.relative(root, import_node_path34.default.join(dir, "metadata.json")),
     regen,
     event,
     control_commit: controlCommit,
@@ -8980,10 +9295,10 @@ function formulaAction(args) {
   ].includes(normalized) ? normalized : "list";
 }
 function formulaDir(root) {
-  return import_node_path34.default.join(root, "cadre", "formulas");
+  return import_node_path35.default.join(root, "cadre", "formulas");
 }
 function wispDir(root) {
-  return import_node_path34.default.join(root, "cadre", "local", "wisps");
+  return import_node_path35.default.join(root, "cadre", "local", "wisps");
 }
 function formulaId(args) {
   const rawArgs3 = args;
@@ -8994,17 +9309,17 @@ function wispId(args) {
   return asOptionalString(args.id) || asOptionalString(rawArgs3.wispId || rawArgs3.wisp_id) || null;
 }
 function formulaPath(root, id) {
-  return import_node_path34.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
+  return import_node_path35.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
 }
 function wispPath(root, id) {
-  return import_node_path34.default.join(wispDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
+  return import_node_path35.default.join(wispDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
 }
 function loadFormula(root, id) {
   if (!id) return { ok: false, error: "formula id is required" };
   const file = formulaPath(root, id);
   const formula = readJson(file, null);
-  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path34.default.relative(root, file) };
-  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path34.default.relative(root, file), formula };
+  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path35.default.relative(root, file) };
+  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path35.default.relative(root, file), formula };
 }
 function variablesFromArgs(formula, args) {
   const rawArgs3 = args;
@@ -9100,14 +9415,14 @@ function cookFormula(root, args) {
 function listFormulas(root) {
   ensureNativeState(root);
   const dir = formulaDir(root);
-  const items = fileExists(dir) ? import_node_fs18.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
-    const file = import_node_path34.default.join(dir, name);
+  const items = fileExists(dir) ? import_node_fs19.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
+    const file = import_node_path35.default.join(dir, name);
     const formula = readJson(file, {});
     return {
       id: asOptionalString(formula.id) || name.replace(/\.json$/i, ""),
       title: asOptionalString(formula.title) || asOptionalString(formula.id) || name,
       recommended_phase: asOptionalString(formula.recommended_phase) || null,
-      path: import_node_path34.default.relative(root, file)
+      path: import_node_path35.default.relative(root, file)
     };
   }) : [];
   return { ok: true, formulas: items, count: items.length };
@@ -9153,13 +9468,13 @@ function createWisp(root, args) {
   const file = wispPath(root, id);
   writeJsonEnsured(file, wisp);
   const event = appendCadreEvent(root, { kind: "wisp_created", workflow: "formula", formula_id, wisp_id: id });
-  return { ok: true, wisp_id: id, path: import_node_path34.default.relative(root, file), wisp, event };
+  return { ok: true, wisp_id: id, path: import_node_path35.default.relative(root, file), wisp, event };
 }
 function listWisps(root) {
   ensureNativeState(root);
   const dir = wispDir(root);
-  const wisps = fileExists(dir) ? import_node_fs18.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
-    const file = import_node_path34.default.join(dir, name);
+  const wisps = fileExists(dir) ? import_node_fs19.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
+    const file = import_node_path35.default.join(dir, name);
     const wisp = readJson(file, {});
     return {
       id: asOptionalString(wisp.id) || name.replace(/\.json$/i, ""),
@@ -9167,7 +9482,7 @@ function listWisps(root) {
       status: asOptionalString(wisp.status) || null,
       owner: asOptionalString(wisp.owner) || null,
       updated_at: asOptionalString(wisp.updated_at) || null,
-      path: import_node_path34.default.relative(root, file)
+      path: import_node_path35.default.relative(root, file)
     };
   }) : [];
   return { ok: true, wisps, count: wisps.length };
@@ -9177,7 +9492,7 @@ function updateWispStep(root, args) {
   if (!id) return { ok: false, error: "wisp id is required" };
   const file = wispPath(root, id);
   const wisp = readJson(file, null);
-  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path34.default.relative(root, file) };
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path35.default.relative(root, file) };
   const rawArgs3 = args;
   const stepId = asOptionalString(rawArgs3.stepId || rawArgs3.step_id || rawArgs3.taskKey || rawArgs3.task_key);
   const stepIndex = Number(rawArgs3.stepIndex || rawArgs3.step_index || args.taskIndex || 0);
@@ -9199,14 +9514,14 @@ function updateWispStep(root, args) {
   const next = { ...wisp, steps, status: asOptionalString(wisp.status) || "active", updated_at: now };
   writeJsonEnsured(file, next);
   const event = appendCadreEvent(root, { kind: "wisp_step_updated", workflow: "formula", wisp_id: id, step_id: asOptionalString(steps[index].step_id) || null, status });
-  return { ok: true, wisp_id: id, path: import_node_path34.default.relative(root, file), step: steps[index], wisp: next, event };
+  return { ok: true, wisp_id: id, path: import_node_path35.default.relative(root, file), step: steps[index], wisp: next, event };
 }
 function squashWisp(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
   const file = wispPath(root, id);
   const wisp = readJson(file, null);
-  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path34.default.relative(root, file) };
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path35.default.relative(root, file) };
   const traceBefore = beginTrace(root);
   const digest = {
     version: 1,
@@ -9220,7 +9535,7 @@ function squashWisp(root, args) {
     steps: Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [],
     evidence: Array.isArray(wisp.evidence) ? wisp.evidence.map(asJsonObject) : []
   };
-  const digestPath = import_node_path34.default.join(root, "cadre", "operations", "wisp-digests.jsonl");
+  const digestPath = import_node_path35.default.join(root, "cadre", "operations", "wisp-digests.jsonl");
   appendJsonl(digestPath, digest);
   const event = appendCadreEvent(root, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
   const controlCommit = commitTrace(root, args, {
@@ -9230,7 +9545,7 @@ function squashWisp(root, args) {
     subject: `squash ${id}`,
     before: traceBefore,
     files: [
-      import_node_path34.default.relative(root, digestPath)
+      import_node_path35.default.relative(root, digestPath)
     ],
     note: {
       event_id: asOptionalString(asJsonObject(event.event).id) || null,
@@ -9239,16 +9554,16 @@ function squashWisp(root, args) {
       formula_id: digest.formula_id
     }
   });
-  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: import_node_path34.default.relative(root, digestPath), event, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: import_node_path35.default.relative(root, digestPath), event, control_commit: controlCommit };
 }
 function burnWisp(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
   const file = wispPath(root, id);
   const existed = fileExists(file);
-  if (existed) import_node_fs18.default.rmSync(file, { force: true });
+  if (existed) import_node_fs19.default.rmSync(file, { force: true });
   const event = appendCadreEvent(root, { kind: "wisp_burned", workflow: "formula", wisp_id: id, existed });
-  return { ok: true, wisp_id: id, existed, path: import_node_path34.default.relative(root, file), event };
+  return { ok: true, wisp_id: id, existed, path: import_node_path35.default.relative(root, file), event };
 }
 function pourFormula(root, args) {
   const id = wispId(args);
@@ -9308,15 +9623,15 @@ function workflowFormula(root, args = {}) {
 }
 
 // src/core/application/runtime/parallel-state.ts
-var import_node_path37 = __toESM(require("node:path"));
+var import_node_path38 = __toESM(require("node:path"));
 
 // src/core/application/runtime/task-completion.ts
-var import_node_path36 = __toESM(require("node:path"));
+var import_node_path37 = __toESM(require("node:path"));
 
 // src/core/application/runtime/manual-verification.ts
-var import_node_path35 = __toESM(require("node:path"));
+var import_node_path36 = __toESM(require("node:path"));
 function completionJournalPath(track) {
-  return import_node_path35.default.join(track.dir, "completion_journal.json");
+  return import_node_path36.default.join(track.dir, "completion_journal.json");
 }
 function readCompletionJournal(track) {
   const value = readJson(completionJournalPath(track), { entries: {} });
@@ -9336,7 +9651,7 @@ function patchCompletionJournal(track, key, patcher) {
   journal.entries[key] = patcher({ ...before }, journal);
   journal.updated_at = utcNow();
   writeCompletionJournal(track, journal);
-  appendJsonl(import_node_path35.default.join(track.dir, "completion_journal.jsonl"), {
+  appendJsonl(import_node_path36.default.join(track.dir, "completion_journal.jsonl"), {
     key,
     recorded_at: journal.updated_at,
     entry: journal.entries[key]
@@ -9590,9 +9905,9 @@ function completeTaskInner(root, args = {}) {
     allow_missing_coverage: allowMissingCoverage,
     allow_low_coverage: allowLowCoverage
   };
-  const sha = resolvedCommitSha ? resolvedCommitSha.slice(0, 12) : "unknown";
-  const dedupKey = `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha.slice(0, 7)}`;
-  const journalKey = `${phaseIndex}:${taskIndex}:${sha}`;
+  const sha2 = resolvedCommitSha ? resolvedCommitSha.slice(0, 12) : "unknown";
+  const dedupKey = `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha2.slice(0, 7)}`;
+  const journalKey = `${phaseIndex}:${taskIndex}:${sha2}`;
   const controlBefore = beginTrace(root);
   const recordState = () => {
     const entry = patchCompletionJournal(track, journalKey, (current) => ({
@@ -9602,7 +9917,7 @@ function completeTaskInner(root, args = {}) {
       phase_index: phaseIndex,
       task_index: taskIndex,
       task_key: task.task_key,
-      commit_sha: sha,
+      commit_sha: sha2,
       dedup_key: dedupKey,
       started_at: current.started_at || utcNow()
     }));
@@ -9614,7 +9929,7 @@ function completeTaskInner(root, args = {}) {
       commitSha: resolvedCommitSha || args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path36.default.relative(root, workingRoot.path) || ".",
+      workingRoot: import_node_path37.default.relative(root, workingRoot.path) || ".",
       ...lastTestRun ? { lastTestRun } : {},
       ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
@@ -9656,7 +9971,7 @@ function completeTaskInner(root, args = {}) {
     task_index: taskIndex,
     task_key: stateTaskResult.task_key,
     status: args.status || "completed",
-    commit_sha: sha,
+    commit_sha: sha2,
     coverage: coverage.coverage ?? null,
     summary: args.summary || null,
     journal_key: journalKey
@@ -9667,11 +9982,11 @@ function completeTaskInner(root, args = {}) {
     subject: `record ${track.track_id} phase ${phaseIndex} task ${taskIndex}`,
     before: controlBefore,
     files: [
-      import_node_path36.default.relative(root, track.metadata_path),
-      import_node_path36.default.relative(root, track.plan_path),
-      import_node_path36.default.relative(root, trackPlanJsonPath(track)),
-      import_node_path36.default.relative(root, completionJournalPath(track)),
-      import_node_path36.default.relative(root, `${completionJournalPath(track)}l`),
+      import_node_path37.default.relative(root, track.metadata_path),
+      import_node_path37.default.relative(root, track.plan_path),
+      import_node_path37.default.relative(root, trackPlanJsonPath(track)),
+      import_node_path37.default.relative(root, completionJournalPath(track)),
+      import_node_path37.default.relative(root, `${completionJournalPath(track)}l`),
       "cadre/events.jsonl"
     ],
     trackId: track.track_id,
@@ -9719,7 +10034,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
     return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };
   }
-  const statePath = import_node_path37.default.join(track.dir, "parallel_state.json");
+  const statePath = import_node_path38.default.join(track.dir, "parallel_state.json");
   const existing = readJson(statePath, {
     track_id: track.track_id,
     execution_mode: "parallel",
@@ -9794,7 +10109,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
     subject: `record ${workerId}`,
     before: traceBefore,
     files: [
-      import_node_path37.default.relative(root, statePath)
+      import_node_path38.default.relative(root, statePath)
     ],
     trackId: track.track_id,
     repo: nextWorker.repo || null,
@@ -9809,7 +10124,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   return {
     ok: controlCommit.ok !== false,
     track_id: track.track_id,
-    state_path: import_node_path37.default.relative(root, statePath),
+    state_path: import_node_path38.default.relative(root, statePath),
     worker: nextWorker,
     completion,
     control_commit: controlCommit,
@@ -9822,7 +10137,7 @@ function recordParallelWorkerUnlocked(root, track, args = {}) {
   };
 }
 function parallelStatePath(track) {
-  return import_node_path37.default.join(track.dir, "parallel_state.json");
+  return import_node_path38.default.join(track.dir, "parallel_state.json");
 }
 function readParallelState(track) {
   const existing = readJson(parallelStatePath(track), {
@@ -9842,7 +10157,7 @@ function readParallelState(track) {
 }
 
 // src/core/application/runtime/parallel-workflow.ts
-var import_node_path38 = __toESM(require("node:path"));
+var import_node_path39 = __toESM(require("node:path"));
 
 // src/core/application/runtime/dispatch-adapters.ts
 var AGENT_IDENTIFIERS = ["claude", "codex", "copilot", "antigravity"];
@@ -9888,7 +10203,7 @@ function changedFilesFromArgs(args) {
   return asStringArray(args.filesChanged || args.files_changed || args.files);
 }
 function isManifestChange(file) {
-  const base = import_node_path38.default.basename(file).toLowerCase();
+  const base = import_node_path39.default.basename(file).toLowerCase();
   return [
     "package.json",
     "package-lock.json",
@@ -9909,7 +10224,7 @@ function isManifestChange(file) {
   ].includes(base);
 }
 function fileStem(file) {
-  return import_node_path38.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
+  return import_node_path39.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
 }
 function isNarrowTestChange(file, ownedFiles) {
   const normalized = normalizeClaimPath(file);
@@ -10137,7 +10452,7 @@ function parallelSetupWorkers(root, track, args = {}) {
     const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
     const entry = entries.get(repo) || { root, base: args.base || "main" };
-    const worktree = import_node_path38.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
+    const worktree = import_node_path39.default.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
     const sourceRoot = asString(entry.root || root);
     commands.push(plannedCommand(
       "git",
@@ -10306,8 +10621,8 @@ function parallelWorkflow(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-basic.ts
-var import_node_fs19 = __toESM(require("node:fs"));
-var import_node_path39 = __toESM(require("node:path"));
+var import_node_fs20 = __toESM(require("node:fs"));
+var import_node_path40 = __toESM(require("node:path"));
 function workflowImplement(root, args = {}) {
   const prep = implementationPrep(root, {
     ...args,
@@ -10407,16 +10722,16 @@ function workflowArchive(root, args = {}) {
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
   const traceBefore = beginTrace(root);
   const archived = [];
-  const archiveRoot = import_node_path39.default.join(root, "cadre", "archive");
-  import_node_fs19.default.mkdirSync(archiveRoot, { recursive: true });
+  const archiveRoot = import_node_path40.default.join(root, "cadre", "archive");
+  import_node_fs20.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target2 = import_node_path39.default.join(archiveRoot, track.track_id);
+    const target2 = import_node_path40.default.join(archiveRoot, track.track_id);
     if (fileExists(target2)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs19.default.renameSync(track.dir, target2);
-    archived.push({ track_id: track.track_id, ok: true, path: import_node_path39.default.relative(root, target2) });
+    import_node_fs20.default.renameSync(track.dir, target2);
+    archived.push({ track_id: track.track_id, ok: true, path: import_node_path40.default.relative(root, target2) });
   }
   const regen = regenIndex(root);
   const controlCommit = commitTrace(root, args, {
@@ -10451,23 +10766,23 @@ function workflowHandoff(root, args = {}) {
   if (context.ok === false) return { ...summary, ok: false, track_context: context };
   const track = findTrack(root, trackId);
   if (!track) return { ...summary, ok: false, track_context: context, error: `Track not found: ${trackId}` };
-  const text = asOptionalString(args.handoffText) || [
+  const text2 = asOptionalString(args.handoffText) || [
     `# Handoff: ${trackId}`,
     "",
     `Updated: ${utcNow()}`,
     "",
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
-  const handoffPath = import_node_path39.default.join(track.dir, "HANDOFF.md");
+  const handoffPath = import_node_path40.default.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
-  const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
+  const handoffJson = markdownDocJson("handoff", text2, { track_id: trackId });
   const reviewFiles = [
-    jsonReviewFile(import_node_path39.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    jsonReviewFile(import_node_path40.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
     textReviewFile(
-      import_node_path39.default.relative(root, handoffPath),
+      import_node_path40.default.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path39.default.relative(root, handoffJsonPath)))
+      withGeneratedMarker(import_node_path40.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path40.default.relative(root, handoffJsonPath)))
     )
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -10476,12 +10791,16 @@ function workflowHandoff(root, args = {}) {
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...approvalError ? [approvalError] : []
+  ];
   const base = {
     ...summary,
     track_id: trackId,
     track_context: context,
-    handoff_path: import_node_path39.default.relative(root, handoffPath),
+    handoff_path: import_node_path40.default.relative(root, handoffPath),
     approval,
     human_review: humanReview,
     review_artifacts: stageReviewArtifacts,
@@ -10491,25 +10810,26 @@ function workflowHandoff(root, args = {}) {
   if (args.execute !== true) {
     return {
       ...base,
-      ok: true,
+      ok: !approvalError,
       dry_run: true,
-      phase_state: "dry_run"
+      phase_state: "dry_run",
+      ...approvalError ? { error: approvalError, stage: "staged_approval" } : {}
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
-      error: "Staged approval is required before writing handoff artifacts"
+      stage: "staged_approval",
+      error: approvalError || "Staged approval is required before writing handoff artifacts"
     };
   }
   const traceBefore = beginTrace(root);
   if (args.execute === true) {
     writeJsonEnsured(handoffJsonPath, handoffJson);
-    import_node_fs19.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path39.default.relative(root, handoffJsonPath))));
+    import_node_fs20.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path40.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path40.default.relative(root, handoffJsonPath))));
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
   const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
@@ -10519,9 +10839,9 @@ function workflowHandoff(root, args = {}) {
     track_id: trackId,
     to: recipient,
     subject,
-    body: asOptionalString(args.body) || text,
-    handoff_path: import_node_path39.default.relative(root, handoffPath),
-    handoff_json_path: import_node_path39.default.relative(root, handoffJsonPath)
+    body: asOptionalString(args.body) || text2,
+    handoff_path: import_node_path40.default.relative(root, handoffPath),
+    handoff_json_path: import_node_path40.default.relative(root, handoffJsonPath)
   });
   const event = appendCadreEvent(root, {
     kind: "handoff_created",
@@ -10529,7 +10849,7 @@ function workflowHandoff(root, args = {}) {
     track_id: trackId,
     to: recipient,
     subject,
-    handoff_path: import_node_path39.default.relative(root, handoffPath)
+    handoff_path: import_node_path40.default.relative(root, handoffPath)
   });
   const controlCommit = commitTrace(root, args, {
     kind: "control",
@@ -10555,16 +10875,16 @@ function workflowHandoff(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-refresh-revert.ts
-var import_node_fs20 = __toESM(require("node:fs"));
-var import_node_path40 = __toESM(require("node:path"));
-function refreshedPatternsText(text, now = utcNow()) {
+var import_node_fs21 = __toESM(require("node:fs"));
+var import_node_path41 = __toESM(require("node:path"));
+function refreshedPatternsText(text2, now = utcNow()) {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
-  const next = /Last refreshed:\s*.*/.test(text) ? text.replace(/Last refreshed:\s*.*/, stamp) : `${text.replace(/\n*$/, "\n\n")}${stamp}
+  const next = /Last refreshed:\s*.*/.test(text2) ? text2.replace(/Last refreshed:\s*.*/, stamp) : `${text2.replace(/\n*$/, "\n\n")}${stamp}
 `;
   return { text: next, stamp };
 }
 function refreshedPatternsArtifacts(root) {
-  const jsonlPath = import_node_path40.default.join(root, "cadre", "patterns.jsonl");
+  const jsonlPath = import_node_path41.default.join(root, "cadre", "patterns.jsonl");
   if (!fileExists(jsonlPath)) return null;
   const entries = readJsonl(jsonlPath);
   const seed = entries[0] || templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
@@ -10573,11 +10893,11 @@ function refreshedPatternsArtifacts(root) {
   const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
   const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
   const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries));
-  const projectionPath = import_node_path40.default.join(root, "cadre", "patterns.md");
+  const projectionPath = import_node_path41.default.join(root, "cadre", "patterns.md");
   return {
     files: [
-      plainReviewFile(import_node_path40.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
-      textReviewFile(import_node_path40.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
+      plainReviewFile(import_node_path41.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
+      textReviewFile(import_node_path41.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
     ],
     jsonlPath,
     projectionPath,
@@ -10718,8 +11038,12 @@ function workflowRefresh(root, args = {}) {
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
-  const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...approvalError ? [approvalError] : []
+  ];
+  const awaitingDocumentReview = args.execute === true && reviewArtifacts.length > 0 && !stagedApprovalReady(approval);
   const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
   const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
@@ -10729,7 +11053,7 @@ function workflowRefresh(root, args = {}) {
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
+      stage: "staged_approval",
       doctor: doctor(root, { hasCadreProject: true }),
       workspace: workspaceDiagnostics(root, { execute: false }),
       dependency_graph: dependencyGraph(root),
@@ -10741,7 +11065,7 @@ function workflowRefresh(root, args = {}) {
       review_artifacts: stageReviewArtifacts,
       review_bundle: stageReviewBundle,
       warnings,
-      error: "Staged approval is required before refreshing Cadre context documents"
+      error: approvalError || "Staged approval is required before refreshing Cadre context documents"
     };
   }
   const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
@@ -10749,12 +11073,12 @@ function workflowRefresh(root, args = {}) {
   if (args.execute === true && refreshPatterns) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
-      import_node_fs20.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      import_node_fs20.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      import_node_fs21.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      import_node_fs21.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
       patterns = {
         ok: true,
-        path: import_node_path40.default.relative(root, refreshed.jsonlPath),
-        projection: import_node_path40.default.relative(root, refreshed.projectionPath),
+        path: import_node_path41.default.relative(root, refreshed.jsonlPath),
+        projection: import_node_path41.default.relative(root, refreshed.projectionPath),
         refreshed_at: refreshed.stamp
       };
     }
@@ -10771,8 +11095,9 @@ function workflowRefresh(root, args = {}) {
   }) : null;
   return {
     ...summary,
-    ok: (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
+    ok: (!approvalError || args.execute === true) && (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
     phase_state: args.execute === true ? controlCommit && controlCommit.ok === false ? "recovery_required" : "executed" : "dry_run",
+    ...approvalError && args.execute !== true ? { stage: "staged_approval", error: approvalError } : {},
     scope: scopeIds,
     doctor: doctor(root, { hasCadreProject: true }),
     workspace: workspaceDiagnostics(root, { execute: false }),
@@ -10791,17 +11116,17 @@ function workflowRefresh(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-release-revise.ts
-var import_node_fs21 = __toESM(require("node:fs"));
-var import_node_path41 = __toESM(require("node:path"));
+var import_node_fs22 = __toESM(require("node:fs"));
+var import_node_path42 = __toESM(require("node:path"));
 function releaseArtifactPlan(root, args = {}) {
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
   const rawArgs3 = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
   const generatedAt = asOptionalString(rawArgs3.generatedAt || rawArgs3.generated_at) || utcNow();
-  const releaseDir = import_node_path41.default.join(root, "cadre", "releases");
+  const releaseDir = import_node_path42.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
-  const releaseMd = import_node_path41.default.join(releaseDir, `${releaseSlug}.md`);
-  const releaseJson = import_node_path41.default.join(releaseDir, `${releaseSlug}.json`);
+  const releaseMd = import_node_path42.default.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = import_node_path42.default.join(releaseDir, `${releaseSlug}.json`);
   const notes = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release - ${version}`,
     "",
@@ -10832,14 +11157,14 @@ function releaseArtifactPlan(root, args = {}) {
 function releaseReviewFiles(root, plan) {
   return [
     textReviewFile(
-      import_node_path41.default.relative(root, plan.releaseMd),
+      import_node_path42.default.relative(root, plan.releaseMd),
       "Release notes",
       "releaseNotes",
       plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `
     ),
     jsonReviewFile(
-      import_node_path41.default.relative(root, plan.releaseJson),
+      import_node_path42.default.relative(root, plan.releaseJson),
       "Release metadata",
       "releaseMetadata",
       plan.metadata
@@ -10861,12 +11186,16 @@ function workflowRelease(root, args = {}) {
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...approvalError ? [approvalError] : []
+  ];
   const base = {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
-    release_artifacts: [import_node_path41.default.relative(root, plan.releaseMd), import_node_path41.default.relative(root, plan.releaseJson)],
+    release_artifacts: [import_node_path42.default.relative(root, plan.releaseMd), import_node_path42.default.relative(root, plan.releaseJson)],
     git_actions: plan.gitActions,
     approval,
     human_review: humanReview,
@@ -10877,31 +11206,32 @@ function workflowRelease(root, args = {}) {
   if (args.execute !== true) {
     return {
       ...base,
-      ok: true,
+      ok: !approvalError,
       phase_state: "dry_run",
-      dry_run: true
+      dry_run: true,
+      ...approvalError ? { error: approvalError, stage: "staged_approval" } : {}
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...base,
       ok: false,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
+      stage: "staged_approval",
       dry_run: true,
-      error: "Staged approval is required before writing release artifacts"
+      error: approvalError || "Staged approval is required before writing release artifacts"
     };
   }
   const traceBefore = beginTrace(root);
-  import_node_fs21.default.mkdirSync(plan.releaseDir, { recursive: true });
-  import_node_fs21.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+  import_node_fs22.default.mkdirSync(plan.releaseDir, { recursive: true });
+  import_node_fs22.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `);
   writeJson(plan.releaseJson, plan.metadata);
-  const indexPatch = patchJsonFile(import_node_path41.default.join(root, "cadre", "setup_state.json"), (current) => {
+  const indexPatch = patchJsonFile(import_node_path42.default.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: plan.version,
-      path: import_node_path41.default.relative(root, plan.releaseMd),
-      metadata: import_node_path41.default.relative(root, plan.releaseJson),
+      path: import_node_path42.default.relative(root, plan.releaseMd),
+      metadata: import_node_path42.default.relative(root, plan.releaseJson),
       completed_tracks: plan.completed.length,
       released_at: plan.generatedAt
     };
@@ -10932,11 +11262,13 @@ function workflowRelease(root, args = {}) {
   };
 }
 function workflowRevise(root, args = {}) {
+  const approvalArgs = JSON.parse(JSON.stringify(args));
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "revise", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
-  const initialPrompts = reviseIntentPrompts(args, trackId || null);
+  const hasStructuredRevision = isRecord(args.spec) || isRecord(args.plan);
+  const initialPrompts = hasStructuredRevision ? [] : reviseIntentPrompts(args, trackId || null);
   if (initialPrompts.length > 0) {
     return {
       ...summary,
@@ -10972,30 +11304,36 @@ function workflowRevise(root, args = {}) {
     };
   }
   if (track && revisedSpec) {
-    reviewFiles.push(jsonReviewFile(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
+    reviewFiles.push(jsonReviewFile(import_node_path42.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
     reviewFiles.push(textReviewFile(
-      import_node_path41.default.relative(root, track.spec_path),
+      import_node_path42.default.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path41.default.relative(root, trackSpecJsonPath(track))))
+      withGeneratedMarker(import_node_path42.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path42.default.relative(root, trackSpecJsonPath(track))))
     ));
   }
   if (track && revisedPlan) {
-    reviewFiles.push(jsonReviewFile(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
+    reviewFiles.push(jsonReviewFile(import_node_path42.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
     reviewFiles.push(textReviewFile(
-      import_node_path41.default.relative(root, track.plan_path),
+      import_node_path42.default.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path41.default.relative(root, trackPlanJsonPath(track))))
+      withGeneratedMarker(import_node_path42.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path42.default.relative(root, trackPlanJsonPath(track))))
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
-  const approval = stagedApprovalState(root, "revise", args, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
+  const approvalError = stagedApprovalError(approval);
+  const qualityWarnings = revisedPlan ? trackGenerationWarnings(revisedSpec || existingSpec || {}, revisedPlan || {}) : revisedSpec ? trackGenerationWarnings(revisedSpec, { phases: [{ tasks: [{ title: "context-only", files: ["context"], manual_verification: { scope: "revision" } }] }] }) : [];
+  const warnings = [
+    ...qualityWarnings,
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...approvalError ? [approvalError] : []
+  ];
   if (reviewFiles.length === 0) {
     return {
       ...summary,
@@ -11027,19 +11365,20 @@ function workflowRevise(root, args = {}) {
   if (args.execute !== true) {
     return {
       ...base,
-      ok: true,
+      ok: !approvalError,
       dry_run: true,
-      phase_state: "dry_run"
+      phase_state: "dry_run",
+      ...approvalError ? { error: approvalError, stage: "staged_approval" } : {}
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
-      error: "Staged approval is required before revising track artifacts"
+      stage: "staged_approval",
+      error: approvalError || "Staged approval is required before revising track artifacts"
     };
   }
   const traceBefore = beginTrace(root);
@@ -11047,15 +11386,15 @@ function workflowRevise(root, args = {}) {
     const written = [];
     if (revisedSpec) {
       writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      import_node_fs21.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path41.default.relative(root, trackSpecJsonPath(track)))));
-      written.push(import_node_path41.default.relative(root, trackSpecJsonPath(track)));
-      written.push(import_node_path41.default.relative(root, track.spec_path));
+      import_node_fs22.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path42.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path42.default.relative(root, trackSpecJsonPath(track)))));
+      written.push(import_node_path42.default.relative(root, trackSpecJsonPath(track)));
+      written.push(import_node_path42.default.relative(root, track.spec_path));
     }
     if (revisedPlan) {
       writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      import_node_fs21.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path41.default.relative(root, trackPlanJsonPath(track)))));
-      written.push(import_node_path41.default.relative(root, trackPlanJsonPath(track)));
-      written.push(import_node_path41.default.relative(root, track.plan_path));
+      import_node_fs22.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path42.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path42.default.relative(root, trackPlanJsonPath(track)))));
+      written.push(import_node_path42.default.relative(root, trackPlanJsonPath(track)));
+      written.push(import_node_path42.default.relative(root, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
   });
@@ -11083,8 +11422,8 @@ function workflowRevise(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-setup.ts
-var import_node_fs22 = __toESM(require("node:fs"));
-var import_node_path42 = __toESM(require("node:path"));
+var import_node_fs23 = __toESM(require("node:fs"));
+var import_node_path43 = __toESM(require("node:path"));
 function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
@@ -11115,6 +11454,8 @@ function workflowSetup(root, args = {}) {
   });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
+  const approvalError = stagedApprovalError(approval);
+  const qualityWarnings = setupGenerationWarnings(args);
   const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
   const nativePrompts = args.execute === true ? [] : setupNativePrompts({
     provider: asJsonObject(provider),
@@ -11126,7 +11467,8 @@ function workflowSetup(root, args = {}) {
   });
   const warnings = [
     ...asStringArray(styleGuides.warnings),
-    ...asStringArray(asJsonObject(stageReviewBundle).warnings)
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...qualityWarnings
   ];
   const result = {
     ...summary,
@@ -11152,7 +11494,7 @@ function workflowSetup(root, args = {}) {
     approval,
     review_artifacts: stageReviewArtifacts || reviewArtifacts,
     review_bundle: stageReviewBundle,
-    warnings,
+    warnings: approvalError ? [...warnings, approvalError] : warnings,
     required_payload: args.execute === true ? ["product", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: [
       ...intentPrompts.length > 0 || nativePrompts.length > 0 ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."] : [],
@@ -11166,8 +11508,17 @@ function workflowSetup(root, args = {}) {
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none."
     ]
   };
+  if (args.execute !== true && approvalError) {
+    return {
+      ...result,
+      ok: false,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
+      error: approvalError
+    };
+  }
   if (args.execute !== true) return result;
-  const cadreDir = import_node_path42.default.join(root, "cadre");
+  const cadreDir = import_node_path43.default.join(root, "cadre");
   const force = asBoolean(rawArgs3.force, false);
   const missingPayload = [
     ...!isRecord(rawArgs3.product) ? ["product"] : [],
@@ -11183,54 +11534,54 @@ function workflowSetup(root, args = {}) {
       missing_payload: missingPayload
     };
   }
-  if (!approvalComplete(args)) {
+  if (!stagedApprovalReady(approval)) {
     return {
       ...result,
       ok: false,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      error: "Staged approval is required before writing setup artifacts"
+      error: approvalError || "Staged approval is required before writing setup artifacts"
     };
   }
   const traceBefore = beginTrace(root);
   const written = [];
   const skipped = [];
-  const writeText = (relativePath, text) => {
-    const file = import_node_path42.default.join(cadreDir, relativePath);
+  const writeText = (relativePath, text2) => {
+    const file = import_node_path43.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path42.default.relative(root, file));
+      skipped.push(import_node_path43.default.relative(root, file));
       return;
     }
-    import_node_fs22.default.mkdirSync(import_node_path42.default.dirname(file), { recursive: true });
-    import_node_fs22.default.writeFileSync(file, text);
-    written.push(import_node_path42.default.relative(root, file));
+    import_node_fs23.default.mkdirSync(import_node_path43.default.dirname(file), { recursive: true });
+    import_node_fs23.default.writeFileSync(file, text2);
+    written.push(import_node_path43.default.relative(root, file));
   };
   const writeSetupJson = (relativePath, value) => {
-    const file = import_node_path42.default.join(cadreDir, relativePath);
+    const file = import_node_path43.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path42.default.relative(root, file));
+      skipped.push(import_node_path43.default.relative(root, file));
       return;
     }
-    import_node_fs22.default.mkdirSync(import_node_path42.default.dirname(file), { recursive: true });
+    import_node_fs23.default.mkdirSync(import_node_path43.default.dirname(file), { recursive: true });
     writeJson(file, value);
-    written.push(import_node_path42.default.relative(root, file));
+    written.push(import_node_path43.default.relative(root, file));
   };
   const writeSetupJsonlEntry = (relativePath, value) => {
-    const file = import_node_path42.default.join(cadreDir, relativePath);
+    const file = import_node_path43.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path42.default.relative(root, file));
+      skipped.push(import_node_path43.default.relative(root, file));
       return;
     }
     appendJsonl(file, value);
-    written.push(import_node_path42.default.relative(root, file));
+    written.push(import_node_path43.default.relative(root, file));
   };
   const writeProjectDoc = (relativePath, kind, value, title) => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
     writeSetupJson(jsonPath, value);
     writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title, `cadre/${jsonPath}`)));
   };
-  import_node_fs22.default.mkdirSync(import_node_path42.default.join(cadreDir, "tracks"), { recursive: true });
-  import_node_fs22.default.mkdirSync(import_node_path42.default.join(cadreDir, "archive"), { recursive: true });
+  import_node_fs23.default.mkdirSync(import_node_path43.default.join(cadreDir, "tracks"), { recursive: true });
+  import_node_fs23.default.mkdirSync(import_node_path43.default.join(cadreDir, "archive"), { recursive: true });
   const nativeState = ensureNativeState(root);
   const nativeIgnorePath = asOptionalString(nativeState.ignore_path);
   if (nativeIgnorePath) written.push(nativeIgnorePath);
@@ -11382,7 +11733,7 @@ function workflowSetup(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-ship-land.ts
-var import_node_path43 = __toESM(require("node:path"));
+var import_node_path44 = __toESM(require("node:path"));
 function providerActionKind(workflow, provider) {
   if (provider === "gitlab") return workflow === "land" ? "open_merge_request_group" : "open_merge_request";
   return workflow === "land" ? "open_pull_request_group" : "open_pull_request";
@@ -11461,7 +11812,7 @@ function publicationLedger(root, workflow, track, args, data) {
     continuation_token: asOptionalString(data.continuation_token) || null,
     ...data
   };
-  const file = import_node_path43.default.join(root, "cadre", "operations", "publication.jsonl");
+  const file = import_node_path44.default.join(root, "cadre", "operations", "publication.jsonl");
   appendJsonl(file, entry);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
@@ -11469,12 +11820,12 @@ function publicationLedger(root, workflow, track, args, data) {
     subject: `publish ${track.track_id}`,
     before,
     files: [
-      import_node_path43.default.relative(root, file)
+      import_node_path44.default.relative(root, file)
     ],
     trackId: track.track_id,
     note: entry
   });
-  return { ok: controlCommit.ok !== false, path: import_node_path43.default.relative(root, file), entry, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, path: import_node_path44.default.relative(root, file), entry, control_commit: controlCommit };
 }
 function runPublicationGit(root, workflow, track, args, gitActions, providerActions) {
   const remote = asOptionalString(args.remote) || "origin";

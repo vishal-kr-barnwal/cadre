@@ -18,10 +18,9 @@ import { renderPlanMarkdown } from "./plan-docs";
 import { humanReviewState, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
-import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
-import { artifactApprovalStages, stagedApprovalState } from "./staged-approval";
+import { artifactApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args)
@@ -171,7 +170,6 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
   const skipped: string[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
-  const traceBefore = execute && humanReviewConfirmed(args) ? beginTrace(root) : null;
   for (const def of defs) {
     const rendered = renderArtifact(root, def, args);
     artifacts.push({
@@ -187,18 +185,6 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       continue;
     }
     reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
-    if (!execute) continue;
-    if (!humanReviewConfirmed(args)) continue;
-    const projectionFile = path.join(root, def.projection);
-    const existing = fileExists(projectionFile) ? fs.readFileSync(projectionFile, "utf8") : "";
-    if (existing && !hasGeneratedMarker(existing) && !force) {
-      skipped.push(def.projection);
-      warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
-      continue;
-    }
-    ensureParent(projectionFile);
-    fs.writeFileSync(projectionFile, rendered.content);
-    written.push(def.projection);
   }
   const reviewBundle = workflowReviewBundle(root, "artifacts", args, reviewFiles, {
     scope: args.scope || "all",
@@ -211,12 +197,14 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifactsFromFiles(reviewFiles);
   const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
-  if (execute && !humanReviewConfirmed(args)) {
+  const approvalError = stagedApprovalError(approval);
+  if (approvalError) warnings.push(approvalError);
+  if (execute && !stagedApprovalReady(approval)) {
     return {
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
-      stage: "human_review",
+      stage: "staged_approval",
       artifacts,
       approval,
       human_review: humanReview,
@@ -224,8 +212,25 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       review_bundle: stageReviewBundle,
       warnings,
       errors: ["Staged approval is required before syncing artifacts"],
-      error: "Staged approval is required before syncing artifacts",
+      error: approvalError || "Staged approval is required before syncing artifacts",
     };
+  }
+  const traceBefore = execute ? beginTrace(root) : null;
+  if (execute) {
+    for (const def of defs) {
+      const rendered = renderArtifact(root, def, args);
+      if (rendered.ok === false || !rendered.content || !def.projection) continue;
+      const projectionFile = path.join(root, def.projection);
+      const existing = fileExists(projectionFile) ? fs.readFileSync(projectionFile, "utf8") : "";
+      if (existing && !hasGeneratedMarker(existing) && !force) {
+        skipped.push(def.projection);
+        warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
+        continue;
+      }
+      ensureParent(projectionFile);
+      fs.writeFileSync(projectionFile, rendered.content);
+      written.push(def.projection);
+    }
   }
   const controlCommit = execute
     ? commitTrace(root, args, {
@@ -243,9 +248,10 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     })
     : null;
   return {
-    ok: errors.length === 0 && (!controlCommit || controlCommit.ok !== false),
+    ok: errors.length === 0 && !approvalError && (!controlCommit || controlCommit.ok !== false),
     dry_run: !execute,
     phase_state: execute ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
+    ...(approvalError && !execute ? { stage: "staged_approval", error: approvalError } : {}),
     artifacts,
     approval,
     review_artifacts: stageReviewArtifacts,

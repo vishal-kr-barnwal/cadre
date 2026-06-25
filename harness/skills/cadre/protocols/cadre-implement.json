@@ -72,6 +72,7 @@
   "references": [
     "parallel-execution",
     "mcp-contract",
-    "ownership-guard"
+    "ownership-guard",
+    "approval-and-generation"
   ]
 }

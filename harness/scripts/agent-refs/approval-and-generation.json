@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "approval-and-generation",
+  "title": "Approval And Structured Generation",
+  "markdownUse": "human_projection_only",
+  "rules": [
+    "Durable Cadre artifact generation must use structured JSON fields, not Markdown payloads.",
+    "Dry-run review comes before mutation for every workflow that writes Cadre control-plane artifacts.",
+    "Staged workflows approve exactly one returned current_stage per packet call.",
+    "Never auto-approve all stages or call approvalComplete:true until the packet-issued approval state reports no pending stages.",
+    "Pass the packet-issued approvalSessionId on every staged approval follow-up and final execute call.",
+    "If the generated payload changes, restart review from the returned current stage."
+  ],
+  "sections": [
+    {
+      "heading": "Staged Approval Contract",
+      "body": "For workflows that return approval.kind=cadre.staged_approval.v1, review only approval.current_stage and its current_review_bundle. To approve, call the same workflow again with approvalSessionId, approvalStage set to that current stage, and approvedStages containing exactly one additional stage in order. After all stages are approved in dry-run calls, call execute:true with approvalComplete:true and the same approvalSessionId."
+    },
+    {
+      "heading": "Generation Contract",
+      "body": "When drafting setup, spec, plan, release, handoff, or revised artifacts, fill canonical JSON from repo evidence and user intent. Prefer concrete fields, domain nouns, commands, contracts, boundaries, risks, and verification details. Do not send shallow summary-only payloads unless the user explicitly requests minimal setup."
+    },
+    {
+      "heading": "Review Bundle Contract",
+      "body": "Use returned review_bundle paths and manifests for review. Do not inline large generated artifacts into model context and do not manually write generated Markdown projections as canonical state."
+    }
+  ]
+}

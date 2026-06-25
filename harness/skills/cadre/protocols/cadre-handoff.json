@@ -39,6 +39,10 @@
     },
     {
       "step": 5,
+      "instruction": "For staged handoff review, approve handoff_json and handoff_projection one stage at a time with approvalSessionId. Handoffs should include current state, completed work, pending work, risks, commands run, and next actions."
+    },
+    {
+      "step": 6,
       "instruction": "Summarize the handoff path, recipient or audience, open risks, changed canonical JSON artifacts, generated human projections, and next packet."
     }
   ],
@@ -63,6 +67,7 @@
     "next recommended packet"
   ],
   "references": [
-    "mcp-contract"
+    "mcp-contract",
+    "approval-and-generation"
   ]
 }

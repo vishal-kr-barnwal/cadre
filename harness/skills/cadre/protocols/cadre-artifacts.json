@@ -43,6 +43,10 @@
     },
     {
       "step": 6,
+      "instruction": "For staged artifact sync review, approve only the generated projection stage with approvalSessionId. Projections must come from canonical JSON/JSONL artifacts, not agent-authored Markdown."
+    },
+    {
+      "step": 7,
       "instruction": "Summarize changed canonical JSON/JSONL artifacts, regenerated human projections, skipped unmarked projections, warnings, and next recommended packet."
     }
   ],
@@ -68,6 +72,7 @@
   ],
   "references": [
     "mcp-contract",
-    "template-locator"
+    "template-locator",
+    "approval-and-generation"
   ]
 }

@@ -108,6 +108,8 @@ const PROPS: Record<string, JsonObject> = {
   workflow_policy: { type: "object" },
   approvalStage: { type: "string" },
   approval_stage: { type: "string" },
+  approvalSessionId: { type: "string" },
+  approval_session_id: { type: "string" },
   approvedStages: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
   approved_stages: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
   approvalComplete: { type: "boolean" },
@@ -254,7 +256,7 @@ export const TOOLS = [
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, debug, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: [...WORKFLOWS, ...FORMULA_ACTIONS],
-    fields: ["workflow", "action", "id", "formulaId", "variables", "wispId", "stepId", "stepIndex", "execute", "approvalStage", "approvedStages", "approvalComplete", "trackId", "detail", "providerMode", "providerEvidence", "mcpCapabilities", "product", "productGuidelines", "workflowPolicy", "techStack", "spec", "plan", "description", "artifact", "scope", "status", "summary", "evidence", "config", "configurationId", "configuration", "breakpoints", "files", "testCommand", "async", "timeoutMs"],
+    fields: ["workflow", "action", "id", "formulaId", "variables", "wispId", "stepId", "stepIndex", "execute", "approvalStage", "approvalSessionId", "approvedStages", "approvalComplete", "trackId", "detail", "providerMode", "providerEvidence", "mcpCapabilities", "product", "productGuidelines", "workflowPolicy", "techStack", "spec", "plan", "description", "artifact", "scope", "status", "summary", "evidence", "config", "configurationId", "configuration", "breakpoints", "files", "testCommand", "async", "timeoutMs"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{
@@ -343,7 +345,7 @@ export const TOOLS = [
     name: "cadre_artifact",
     description: "Cadre artifact packet: catalog, schema, validate JSON canonicals, render human projections, diff, and sync generated artifacts.",
     actionEnum: ["catalog", "schema", "validate", "render", "diff", "sync"],
-    fields: ["action", "artifact", "id", "scope", "trackId", "execute", "approvalComplete", "force", "includeArchive"],
+    fields: ["action", "artifact", "id", "scope", "trackId", "execute", "approvalStage", "approvalSessionId", "approvedStages", "approvalComplete", "force", "includeArchive"],
     required: ["root", "action"],
   }),
 ];

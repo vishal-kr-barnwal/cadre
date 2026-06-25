@@ -39,6 +39,10 @@
     },
     {
       "step": 5,
+      "instruction": "For staged revision review, approve only the current revised spec or plan stage with approvalSessionId and one new approved stage; do not approve both spec and plan in one call."
+    },
+    {
+      "step": 6,
       "instruction": "Summarize changed requirements, affected tasks, tests to update, changed canonical JSON artifacts, generated human projections, and packet warnings."
     }
   ],
@@ -64,6 +68,7 @@
   ],
   "references": [
     "mcp-contract",
-    "native-prompts"
+    "native-prompts",
+    "approval-and-generation"
   ]
 }

@@ -67,6 +67,7 @@
     "warnings, missing adapter commands, and next recommended packet"
   ],
   "references": [
-    "mcp-contract"
+    "mcp-contract",
+    "approval-and-generation"
   ]
 }
