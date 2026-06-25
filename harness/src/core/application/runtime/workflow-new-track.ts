@@ -24,7 +24,7 @@ import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
-import { newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 import { trackGenerationWarnings } from "./generation-quality";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
@@ -86,6 +86,7 @@ export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: Jso
 }
 
 export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "newtrack");
   const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);

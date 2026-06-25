@@ -28,10 +28,11 @@ import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-st
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
-import { setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 import { setupGenerationWarnings } from "./generation-quality";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "setup");
   const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };

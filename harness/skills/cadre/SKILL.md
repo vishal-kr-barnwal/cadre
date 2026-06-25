@@ -26,3 +26,9 @@ Load `cadre://skill-contract` for the authoritative `cadre.skill.v1` contract.
 Use `cadre://workflow-protocols` to discover workflow protocol resources, then
 load `cadre://workflow-protocol?workflow=<name>` for the active workflow.
 References and template inventory are also MCP-served through Cadre resources.
+
+For staged approvals, stay on Cadre's packet-led review path: use the returned
+`approval.current_stage`, review bundle manifest, and specific review paths
+first. Ask the user for explicit approval of the current stage before sending
+approval fields. Avoid extra local inspection or validation commands unless a
+concrete review question cannot be answered from the packet evidence.

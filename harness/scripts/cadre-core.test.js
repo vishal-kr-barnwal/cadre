@@ -1337,6 +1337,27 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.equal(blocked.stage, "staged_approval");
     assert.equal(blocked.phase_state, "awaiting_staged_approval");
     assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
+
+    const approvedMinimal = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(approvedMinimal.ok, true, approvedMinimal.error || JSON.stringify(approvedMinimal.approval || {}));
+    assert.equal(approvedMinimal.approval.current_stage, "product_guidelines");
+    assert.deepEqual(approvedMinimal.approval.approved_stages, ["product"]);
+
+    const approvedWithAccidentalPayload = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "product_guidelines",
+      approvedStages: ["product", "product_guidelines"],
+      product: { name: "Accidental payload drift should not replace reviewed session payload" },
+      providerMode: "github",
+    });
+    assert.equal(approvedWithAccidentalPayload.ok, true, approvedWithAccidentalPayload.error || JSON.stringify(approvedWithAccidentalPayload.approval || {}));
+    assert.equal(approvedWithAccidentalPayload.approval.current_stage, "tech_stack");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

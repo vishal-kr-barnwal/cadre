@@ -26,7 +26,7 @@ import { reviseIntentPrompts } from "./intent-prompts";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
-import { releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 import { trackGenerationWarnings } from "./generation-quality";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
@@ -89,6 +89,7 @@ export function releaseReviewFiles(root: string, plan: ReleaseArtifactPlan): Rev
 }
 
 export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "release");
   const summary = workflowSummary(root, "release", args);
   const plan = releaseArtifactPlan(root, args);
   const reviewFiles = releaseReviewFiles(root, plan);
@@ -179,6 +180,7 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
 }
 
 export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "revise");
   const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "revise", args);

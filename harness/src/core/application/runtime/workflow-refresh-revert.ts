@@ -30,7 +30,7 @@ import { parsePlanFile } from "./track-schedule";
 import { templateJson, workflowSummary } from "./workflow-response";
 import { doctor, lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
-import { refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 
 export function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
@@ -175,6 +175,7 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
 }
 
 export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "refresh");
   const summary = workflowSummary(root, "refresh", args);
   const intentPrompts = refreshIntentPrompts(args);
   if (intentPrompts.length > 0) {

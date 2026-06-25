@@ -20,7 +20,7 @@ import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
-import { artifactApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, artifactApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args)
@@ -154,6 +154,7 @@ export function artifactDiff(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "artifacts");
   const execute = args.execute === true;
   const force = args.force === true;
   if ((args as UnknownRecord).importLegacy !== undefined || (args as UnknownRecord).import_legacy !== undefined) {

@@ -8,12 +8,16 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { ReviewFile } from "./contracts";
 import { reviewArtifactsFromFiles, workflowReviewBundle } from "./review-bundles";
 
-export interface ApprovalStage {
-  id: string;
-  title: string;
-  description: string;
-  fileMatches: string[];
-}
+import type { ApprovalStage } from "./staged-approval-stages";
+export {
+  artifactApprovalStages,
+  handoffApprovalStages,
+  newTrackApprovalStages,
+  refreshApprovalStages,
+  releaseApprovalStages,
+  reviseApprovalStages,
+  setupApprovalStages,
+} from "./staged-approval-stages";
 
 function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string): string {
   return `Approve Cadre ${workflow} stage "${stage.id}" (${stage.title})? Reply "approve ${stage.id}" to allow one staged approval for session ${sessionId}.`;
@@ -23,6 +27,7 @@ type ApprovalSession = {
   session_id: string;
   workflow: string;
   payload_hash: string;
+  payload: JsonObject;
   approved_stages: string[];
   updated_at: string;
 };
@@ -86,6 +91,57 @@ function readApprovalSession(sessionId: string): ApprovalSession | null {
 function writeApprovalSession(session: ApprovalSession): void {
   fs.mkdirSync(approvalSessionDir(), { recursive: true });
   fs.writeFileSync(approvalSessionFile(session.session_id), `${JSON.stringify(session, null, 2)}\n`);
+}
+
+function hasApprovalIntent(args: RuntimeArgs): boolean {
+  const raw = rawArgs(args);
+  return approvedStageIds(args).length > 0
+    || approvalComplete(args)
+    || raw.approvalStage !== undefined
+    || raw.approval_stage !== undefined;
+}
+
+function approvalControlPayload(args: RuntimeArgs): JsonObject {
+  const raw = rawArgs(args);
+  const controls: JsonObject = {};
+  for (const key of [
+    "execute",
+    "approvalComplete",
+    "approval_complete",
+    "approvalStage",
+    "approval_stage",
+    "approvedStages",
+    "approved_stages",
+    "approvalSessionId",
+    "approval_session_id",
+    "reviewBundleDir",
+    "review_bundle_dir",
+    "reviewDir",
+    "review_dir",
+    "responseMode",
+    "response_mode",
+    "detail",
+    "compact",
+  ]) {
+    if (raw[key] !== undefined) controls[key] = raw[key] as JsonObject[string];
+  }
+  return controls;
+}
+
+export function applyStagedApprovalSessionPayload(args: RuntimeArgs = {}, workflow: string): RuntimeArgs {
+  if (!hasApprovalIntent(args)) return args;
+  const sessionId = requestedApprovalSessionId(args);
+  if (!sessionId) return args;
+  const session = readApprovalSession(sessionId);
+  if (!session || session.workflow !== workflow) return args;
+  const controls = approvalControlPayload(args);
+  if (approvalComplete(args) && !controls.approvedStages && !controls.approved_stages) {
+    controls.approvedStages = session.approved_stages;
+  }
+  return {
+    ...session.payload,
+    ...controls,
+  };
 }
 
 function stageHash(workflow: string, stage: ApprovalStage, files: ReviewFile[], extras: JsonObject): string {
@@ -171,9 +227,10 @@ function approvalTransitionError(
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return orderError;
   const requestedSession = requestedApprovalSessionId(args);
-  const hasApprovalIntent = approved.length > 0 || approvalComplete(args) || raw.approvalStage !== undefined || raw.approval_stage !== undefined;
-  if (!hasApprovalIntent) {
-    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, approved_stages: [], updated_at: new Date().toISOString() });
+  const payload = approvalPayload(args);
+  const approvalIntent = hasApprovalIntent(args);
+  if (!approvalIntent) {
+    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, payload, approved_stages: [], updated_at: new Date().toISOString() });
     return null;
   }
   if (!requestedSession) return "approvalSessionId is required when approving staged workflow output.";
@@ -192,7 +249,7 @@ function approvalTransitionError(
   if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
   const session = readApprovalSession(sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
-    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, approved_stages: [], updated_at: new Date().toISOString() });
+    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, payload, approved_stages: [], updated_at: new Date().toISOString() });
     return "Approval session was not found for this payload; review the current stage before approving.";
   }
   const previous = session.approved_stages || [];
@@ -212,7 +269,7 @@ function approvalTransitionError(
   if (delta[0] !== nextExpected) return `Next approval stage must be ${nextExpected}.`;
   const requestedStage = requestedApprovalStage(args);
   if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
-  writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, approved_stages: approved, updated_at: new Date().toISOString() });
+  writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, payload: session.payload || payload, approved_stages: approved, updated_at: new Date().toISOString() });
   return null;
 }
 
@@ -232,7 +289,7 @@ export function stagedApprovalState(
   const approved = new Set(approvedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));
   const requested = requestedApprovalStage(args);
-  const active = stages.find((stage) => stage.id === requested)
+  const active = stages.find((stage) => stage.id === requested && !approved.has(stage.id))
     || pending[0]
     || stages[stages.length - 1]
     || null;
@@ -312,165 +369,4 @@ export function stagedApprovalReady(approval: unknown): boolean {
 
 export function stagedApprovalError(approval: unknown): string | null {
   return asOptionalString(asJsonObject(approval).approval_error) || null;
-}
-
-export function setupApprovalStages(polyrepoRequested: boolean): ApprovalStage[] {
-  return [
-    {
-      id: "product",
-      title: "Product Context",
-      description: "Product summary, users, workflows, domain model, invariants, and boundaries.",
-      fileMatches: ["product.json", "product.md"],
-    },
-    {
-      id: "product_guidelines",
-      title: "Product Guidelines",
-      description: "Product principles, user promises, trust boundaries, non-goals, decision rules, and review checklist.",
-      fileMatches: ["product_guidelines"],
-    },
-    {
-      id: "tech_stack",
-      title: "Tech Stack",
-      description: "Structured languages, frameworks, package managers, platforms, and project commands.",
-      fileMatches: ["tech-stack.json", "techStack"],
-    },
-    {
-      id: "workflow",
-      title: "Workflow Policy",
-      description: "Development, verification, review, commit, and coordination expectations.",
-      fileMatches: ["workflow.json", "workflow.md", "workflowPolicy"],
-    },
-    {
-      id: "styleguides",
-      title: "Style Guides",
-      description: "Generated style-guide selection and projections derived from the tech stack.",
-      fileMatches: ["styleguides", "code_styleguides"],
-    },
-    {
-      id: polyrepoRequested ? "project_state" : "project_state",
-      title: polyrepoRequested ? "Project State And Repos" : "Project State",
-      description: "Initial indexes, patterns, optional repository topology, and setup support artifacts.",
-      fileMatches: ["patterns", "tracks.json", "repos.json", "lsp.json"],
-    },
-  ];
-}
-
-export function newTrackApprovalStages(): ApprovalStage[] {
-  return [
-    {
-      id: "spec",
-      title: "Track Spec",
-      description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
-      fileMatches: ["spec.json", "spec.md"],
-    },
-    {
-      id: "plan",
-      title: "Track Plan",
-      description: "Phases, tasks, dependencies, file claims, and manual verification tasks.",
-      fileMatches: ["plan.json", "plan.md"],
-    },
-    {
-      id: "metadata",
-      title: "Track Metadata",
-      description: "Track identity, ownership, status, priority, branch, and worktree routing.",
-      fileMatches: ["metadata.json", "metadata"],
-    },
-    {
-      id: "learnings",
-      title: "Track Learnings",
-      description: "Initial learnings journal and human projection for future implementation notes.",
-      fileMatches: ["learnings"],
-    },
-  ];
-}
-
-export function reviseApprovalStages(hasSpec: boolean, hasPlan: boolean): ApprovalStage[] {
-  return [
-    ...(hasSpec
-      ? [{
-        id: "spec_changes",
-        title: "Spec Changes",
-        description: "Revised track requirements, acceptance criteria, and scope.",
-        fileMatches: ["spec.json", "spec.md", "spec"],
-      }]
-      : []),
-    ...(hasPlan
-      ? [{
-        id: "plan_changes",
-        title: "Plan Changes",
-        description: "Revised phases, tasks, dependencies, and manual verification tasks.",
-        fileMatches: ["plan.json", "plan.md", "plan"],
-      }]
-      : []),
-  ];
-}
-
-export function refreshApprovalStages(includePatterns = true, includeLsp = false): ApprovalStage[] {
-  return [
-    ...(includePatterns ? [{
-      id: "patterns",
-      title: "Project Patterns",
-      description: "Refreshed project patterns canonical JSONL and generated projection.",
-      fileMatches: ["patterns"],
-    }] : []),
-    ...(includeLsp ? [{
-      id: "lsp_config",
-      title: "LSP Configuration",
-      description: "Language server setup changes requested by the refresh scope.",
-      fileMatches: ["lsp"],
-    }] : []),
-  ];
-}
-
-export function artifactApprovalStages(): ApprovalStage[] {
-  return [
-    {
-      id: "projections",
-      title: "Generated Projections",
-      description: "Generated human projections derived from canonical JSON/JSONL artifacts.",
-      fileMatches: ["*"],
-    },
-  ];
-}
-
-export function releaseApprovalStages(hasGitActions: boolean): ApprovalStage[] {
-  return [
-    {
-      id: "release_notes",
-      title: "Release Notes",
-      description: "Human-facing release notes for the selected completed tracks.",
-      fileMatches: [".md", "releaseNotes"],
-    },
-    {
-      id: "release_metadata",
-      title: "Release Metadata",
-      description: "Canonical release metadata for completed tracks and review state.",
-      fileMatches: [".json", "releaseMetadata"],
-    },
-    ...(hasGitActions
-      ? [{
-        id: "git_actions",
-        title: "Git Actions",
-        description: "Optional local git actions such as release tag creation.",
-        fileMatches: [],
-      }]
-      : []),
-  ];
-}
-
-export function handoffApprovalStages(): ApprovalStage[] {
-  return [
-    {
-      id: "handoff_json",
-      title: "Handoff Canonical",
-      description: "Structured handoff context for the target track.",
-      fileMatches: ["handoff.json", "handoffText"],
-    },
-    {
-      id: "handoff_projection",
-      title: "Handoff Projection",
-      description: "Generated handoff document for another session or teammate.",
-      fileMatches: ["HANDOFF.md", "handoff.md"],
-    },
-  ];
 }

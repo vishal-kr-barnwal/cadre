@@ -30,7 +30,7 @@ import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
-import { handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const prep = implementationPrep(root, {
@@ -175,6 +175,7 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
 }
 
 export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(args, "handoff");
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "handoff", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
