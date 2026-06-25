@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, and selected JSON style guides."
+      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, selected JSON style guides, and any `native_prompts` recommendation prompts. When `native_prompts` are present, load the `native-prompts` reference and use the client native selection affordance before calling setup again with structured arguments."
     },
     {
       "step": 4,
@@ -67,6 +67,7 @@
   ],
   "references": [
     "template-locator",
-    "mcp-contract"
+    "mcp-contract",
+    "native-prompts"
   ]
 }

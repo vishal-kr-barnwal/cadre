@@ -154,6 +154,19 @@ function compactLspSetup(value: unknown): JsonObject | null {
   };
 }
 
+function compactNativePrompts(value: unknown): JsonObject[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const prompt = asJsonObject(entry);
+    const target = asJsonObject(prompt.responseTarget);
+    return {
+      id: asOptionalString(prompt.id) || null,
+      selectionMode: asOptionalString(prompt.selectionMode) || "single",
+      argument: asOptionalString(target.argument) || null,
+    };
+  });
+}
+
 function compactSetupResponse(result: CoreResult): CoreResult {
   const styleGuides = compactStyleGuides(result.styleGuides);
   const reviewBundle = compactReviewBundle(result.review_bundle);
@@ -225,6 +238,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
       }
       : result.techStackSummary,
     human_review: humanReview,
+    native_prompts: compactNativePrompts(result.native_prompts),
     review_artifacts: reviewArtifacts.files,
     review_bundle: reviewBundleSummary,
     review_bundle_path: reviewBundleSummary?.manifest_path || null,

@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "schema": "cadre.reference.v1",
+  "id": "native-prompts",
+  "title": "Native Recommendation Prompts",
+  "markdownUse": "human_projection_only",
+  "rules": [
+    "Use `native_prompts` only as host-client interaction guidance; do not persist prompt answers directly.",
+    "Map selected choice ids and custom text to the prompt `responseTarget` before calling the next Cadre packet.",
+    "Keep Cadre mutation packet-owned: prompt answers become structured packet arguments, not handwritten Cadre state."
+  ],
+  "sections": [
+    {
+      "heading": "Prompt Contract",
+      "body": "Cadre may return `native_prompts` entries with schema `cadre.native_prompt.v1`. Each prompt includes an id, title, question, `selectionMode`, choices, `allowCustom`, an optional custom argument, and a `responseTarget` that names the next packet argument to populate. Single-select prompts produce one choice id; multi-select prompts produce an ordered list of selected ids plus optional custom text."
+    },
+    {
+      "heading": "Setup Usage",
+      "body": "`cadre-setup` dry-runs can return prompts for provider mode, sync mode, style guides, LSP setup, and optional MCP integrations. After the user answers, call `cadre_workflow` for setup again with the selected values as structured JSON fields such as `providerMode`, `syncMode`, `styleGuideIds`, `writeLsp`, and `integrations`. Do not write a prompt response file or edit generated projections."
+    },
+    {
+      "heading": "Client Adapters",
+      "body": "<!-- AGENT:codex -->\nUse Codex native user-input affordances such as `request_user_input` when available. Preserve the prompt choices and recommended defaults, and pass custom text through the prompt custom argument.\n<!-- /AGENT:codex -->\n<!-- AGENT:claude -->\nUse Claude Code's native ask/select affordance when available. If no native selector is exposed, present the choices compactly in chat and accept selected ids plus optional custom text.\n<!-- /AGENT:claude -->\n<!-- AGENT:copilot -->\nUse Copilot's native prompt or quick-pick/select affordance when available. If unavailable, render the same choices in chat and map the user's selected ids to the `responseTarget`.\n<!-- /AGENT:copilot -->\n<!-- AGENT:antigravity -->\nUse Antigravity's native prompt/select affordance when available. If unavailable, render the same choices in chat and map the user's selected ids to the `responseTarget`.\n<!-- /AGENT:antigravity -->"
+    }
+  ],
+  "platforms": {
+    "codex": {
+      "adapter": "request_user_input",
+      "alternate": "Render choices in chat and accept selected ids plus custom text."
+    },
+    "claude": {
+      "adapter": "native ask/select",
+      "alternate": "Render choices in chat and accept selected ids plus custom text."
+    },
+    "copilot": {
+      "adapter": "native prompt or quick pick",
+      "alternate": "Render choices in chat and accept selected ids plus custom text."
+    },
+    "antigravity": {
+      "adapter": "native prompt/select",
+      "alternate": "Render choices in chat and accept selected ids plus custom text."
+    }
+  }
+}

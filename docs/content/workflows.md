@@ -40,6 +40,13 @@ What setup gathers:
 - Native event/message/formula state and optional CI templates.
 - Optional LSP recommendations.
 
+Setup dry-runs may include `native_prompts` with schema
+`cadre.native_prompt.v1`. Agents should present those through the host client's
+native selection UI when available, then pass the selected ids or custom "Other"
+text back as structured setup arguments such as `providerMode`, `syncMode`,
+`styleGuideIds`, `writeLsp`, and `integrations`. Prompt answers are not stored
+as standalone Cadre state.
+
 What setup writes:
 
 - `cadre/product.json` and generated `cadre/product.md`

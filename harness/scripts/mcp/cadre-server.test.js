@@ -597,12 +597,19 @@ test("MCP root resolution rejects harness skill directories without project stat
     const parsedAgentReferences = JSON.parse(agentReferences.contents[0].text);
     assert.equal(parsedAgentReferences.ok, true);
     assert.ok(parsedAgentReferences.data.references.some((reference) => reference.id === "mcp-contract"));
+    assert.ok(parsedAgentReferences.data.references.some((reference) => reference.id === "native-prompts"));
 
     const mcpContract = await request("resources/read", { uri: "cadre://agent-reference?name=mcp-contract" });
     const parsedMcpContract = JSON.parse(mcpContract.contents[0].text);
     assert.equal(parsedMcpContract.ok, true);
     assert.equal(parsedMcpContract.data.reference.id, "mcp-contract");
     assert.equal(parsedMcpContract.data.reference.schema, "cadre.reference.v1");
+
+    const nativePrompts = await request("resources/read", { uri: "cadre://agent-reference?name=native-prompts" });
+    const parsedNativePrompts = JSON.parse(nativePrompts.contents[0].text);
+    assert.equal(parsedNativePrompts.ok, true);
+    assert.equal(parsedNativePrompts.data.reference.id, "native-prompts");
+    assert.equal(parsedNativePrompts.data.reference.platforms.codex.adapter, "request_user_input");
 
     const templateInventory = await request("resources/read", { uri: "cadre://template-inventory" });
     const parsedTemplateInventory = JSON.parse(templateInventory.contents[0].text);

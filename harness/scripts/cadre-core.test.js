@@ -1271,6 +1271,79 @@ test("workflow setup requires human confirmation before writing reviewed artifac
   }
 });
 
+test("workflow setup dry-run returns native recommendation prompts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-native-prompts-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "src", "app.ts"), "export const app = true;\n");
+
+    const preview = core.workflowPacket(root, {
+      workflow: "setup",
+      teamSize: 3,
+      product: { title: "Product", summary: "Test product" },
+      techStack: { languages: ["TypeScript"], frameworks: ["React"] },
+      responseMode: "detail",
+    });
+
+    assert.equal(preview.ok, true);
+    assert.deepEqual(preview.native_prompts.map((prompt) => prompt.id), [
+      "setup-provider-mode",
+      "setup-sync-mode",
+      "setup-style-guides",
+      "setup-lsp",
+      "setup-optional-mcps",
+    ]);
+    for (const prompt of preview.native_prompts) {
+      assert.equal(prompt.schema, "cadre.native_prompt.v1");
+      assert.equal(prompt.allowCustom, true);
+      assert.equal(prompt.responseTarget.tool, "cadre_workflow");
+      assert.equal(prompt.responseTarget.workflow, "setup");
+      assert.equal(typeof prompt.customArgument, "string");
+      assert.ok(prompt.choices.length > 0);
+    }
+
+    const provider = preview.native_prompts.find((prompt) => prompt.id === "setup-provider-mode");
+    assert.equal(provider.selectionMode, "single");
+    assert.equal(provider.responseTarget.argument, "providerMode");
+    assert.equal(provider.choices.find((choice) => choice.id === "local").recommended, true);
+
+    const sync = preview.native_prompts.find((prompt) => prompt.id === "setup-sync-mode");
+    assert.equal(sync.selectionMode, "single");
+    assert.equal(sync.responseTarget.argument, "syncMode");
+    assert.equal(sync.choices.find((choice) => choice.id === "shared").recommended, true);
+
+    const styleGuides = preview.native_prompts.find((prompt) => prompt.id === "setup-style-guides");
+    assert.equal(styleGuides.selectionMode, "multi");
+    assert.equal(styleGuides.responseTarget.argument, "styleGuideIds");
+    assert.ok(styleGuides.choices.some((choice) => choice.id === "general" && choice.recommended === true));
+    assert.ok(styleGuides.choices.some((choice) => choice.id === "typescript" && choice.recommended === true));
+
+    const lsp = preview.native_prompts.find((prompt) => prompt.id === "setup-lsp");
+    assert.equal(lsp.selectionMode, "single");
+    assert.equal(lsp.responseTarget.argument, "writeLsp");
+    assert.ok(lsp.choices.some((choice) => choice.id === "write-lsp" && choice.recommended === true));
+
+    const optionalMcps = preview.native_prompts.find((prompt) => prompt.id === "setup-optional-mcps");
+    assert.equal(optionalMcps.selectionMode, "multi");
+    assert.equal(optionalMcps.responseTarget.argument, "integrations");
+    assert.ok(optionalMcps.choices.some((choice) => choice.id === "code_search"));
+
+    const compact = core.workflowPacket(root, {
+      workflow: "setup",
+      teamSize: 3,
+      product: { title: "Product", summary: "Test product" },
+      techStack: { languages: ["TypeScript"], frameworks: ["React"] },
+    });
+    const compactProvider = compact.native_prompts.find((prompt) => prompt.id === "setup-provider-mode");
+    assert.equal(compactProvider.selectionMode, "single");
+    assert.equal(compactProvider.argument, "providerMode");
+    assert.equal(Object.prototype.hasOwnProperty.call(compactProvider, "choices"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(compactProvider, "recommended"), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow setup writes detected and requested style guides from templates", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-test-"));
   const oldPath = process.env.PATH;
@@ -1357,6 +1430,8 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.match(fs.readFileSync(path.join(root, "cadre", ".gitignore"), "utf8"), /\/local\//);
     const events = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8").trim().split(/\n/).map((line) => JSON.parse(line));
     assert.ok(events.some((event) => event.kind === "setup_completed"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "native-prompts.jsonl")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "prompt-responses.jsonl")), false);
   } finally {
     process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });

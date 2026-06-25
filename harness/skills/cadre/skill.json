@@ -138,6 +138,9 @@
     "provider-evidence": {
       "uri": "cadre://agent-reference?name=provider-evidence"
     },
+    "native-prompts": {
+      "uri": "cadre://agent-reference?name=native-prompts"
+    },
     "team-ops": {
       "uri": "cadre://agent-reference?name=team-ops"
     },

@@ -16,6 +16,7 @@ import { summarizeLspSetupResult } from "./health-summaries";
 import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
+import { setupNativePrompts } from "./native-prompts";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { appendLspReviewArtifacts, humanReviewState, setupReviewArtifacts, setupReviewBundle, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
 import { configuredCiProvider, lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
@@ -78,6 +79,16 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,
+    ...(args.execute === true ? {} : {
+      native_prompts: setupNativePrompts({
+        provider: asJsonObject(provider),
+        syncMode: syncModeRecommendation,
+        styleGuides: asJsonObject(styleGuides),
+        lspSetup: asJsonObject(lspRecommendations),
+        integrations: workspaceHealthResult.integrations,
+        runtimeArgs: args,
+      }),
+    }),
     warnings,
     required_payload: args.execute === true
       ? ["product", "techStack"]
