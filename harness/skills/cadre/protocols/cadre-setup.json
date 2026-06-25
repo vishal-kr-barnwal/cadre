@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields. Use the returned setup review artifacts and native state summary for the user review."
+      "instruction": "Call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, structured `product`, optional `productGuidelines`, optional `workflowPolicy`, and `techStack` JSON fields. Use the returned staged approval object, current review_bundle manifest/path list, setup review artifacts, and native state summary for the user review."
     },
     {
       "step": 3,
@@ -35,11 +35,11 @@
     },
     {
       "step": 4,
-      "instruction": "After prompt answers have been mapped back to structured setup arguments, present returned setup review artifacts using the review_bundle manifest/path list so large generated Markdown projections do not enter model context."
+      "instruction": "After prompt answers have been mapped back to structured setup arguments, review the current `approval.current_stage` using the returned review_bundle manifest/path list so large generated Markdown projections do not enter model context. When the user approves a stage, call setup again with that stage included in `approvedStages` to advance to the next stage."
     },
     {
       "step": 5,
-      "instruction": "When the user confirms the setup payload and review artifacts, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, and `humanConfirmed: true`."
+      "instruction": "When all setup stages are approved, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, and `approvalComplete: true` using the same structured payload."
     },
     {
       "step": 6,
@@ -50,7 +50,8 @@
     "requiredForMutation": true,
     "dryRunFirst": true,
     "executeArgument": "execute",
-    "humanConfirmationArgument": "humanConfirmed"
+    "approvalArgument": "approvalComplete",
+    "stagedApproval": true
   },
   "forbiddenActions": [
     "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",

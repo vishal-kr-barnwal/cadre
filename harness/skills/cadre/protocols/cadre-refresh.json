@@ -35,7 +35,7 @@
     },
     {
       "step": 4,
-      "instruction": "When packet-supported document updates are requested, call the workflow packet again with `execute: true` and `humanConfirmed: true`."
+      "instruction": "When packet-supported document updates are requested, call the workflow packet again with `execute: true` and `approvalComplete: true`."
     },
     {
       "step": 5,
@@ -46,7 +46,7 @@
     "requiredForMutation": true,
     "dryRunFirst": true,
     "executeArgument": "execute",
-    "humanConfirmationArgument": "humanConfirmed"
+    "approvalArgument": "approvalComplete"
   },
   "forbiddenActions": [
     "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",

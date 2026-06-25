@@ -42,7 +42,7 @@
     "requiredForMutation": true,
     "dryRunFirst": false,
     "executeArgument": "execute",
-    "humanConfirmationArgument": "humanConfirmed"
+    "approvalArgument": "approvalComplete"
   },
   "forbiddenActions": [
     "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",

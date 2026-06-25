@@ -123,10 +123,10 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     return {
       ...base,
       ok: false,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       dry_run: true,
-      error: "Human confirmation is required before writing release artifacts",
+      error: "Staged approval is required before writing release artifacts",
     };
   }
   const traceBefore = beginTrace(root);
@@ -270,9 +270,9 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       ...base,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
-      error: "Human confirmation is required before revising track artifacts",
+      error: "Staged approval is required before revising track artifacts",
     };
   }
   const traceBefore = beginTrace(root);

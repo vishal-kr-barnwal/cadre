@@ -1898,7 +1898,7 @@ function lspImpact(root, args = {}) {
 // src/core/application/runtime/tech-stack.ts
 function humanReviewConfirmed(args = {}) {
   const rawArgs = args;
-  return rawArgs.humanConfirmed === true || rawArgs.human_confirmed === true || rawArgs.userConfirmed === true || rawArgs.user_confirmed === true || rawArgs.confirmed === true;
+  return rawArgs.approvalComplete === true || rawArgs.approval_complete === true;
 }
 
 // src/core/application/runtime/repo-resolution.ts
@@ -2816,7 +2816,7 @@ function prepareManualVerificationCompletion(root, track, task, args, workingRoo
       ok: false,
       dry_run: true,
       blocked: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "manual_verification_approval",
       track_id: track.track_id,
       task_key: task.task_key,
@@ -2829,7 +2829,7 @@ function prepareManualVerificationCompletion(root, track, task, args, workingRoo
       ok: false,
       dry_run: true,
       blocked: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "manual_verification_approval",
       track_id: track.track_id,
       task_key: task.task_key,

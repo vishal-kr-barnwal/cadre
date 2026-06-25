@@ -152,14 +152,14 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
             ...summary,
             ok: false,
             dry_run: true,
-            phase_state: "awaiting_human_review",
+            phase_state: "awaiting_staged_approval",
             stage: "human_review",
             track_context: context,
             proposed_status: status,
             reason,
             human_review: humanReview,
             review_artifacts: reviewArtifacts,
-            error: "Human confirmation is required before flagging track status",
+            error: "Staged approval is required before flagging track status",
           };
         }
         const traceBefore = beginTrace(root);

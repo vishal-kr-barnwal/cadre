@@ -296,7 +296,7 @@ Common scopes:
   and project-level projections.
 
 Confirmed sync requires the dry-run review bundle first, then `execute:true`
-and `humanConfirmed:true`. Unmarked generated projections are skipped unless
+and `approvalComplete:true`. Unmarked generated projections are skipped unless
 the user explicitly approves `force:true`.
 
 ## `cadre-revert`

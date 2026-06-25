@@ -3293,6 +3293,36 @@ function compactReviewBundle(value) {
     truncated: files.length > 30
   };
 }
+function compactApproval(value) {
+  if (!value || !isRecord(value)) return null;
+  const approval = asJsonObject(value);
+  const stages = Array.isArray(approval.stages) ? approval.stages.map(asJsonObject) : [];
+  const artifacts = compactReviewArtifacts(approval.current_review_artifacts);
+  const bundle = compactReviewBundle(approval.current_review_bundle);
+  return {
+    version: approval.version || 1,
+    kind: asOptionalString(approval.kind) || "cadre.staged_approval.v1",
+    workflow: asOptionalString(approval.workflow) || null,
+    required: approval.required !== false,
+    approval_argument: asOptionalString(approval.approval_argument) || "approvalComplete",
+    approval_complete: approval.approval_complete === true,
+    current_stage: asOptionalString(approval.current_stage) || null,
+    current_stage_title: asOptionalString(approval.current_stage_title) || null,
+    approved_stages: asStringArray(approval.approved_stages),
+    pending_stages: asStringArray(approval.pending_stages),
+    stages: stages.map((stage) => ({
+      id: asOptionalString(stage.id) || null,
+      title: asOptionalString(stage.title) || null,
+      approved: stage.approved === true,
+      file_count: Number(stage.file_count || 0)
+    })),
+    current_review_artifacts: artifacts.files,
+    current_review_artifact_count: artifacts.count,
+    current_review_bundle: bundle,
+    current_review_bundle_path: bundle?.manifest_path || null,
+    next_actions: Array.isArray(approval.next_actions) ? approval.next_actions : []
+  };
+}
 function compactProvider(value) {
   if (!value || !isRecord(value)) return null;
   const provider = asJsonObject(value);
@@ -3407,6 +3437,7 @@ function compactSetupResponse(result) {
   const styleGuides = compactStyleGuides(result.styleGuides);
   const reviewBundle = compactReviewBundle(result.review_bundle);
   const reviewArtifacts = compactReviewArtifacts(result.review_artifacts);
+  const approval = compactApproval(result.approval);
   const reviewBundleSummary = reviewBundle ? {
     directory: reviewBundle.directory,
     manifest_path: reviewBundle.manifest_path,
@@ -3420,7 +3451,7 @@ function compactSetupResponse(result) {
     required: asJsonObject(result.human_review).required !== false,
     confirmed: asJsonObject(result.human_review).confirmed === true,
     workflow: asOptionalString(asJsonObject(result.human_review).workflow) || null,
-    confirm_argument: asOptionalString(asJsonObject(result.human_review).confirm_argument) || "humanConfirmed",
+    confirm_argument: asOptionalString(asJsonObject(result.human_review).confirm_argument) || "approvalComplete",
     explicit_approval_required: asJsonObject(result.human_review).explicit_approval_required === true,
     approval_instruction: asOptionalString(asJsonObject(result.human_review).approval_instruction) || null,
     not_approval: asStringArray(asJsonObject(result.human_review).not_approval),
@@ -3462,6 +3493,7 @@ function compactSetupResponse(result) {
       styleGuideIds: asJsonObject(result.techStackSummary).styleGuideIds,
       summary: asJsonObject(result.techStackSummary).summary
     } : result.techStackSummary,
+    approval,
     human_review: humanReview,
     intent_prompts: compactNativePrompts(result.intent_prompts),
     native_prompts: compactNativePrompts(result.native_prompts),
@@ -4529,8 +4561,8 @@ function setupStyleGuides(root, args = {}) {
   };
 }
 function humanReviewConfirmed(args = {}) {
-  const rawArgs2 = args;
-  return rawArgs2.humanConfirmed === true || rawArgs2.human_confirmed === true || rawArgs2.userConfirmed === true || rawArgs2.user_confirmed === true || rawArgs2.confirmed === true;
+  const rawArgs3 = args;
+  return rawArgs3.approvalComplete === true || rawArgs3.approval_complete === true;
 }
 
 // src/core/application/runtime/review-bundles.ts
@@ -4573,12 +4605,12 @@ function jsonReviewFile(relativePath, title, source, value) {
   };
 }
 function setupLspWriteRequested(args = {}) {
-  const rawArgs2 = args;
-  return rawArgs2.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true;
+  const rawArgs3 = args;
+  return rawArgs3.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true;
 }
 function setupLspWriteDisabled(args = {}) {
-  const rawArgs2 = args;
-  return rawArgs2.lsp === false || args.setupLsp === false || args.setup_lsp === false || args.writeLsp === false || args.write_lsp === false;
+  const rawArgs3 = args;
+  return rawArgs3.lsp === false || args.setupLsp === false || args.setup_lsp === false || args.writeLsp === false || args.write_lsp === false;
 }
 function setupShouldWriteLsp(args, lspRecommendations) {
   if (setupLspWriteRequested(args)) return true;
@@ -4586,17 +4618,17 @@ function setupShouldWriteLsp(args, lspRecommendations) {
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
 function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
-  const rawArgs2 = args;
+  const rawArgs3 = args;
   const techStack = techStackForPacket(root, args);
-  const productJson = normalizeProjectDoc("product", rawArgs2.product, "product.json", "Product Context", "Project-Specific Product Notes");
+  const productJson = normalizeProjectDoc("product", rawArgs3.product, "product.json", "Product Context", "Project-Specific Product Notes");
   const productGuidelinesJson = normalizeProjectDoc(
     "product_guidelines",
-    rawArgs2.productGuidelines || rawArgs2.product_guidelines,
+    rawArgs3.productGuidelines || rawArgs3.product_guidelines,
     "product_guidelines.json",
     "Product Guidelines",
     "Project-Specific Product Guideline Notes"
   );
-  const workflowJson = normalizeProjectDoc("workflow", rawArgs2.workflowPolicy || rawArgs2.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes");
+  const workflowJson = normalizeProjectDoc("workflow", rawArgs3.workflowPolicy || rawArgs3.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes");
   const patternsSeed = templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
   const patternsText = asOptionalString(patternsSeed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
   const patternsEntry = {
@@ -4647,7 +4679,7 @@ function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
     })
   ];
   if (polyrepoRequested) {
-    files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs2.repos) ? asJsonObject(rawArgs2.repos) : null));
+    files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs3.repos) ? asJsonObject(rawArgs3.repos) : null));
   }
   return files;
 }
@@ -4680,10 +4712,10 @@ function shellQuote(value) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras = {}) {
-  const rawArgs2 = args;
+  const rawArgs3 = args;
   if (reviewFiles.length === 0) return null;
-  if (args.execute === true && humanReviewConfirmed(args) || rawArgs2.reviewBundle === false || rawArgs2.reviewFiles === false) return null;
-  const explicitDir = asOptionalString(rawArgs2.reviewBundleDir || rawArgs2.review_bundle_dir || rawArgs2.reviewDir || rawArgs2.review_dir);
+  if (args.execute === true && (humanReviewConfirmed(args) || rawArgs3.approvalComplete === true || rawArgs3.approval_complete === true) || rawArgs3.reviewBundle === false || rawArgs3.reviewFiles === false) return null;
+  const explicitDir = asOptionalString(rawArgs3.reviewBundleDir || rawArgs3.review_bundle_dir || rawArgs3.reviewDir || rawArgs3.review_dir);
   const rootHash = import_node_crypto2.default.createHash("sha256").update(root).digest("hex").slice(0, 12);
   const defaultDirectory = import_node_path22.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path22.default.basename(root))}-${rootHash}`);
   let directory = explicitDir ? import_node_path22.default.resolve(root, explicitDir) : defaultDirectory;
@@ -4741,15 +4773,6 @@ function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras 
     commands
   };
 }
-function setupReviewBundle(root, args, reviewFiles, styleGuides) {
-  return workflowReviewBundle(root, "setup", args, reviewFiles, {
-    styleGuides: {
-      selected: asStringArray(styleGuides.selected),
-      missing: asStringArray(styleGuides.missing),
-      warnings: asStringArray(styleGuides.warnings)
-    }
-  });
-}
 function setupLspReviewArtifacts(args = {}, writeRequested = setupLspWriteRequested(args)) {
   if (writeRequested) {
     return [
@@ -4773,9 +4796,9 @@ function humanReviewState(workflow, args, artifacts, reviewBundle = null) {
     required: true,
     confirmed: humanReviewConfirmed(args),
     workflow,
-    confirm_argument: "humanConfirmed",
+    confirm_argument: "approvalComplete",
     explicit_approval_required: true,
-    approval_instruction: `Review the ${workflow} bundle, then ask the user for explicit approval before calling the mutating packet with humanConfirmed:true.`,
+    approval_instruction: `Review the ${workflow} bundle, then ask the user for explicit approval before calling the mutating packet with approvalComplete:true.`,
     not_approval: [
       "native prompt answers",
       "numbered option selections",
@@ -6704,14 +6727,14 @@ function artifactSync(root, args = {}) {
     return {
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       artifacts,
       human_review: humanReview,
       review_bundle: reviewBundle,
       warnings,
-      errors: ["Human confirmation is required before syncing artifacts"],
-      error: "Human confirmation is required before syncing artifacts"
+      errors: ["Staged approval is required before syncing artifacts"],
+      error: "Staged approval is required before syncing artifacts"
     };
   }
   const controlCommit = execute ? commitTrace(root, args, {
@@ -8486,6 +8509,137 @@ function refreshIntentPrompts(args = {}) {
   ];
 }
 
+// src/core/application/runtime/staged-approval.ts
+function rawArgs2(args) {
+  return args;
+}
+function approvalComplete(args = {}) {
+  const raw = rawArgs2(args);
+  return raw.approvalComplete === true || raw.approval_complete === true;
+}
+function approvedStageIds(args = {}) {
+  const raw = rawArgs2(args);
+  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages))).sort();
+}
+function requestedApprovalStage(args = {}) {
+  const raw = rawArgs2(args);
+  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
+}
+function filesForStage(files, stage) {
+  return files.filter((file) => stage.fileMatches.some((needle) => file.path.includes(needle) || file.source.includes(needle)));
+}
+function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras = {}) {
+  const approved = new Set(approvedStageIds(args));
+  const pending = stages.filter((stage) => !approved.has(stage.id));
+  const requested = requestedApprovalStage(args);
+  const active = stages.find((stage) => stage.id === requested) || pending[0] || stages[stages.length - 1] || null;
+  const activeFiles = active ? filesForStage(reviewFiles, active) : [];
+  const stageBundle = active ? workflowReviewBundle(root, `${workflow}-${active.id}`, args, activeFiles, {
+    ...extras,
+    approval_stage: active.id,
+    approved_stages: Array.from(approved),
+    pending_stages: pending.map((stage) => stage.id)
+  }) : null;
+  const complete = approvalComplete(args);
+  return {
+    version: 1,
+    kind: "cadre.staged_approval.v1",
+    workflow,
+    required: true,
+    approval_argument: "approvalComplete",
+    approval_complete: complete,
+    current_stage: active?.id || null,
+    current_stage_title: active?.title || null,
+    approved_stages: Array.from(approved),
+    pending_stages: pending.map((stage) => stage.id),
+    stages: stages.map((stage) => {
+      const stageFiles = filesForStage(reviewFiles, stage);
+      return {
+        id: stage.id,
+        title: stage.title,
+        description: stage.description,
+        approved: approved.has(stage.id),
+        file_count: stageFiles.length
+      };
+    }),
+    current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
+    current_review_bundle: stageBundle,
+    next_actions: complete ? [`Call ${workflow} with execute:true and approvalComplete:true to apply the approved staged payload.`] : active ? [
+      `Review and approve the ${active.id} stage.`,
+      `Call ${workflow} again with approvedStages including ${active.id} to advance to the next stage.`,
+      "After all stages are approved, call the mutating packet with execute:true and approvalComplete:true."
+    ] : []
+  };
+}
+function setupApprovalStages(polyrepoRequested) {
+  return [
+    {
+      id: "product",
+      title: "Product Context",
+      description: "Product summary, users, workflows, domain model, invariants, and boundaries.",
+      fileMatches: ["product.json", "product.md"]
+    },
+    {
+      id: "product_guidelines",
+      title: "Product Guidelines",
+      description: "Product principles, user promises, trust boundaries, non-goals, decision rules, and review checklist.",
+      fileMatches: ["product_guidelines"]
+    },
+    {
+      id: "tech_stack",
+      title: "Tech Stack",
+      description: "Structured languages, frameworks, package managers, platforms, and project commands.",
+      fileMatches: ["tech-stack.json", "techStack"]
+    },
+    {
+      id: "workflow",
+      title: "Workflow Policy",
+      description: "Development, verification, review, commit, and coordination expectations.",
+      fileMatches: ["workflow.json", "workflow.md", "workflowPolicy"]
+    },
+    {
+      id: "styleguides",
+      title: "Style Guides",
+      description: "Generated style-guide selection and projections derived from the tech stack.",
+      fileMatches: ["styleguides", "code_styleguides"]
+    },
+    {
+      id: polyrepoRequested ? "project_state" : "project_state",
+      title: polyrepoRequested ? "Project State And Repos" : "Project State",
+      description: "Initial indexes, patterns, optional repository topology, and setup support artifacts.",
+      fileMatches: ["patterns", "tracks.json", "repos.json", "lsp.json"]
+    }
+  ];
+}
+function newTrackApprovalStages() {
+  return [
+    {
+      id: "spec",
+      title: "Track Spec",
+      description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
+      fileMatches: ["spec.json", "spec.md"]
+    },
+    {
+      id: "plan",
+      title: "Track Plan",
+      description: "Phases, tasks, dependencies, file claims, and manual verification tasks.",
+      fileMatches: ["plan.json", "plan.md"]
+    },
+    {
+      id: "metadata",
+      title: "Track Metadata",
+      description: "Track identity, ownership, status, priority, branch, and worktree routing.",
+      fileMatches: ["metadata.json", "metadata"]
+    },
+    {
+      id: "learnings",
+      title: "Track Learnings",
+      description: "Initial learnings journal and human projection for future implementation notes.",
+      fileMatches: ["learnings"]
+    }
+  ];
+}
+
 // src/core/application/runtime/workflow-new-track.ts
 function newTrackReviewFiles(trackId, spec, plan, metadata) {
   const safeTrack = safeName(trackId);
@@ -8606,9 +8760,10 @@ function workflowNewTrack(root, args = {}) {
   };
   const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const reviewBundle = workflowReviewBundle(root, "newtrack", args, reviewFiles, { track_id: String(trackId) });
-  const humanReview = humanReviewState("newtrack", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const approval = stagedApprovalState(root, "newtrack", args, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, plan: planJson, trackId });
   if (dryRun) {
@@ -8616,45 +8771,43 @@ function workflowNewTrack(root, args = {}) {
       ...summary,
       ok: assist.ok !== false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
       track_id: trackId,
       metadata,
       plan_assist: assist,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
+      approval,
+      review_artifacts: stageReviewArtifacts || reviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       next_actions: [
-        "Review the newtrack review_bundle manifest and generated artifact files.",
-        "Ask the user for explicit approval of this review bundle; native prompt answers and numbered option selections are not approval.",
-        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload."
+        "Approve newtrack one stage at a time with approvedStages.",
+        "After spec, plan, metadata, and learnings are approved, call newtrack with execute:true and approvalComplete:true using the same structured payload."
       ]
     };
   }
   if (findTrack(root, trackId)) {
     return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!approvalComplete(args)) {
     return {
       ...summary,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
       track_id: trackId,
       metadata,
       plan_assist: assist,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
+      approval,
+      review_artifacts: stageReviewArtifacts || reviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       next_actions: [
-        "Review the newtrack review_bundle manifest and generated artifact files.",
-        "Ask the user for explicit approval before retrying the mutating packet.",
-        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload."
+        "Review the current staged approval bundle.",
+        "Call newtrack again with execute:true and approvalComplete:true only after every staged approval is complete."
       ],
-      error: "Human confirmation is required before creating track artifacts"
+      error: "Staged approval is required before creating track artifacts"
     };
   }
   const traceBefore = beginTrace(root);
@@ -8706,7 +8859,7 @@ function workflowNewTrack(root, args = {}) {
     event,
     control_commit: controlCommit,
     phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
-    human_review: humanReview,
+    approval,
     worktree_plan: worktreePlan(root, { trackId })
   };
 }
@@ -8714,8 +8867,8 @@ function workflowNewTrack(root, args = {}) {
 // src/core/application/runtime/formula-workflow.ts
 var READ_ACTIONS = /* @__PURE__ */ new Set(["list", "show", "cook", "wisp_list", "pour"]);
 function formulaAction(args) {
-  const rawArgs2 = args;
-  const raw = asOptionalString(rawArgs2.operation) || asOptionalString(rawArgs2.mode) || asOptionalString(rawArgs2.formulaAction || rawArgs2.formula_action) || (asOptionalString(args.action) && asOptionalString(args.action) !== "formula" ? asOptionalString(args.action) : null) || "list";
+  const rawArgs3 = args;
+  const raw = asOptionalString(rawArgs3.operation) || asOptionalString(rawArgs3.mode) || asOptionalString(rawArgs3.formulaAction || rawArgs3.formula_action) || (asOptionalString(args.action) && asOptionalString(args.action) !== "formula" ? asOptionalString(args.action) : null) || "list";
   const normalized = raw.replace(/^formula_/, "").replace(/-/g, "_");
   if (normalized === "wisp_update") return "wisp_update_step";
   if (normalized === "squash") return "wisp_squash";
@@ -8742,12 +8895,12 @@ function wispDir(root) {
   return import_node_path34.default.join(root, "cadre", "local", "wisps");
 }
 function formulaId(args) {
-  const rawArgs2 = args;
-  return asOptionalString(args.id) || asOptionalString(rawArgs2.formulaId || rawArgs2.formula_id) || asOptionalString(args.name) || null;
+  const rawArgs3 = args;
+  return asOptionalString(args.id) || asOptionalString(rawArgs3.formulaId || rawArgs3.formula_id) || asOptionalString(args.name) || null;
 }
 function wispId(args) {
-  const rawArgs2 = args;
-  return asOptionalString(args.id) || asOptionalString(rawArgs2.wispId || rawArgs2.wisp_id) || null;
+  const rawArgs3 = args;
+  return asOptionalString(args.id) || asOptionalString(rawArgs3.wispId || rawArgs3.wisp_id) || null;
 }
 function formulaPath(root, id) {
   return import_node_path34.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
@@ -8763,11 +8916,11 @@ function loadFormula(root, id) {
   return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path34.default.relative(root, file), formula };
 }
 function variablesFromArgs(formula, args) {
-  const rawArgs2 = args;
+  const rawArgs3 = args;
   return {
     ...asJsonObject(formula.defaults),
-    ...asJsonObject(rawArgs2.variables),
-    ...asJsonObject(rawArgs2.vars)
+    ...asJsonObject(rawArgs3.variables),
+    ...asJsonObject(rawArgs3.vars)
   };
 }
 function variableValue(variables, key) {
@@ -8934,9 +9087,9 @@ function updateWispStep(root, args) {
   const file = wispPath(root, id);
   const wisp = readJson(file, null);
   if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path34.default.relative(root, file) };
-  const rawArgs2 = args;
-  const stepId = asOptionalString(rawArgs2.stepId || rawArgs2.step_id || rawArgs2.taskKey || rawArgs2.task_key);
-  const stepIndex = Number(rawArgs2.stepIndex || rawArgs2.step_index || args.taskIndex || 0);
+  const rawArgs3 = args;
+  const stepId = asOptionalString(rawArgs3.stepId || rawArgs3.step_id || rawArgs3.taskKey || rawArgs3.task_key);
+  const stepIndex = Number(rawArgs3.stepIndex || rawArgs3.step_index || args.taskIndex || 0);
   const steps = Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [];
   const index = steps.findIndex(
     (step, offset) => stepId && asOptionalString(step.step_id) === stepId || stepIndex > 0 && offset + 1 === stepIndex
@@ -9177,7 +9330,7 @@ function prepareManualVerificationCompletion(root, track, task, args, workingRoo
       ok: false,
       dry_run: true,
       blocked: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "manual_verification_approval",
       track_id: track.track_id,
       task_key: task.task_key,
@@ -9190,7 +9343,7 @@ function prepareManualVerificationCompletion(root, track, task, args, workingRoo
       ok: false,
       dry_run: true,
       blocked: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "manual_verification_approval",
       track_id: track.track_id,
       task_key: task.task_key,
@@ -9637,8 +9790,8 @@ function positiveInt(value, fallback, max = 20) {
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.max(1, Math.min(max, Math.floor(parsed)));
 }
-function humanConfirmed(args) {
-  return args.humanConfirmed === true || args.human_confirmed === true;
+function approvalComplete2(args) {
+  return args.approvalComplete === true || args.approval_complete === true;
 }
 function changedFilesFromArgs(args) {
   return asStringArray(args.filesChanged || args.files_changed || args.files);
@@ -9706,7 +9859,7 @@ function validateWorkerFinishEvidence(root, track, args = {}) {
     (file) => ownedFiles.some((owned) => claimsOverlap(file, owned)) || likelyTests.includes(file) || isNarrowTestChange(file, ownedFiles) || isManifestChange(file)
   );
   const violations = changed.filter((file) => !allowed.includes(file));
-  const forceAccepted = violations.length > 0 && args.force === true && humanConfirmed(args);
+  const forceAccepted = violations.length > 0 && args.force === true && approvalComplete2(args);
   return {
     ok: violations.length === 0 || forceAccepted,
     checked: true,
@@ -9718,7 +9871,7 @@ function validateWorkerFinishEvidence(root, track, args = {}) {
     files_changed: changed,
     allowed_files_changed: allowed,
     unowned_files_changed: violations,
-    reason: violations.length === 0 ? "All changed files are owned, likely related tests, or narrow manifest changes" : forceAccepted ? "Unowned changed files accepted because force and humanConfirmed were supplied" : "Changed files include paths outside the worker ownership claim"
+    reason: violations.length === 0 ? "All changed files are owned, likely related tests, or narrow manifest changes" : forceAccepted ? "Unowned changed files accepted because force and approvalComplete were supplied" : "Changed files include paths outside the worker ownership claim"
   };
 }
 function parallelWorkersForWave(root, track, args = {}) {
@@ -10151,12 +10304,12 @@ function workflowArchive(root, args = {}) {
       ...summary,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
-      error: "Human confirmation is required before archiving tracks"
+      error: "Staged approval is required before archiving tracks"
     };
   }
   const syncPre = syncControlPlane(root, { mode: "pre" });
@@ -10253,9 +10406,9 @@ function workflowHandoff(root, args = {}) {
       ...base,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
-      error: "Human confirmation is required before writing handoff artifacts"
+      error: "Staged approval is required before writing handoff artifacts"
     };
   }
   const traceBefore = beginTrace(root);
@@ -10390,14 +10543,14 @@ function workflowRevert(root, args = {}) {
     return {
       ...summary,
       ok: false,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       dry_run: true,
       track_context: trackContext(root, trackId),
       git_actions: gitActions,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
-      error: "Human confirmation is required before reverting tracked commits"
+      error: "Staged approval is required before reverting tracked commits"
     };
   }
   const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
@@ -10477,7 +10630,7 @@ function workflowRefresh(root, args = {}) {
       ...summary,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       doctor: doctor(root, { hasCadreProject: true }),
       workspace: workspaceDiagnostics(root, { execute: false }),
@@ -10489,7 +10642,7 @@ function workflowRefresh(root, args = {}) {
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
       warnings,
-      error: "Human confirmation is required before refreshing Cadre context documents"
+      error: "Staged approval is required before refreshing Cadre context documents"
     };
   }
   const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
@@ -10542,9 +10695,9 @@ var import_node_fs21 = __toESM(require("node:fs"));
 var import_node_path41 = __toESM(require("node:path"));
 function releaseArtifactPlan(root, args = {}) {
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
-  const rawArgs2 = args;
+  const rawArgs3 = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
-  const generatedAt = asOptionalString(rawArgs2.generatedAt || rawArgs2.generated_at) || utcNow();
+  const generatedAt = asOptionalString(rawArgs3.generatedAt || rawArgs3.generated_at) || utcNow();
   const releaseDir = import_node_path41.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
   const releaseMd = import_node_path41.default.join(releaseDir, `${releaseSlug}.md`);
@@ -10573,7 +10726,7 @@ function releaseArtifactPlan(root, args = {}) {
       review: track.review
     }))
   };
-  const gitActions = rawArgs2.createTag === true || rawArgs2.create_tag === true || rawArgs2.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
+  const gitActions = rawArgs3.createTag === true || rawArgs3.create_tag === true || rawArgs3.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
   return { version, generatedAt, completed, releaseDir, releaseMd, releaseJson, notes, metadata, gitActions };
 }
 function releaseReviewFiles(root, plan) {
@@ -10629,10 +10782,10 @@ function workflowRelease(root, args = {}) {
     return {
       ...base,
       ok: false,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       dry_run: true,
-      error: "Human confirmation is required before writing release artifacts"
+      error: "Staged approval is required before writing release artifacts"
     };
   }
   const traceBefore = beginTrace(root);
@@ -10776,9 +10929,9 @@ function workflowRevise(root, args = {}) {
       ...base,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
-      error: "Human confirmation is required before revising track artifacts"
+      error: "Staged approval is required before revising track artifacts"
     };
   }
   const traceBefore = beginTrace(root);
@@ -10828,10 +10981,10 @@ function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
-  const rawArgs2 = args;
-  const requestedTopology = asOptionalString(rawArgs2.topology)?.toLowerCase();
-  const reposPayload = isRecord(rawArgs2.repos) ? asJsonObject(rawArgs2.repos) : null;
-  const polyrepoRequested = Boolean(reposPayload && reposPayload.mode === "polyrepo") || requestedTopology === "polyrepo" || rawArgs2.polyrepo === true;
+  const rawArgs3 = args;
+  const requestedTopology = asOptionalString(rawArgs3.topology)?.toLowerCase();
+  const reposPayload = isRecord(rawArgs3.repos) ? asJsonObject(rawArgs3.repos) : null;
+  const polyrepoRequested = Boolean(reposPayload && reposPayload.mode === "polyrepo") || requestedTopology === "polyrepo" || rawArgs3.polyrepo === true;
   const styleGuides = setupStyleGuides(root, args);
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
@@ -10839,14 +10992,21 @@ function workflowSetup(root, args = {}) {
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
-  const configOverrides = asJsonObject(rawArgs2.config);
-  const requestedSyncMode = asOptionalString(rawArgs2.syncMode || rawArgs2.sync_mode || configOverrides.sync_mode);
-  const teamSize = Number(rawArgs2.teamSize || rawArgs2.team_size || 0);
+  const configOverrides = asJsonObject(rawArgs3.config);
+  const requestedSyncMode = asOptionalString(rawArgs3.syncMode || rawArgs3.sync_mode || configOverrides.sync_mode);
+  const teamSize = Number(rawArgs3.teamSize || rawArgs3.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
   const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
-  const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
   const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
-  const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
+  const approval = stagedApprovalState(root, "setup", args, setupApprovalStages(polyrepoRequested), reviewFiles, {
+    styleGuides: {
+      selected: asStringArray(styleGuides.selected),
+      missing: asStringArray(styleGuides.missing),
+      warnings: asStringArray(styleGuides.warnings)
+    }
+  });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
   const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
   const nativePrompts = args.execute === true ? [] : setupNativePrompts({
     provider: asJsonObject(provider),
@@ -10858,7 +11018,7 @@ function workflowSetup(root, args = {}) {
   });
   const warnings = [
     ...asStringArray(styleGuides.warnings),
-    ...asStringArray(asJsonObject(reviewBundle).warnings)
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings)
   ];
   const result = {
     ...summary,
@@ -10881,28 +11041,28 @@ function workflowSetup(root, args = {}) {
     techStackSummary: techStackSummary(root, args),
     ...intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {},
     ...nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {},
-    human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    approval,
+    review_artifacts: stageReviewArtifacts || reviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings,
     required_payload: args.execute === true ? ["product", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: [
       ...intentPrompts.length > 0 || nativePrompts.length > 0 ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."] : [],
       ...provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
-      "After prompt answers, review the setup bundle; call setup with execute:true and humanConfirmed:true only after explicit approval."
+      "Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true."
     ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
-      "Setup writes are human-in-loop: mutating setup packets require humanConfirmed:true after artifact review.",
+      "Setup writes are human-in-loop: mutating setup packets require approvalComplete:true after staged artifact review.",
       "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves.",
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none."
     ]
   };
   if (args.execute !== true) return result;
   const cadreDir = import_node_path42.default.join(root, "cadre");
-  const force = asBoolean(rawArgs2.force, false);
+  const force = asBoolean(rawArgs3.force, false);
   const missingPayload = [
-    ...!isRecord(rawArgs2.product) ? ["product"] : [],
+    ...!isRecord(rawArgs3.product) ? ["product"] : [],
     ...!techStackFromArgs(args) ? ["techStack"] : [],
     ...provider.requires_confirmation === true || !providerMode ? ["providerMode"] : [],
     ...polyrepoRequested && !reposPayload ? ["repos"] : []
@@ -10915,13 +11075,13 @@ function workflowSetup(root, args = {}) {
       missing_payload: missingPayload
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!approvalComplete(args)) {
     return {
       ...result,
       ok: false,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
-      error: "Human confirmation is required before writing setup artifacts"
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
+      error: "Staged approval is required before writing setup artifacts"
     };
   }
   const traceBefore = beginTrace(root);
@@ -10969,7 +11129,7 @@ function workflowSetup(root, args = {}) {
   writeProjectDoc(
     "product.md",
     "product",
-    normalizeProjectDoc("product", rawArgs2.product, "product.json", "Product Context", "Project-Specific Product Notes"),
+    normalizeProjectDoc("product", rawArgs3.product, "product.json", "Product Context", "Project-Specific Product Notes"),
     "Product Context"
   );
   writeProjectDoc(
@@ -10977,7 +11137,7 @@ function workflowSetup(root, args = {}) {
     "product_guidelines",
     normalizeProjectDoc(
       "product_guidelines",
-      rawArgs2.productGuidelines || rawArgs2.product_guidelines,
+      rawArgs3.productGuidelines || rawArgs3.product_guidelines,
       "product_guidelines.json",
       "Product Guidelines",
       "Project-Specific Product Guideline Notes"
@@ -10988,7 +11148,7 @@ function workflowSetup(root, args = {}) {
   writeProjectDoc(
     "workflow.md",
     "workflow",
-    normalizeProjectDoc("workflow", rawArgs2.workflowPolicy || rawArgs2.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes"),
+    normalizeProjectDoc("workflow", rawArgs3.workflowPolicy || rawArgs3.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes"),
     "Project Workflow"
   );
   writeSetupJson("tracks.json", trackIndexPayload(root, []));
@@ -11044,7 +11204,7 @@ function workflowSetup(root, args = {}) {
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {},
-    ...isRecord(rawArgs2.integrations) ? { integrations: asJsonObject(rawArgs2.integrations) } : {},
+    ...isRecord(rawArgs3.integrations) ? { integrations: asJsonObject(rawArgs3.integrations) } : {},
     ...configOverrides
   };
   writeSetupJson("config.json", configPayload);
@@ -11054,7 +11214,7 @@ function workflowSetup(root, args = {}) {
     writeSetupJson("repos.json", reposPayload);
   }
   const lspSetupResult = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
-  const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs2.writeGitattributes === true || rawArgs2.write_gitattributes === true;
+  const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs3.writeGitattributes === true || rawArgs3.write_gitattributes === true;
   const gitattributes = gitattributesNeeded ? setupGitattributes(root) : null;
   const ciSetup = setupCiTemplates(
     root,
@@ -11455,14 +11615,14 @@ function workflowPacket(root, args = {}) {
             ...summary,
             ok: false,
             dry_run: true,
-            phase_state: "awaiting_human_review",
+            phase_state: "awaiting_staged_approval",
             stage: "human_review",
             track_context: context,
             proposed_status: status,
             reason,
             human_review: humanReview,
             review_artifacts: reviewArtifacts,
-            error: "Human confirmation is required before flagging track status"
+            error: "Staged approval is required before flagging track status"
           };
         }
         const traceBefore = beginTrace(root);

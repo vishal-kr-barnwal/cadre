@@ -228,7 +228,11 @@ test("Protocol files are structured JSON workflow definitions", () => {
         if (typeof step.instruction !== "string" || step.instruction.length < 40) failures.push(`${rel}: incomplete packet instruction ${index + 1}`);
       }
       if (protocol.confirmation.executeArgument !== "execute") failures.push(`${rel}: missing execute confirmation argument`);
-      if (protocol.confirmation.humanConfirmationArgument !== "humanConfirmed") failures.push(`${rel}: missing human confirmation argument`);
+      if (protocol.confirmation.stagedApproval === true) {
+        if (protocol.confirmation.approvalArgument !== "approvalComplete") failures.push(`${rel}: missing staged approval argument`);
+      } else if (protocol.confirmation.approvalArgument !== "approvalComplete") {
+        failures.push(`${rel}: missing staged approval argument`);
+      }
       if (!protocol.forbiddenActions.some((rule) => /Markdown/.test(rule))) failures.push(`${rel}: missing Markdown prohibition`);
       if (!protocol.responseSummary.some((item) => /canonical JSON/.test(item))) failures.push(`${rel}: missing canonical JSON response summary`);
     }
@@ -293,7 +297,11 @@ test("Artifact workflow protocols require token-safe review bundles", () => {
       if (!/manifest\/path list/.test(flow)) failures.push(`${path.relative(root, file)}: missing manifest/path list guidance for ${workflow}`);
       if (!/model\s+context/.test(flow)) failures.push(`${path.relative(root, file)}: missing model-context avoidance for ${workflow}`);
       if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run-first confirmation for ${workflow}`);
-      if (!/humanConfirmed: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
+      if (protocol.confirmation.stagedApproval === true) {
+        if (!/approvalComplete: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing approvalComplete:true execute guidance for ${workflow}`);
+      } else if (!/approvalComplete: true/.test(flow)) {
+        failures.push(`${path.relative(root, file)}: missing approvalComplete:true execute guidance for ${workflow}`);
+      }
     }
   }
   assert.deepEqual(failures, []);
@@ -312,7 +320,7 @@ test("Action workflow protocols require packet dry-run confirmation", () => {
       const protocol = readJson(file);
       const flow = protocol.packetFlow.map((step) => step.instruction).join("\n");
       if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run review for ${workflow}`);
-      if (!/humanConfirmed: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing humanConfirmed:true execute guidance for ${workflow}`);
+      if (!/approvalComplete: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing approvalComplete:true execute guidance for ${workflow}`);
       if (!protocol.forbiddenActions.some((rule) => /Markdown/.test(rule))) failures.push(`${path.relative(root, file)}: missing no-manual-mutation guidance for ${workflow}`);
     }
   }

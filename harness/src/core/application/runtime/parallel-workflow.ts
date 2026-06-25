@@ -30,8 +30,8 @@ function positiveInt(value: unknown, fallback: number, max = 20): number {
   return Math.max(1, Math.min(max, Math.floor(parsed)));
 }
 
-function humanConfirmed(args: RuntimeArgs): boolean {
-  return args.humanConfirmed === true || args.human_confirmed === true;
+function approvalComplete(args: RuntimeArgs): boolean {
+  return args.approvalComplete === true || args.approval_complete === true;
 }
 
 function changedFilesFromArgs(args: RuntimeArgs): string[] {
@@ -108,7 +108,7 @@ export function validateWorkerFinishEvidence(root: string, track: CadreTrack, ar
     || isManifestChange(file)
   );
   const violations = changed.filter((file) => !allowed.includes(file));
-  const forceAccepted = violations.length > 0 && args.force === true && humanConfirmed(args);
+  const forceAccepted = violations.length > 0 && args.force === true && approvalComplete(args);
   return {
     ok: violations.length === 0 || forceAccepted,
     checked: true,
@@ -123,7 +123,7 @@ export function validateWorkerFinishEvidence(root: string, track: CadreTrack, ar
     reason: violations.length === 0
       ? "All changed files are owned, likely related tests, or narrow manifest changes"
       : (forceAccepted
-        ? "Unowned changed files accepted because force and humanConfirmed were supplied"
+        ? "Unowned changed files accepted because force and approvalComplete were supplied"
         : "Changed files include paths outside the worker ownership claim"),
   };
 }

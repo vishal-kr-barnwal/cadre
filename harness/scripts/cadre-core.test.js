@@ -265,7 +265,7 @@ function setupTraceableProject(root) {
   const setup = core.workflowPacket(root, {
     workflow: "setup",
     execute: true,
-    humanConfirmed: true,
+    approvalComplete: true,
     responseMode: "detail",
     providerMode: "local",
     product: { title: "Trace Product", summary: "Traceable workflow test." },
@@ -329,7 +329,7 @@ test("commit trace records setup, newtrack, and task completion commits", () => 
     const created = core.workflowPacket(root, {
       workflow: "newtrack",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       responseMode: "detail",
       trackId,
       spec: sampleSpec(trackId),
@@ -978,7 +978,7 @@ test("completeTask records approved offline manual verification evidence", () =>
       trackId: "manual_offline_20260619",
       phaseIndex: 1,
       taskIndex: 2,
-      humanConfirmed: true,
+      approvalComplete: true,
       manualVerificationMode: "offline",
       manualVerificationSummary: "Ran the checkout flow by hand and confirmed the new behavior.",
       manualVerificationChecks: [
@@ -1045,7 +1045,7 @@ test("completeTask records approved autorun manual verification evidence", () =>
       trackId: "manual_autorun_approve_20260619",
       phaseIndex: 1,
       taskIndex: 2,
-      humanConfirmed: true,
+      approvalComplete: true,
       manualVerificationMode: "autorun",
       manualVerificationCommand: "printf 'manual ok\\n'",
       manualVerificationResult: preview.manual_verification,
@@ -1239,7 +1239,7 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
   }
 });
 
-test("workflow setup requires human confirmation before writing reviewed artifacts", () => {
+test("workflow setup requires staged approval before writing reviewed artifacts", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-human-review-test-"));
   try {
     git(root, ["init"]);
@@ -1252,19 +1252,20 @@ test("workflow setup requires human confirmation before writing reviewed artifac
     };
     const preview = core.workflowPacket(root, args);
     assert.equal(preview.ok, true);
-    assert.equal(preview.human_review.required, true);
-    assert.equal(preview.human_review.confirmed, false);
-    const guidelinesArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/product_guidelines.md");
-    assert.ok(guidelinesArtifact);
-    assert.equal(Object.prototype.hasOwnProperty.call(guidelinesArtifact, "content"), false);
+    assert.equal(preview.approval.required, true);
+    assert.equal(preview.approval.approval_complete, false);
+    assert.equal(preview.approval.current_stage, "product");
+    const productArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/product.md");
+    assert.ok(productArtifact);
+    assert.equal(Object.prototype.hasOwnProperty.call(productArtifact, "content"), false);
     assert.equal(preview.review_bundle.content_in_response, false);
-    assert.ok(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "product_guidelines.md")));
+    assert.ok(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "product.md")));
     assert.ok(fs.existsSync(preview.review_bundle.manifest_path));
 
     const blocked = core.workflowPacket(root, { ...args, execute: true });
     assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "human_review");
-    assert.equal(blocked.phase_state, "awaiting_human_review");
+    assert.equal(blocked.stage, "staged_approval");
+    assert.equal(blocked.phase_state, "awaiting_staged_approval");
     assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1376,7 +1377,7 @@ test("workflow setup writes detected and requested style guides from templates",
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
@@ -1397,7 +1398,7 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.styleGuides.selected.includes("general"));
     assert.ok(setup.styleGuides.selected.includes("python"));
     assert.deepEqual(setup.styleGuides.missing, []);
-    assert.equal(setup.human_review.confirmed, true);
+    assert.equal(setup.approval.approval_complete, true);
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/python.md"));
@@ -1589,12 +1590,11 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     });
     assert.equal(schemaGuidedTrack.ok, true);
     assert.equal(schemaGuidedTrack.dry_run, true);
-    assert.equal(schemaGuidedTrack.phase_state, "awaiting_human_review");
-    assert.equal(schemaGuidedTrack.stage, "human_review");
+    assert.equal(schemaGuidedTrack.phase_state, "awaiting_staged_approval");
+    assert.equal(schemaGuidedTrack.stage, "staged_approval");
     assert.ok(schemaGuidedTrack.review_bundle);
-    assert.equal(schemaGuidedTrack.human_review.explicit_approval_required, true);
-    assert.ok(schemaGuidedTrack.human_review.not_approval.includes("numbered option selections"));
-    assert.ok(schemaGuidedTrack.next_actions.some((action) => action.includes("numbered option selections are not approval")));
+    assert.equal(schemaGuidedTrack.approval.current_stage, "spec");
+    assert.ok(schemaGuidedTrack.approval.pending_stages.includes("plan"));
 
     const vagueRevise = core.workflowPacket(root, {
       workflow: "revise",
@@ -1626,7 +1626,7 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Rust"], styleGuideIds: ["rust"] },
@@ -1662,7 +1662,7 @@ test("workflow setup preserves baseline workflow quality gates with custom notes
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: { title: "Product", summary: "Test product" },
       workflowPolicy: { title: "Project Workflow", summary: "Run `cargo test` before broad validation." },
@@ -1695,7 +1695,7 @@ test("workflow setup preserves baseline product context with custom notes", () =
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: { title: "Product Context", summary: "A self-hosted feature flag platform for internal teams." },
       productGuidelines: { title: "Product Guidelines", summary: "Preserve tenant isolation and audit trails." },
@@ -1731,7 +1731,7 @@ test("workflow setup hydrates template JSON sections with structured setup detai
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: {
         name: "Stitchd Event / Message Queue",
@@ -1864,7 +1864,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     const githubSetup = core.workflowPacket(githubRoot, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -1880,7 +1880,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     const gitlabSetup = core.workflowPacket(gitlabRoot, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Go"] },
     });
@@ -1894,7 +1894,7 @@ test("workflow setup records provider mode from remotes or local intent", () => 
     const localSetup = core.workflowPacket(localRoot, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["Python"] },
@@ -1922,7 +1922,7 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       topology: "polyrepo",
       providerMode: "github",
       product: { title: "Product", summary: "Test product" },
@@ -1985,7 +1985,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
     const local = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
@@ -2019,7 +2019,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     const local = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       providerMode: "local",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
@@ -2066,7 +2066,7 @@ test("implementationPrep returns packet-selected style guides", () => {
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       product: { title: "Product", summary: "Test product" },
       techStack: {
         languages: ["TypeScript"],
@@ -2114,7 +2114,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
     const setup = core.workflowPacket(root, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2126,11 +2126,13 @@ test("workflow newtrack writes template-backed track learnings", () => {
       trackId: "blocked_20260618",
       spec: sampleSpec("spec"),
       plan: samplePlan("blocked_20260618"),
+      approvedStages: ["spec"],
       reviewBundleDir: ".newtrack-review",
     });
     assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "human_review");
-    assert.equal(blocked.human_review.confirmed, false);
+    assert.equal(blocked.stage, "staged_approval");
+    assert.equal(blocked.approval.approval_complete, false);
+    assert.equal(blocked.approval.current_stage, "plan");
     const blockedPlanArtifact = blocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/blocked_20260618/plan.md");
     assert.ok(blockedPlanArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(blockedPlanArtifact, "content"), false);
@@ -2168,7 +2170,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
     const created = core.workflowPacket(root, {
       workflow: "newtrack",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       trackId: "tmpl_20260618",
       spec,
       plan: samplePlan("tmpl_20260618"),
@@ -2233,7 +2235,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
     const idempotent = core.workflowPacket(root, {
       workflow: "revise",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       trackId: "tmpl_20260618",
       reason: "Re-apply normalized plan to confirm manual verification remains idempotent.",
       plan: planJson,
@@ -2294,7 +2296,7 @@ test("artifact sync rejects legacy import and regenerates projections from canon
       action: "sync",
       scope: "track:legacy_20260618",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       force: true,
     });
     assert.equal(written.ok, true);
@@ -2361,7 +2363,7 @@ test("workflow revise reviews proposed track files before writing", () => {
     const written = core.workflowPacket(root, {
       workflow: "revise",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       trackId: "revise_20260618",
       reason: "Implementation discovery requires an extra follow-up task.",
       plan: revisedPlan,
@@ -2394,7 +2396,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     const setup = core.workflowPacket(setupRoot, {
       workflow: "setup",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2458,7 +2460,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       trackId: "workflow_20260618",
       handoffText: "# Handoff\n\nContinue with the next task.\n",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
     });
     assert.equal(handoff.ok, true);
     assert.equal(handoff.phase_state, "executed");
@@ -2477,7 +2479,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       workflow: "archive",
       trackId: "done_20260618",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
     });
     assert.equal(archived.ok, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "archive", "done_20260618")), true);
@@ -2500,7 +2502,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       status: "blocked",
       reason: "waiting for credentials",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
     });
     assert.equal(flag.ok, true);
     assert.equal(flag.dry_run, false);
@@ -3078,7 +3080,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     const revert = core.workflowPacket(root, {
       workflow: "revert",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       trackId: "execute_20260618",
       reason: "test revert",
     });
@@ -3109,7 +3111,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     const release = core.workflowPacket(root, {
       workflow: "release",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       createTag: true,
       releaseVersion: "v1.2.3",
     });
@@ -3141,7 +3143,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     const refresh = core.workflowPacket(root, {
       workflow: "refresh",
       execute: true,
-      humanConfirmed: true,
+      approvalComplete: true,
       refreshScope: "all",
       lsp: true,
     });

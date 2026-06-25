@@ -187,7 +187,11 @@ export function shellQuote(value: string): string {
 export function workflowReviewBundle(root: string, workflow: string, args: RuntimeArgs, reviewFiles: ReviewFile[], manifestExtras: JsonObject = {}): JsonObject | null {
   const rawArgs = args as UnknownRecord;
   if (reviewFiles.length === 0) return null;
-  if ((args.execute === true && humanReviewConfirmed(args)) || rawArgs.reviewBundle === false || rawArgs.reviewFiles === false) return null;
+  if (
+    (args.execute === true && (humanReviewConfirmed(args) || rawArgs.approvalComplete === true || rawArgs.approval_complete === true))
+    || rawArgs.reviewBundle === false
+    || rawArgs.reviewFiles === false
+  ) return null;
   const explicitDir = asOptionalString(rawArgs.reviewBundleDir || rawArgs.review_bundle_dir || rawArgs.reviewDir || rawArgs.review_dir);
   const rootHash = crypto.createHash("sha256").update(root).digest("hex").slice(0, 12);
   const defaultDirectory = path.join(os.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(path.basename(root))}-${rootHash}`);
@@ -288,9 +292,9 @@ export function humanReviewState(workflow: string, args: RuntimeArgs, artifacts:
     required: true,
     confirmed: humanReviewConfirmed(args),
     workflow,
-    confirm_argument: "humanConfirmed",
+    confirm_argument: "approvalComplete",
     explicit_approval_required: true,
-    approval_instruction: `Review the ${workflow} bundle, then ask the user for explicit approval before calling the mutating packet with humanConfirmed:true.`,
+    approval_instruction: `Review the ${workflow} bundle, then ask the user for explicit approval before calling the mutating packet with approvalComplete:true.`,
     not_approval: [
       "native prompt answers",
       "numbered option selections",

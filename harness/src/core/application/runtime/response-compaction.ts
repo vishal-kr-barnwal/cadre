@@ -81,6 +81,37 @@ function compactReviewBundle(value: unknown): JsonObject | null {
   };
 }
 
+function compactApproval(value: unknown): JsonObject | null {
+  if (!value || !isRecord(value)) return null;
+  const approval = asJsonObject(value);
+  const stages = Array.isArray(approval.stages) ? approval.stages.map(asJsonObject) : [];
+  const artifacts = compactReviewArtifacts(approval.current_review_artifacts);
+  const bundle = compactReviewBundle(approval.current_review_bundle);
+  return {
+    version: approval.version || 1,
+    kind: asOptionalString(approval.kind) || "cadre.staged_approval.v1",
+    workflow: asOptionalString(approval.workflow) || null,
+    required: approval.required !== false,
+    approval_argument: asOptionalString(approval.approval_argument) || "approvalComplete",
+    approval_complete: approval.approval_complete === true,
+    current_stage: asOptionalString(approval.current_stage) || null,
+    current_stage_title: asOptionalString(approval.current_stage_title) || null,
+    approved_stages: asStringArray(approval.approved_stages),
+    pending_stages: asStringArray(approval.pending_stages),
+    stages: stages.map((stage) => ({
+      id: asOptionalString(stage.id) || null,
+      title: asOptionalString(stage.title) || null,
+      approved: stage.approved === true,
+      file_count: Number(stage.file_count || 0),
+    })),
+    current_review_artifacts: artifacts.files,
+    current_review_artifact_count: artifacts.count,
+    current_review_bundle: bundle,
+    current_review_bundle_path: bundle?.manifest_path || null,
+    next_actions: Array.isArray(approval.next_actions) ? approval.next_actions : [],
+  };
+}
+
 function compactProvider(value: unknown): JsonObject | null {
   if (!value || !isRecord(value)) return null;
   const provider = asJsonObject(value);
@@ -207,6 +238,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
   const styleGuides = compactStyleGuides(result.styleGuides);
   const reviewBundle = compactReviewBundle(result.review_bundle);
   const reviewArtifacts = compactReviewArtifacts(result.review_artifacts);
+  const approval = compactApproval(result.approval);
   const reviewBundleSummary = reviewBundle
     ? {
       directory: reviewBundle.directory,
@@ -223,7 +255,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
       required: asJsonObject(result.human_review).required !== false,
       confirmed: asJsonObject(result.human_review).confirmed === true,
       workflow: asOptionalString(asJsonObject(result.human_review).workflow) || null,
-      confirm_argument: asOptionalString(asJsonObject(result.human_review).confirm_argument) || "humanConfirmed",
+      confirm_argument: asOptionalString(asJsonObject(result.human_review).confirm_argument) || "approvalComplete",
       explicit_approval_required: asJsonObject(result.human_review).explicit_approval_required === true,
       approval_instruction: asOptionalString(asJsonObject(result.human_review).approval_instruction) || null,
       not_approval: asStringArray(asJsonObject(result.human_review).not_approval),
@@ -268,6 +300,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
         summary: asJsonObject(result.techStackSummary).summary,
       }
       : result.techStackSummary,
+    approval,
     human_review: humanReview,
     intent_prompts: compactNativePrompts(result.intent_prompts),
     native_prompts: compactNativePrompts(result.native_prompts),

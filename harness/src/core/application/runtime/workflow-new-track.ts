@@ -17,14 +17,14 @@ import { appendCadreEvent } from "./native-state";
 import { renderPlanMarkdown } from "./plan-docs";
 import { planAssist, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
-import { humanReviewState, jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText, workflowReviewBundle } from "./review-bundles";
+import { jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
 import { gitIdentity } from "../../infrastructure/runtime/system";
-import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
+import { approvalComplete, newTrackApprovalStages, stagedApprovalState } from "./staged-approval";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
@@ -145,9 +145,10 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   };
   const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const reviewBundle = workflowReviewBundle(root, "newtrack", args, reviewFiles, { track_id: String(trackId) });
-  const humanReview = humanReviewState("newtrack", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const approval = stagedApprovalState(root, "newtrack", args, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const dryRun = args.execute !== true;
   const assist = planAssist(root, { ...args, plan: planJson, trackId });
   if (dryRun) {
@@ -155,45 +156,43 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       ...summary,
       ok: assist.ok !== false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
       track_id: trackId,
       metadata,
       plan_assist: assist,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
+      approval,
+      review_artifacts: stageReviewArtifacts || reviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       next_actions: [
-        "Review the newtrack review_bundle manifest and generated artifact files.",
-        "Ask the user for explicit approval of this review bundle; native prompt answers and numbered option selections are not approval.",
-        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload.",
+        "Approve newtrack one stage at a time with approvedStages.",
+        "After spec, plan, metadata, and learnings are approved, call newtrack with execute:true and approvalComplete:true using the same structured payload.",
       ],
     };
   }
   if (findTrack(root, trackId)) {
     return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!approvalComplete(args)) {
     return {
       ...summary,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
       track_id: trackId,
       metadata,
       plan_assist: assist,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
+      approval,
+      review_artifacts: stageReviewArtifacts || reviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       next_actions: [
-        "Review the newtrack review_bundle manifest and generated artifact files.",
-        "Ask the user for explicit approval before retrying the mutating packet.",
-        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload.",
+        "Review the current staged approval bundle.",
+        "Call newtrack again with execute:true and approvalComplete:true only after every staged approval is complete.",
       ],
-      error: "Human confirmation is required before creating track artifacts",
+      error: "Staged approval is required before creating track artifacts",
     };
   }
   const traceBefore = beginTrace(root);
@@ -244,7 +243,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     event,
     control_commit: controlCommit,
     phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
-    human_review: humanReview,
+    approval,
     worktree_plan: worktreePlan(root, { trackId }),
   };
 }

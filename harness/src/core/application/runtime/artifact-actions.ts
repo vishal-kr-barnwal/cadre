@@ -208,14 +208,14 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     return {
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       artifacts,
       human_review: humanReview,
       review_bundle: reviewBundle,
       warnings,
-      errors: ["Human confirmation is required before syncing artifacts"],
-      error: "Human confirmation is required before syncing artifacts",
+      errors: ["Staged approval is required before syncing artifacts"],
+      error: "Staged approval is required before syncing artifacts",
     };
   }
   const controlCommit = execute

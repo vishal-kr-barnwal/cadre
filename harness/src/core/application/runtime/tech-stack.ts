@@ -165,9 +165,5 @@ export function setupStyleGuides(root: string, args: RuntimeArgs = {}): CoreResu
 
 export function humanReviewConfirmed(args: RuntimeArgs = {}): boolean {
   const rawArgs = args as UnknownRecord;
-  return rawArgs.humanConfirmed === true
-    || rawArgs.human_confirmed === true
-    || rawArgs.userConfirmed === true
-    || rawArgs.user_confirmed === true
-    || rawArgs.confirmed === true;
+  return rawArgs.approvalComplete === true || rawArgs.approval_complete === true;
 }

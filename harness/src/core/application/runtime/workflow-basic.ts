@@ -124,12 +124,12 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
       ...summary,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
-      error: "Human confirmation is required before archiving tracks",
+      error: "Staged approval is required before archiving tracks",
     };
   }
   const syncPre = syncControlPlane(root, { mode: "pre" });
@@ -228,9 +228,9 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
       ...base,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
-      error: "Human confirmation is required before writing handoff artifacts",
+      error: "Staged approval is required before writing handoff artifacts",
     };
   }
   const traceBefore = beginTrace(root);

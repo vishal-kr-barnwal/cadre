@@ -119,14 +119,14 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
     return {
       ...summary,
       ok: false,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       dry_run: true,
       track_context: trackContext(root, trackId),
       git_actions: gitActions,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
-      error: "Human confirmation is required before reverting tracked commits",
+      error: "Staged approval is required before reverting tracked commits",
     };
   }
   const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
@@ -211,7 +211,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       ...summary,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_human_review",
+      phase_state: "awaiting_staged_approval",
       stage: "human_review",
       doctor: doctor(root, { hasCadreProject: true }),
       workspace: workspaceDiagnostics(root, { execute: false }),
@@ -223,7 +223,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
       warnings,
-      error: "Human confirmation is required before refreshing Cadre context documents",
+      error: "Staged approval is required before refreshing Cadre context documents",
     };
   }
   const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;

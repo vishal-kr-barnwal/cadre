@@ -19,15 +19,16 @@ import { appendCadreEvent, ensureNativeState } from "./native-state";
 import { setupIntentPrompts } from "./intent-prompts";
 import { setupNativePrompts } from "./native-prompts";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
-import { appendLspReviewArtifacts, humanReviewState, setupReviewArtifacts, setupReviewBundle, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
+import { appendLspReviewArtifacts, setupReviewArtifacts, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
 import { configuredCiProvider, lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
 import { renderStyleGuideMarkdown } from "./spec-docs";
 import { trackIndexPayload } from "./status";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
-import { humanReviewConfirmed, setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
+import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
+import { approvalComplete, setupApprovalStages, stagedApprovalState } from "./staged-approval";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "setup", args);
@@ -51,9 +52,16 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
   const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
-  const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
   const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
-  const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
+  const approval = stagedApprovalState(root, "setup", args, setupApprovalStages(polyrepoRequested), reviewFiles, {
+    styleGuides: {
+      selected: asStringArray(styleGuides.selected),
+      missing: asStringArray(styleGuides.missing),
+      warnings: asStringArray(styleGuides.warnings),
+    },
+  });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
   const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
   const nativePrompts = args.execute === true ? [] : setupNativePrompts({
     provider: asJsonObject(provider),
@@ -65,7 +73,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   });
   const warnings = [
     ...asStringArray(styleGuides.warnings),
-    ...asStringArray(asJsonObject(reviewBundle).warnings),
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
   ];
   const result: CoreResult = {
     ...summary,
@@ -90,9 +98,9 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     techStackSummary: techStackSummary(root, args),
     ...(intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {}),
     ...(nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {}),
-    human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    approval,
+    review_artifacts: stageReviewArtifacts || reviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings,
     required_payload: args.execute === true
       ? ["product", "techStack"]
@@ -106,11 +114,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       ...(provider.requires_confirmation === true
         ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
         : []),
-      "After prompt answers, review the setup bundle; call setup with execute:true and humanConfirmed:true only after explicit approval.",
+      "Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true.",
     ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
-      "Setup writes are human-in-loop: mutating setup packets require humanConfirmed:true after artifact review.",
+      "Setup writes are human-in-loop: mutating setup packets require approvalComplete:true after staged artifact review.",
       "Project mutation must be performed by MCP packets; clients must not recreate Cadre setup writes themselves.",
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
@@ -133,13 +141,13 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       missing_payload: missingPayload,
     };
   }
-  if (!humanReviewConfirmed(args)) {
+  if (!approvalComplete(args)) {
     return {
       ...result,
       ok: false,
-      phase_state: "awaiting_human_review",
-      stage: "human_review",
-      error: "Human confirmation is required before writing setup artifacts",
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_approval",
+      error: "Staged approval is required before writing setup artifacts",
     };
   }
   const traceBefore = beginTrace(root);
