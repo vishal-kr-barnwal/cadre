@@ -19,6 +19,10 @@ function textPresent(value: unknown): boolean {
   return typeof value === "string" && value.trim().length >= 8;
 }
 
+function schemaTextPresent(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function normalizedPromptText(value: unknown): string {
   return typeof value === "string"
     ? value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
@@ -80,6 +84,111 @@ function hasNamedValue(args: RuntimeArgs, names: string[]): boolean {
 function hasArrayField(record: JsonObject | null, names: string[]): boolean {
   if (!record) return false;
   return names.some((name) => arrayPresent(record[name]));
+}
+
+const SPEC_SCHEMA = "cadre.spec.v1";
+const PLAN_SCHEMA = "cadre.plan.v1";
+
+const SPEC_FIELD_ALIASES: Record<string, string> = {
+  functionalRequirements: "functional_requirements",
+  nonFunctionalRequirements: "non_functional_requirements",
+  acceptanceCriteria: "acceptance_criteria",
+  outOfScope: "out_of_scope",
+  requirements: "functional_requirements",
+  successCriteria: "acceptance_criteria",
+  goals: "description",
+};
+
+const PLAN_FIELD_ALIASES: Record<string, string> = {
+  steps: "phases",
+  phaseList: "phases",
+  dependsOn: "depends_on",
+  taskKey: "task_key",
+  commitShas: "commit_shas",
+  repoShas: "repo_shas",
+};
+
+function issue(field: string, message: string, expected: string): JsonObject {
+  return { field, message, expected };
+}
+
+function checkSchemaLiteral(value: JsonObject, field: string, expected: string): JsonObject[] {
+  const actual = value.schema;
+  if (actual === undefined) return [issue(field, `Missing ${field}; load the Cadre artifact schema before drafting.`, expected)];
+  if (actual !== expected) return [issue(field, `Unsupported schema ${String(actual)}.`, expected)];
+  return [];
+}
+
+function aliasIssues(value: JsonObject, prefix: string, aliases: Record<string, string>): JsonObject[] {
+  return Object.entries(aliases)
+    .filter(([name]) => Object.prototype.hasOwnProperty.call(value, name))
+    .map(([name, expected]) => issue(`${prefix}.${name}`, `Use Cadre canonical field ${expected}, not ${name}.`, `${prefix}.${expected}`));
+}
+
+function specArrayShapeIssues(spec: JsonObject, field: string): JsonObject[] {
+  const value = spec[field];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return [issue(`spec.${field}`, "Expected an array of structured requirement items.", `spec.${field}: [{ heading, body }]`)];
+  return value.flatMap((entry, index) => {
+    const item = asJsonObject(entry);
+    if (!isRecord(entry)) return [issue(`spec.${field}[${index}]`, "Expected an object, not a string or primitive.", "{ heading: string, body?: string }")];
+    if (!schemaTextPresent(item.heading)) return [issue(`spec.${field}[${index}].heading`, "Requirement item is missing a heading.", "string")];
+    return [];
+  });
+}
+
+function planPhaseShapeIssues(plan: JsonObject): JsonObject[] {
+  const phases = plan.phases;
+  if (plan.tasks !== undefined && phases === undefined) {
+    return [issue("plan.tasks", "Top-level plan.tasks is not accepted for newtrack; put tasks inside plan.phases[].tasks.", "plan.phases[].tasks")];
+  }
+  if (phases === undefined) return [];
+  if (!Array.isArray(phases)) return [issue("plan.phases", "Expected an array of phase objects.", "plan.phases: [{ phase_index, title, tasks }]")];
+  return phases.flatMap((rawPhase, phaseIndex) => {
+    const phase = asJsonObject(rawPhase);
+    const prefix = `plan.phases[${phaseIndex}]`;
+    if (!isRecord(rawPhase)) return [issue(prefix, "Expected a phase object.", "{ phase_index, title, tasks }")];
+    const issues = aliasIssues(phase, prefix, PLAN_FIELD_ALIASES);
+    if (!schemaTextPresent(phase.title)) issues.push(issue(`${prefix}.title`, "Phase title is required.", "string"));
+    const tasks = phase.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      issues.push(issue(`${prefix}.tasks`, "Each phase must contain at least one task.", "array"));
+      return issues;
+    }
+    tasks.forEach((rawTask, taskIndex) => {
+      const task = asJsonObject(rawTask);
+      const taskPrefix = `${prefix}.tasks[${taskIndex}]`;
+      if (!isRecord(rawTask)) {
+        issues.push(issue(taskPrefix, "Expected a task object.", "{ task_index, task_key, title, files, depends_on }"));
+        return;
+      }
+      issues.push(...aliasIssues(task, taskPrefix, PLAN_FIELD_ALIASES));
+      if (!schemaTextPresent(task.title)) issues.push(issue(`${taskPrefix}.title`, "Task title is required.", "string"));
+      if (task.files !== undefined && !Array.isArray(task.files)) issues.push(issue(`${taskPrefix}.files`, "Task files must be an array.", "string[]"));
+      if (task.depends_on !== undefined && !Array.isArray(task.depends_on)) issues.push(issue(`${taskPrefix}.depends_on`, "Task dependencies must use depends_on as an array.", "string[]"));
+    });
+    return issues;
+  });
+}
+
+export function newTrackSchemaIssues(args: RuntimeArgs = {}): JsonObject[] {
+  const raw = rawArgs(args);
+  const spec = isRecord(raw.spec) ? asJsonObject(raw.spec) : null;
+  const plan = isRecord(raw.plan) ? asJsonObject(raw.plan) : null;
+  const issues: JsonObject[] = [];
+  if (spec) {
+    issues.push(...checkSchemaLiteral(spec, "spec.schema", SPEC_SCHEMA));
+    issues.push(...aliasIssues(spec, "spec", SPEC_FIELD_ALIASES));
+    for (const field of ["functional_requirements", "non_functional_requirements", "acceptance_criteria", "out_of_scope"]) {
+      issues.push(...specArrayShapeIssues(spec, field));
+    }
+  }
+  if (plan) {
+    issues.push(...checkSchemaLiteral(plan, "plan.schema", PLAN_SCHEMA));
+    issues.push(...aliasIssues(plan, "plan", PLAN_FIELD_ALIASES));
+    issues.push(...planPhaseShapeIssues(plan));
+  }
+  return issues;
 }
 
 function target(toolWorkflow: string, argument: string, customArgument: string): JsonObject {
@@ -162,7 +271,7 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
     || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null)
     || meaningfulSpecText(metadata?.scope, trackId || null)
     || hasNamedValue(args, ["scope"]);
-  const hasPlan = hasArrayField(plan, ["phases", "tasks"]);
+  const hasPlan = hasArrayField(plan, ["phases"]);
 
   if (!trackId) {
     prompts.push(intentPrompt(

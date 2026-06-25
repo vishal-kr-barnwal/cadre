@@ -96,6 +96,10 @@ When the request is vague, `cadre-newtrack` returns `intent_prompts` and
 `phase_state:"awaiting_clarification"` instead of generating a spec or plan.
 Agents should ask for goal, outcome, acceptance criteria, and scope before
 drafting structured `spec` and `plan` JSON.
+Agents should load the `spec` and `plan` artifact schemas before drafting.
+If a payload uses aliases such as `acceptanceCriteria` or top-level
+`plan.tasks`, Cadre returns `stage:"schema_validation"` with schema resources
+instead of generating review artifacts.
 
 Good tracks have testable acceptance criteria, explicit dependencies, clear file
 annotations, and a plan that can be resumed by another session.

@@ -1508,6 +1508,39 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
     assert.equal(Object.prototype.hasOwnProperty.call(detailedPlanWeakSpec, "review_bundle"), false);
 
+    const schemaDrift = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: "schema_drift_20260625",
+      spec: {
+        version: 1,
+        schema: "cadre.spec.v1",
+        track_id: "schema_drift_20260625",
+        title: "OAuth Login",
+        description: "Allow users to sign in with the configured OAuth provider.",
+        functionalRequirements: [{ heading: "OAuth callback", body: "Exchange the OAuth code and create a session." }],
+        acceptanceCriteria: [{ heading: "Successful login", body: "A user can complete OAuth login and land in the app." }],
+        outOfScope: [{ heading: "Provider admin setup", body: "Creating the OAuth app in the provider console is out of scope." }],
+      },
+      plan: {
+        version: 1,
+        schema: "cadre.plan.v1",
+        track_id: "schema_drift_20260625",
+        title: "Plan: schema_drift_20260625",
+        tasks: [
+          planTask(1, 1, "Add OAuth callback route and token exchange", ["src/auth/oauth.ts"]),
+        ],
+      },
+    });
+    assert.equal(schemaDrift.ok, false);
+    assert.equal(schemaDrift.stage, "schema_validation");
+    assert.equal(schemaDrift.phase_state, "awaiting_clarification");
+    assert.ok(schemaDrift.schema_errors.some((entry) => entry.field === "spec.functionalRequirements"));
+    assert.ok(schemaDrift.schema_errors.some((entry) => entry.field === "spec.acceptanceCriteria"));
+    assert.ok(schemaDrift.schema_errors.some((entry) => entry.field === "plan.tasks"));
+    assert.ok(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=spec")));
+    assert.ok(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=plan")));
+    assert.equal(Object.prototype.hasOwnProperty.call(schemaDrift, "review_bundle"), false);
+
     const vagueRevise = core.workflowPacket(root, {
       workflow: "revise",
       trackId: "clarify_20260625",

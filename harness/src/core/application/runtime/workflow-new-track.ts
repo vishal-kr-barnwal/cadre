@@ -23,7 +23,7 @@ import { gitIdentity } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
-import { newTrackIntentPrompts } from "./intent-prompts";
+import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
@@ -88,6 +88,27 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
+  const schemaIssues = newTrackSchemaIssues(args);
+  if (schemaIssues.length > 0) {
+    const encodedRoot = encodeURIComponent(root);
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "schema_validation",
+      schema_errors: schemaIssues,
+      schema_resources: [
+        `cadre://artifact-schema?root=${encodedRoot}&artifact=spec`,
+        `cadre://artifact-schema?root=${encodedRoot}&artifact=plan`,
+      ],
+      next_actions: [
+        "Load the Cadre spec and plan schemas before drafting newtrack payloads.",
+        "Call newtrack again with canonical spec and plan JSON fields, not aliases or Markdown-derived shapes.",
+      ],
+      error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped.",
+    };
+  }
   const intentPrompts = newTrackIntentPrompts(args);
   if (intentPrompts.length > 0) {
     return {

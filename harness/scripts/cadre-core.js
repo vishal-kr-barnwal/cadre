@@ -7882,6 +7882,9 @@ function nestedIntentValue(args, name) {
 function textPresent(value) {
   return typeof value === "string" && value.trim().length >= 8;
 }
+function schemaTextPresent(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
 function normalizedPromptText(value) {
   return typeof value === "string" ? value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() : "";
 }
@@ -7930,6 +7933,100 @@ function hasNamedValue(args, names) {
 function hasArrayField(record, names) {
   if (!record) return false;
   return names.some((name) => arrayPresent(record[name]));
+}
+var SPEC_SCHEMA = "cadre.spec.v1";
+var PLAN_SCHEMA = "cadre.plan.v1";
+var SPEC_FIELD_ALIASES = {
+  functionalRequirements: "functional_requirements",
+  nonFunctionalRequirements: "non_functional_requirements",
+  acceptanceCriteria: "acceptance_criteria",
+  outOfScope: "out_of_scope",
+  requirements: "functional_requirements",
+  successCriteria: "acceptance_criteria",
+  goals: "description"
+};
+var PLAN_FIELD_ALIASES = {
+  steps: "phases",
+  phaseList: "phases",
+  dependsOn: "depends_on",
+  taskKey: "task_key",
+  commitShas: "commit_shas",
+  repoShas: "repo_shas"
+};
+function issue(field, message, expected) {
+  return { field, message, expected };
+}
+function checkSchemaLiteral(value, field, expected) {
+  const actual = value.schema;
+  if (actual === void 0) return [issue(field, `Missing ${field}; load the Cadre artifact schema before drafting.`, expected)];
+  if (actual !== expected) return [issue(field, `Unsupported schema ${String(actual)}.`, expected)];
+  return [];
+}
+function aliasIssues(value, prefix, aliases) {
+  return Object.entries(aliases).filter(([name]) => Object.prototype.hasOwnProperty.call(value, name)).map(([name, expected]) => issue(`${prefix}.${name}`, `Use Cadre canonical field ${expected}, not ${name}.`, `${prefix}.${expected}`));
+}
+function specArrayShapeIssues(spec, field) {
+  const value = spec[field];
+  if (value === void 0) return [];
+  if (!Array.isArray(value)) return [issue(`spec.${field}`, "Expected an array of structured requirement items.", `spec.${field}: [{ heading, body }]`)];
+  return value.flatMap((entry, index) => {
+    const item = asJsonObject(entry);
+    if (!isRecord(entry)) return [issue(`spec.${field}[${index}]`, "Expected an object, not a string or primitive.", "{ heading: string, body?: string }")];
+    if (!schemaTextPresent(item.heading)) return [issue(`spec.${field}[${index}].heading`, "Requirement item is missing a heading.", "string")];
+    return [];
+  });
+}
+function planPhaseShapeIssues(plan) {
+  const phases = plan.phases;
+  if (plan.tasks !== void 0 && phases === void 0) {
+    return [issue("plan.tasks", "Top-level plan.tasks is not accepted for newtrack; put tasks inside plan.phases[].tasks.", "plan.phases[].tasks")];
+  }
+  if (phases === void 0) return [];
+  if (!Array.isArray(phases)) return [issue("plan.phases", "Expected an array of phase objects.", "plan.phases: [{ phase_index, title, tasks }]")];
+  return phases.flatMap((rawPhase, phaseIndex) => {
+    const phase = asJsonObject(rawPhase);
+    const prefix = `plan.phases[${phaseIndex}]`;
+    if (!isRecord(rawPhase)) return [issue(prefix, "Expected a phase object.", "{ phase_index, title, tasks }")];
+    const issues = aliasIssues(phase, prefix, PLAN_FIELD_ALIASES);
+    if (!schemaTextPresent(phase.title)) issues.push(issue(`${prefix}.title`, "Phase title is required.", "string"));
+    const tasks = phase.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      issues.push(issue(`${prefix}.tasks`, "Each phase must contain at least one task.", "array"));
+      return issues;
+    }
+    tasks.forEach((rawTask, taskIndex) => {
+      const task = asJsonObject(rawTask);
+      const taskPrefix = `${prefix}.tasks[${taskIndex}]`;
+      if (!isRecord(rawTask)) {
+        issues.push(issue(taskPrefix, "Expected a task object.", "{ task_index, task_key, title, files, depends_on }"));
+        return;
+      }
+      issues.push(...aliasIssues(task, taskPrefix, PLAN_FIELD_ALIASES));
+      if (!schemaTextPresent(task.title)) issues.push(issue(`${taskPrefix}.title`, "Task title is required.", "string"));
+      if (task.files !== void 0 && !Array.isArray(task.files)) issues.push(issue(`${taskPrefix}.files`, "Task files must be an array.", "string[]"));
+      if (task.depends_on !== void 0 && !Array.isArray(task.depends_on)) issues.push(issue(`${taskPrefix}.depends_on`, "Task dependencies must use depends_on as an array.", "string[]"));
+    });
+    return issues;
+  });
+}
+function newTrackSchemaIssues(args = {}) {
+  const raw = rawArgs(args);
+  const spec = isRecord(raw.spec) ? asJsonObject(raw.spec) : null;
+  const plan = isRecord(raw.plan) ? asJsonObject(raw.plan) : null;
+  const issues = [];
+  if (spec) {
+    issues.push(...checkSchemaLiteral(spec, "spec.schema", SPEC_SCHEMA));
+    issues.push(...aliasIssues(spec, "spec", SPEC_FIELD_ALIASES));
+    for (const field of ["functional_requirements", "non_functional_requirements", "acceptance_criteria", "out_of_scope"]) {
+      issues.push(...specArrayShapeIssues(spec, field));
+    }
+  }
+  if (plan) {
+    issues.push(...checkSchemaLiteral(plan, "plan.schema", PLAN_SCHEMA));
+    issues.push(...aliasIssues(plan, "plan", PLAN_FIELD_ALIASES));
+    issues.push(...planPhaseShapeIssues(plan));
+  }
+  return issues;
 }
 function target(toolWorkflow, argument, customArgument) {
   return {
@@ -7990,7 +8087,7 @@ function newTrackIntentPrompts(args = {}) {
   const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null) || hasNamedValue(args, ["outcome", "outcomes"]);
   const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null) || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
   const hasScope = meaningfulSpecText(spec?.scope, trackId || null) || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null) || meaningfulSpecText(metadata?.scope, trackId || null) || hasNamedValue(args, ["scope"]);
-  const hasPlan = hasArrayField(plan, ["phases", "tasks"]);
+  const hasPlan = hasArrayField(plan, ["phases"]);
   if (!trackId) {
     prompts.push(intentPrompt(
       "newtrack",
@@ -8234,6 +8331,27 @@ function workflowNewTrack(root, args = {}) {
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
+  const schemaIssues = newTrackSchemaIssues(args);
+  if (schemaIssues.length > 0) {
+    const encodedRoot = encodeURIComponent(root);
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "schema_validation",
+      schema_errors: schemaIssues,
+      schema_resources: [
+        `cadre://artifact-schema?root=${encodedRoot}&artifact=spec`,
+        `cadre://artifact-schema?root=${encodedRoot}&artifact=plan`
+      ],
+      next_actions: [
+        "Load the Cadre spec and plan schemas before drafting newtrack payloads.",
+        "Call newtrack again with canonical spec and plan JSON fields, not aliases or Markdown-derived shapes."
+      ],
+      error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped."
+    };
+  }
   const intentPrompts = newTrackIntentPrompts(args);
   if (intentPrompts.length > 0) {
     return {
