@@ -7882,6 +7882,39 @@ function nestedIntentValue(args, name) {
 function textPresent(value) {
   return typeof value === "string" && value.trim().length >= 8;
 }
+function normalizedPromptText(value) {
+  return typeof value === "string" ? value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() : "";
+}
+function isGenericSpecText(value) {
+  const text = normalizedPromptText(value);
+  if (!text) return true;
+  return [
+    "deliver behavior",
+    "implement the requested behavior",
+    "works",
+    "the work is complete",
+    "the planned work is complete and verified",
+    "verify delivered outcome",
+    "manually verify that the completed track delivers the intended behavior from the spec"
+  ].includes(text);
+}
+function isTrackPlaceholderText(value, trackId) {
+  const text = normalizedPromptText(value);
+  const normalizedTrack = normalizedPromptText(trackId || "");
+  if (!text || !normalizedTrack) return false;
+  return text === normalizedTrack || text === `spec ${normalizedTrack}` || text === `spec for ${normalizedTrack}` || text === `plan ${normalizedTrack}` || text === `plan for ${normalizedTrack}`;
+}
+function meaningfulSpecText(value, trackId) {
+  return textPresent(value) && !isGenericSpecText(value) && !isTrackPlaceholderText(value, trackId);
+}
+function meaningfulSpecItems(value, trackId) {
+  if (!Array.isArray(value)) return false;
+  return value.map(asJsonObject).some((entry) => {
+    const heading = entry.heading || entry.title || entry.name;
+    const body = entry.body || entry.description || entry.text;
+    return meaningfulSpecText(heading, trackId) || meaningfulSpecText(body, trackId);
+  });
+}
 function arrayPresent(value) {
   return Array.isArray(value) && value.length > 0;
 }
@@ -7897,10 +7930,6 @@ function hasNamedValue(args, names) {
 function hasArrayField(record, names) {
   if (!record) return false;
   return names.some((name) => arrayPresent(record[name]));
-}
-function hasField(record, names) {
-  if (!record) return false;
-  return names.some((name) => Object.prototype.hasOwnProperty.call(record, name));
 }
 function target(toolWorkflow, argument, customArgument) {
   return {
@@ -7957,10 +7986,10 @@ function newTrackIntentPrompts(args = {}) {
   const spec = isRecord(rawArgs(args).spec) ? asJsonObject(rawArgs(args).spec) : null;
   const plan = isRecord(rawArgs(args).plan) ? asJsonObject(rawArgs(args).plan) : null;
   const metadata = isRecord(rawArgs(args).metadata) ? asJsonObject(rawArgs(args).metadata) : null;
-  const hasGoal = textPresent(spec?.description) || textPresent(spec?.title) || hasNamedValue(args, ["goal", "description"]);
-  const hasOutcome = hasArrayField(spec, ["functional_requirements", "functionalRequirements", "outcomes"]) || hasNamedValue(args, ["outcome", "outcomes"]);
-  const hasAcceptance = hasArrayField(spec, ["acceptance_criteria", "acceptanceCriteria"]) || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
-  const hasScope = hasField(spec, ["scope", "out_of_scope", "outOfScope"]) || hasField(metadata, ["scope"]) || hasNamedValue(args, ["scope"]);
+  const hasGoal = meaningfulSpecText(spec?.description, trackId || null) || meaningfulSpecText(spec?.title, trackId || null) || hasNamedValue(args, ["goal", "description"]);
+  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null) || hasNamedValue(args, ["outcome", "outcomes"]);
+  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null) || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
+  const hasScope = meaningfulSpecText(spec?.scope, trackId || null) || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null) || meaningfulSpecText(metadata?.scope, trackId || null) || hasNamedValue(args, ["scope"]);
   const hasPlan = hasArrayField(plan, ["phases", "tasks"]);
   if (!trackId) {
     prompts.push(intentPrompt(
@@ -8455,7 +8484,7 @@ function cookedSpec(trackId, formula, rendered) {
     ],
     non_functional_requirements: [],
     acceptance_criteria: acceptance.length > 0 ? acceptance.map((entry, index) => ({ heading: `Acceptance ${index + 1}`, body: entry })) : [{ heading: "Formula plan reviewed", body: "The generated formula plan is reviewed and approved before track creation." }],
-    out_of_scope: []
+    out_of_scope: [{ heading: "Formula boundaries", body: "Changes outside the generated formula plan remain out of scope until explicitly revised." }]
   };
 }
 function cookFormula(root, args) {

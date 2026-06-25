@@ -29,11 +29,11 @@ function sampleSpec(id) {
     schema: "cadre.spec.v1",
     track_id: id,
     title: `Spec: ${id}`,
-    description: `Spec for ${id}`,
-    functional_requirements: [{ heading: "Deliver behavior", body: "Implement the requested behavior." }],
+    description: `Deliver the reviewed ${id} behavior with explicit acceptance and scope.`,
+    functional_requirements: [{ heading: "Reviewed behavior", body: `Implement the ${id} behavior described by the track plan and review bundle.` }],
     non_functional_requirements: [],
-    acceptance_criteria: [{ heading: "Works", body: "The work is complete." }],
-    out_of_scope: [],
+    acceptance_criteria: [{ heading: "Verified behavior", body: `Tests or manual verification confirm the ${id} behavior is complete.` }],
+    out_of_scope: [{ heading: "Unplanned changes", body: `Changes outside ${id} behavior remain out of scope.` }],
   };
 }
 

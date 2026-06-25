@@ -34,11 +34,11 @@ function sampleSpec(id, overrides = {}) {
     kind: "spec",
     track_id: id,
     title: `Spec: ${id}`,
-    description: `Spec for ${id}`,
-    functional_requirements: [{ heading: "Deliver behavior", body: "Implement the requested behavior." }],
+    description: `Deliver the reviewed ${id} behavior with explicit acceptance and scope.`,
+    functional_requirements: [{ heading: "Reviewed behavior", body: `Implement the ${id} behavior described by the track plan and review bundle.` }],
     non_functional_requirements: [],
-    acceptance_criteria: [{ heading: "Works", body: "The planned work is complete and verified." }],
-    out_of_scope: [],
+    acceptance_criteria: [{ heading: "Verified behavior", body: `Tests or manual verification confirm the ${id} behavior is complete.` }],
+    out_of_scope: [{ heading: "Unplanned changes", body: `Changes outside ${id} behavior remain out of scope.` }],
     ...overrides,
   };
 }
@@ -1473,6 +1473,40 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.ok(vagueTrack.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
     assert.equal(Object.prototype.hasOwnProperty.call(vagueTrack, "review_bundle"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(vagueTrack, "review_artifacts"), false);
+
+    const detailedPlanWeakSpec = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: "oauth_drift_20260625",
+      spec: {
+        version: 1,
+        schema: "cadre.spec.v1",
+        track_id: "oauth_drift_20260625",
+        title: "Spec: oauth_drift_20260625",
+        description: "Spec for oauth_drift_20260625",
+        functional_requirements: [{ heading: "Deliver behavior", body: "Implement the requested behavior." }],
+        acceptance_criteria: [{ heading: "Works", body: "The planned work is complete and verified." }],
+        out_of_scope: [],
+      },
+      plan: planFromPhases("oauth_drift_20260625", [
+        {
+          phase_index: 1,
+          title: "Phase 1: OAuth Login",
+          execution_mode: "sequential",
+          depends_on: [],
+          tasks: [
+            planTask(1, 1, "Add OAuth callback route and token exchange", ["src/auth/oauth.ts"]),
+            planTask(1, 2, "Persist OAuth account mapping and session state", ["src/auth/session.ts"]),
+          ],
+        },
+      ]),
+    });
+    assert.equal(detailedPlanWeakSpec.ok, false);
+    assert.equal(detailedPlanWeakSpec.phase_state, "awaiting_clarification");
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-outcome"));
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-acceptance"));
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
+    assert.equal(Object.prototype.hasOwnProperty.call(detailedPlanWeakSpec, "review_bundle"), false);
 
     const vagueRevise = core.workflowPacket(root, {
       workflow: "revise",

@@ -170,7 +170,7 @@ function cookedSpec(trackId: string, formula: JsonObject, rendered: JsonObject):
     acceptance_criteria: acceptance.length > 0
       ? acceptance.map((entry, index) => ({ heading: `Acceptance ${index + 1}`, body: entry }))
       : [{ heading: "Formula plan reviewed", body: "The generated formula plan is reviewed and approved before track creation." }],
-    out_of_scope: [],
+    out_of_scope: [{ heading: "Formula boundaries", body: "Changes outside the generated formula plan remain out of scope until explicitly revised." }],
   };
 }
 

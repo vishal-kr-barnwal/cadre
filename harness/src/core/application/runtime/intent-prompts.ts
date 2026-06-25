@@ -19,6 +19,50 @@ function textPresent(value: unknown): boolean {
   return typeof value === "string" && value.trim().length >= 8;
 }
 
+function normalizedPromptText(value: unknown): string {
+  return typeof value === "string"
+    ? value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+    : "";
+}
+
+function isGenericSpecText(value: unknown): boolean {
+  const text = normalizedPromptText(value);
+  if (!text) return true;
+  return [
+    "deliver behavior",
+    "implement the requested behavior",
+    "works",
+    "the work is complete",
+    "the planned work is complete and verified",
+    "verify delivered outcome",
+    "manually verify that the completed track delivers the intended behavior from the spec",
+  ].includes(text);
+}
+
+function isTrackPlaceholderText(value: unknown, trackId: string | null): boolean {
+  const text = normalizedPromptText(value);
+  const normalizedTrack = normalizedPromptText(trackId || "");
+  if (!text || !normalizedTrack) return false;
+  return text === normalizedTrack
+    || text === `spec ${normalizedTrack}`
+    || text === `spec for ${normalizedTrack}`
+    || text === `plan ${normalizedTrack}`
+    || text === `plan for ${normalizedTrack}`;
+}
+
+function meaningfulSpecText(value: unknown, trackId: string | null): boolean {
+  return textPresent(value) && !isGenericSpecText(value) && !isTrackPlaceholderText(value, trackId);
+}
+
+function meaningfulSpecItems(value: unknown, trackId: string | null): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.map(asJsonObject).some((entry) => {
+    const heading = entry.heading || entry.title || entry.name;
+    const body = entry.body || entry.description || entry.text;
+    return meaningfulSpecText(heading, trackId) || meaningfulSpecText(body, trackId);
+  });
+}
+
 function arrayPresent(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
@@ -36,11 +80,6 @@ function hasNamedValue(args: RuntimeArgs, names: string[]): boolean {
 function hasArrayField(record: JsonObject | null, names: string[]): boolean {
   if (!record) return false;
   return names.some((name) => arrayPresent(record[name]));
-}
-
-function hasField(record: JsonObject | null, names: string[]): boolean {
-  if (!record) return false;
-  return names.some((name) => Object.prototype.hasOwnProperty.call(record, name));
 }
 
 function target(toolWorkflow: string, argument: string, customArgument: string): JsonObject {
@@ -112,15 +151,16 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
   const spec = isRecord(rawArgs(args).spec) ? asJsonObject(rawArgs(args).spec) : null;
   const plan = isRecord(rawArgs(args).plan) ? asJsonObject(rawArgs(args).plan) : null;
   const metadata = isRecord(rawArgs(args).metadata) ? asJsonObject(rawArgs(args).metadata) : null;
-  const hasGoal = textPresent(spec?.description)
-    || textPresent(spec?.title)
+  const hasGoal = meaningfulSpecText(spec?.description, trackId || null)
+    || meaningfulSpecText(spec?.title, trackId || null)
     || hasNamedValue(args, ["goal", "description"]);
-  const hasOutcome = hasArrayField(spec, ["functional_requirements", "functionalRequirements", "outcomes"])
+  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null)
     || hasNamedValue(args, ["outcome", "outcomes"]);
-  const hasAcceptance = hasArrayField(spec, ["acceptance_criteria", "acceptanceCriteria"])
+  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null)
     || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
-  const hasScope = hasField(spec, ["scope", "out_of_scope", "outOfScope"])
-    || hasField(metadata, ["scope"])
+  const hasScope = meaningfulSpecText(spec?.scope, trackId || null)
+    || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null)
+    || meaningfulSpecText(metadata?.scope, trackId || null)
     || hasNamedValue(args, ["scope"]);
   const hasPlan = hasArrayField(plan, ["phases", "tasks"]);
 
