@@ -224,6 +224,9 @@ function compactSetupResponse(result: CoreResult): CoreResult {
       confirmed: asJsonObject(result.human_review).confirmed === true,
       workflow: asOptionalString(asJsonObject(result.human_review).workflow) || null,
       confirm_argument: asOptionalString(asJsonObject(result.human_review).confirm_argument) || "humanConfirmed",
+      explicit_approval_required: asJsonObject(result.human_review).explicit_approval_required === true,
+      approval_instruction: asOptionalString(asJsonObject(result.human_review).approval_instruction) || null,
+      not_approval: asStringArray(asJsonObject(result.human_review).not_approval),
       artifact_count: reviewArtifacts.count,
       review_bundle_path: reviewBundleSummary?.manifest_path || null,
     }

@@ -289,6 +289,14 @@ export function humanReviewState(workflow: string, args: RuntimeArgs, artifacts:
     confirmed: humanReviewConfirmed(args),
     workflow,
     confirm_argument: "humanConfirmed",
+    explicit_approval_required: true,
+    approval_instruction: `Review the ${workflow} bundle, then ask the user for explicit approval before calling the mutating packet with humanConfirmed:true.`,
+    not_approval: [
+      "native prompt answers",
+      "numbered option selections",
+      "intent clarification answers",
+      "review bundle generation",
+    ],
     artifacts,
     review_bundle: reviewBundle,
   };

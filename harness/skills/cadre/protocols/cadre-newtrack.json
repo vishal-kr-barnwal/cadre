@@ -35,11 +35,11 @@
     },
     {
       "step": 4,
-      "instruction": "Review the returned canonical spec/plan JSON artifacts, generated Markdown projection previews, learnings starter, plan assistance, and review_bundle manifest/path list without inlining large artifacts into model context."
+      "instruction": "Review the returned canonical spec/plan JSON artifacts, generated Markdown projection previews, learnings starter, plan assistance, and review_bundle manifest/path list without inlining large artifacts into model context. Treat a valid dry run as `awaiting_human_review`: ask the user for explicit approval of the reviewed bundle. A native prompt answer, numbered option selection, clarification answer, or track-option choice is not approval."
     },
     {
       "step": 5,
-      "instruction": "To create the track after approval, call `cadre_workflow` again with `workflow: \"newtrack\"`, `execute: true`, and `humanConfirmed: true` using the same JSON payload."
+      "instruction": "To create the track only after explicit user approval, call `cadre_workflow` again with `workflow: \"newtrack\"`, `execute: true`, and `humanConfirmed: true` using the same JSON payload."
     },
     {
       "step": 6,

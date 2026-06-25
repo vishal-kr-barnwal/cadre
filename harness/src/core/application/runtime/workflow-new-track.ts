@@ -155,6 +155,8 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       ...summary,
       ok: assist.ok !== false,
       dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
       track_id: trackId,
       metadata,
       plan_assist: assist,
@@ -162,6 +164,11 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
       warnings,
+      next_actions: [
+        "Review the newtrack review_bundle manifest and generated artifact files.",
+        "Ask the user for explicit approval of this review bundle; native prompt answers and numbered option selections are not approval.",
+        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload.",
+      ],
     };
   }
   if (findTrack(root, trackId)) {
@@ -181,6 +188,11 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
       warnings,
+      next_actions: [
+        "Review the newtrack review_bundle manifest and generated artifact files.",
+        "Ask the user for explicit approval before retrying the mutating packet.",
+        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload.",
+      ],
       error: "Human confirmation is required before creating track artifacts",
     };
   }

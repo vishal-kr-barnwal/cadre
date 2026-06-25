@@ -1589,8 +1589,12 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     });
     assert.equal(schemaGuidedTrack.ok, true);
     assert.equal(schemaGuidedTrack.dry_run, true);
-    assert.equal(schemaGuidedTrack.stage, undefined);
+    assert.equal(schemaGuidedTrack.phase_state, "awaiting_human_review");
+    assert.equal(schemaGuidedTrack.stage, "human_review");
     assert.ok(schemaGuidedTrack.review_bundle);
+    assert.equal(schemaGuidedTrack.human_review.explicit_approval_required, true);
+    assert.ok(schemaGuidedTrack.human_review.not_approval.includes("numbered option selections"));
+    assert.ok(schemaGuidedTrack.next_actions.some((action) => action.includes("numbered option selections are not approval")));
 
     const vagueRevise = core.workflowPacket(root, {
       workflow: "revise",

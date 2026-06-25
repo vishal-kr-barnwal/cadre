@@ -3421,6 +3421,9 @@ function compactSetupResponse(result) {
     confirmed: asJsonObject(result.human_review).confirmed === true,
     workflow: asOptionalString(asJsonObject(result.human_review).workflow) || null,
     confirm_argument: asOptionalString(asJsonObject(result.human_review).confirm_argument) || "humanConfirmed",
+    explicit_approval_required: asJsonObject(result.human_review).explicit_approval_required === true,
+    approval_instruction: asOptionalString(asJsonObject(result.human_review).approval_instruction) || null,
+    not_approval: asStringArray(asJsonObject(result.human_review).not_approval),
     artifact_count: reviewArtifacts.count,
     review_bundle_path: reviewBundleSummary?.manifest_path || null
   } : null;
@@ -4650,6 +4653,14 @@ function humanReviewState(workflow, args, artifacts, reviewBundle = null) {
     confirmed: humanReviewConfirmed(args),
     workflow,
     confirm_argument: "humanConfirmed",
+    explicit_approval_required: true,
+    approval_instruction: `Review the ${workflow} bundle, then ask the user for explicit approval before calling the mutating packet with humanConfirmed:true.`,
+    not_approval: [
+      "native prompt answers",
+      "numbered option selections",
+      "intent clarification answers",
+      "review bundle generation"
+    ],
     artifacts,
     review_bundle: reviewBundle
   };
@@ -8483,13 +8494,20 @@ function workflowNewTrack(root, args = {}) {
       ...summary,
       ok: assist.ok !== false,
       dry_run: true,
+      phase_state: "awaiting_human_review",
+      stage: "human_review",
       track_id: trackId,
       metadata,
       plan_assist: assist,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
-      warnings
+      warnings,
+      next_actions: [
+        "Review the newtrack review_bundle manifest and generated artifact files.",
+        "Ask the user for explicit approval of this review bundle; native prompt answers and numbered option selections are not approval.",
+        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload."
+      ]
     };
   }
   if (findTrack(root, trackId)) {
@@ -8509,6 +8527,11 @@ function workflowNewTrack(root, args = {}) {
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
       warnings,
+      next_actions: [
+        "Review the newtrack review_bundle manifest and generated artifact files.",
+        "Ask the user for explicit approval before retrying the mutating packet.",
+        "Only after explicit approval, call newtrack again with execute:true and humanConfirmed:true using the same structured payload."
+      ],
       error: "Human confirmation is required before creating track artifacts"
     };
   }
