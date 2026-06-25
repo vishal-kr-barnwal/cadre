@@ -15,6 +15,10 @@ export interface ApprovalStage {
   fileMatches: string[];
 }
 
+function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string): string {
+  return `Approve Cadre ${workflow} stage "${stage.id}" (${stage.title})? Reply "approve ${stage.id}" to allow one staged approval for session ${sessionId}.`;
+}
+
 type ApprovalSession = {
   session_id: string;
   workflow: string;
@@ -244,6 +248,7 @@ export function stagedApprovalState(
   const complete = approvalComplete(args);
   const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, reviewFiles, extras)]));
   const validForExecute = !approvalError && complete && approvedIds.length === stages.length;
+  const manualPrompt = active ? stageApprovalPrompt(workflow, active, sessionId) : null;
   return {
     version: 1,
     kind: "cadre.staged_approval.v1",
@@ -253,6 +258,18 @@ export function stagedApprovalState(
     payload_hash: payloadHash,
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
+    explicit_user_approval_required: true,
+    manual_approval_required: true,
+    manual_approval_prompt: manualPrompt,
+    approval_instruction: active
+      ? `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.`
+      : "Ask the user for explicit staged approval before sending any staged approval packet.",
+    not_approval: [
+      "Agent review is not approval.",
+      "No warnings is not approval.",
+      "Recommended setup choices are not approval.",
+      "Different session/payload approval is stale.",
+    ],
     approval_complete: complete,
     valid_for_execute: validForExecute,
     approval_error: approvalError,
@@ -280,8 +297,8 @@ export function stagedApprovalState(
         : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`]
       : active
         ? [
-          `Review and approve the ${active.id} stage.`,
-          `Call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
+          `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,
+          `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
           "After all stages are approved in dry-run calls, call the mutating packet with execute:true, approvalComplete:true, and the same approvalSessionId.",
         ]
         : [],

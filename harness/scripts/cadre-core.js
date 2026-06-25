@@ -3304,10 +3304,11 @@ function compactApproval(value) {
     workflow: asOptionalString(approval.workflow) || null,
     required: approval.required !== false,
     session_id: asOptionalString(approval.session_id) || null,
-    payload_hash: asOptionalString(approval.payload_hash) || null,
-    current_stage_hash: asOptionalString(approval.current_stage_hash) || null,
     approval_session_argument: asOptionalString(approval.approval_session_argument) || "approvalSessionId",
     approval_argument: asOptionalString(approval.approval_argument) || "approvalComplete",
+    explicit_user_approval_required: approval.explicit_user_approval_required === true,
+    manual_approval_required: approval.manual_approval_required === true,
+    manual_approval_prompt: asOptionalString(approval.manual_approval_prompt) || null,
     approval_complete: approval.approval_complete === true,
     valid_for_execute: approval.valid_for_execute === true,
     approval_error: asOptionalString(approval.approval_error) || null,
@@ -6589,6 +6590,9 @@ var import_node_fs14 = __toESM(require("node:fs"));
 var import_node_path28 = __toESM(require("node:path"));
 var import_node_crypto3 = __toESM(require("node:crypto"));
 var import_node_os3 = __toESM(require("node:os"));
+function stageApprovalPrompt(workflow, stage, sessionId) {
+  return `Approve Cadre ${workflow} stage "${stage.id}" (${stage.title})? Reply "approve ${stage.id}" to allow one staged approval for session ${sessionId}.`;
+}
 function rawArgs(args) {
   return args;
 }
@@ -6770,6 +6774,7 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras =
   const complete = approvalComplete(args);
   const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, reviewFiles, extras)]));
   const validForExecute = !approvalError && complete && approvedIds.length === stages.length;
+  const manualPrompt = active ? stageApprovalPrompt(workflow, active, sessionId) : null;
   return {
     version: 1,
     kind: "cadre.staged_approval.v1",
@@ -6779,6 +6784,16 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras =
     payload_hash: payloadHash,
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
+    explicit_user_approval_required: true,
+    manual_approval_required: true,
+    manual_approval_prompt: manualPrompt,
+    approval_instruction: active ? `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.` : "Ask the user for explicit staged approval before sending any staged approval packet.",
+    not_approval: [
+      "Agent review is not approval.",
+      "No warnings is not approval.",
+      "Recommended setup choices are not approval.",
+      "Different session/payload approval is stale."
+    ],
     approval_complete: complete,
     valid_for_execute: validForExecute,
     approval_error: approvalError,
@@ -6801,8 +6816,8 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras =
     current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
     current_review_bundle: stageBundle,
     next_actions: complete ? approvalError ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."] : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`] : active ? [
-      `Review and approve the ${active.id} stage.`,
-      `Call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
+      `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,
+      `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
       "After all stages are approved in dry-run calls, call the mutating packet with execute:true, approvalComplete:true, and the same approvalSessionId."
     ] : []
   };

@@ -1321,6 +1321,9 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.equal(preview.ok, true);
     assert.equal(preview.approval.required, true);
     assert.equal(preview.approval.approval_complete, false);
+    assert.equal(preview.approval.explicit_user_approval_required, true);
+    assert.equal(preview.approval.manual_approval_required, true);
+    assert.match(preview.approval.manual_approval_prompt, /approve product/);
     assert.equal(preview.approval.current_stage, "product");
     const productArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/product.md");
     assert.ok(productArtifact);
