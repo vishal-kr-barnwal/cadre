@@ -10,7 +10,7 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { appendCanonicalJsonBlock, markerForPlanStatus, normalizedText } from "./markdown-docs";
+import { appendCanonicalJsonReference, markerForPlanStatus, normalizedText } from "./markdown-docs";
 import { specItemsFromRaw } from "./spec-docs";
 import { asArray } from "./status";
 
@@ -297,7 +297,7 @@ export function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
   return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
 }
 
-export function renderPlanMarkdown(raw: JsonObject): string {
+export function renderPlanMarkdown(raw: JsonObject, canonicalSource?: string): string {
   const trackId = asOptionalString(raw.track_id) || "track";
   const parts: string[] = [`# Plan: ${trackId}`, ""];
   const parsed = planJsonToParsedPlan(raw);
@@ -327,6 +327,6 @@ export function renderPlanMarkdown(raw: JsonObject): string {
       parts.push("");
     }
   }
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }

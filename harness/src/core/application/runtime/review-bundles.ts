@@ -117,12 +117,12 @@ export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: C
   };
   const files: ReviewFile[] = [
     jsonReviewFile("cadre/product.json", "Product context canonical", "product", productJson),
-    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context"))),
+    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context", "cadre/product.json"))),
     jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelines", productGuidelinesJson),
-    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines"))),
+    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines", "cadre/product_guidelines.json"))),
     jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
     jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowPolicy", workflowJson),
-    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow"))),
+    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow", "cadre/workflow.json"))),
     plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", `${JSON.stringify(patternsEntry)}\n`),
     textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText)),
     jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),

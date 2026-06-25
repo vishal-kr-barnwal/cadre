@@ -1405,7 +1405,7 @@ function recordTaskResultUnlocked(root, args = {}) {
     const nextPlan = asJsonObject(planPatch.value);
     import_node_fs7.default.writeFileSync(
       track.plan_path,
-      withGeneratedMarker(import_node_path13.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+      withGeneratedMarker(import_node_path13.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan, import_node_path13.default.relative(root, planJsonPath)))
     );
     return {
       ok: true,
@@ -2148,8 +2148,9 @@ function withGeneratedMarker(source, schema, body) {
   return `${generatedMarker(source, schema, normalized)}
 ${normalized}`;
 }
-function appendCanonicalJsonBlock(parts, value, heading = "Canonical JSON") {
-  parts.push(`## ${heading}`, "", "```json", JSON.stringify(value, null, 2), "```", "");
+function appendCanonicalJsonReference(parts, source, heading = "Canonical Source") {
+  const target = source ? `\`${source}\`` : "the canonical JSON file referenced by the generated marker";
+  parts.push(`## ${heading}`, "", `Canonical data lives in ${target}. This Markdown is a generated human-readable projection.`, "");
 }
 function markerForPlanStatus(status) {
   const normalized = String(status || "pending");
@@ -2242,7 +2243,7 @@ function planJsonToParsedPlan(raw) {
   });
   return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
 }
-function renderPlanMarkdown(raw) {
+function renderPlanMarkdown(raw, canonicalSource) {
   const trackId = asOptionalString(raw.track_id) || "track";
   const parts = [`# Plan: ${trackId}`, ""];
   const parsed = planJsonToParsedPlan(raw);
@@ -2272,7 +2273,7 @@ function renderPlanMarkdown(raw) {
       parts.push("");
     }
   }
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }
 

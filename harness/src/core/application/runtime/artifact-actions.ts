@@ -13,7 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { artifactDefinitions, artifactMatches, artifactSchema } from "./artifact-catalog";
 import { ArtifactDefinition, ArtifactRenderResult, CoreResult, ReviewFile } from "./contracts";
 import { ensureParent, fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
-import { appendCanonicalJsonBlock, hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { appendCanonicalJsonReference, hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown } from "./plan-docs";
 import { humanReviewState, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
@@ -81,12 +81,12 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
   } else if (fileExists(canonicalPath)) {
     raw = readJson<JsonObject | null>(canonicalPath, null);
     if (!raw) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, error: "Invalid canonical JSON" };
-    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
-    else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
+    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw, def.canonical);
+    else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw, def.canonical);
     else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
     else if (def.schema === "cadre.styleguide_index.v1") body = renderJsonCodeblock(def.title, raw);
     else if (def.schema === "cadre.release.v1") body = releaseMarkdownFromMetadata(raw);
-    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title);
+    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title, def.canonical);
     else body = renderJsonCodeblock(def.title, raw);
   } else {
     missingCanonical = true;
@@ -114,7 +114,7 @@ export function releaseMarkdownFromMetadata(metadata: JsonObject): string {
     parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
   }
   parts.push("");
-  appendCanonicalJsonBlock(parts, metadata);
+  appendCanonicalJsonReference(parts);
   return normalizedText(parts.join("\n"));
 }
 

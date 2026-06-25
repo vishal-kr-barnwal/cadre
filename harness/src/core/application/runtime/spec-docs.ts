@@ -12,7 +12,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 
 import { compactLines } from "./text-utils";
 import { utcNow } from "../../infrastructure/runtime/json-store";
-import { appendCanonicalJsonBlock, normalizedText, splitMarkdownSections } from "./markdown-docs";
+import { appendCanonicalJsonReference, normalizedText, splitMarkdownSections } from "./markdown-docs";
 import { asArray } from "./status";
 
 export function normalizedSpecHeading(heading: string): string {
@@ -208,7 +208,7 @@ export function appendSpecItemSection(parts: string[], heading: string, items: J
   parts.push("");
 }
 
-export function renderSpecMarkdown(raw: JsonObject): string {
+export function renderSpecMarkdown(raw: JsonObject, canonicalSource?: string): string {
   const spec = normalizedSpecFromRaw(raw);
   const title = asOptionalString(spec.title) || `Spec: ${asOptionalString(spec.track_id) || "track"}`;
   const parts = [`# ${title}`, ""];
@@ -218,7 +218,7 @@ export function renderSpecMarkdown(raw: JsonObject): string {
   appendSpecItemSection(parts, "Non-Functional Requirements", specItemsFromRaw(spec.non_functional_requirements));
   appendSpecItemSection(parts, "Acceptance Criteria", specItemsFromRaw(spec.acceptance_criteria));
   appendSpecItemSection(parts, "Out Of Scope", specItemsFromRaw(spec.out_of_scope));
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }
 
@@ -247,6 +247,6 @@ export function renderStyleGuideMarkdown(raw: JsonObject): string {
     const body = asOptionalString(section.body);
     if (heading && body) parts.push(`## ${heading}`, "", body, "");
   }
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts);
   return normalizedText(parts.join("\n"));
 }

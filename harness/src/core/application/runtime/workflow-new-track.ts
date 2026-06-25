@@ -49,7 +49,7 @@ export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: Jso
       `cadre/tracks/${safeTrack}/spec.md`,
       "Track spec",
       "spec.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson))
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeTrack}/spec.json`))
     ),
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/plan.json`,
@@ -61,7 +61,7 @@ export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: Jso
       `cadre/tracks/${safeTrack}/plan.md`,
       "Track plan",
       "plan.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson))
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeTrack}/plan.json`))
     ),
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/metadata.json`,
@@ -210,8 +210,8 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   writeJson(path.join(dir, "metadata.json"), metadata);
   writeJson(path.join(dir, "spec.json"), specJson);
   writeJson(path.join(dir, "plan.json"), planJson);
-  fs.writeFileSync(path.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
-  fs.writeFileSync(path.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
+  fs.writeFileSync(path.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
+  fs.writeFileSync(path.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
   fs.writeFileSync(path.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}\n`);
   fs.writeFileSync(path.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);

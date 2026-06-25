@@ -26,8 +26,9 @@ export function withGeneratedMarker(source: string, schema: string, body: string
   return `${generatedMarker(source, schema, normalized)}\n${normalized}`;
 }
 
-export function appendCanonicalJsonBlock(parts: string[], value: JsonObject, heading = "Canonical JSON"): void {
-  parts.push(`## ${heading}`, "", "```json", JSON.stringify(value, null, 2), "```", "");
+export function appendCanonicalJsonReference(parts: string[], source?: string, heading = "Canonical Source"): void {
+  const target = source ? `\`${source}\`` : "the canonical JSON file referenced by the generated marker";
+  parts.push(`## ${heading}`, "", `Canonical data lives in ${target}. This Markdown is a generated human-readable projection.`, "");
 }
 
 export function hasGeneratedMarker(text: string): boolean {
@@ -82,7 +83,7 @@ export function markdownDocJson(kind: string, markdown: string, extras: JsonObje
   };
 }
 
-export function renderMarkdownDoc(value: JsonObject, fallbackTitle: string): string {
+export function renderMarkdownDoc(value: JsonObject, fallbackTitle: string, canonicalSource?: string): string {
   const title = asOptionalString(value.title) || fallbackTitle;
   const parts: string[] = [`# ${title}`, ""];
   const summary = asOptionalString(value.summary);
@@ -95,7 +96,7 @@ export function renderMarkdownDoc(value: JsonObject, fallbackTitle: string): str
     const body = asOptionalString(section.body);
     if (body) parts.push(body, "");
   }
-  appendCanonicalJsonBlock(parts, value);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }
 

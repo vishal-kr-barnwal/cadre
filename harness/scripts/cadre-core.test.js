@@ -1709,8 +1709,9 @@ test("workflow setup preserves baseline product context with custom notes", () =
     assert.match(product, /## Data And Integrations/);
     assert.match(product, /## Project-Specific Product Notes/);
     assert.match(product, /self-hosted feature flag platform/);
-    assert.match(product, /## Canonical JSON/);
-    assert.match(product, /"schema": "cadre\.product\.v1"/);
+    assert.match(product, /## Canonical Source/);
+    assert.match(product, /Canonical data lives in `cadre\/product\.json`/);
+    assert.doesNotMatch(product, /"schema": "cadre\.product\.v1"/);
     const guidelines = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
     assert.match(guidelines, /## Trust And Safety Boundaries/);
     assert.match(guidelines, /## Data Ownership/);
@@ -2216,17 +2217,19 @@ test("workflow newtrack writes template-backed track learnings", () => {
     assert.match(specProjection, /- \*\*Throttle failed attempts\*\*: Count failed login attempts per account and source\./);
     assert.match(specProjection, /## Non-Functional Requirements/);
     assert.match(specProjection, /## Out Of Scope/);
-    assert.match(specProjection, /## Canonical JSON/);
-    assert.match(specProjection, /"functional_requirements"/);
-    assert.match(specProjection, /"acceptance_criteria"/);
+    assert.match(specProjection, /## Canonical Source/);
+    assert.match(specProjection, /Canonical data lives in `cadre\/tracks\/tmpl_20260618\/spec\.json`/);
+    assert.doesNotMatch(specProjection, /"functional_requirements"/);
+    assert.doesNotMatch(specProjection, /"acceptance_criteria"/);
     const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.md"), "utf8");
     assert.match(plan, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/plan\.json"/);
     assert.match(plan, /Track-Level User Manual Verification/);
     assert.match(plan, /manual-verification-scope: phase/);
     assert.match(plan, /Track-Level User Manual Verification/);
-    assert.match(plan, /## Canonical JSON/);
-    assert.match(plan, /"manual_verification"/);
-    assert.match(plan, /"suggested_checks"/);
+    assert.match(plan, /## Canonical Source/);
+    assert.match(plan, /Canonical data lives in `cadre\/tracks\/tmpl_20260618\/plan\.json`/);
+    assert.doesNotMatch(plan, /"manual_verification"/);
+    assert.doesNotMatch(plan, /"suggested_checks"/);
     const idempotent = core.workflowPacket(root, {
       workflow: "revise",
       execute: true,

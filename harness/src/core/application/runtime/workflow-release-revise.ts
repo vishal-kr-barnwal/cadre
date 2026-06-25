@@ -214,7 +214,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       path.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec))
+      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track))))
     ));
   }
   if (track && revisedPlan) {
@@ -223,7 +223,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       path.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan))
+      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track))))
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -280,13 +280,13 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     const written: string[] = [];
     if (revisedSpec) {
       writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
+      fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track)))));
       written.push(path.relative(root, trackSpecJsonPath(track)));
       written.push(path.relative(root, track.spec_path));
     }
     if (revisedPlan) {
       writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
+      fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track)))));
       written.push(path.relative(root, trackPlanJsonPath(track)));
       written.push(path.relative(root, track.plan_path));
     }

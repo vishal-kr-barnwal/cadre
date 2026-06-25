@@ -177,7 +177,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const writeProjectDoc = (relativePath: string, kind: string, value: JsonObject, title: string): void => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
     writeSetupJson(jsonPath, value);
-    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
+    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title, `cadre/${jsonPath}`)));
   };
 
   fs.mkdirSync(path.join(cadreDir, "tracks"), { recursive: true });

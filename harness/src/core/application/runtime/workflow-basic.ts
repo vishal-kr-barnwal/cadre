@@ -198,7 +198,7 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
       path.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+      withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, path.relative(root, handoffJsonPath)))
     ),
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -236,7 +236,7 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
   const traceBefore = beginTrace(root);
   if (args.execute === true) {
     writeJsonEnsured(handoffJsonPath, handoffJson);
-    fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
+    fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, path.relative(root, handoffJsonPath))));
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
   const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;

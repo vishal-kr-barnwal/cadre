@@ -333,7 +333,7 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
     const nextPlan = asJsonObject(planPatch.value);
     fs.writeFileSync(
       track.plan_path,
-      withGeneratedMarker(path.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+      withGeneratedMarker(path.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan, path.relative(root, planJsonPath)))
     );
     return {
       ok: true,

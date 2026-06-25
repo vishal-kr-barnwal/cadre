@@ -2239,7 +2239,7 @@ function recordTaskResultUnlocked(root, args = {}) {
     const nextPlan = asJsonObject(planPatch.value);
     import_node_fs8.default.writeFileSync(
       track.plan_path,
-      withGeneratedMarker(import_node_path15.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan))
+      withGeneratedMarker(import_node_path15.default.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan, import_node_path15.default.relative(root, planJsonPath)))
     );
     return {
       ok: true,
@@ -3090,7 +3090,7 @@ function appendSpecItemSection(parts, heading, items) {
   }
   parts.push("");
 }
-function renderSpecMarkdown(raw) {
+function renderSpecMarkdown(raw, canonicalSource) {
   const spec = normalizedSpecFromRaw(raw);
   const title = asOptionalString(spec.title) || `Spec: ${asOptionalString(spec.track_id) || "track"}`;
   const parts = [`# ${title}`, ""];
@@ -3100,7 +3100,7 @@ function renderSpecMarkdown(raw) {
   appendSpecItemSection(parts, "Non-Functional Requirements", specItemsFromRaw(spec.non_functional_requirements));
   appendSpecItemSection(parts, "Acceptance Criteria", specItemsFromRaw(spec.acceptance_criteria));
   appendSpecItemSection(parts, "Out Of Scope", specItemsFromRaw(spec.out_of_scope));
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }
 function renderStyleGuideMarkdown(raw) {
@@ -3128,7 +3128,7 @@ function renderStyleGuideMarkdown(raw) {
     const body = asOptionalString(section.body);
     if (heading && body) parts.push(`## ${heading}`, "", body, "");
   }
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts);
   return normalizedText(parts.join("\n"));
 }
 
@@ -4615,12 +4615,12 @@ function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
   };
   const files = [
     jsonReviewFile("cadre/product.json", "Product context canonical", "product", productJson),
-    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context"))),
+    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context", "cadre/product.json"))),
     jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelines", productGuidelinesJson),
-    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines"))),
+    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines", "cadre/product_guidelines.json"))),
     jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
     jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowPolicy", workflowJson),
-    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow"))),
+    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow", "cadre/workflow.json"))),
     plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", `${JSON.stringify(patternsEntry)}
 `),
     textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText)),
@@ -5871,8 +5871,9 @@ function withGeneratedMarker(source, schema, body) {
   return `${generatedMarker(source, schema, normalized)}
 ${normalized}`;
 }
-function appendCanonicalJsonBlock(parts, value, heading = "Canonical JSON") {
-  parts.push(`## ${heading}`, "", "```json", JSON.stringify(value, null, 2), "```", "");
+function appendCanonicalJsonReference(parts, source, heading = "Canonical Source") {
+  const target2 = source ? `\`${source}\`` : "the canonical JSON file referenced by the generated marker";
+  parts.push(`## ${heading}`, "", `Canonical data lives in ${target2}. This Markdown is a generated human-readable projection.`, "");
 }
 function hasGeneratedMarker(text) {
   return /<!--\s*cadre:generated\b/.test(text);
@@ -5922,7 +5923,7 @@ function markdownDocJson(kind, markdown, extras = {}) {
     ...extras
   };
 }
-function renderMarkdownDoc(value, fallbackTitle) {
+function renderMarkdownDoc(value, fallbackTitle, canonicalSource) {
   const title = asOptionalString(value.title) || fallbackTitle;
   const parts = [`# ${title}`, ""];
   const summary = asOptionalString(value.summary);
@@ -5935,7 +5936,7 @@ function renderMarkdownDoc(value, fallbackTitle) {
     const body = asOptionalString(section.body);
     if (body) parts.push(body, "");
   }
-  appendCanonicalJsonBlock(parts, value);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }
 function markerForPlanStatus(status) {
@@ -6199,7 +6200,7 @@ function planJsonToParsedPlan(raw) {
   });
   return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
 }
-function renderPlanMarkdown(raw) {
+function renderPlanMarkdown(raw, canonicalSource) {
   const trackId = asOptionalString(raw.track_id) || "track";
   const parts = [`# Plan: ${trackId}`, ""];
   const parsed = planJsonToParsedPlan(raw);
@@ -6229,7 +6230,7 @@ function renderPlanMarkdown(raw) {
       parts.push("");
     }
   }
-  appendCanonicalJsonBlock(parts, raw);
+  appendCanonicalJsonReference(parts, canonicalSource);
   return normalizedText(parts.join("\n"));
 }
 
@@ -6581,12 +6582,12 @@ function renderArtifact(root, def, args = {}) {
   } else if (fileExists(canonicalPath)) {
     raw = readJson(canonicalPath, null);
     if (!raw) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, error: "Invalid canonical JSON" };
-    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw);
-    else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw);
+    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw, def.canonical);
+    else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw, def.canonical);
     else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
     else if (def.schema === "cadre.styleguide_index.v1") body = renderJsonCodeblock(def.title, raw);
     else if (def.schema === "cadre.release.v1") body = releaseMarkdownFromMetadata(raw);
-    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title);
+    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title, def.canonical);
     else body = renderJsonCodeblock(def.title, raw);
   } else {
     missingCanonical = true;
@@ -6613,7 +6614,7 @@ function releaseMarkdownFromMetadata(metadata) {
     parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
   }
   parts.push("");
-  appendCanonicalJsonBlock(parts, metadata);
+  appendCanonicalJsonReference(parts);
   return normalizedText(parts.join("\n"));
 }
 function artifactRender(root, args = {}) {
@@ -8509,7 +8510,7 @@ function newTrackReviewFiles(trackId, spec, plan, metadata) {
       `cadre/tracks/${safeTrack}/spec.md`,
       "Track spec",
       "spec.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson))
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeTrack}/spec.json`))
     ),
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/plan.json`,
@@ -8521,7 +8522,7 @@ function newTrackReviewFiles(trackId, spec, plan, metadata) {
       `cadre/tracks/${safeTrack}/plan.md`,
       "Track plan",
       "plan.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson))
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeTrack}/plan.json`))
     ),
     jsonReviewFile(
       `cadre/tracks/${safeTrack}/metadata.json`,
@@ -8670,8 +8671,8 @@ function workflowNewTrack(root, args = {}) {
   writeJson(import_node_path33.default.join(dir, "metadata.json"), metadata);
   writeJson(import_node_path33.default.join(dir, "spec.json"), specJson);
   writeJson(import_node_path33.default.join(dir, "plan.json"), planJson);
-  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson)));
-  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson)));
+  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
+  import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
   import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}
 `);
   import_node_fs17.default.writeFileSync(import_node_path33.default.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
@@ -10222,7 +10223,7 @@ function workflowHandoff(root, args = {}) {
       import_node_path39.default.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`))
+      withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path39.default.relative(root, handoffJsonPath)))
     )
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -10260,7 +10261,7 @@ function workflowHandoff(root, args = {}) {
   const traceBefore = beginTrace(root);
   if (args.execute === true) {
     writeJsonEnsured(handoffJsonPath, handoffJson);
-    import_node_fs19.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`)));
+    import_node_fs19.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path39.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path39.default.relative(root, handoffJsonPath))));
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
   const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
@@ -10719,7 +10720,7 @@ function workflowRevise(root, args = {}) {
       import_node_path41.default.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec))
+      withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path41.default.relative(root, trackSpecJsonPath(track))))
     ));
   }
   if (track && revisedPlan) {
@@ -10728,7 +10729,7 @@ function workflowRevise(root, args = {}) {
       import_node_path41.default.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan))
+      withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path41.default.relative(root, trackPlanJsonPath(track))))
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -10785,13 +10786,13 @@ function workflowRevise(root, args = {}) {
     const written = [];
     if (revisedSpec) {
       writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      import_node_fs21.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec)));
+      import_node_fs21.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path41.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path41.default.relative(root, trackSpecJsonPath(track)))));
       written.push(import_node_path41.default.relative(root, trackSpecJsonPath(track)));
       written.push(import_node_path41.default.relative(root, track.spec_path));
     }
     if (revisedPlan) {
       writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      import_node_fs21.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan)));
+      import_node_fs21.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path41.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path41.default.relative(root, trackPlanJsonPath(track)))));
       written.push(import_node_path41.default.relative(root, trackPlanJsonPath(track)));
       written.push(import_node_path41.default.relative(root, track.plan_path));
     }
@@ -10958,7 +10959,7 @@ function workflowSetup(root, args = {}) {
   const writeProjectDoc = (relativePath, kind, value, title) => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
     writeSetupJson(jsonPath, value);
-    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title)));
+    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title, `cadre/${jsonPath}`)));
   };
   import_node_fs22.default.mkdirSync(import_node_path42.default.join(cadreDir, "tracks"), { recursive: true });
   import_node_fs22.default.mkdirSync(import_node_path42.default.join(cadreDir, "archive"), { recursive: true });
