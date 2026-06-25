@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Review returned completed tracks, release evidence, warnings, proposed artifacts, and review_bundle manifest/path list without inlining large artifacts into model context."
+      "instruction": "Review returned completed tracks, release evidence, warnings, proposed artifacts, and current `approval.current_stage` review_bundle manifest/path list without inlining large artifacts into model context."
     },
     {
       "step": 4,
@@ -46,7 +46,8 @@
     "requiredForMutation": true,
     "dryRunFirst": true,
     "executeArgument": "execute",
-    "approvalArgument": "approvalComplete"
+    "approvalArgument": "approvalComplete",
+    "stagedApproval": true
   },
   "forbiddenActions": [
     "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",

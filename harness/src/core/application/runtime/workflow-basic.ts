@@ -30,6 +30,7 @@ import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
+import { handoffApprovalStages, stagedApprovalState } from "./staged-approval";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const prep = implementationPrep(root, {
@@ -203,16 +204,20 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "handoff", args, handoffApprovalStages(), reviewFiles, { track_id: trackId });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const base = {
     ...summary,
     track_id: trackId,
     track_context: context,
     handoff_path: path.relative(root, handoffPath),
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings,
   };
   if (args.execute !== true) {

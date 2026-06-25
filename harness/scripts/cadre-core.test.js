@@ -1272,6 +1272,56 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
   }
 });
 
+test("review-heavy workflows expose staged approval bundles", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-staged-review-test-"));
+  try {
+    setupTraceableProject(root);
+    const trackId = "staged_review_20260625";
+    const created = core.workflowPacket(root, {
+      workflow: "newtrack",
+      execute: true,
+      approvalComplete: true,
+      trackId,
+      spec: sampleSpec(trackId),
+      plan: samplePlan(trackId),
+    });
+    assert.equal(created.ok, true);
+
+    const revised = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Exercise staged approval for revised spec and plan artifacts.",
+      spec: sampleSpec(trackId, {
+        acceptance_criteria: [{ heading: "Revised acceptance", body: "Staged approval exposes spec changes first." }],
+      }),
+      plan: samplePlan(trackId),
+    });
+    assert.equal(revised.ok, true);
+    assert.equal(revised.approval.current_stage, "spec_changes");
+    assert.ok(fs.existsSync(path.join(revised.review_bundle.directory, "cadre", "tracks", trackId, "spec.json")));
+
+    const handoff = core.workflowPacket(root, { workflow: "handoff", trackId });
+    assert.equal(handoff.ok, true);
+    assert.equal(handoff.approval.current_stage, "handoff_json");
+
+    const refresh = core.workflowPacket(root, { workflow: "refresh", refreshScope: "patterns" });
+    assert.equal(refresh.ok, true);
+    assert.equal(refresh.approval.current_stage, "patterns");
+
+    const artifacts = core.artifactPacket(root, { action: "sync", scope: `track:${trackId}` });
+    assert.equal(artifacts.ok, true);
+    assert.equal(artifacts.approval.current_stage, "projections");
+
+    const patched = core.metadataPatch(root, { trackId, patch: { status: "completed" } });
+    assert.equal(patched.ok, true);
+    const release = core.workflowPacket(root, { workflow: "release", releaseVersion: "v0.0.1" });
+    assert.equal(release.ok, true);
+    assert.equal(release.approval.current_stage, "release_notes");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow setup dry-run returns native recommendation prompts", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-native-prompts-test-"));
   try {

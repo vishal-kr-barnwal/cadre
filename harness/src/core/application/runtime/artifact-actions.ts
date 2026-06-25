@@ -21,6 +21,7 @@ import { asArray } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
+import { artifactApprovalStages, stagedApprovalState } from "./staged-approval";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args)
@@ -203,6 +204,12 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     scope: args.scope || "all",
     artifact: args.artifact || null,
   });
+  const approval = stagedApprovalState(root, "artifacts", args, artifactApprovalStages(), reviewFiles, {
+    scope: args.scope || "all",
+    artifact: args.artifact || null,
+  });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifactsFromFiles(reviewFiles);
   const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
   if (execute && !humanReviewConfirmed(args)) {
     return {
@@ -211,8 +218,10 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       phase_state: "awaiting_staged_approval",
       stage: "human_review",
       artifacts,
+      approval,
       human_review: humanReview,
-      review_bundle: reviewBundle,
+      review_artifacts: stageReviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       errors: ["Staged approval is required before syncing artifacts"],
       error: "Staged approval is required before syncing artifacts",
@@ -238,7 +247,9 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     dry_run: !execute,
     phase_state: execute ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
     artifacts,
-    review_bundle: reviewBundle,
+    approval,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     human_review: humanReview,
     written,
     skipped,

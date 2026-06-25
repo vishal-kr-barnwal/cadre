@@ -27,6 +27,7 @@ import { reviseIntentPrompts } from "./intent-prompts";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
+import { releaseApprovalStages, reviseApprovalStages, stagedApprovalState } from "./staged-approval";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
   const completed = listTracks(root)
@@ -98,17 +99,21 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     }));
   }
   const reviewBundle = workflowReviewBundle(root, "release", args, reviewFiles, { release_version: plan.version });
+  const approval = stagedApprovalState(root, "release", args, releaseApprovalStages(plan.gitActions.length > 0), reviewFiles, { release_version: plan.version });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const base = {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
     release_artifacts: [path.relative(root, plan.releaseMd), path.relative(root, plan.releaseJson)],
     git_actions: plan.gitActions,
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings,
   };
   if (args.execute !== true) {
@@ -228,8 +233,11 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "revise", args, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   if (reviewFiles.length === 0) {
     return {
       ...summary,
@@ -252,9 +260,10 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     track_id: trackId,
     track_context: context,
     impact,
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings,
   };
   if (args.execute !== true) {

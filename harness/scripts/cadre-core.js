@@ -6550,6 +6550,218 @@ function artifactMatches(def, args = {}) {
   return def.id === scope || def.scope === scope;
 }
 
+// src/core/application/runtime/staged-approval.ts
+function rawArgs(args) {
+  return args;
+}
+function approvalComplete(args = {}) {
+  const raw = rawArgs(args);
+  return raw.approvalComplete === true || raw.approval_complete === true;
+}
+function approvedStageIds(args = {}) {
+  const raw = rawArgs(args);
+  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages))).sort();
+}
+function requestedApprovalStage(args = {}) {
+  const raw = rawArgs(args);
+  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
+}
+function filesForStage(files, stage) {
+  if (stage.fileMatches.includes("*")) return files;
+  return files.filter((file) => stage.fileMatches.some((needle) => file.path.includes(needle) || file.source.includes(needle)));
+}
+function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras = {}) {
+  const approved = new Set(approvedStageIds(args));
+  const pending = stages.filter((stage) => !approved.has(stage.id));
+  const requested = requestedApprovalStage(args);
+  const active = stages.find((stage) => stage.id === requested) || pending[0] || stages[stages.length - 1] || null;
+  const activeFiles = active ? filesForStage(reviewFiles, active) : [];
+  const stageBundle = active ? workflowReviewBundle(root, `${workflow}-${active.id}`, args, activeFiles, {
+    ...extras,
+    approval_stage: active.id,
+    approved_stages: Array.from(approved),
+    pending_stages: pending.map((stage) => stage.id)
+  }) : null;
+  const complete = approvalComplete(args);
+  return {
+    version: 1,
+    kind: "cadre.staged_approval.v1",
+    workflow,
+    required: true,
+    approval_argument: "approvalComplete",
+    approval_complete: complete,
+    current_stage: active?.id || null,
+    current_stage_title: active?.title || null,
+    approved_stages: Array.from(approved),
+    pending_stages: pending.map((stage) => stage.id),
+    stages: stages.map((stage) => {
+      const stageFiles = filesForStage(reviewFiles, stage);
+      return {
+        id: stage.id,
+        title: stage.title,
+        description: stage.description,
+        approved: approved.has(stage.id),
+        file_count: stageFiles.length
+      };
+    }),
+    current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
+    current_review_bundle: stageBundle,
+    next_actions: complete ? [`Call ${workflow} with execute:true and approvalComplete:true to apply the approved staged payload.`] : active ? [
+      `Review and approve the ${active.id} stage.`,
+      `Call ${workflow} again with approvedStages including ${active.id} to advance to the next stage.`,
+      "After all stages are approved, call the mutating packet with execute:true and approvalComplete:true."
+    ] : []
+  };
+}
+function setupApprovalStages(polyrepoRequested) {
+  return [
+    {
+      id: "product",
+      title: "Product Context",
+      description: "Product summary, users, workflows, domain model, invariants, and boundaries.",
+      fileMatches: ["product.json", "product.md"]
+    },
+    {
+      id: "product_guidelines",
+      title: "Product Guidelines",
+      description: "Product principles, user promises, trust boundaries, non-goals, decision rules, and review checklist.",
+      fileMatches: ["product_guidelines"]
+    },
+    {
+      id: "tech_stack",
+      title: "Tech Stack",
+      description: "Structured languages, frameworks, package managers, platforms, and project commands.",
+      fileMatches: ["tech-stack.json", "techStack"]
+    },
+    {
+      id: "workflow",
+      title: "Workflow Policy",
+      description: "Development, verification, review, commit, and coordination expectations.",
+      fileMatches: ["workflow.json", "workflow.md", "workflowPolicy"]
+    },
+    {
+      id: "styleguides",
+      title: "Style Guides",
+      description: "Generated style-guide selection and projections derived from the tech stack.",
+      fileMatches: ["styleguides", "code_styleguides"]
+    },
+    {
+      id: polyrepoRequested ? "project_state" : "project_state",
+      title: polyrepoRequested ? "Project State And Repos" : "Project State",
+      description: "Initial indexes, patterns, optional repository topology, and setup support artifacts.",
+      fileMatches: ["patterns", "tracks.json", "repos.json", "lsp.json"]
+    }
+  ];
+}
+function newTrackApprovalStages() {
+  return [
+    {
+      id: "spec",
+      title: "Track Spec",
+      description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
+      fileMatches: ["spec.json", "spec.md"]
+    },
+    {
+      id: "plan",
+      title: "Track Plan",
+      description: "Phases, tasks, dependencies, file claims, and manual verification tasks.",
+      fileMatches: ["plan.json", "plan.md"]
+    },
+    {
+      id: "metadata",
+      title: "Track Metadata",
+      description: "Track identity, ownership, status, priority, branch, and worktree routing.",
+      fileMatches: ["metadata.json", "metadata"]
+    },
+    {
+      id: "learnings",
+      title: "Track Learnings",
+      description: "Initial learnings journal and human projection for future implementation notes.",
+      fileMatches: ["learnings"]
+    }
+  ];
+}
+function reviseApprovalStages(hasSpec, hasPlan) {
+  return [
+    ...hasSpec ? [{
+      id: "spec_changes",
+      title: "Spec Changes",
+      description: "Revised track requirements, acceptance criteria, and scope.",
+      fileMatches: ["spec.json", "spec.md", "spec"]
+    }] : [],
+    ...hasPlan ? [{
+      id: "plan_changes",
+      title: "Plan Changes",
+      description: "Revised phases, tasks, dependencies, and manual verification tasks.",
+      fileMatches: ["plan.json", "plan.md", "plan"]
+    }] : []
+  ];
+}
+function refreshApprovalStages(includePatterns = true, includeLsp = false) {
+  return [
+    ...includePatterns ? [{
+      id: "patterns",
+      title: "Project Patterns",
+      description: "Refreshed project patterns canonical JSONL and generated projection.",
+      fileMatches: ["patterns"]
+    }] : [],
+    ...includeLsp ? [{
+      id: "lsp_config",
+      title: "LSP Configuration",
+      description: "Language server setup changes requested by the refresh scope.",
+      fileMatches: ["lsp"]
+    }] : []
+  ];
+}
+function artifactApprovalStages() {
+  return [
+    {
+      id: "projections",
+      title: "Generated Projections",
+      description: "Generated human projections derived from canonical JSON/JSONL artifacts.",
+      fileMatches: ["*"]
+    }
+  ];
+}
+function releaseApprovalStages(hasGitActions) {
+  return [
+    {
+      id: "release_notes",
+      title: "Release Notes",
+      description: "Human-facing release notes for the selected completed tracks.",
+      fileMatches: [".md", "releaseNotes"]
+    },
+    {
+      id: "release_metadata",
+      title: "Release Metadata",
+      description: "Canonical release metadata for completed tracks and review state.",
+      fileMatches: [".json", "releaseMetadata"]
+    },
+    ...hasGitActions ? [{
+      id: "git_actions",
+      title: "Git Actions",
+      description: "Optional local git actions such as release tag creation.",
+      fileMatches: []
+    }] : []
+  ];
+}
+function handoffApprovalStages() {
+  return [
+    {
+      id: "handoff_json",
+      title: "Handoff Canonical",
+      description: "Structured handoff context for the target track.",
+      fileMatches: ["handoff.json", "handoffText"]
+    },
+    {
+      id: "handoff_projection",
+      title: "Handoff Projection",
+      description: "Generated handoff document for another session or teammate.",
+      fileMatches: ["HANDOFF.md", "handoff.md"]
+    }
+  ];
+}
+
 // src/core/application/runtime/artifact-actions.ts
 function artifactCatalog(root, args = {}) {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args)).map((def) => ({
@@ -6722,6 +6934,12 @@ function artifactSync(root, args = {}) {
     scope: args.scope || "all",
     artifact: args.artifact || null
   });
+  const approval = stagedApprovalState(root, "artifacts", args, artifactApprovalStages(), reviewFiles, {
+    scope: args.scope || "all",
+    artifact: args.artifact || null
+  });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifactsFromFiles(reviewFiles);
   const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
   if (execute && !humanReviewConfirmed(args)) {
     return {
@@ -6730,8 +6948,10 @@ function artifactSync(root, args = {}) {
       phase_state: "awaiting_staged_approval",
       stage: "human_review",
       artifacts,
+      approval,
       human_review: humanReview,
-      review_bundle: reviewBundle,
+      review_artifacts: stageReviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       errors: ["Staged approval is required before syncing artifacts"],
       error: "Staged approval is required before syncing artifacts"
@@ -6755,7 +6975,9 @@ function artifactSync(root, args = {}) {
     dry_run: !execute,
     phase_state: execute ? controlCommit && controlCommit.ok === false ? "recovery_required" : "executed" : "dry_run",
     artifacts,
-    review_bundle: reviewBundle,
+    approval,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     human_review: humanReview,
     written,
     skipped,
@@ -8111,11 +8333,11 @@ function setupNativePrompts(args) {
 }
 
 // src/core/application/runtime/intent-prompts.ts
-function rawArgs(args) {
+function rawArgs2(args) {
   return args;
 }
 function intentArgs(args) {
-  return asJsonObject(rawArgs(args).intent);
+  return asJsonObject(rawArgs2(args).intent);
 }
 function nestedIntentValue(args, name) {
   return intentArgs(args)[name];
@@ -8163,7 +8385,7 @@ function arrayPresent(value) {
   return Array.isArray(value) && value.length > 0;
 }
 function hasNamedValue(args, names) {
-  const raw = rawArgs(args);
+  const raw = rawArgs2(args);
   return names.some((name) => {
     const direct = raw[name];
     if (textPresent(direct) || arrayPresent(direct) || isRecord(direct)) return true;
@@ -8251,7 +8473,7 @@ function planPhaseShapeIssues(plan) {
   });
 }
 function newTrackSchemaIssues(args = {}) {
-  const raw = rawArgs(args);
+  const raw = rawArgs2(args);
   const spec = isRecord(raw.spec) ? asJsonObject(raw.spec) : null;
   const plan = isRecord(raw.plan) ? asJsonObject(raw.plan) : null;
   const issues = [];
@@ -8282,8 +8504,8 @@ function intentPrompt(workflow, id, title, question, selectionMode, choices, arg
 }
 function setupIntentPrompts(args = {}) {
   const prompts = [];
-  const product = isRecord(rawArgs(args).product) ? asJsonObject(rawArgs(args).product) : null;
-  const techStack = isRecord(rawArgs(args).techStack || rawArgs(args).tech_stack) ? asJsonObject(rawArgs(args).techStack || rawArgs(args).tech_stack) : null;
+  const product = isRecord(rawArgs2(args).product) ? asJsonObject(rawArgs2(args).product) : null;
+  const techStack = isRecord(rawArgs2(args).techStack || rawArgs2(args).tech_stack) ? asJsonObject(rawArgs2(args).techStack || rawArgs2(args).tech_stack) : null;
   if (!product && !hasNamedValue(args, ["productIntent", "productSummary"])) {
     prompts.push(intentPrompt(
       "setup",
@@ -8320,10 +8542,10 @@ function setupIntentPrompts(args = {}) {
 }
 function newTrackIntentPrompts(args = {}) {
   const prompts = [];
-  const trackId = asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id);
-  const spec = isRecord(rawArgs(args).spec) ? asJsonObject(rawArgs(args).spec) : null;
-  const plan = isRecord(rawArgs(args).plan) ? asJsonObject(rawArgs(args).plan) : null;
-  const metadata = isRecord(rawArgs(args).metadata) ? asJsonObject(rawArgs(args).metadata) : null;
+  const trackId = asOptionalString(rawArgs2(args).trackId || rawArgs2(args).track_id);
+  const spec = isRecord(rawArgs2(args).spec) ? asJsonObject(rawArgs2(args).spec) : null;
+  const plan = isRecord(rawArgs2(args).plan) ? asJsonObject(rawArgs2(args).plan) : null;
+  const metadata = isRecord(rawArgs2(args).metadata) ? asJsonObject(rawArgs2(args).metadata) : null;
   const hasGoal = meaningfulSpecText(spec?.description, trackId || null) || meaningfulSpecText(spec?.title, trackId || null) || hasNamedValue(args, ["goal", "description"]);
   const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null) || hasNamedValue(args, ["outcome", "outcomes"]);
   const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null) || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
@@ -8416,8 +8638,8 @@ function newTrackIntentPrompts(args = {}) {
 }
 function reviseIntentPrompts(args = {}, trackId = null) {
   const prompts = [];
-  const hasTrack = Boolean(trackId || asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id));
-  const hasRevisionPayload = isRecord(rawArgs(args).spec) || isRecord(rawArgs(args).plan);
+  const hasTrack = Boolean(trackId || asOptionalString(rawArgs2(args).trackId || rawArgs2(args).track_id));
+  const hasRevisionPayload = isRecord(rawArgs2(args).spec) || isRecord(rawArgs2(args).plan);
   const hasReason = hasNamedValue(args, ["reason", "revisionReason", "revision_reason", "changeSummary", "change_summary"]);
   const hasScope = hasRevisionPayload || hasNamedValue(args, ["scope", "revisionScope", "revision_scope", "reviseScope", "revise_scope"]);
   if (!hasTrack) {
@@ -8472,7 +8694,7 @@ function reviseIntentPrompts(args = {}, trackId = null) {
   return prompts;
 }
 function refreshScopeIds(args = {}) {
-  const raw = rawArgs(args);
+  const raw = rawArgs2(args);
   const direct = [
     raw.refreshScope,
     raw.refresh_scope,
@@ -8506,137 +8728,6 @@ function refreshIntentPrompts(args = {}) {
       "refreshScope",
       "refreshScopeOther"
     )
-  ];
-}
-
-// src/core/application/runtime/staged-approval.ts
-function rawArgs2(args) {
-  return args;
-}
-function approvalComplete(args = {}) {
-  const raw = rawArgs2(args);
-  return raw.approvalComplete === true || raw.approval_complete === true;
-}
-function approvedStageIds(args = {}) {
-  const raw = rawArgs2(args);
-  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages))).sort();
-}
-function requestedApprovalStage(args = {}) {
-  const raw = rawArgs2(args);
-  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
-}
-function filesForStage(files, stage) {
-  return files.filter((file) => stage.fileMatches.some((needle) => file.path.includes(needle) || file.source.includes(needle)));
-}
-function stagedApprovalState(root, workflow, args, stages, reviewFiles, extras = {}) {
-  const approved = new Set(approvedStageIds(args));
-  const pending = stages.filter((stage) => !approved.has(stage.id));
-  const requested = requestedApprovalStage(args);
-  const active = stages.find((stage) => stage.id === requested) || pending[0] || stages[stages.length - 1] || null;
-  const activeFiles = active ? filesForStage(reviewFiles, active) : [];
-  const stageBundle = active ? workflowReviewBundle(root, `${workflow}-${active.id}`, args, activeFiles, {
-    ...extras,
-    approval_stage: active.id,
-    approved_stages: Array.from(approved),
-    pending_stages: pending.map((stage) => stage.id)
-  }) : null;
-  const complete = approvalComplete(args);
-  return {
-    version: 1,
-    kind: "cadre.staged_approval.v1",
-    workflow,
-    required: true,
-    approval_argument: "approvalComplete",
-    approval_complete: complete,
-    current_stage: active?.id || null,
-    current_stage_title: active?.title || null,
-    approved_stages: Array.from(approved),
-    pending_stages: pending.map((stage) => stage.id),
-    stages: stages.map((stage) => {
-      const stageFiles = filesForStage(reviewFiles, stage);
-      return {
-        id: stage.id,
-        title: stage.title,
-        description: stage.description,
-        approved: approved.has(stage.id),
-        file_count: stageFiles.length
-      };
-    }),
-    current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
-    current_review_bundle: stageBundle,
-    next_actions: complete ? [`Call ${workflow} with execute:true and approvalComplete:true to apply the approved staged payload.`] : active ? [
-      `Review and approve the ${active.id} stage.`,
-      `Call ${workflow} again with approvedStages including ${active.id} to advance to the next stage.`,
-      "After all stages are approved, call the mutating packet with execute:true and approvalComplete:true."
-    ] : []
-  };
-}
-function setupApprovalStages(polyrepoRequested) {
-  return [
-    {
-      id: "product",
-      title: "Product Context",
-      description: "Product summary, users, workflows, domain model, invariants, and boundaries.",
-      fileMatches: ["product.json", "product.md"]
-    },
-    {
-      id: "product_guidelines",
-      title: "Product Guidelines",
-      description: "Product principles, user promises, trust boundaries, non-goals, decision rules, and review checklist.",
-      fileMatches: ["product_guidelines"]
-    },
-    {
-      id: "tech_stack",
-      title: "Tech Stack",
-      description: "Structured languages, frameworks, package managers, platforms, and project commands.",
-      fileMatches: ["tech-stack.json", "techStack"]
-    },
-    {
-      id: "workflow",
-      title: "Workflow Policy",
-      description: "Development, verification, review, commit, and coordination expectations.",
-      fileMatches: ["workflow.json", "workflow.md", "workflowPolicy"]
-    },
-    {
-      id: "styleguides",
-      title: "Style Guides",
-      description: "Generated style-guide selection and projections derived from the tech stack.",
-      fileMatches: ["styleguides", "code_styleguides"]
-    },
-    {
-      id: polyrepoRequested ? "project_state" : "project_state",
-      title: polyrepoRequested ? "Project State And Repos" : "Project State",
-      description: "Initial indexes, patterns, optional repository topology, and setup support artifacts.",
-      fileMatches: ["patterns", "tracks.json", "repos.json", "lsp.json"]
-    }
-  ];
-}
-function newTrackApprovalStages() {
-  return [
-    {
-      id: "spec",
-      title: "Track Spec",
-      description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
-      fileMatches: ["spec.json", "spec.md"]
-    },
-    {
-      id: "plan",
-      title: "Track Plan",
-      description: "Phases, tasks, dependencies, file claims, and manual verification tasks.",
-      fileMatches: ["plan.json", "plan.md"]
-    },
-    {
-      id: "metadata",
-      title: "Track Metadata",
-      description: "Track identity, ownership, status, priority, branch, and worktree routing.",
-      fileMatches: ["metadata.json", "metadata"]
-    },
-    {
-      id: "learnings",
-      title: "Track Learnings",
-      description: "Initial learnings journal and human projection for future implementation notes.",
-      fileMatches: ["learnings"]
-    }
   ];
 }
 
@@ -10381,16 +10472,20 @@ function workflowHandoff(root, args = {}) {
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "handoff", args, handoffApprovalStages(), reviewFiles, { track_id: trackId });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const base = {
     ...summary,
     track_id: trackId,
     track_context: context,
     handoff_path: import_node_path39.default.relative(root, handoffPath),
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings
   };
   if (args.execute !== true) {
@@ -10619,8 +10714,11 @@ function workflowRefresh(root, args = {}) {
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   if (lspWriteRequested) reviewArtifacts.push(...setupLspReviewArtifacts(args));
   const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
+  const approval = stagedApprovalState(root, "refresh", args, refreshApprovalStages(refreshPatterns, lspWriteRequested), reviewFiles);
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
   const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
   const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
@@ -10638,9 +10736,10 @@ function workflowRefresh(root, args = {}) {
       lsp: lspConfigStatus(root),
       lsp_setup: lsp,
       scope: scopeIds,
+      approval,
       human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      review_bundle: reviewBundle,
+      review_artifacts: stageReviewArtifacts,
+      review_bundle: stageReviewBundle,
       warnings,
       error: "Staged approval is required before refreshing Cadre context documents"
     };
@@ -10683,9 +10782,10 @@ function workflowRefresh(root, args = {}) {
     regen,
     patterns,
     control_commit: controlCommit,
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings
   };
 }
@@ -10757,17 +10857,21 @@ function workflowRelease(root, args = {}) {
     }));
   }
   const reviewBundle = workflowReviewBundle(root, "release", args, reviewFiles, { release_version: plan.version });
+  const approval = stagedApprovalState(root, "release", args, releaseApprovalStages(plan.gitActions.length > 0), reviewFiles, { release_version: plan.version });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   const base = {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
     release_artifacts: [import_node_path41.default.relative(root, plan.releaseMd), import_node_path41.default.relative(root, plan.releaseJson)],
     git_actions: plan.gitActions,
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings
   };
   if (args.execute !== true) {
@@ -10887,8 +10991,11 @@ function workflowRevise(root, args = {}) {
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "revise", args, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
-  const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
+  const warnings = asStringArray(asJsonObject(stageReviewBundle).warnings);
   if (reviewFiles.length === 0) {
     return {
       ...summary,
@@ -10911,9 +11018,10 @@ function workflowRevise(root, args = {}) {
     track_id: trackId,
     track_context: context,
     impact,
+    approval,
     human_review: humanReview,
-    review_artifacts: reviewArtifacts,
-    review_bundle: reviewBundle,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: stageReviewBundle,
     warnings
   };
   if (args.execute !== true) {

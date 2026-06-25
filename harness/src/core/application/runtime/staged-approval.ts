@@ -31,6 +31,7 @@ export function requestedApprovalStage(args: RuntimeArgs = {}): string | null {
 }
 
 function filesForStage(files: ReviewFile[], stage: ApprovalStage): ReviewFile[] {
+  if (stage.fileMatches.includes("*")) return files;
   return files.filter((file) => stage.fileMatches.some((needle) => file.path.includes(needle) || file.source.includes(needle)));
 }
 
@@ -160,6 +161,97 @@ export function newTrackApprovalStages(): ApprovalStage[] {
       title: "Track Learnings",
       description: "Initial learnings journal and human projection for future implementation notes.",
       fileMatches: ["learnings"],
+    },
+  ];
+}
+
+export function reviseApprovalStages(hasSpec: boolean, hasPlan: boolean): ApprovalStage[] {
+  return [
+    ...(hasSpec
+      ? [{
+        id: "spec_changes",
+        title: "Spec Changes",
+        description: "Revised track requirements, acceptance criteria, and scope.",
+        fileMatches: ["spec.json", "spec.md", "spec"],
+      }]
+      : []),
+    ...(hasPlan
+      ? [{
+        id: "plan_changes",
+        title: "Plan Changes",
+        description: "Revised phases, tasks, dependencies, and manual verification tasks.",
+        fileMatches: ["plan.json", "plan.md", "plan"],
+      }]
+      : []),
+  ];
+}
+
+export function refreshApprovalStages(includePatterns = true, includeLsp = false): ApprovalStage[] {
+  return [
+    ...(includePatterns ? [{
+      id: "patterns",
+      title: "Project Patterns",
+      description: "Refreshed project patterns canonical JSONL and generated projection.",
+      fileMatches: ["patterns"],
+    }] : []),
+    ...(includeLsp ? [{
+      id: "lsp_config",
+      title: "LSP Configuration",
+      description: "Language server setup changes requested by the refresh scope.",
+      fileMatches: ["lsp"],
+    }] : []),
+  ];
+}
+
+export function artifactApprovalStages(): ApprovalStage[] {
+  return [
+    {
+      id: "projections",
+      title: "Generated Projections",
+      description: "Generated human projections derived from canonical JSON/JSONL artifacts.",
+      fileMatches: ["*"],
+    },
+  ];
+}
+
+export function releaseApprovalStages(hasGitActions: boolean): ApprovalStage[] {
+  return [
+    {
+      id: "release_notes",
+      title: "Release Notes",
+      description: "Human-facing release notes for the selected completed tracks.",
+      fileMatches: [".md", "releaseNotes"],
+    },
+    {
+      id: "release_metadata",
+      title: "Release Metadata",
+      description: "Canonical release metadata for completed tracks and review state.",
+      fileMatches: [".json", "releaseMetadata"],
+    },
+    ...(hasGitActions
+      ? [{
+        id: "git_actions",
+        title: "Git Actions",
+        description: "Optional local git actions such as release tag creation.",
+        fileMatches: [],
+      }]
+      : []),
+  ];
+}
+
+export function handoffApprovalStages(): ApprovalStage[] {
+  return [
+    {
+      id: "handoff_json",
+      title: "Handoff Canonical",
+      description: "Structured handoff context for the target track.",
+      fileMatches: ["handoff.json", "handoffText"],
+    },
+    {
+      id: "handoff_projection",
+      title: "Handoff Projection",
+      description: "Generated handoff document for another session or teammate.",
+      fileMatches: ["HANDOFF.md", "handoff.md"],
     },
   ];
 }

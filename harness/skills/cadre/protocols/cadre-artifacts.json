@@ -35,7 +35,7 @@
     },
     {
       "step": 4,
-      "instruction": "Review `review_bundle` when present. The bundle contains a manifest/path list for full proposed artifacts so large Markdown projections stay out of model context."
+      "instruction": "Review the current `approval.current_stage` when present. The staged review_bundle contains a manifest/path list for proposed projection artifacts so large Markdown projections stay out of model context."
     },
     {
       "step": 5,
@@ -50,7 +50,8 @@
     "requiredForMutation": true,
     "dryRunFirst": true,
     "executeArgument": "execute",
-    "approvalArgument": "approvalComplete"
+    "approvalArgument": "approvalComplete",
+    "stagedApproval": true
   },
   "forbiddenActions": [
     "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
