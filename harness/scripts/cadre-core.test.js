@@ -1329,8 +1329,11 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.ok(productArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(productArtifact, "content"), false);
     assert.equal(preview.review_bundle.content_in_response, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(preview.review_bundle, "commands"), false);
     assert.ok(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "product.md")));
     assert.ok(fs.existsSync(preview.review_bundle.manifest_path));
+    const manifest = readJson(preview.review_bundle.manifest_path);
+    assert.equal(Object.prototype.hasOwnProperty.call(manifest, "commands"), false);
 
     const blocked = core.workflowPacket(root, { ...args, execute: true });
     assert.equal(blocked.ok, false);

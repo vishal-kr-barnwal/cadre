@@ -22,7 +22,7 @@
     },
     {
       "heading": "Workflow Review Bundles",
-      "body": "Reviewable workflow dry-runs return `review_artifacts` as metadata only and\n`review_bundle` with a manifest path, absolute review file paths, and optional\nshell commands for local rendering. Use those files for human review instead of\npasting complete generated files into chat/model context by default."
+      "body": "Reviewable workflow dry-runs return `review_artifacts` as metadata only and\n`review_bundle` with a manifest path plus absolute review file paths. Review bundles intentionally do not include command recipes; use packet-provided summaries and the returned paths for human review instead of running ad hoc inspection commands by default."
     },
     {
       "heading": "Agent Use",

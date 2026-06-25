@@ -4743,9 +4743,6 @@ function setupReviewArtifacts(reviewFiles, styleGuides) {
   ];
   return artifacts;
 }
-function shellQuote(value) {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
 function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras = {}) {
   const rawArgs3 = args;
   if (reviewFiles.length === 0) return null;
@@ -4778,14 +4775,6 @@ function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras 
     };
   });
   const manifestPath = import_node_path22.default.join(directory, "manifest.json");
-  const relativeReviewPaths = files.map((file) => shellQuote(String(file.path)));
-  const openCommand = relativeReviewPaths.length > 0 ? `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${relativeReviewPaths.join(" ")}` : `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${shellQuote("manifest.json")}`;
-  const printCommand = relativeReviewPaths.length > 0 ? `cd ${shellQuote(directory)} && for file in ${relativeReviewPaths.join(" ")}; do printf '\\n### %s\\n' "$file"; sed -n '1,240p' "$file"; done` : `sed -n '1,240p' ${shellQuote(manifestPath)}`;
-  const commands = {
-    list: `find ${shellQuote(directory)} -type f | sort`,
-    open_editor: openCommand,
-    print: printCommand
-  };
   const manifest = {
     version: 1,
     kind: `cadre_${safeName(workflow)}_review`,
@@ -4795,8 +4784,7 @@ function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras 
     content_in_response: false,
     warnings,
     files,
-    ...manifestExtras,
-    commands
+    ...manifestExtras
   };
   writeJson(manifestPath, manifest);
   return {
@@ -4804,8 +4792,7 @@ function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras 
     manifest_path: manifestPath,
     content_in_response: false,
     warnings,
-    files,
-    commands
+    files
   };
 }
 function setupLspReviewArtifacts(args = {}, writeRequested = setupLspWriteRequested(args)) {

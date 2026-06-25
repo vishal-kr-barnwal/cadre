@@ -180,10 +180,6 @@ export function setupReviewArtifacts(reviewFiles: ReviewFile[], styleGuides: Cor
   return artifacts;
 }
 
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
 export function workflowReviewBundle(root: string, workflow: string, args: RuntimeArgs, reviewFiles: ReviewFile[], manifestExtras: JsonObject = {}): JsonObject | null {
   const rawArgs = args as UnknownRecord;
   if (reviewFiles.length === 0) return null;
@@ -222,18 +218,6 @@ export function workflowReviewBundle(root: string, workflow: string, args: Runti
     };
   });
   const manifestPath = path.join(directory, "manifest.json");
-  const relativeReviewPaths = files.map((file) => shellQuote(String(file.path)));
-  const openCommand = relativeReviewPaths.length > 0
-    ? `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${relativeReviewPaths.join(" ")}`
-    : `cd ${shellQuote(directory)} && \${VISUAL:-\${EDITOR:-vi}} ${shellQuote("manifest.json")}`;
-  const printCommand = relativeReviewPaths.length > 0
-    ? `cd ${shellQuote(directory)} && for file in ${relativeReviewPaths.join(" ")}; do printf '\\n### %s\\n' "$file"; sed -n '1,240p' "$file"; done`
-    : `sed -n '1,240p' ${shellQuote(manifestPath)}`;
-  const commands: JsonObject = {
-    list: `find ${shellQuote(directory)} -type f | sort`,
-    open_editor: openCommand,
-    print: printCommand,
-  };
   const manifest: JsonObject = {
     version: 1,
     kind: `cadre_${safeName(workflow)}_review`,
@@ -244,7 +228,6 @@ export function workflowReviewBundle(root: string, workflow: string, args: Runti
     warnings,
     files,
     ...manifestExtras,
-    commands,
   };
   writeJson(manifestPath, manifest);
   return {
@@ -253,7 +236,6 @@ export function workflowReviewBundle(root: string, workflow: string, args: Runti
     content_in_response: false,
     warnings,
     files,
-    commands,
   };
 }
 
