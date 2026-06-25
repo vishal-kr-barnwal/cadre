@@ -1337,8 +1337,27 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     const compactProvider = compact.native_prompts.find((prompt) => prompt.id === "setup-provider-mode");
     assert.equal(compactProvider.selectionMode, "single");
     assert.equal(compactProvider.argument, "providerMode");
-    assert.equal(Object.prototype.hasOwnProperty.call(compactProvider, "choices"), false);
-    assert.equal(Object.prototype.hasOwnProperty.call(compactProvider, "recommended"), false);
+    assert.ok(compactProvider.choices.some((choice) => choice.id === "local" && choice.label === "Local" && choice.recommended === true));
+    assert.equal(compactProvider.allowCustom, true);
+    assert.ok(compact.native_prompts.find((prompt) => prompt.id === "setup-style-guides").choices.some((choice) => choice.id === "typescript" && choice.recommended === true));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup dry-run exposes clarification prompts before approval", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-intent-prompts-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "src", "app.ts"), "export const app = true;\n");
+
+    const preview = core.workflowPacket(root, { workflow: "setup" });
+    assert.equal(preview.ok, true);
+    assert.equal(preview.phase_state, "awaiting_clarification");
+    assert.equal(preview.stage, "intent_clarification");
+    assert.ok(preview.intent_prompts.some((prompt) => prompt.id === "setup-product-intent"));
+    assert.ok(preview.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.match(preview.next_actions[0], /Answer returned intent_prompts\/native_prompts/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1438,6 +1457,43 @@ test("workflow setup writes detected and requested style guides from templates",
   }
 });
 
+test("workflow clarity gates ask before generating vague newtrack, revise, and refresh artifacts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-clarity-gates-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "clarify_20260625", samplePlan("clarify_20260625"));
+
+    const vagueTrack = core.workflowPacket(root, {
+      workflow: "newtrack",
+      description: "do auth",
+    });
+    assert.equal(vagueTrack.ok, false);
+    assert.equal(vagueTrack.phase_state, "awaiting_clarification");
+    assert.equal(vagueTrack.stage, "intent_clarification");
+    assert.ok(vagueTrack.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
+    assert.equal(Object.prototype.hasOwnProperty.call(vagueTrack, "review_bundle"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(vagueTrack, "review_artifacts"), false);
+
+    const vagueRevise = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId: "clarify_20260625",
+    });
+    assert.equal(vagueRevise.ok, false);
+    assert.equal(vagueRevise.phase_state, "awaiting_clarification");
+    assert.ok(vagueRevise.intent_prompts.some((prompt) => prompt.id === "revise-reason"));
+    assert.ok(vagueRevise.intent_prompts.some((prompt) => prompt.id === "revise-scope"));
+    assert.equal(Object.prototype.hasOwnProperty.call(vagueRevise, "review_bundle"), false);
+
+    const vagueRefresh = core.workflowPacket(root, { workflow: "refresh" });
+    assert.equal(vagueRefresh.ok, false);
+    assert.equal(vagueRefresh.phase_state, "awaiting_clarification");
+    assert.deepEqual(vagueRefresh.intent_prompts.map((prompt) => prompt.id), ["refresh-scope"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(vagueRefresh, "review_bundle"), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow setup resolves bundled templates and writes default LSP config", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-plugin-template-test-"));
   const oldPath = process.env.PATH;
@@ -1531,6 +1587,8 @@ test("workflow setup preserves baseline product context with custom notes", () =
     assert.match(product, /## Data And Integrations/);
     assert.match(product, /## Project-Specific Product Notes/);
     assert.match(product, /self-hosted feature flag platform/);
+    assert.match(product, /## Canonical JSON/);
+    assert.match(product, /"schema": "cadre\.product\.v1"/);
     const guidelines = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
     assert.match(guidelines, /## Trust And Safety Boundaries/);
     assert.match(guidelines, /## Data Ownership/);
@@ -1943,16 +2001,23 @@ test("workflow newtrack writes template-backed track learnings", () => {
     assert.match(specProjection, /- \*\*Throttle failed attempts\*\*: Count failed login attempts per account and source\./);
     assert.match(specProjection, /## Non-Functional Requirements/);
     assert.match(specProjection, /## Out Of Scope/);
+    assert.match(specProjection, /## Canonical JSON/);
+    assert.match(specProjection, /"functional_requirements"/);
+    assert.match(specProjection, /"acceptance_criteria"/);
     const plan = fs.readFileSync(path.join(root, "cadre", "tracks", "tmpl_20260618", "plan.md"), "utf8");
     assert.match(plan, /cadre:generated from="cadre\/tracks\/tmpl_20260618\/plan\.json"/);
     assert.match(plan, /Track-Level User Manual Verification/);
     assert.match(plan, /manual-verification-scope: phase/);
     assert.match(plan, /Track-Level User Manual Verification/);
+    assert.match(plan, /## Canonical JSON/);
+    assert.match(plan, /"manual_verification"/);
+    assert.match(plan, /"suggested_checks"/);
     const idempotent = core.workflowPacket(root, {
       workflow: "revise",
       execute: true,
       humanConfirmed: true,
       trackId: "tmpl_20260618",
+      reason: "Re-apply normalized plan to confirm manual verification remains idempotent.",
       plan: planJson,
     });
     assert.equal(idempotent.ok, true);
@@ -2053,6 +2118,7 @@ test("workflow revise reviews proposed track files before writing", () => {
     const preview = core.workflowPacket(root, {
       workflow: "revise",
       trackId: "revise_20260618",
+      reason: "Implementation discovery requires an extra follow-up task.",
       plan: revisedPlan,
       reviewBundleDir: ".revise-review",
     });
@@ -2067,6 +2133,7 @@ test("workflow revise reviews proposed track files before writing", () => {
       workflow: "revise",
       execute: true,
       trackId: "revise_20260618",
+      reason: "Implementation discovery requires an extra follow-up task.",
       plan: revisedPlan,
     });
     assert.equal(blocked.ok, false);
@@ -2078,6 +2145,7 @@ test("workflow revise reviews proposed track files before writing", () => {
       execute: true,
       humanConfirmed: true,
       trackId: "revise_20260618",
+      reason: "Implementation discovery requires an extra follow-up task.",
       plan: revisedPlan,
     });
     assert.equal(written.ok, true);
@@ -2838,6 +2906,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     const refreshBlocked = core.workflowPacket(root, {
       workflow: "refresh",
       execute: true,
+      refreshScope: "all",
       lsp: true,
       reviewBundleDir: ".refresh-review",
     });
@@ -2855,6 +2924,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       workflow: "refresh",
       execute: true,
       humanConfirmed: true,
+      refreshScope: "all",
       lsp: true,
     });
     assert.equal(refresh.ok, true);

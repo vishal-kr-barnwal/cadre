@@ -23,6 +23,7 @@ import { gitIdentity } from "../../infrastructure/runtime/system";
 import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
+import { newTrackIntentPrompts } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
@@ -87,6 +88,22 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
+  const intentPrompts = newTrackIntentPrompts(args);
+  if (intentPrompts.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      intent_prompts: intentPrompts,
+      next_actions: [
+        "Answer intent_prompts with the client native selector or concise chat fallback.",
+        "Call newtrack again with trackId plus structured spec and plan JSON before review or mutation.",
+      ],
+      error: "New track intent is under-specified; Cadre will not generate spec or plan artifacts until goal, outcome, acceptance, and scope are clear.",
+    };
+  }
   const trackId = args.trackId || args.track_id;
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };

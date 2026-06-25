@@ -30,7 +30,10 @@ function sampleSpec(id) {
     track_id: id,
     title: `Spec: ${id}`,
     description: `Spec for ${id}`,
+    functional_requirements: [{ heading: "Deliver behavior", body: "Implement the requested behavior." }],
+    non_functional_requirements: [],
     acceptance_criteria: [{ heading: "Works", body: "The work is complete." }],
+    out_of_scope: [],
   };
 }
 
@@ -610,6 +613,53 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(parsedNativePrompts.ok, true);
     assert.equal(parsedNativePrompts.data.reference.id, "native-prompts");
     assert.equal(parsedNativePrompts.data.reference.platforms.codex.adapter, "request_user_input");
+
+    const freshRoot = path.join(root, "fresh");
+    write(path.join(freshRoot, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
+    write(path.join(freshRoot, "src", "index.ts"), "export const fresh = true;\n");
+    const freshProjectRoot = parseTextJson(await request("tools/call", {
+      name: "cadre_project",
+      arguments: { action: "root", root: freshRoot },
+    })).data;
+    assert.equal(freshProjectRoot.root, freshRoot);
+    assert.equal(freshProjectRoot.has_cadre, false);
+    assert.equal(freshProjectRoot.setup_candidate, true);
+
+    const freshTechStack = parseTextJson(await request("tools/call", {
+      name: "cadre_project",
+      arguments: { action: "tech_stack_summary", root: freshRoot, techStack: { languages: ["TypeScript"] } },
+    })).data;
+    assert.equal(freshTechStack.ok, true);
+    assert.equal(freshTechStack.root, freshRoot);
+
+    const freshIntegrations = parseTextJson(await request("tools/call", {
+      name: "cadre_project",
+      arguments: { action: "integrations", root: freshRoot },
+    })).data;
+    assert.equal(freshIntegrations.ok, true);
+    assert.equal(freshIntegrations.root, freshRoot);
+
+    const freshRepoMap = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { action: "repo_map", root: freshRoot, limit: 20 },
+    })).data;
+    assert.equal(freshRepoMap.ok, true);
+    assert.equal(freshRepoMap.root, freshRoot);
+
+    const freshDiagnostics = parseTextJson(await request("tools/call", {
+      name: "cadre_intel",
+      arguments: { action: "workspace_diagnostics", root: freshRoot },
+    })).data;
+    assert.equal(freshDiagnostics.ok, true);
+    assert.equal(freshDiagnostics.root, freshRoot);
+
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_status",
+        arguments: { action: "live", root: freshRoot },
+      }),
+      /requires \{ root \}/
+    );
 
     const templateInventory = await request("resources/read", { uri: "cadre://template-inventory" });
     const parsedTemplateInventory = JSON.parse(templateInventory.contents[0].text);

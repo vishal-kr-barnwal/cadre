@@ -155,13 +155,22 @@ function cookedPlan(trackId: string, formula: JsonObject, rendered: JsonObject):
 
 function cookedSpec(trackId: string, formula: JsonObject, rendered: JsonObject): JsonObject {
   if (isRecord(rendered.spec)) return asJsonObject(rendered.spec);
+  const description = asOptionalString(rendered.description) || asOptionalString(formula.description) || asOptionalString(formula.title) || trackId;
+  const acceptance = asStringArray(rendered.acceptance);
   return {
     version: 1,
     schema: "cadre.spec.v1",
     track_id: trackId,
     title: asOptionalString(rendered.title) || `Spec: ${trackId}`,
-    description: asOptionalString(rendered.description) || asOptionalString(formula.description) || asOptionalString(formula.title) || trackId,
-    acceptance: asStringArray(rendered.acceptance),
+    description,
+    functional_requirements: [
+      { heading: "Formula outcome", body: description },
+    ],
+    non_functional_requirements: [],
+    acceptance_criteria: acceptance.length > 0
+      ? acceptance.map((entry, index) => ({ heading: `Acceptance ${index + 1}`, body: entry }))
+      : [{ heading: "Formula plan reviewed", body: "The generated formula plan is reviewed and approved before track creation." }],
+    out_of_scope: [],
   };
 }
 

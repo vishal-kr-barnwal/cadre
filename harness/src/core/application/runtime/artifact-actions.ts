@@ -13,7 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { artifactDefinitions, artifactMatches, artifactSchema } from "./artifact-catalog";
 import { ArtifactDefinition, ArtifactRenderResult, CoreResult, ReviewFile } from "./contracts";
 import { ensureParent, fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
-import { hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { appendCanonicalJsonBlock, hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown } from "./plan-docs";
 import { humanReviewState, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
@@ -114,6 +114,7 @@ export function releaseMarkdownFromMetadata(metadata: JsonObject): string {
     parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
   }
   parts.push("");
+  appendCanonicalJsonBlock(parts, metadata);
   return normalizedText(parts.join("\n"));
 }
 

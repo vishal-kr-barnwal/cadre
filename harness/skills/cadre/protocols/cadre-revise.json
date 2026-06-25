@@ -27,11 +27,11 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"revise\"`, the requested `trackId`, and proposed structured `spec` or `plan` JSON fields. Do not send Markdown fields such as `specText`, `planText`, or `planPath`."
+      "instruction": "Call `cadre_workflow` with `workflow: \"revise\"`, the requested `trackId`, revision `reason`, and proposed structured `spec` or `plan` JSON fields. If reason or spec/plan scope is unclear, the packet returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`; load `native-prompts`, ask those questions, and do not invent revised requirements."
     },
     {
       "step": 3,
-      "instruction": "Use the returned track context and impact analysis to review proposed canonical JSON changes and generated Markdown projection previews."
+      "instruction": "Use the returned track context, impact analysis, revision reason, and review_bundle manifest/path list to review proposed canonical JSON changes and generated Markdown projection previews."
     },
     {
       "step": 4,
@@ -62,6 +62,7 @@
     "next recommended packet"
   ],
   "references": [
-    "mcp-contract"
+    "mcp-contract",
+    "native-prompts"
   ]
 }

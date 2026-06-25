@@ -2148,6 +2148,9 @@ function withGeneratedMarker(source, schema, body) {
   return `${generatedMarker(source, schema, normalized)}
 ${normalized}`;
 }
+function appendCanonicalJsonBlock(parts, value, heading = "Canonical JSON") {
+  parts.push(`## ${heading}`, "", "```json", JSON.stringify(value, null, 2), "```", "");
+}
 function markerForPlanStatus(status) {
   const normalized = String(status || "pending");
   if (normalized === "completed") return "x";
@@ -2269,6 +2272,7 @@ function renderPlanMarkdown(raw) {
       parts.push("");
     }
   }
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }
 

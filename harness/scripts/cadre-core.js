@@ -8,9 +8,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
+var __export = (target2, all) => {
   for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
+    __defProp(target2, name, { get: all[name], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -20,12 +20,12 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
   // If the importer is in node compatibility mode or this is not an ESM
   // file that has been converted to a CommonJS file using a Babel-
   // compatible transform (i.e. "__esModule" has not been set), then set
   // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target2, "default", { value: mod, enumerable: true }) : target2,
   mod
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
@@ -2467,14 +2467,14 @@ function providerEvidenceRequirement(root, args = {}) {
   const readiness = providerReadiness(root, args);
   const track = args.trackId ? findTrack(root, args.trackId) : null;
   const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
-  const target = args.pr || args.prNumber || args.mr || branch || null;
+  const target2 = args.pr || args.prNumber || args.mr || branch || null;
   const kind = provider === "gitlab" ? "gitlab_merge_request_status" : "github_pull_request_status";
   const minimumFields = provider === "gitlab" ? ["url", "state", "source_branch", "target_branch", "head_sha", "approvals", "pipeline_status", "discussions"] : ["url", "state", "head_ref", "base_ref", "head_sha", "review_decision", "status_checks", "workflow_runs", "comments"];
   return {
     ok: false,
     available: false,
     provider,
-    target,
+    target: target2,
     branch,
     provider_mode: provider,
     required_provider_mcp: provider === "local" ? null : {
@@ -2488,7 +2488,7 @@ function providerEvidenceRequirement(root, args = {}) {
     required_evidence: provider === "local" ? null : {
       kind,
       provider,
-      target,
+      target: target2,
       branch,
       minimum_fields: minimumFields,
       write_back: {
@@ -3100,6 +3100,7 @@ function renderSpecMarkdown(raw) {
   appendSpecItemSection(parts, "Non-Functional Requirements", specItemsFromRaw(spec.non_functional_requirements));
   appendSpecItemSection(parts, "Acceptance Criteria", specItemsFromRaw(spec.acceptance_criteria));
   appendSpecItemSection(parts, "Out Of Scope", specItemsFromRaw(spec.out_of_scope));
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }
 function renderStyleGuideMarkdown(raw) {
@@ -3127,6 +3128,7 @@ function renderStyleGuideMarkdown(raw) {
     const body = asOptionalString(section.body);
     if (heading && body) parts.push(`## ${heading}`, "", body, "");
   }
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }
 
@@ -3265,10 +3267,7 @@ function compactReviewArtifacts(value) {
     files: artifacts.slice(0, 30).map((artifact) => ({
       path: asOptionalString(artifact.path) || null,
       title: asOptionalString(artifact.title) || null,
-      kind: asOptionalString(artifact.kind) || null,
-      source: asOptionalString(artifact.source) || null,
-      bytes: Number(artifact.bytes || 0),
-      missing: artifact.missing === true
+      kind: asOptionalString(artifact.kind) || null
     })),
     truncated: artifacts.length > 30,
     content_in_response: false
@@ -3289,9 +3288,7 @@ function compactReviewBundle(value) {
       path: asOptionalString(file.path) || null,
       review_path: asOptionalString(file.review_path) || null,
       title: asOptionalString(file.title) || null,
-      kind: asOptionalString(file.kind) || null,
-      bytes: Number(file.bytes || 0),
-      missing: file.missing === true
+      kind: asOptionalString(file.kind) || null
     })),
     truncated: files.length > 30
   };
@@ -3321,23 +3318,42 @@ function compactProvider(value) {
 function compactWorkspaceHealth(value) {
   if (!value || !isRecord(value)) return null;
   const health = asJsonObject(value);
+  const workspace = asJsonObject(health.workspace);
+  const dependencyGraph2 = asJsonObject(health.dependency_graph);
+  const lsp = asJsonObject(health.lsp);
+  const integrations = asJsonObject(health.integrations);
   return {
     ok: health.ok !== false,
     response_mode: asOptionalString(health.response_mode) || "compact",
     detail_available: health.detail_available !== false,
     topology: health.topology,
-    workspace: health.workspace,
-    dependency_graph: health.dependency_graph,
+    workspace: {
+      repo_count: workspace.repo_count ?? null,
+      adapters_count: Array.isArray(workspace.adapters) ? workspace.adapters.length : Number(workspace.adapters_count || 0),
+      commands_count: Array.isArray(workspace.commands) ? workspace.commands.length : Number(workspace.commands_count || 0)
+    },
+    dependency_graph: {
+      manifests_count: Array.isArray(dependencyGraph2.manifests) ? dependencyGraph2.manifests.length : Number(dependencyGraph2.manifests_count || 0),
+      edges_count: Array.isArray(dependencyGraph2.edges) ? dependencyGraph2.edges.length : Number(dependencyGraph2.edges_count || 0)
+    },
     parallel: health.parallel,
     languages: health.languages,
-    lsp: health.lsp,
+    lsp: {
+      coverage: lsp.coverage ?? null,
+      configured_count: lsp.configured_count ?? null,
+      recommended_count: lsp.recommended_count ?? null,
+      missing_count: lsp.missing_count ?? null
+    },
     integrations: isRecord(health.integrations) ? {
-      summary: asJsonObject(health.integrations).summary || null,
-      provider: asJsonObject(health.integrations).provider || null,
-      optional_mcps: Array.isArray(asJsonObject(health.integrations).optional_mcps) ? asJsonObject(health.integrations).optional_mcps : []
-    } : null,
-    detail_resources: Array.isArray(health.detail_resources) ? health.detail_resources : []
+      summary: integrations.summary || null,
+      provider: integrations.provider || null
+    } : null
   };
+}
+function compactDetailResources(value) {
+  if (!Array.isArray(value)) return [];
+  const keep = ["workspace-diagnostics", "dependency-graph", "mcp-readiness", "repo-map", "integrations", "template-inventory"];
+  return value.filter((entry) => typeof entry === "string" && keep.some((needle) => entry.includes(needle))).slice(0, 6);
 }
 function compactLspSetup(value) {
   if (!value || !isRecord(value)) return null;
@@ -3355,15 +3371,35 @@ function compactLspSetup(value) {
     recommended_count: Array.isArray(setup.recommended) ? setup.recommended.length : Number(setup.recommended_count || 0)
   };
 }
+function compactSetupIntegrations(value) {
+  if (!value || !isRecord(value)) return null;
+  const integrations = asJsonObject(value);
+  const optionalMcps = integrations.optional_mcps;
+  return {
+    summary: integrations.summary || null,
+    provider: integrations.provider || null,
+    optional_mcp_count: Array.isArray(optionalMcps) ? optionalMcps.length : 0
+  };
+}
 function compactNativePrompts(value) {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => {
     const prompt = asJsonObject(entry);
-    const target = asJsonObject(prompt.responseTarget);
+    const target2 = asJsonObject(prompt.responseTarget);
+    const choices = Array.isArray(prompt.choices) ? prompt.choices.map(asJsonObject) : [];
     return {
       id: asOptionalString(prompt.id) || null,
+      title: asOptionalString(prompt.title) || null,
+      question: asOptionalString(prompt.question) || null,
       selectionMode: asOptionalString(prompt.selectionMode) || "single",
-      argument: asOptionalString(target.argument) || null
+      allowCustom: prompt.allowCustom === true,
+      argument: asOptionalString(target2.argument) || null,
+      customArgument: asOptionalString(prompt.customArgument) || asOptionalString(target2.customArgument) || null,
+      choices: choices.map((choice2) => ({
+        id: asOptionalString(choice2.id) || null,
+        label: asOptionalString(choice2.label) || asOptionalString(choice2.id) || null,
+        recommended: choice2.recommended === true
+      }))
     };
   });
 }
@@ -3413,11 +3449,7 @@ function compactSetupResponse(result) {
     dependency_graph: result.dependency_graph,
     lsp: result.lsp,
     lsp_setup: compactLspSetup(result.lsp_setup),
-    integrations: isRecord(result.integrations) ? {
-      summary: asJsonObject(result.integrations).summary || null,
-      provider: asJsonObject(result.integrations).provider || null,
-      optional_mcps: Array.isArray(asJsonObject(result.integrations).optional_mcps) ? asJsonObject(result.integrations).optional_mcps : []
-    } : null,
+    integrations: compactSetupIntegrations(result.integrations),
     styleGuides,
     styleguide_ids: asStringArray(styleGuides.selected),
     templates: compactTemplateManifest(result.templates),
@@ -3428,14 +3460,15 @@ function compactSetupResponse(result) {
       summary: asJsonObject(result.techStackSummary).summary
     } : result.techStackSummary,
     human_review: humanReview,
+    intent_prompts: compactNativePrompts(result.intent_prompts),
     native_prompts: compactNativePrompts(result.native_prompts),
     review_artifacts: reviewArtifacts.files,
     review_bundle: reviewBundleSummary,
     review_bundle_path: reviewBundleSummary?.manifest_path || null,
     warnings: Array.isArray(result.warnings) ? result.warnings : [],
     next_actions: Array.isArray(result.next_actions) ? result.next_actions : [],
-    packet_notes: Array.isArray(result.packet_notes) ? result.packet_notes : [],
-    detail_resources: Array.isArray(result.detail_resources) ? result.detail_resources : [],
+    packet_notes_count: Array.isArray(result.packet_notes) ? result.packet_notes.length : 0,
+    detail_resources: compactDetailResources(result.detail_resources),
     resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : [],
     scaffolded: result.scaffolded,
     written: Array.isArray(result.written) ? result.written : void 0,
@@ -4372,8 +4405,8 @@ function setupStyleGuides(root, args = {}) {
   };
 }
 function humanReviewConfirmed(args = {}) {
-  const rawArgs = args;
-  return rawArgs.humanConfirmed === true || rawArgs.human_confirmed === true || rawArgs.userConfirmed === true || rawArgs.user_confirmed === true || rawArgs.confirmed === true;
+  const rawArgs2 = args;
+  return rawArgs2.humanConfirmed === true || rawArgs2.human_confirmed === true || rawArgs2.userConfirmed === true || rawArgs2.user_confirmed === true || rawArgs2.confirmed === true;
 }
 
 // src/core/application/runtime/review-bundles.ts
@@ -4416,12 +4449,12 @@ function jsonReviewFile(relativePath, title, source, value) {
   };
 }
 function setupLspWriteRequested(args = {}) {
-  const rawArgs = args;
-  return rawArgs.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true;
+  const rawArgs2 = args;
+  return rawArgs2.lsp === true || args.setupLsp === true || args.setup_lsp === true || args.writeLsp === true || args.write_lsp === true;
 }
 function setupLspWriteDisabled(args = {}) {
-  const rawArgs = args;
-  return rawArgs.lsp === false || args.setupLsp === false || args.setup_lsp === false || args.writeLsp === false || args.write_lsp === false;
+  const rawArgs2 = args;
+  return rawArgs2.lsp === false || args.setupLsp === false || args.setup_lsp === false || args.writeLsp === false || args.write_lsp === false;
 }
 function setupShouldWriteLsp(args, lspRecommendations) {
   if (setupLspWriteRequested(args)) return true;
@@ -4429,17 +4462,17 @@ function setupShouldWriteLsp(args, lspRecommendations) {
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
 function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
-  const rawArgs = args;
+  const rawArgs2 = args;
   const techStack = techStackForPacket(root, args);
-  const productJson = normalizeProjectDoc("product", rawArgs.product, "product.json", "Product Context", "Project-Specific Product Notes");
+  const productJson = normalizeProjectDoc("product", rawArgs2.product, "product.json", "Product Context", "Project-Specific Product Notes");
   const productGuidelinesJson = normalizeProjectDoc(
     "product_guidelines",
-    rawArgs.productGuidelines || rawArgs.product_guidelines,
+    rawArgs2.productGuidelines || rawArgs2.product_guidelines,
     "product_guidelines.json",
     "Product Guidelines",
     "Project-Specific Product Guideline Notes"
   );
-  const workflowJson = normalizeProjectDoc("workflow", rawArgs.workflowPolicy || rawArgs.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes");
+  const workflowJson = normalizeProjectDoc("workflow", rawArgs2.workflowPolicy || rawArgs2.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes");
   const patternsSeed = templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
   const patternsText = asOptionalString(patternsSeed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
   const patternsEntry = {
@@ -4490,7 +4523,7 @@ function setupReviewFiles(root, args, styleGuides, polyrepoRequested) {
     })
   ];
   if (polyrepoRequested) {
-    files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
+    files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs2.repos) ? asJsonObject(rawArgs2.repos) : null));
   }
   return files;
 }
@@ -4523,10 +4556,10 @@ function shellQuote(value) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 function workflowReviewBundle(root, workflow, args, reviewFiles, manifestExtras = {}) {
-  const rawArgs = args;
+  const rawArgs2 = args;
   if (reviewFiles.length === 0) return null;
-  if (args.execute === true && humanReviewConfirmed(args) || rawArgs.reviewBundle === false || rawArgs.reviewFiles === false) return null;
-  const explicitDir = asOptionalString(rawArgs.reviewBundleDir || rawArgs.review_bundle_dir || rawArgs.reviewDir || rawArgs.review_dir);
+  if (args.execute === true && humanReviewConfirmed(args) || rawArgs2.reviewBundle === false || rawArgs2.reviewFiles === false) return null;
+  const explicitDir = asOptionalString(rawArgs2.reviewBundleDir || rawArgs2.review_bundle_dir || rawArgs2.reviewDir || rawArgs2.review_dir);
   const rootHash = import_node_crypto2.default.createHash("sha256").update(root).digest("hex").slice(0, 12);
   const defaultDirectory = import_node_path22.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path22.default.basename(root))}-${rootHash}`);
   let directory = explicitDir ? import_node_path22.default.resolve(root, explicitDir) : defaultDirectory;
@@ -5706,6 +5739,9 @@ function withGeneratedMarker(source, schema, body) {
   return `${generatedMarker(source, schema, normalized)}
 ${normalized}`;
 }
+function appendCanonicalJsonBlock(parts, value, heading = "Canonical JSON") {
+  parts.push(`## ${heading}`, "", "```json", JSON.stringify(value, null, 2), "```", "");
+}
 function hasGeneratedMarker(text) {
   return /<!--\s*cadre:generated\b/.test(text);
 }
@@ -5767,6 +5803,7 @@ function renderMarkdownDoc(value, fallbackTitle) {
     const body = asOptionalString(section.body);
     if (body) parts.push(body, "");
   }
+  appendCanonicalJsonBlock(parts, value);
   return normalizedText(parts.join("\n"));
 }
 function markerForPlanStatus(status) {
@@ -6060,6 +6097,7 @@ function renderPlanMarkdown(raw) {
       parts.push("");
     }
   }
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }
 
@@ -6358,6 +6396,7 @@ function releaseMarkdownFromMetadata(metadata) {
     parts.push(`- ${asOptionalString(track.track_id) || "track"}: ${asOptionalString(track.name || track.status) || ""}`.trim());
   }
   parts.push("");
+  appendCanonicalJsonBlock(parts, metadata);
   return normalizedText(parts.join("\n"));
 }
 function artifactRender(root, args = {}) {
@@ -7112,13 +7151,13 @@ function setupCiTemplates(root, provider, args = {}) {
   const sourceText = templateText(template, "");
   const source = templateSourceLabel(template) || template;
   if (!sourceText) return { ok: false, error: `Missing CI template ${template}` };
-  const target = provider === "github" ? import_node_path31.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path31.default.join(root, ".gitlab-ci.yml");
-  if (fileExists(target) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source, path: import_node_path31.default.relative(root, target) };
+  const target2 = provider === "github" ? import_node_path31.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path31.default.join(root, ".gitlab-ci.yml");
+  if (fileExists(target2) && args.force !== true) {
+    return { ok: true, skipped: true, provider, source, path: import_node_path31.default.relative(root, target2) };
   }
-  import_node_fs16.default.mkdirSync(import_node_path31.default.dirname(target), { recursive: true });
-  import_node_fs16.default.writeFileSync(target, sourceText);
-  return { ok: true, provider, source, path: import_node_path31.default.relative(root, target), written: true };
+  import_node_fs16.default.mkdirSync(import_node_path31.default.dirname(target2), { recursive: true });
+  import_node_fs16.default.writeFileSync(target2, sourceText);
+  return { ok: true, provider, source, path: import_node_path31.default.relative(root, target2), written: true };
 }
 function setupSubmodulePlan(root, repos, args = {}) {
   const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
@@ -7652,6 +7691,458 @@ var import_node_path34 = __toESM(require("node:path"));
 // src/core/application/runtime/workflow-new-track.ts
 var import_node_fs17 = __toESM(require("node:fs"));
 var import_node_path33 = __toESM(require("node:path"));
+
+// src/core/application/runtime/native-prompts.ts
+function choice(id, label, description, recommended = false) {
+  return { id, label, description, recommended };
+}
+function nativePrompt(id, title, question, selectionMode, choices, responseTarget, customArgument) {
+  return {
+    version: 1,
+    schema: "cadre.native_prompt.v1",
+    id,
+    title,
+    question,
+    selectionMode,
+    choices,
+    allowCustom: true,
+    customLabel: "Other",
+    customArgument,
+    responseTarget
+  };
+}
+function recommendedProviderMode(provider) {
+  const mode = asOptionalString(provider.provider_mode) || "local";
+  return ["local", "github", "gitlab"].includes(mode) ? mode : "local";
+}
+function providerPrompt(provider) {
+  const recommended = recommendedProviderMode(provider);
+  return nativePrompt(
+    "setup-provider-mode",
+    "Provider Mode",
+    "Which hosted provider should Cadre use for review and publication evidence?",
+    "single",
+    [
+      choice("local", "Local", "Use local review and no hosted provider MCP.", recommended === "local"),
+      choice("github", "GitHub", "Use GitHub provider evidence through the GitHub MCP.", recommended === "github"),
+      choice("gitlab", "GitLab", "Use GitLab provider evidence through the GitLab MCP.", recommended === "gitlab")
+    ],
+    {
+      tool: "cadre_workflow",
+      workflow: "setup",
+      argument: "providerMode",
+      customArgument: "providerModeOther",
+      valueMap: {
+        local: { providerMode: "local" },
+        github: { providerMode: "github" },
+        gitlab: { providerMode: "gitlab" }
+      }
+    },
+    "providerModeOther"
+  );
+}
+function hasAnyArg(args, names) {
+  const raw = args;
+  return names.some((name) => raw[name] !== void 0 && raw[name] !== null && raw[name] !== "");
+}
+function syncPrompt(syncMode) {
+  const recommended = syncMode === "shared" ? "shared" : "local";
+  return nativePrompt(
+    "setup-sync-mode",
+    "Sync Mode",
+    "How should Cadre coordinate control-plane state for this project?",
+    "single",
+    [
+      choice("local", "Local", "Keep Cadre state local to this working copy.", recommended === "local"),
+      choice("shared", "Shared", "Use shared sync for team ownership, review queues, and handoffs.", recommended === "shared")
+    ],
+    {
+      tool: "cadre_workflow",
+      workflow: "setup",
+      argument: "syncMode",
+      customArgument: "syncModeOther",
+      valueMap: {
+        local: { syncMode: "local" },
+        shared: { syncMode: "shared" }
+      }
+    },
+    "syncModeOther"
+  );
+}
+function styleGuideDescription(id, detected, selected) {
+  if (detected.has(id)) return "Detected from the structured tech stack.";
+  if (selected.has(id)) return "Selected from setup arguments or default Cadre guidance.";
+  return "Available bundled Cadre style guidance.";
+}
+function styleGuidePrompt(styleGuides) {
+  const detected = new Set(asStringArray(styleGuides.detected));
+  const selected = new Set(asStringArray(styleGuides.selected));
+  const choices = availableStyleGuideIds().map(
+    (id) => choice(id, id, styleGuideDescription(id, detected, selected), selected.has(id))
+  );
+  return nativePrompt(
+    "setup-style-guides",
+    "Style Guides",
+    "Which Cadre style guides should setup include?",
+    "multi",
+    choices,
+    {
+      tool: "cadre_workflow",
+      workflow: "setup",
+      argument: "styleGuideIds",
+      customArgument: "styleGuideIds",
+      selectedIds: asStringArray(styleGuides.selected)
+    },
+    "styleGuideIds"
+  );
+}
+function lspRecommendationIds(lspSetup2) {
+  const recommended = Array.isArray(lspSetup2.recommended) ? lspSetup2.recommended.map(asJsonObject).map((rec) => asOptionalString(rec.id)).filter((id) => Boolean(id)) : [];
+  return recommended.length > 0 ? recommended : asStringArray(lspSetup2.missingFromConfig || lspSetup2.missing_from_config);
+}
+function lspPrompt(lspSetup2) {
+  const ids = lspRecommendationIds(lspSetup2);
+  if (ids.length === 0) return null;
+  const label = ids.slice(0, 4).join(", ");
+  const suffix = ids.length > 4 ? `, +${ids.length - 4} more` : "";
+  return nativePrompt(
+    "setup-lsp",
+    "Language Servers",
+    "Should Cadre write detected language-server recommendations during setup?",
+    "single",
+    [
+      choice("write-lsp", "Write LSP", `Write cadre/lsp.json entries for ${label}${suffix}.`, true),
+      choice("skip-lsp", "Skip LSP", "Do not write cadre/lsp.json during setup.", false)
+    ],
+    {
+      tool: "cadre_workflow",
+      workflow: "setup",
+      argument: "writeLsp",
+      customArgument: "lspSetupOther",
+      valueMap: {
+        "write-lsp": { writeLsp: true },
+        "skip-lsp": { writeLsp: false }
+      }
+    },
+    "lspSetupOther"
+  );
+}
+function optionalMcpRecommendations(integrations) {
+  const readiness = asJsonObject(asJsonObject(integrations).mcp_readiness);
+  const recommendations = Array.isArray(readiness.recommendations) ? readiness.recommendations.map(asJsonObject) : [];
+  if (recommendations.length > 0) return recommendations.filter((entry) => asOptionalString(entry.kind));
+  const rawOptional = asJsonObject(integrations).optional_mcps;
+  const optional = Array.isArray(rawOptional) ? rawOptional.map(asJsonObject) : [];
+  return optional.filter((entry) => asOptionalString(entry.kind) && entry.available !== true);
+}
+function optionalMcpPrompt(integrations) {
+  const recommendations = optionalMcpRecommendations(integrations);
+  if (recommendations.length === 0) return null;
+  return nativePrompt(
+    "setup-optional-mcps",
+    "Optional MCPs",
+    "Which optional MCP integrations should Cadre remember as setup intent?",
+    "multi",
+    recommendations.map((entry) => choice(
+      asOptionalString(entry.kind) || "unknown",
+      asOptionalString(entry.label) || asOptionalString(entry.kind) || "Unknown",
+      asOptionalString(entry.reason) || "Optional MCP improves Cadre evidence and team visibility.",
+      true
+    )),
+    {
+      tool: "cadre_workflow",
+      workflow: "setup",
+      argument: "integrations",
+      customArgument: "integrations.other",
+      selectedIds: []
+    },
+    "integrations.other"
+  );
+}
+function setupNativePrompts(args) {
+  return [
+    hasAnyArg(args.runtimeArgs, ["providerMode", "provider_mode", "provider"]) ? null : providerPrompt(args.provider),
+    hasAnyArg(args.runtimeArgs, ["syncMode", "sync_mode"]) ? null : syncPrompt(args.syncMode),
+    styleGuidePrompt(args.styleGuides),
+    hasAnyArg(args.runtimeArgs, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) ? null : lspPrompt(args.lspSetup),
+    optionalMcpPrompt(args.integrations)
+  ].filter((prompt) => prompt !== null);
+}
+
+// src/core/application/runtime/intent-prompts.ts
+function rawArgs(args) {
+  return args;
+}
+function intentArgs(args) {
+  return asJsonObject(rawArgs(args).intent);
+}
+function nestedIntentValue(args, name) {
+  return intentArgs(args)[name];
+}
+function textPresent(value) {
+  return typeof value === "string" && value.trim().length >= 8;
+}
+function arrayPresent(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+function hasNamedValue(args, names) {
+  const raw = rawArgs(args);
+  return names.some((name) => {
+    const direct = raw[name];
+    if (textPresent(direct) || arrayPresent(direct) || isRecord(direct)) return true;
+    const nested = nestedIntentValue(args, name);
+    return textPresent(nested) || arrayPresent(nested) || isRecord(nested);
+  });
+}
+function hasArrayField(record, names) {
+  if (!record) return false;
+  return names.some((name) => arrayPresent(record[name]));
+}
+function hasField(record, names) {
+  if (!record) return false;
+  return names.some((name) => Object.prototype.hasOwnProperty.call(record, name));
+}
+function target(toolWorkflow, argument, customArgument) {
+  return {
+    tool: "cadre_workflow",
+    workflow: toolWorkflow,
+    argument,
+    customArgument
+  };
+}
+function intentPrompt(workflow, id, title, question, selectionMode, choices, argument, customArgument) {
+  return nativePrompt(id, title, question, selectionMode, choices, target(workflow, argument, customArgument), customArgument);
+}
+function setupIntentPrompts(args = {}) {
+  const prompts = [];
+  const product = isRecord(rawArgs(args).product) ? asJsonObject(rawArgs(args).product) : null;
+  const techStack = isRecord(rawArgs(args).techStack || rawArgs(args).tech_stack) ? asJsonObject(rawArgs(args).techStack || rawArgs(args).tech_stack) : null;
+  if (!product && !hasNamedValue(args, ["productIntent", "productSummary"])) {
+    prompts.push(intentPrompt(
+      "setup",
+      "setup-product-intent",
+      "Product Intent",
+      "What product context should Cadre seed for this project?",
+      "single",
+      [
+        choice("use-readme", "Use README", "Derive initial product context from repository docs.", true),
+        choice("ask-human", "Ask Human", "Collect a short product summary before writing setup files."),
+        choice("minimal", "Minimal", "Seed only minimal product context for now.")
+      ],
+      "intent.product",
+      "intent.productOther"
+    ));
+  }
+  if (!techStack && !hasNamedValue(args, ["techStackIntent", "techStackSummary"])) {
+    prompts.push(intentPrompt(
+      "setup",
+      "setup-tech-stack-intent",
+      "Tech Stack",
+      "How should Cadre establish the initial tech-stack context?",
+      "single",
+      [
+        choice("detect", "Detect From Files", "Use repository manifests and source files as the starting point.", true),
+        choice("ask-human", "Ask Human", "Collect explicit languages, frameworks, and test commands first."),
+        choice("minimal", "Minimal", "Seed only detected languages for now.")
+      ],
+      "intent.techStack",
+      "intent.techStackOther"
+    ));
+  }
+  return prompts;
+}
+function newTrackIntentPrompts(args = {}) {
+  const prompts = [];
+  const trackId = asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id);
+  const spec = isRecord(rawArgs(args).spec) ? asJsonObject(rawArgs(args).spec) : null;
+  const plan = isRecord(rawArgs(args).plan) ? asJsonObject(rawArgs(args).plan) : null;
+  const metadata = isRecord(rawArgs(args).metadata) ? asJsonObject(rawArgs(args).metadata) : null;
+  const hasGoal = textPresent(spec?.description) || textPresent(spec?.title) || hasNamedValue(args, ["goal", "description"]);
+  const hasOutcome = hasArrayField(spec, ["functional_requirements", "functionalRequirements", "outcomes"]) || hasNamedValue(args, ["outcome", "outcomes"]);
+  const hasAcceptance = hasArrayField(spec, ["acceptance_criteria", "acceptanceCriteria"]) || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
+  const hasScope = hasField(spec, ["scope", "out_of_scope", "outOfScope"]) || hasField(metadata, ["scope"]) || hasNamedValue(args, ["scope"]);
+  const hasPlan = hasArrayField(plan, ["phases", "tasks"]);
+  if (!trackId) {
+    prompts.push(intentPrompt(
+      "newtrack",
+      "newtrack-target-track",
+      "Track Target",
+      "What track id or track type should Cadre use?",
+      "single",
+      [
+        choice("feature-track", "Feature Track", "Create a feature-oriented track id from the goal.", true),
+        choice("bug-track", "Bug Track", "Create a bug-fix track id from the issue."),
+        choice("custom-track-id", "Custom Track", "Use a specific track id supplied by the human.")
+      ],
+      "trackId",
+      "trackId"
+    ));
+  }
+  if (!hasGoal) {
+    prompts.push(intentPrompt(
+      "newtrack",
+      "newtrack-goal",
+      "Goal",
+      "What concrete goal should this track achieve?",
+      "single",
+      [
+        choice("feature", "New Feature", "Deliver a new user or product capability.", true),
+        choice("bug-fix", "Bug Fix", "Correct incorrect behavior."),
+        choice("refactor", "Refactor", "Improve internal structure without intended behavior change."),
+        choice("research", "Research", "Investigate options before implementation.")
+      ],
+      "intent.goal",
+      "intent.goalOther"
+    ));
+  }
+  if (!hasOutcome) {
+    prompts.push(intentPrompt(
+      "newtrack",
+      "newtrack-outcome",
+      "Outcome",
+      "What user-visible or engineering outcome proves this track matters?",
+      "single",
+      [
+        choice("user-behavior", "User Behavior", "A user workflow changes in a verifiable way.", true),
+        choice("reliability", "Reliability", "The system becomes safer, faster, or more observable."),
+        choice("developer-experience", "Developer Experience", "The codebase or tooling becomes easier to work with.")
+      ],
+      "intent.outcome",
+      "intent.outcomeOther"
+    ));
+  }
+  if (!hasAcceptance) {
+    prompts.push(intentPrompt(
+      "newtrack",
+      "newtrack-acceptance",
+      "Acceptance",
+      "What acceptance signal should the spec and plan optimize for?",
+      "multi",
+      [
+        choice("automated-tests", "Automated Tests", "Tests demonstrate the changed behavior.", true),
+        choice("manual-check", "Manual Check", "A human can verify the workflow end to end."),
+        choice("metrics", "Metrics", "Runtime metrics or logs prove the outcome."),
+        choice("docs", "Docs Updated", "Documentation reflects the changed behavior.")
+      ],
+      "intent.acceptanceCriteria",
+      "intent.acceptanceCriteriaOther"
+    ));
+  }
+  if (!hasScope || !hasPlan) {
+    prompts.push(intentPrompt(
+      "newtrack",
+      "newtrack-scope",
+      "Scope",
+      "What implementation scope should Cadre plan around?",
+      "single",
+      [
+        choice("single-module", "Single Module", "Keep the work focused to one package or subsystem.", true),
+        choice("backend-api", "Backend/API", "Include service, persistence, or API changes."),
+        choice("frontend-ui", "Frontend/UI", "Include user-interface behavior and states."),
+        choice("cross-cutting", "Cross-Cutting", "Coordinate changes across multiple subsystems.")
+      ],
+      "intent.scope",
+      "intent.scopeOther"
+    ));
+  }
+  return prompts;
+}
+function reviseIntentPrompts(args = {}, trackId = null) {
+  const prompts = [];
+  const hasTrack = Boolean(trackId || asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id));
+  const hasRevisionPayload = isRecord(rawArgs(args).spec) || isRecord(rawArgs(args).plan);
+  const hasReason = hasNamedValue(args, ["reason", "revisionReason", "revision_reason", "changeSummary", "change_summary"]);
+  const hasScope = hasRevisionPayload || hasNamedValue(args, ["scope", "revisionScope", "revision_scope", "reviseScope", "revise_scope"]);
+  if (!hasTrack) {
+    prompts.push(intentPrompt(
+      "revise",
+      "revise-target-track",
+      "Target Track",
+      "Which track should Cadre revise?",
+      "single",
+      [
+        choice("current-track", "Current Track", "Use the currently active track if one is selected.", true),
+        choice("blocked-track", "Blocked Track", "Revise a blocked track that needs changed requirements."),
+        choice("custom-track-id", "Custom Track", "Use a specific track id supplied by the human.")
+      ],
+      "trackId",
+      "trackId"
+    ));
+  }
+  if (!hasReason) {
+    prompts.push(intentPrompt(
+      "revise",
+      "revise-reason",
+      "Revision Reason",
+      "What changed that requires the spec or plan to be revised?",
+      "single",
+      [
+        choice("implementation-discovery", "Implementation Discovery", "Code work exposed a requirement or plan mismatch.", true),
+        choice("user-feedback", "User Feedback", "Human feedback changed the intended behavior."),
+        choice("scope-change", "Scope Change", "The work needs to add, remove, or defer scope."),
+        choice("risk-found", "Risk Found", "A constraint, risk, or dependency changed the plan.")
+      ],
+      "intent.revisionReason",
+      "intent.revisionReasonOther"
+    ));
+  }
+  if (!hasScope) {
+    prompts.push(intentPrompt(
+      "revise",
+      "revise-scope",
+      "Revision Scope",
+      "Should Cadre update the spec, the plan, or both?",
+      "single",
+      [
+        choice("both", "Spec And Plan", "Update requirements and implementation steps together.", true),
+        choice("spec", "Spec Only", "Update requirements and acceptance criteria only."),
+        choice("plan", "Plan Only", "Update tasks, sequencing, or verification only.")
+      ],
+      "intent.revisionScope",
+      "intent.revisionScopeOther"
+    ));
+  }
+  return prompts;
+}
+function refreshScopeIds(args = {}) {
+  const raw = rawArgs(args);
+  const direct = [
+    raw.refreshScope,
+    raw.refresh_scope,
+    raw.scope
+  ].flatMap((value) => typeof value === "string" ? value.split(",") : []);
+  const listed = Array.isArray(raw.scopes) ? raw.scopes : [];
+  const ids = direct.concat(listed.map(String)).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+  if (raw.all === true) ids.push("all");
+  if (raw.patterns === true) ids.push("patterns");
+  if (raw.docs === true || raw.projections === true) ids.push("docs");
+  if (raw.diagnostics === true) ids.push("diagnostics");
+  if (hasAnyArg(args, ["lsp", "writeLsp", "write_lsp", "setupLsp", "setup_lsp"])) ids.push("lsp");
+  return Array.from(new Set(ids));
+}
+function refreshIntentPrompts(args = {}) {
+  if (refreshScopeIds(args).length > 0) return [];
+  return [
+    intentPrompt(
+      "refresh",
+      "refresh-scope",
+      "Refresh Scope",
+      "What Cadre context should refresh update or inspect?",
+      "single",
+      [
+        choice("patterns", "Patterns Only", "Refresh project pattern canonical data and projection.", true),
+        choice("lsp", "LSP Setup", "Inspect or write language-server setup recommendations."),
+        choice("docs", "Docs/Projections", "Regenerate supported human-readable projections."),
+        choice("diagnostics", "Diagnostics", "Report workspace diagnostics without document changes."),
+        choice("all", "All Supported", "Run all supported refresh checks and document updates.")
+      ],
+      "refreshScope",
+      "refreshScopeOther"
+    )
+  ];
+}
+
+// src/core/application/runtime/workflow-new-track.ts
 function newTrackReviewFiles(trackId, spec, plan, metadata) {
   const safeTrack = safeName(trackId);
   const specJson = normalizeSpecJson(trackId, spec);
@@ -7714,6 +8205,22 @@ function workflowNewTrack(root, args = {}) {
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
+  const intentPrompts = newTrackIntentPrompts(args);
+  if (intentPrompts.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      intent_prompts: intentPrompts,
+      next_actions: [
+        "Answer intent_prompts with the client native selector or concise chat fallback.",
+        "Call newtrack again with trackId plus structured spec and plan JSON before review or mutation."
+      ],
+      error: "New track intent is under-specified; Cadre will not generate spec or plan artifacts until goal, outcome, acceptance, and scope are clear."
+    };
+  }
   const trackId = args.trackId || args.track_id;
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };
@@ -7830,8 +8337,8 @@ function workflowNewTrack(root, args = {}) {
 // src/core/application/runtime/formula-workflow.ts
 var READ_ACTIONS = /* @__PURE__ */ new Set(["list", "show", "cook", "wisp_list", "pour"]);
 function formulaAction(args) {
-  const rawArgs = args;
-  const raw = asOptionalString(rawArgs.operation) || asOptionalString(rawArgs.mode) || asOptionalString(rawArgs.formulaAction || rawArgs.formula_action) || (asOptionalString(args.action) && asOptionalString(args.action) !== "formula" ? asOptionalString(args.action) : null) || "list";
+  const rawArgs2 = args;
+  const raw = asOptionalString(rawArgs2.operation) || asOptionalString(rawArgs2.mode) || asOptionalString(rawArgs2.formulaAction || rawArgs2.formula_action) || (asOptionalString(args.action) && asOptionalString(args.action) !== "formula" ? asOptionalString(args.action) : null) || "list";
   const normalized = raw.replace(/^formula_/, "").replace(/-/g, "_");
   if (normalized === "wisp_update") return "wisp_update_step";
   if (normalized === "squash") return "wisp_squash";
@@ -7858,12 +8365,12 @@ function wispDir(root) {
   return import_node_path34.default.join(root, "cadre", "local", "wisps");
 }
 function formulaId(args) {
-  const rawArgs = args;
-  return asOptionalString(args.id) || asOptionalString(rawArgs.formulaId || rawArgs.formula_id) || asOptionalString(args.name) || null;
+  const rawArgs2 = args;
+  return asOptionalString(args.id) || asOptionalString(rawArgs2.formulaId || rawArgs2.formula_id) || asOptionalString(args.name) || null;
 }
 function wispId(args) {
-  const rawArgs = args;
-  return asOptionalString(args.id) || asOptionalString(rawArgs.wispId || rawArgs.wisp_id) || null;
+  const rawArgs2 = args;
+  return asOptionalString(args.id) || asOptionalString(rawArgs2.wispId || rawArgs2.wisp_id) || null;
 }
 function formulaPath(root, id) {
   return import_node_path34.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
@@ -7879,11 +8386,11 @@ function loadFormula(root, id) {
   return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path34.default.relative(root, file), formula };
 }
 function variablesFromArgs(formula, args) {
-  const rawArgs = args;
+  const rawArgs2 = args;
   return {
     ...asJsonObject(formula.defaults),
-    ...asJsonObject(rawArgs.variables),
-    ...asJsonObject(rawArgs.vars)
+    ...asJsonObject(rawArgs2.variables),
+    ...asJsonObject(rawArgs2.vars)
   };
 }
 function variableValue(variables, key) {
@@ -7935,13 +8442,20 @@ function cookedPlan(trackId, formula, rendered) {
 }
 function cookedSpec(trackId, formula, rendered) {
   if (isRecord(rendered.spec)) return asJsonObject(rendered.spec);
+  const description = asOptionalString(rendered.description) || asOptionalString(formula.description) || asOptionalString(formula.title) || trackId;
+  const acceptance = asStringArray(rendered.acceptance);
   return {
     version: 1,
     schema: "cadre.spec.v1",
     track_id: trackId,
     title: asOptionalString(rendered.title) || `Spec: ${trackId}`,
-    description: asOptionalString(rendered.description) || asOptionalString(formula.description) || asOptionalString(formula.title) || trackId,
-    acceptance: asStringArray(rendered.acceptance)
+    description,
+    functional_requirements: [
+      { heading: "Formula outcome", body: description }
+    ],
+    non_functional_requirements: [],
+    acceptance_criteria: acceptance.length > 0 ? acceptance.map((entry, index) => ({ heading: `Acceptance ${index + 1}`, body: entry })) : [{ heading: "Formula plan reviewed", body: "The generated formula plan is reviewed and approved before track creation." }],
+    out_of_scope: []
   };
 }
 function cookFormula(root, args) {
@@ -8043,9 +8557,9 @@ function updateWispStep(root, args) {
   const file = wispPath(root, id);
   const wisp = readJson(file, null);
   if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path34.default.relative(root, file) };
-  const rawArgs = args;
-  const stepId = asOptionalString(rawArgs.stepId || rawArgs.step_id || rawArgs.taskKey || rawArgs.task_key);
-  const stepIndex = Number(rawArgs.stepIndex || rawArgs.step_index || args.taskIndex || 0);
+  const rawArgs2 = args;
+  const stepId = asOptionalString(rawArgs2.stepId || rawArgs2.step_id || rawArgs2.taskKey || rawArgs2.task_key);
+  const stepIndex = Number(rawArgs2.stepIndex || rawArgs2.step_index || args.taskIndex || 0);
   const steps = Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [];
   const index = steps.findIndex(
     (step, offset) => stepId && asOptionalString(step.step_id) === stepId || stepIndex > 0 && offset + 1 === stepIndex
@@ -9275,13 +9789,13 @@ function workflowArchive(root, args = {}) {
   const archiveRoot = import_node_path39.default.join(root, "cadre", "archive");
   import_node_fs19.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target = import_node_path39.default.join(archiveRoot, track.track_id);
-    if (fileExists(target)) {
+    const target2 = import_node_path39.default.join(archiveRoot, track.track_id);
+    if (fileExists(target2)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs19.default.renameSync(track.dir, target);
-    archived.push({ track_id: track.track_id, ok: true, path: import_node_path39.default.relative(root, target) });
+    import_node_fs19.default.renameSync(track.dir, target2);
+    archived.push({ track_id: track.track_id, ok: true, path: import_node_path39.default.relative(root, target2) });
   }
   const regen = regenIndex(root);
   const controlCommit = commitTrace(root, args, {
@@ -9550,15 +10064,36 @@ function workflowRevert(root, args = {}) {
 }
 function workflowRefresh(root, args = {}) {
   const summary = workflowSummary(root, "refresh", args);
-  const reviewFiles = refreshReviewFiles(root);
+  const intentPrompts = refreshIntentPrompts(args);
+  if (intentPrompts.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      intent_prompts: intentPrompts,
+      next_actions: [
+        "Answer refresh-scope before running refresh.",
+        "Call refresh again with refreshScope set to patterns, lsp, docs, diagnostics, or all."
+      ],
+      error: "Refresh scope is unclear; Cadre will not generate refresh artifacts until the requested scope is selected."
+    };
+  }
+  const scopeIds = refreshScopeIds(args);
+  const refreshPatterns = scopeIds.some((scope) => ["all", "patterns", "docs", "projections"].includes(scope));
+  const lspScopeRequested = scopeIds.some((scope) => ["all", "lsp"].includes(scope));
+  const lspWriteRequested = lspScopeRequested && setupLspWriteRequested(args);
+  const mutatingRefresh = refreshPatterns || lspWriteRequested;
+  const reviewFiles = refreshPatterns ? refreshReviewFiles(root) : [];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  if (setupLspWriteRequested(args)) reviewArtifacts.push(...setupLspReviewArtifacts(args));
+  if (lspWriteRequested) reviewArtifacts.push(...setupLspReviewArtifacts(args));
   const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
   const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
   const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
   const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
-  const lspRequested = args.execute === true && !awaitingDocumentReview && setupLspWriteRequested(args);
-  const traceBefore = args.execute === true && !awaitingDocumentReview ? beginTrace(root) : null;
+  const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
+  const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
   if (awaitingDocumentReview) {
     return {
@@ -9572,6 +10107,7 @@ function workflowRefresh(root, args = {}) {
       dependency_graph: dependencyGraph(root),
       lsp: lspConfigStatus(root),
       lsp_setup: lsp,
+      scope: scopeIds,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
@@ -9579,9 +10115,9 @@ function workflowRefresh(root, args = {}) {
       error: "Human confirmation is required before refreshing Cadre context documents"
     };
   }
-  const regen = args.execute === true ? regenIndex(root) : null;
+  const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
   let patterns = null;
-  if (args.execute === true) {
+  if (args.execute === true && refreshPatterns) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
       import_node_fs20.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
@@ -9594,7 +10130,7 @@ function workflowRefresh(root, args = {}) {
       };
     }
   }
-  const controlCommit = args.execute === true ? commitTrace(root, args, {
+  const controlCommit = args.execute === true && mutatingRefresh ? commitTrace(root, args, {
     kind: "control",
     workflow: "refresh",
     subject: "refresh project context",
@@ -9608,6 +10144,7 @@ function workflowRefresh(root, args = {}) {
     ...summary,
     ok: (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
     phase_state: args.execute === true ? controlCommit && controlCommit.ok === false ? "recovery_required" : "executed" : "dry_run",
+    scope: scopeIds,
     doctor: doctor(root, { hasCadreProject: true }),
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),
@@ -9628,9 +10165,9 @@ var import_node_fs21 = __toESM(require("node:fs"));
 var import_node_path41 = __toESM(require("node:path"));
 function releaseArtifactPlan(root, args = {}) {
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
-  const rawArgs = args;
+  const rawArgs2 = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
-  const generatedAt = asOptionalString(rawArgs.generatedAt || rawArgs.generated_at) || utcNow();
+  const generatedAt = asOptionalString(rawArgs2.generatedAt || rawArgs2.generated_at) || utcNow();
   const releaseDir = import_node_path41.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
   const releaseMd = import_node_path41.default.join(releaseDir, `${releaseSlug}.md`);
@@ -9659,7 +10196,7 @@ function releaseArtifactPlan(root, args = {}) {
       review: track.review
     }))
   };
-  const gitActions = rawArgs.createTag === true || rawArgs.create_tag === true || rawArgs.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
+  const gitActions = rawArgs2.createTag === true || rawArgs2.create_tag === true || rawArgs2.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
   return { version, generatedAt, completed, releaseDir, releaseMd, releaseJson, notes, metadata, gitActions };
 }
 function releaseReviewFiles(root, plan) {
@@ -9765,6 +10302,23 @@ function workflowRevise(root, args = {}) {
   const summary = workflowSummary(root, "revise", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
+  const initialPrompts = reviseIntentPrompts(args, trackId || null);
+  if (initialPrompts.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      ...trackId ? { track_id: trackId, track_context: trackContext(root, trackId) } : {},
+      intent_prompts: initialPrompts,
+      next_actions: [
+        "Answer revise intent_prompts before producing revised artifacts.",
+        "Call revise again with reason plus structured spec and/or plan JSON."
+      ],
+      error: "Revision intent is under-specified; Cadre needs a target, reason, and spec/plan scope before generating revision artifacts."
+    };
+  }
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   const track = findTrack(root, trackId);
   const context = trackContext(root, trackId);
@@ -9893,193 +10447,14 @@ function workflowRevise(root, args = {}) {
 // src/core/application/runtime/workflow-setup.ts
 var import_node_fs22 = __toESM(require("node:fs"));
 var import_node_path42 = __toESM(require("node:path"));
-
-// src/core/application/runtime/native-prompts.ts
-function choice(id, label, description, recommended = false) {
-  return { id, label, description, recommended };
-}
-function nativePrompt(id, title, question, selectionMode, choices, responseTarget, customArgument) {
-  return {
-    version: 1,
-    schema: "cadre.native_prompt.v1",
-    id,
-    title,
-    question,
-    selectionMode,
-    choices,
-    allowCustom: true,
-    customLabel: "Other",
-    customArgument,
-    responseTarget
-  };
-}
-function recommendedProviderMode(provider) {
-  const mode = asOptionalString(provider.provider_mode) || "local";
-  return ["local", "github", "gitlab"].includes(mode) ? mode : "local";
-}
-function providerPrompt(provider) {
-  const recommended = recommendedProviderMode(provider);
-  return nativePrompt(
-    "setup-provider-mode",
-    "Provider Mode",
-    "Which hosted provider should Cadre use for review and publication evidence?",
-    "single",
-    [
-      choice("local", "Local", "Use local review and no hosted provider MCP.", recommended === "local"),
-      choice("github", "GitHub", "Use GitHub provider evidence through the GitHub MCP.", recommended === "github"),
-      choice("gitlab", "GitLab", "Use GitLab provider evidence through the GitLab MCP.", recommended === "gitlab")
-    ],
-    {
-      tool: "cadre_workflow",
-      workflow: "setup",
-      argument: "providerMode",
-      customArgument: "providerModeOther",
-      valueMap: {
-        local: { providerMode: "local" },
-        github: { providerMode: "github" },
-        gitlab: { providerMode: "gitlab" }
-      }
-    },
-    "providerModeOther"
-  );
-}
-function hasAnyArg(args, names) {
-  const raw = args;
-  return names.some((name) => raw[name] !== void 0 && raw[name] !== null && raw[name] !== "");
-}
-function syncPrompt(syncMode) {
-  const recommended = syncMode === "shared" ? "shared" : "local";
-  return nativePrompt(
-    "setup-sync-mode",
-    "Sync Mode",
-    "How should Cadre coordinate control-plane state for this project?",
-    "single",
-    [
-      choice("local", "Local", "Keep Cadre state local to this working copy.", recommended === "local"),
-      choice("shared", "Shared", "Use shared sync for team ownership, review queues, and handoffs.", recommended === "shared")
-    ],
-    {
-      tool: "cadre_workflow",
-      workflow: "setup",
-      argument: "syncMode",
-      customArgument: "syncModeOther",
-      valueMap: {
-        local: { syncMode: "local" },
-        shared: { syncMode: "shared" }
-      }
-    },
-    "syncModeOther"
-  );
-}
-function styleGuideDescription(id, detected, selected) {
-  if (detected.has(id)) return "Detected from the structured tech stack.";
-  if (selected.has(id)) return "Selected from setup arguments or default Cadre guidance.";
-  return "Available bundled Cadre style guidance.";
-}
-function styleGuidePrompt(styleGuides) {
-  const detected = new Set(asStringArray(styleGuides.detected));
-  const selected = new Set(asStringArray(styleGuides.selected));
-  const choices = availableStyleGuideIds().map(
-    (id) => choice(id, id, styleGuideDescription(id, detected, selected), selected.has(id))
-  );
-  return nativePrompt(
-    "setup-style-guides",
-    "Style Guides",
-    "Which Cadre style guides should setup include?",
-    "multi",
-    choices,
-    {
-      tool: "cadre_workflow",
-      workflow: "setup",
-      argument: "styleGuideIds",
-      customArgument: "styleGuideIds",
-      selectedIds: asStringArray(styleGuides.selected)
-    },
-    "styleGuideIds"
-  );
-}
-function lspRecommendationIds(lspSetup2) {
-  const recommended = Array.isArray(lspSetup2.recommended) ? lspSetup2.recommended.map(asJsonObject).map((rec) => asOptionalString(rec.id)).filter((id) => Boolean(id)) : [];
-  return recommended.length > 0 ? recommended : asStringArray(lspSetup2.missingFromConfig || lspSetup2.missing_from_config);
-}
-function lspPrompt(lspSetup2) {
-  const ids = lspRecommendationIds(lspSetup2);
-  if (ids.length === 0) return null;
-  const label = ids.slice(0, 4).join(", ");
-  const suffix = ids.length > 4 ? `, +${ids.length - 4} more` : "";
-  return nativePrompt(
-    "setup-lsp",
-    "Language Servers",
-    "Should Cadre write detected language-server recommendations during setup?",
-    "single",
-    [
-      choice("write-lsp", "Write LSP", `Write cadre/lsp.json entries for ${label}${suffix}.`, true),
-      choice("skip-lsp", "Skip LSP", "Do not write cadre/lsp.json during setup.", false)
-    ],
-    {
-      tool: "cadre_workflow",
-      workflow: "setup",
-      argument: "writeLsp",
-      customArgument: "lspSetupOther",
-      valueMap: {
-        "write-lsp": { writeLsp: true },
-        "skip-lsp": { writeLsp: false }
-      }
-    },
-    "lspSetupOther"
-  );
-}
-function optionalMcpRecommendations(integrations) {
-  const readiness = asJsonObject(asJsonObject(integrations).mcp_readiness);
-  const recommendations = Array.isArray(readiness.recommendations) ? readiness.recommendations.map(asJsonObject) : [];
-  if (recommendations.length > 0) return recommendations.filter((entry) => asOptionalString(entry.kind));
-  const rawOptional = asJsonObject(integrations).optional_mcps;
-  const optional = Array.isArray(rawOptional) ? rawOptional.map(asJsonObject) : [];
-  return optional.filter((entry) => asOptionalString(entry.kind) && entry.available !== true);
-}
-function optionalMcpPrompt(integrations) {
-  const recommendations = optionalMcpRecommendations(integrations);
-  if (recommendations.length === 0) return null;
-  return nativePrompt(
-    "setup-optional-mcps",
-    "Optional MCPs",
-    "Which optional MCP integrations should Cadre remember as setup intent?",
-    "multi",
-    recommendations.map((entry) => choice(
-      asOptionalString(entry.kind) || "unknown",
-      asOptionalString(entry.label) || asOptionalString(entry.kind) || "Unknown",
-      asOptionalString(entry.reason) || "Optional MCP improves Cadre evidence and team visibility.",
-      true
-    )),
-    {
-      tool: "cadre_workflow",
-      workflow: "setup",
-      argument: "integrations",
-      customArgument: "integrations.other",
-      selectedIds: []
-    },
-    "integrations.other"
-  );
-}
-function setupNativePrompts(args) {
-  return [
-    hasAnyArg(args.runtimeArgs, ["providerMode", "provider_mode", "provider"]) ? null : providerPrompt(args.provider),
-    hasAnyArg(args.runtimeArgs, ["syncMode", "sync_mode"]) ? null : syncPrompt(args.syncMode),
-    styleGuidePrompt(args.styleGuides),
-    hasAnyArg(args.runtimeArgs, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) ? null : lspPrompt(args.lspSetup),
-    optionalMcpPrompt(args.integrations)
-  ].filter((prompt) => prompt !== null);
-}
-
-// src/core/application/runtime/workflow-setup.ts
 function workflowSetup(root, args = {}) {
   const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
-  const rawArgs = args;
-  const requestedTopology = asOptionalString(rawArgs.topology)?.toLowerCase();
-  const reposPayload = isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null;
-  const polyrepoRequested = Boolean(reposPayload && reposPayload.mode === "polyrepo") || requestedTopology === "polyrepo" || rawArgs.polyrepo === true;
+  const rawArgs2 = args;
+  const requestedTopology = asOptionalString(rawArgs2.topology)?.toLowerCase();
+  const reposPayload = isRecord(rawArgs2.repos) ? asJsonObject(rawArgs2.repos) : null;
+  const polyrepoRequested = Boolean(reposPayload && reposPayload.mode === "polyrepo") || requestedTopology === "polyrepo" || rawArgs2.polyrepo === true;
   const styleGuides = setupStyleGuides(root, args);
   const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
@@ -10087,14 +10462,23 @@ function workflowSetup(root, args = {}) {
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
-  const configOverrides = asJsonObject(rawArgs.config);
-  const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
-  const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
+  const configOverrides = asJsonObject(rawArgs2.config);
+  const requestedSyncMode = asOptionalString(rawArgs2.syncMode || rawArgs2.sync_mode || configOverrides.sync_mode);
+  const teamSize = Number(rawArgs2.teamSize || rawArgs2.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
   const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
   const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
   const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
   const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
+  const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
+  const nativePrompts = args.execute === true ? [] : setupNativePrompts({
+    provider: asJsonObject(provider),
+    syncMode: syncModeRecommendation,
+    styleGuides: asJsonObject(styleGuides),
+    lspSetup: asJsonObject(lspRecommendations),
+    integrations: workspaceHealthResult.integrations,
+    runtimeArgs: args
+  });
   const warnings = [
     ...asStringArray(styleGuides.warnings),
     ...asStringArray(asJsonObject(reviewBundle).warnings)
@@ -10102,6 +10486,8 @@ function workflowSetup(root, args = {}) {
   const result = {
     ...summary,
     ok: true,
+    phase_state: args.execute !== true && intentPrompts.length > 0 ? "awaiting_clarification" : summary.phase_state,
+    ...args.execute !== true && intentPrompts.length > 0 ? { stage: "intent_clarification" } : {},
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace_health: workspaceHealthResult,
     workspace: workspaceHealthResult.workspace,
@@ -10116,24 +10502,17 @@ function workflowSetup(root, args = {}) {
     styleGuides,
     templates: templateManifest(),
     techStackSummary: techStackSummary(root, args),
+    ...intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {},
+    ...nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {},
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,
-    ...args.execute === true ? {} : {
-      native_prompts: setupNativePrompts({
-        provider: asJsonObject(provider),
-        syncMode: syncModeRecommendation,
-        styleGuides: asJsonObject(styleGuides),
-        lspSetup: asJsonObject(lspRecommendations),
-        integrations: workspaceHealthResult.integrations,
-        runtimeArgs: args
-      })
-    },
     warnings,
     required_payload: args.execute === true ? ["product", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: [
+      ...intentPrompts.length > 0 || nativePrompts.length > 0 ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."] : [],
       ...provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
-      "Review setup artifacts with the user; call setup_scaffold with execute:true and humanConfirmed:true only after explicit approval."
+      "After prompt answers, review the setup bundle; call setup with execute:true and humanConfirmed:true only after explicit approval."
     ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
@@ -10144,9 +10523,9 @@ function workflowSetup(root, args = {}) {
   };
   if (args.execute !== true) return result;
   const cadreDir = import_node_path42.default.join(root, "cadre");
-  const force = asBoolean(rawArgs.force, false);
+  const force = asBoolean(rawArgs2.force, false);
   const missingPayload = [
-    ...!isRecord(rawArgs.product) ? ["product"] : [],
+    ...!isRecord(rawArgs2.product) ? ["product"] : [],
     ...!techStackFromArgs(args) ? ["techStack"] : [],
     ...provider.requires_confirmation === true || !providerMode ? ["providerMode"] : [],
     ...polyrepoRequested && !reposPayload ? ["repos"] : []
@@ -10213,7 +10592,7 @@ function workflowSetup(root, args = {}) {
   writeProjectDoc(
     "product.md",
     "product",
-    normalizeProjectDoc("product", rawArgs.product, "product.json", "Product Context", "Project-Specific Product Notes"),
+    normalizeProjectDoc("product", rawArgs2.product, "product.json", "Product Context", "Project-Specific Product Notes"),
     "Product Context"
   );
   writeProjectDoc(
@@ -10221,7 +10600,7 @@ function workflowSetup(root, args = {}) {
     "product_guidelines",
     normalizeProjectDoc(
       "product_guidelines",
-      rawArgs.productGuidelines || rawArgs.product_guidelines,
+      rawArgs2.productGuidelines || rawArgs2.product_guidelines,
       "product_guidelines.json",
       "Product Guidelines",
       "Project-Specific Product Guideline Notes"
@@ -10232,7 +10611,7 @@ function workflowSetup(root, args = {}) {
   writeProjectDoc(
     "workflow.md",
     "workflow",
-    normalizeProjectDoc("workflow", rawArgs.workflowPolicy || rawArgs.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes"),
+    normalizeProjectDoc("workflow", rawArgs2.workflowPolicy || rawArgs2.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes"),
     "Project Workflow"
   );
   writeSetupJson("tracks.json", trackIndexPayload(root, []));
@@ -10288,7 +10667,7 @@ function workflowSetup(root, args = {}) {
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {},
-    ...isRecord(rawArgs.integrations) ? { integrations: asJsonObject(rawArgs.integrations) } : {},
+    ...isRecord(rawArgs2.integrations) ? { integrations: asJsonObject(rawArgs2.integrations) } : {},
     ...configOverrides
   };
   writeSetupJson("config.json", configPayload);
@@ -10298,7 +10677,7 @@ function workflowSetup(root, args = {}) {
     writeSetupJson("repos.json", reposPayload);
   }
   const lspSetupResult = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
-  const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs.writeGitattributes === true || rawArgs.write_gitattributes === true;
+  const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs2.writeGitattributes === true || rawArgs2.write_gitattributes === true;
   const gitattributes = gitattributesNeeded ? setupGitattributes(root) : null;
   const ciSetup = setupCiTemplates(
     root,
@@ -10370,7 +10749,7 @@ function providerActionsForTrack(root, workflow, track, args = {}) {
   const label = `cadre-track:${track.track_id}`;
   return entries.map((entry) => {
     const repo = asString(entry.repo, ".");
-    const target = entry.head || track.metadata.git_branch || `track/${track.track_id}`;
+    const target2 = entry.head || track.metadata.git_branch || `track/${track.track_id}`;
     return {
       id: `${workflow}-${safeName(repo)}`,
       provider,
@@ -10378,7 +10757,7 @@ function providerActionsForTrack(root, workflow, track, args = {}) {
       repo,
       track_id: track.track_id,
       title: `${track.track_id}: ${track.metadata.description || track.metadata.name || track.track_id}`,
-      source_branch: target,
+      source_branch: target2,
       target_branch: entry.base || args.base || "main",
       body: [
         `Cadre track: ${track.track_id}`,

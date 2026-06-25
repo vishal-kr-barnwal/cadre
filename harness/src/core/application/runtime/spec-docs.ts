@@ -12,7 +12,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 
 import { compactLines } from "./text-utils";
 import { utcNow } from "../../infrastructure/runtime/json-store";
-import { normalizedText, splitMarkdownSections } from "./markdown-docs";
+import { appendCanonicalJsonBlock, normalizedText, splitMarkdownSections } from "./markdown-docs";
 import { asArray } from "./status";
 
 export function normalizedSpecHeading(heading: string): string {
@@ -218,6 +218,7 @@ export function renderSpecMarkdown(raw: JsonObject): string {
   appendSpecItemSection(parts, "Non-Functional Requirements", specItemsFromRaw(spec.non_functional_requirements));
   appendSpecItemSection(parts, "Acceptance Criteria", specItemsFromRaw(spec.acceptance_criteria));
   appendSpecItemSection(parts, "Out Of Scope", specItemsFromRaw(spec.out_of_scope));
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }
 
@@ -246,5 +247,6 @@ export function renderStyleGuideMarkdown(raw: JsonObject): string {
     const body = asOptionalString(section.body);
     if (heading && body) parts.push(`## ${heading}`, "", body, "");
   }
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }

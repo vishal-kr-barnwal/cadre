@@ -24,6 +24,7 @@ import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../i
 import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
+import { refreshIntentPrompts, refreshScopeIds } from "./intent-prompts";
 import { metadataPatch } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
 import { templateJson, workflowSummary } from "./workflow-response";
@@ -174,15 +175,36 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
 
 export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "refresh", args);
-  const reviewFiles = refreshReviewFiles(root);
+  const intentPrompts = refreshIntentPrompts(args);
+  if (intentPrompts.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      intent_prompts: intentPrompts,
+      next_actions: [
+        "Answer refresh-scope before running refresh.",
+        "Call refresh again with refreshScope set to patterns, lsp, docs, diagnostics, or all.",
+      ],
+      error: "Refresh scope is unclear; Cadre will not generate refresh artifacts until the requested scope is selected.",
+    };
+  }
+  const scopeIds = refreshScopeIds(args);
+  const refreshPatterns = scopeIds.some((scope) => ["all", "patterns", "docs", "projections"].includes(scope));
+  const lspScopeRequested = scopeIds.some((scope) => ["all", "lsp"].includes(scope));
+  const lspWriteRequested = lspScopeRequested && setupLspWriteRequested(args);
+  const mutatingRefresh = refreshPatterns || lspWriteRequested;
+  const reviewFiles = refreshPatterns ? refreshReviewFiles(root) : [];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  if (setupLspWriteRequested(args)) reviewArtifacts.push(...setupLspReviewArtifacts(args));
+  if (lspWriteRequested) reviewArtifacts.push(...setupLspReviewArtifacts(args));
   const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
   const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
   const warnings = asStringArray(asJsonObject(reviewBundle).warnings);
   const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !humanReviewConfirmed(args);
-  const lspRequested = args.execute === true && !awaitingDocumentReview && setupLspWriteRequested(args);
-  const traceBefore = args.execute === true && !awaitingDocumentReview ? beginTrace(root) : null;
+  const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
+  const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
   if (awaitingDocumentReview) {
     return {
@@ -196,6 +218,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       dependency_graph: dependencyGraph(root),
       lsp: lspConfigStatus(root),
       lsp_setup: lsp,
+      scope: scopeIds,
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
       review_bundle: reviewBundle,
@@ -203,9 +226,9 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       error: "Human confirmation is required before refreshing Cadre context documents",
     };
   }
-  const regen = args.execute === true ? regenIndex(root) : null;
+  const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
   let patterns: CoreResult | null = null;
-  if (args.execute === true) {
+  if (args.execute === true && refreshPatterns) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
       fs.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
@@ -218,7 +241,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       };
     }
   }
-  const controlCommit = args.execute === true
+  const controlCommit = args.execute === true && mutatingRefresh
     ? commitTrace(root, args, {
       kind: "control",
       workflow: "refresh",
@@ -234,6 +257,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     ...summary,
     ok: (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
     phase_state: args.execute === true ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
+    scope: scopeIds,
     doctor: doctor(root, { hasCadreProject: true }),
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),

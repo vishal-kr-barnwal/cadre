@@ -45,7 +45,8 @@ Setup dry-runs may include `native_prompts` with schema
 native selection UI when available, then pass the selected ids or custom "Other"
 text back as structured setup arguments such as `providerMode`, `syncMode`,
 `styleGuideIds`, `writeLsp`, and `integrations`. Prompt answers are not stored
-as standalone Cadre state.
+as standalone Cadre state. Answer setup prompts before asking the user to
+approve the setup review bundle.
 
 What setup writes:
 
@@ -87,6 +88,14 @@ The new-track packet previews or creates:
 Dry runs expose full proposed files through a review bundle on disk, so agents
 can show the manifest and file paths without pasting generated specs or plans
 into chat.
+Generated Markdown projections include readable review sections plus the
+canonical JSON detail block, so human review can inspect the same structured
+fields Cadre agents use.
+
+When the request is vague, `cadre-newtrack` returns `intent_prompts` and
+`phase_state:"awaiting_clarification"` instead of generating a spec or plan.
+Agents should ask for goal, outcome, acceptance criteria, and scope before
+drafting structured `spec` and `plan` JSON.
 
 Good tracks have testable acceptance criteria, explicit dependencies, clear file
 annotations, and a plan that can be resumed by another session.
@@ -233,6 +242,10 @@ Refresh can update:
 Refresh is useful after toolchain changes, repo topology changes, or stale
 project context.
 
+When refresh scope is unclear, Cadre asks first with an `intent_prompts`
+selection for patterns, LSP, docs/projections, diagnostics, or all supported
+refreshes.
+
 Document refreshes use review bundles for proposed context files and require
 confirmation before writing.
 
@@ -251,6 +264,10 @@ Revise should preserve track history and reason about:
 
 Revised specs and plans are reviewed from packet-generated bundle files before
 the confirmed write.
+
+When the revision reason or target is unclear, `cadre-revise` returns
+`intent_prompts` instead of generating changes. Agents should ask what changed
+and whether the spec, plan, or both should be updated.
 
 ## `cadre-artifacts`
 

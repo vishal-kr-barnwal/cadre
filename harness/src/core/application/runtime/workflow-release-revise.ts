@@ -23,6 +23,7 @@ import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../i
 import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
+import { reviseIntentPrompts } from "./intent-prompts";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
@@ -172,6 +173,23 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   const summary = workflowSummary(root, "revise", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
+  const initialPrompts = reviseIntentPrompts(args, trackId || null);
+  if (initialPrompts.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      ...(trackId ? { track_id: trackId, track_context: trackContext(root, trackId) } : {}),
+      intent_prompts: initialPrompts,
+      next_actions: [
+        "Answer revise intent_prompts before producing revised artifacts.",
+        "Call revise again with reason plus structured spec and/or plan JSON.",
+      ],
+      error: "Revision intent is under-specified; Cadre needs a target, reason, and spec/plan scope before generating revision artifacts.",
+    };
+  }
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
   const track = findTrack(root, trackId);
   const context = trackContext(root, trackId);

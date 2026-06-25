@@ -10,7 +10,7 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { markerForPlanStatus, normalizedText } from "./markdown-docs";
+import { appendCanonicalJsonBlock, markerForPlanStatus, normalizedText } from "./markdown-docs";
 import { specItemsFromRaw } from "./spec-docs";
 import { asArray } from "./status";
 
@@ -327,5 +327,6 @@ export function renderPlanMarkdown(raw: JsonObject): string {
       parts.push("");
     }
   }
+  appendCanonicalJsonBlock(parts, raw);
   return normalizedText(parts.join("\n"));
 }

@@ -31,11 +31,11 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, selected JSON style guides, and any `native_prompts` recommendation prompts. When `native_prompts` are present, load the `native-prompts` reference and use the client native selection affordance before calling setup again with structured arguments."
+      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, selected JSON style guides, and any `intent_prompts` or `native_prompts`. When prompts are present, load the `native-prompts` reference and answer those prompts first with the client native selection affordance before review-bundle approval."
     },
     {
       "step": 4,
-      "instruction": "Present returned setup review artifacts using the review_bundle manifest/path list so large generated Markdown projections do not enter model context."
+      "instruction": "After prompt answers have been mapped back to structured setup arguments, present returned setup review artifacts using the review_bundle manifest/path list so large generated Markdown projections do not enter model context."
     },
     {
       "step": 5,

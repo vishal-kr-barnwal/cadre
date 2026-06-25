@@ -54,9 +54,6 @@ function compactReviewArtifacts(value: unknown): JsonObject {
       path: asOptionalString(artifact.path) || null,
       title: asOptionalString(artifact.title) || null,
       kind: asOptionalString(artifact.kind) || null,
-      source: asOptionalString(artifact.source) || null,
-      bytes: Number(artifact.bytes || 0),
-      missing: artifact.missing === true,
     })),
     truncated: artifacts.length > 30,
     content_in_response: false,
@@ -79,8 +76,6 @@ function compactReviewBundle(value: unknown): JsonObject | null {
       review_path: asOptionalString(file.review_path) || null,
       title: asOptionalString(file.title) || null,
       kind: asOptionalString(file.kind) || null,
-      bytes: Number(file.bytes || 0),
-      missing: file.missing === true,
     })),
     truncated: files.length > 30,
   };
@@ -114,27 +109,47 @@ function compactProvider(value: unknown): JsonObject | null {
 function compactWorkspaceHealth(value: unknown): JsonObject | null {
   if (!value || !isRecord(value)) return null;
   const health = asJsonObject(value);
+  const workspace = asJsonObject(health.workspace);
+  const dependencyGraph = asJsonObject(health.dependency_graph);
+  const lsp = asJsonObject(health.lsp);
+  const integrations = asJsonObject(health.integrations);
   return {
     ok: health.ok !== false,
     response_mode: asOptionalString(health.response_mode) || "compact",
     detail_available: health.detail_available !== false,
     topology: health.topology,
-    workspace: health.workspace,
-    dependency_graph: health.dependency_graph,
+    workspace: {
+      repo_count: workspace.repo_count ?? null,
+      adapters_count: Array.isArray(workspace.adapters) ? workspace.adapters.length : Number(workspace.adapters_count || 0),
+      commands_count: Array.isArray(workspace.commands) ? workspace.commands.length : Number(workspace.commands_count || 0),
+    },
+    dependency_graph: {
+      manifests_count: Array.isArray(dependencyGraph.manifests) ? dependencyGraph.manifests.length : Number(dependencyGraph.manifests_count || 0),
+      edges_count: Array.isArray(dependencyGraph.edges) ? dependencyGraph.edges.length : Number(dependencyGraph.edges_count || 0),
+    },
     parallel: health.parallel,
     languages: health.languages,
-    lsp: health.lsp,
+    lsp: {
+      coverage: lsp.coverage ?? null,
+      configured_count: lsp.configured_count ?? null,
+      recommended_count: lsp.recommended_count ?? null,
+      missing_count: lsp.missing_count ?? null,
+    },
     integrations: isRecord(health.integrations)
       ? {
-        summary: asJsonObject(health.integrations).summary || null,
-        provider: asJsonObject(health.integrations).provider || null,
-        optional_mcps: Array.isArray(asJsonObject(health.integrations).optional_mcps)
-          ? asJsonObject(health.integrations).optional_mcps
-          : [],
+        summary: integrations.summary || null,
+        provider: integrations.provider || null,
       }
       : null,
-    detail_resources: Array.isArray(health.detail_resources) ? health.detail_resources : [],
   };
+}
+
+function compactDetailResources(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  const keep = ["workspace-diagnostics", "dependency-graph", "mcp-readiness", "repo-map", "integrations", "template-inventory"];
+  return value
+    .filter((entry) => typeof entry === "string" && keep.some((needle) => entry.includes(needle)))
+    .slice(0, 6);
 }
 
 function compactLspSetup(value: unknown): JsonObject | null {
@@ -154,15 +169,36 @@ function compactLspSetup(value: unknown): JsonObject | null {
   };
 }
 
+function compactSetupIntegrations(value: unknown): JsonObject | null {
+  if (!value || !isRecord(value)) return null;
+  const integrations = asJsonObject(value);
+  const optionalMcps = integrations.optional_mcps;
+  return {
+    summary: integrations.summary || null,
+    provider: integrations.provider || null,
+    optional_mcp_count: Array.isArray(optionalMcps) ? optionalMcps.length : 0,
+  };
+}
+
 function compactNativePrompts(value: unknown): JsonObject[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => {
     const prompt = asJsonObject(entry);
     const target = asJsonObject(prompt.responseTarget);
+    const choices = Array.isArray(prompt.choices) ? prompt.choices.map(asJsonObject) : [];
     return {
       id: asOptionalString(prompt.id) || null,
+      title: asOptionalString(prompt.title) || null,
+      question: asOptionalString(prompt.question) || null,
       selectionMode: asOptionalString(prompt.selectionMode) || "single",
+      allowCustom: prompt.allowCustom === true,
       argument: asOptionalString(target.argument) || null,
+      customArgument: asOptionalString(prompt.customArgument) || asOptionalString(target.customArgument) || null,
+      choices: choices.map((choice) => ({
+        id: asOptionalString(choice.id) || null,
+        label: asOptionalString(choice.label) || asOptionalString(choice.id) || null,
+        recommended: choice.recommended === true,
+      })),
     };
   });
 }
@@ -217,15 +253,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
     dependency_graph: result.dependency_graph,
     lsp: result.lsp,
     lsp_setup: compactLspSetup(result.lsp_setup),
-    integrations: isRecord(result.integrations)
-      ? {
-        summary: asJsonObject(result.integrations).summary || null,
-        provider: asJsonObject(result.integrations).provider || null,
-        optional_mcps: Array.isArray(asJsonObject(result.integrations).optional_mcps)
-          ? asJsonObject(result.integrations).optional_mcps
-          : [],
-      }
-      : null,
+    integrations: compactSetupIntegrations(result.integrations),
     styleGuides,
     styleguide_ids: asStringArray(styleGuides.selected),
     templates: compactTemplateManifest(result.templates),
@@ -238,14 +266,15 @@ function compactSetupResponse(result: CoreResult): CoreResult {
       }
       : result.techStackSummary,
     human_review: humanReview,
+    intent_prompts: compactNativePrompts(result.intent_prompts),
     native_prompts: compactNativePrompts(result.native_prompts),
     review_artifacts: reviewArtifacts.files,
     review_bundle: reviewBundleSummary,
     review_bundle_path: reviewBundleSummary?.manifest_path || null,
     warnings: Array.isArray(result.warnings) ? result.warnings : [],
     next_actions: Array.isArray(result.next_actions) ? result.next_actions : [],
-    packet_notes: Array.isArray(result.packet_notes) ? result.packet_notes : [],
-    detail_resources: Array.isArray(result.detail_resources) ? result.detail_resources : [],
+    packet_notes_count: Array.isArray(result.packet_notes) ? result.packet_notes.length : 0,
+    detail_resources: compactDetailResources(result.detail_resources),
     resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : [],
     scaffolded: result.scaffolded,
     written: Array.isArray(result.written) ? result.written : undefined,

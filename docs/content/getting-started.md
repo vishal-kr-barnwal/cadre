@@ -77,6 +77,8 @@ Setup asks for product context, tech stack, topology, sync mode, provider mode,
 quality gate, optional CI templates, and LSP setup. Setup dry-runs can return
 native recommendation prompts for Codex, Claude, Copilot, and Antigravity so
 you can select one or more recommended options, or type a custom "Other" value.
+Discovery packets can inspect the fresh repository before `cadre/` exists; Cadre
+state writes still happen only after review and approval.
 When language-server recommendations are detected, setup writes `cadre/lsp.json`
 by default unless you opt out. The workflow is packet-owned: the agent should
 call Cadre MCP, and Cadre MCP writes the control plane.

@@ -16,7 +16,11 @@
     },
     {
       "heading": "Setup Usage",
-      "body": "`cadre-setup` dry-runs can return prompts for provider mode, sync mode, style guides, LSP setup, and optional MCP integrations. After the user answers, call `cadre_workflow` for setup again with the selected values as structured JSON fields such as `providerMode`, `syncMode`, `styleGuideIds`, `writeLsp`, and `integrations`. Do not write a prompt response file or edit generated projections."
+      "body": "`cadre-setup` dry-runs can return prompts for provider mode, sync mode, style guides, LSP setup, optional MCP integrations, and missing setup intent. Answer prompts before asking for setup approval. After the user answers, call `cadre_workflow` for setup again with the selected values as structured JSON fields such as `providerMode`, `syncMode`, `styleGuideIds`, `writeLsp`, and `integrations`. Then review the bundle and request approval for `execute:true`. Do not write a prompt response file or edit generated projections."
+    },
+    {
+      "heading": "Intent Clarification",
+      "body": "Cadre workflows may return `intent_prompts` with the same `cadre.native_prompt.v1` schema and `phase_state:\"awaiting_clarification\"`. This means the packet is intentionally refusing to generate artifacts until the human clarifies intent. Use the prompt answers to call the same workflow again with structured arguments. Do not synthesize missing product, track, refresh, or revision requirements from guesswork."
     },
     {
       "heading": "Client Adapters",

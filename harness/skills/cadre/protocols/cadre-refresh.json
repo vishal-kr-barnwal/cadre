@@ -27,11 +27,11 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"refresh\"` and any requested scope as structured JSON fields."
+      "instruction": "Call `cadre_workflow` with `workflow: \"refresh\"` and any requested scope as structured JSON fields. If the requested scope is not obvious, the packet returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`; load `native-prompts`, ask the scope question, and call refresh again with `refreshScope`."
     },
     {
       "step": 3,
-      "instruction": "Use the returned doctor, workspace diagnostics, dependency graph, LSP evidence, and review_bundle manifest/path list to identify stale canonical JSON/JSONL context without inlining large artifacts into model context."
+      "instruction": "Use the returned doctor, workspace diagnostics, dependency graph, LSP evidence, selected scope, and review_bundle manifest/path list to identify stale canonical JSON/JSONL context without inlining large artifacts into model context."
     },
     {
       "step": 4,
@@ -62,6 +62,7 @@
     "next recommended packet"
   ],
   "references": [
-    "mcp-contract"
+    "mcp-contract",
+    "native-prompts"
   ]
 }

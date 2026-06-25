@@ -27,11 +27,11 @@
     },
     {
       "step": 2,
-      "instruction": "Draft structured `spec` and `plan` JSON from the user request and current project context. Do not send Markdown fields such as `specText`, `planText`, or `planPath`."
+      "instruction": "Draft structured `spec` and `plan` JSON from the user request and current project context only when minimum intent is clear: goal, outcome, acceptance criteria, and scope. Do not invent missing product or track requirements, and do not send Markdown fields such as `specText`, `planText`, or `planPath`."
     },
     {
       "step": 3,
-      "instruction": "Call `cadre_workflow` with `workflow: \"newtrack\"`, `trackId`, `spec`, `plan`, and any metadata as structured JSON fields."
+      "instruction": "Call `cadre_workflow` with `workflow: \"newtrack\"`, `trackId`, `spec`, `plan`, and any metadata as structured JSON fields. If the packet returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`, load `native-prompts`, ask those questions first, and call newtrack again before generating review artifacts."
     },
     {
       "step": 4,
@@ -66,6 +66,7 @@
     "next recommended packet"
   ],
   "references": [
-    "mcp-contract"
+    "mcp-contract",
+    "native-prompts"
   ]
 }

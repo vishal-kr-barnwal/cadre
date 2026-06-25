@@ -12,11 +12,11 @@ type PromptArgs = {
   runtimeArgs: RuntimeArgs;
 };
 
-function choice(id: string, label: string, description: string, recommended = false): JsonObject {
+export function choice(id: string, label: string, description: string, recommended = false): JsonObject {
   return { id, label, description, recommended };
 }
 
-function nativePrompt(
+export function nativePrompt(
   id: string,
   title: string,
   question: string,
@@ -72,7 +72,7 @@ function providerPrompt(provider: JsonObject): JsonObject {
   );
 }
 
-function hasAnyArg(args: RuntimeArgs, names: string[]): boolean {
+export function hasAnyArg(args: RuntimeArgs, names: string[]): boolean {
   const raw = args as UnknownRecord;
   return names.some((name) => raw[name] !== undefined && raw[name] !== null && raw[name] !== "");
 }

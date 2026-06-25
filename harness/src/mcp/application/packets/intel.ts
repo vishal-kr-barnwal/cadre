@@ -5,12 +5,40 @@ import { jobEnvelope, jobTypeForPacket } from "../job-support";
 import { warmLspReview } from "../review-support";
 import type { RuntimeDependencies } from "../ports";
 
+const SETUP_SAFE_READ_ACTIONS = new Set([
+  "repo_map",
+  "workspace_diagnostics",
+  "dependency_graph",
+  "test_impact",
+  "lsp_setup",
+  "dap_setup",
+  "dap_status",
+  "mcp_readiness",
+]);
+
+function invalidRootError(received: unknown): Error {
+  return Object.assign(
+    new Error(`This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${received || "(missing)"}`),
+    { code: -32602 }
+  );
+}
+
 export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs): Promise<RuntimeEnvelope> {
-  const daemonRoot = args.root ? deps.rootResolver.rootFromCandidate(args.root) : null;
-  const root = args.action && args.action.startsWith("lsp_daemon")
-    ? (daemonRoot ? daemonRoot.root : process.cwd())
-    : deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "repo_map";
+  const rootInfo = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
+  const usesCandidateRoot = action.startsWith("lsp_daemon") || SETUP_SAFE_READ_ACTIONS.has(String(action));
+  if (!rootInfo && usesCandidateRoot) throw invalidRootError(args.root);
+  if (
+    rootInfo
+    && !rootInfo.has_cadre
+    && args.execute === true
+    && ["lsp_setup", "dap_setup"].includes(String(action))
+  ) {
+    throw invalidRootError(args.root);
+  }
+  const root = usesCandidateRoot
+    ? (rootInfo ? rootInfo.root : process.cwd())
+    : deps.rootResolver.requireCadreRoot(args);
   if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args, deps);
   if (action === "repo_map") return envelope(deps.core.repoMap(root, args));
   if (action === "lsp_setup") return envelope(deps.core.lspSetup(root, args));

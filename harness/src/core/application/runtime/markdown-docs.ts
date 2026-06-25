@@ -26,6 +26,10 @@ export function withGeneratedMarker(source: string, schema: string, body: string
   return `${generatedMarker(source, schema, normalized)}\n${normalized}`;
 }
 
+export function appendCanonicalJsonBlock(parts: string[], value: JsonObject, heading = "Canonical JSON"): void {
+  parts.push(`## ${heading}`, "", "```json", JSON.stringify(value, null, 2), "```", "");
+}
+
 export function hasGeneratedMarker(text: string): boolean {
   return /<!--\s*cadre:generated\b/.test(text);
 }
@@ -91,6 +95,7 @@ export function renderMarkdownDoc(value: JsonObject, fallbackTitle: string): str
     const body = asOptionalString(section.body);
     if (body) parts.push(body, "");
   }
+  appendCanonicalJsonBlock(parts, value);
   return normalizedText(parts.join("\n"));
 }
 

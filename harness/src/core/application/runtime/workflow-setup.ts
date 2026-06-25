@@ -16,6 +16,7 @@ import { summarizeLspSetupResult } from "./health-summaries";
 import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
+import { setupIntentPrompts } from "./intent-prompts";
 import { setupNativePrompts } from "./native-prompts";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { appendLspReviewArtifacts, humanReviewState, setupReviewArtifacts, setupReviewBundle, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
@@ -53,6 +54,15 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const reviewBundle = setupReviewBundle(root, args, reviewFiles, styleGuides);
   const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
   const humanReview = humanReviewState("setup", args, reviewArtifacts, reviewBundle);
+  const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
+  const nativePrompts = args.execute === true ? [] : setupNativePrompts({
+    provider: asJsonObject(provider),
+    syncMode: syncModeRecommendation,
+    styleGuides: asJsonObject(styleGuides),
+    lspSetup: asJsonObject(lspRecommendations),
+    integrations: workspaceHealthResult.integrations,
+    runtimeArgs: args,
+  });
   const warnings = [
     ...asStringArray(styleGuides.warnings),
     ...asStringArray(asJsonObject(reviewBundle).warnings),
@@ -60,6 +70,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const result: CoreResult = {
     ...summary,
     ok: true,
+    phase_state: args.execute !== true && intentPrompts.length > 0 ? "awaiting_clarification" : summary.phase_state,
+    ...(args.execute !== true && intentPrompts.length > 0 ? { stage: "intent_clarification" } : {}),
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace_health: workspaceHealthResult,
     workspace: workspaceHealthResult.workspace,
@@ -76,19 +88,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     styleGuides,
     templates: templateManifest(),
     techStackSummary: techStackSummary(root, args),
+    ...(intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {}),
+    ...(nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {}),
     human_review: humanReview,
     review_artifacts: reviewArtifacts,
     review_bundle: reviewBundle,
-    ...(args.execute === true ? {} : {
-      native_prompts: setupNativePrompts({
-        provider: asJsonObject(provider),
-        syncMode: syncModeRecommendation,
-        styleGuides: asJsonObject(styleGuides),
-        lspSetup: asJsonObject(lspRecommendations),
-        integrations: workspaceHealthResult.integrations,
-        runtimeArgs: args,
-      }),
-    }),
     warnings,
     required_payload: args.execute === true
       ? ["product", "techStack"]
@@ -96,10 +100,13 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
         .concat(polyrepoRequested && !reposPayload ? ["repos"] : [])
       : [],
     next_actions: [
+      ...(intentPrompts.length > 0 || nativePrompts.length > 0
+        ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."]
+        : []),
       ...(provider.requires_confirmation === true
         ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
         : []),
-      "Review setup artifacts with the user; call setup_scaffold with execute:true and humanConfirmed:true only after explicit approval.",
+      "After prompt answers, review the setup bundle; call setup with execute:true and humanConfirmed:true only after explicit approval.",
     ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
