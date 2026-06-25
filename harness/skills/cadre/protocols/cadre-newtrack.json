@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Before drafting, load the Cadre artifact schemas for `spec` and `plan` with `cadre_artifact` action `schema` or `cadre://artifact-schema?artifact=spec|plan`. Draft structured `spec` and `plan` JSON from the user request and current project context only when minimum intent is clear: goal, outcome, acceptance criteria, and scope. Use canonical schema fields such as `functional_requirements`, `acceptance_criteria`, `out_of_scope`, `phases`, and `tasks`; do not invent missing product or track requirements, and do not send Markdown fields such as `specText`, `planText`, or `planPath`."
+      "instruction": "Before drafting, load the Cadre artifact schemas for `spec` and `plan` with `cadre_artifact` action `schema` or `cadre://artifact-schema?artifact=spec|plan`. Draft structured `spec` and `plan` JSON from the user request and current project context only when minimum intent is clear: goal, outcome, acceptance criteria, and scope. Include the literal schema identifiers `spec.schema:\"cadre.spec.v1\"` and `plan.schema:\"cadre.plan.v1\"`. Use canonical snake_case fields such as `functional_requirements`, `acceptance_criteria`, `out_of_scope`, and `phases`; put task objects under `plan.phases[].tasks`, not top-level `plan.tasks`. Do not invent missing product or track requirements, and do not send Markdown fields such as `specText`, `planText`, or `planPath`."
     },
     {
       "step": 3,

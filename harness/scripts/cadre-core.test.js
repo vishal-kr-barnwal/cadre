@@ -1541,6 +1541,57 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.ok(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=plan")));
     assert.equal(Object.prototype.hasOwnProperty.call(schemaDrift, "review_bundle"), false);
 
+    const specSchema = core.artifactPacket(root, { action: "schema", artifact: "spec" });
+    assert.equal(specSchema.ok, true);
+    assert.equal(specSchema.schema_id, "cadre.spec.v1");
+    assert.ok(specSchema.schema.required.includes("schema"));
+    assert.equal(specSchema.schema.properties.schema.const, "cadre.spec.v1");
+    assert.equal(specSchema.example.schema, "cadre.spec.v1");
+    assert.ok(specSchema.guidance.some((entry) => entry.includes("snake_case")));
+
+    const planSchema = core.artifactPacket(root, { action: "schema", artifact: "plan" });
+    assert.equal(planSchema.ok, true);
+    assert.equal(planSchema.schema_id, "cadre.plan.v1");
+    assert.ok(planSchema.schema.required.includes("schema"));
+    assert.equal(planSchema.schema.properties.schema.const, "cadre.plan.v1");
+    assert.equal(planSchema.schema.properties.phases.items.properties.tasks.items.properties.task_key.type, "string");
+    assert.equal(planSchema.example.phases[0].tasks[0].task_key, "phase1_task1");
+    assert.ok(planSchema.guidance.some((entry) => entry.includes("top-level plan.tasks")));
+
+    const schemaGuidedTrack = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: "schema_guided_20260625",
+      spec: {
+        ...specSchema.example,
+        track_id: "schema_guided_20260625",
+        title: "Schema Guided Track",
+        description: "Create a new Cadre track from the published artifact schema without a corrective retry.",
+        functional_requirements: [{ heading: "Schema-shaped first draft", body: "The first draft uses canonical spec fields from the schema response." }],
+        acceptance_criteria: [{ heading: "Review bundle generated", body: "The dry run returns review artifacts without schema validation errors." }],
+        out_of_scope: [{ heading: "No runtime behavior changes", body: "This track only verifies the newtrack payload shape." }],
+      },
+      plan: {
+        ...planSchema.example,
+        track_id: "schema_guided_20260625",
+        title: "Plan: schema_guided_20260625",
+        phases: [
+          {
+            phase_index: 1,
+            title: "Phase 1: Verify Schema Flow",
+            execution_mode: "sequential",
+            depends_on: [],
+            tasks: [
+              planTask(1, 1, "Submit schema-shaped newtrack dry run", ["cadre/tracks/schema_guided_20260625/spec.json"]),
+            ],
+          },
+        ],
+      },
+    });
+    assert.equal(schemaGuidedTrack.ok, true);
+    assert.equal(schemaGuidedTrack.dry_run, true);
+    assert.equal(schemaGuidedTrack.stage, undefined);
+    assert.ok(schemaGuidedTrack.review_bundle);
+
     const vagueRevise = core.workflowPacket(root, {
       workflow: "revise",
       trackId: "clarify_20260625",

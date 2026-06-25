@@ -36,8 +36,69 @@ export function artifactSchema(artifact: unknown): JsonObject {
     heading: { type: "string" },
     body: { type: "string" },
   });
+  const planTaskSchema = objectSchema(["task_index", "task_key", "title", "files", "depends_on"], {
+    task_index: { type: "integer" },
+    task_key: { type: "string" },
+    title: { type: "string" },
+    status: { type: "string", enum: ["pending", "in_progress", "completed", "blocked", "skipped"] },
+    files: { type: "array", items: { type: "string" } },
+    depends_on: { type: "array", items: { type: "string" } },
+    repo: { type: ["string", "null"] },
+    annotations: { type: "object" },
+    commit_shas: { type: "array", items: { type: "string" } },
+    repo_shas: { type: "object" },
+  });
+  const planPhaseSchema = objectSchema(["phase_index", "title", "tasks"], {
+    phase_index: { type: "integer" },
+    title: { type: "string" },
+    execution_mode: { type: "string", enum: ["sequential", "parallel"] },
+    depends_on: { type: "array", items: { type: "string" } },
+    annotations: { type: "object" },
+    tasks: { type: "array", minItems: 1, items: planTaskSchema },
+  });
+  const specExample: JsonObject = {
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: "example-track",
+    title: "Spec: example-track",
+    description: "Describe the goal and intended outcome in concrete project terms.",
+    functional_requirements: [{ heading: "User-visible behavior", body: "State the behavior this track must deliver." }],
+    non_functional_requirements: [],
+    acceptance_criteria: [{ heading: "Verified outcome", body: "State how completion will be verified." }],
+    out_of_scope: [{ heading: "Excluded work", body: "State what this track must not change." }],
+  };
+  const planExample: JsonObject = {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: "example-track",
+    title: "Plan: example-track",
+    phases: [
+      {
+        phase_index: 1,
+        title: "Phase 1: Implement",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [
+          {
+            task_index: 1,
+            task_key: "phase1_task1",
+            title: "Implement the scoped change",
+            status: "pending",
+            files: [],
+            depends_on: [],
+            commit_shas: [],
+            repo_shas: {},
+          },
+        ],
+      },
+    ],
+  };
   const schemas: Record<string, JsonObject> = {
-    spec: objectSchema(["track_id", "title"], {
+    spec: objectSchema(["schema", "track_id", "title", "description", "functional_requirements", "acceptance_criteria", "out_of_scope"], {
+      version: { type: "integer" },
+      schema: { const: "cadre.spec.v1" },
+      kind: { const: "spec" },
       track_id: { type: "string" },
       title: { type: "string" },
       description: { type: "string" },
@@ -46,10 +107,12 @@ export function artifactSchema(artifact: unknown): JsonObject {
       acceptance_criteria: { type: "array", items: specListItemSchema },
       out_of_scope: { type: "array", items: specListItemSchema },
     }),
-    plan: objectSchema(["track_id", "phases"], {
+    plan: objectSchema(["schema", "track_id", "phases"], {
+      version: { type: "integer" },
+      schema: { const: "cadre.plan.v1" },
       track_id: { type: "string" },
-      phases: { type: "array" },
-      tasks: { type: "array" },
+      title: { type: "string" },
+      phases: { type: "array", minItems: 1, items: planPhaseSchema },
       execution_mode: { type: "string" },
       dependencies: { type: "array" },
       files: { type: "array" },
@@ -116,13 +179,35 @@ export function artifactSchema(artifact: unknown): JsonObject {
       errors: { type: "array", items: { type: "string" } },
     }),
   };
+  const schemaIds: Record<string, string> = {
+    spec: "cadre.spec.v1",
+    plan: "cadre.plan.v1",
+    styleguide: "cadre.styleguide.v1",
+  };
+  const examples: Record<string, JsonObject> = {
+    spec: specExample,
+    plan: planExample,
+  };
+  const notes: Record<string, string[]> = {
+    spec: [
+      "Use canonical snake_case fields; aliases such as functionalRequirements and acceptanceCriteria are rejected by newtrack.",
+      "Newtrack requires meaningful goal, outcome, acceptance criteria, and scope before it creates review artifacts.",
+    ],
+    plan: [
+      "Do not send top-level plan.tasks for newtrack; put task objects under plan.phases[].tasks.",
+      "Each phase must have a title and at least one task object with a title.",
+    ],
+  };
   return {
     ok: true,
     artifact: id,
+    schema_id: schemaIds[id] || null,
     schema: schemas[id]
       || (["review-evidence", "review_evidence", "provider-evidence", "provider_evidence"].includes(id) ? schemas.evidence : undefined)
       || (["completion-journal", "completion_journal"].includes(id) ? schemas.journal : undefined)
       || schemas.project_doc,
+    example: examples[id],
+    guidance: notes[id] || [],
     dialect: "https://json-schema.org/draft/2020-12/schema",
   };
 }
