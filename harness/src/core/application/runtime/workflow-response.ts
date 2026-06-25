@@ -209,6 +209,141 @@ export function markdownPayloadError(args: RuntimeArgs = {}): CoreResult | null 
   };
 }
 
+function bulletList(values: string[]): string {
+  return values.map((value) => `- ${value}`).join("\n");
+}
+
+function stringList(value: unknown): string[] {
+  return asStringArray(value).filter((item) => item.trim().length > 0);
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = asOptionalString(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function appendLines(lines: string[], heading: string, values: string[]): void {
+  if (values.length === 0) return;
+  if (lines.length > 0) lines.push("");
+  lines.push(`${heading}:`, bulletList(values));
+}
+
+function productSectionBody(heading: string, provided: JsonObject, fallback: string): string {
+  const lines: string[] = [];
+  const name = firstString(provided.name, provided.productName, provided.product_name, provided.title);
+  const summary = firstString(provided.summary, provided.description, provided.notes);
+  switch (heading.toLowerCase()) {
+    case "product summary":
+      if (name) lines.push(`- What the product is: ${name}`);
+      if (summary) lines.push(`- Primary value proposition: ${summary}`);
+      appendLines(lines, "Primary users", stringList(provided.users));
+      break;
+    case "users and personas":
+      appendLines(lines, "Primary users", stringList(provided.users));
+      break;
+    case "core workflows":
+      appendLines(lines, "Product goals", stringList(provided.goals));
+      appendLines(lines, "Primary workflows", stringList(provided.workflows || provided.coreWorkflows || provided.core_workflows));
+      break;
+    case "product invariants":
+      appendLines(lines, "Product invariants", stringList(provided.invariants || provided.productInvariants || provided.product_invariants));
+      appendLines(lines, "Non-goals", stringList(provided.nonGoals || provided.non_goals));
+      break;
+    case "architecture boundaries":
+      appendLines(lines, "Architecture boundaries", stringList(provided.boundaries || provided.architectureBoundaries || provided.architecture_boundaries));
+      break;
+    case "data and integrations":
+      appendLines(lines, "Data stores", stringList(provided.dataStores || provided.data_stores || provided.datastores));
+      appendLines(lines, "Integrations", stringList(provided.integrations));
+      break;
+    case "quality and release expectations":
+      appendLines(lines, "Quality expectations", stringList(provided.qualityBar || provided.quality_bar || provided.qualityExpectations || provided.quality_expectations));
+      break;
+    case "open questions":
+      appendLines(lines, "Open questions", stringList(provided.openQuestions || provided.open_questions));
+      break;
+    default:
+      break;
+  }
+  return lines.length > 0 ? lines.join("\n") : fallback;
+}
+
+function productGuidelinesSectionBody(heading: string, provided: JsonObject, fallback: string): string {
+  const lines: string[] = [];
+  switch (heading.toLowerCase()) {
+    case "product principles":
+      appendLines(lines, "Principles", stringList(provided.principles));
+      break;
+    case "user promises":
+      appendLines(lines, "User promises", stringList(provided.userPromises || provided.user_promises || provided.promises));
+      break;
+    case "trust and safety boundaries":
+      appendLines(lines, "Trust and safety boundaries", stringList(provided.trustAndSafety || provided.trust_and_safety || provided.safety || provided.boundaries));
+      break;
+    case "domain and workflow rules":
+      appendLines(lines, "Domain and workflow rules", stringList(provided.rules || provided.domainRules || provided.domain_rules || provided.workflowRules || provided.workflow_rules));
+      break;
+    case "data ownership":
+      appendLines(lines, "Data ownership", stringList(provided.dataOwnership || provided.data_ownership));
+      break;
+    case "non-goals":
+      appendLines(lines, "Non-goals", stringList(provided.nonGoals || provided.non_goals));
+      break;
+    case "decision rules":
+      appendLines(lines, "Decision rules", stringList(provided.decisionRules || provided.decision_rules));
+      break;
+    case "review checklist":
+      appendLines(lines, "Quality bar", stringList(provided.qualityBar || provided.quality_bar || provided.reviewChecklist || provided.review_checklist));
+      break;
+    default:
+      break;
+  }
+  return lines.length > 0 ? lines.join("\n") : fallback;
+}
+
+function workflowSectionBody(heading: string, provided: JsonObject, fallback: string): string {
+  const lines: string[] = [];
+  const preferredTestCommand = firstString(provided.preferredTestCommand, provided.preferred_test_command, provided.testCommand, provided.test_command);
+  const reviewGate = firstString(provided.reviewGate, provided.review_gate);
+  const providerMode = firstString(provided.providerMode, provided.provider_mode);
+  switch (heading.toLowerCase()) {
+    case "quality gates":
+      if (reviewGate) lines.push(`- Review gate: ${reviewGate}`);
+      if (preferredTestCommand) lines.push(`- Preferred test command: \`${preferredTestCommand}\``);
+      break;
+    case "development commands":
+      if (preferredTestCommand) lines.push(`- Preferred test command: \`${preferredTestCommand}\``);
+      appendLines(lines, "Additional commands", stringList(provided.commands || provided.developmentCommands || provided.development_commands));
+      break;
+    case "guiding principles":
+      appendLines(lines, "Project workflow principles", stringList(provided.principles));
+      if (providerMode) lines.push(`- Provider mode: ${providerMode}`);
+      break;
+    default:
+      break;
+  }
+  return lines.length > 0 ? lines.join("\n") : fallback;
+}
+
+function hydrateTemplateSections(kind: string, templateSections: JsonObject[], provided: JsonObject): JsonObject[] {
+  if (Object.keys(provided).length === 0) return templateSections;
+  return templateSections.map((section) => {
+    const heading = asOptionalString(section.heading) || "";
+    const fallback = asOptionalString(section.body) || "";
+    const body = kind === "product"
+      ? productSectionBody(heading, provided, fallback)
+      : kind === "product_guidelines"
+        ? productGuidelinesSectionBody(heading, provided, fallback)
+        : kind === "workflow"
+          ? workflowSectionBody(heading, provided, fallback)
+          : fallback;
+    return { ...section, body };
+  });
+}
+
 export function normalizeProjectDoc(kind: string, raw: unknown, templateFile: string, fallbackTitle: string, notesHeading: string): JsonObject {
   const template = templateJson(templateFile, {
     version: 1,
@@ -225,7 +360,7 @@ export function normalizeProjectDoc(kind: string, raw: unknown, templateFile: st
   const sections = providedSections.length > 0
     ? providedSections
     : [
-        ...templateSections,
+        ...hydrateTemplateSections(kind, templateSections, provided),
         ...(providedSummary && isRecord(raw) ? [{ heading: notesHeading, body: providedSummary }] : []),
       ];
   return {
@@ -234,7 +369,7 @@ export function normalizeProjectDoc(kind: string, raw: unknown, templateFile: st
     version: 1,
     schema: `cadre.${kind}.v1`,
     kind,
-    title: asOptionalString(provided.title) || asOptionalString(template.title) || fallbackTitle,
+    title: asOptionalString(provided.title || provided.name || provided.productName || provided.product_name) || asOptionalString(template.title) || fallbackTitle,
     summary: asOptionalString(provided.summary || provided.description) || asOptionalString(template.summary) || "",
     sections,
     updated_at: utcNow(),

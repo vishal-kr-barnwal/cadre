@@ -1722,6 +1722,99 @@ test("workflow setup preserves baseline product context with custom notes", () =
   }
 });
 
+test("workflow setup hydrates template JSON sections with structured setup details", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-structured-details-test-"));
+  try {
+    git(root, ["init"]);
+
+    const setup = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      humanConfirmed: true,
+      providerMode: "local",
+      product: {
+        name: "Stitchd Event / Message Queue",
+        summary: "A Rust-based PostgreSQL-backed event buffering and message queue library.",
+        users: [
+          "Rust services that need buffered event ingestion into PostgreSQL",
+          "Developers integrating asynchronous queue consumers and retry processing",
+        ],
+        goals: [
+          "Provide efficient buffered event insertion with size-based and time-based flush triggers",
+          "Persist queue data and jobs into PostgreSQL dataset tables using transactional binary COPY",
+        ],
+        nonGoals: ["Full hosted queue service operations"],
+      },
+      productGuidelines: {
+        principles: [
+          "Prefer correctness and explicit error handling around queue persistence",
+          "Keep database interactions transactional where queue consistency depends on paired writes",
+        ],
+        qualityBar: [
+          "Run Rust formatting and compile/test checks before shipping behavioral changes",
+          "Treat SQL schema/function contracts as part of the product surface",
+        ],
+      },
+      workflowPolicy: {
+        preferredTestCommand: "cargo test",
+        reviewGate: "Run cargo fmt/check/test as appropriate for the change scope.",
+        providerMode: "github",
+      },
+      techStack: {
+        language: "Rust",
+        edition: "2024",
+        packageManager: "cargo",
+        runtime: ["tokio"],
+        database: ["PostgreSQL"],
+        majorDependencies: ["deadpool-postgres", "tokio-postgres", "cbor-data"],
+        artifacts: ["Cargo.toml", "queue.sql", "src/lib.rs"],
+        testCommand: "cargo test",
+      },
+      writeLsp: false,
+    });
+
+    assert.equal(setup.ok, true);
+    const productJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"));
+    assert.equal(productJson.title, "Stitchd Event / Message Queue");
+    assert.match(productJson.sections.find((section) => section.heading === "Product Summary").body, /Stitchd Event \/ Message Queue/);
+    assert.match(productJson.sections.find((section) => section.heading === "Users And Personas").body, /Rust services that need buffered event ingestion/);
+    assert.match(productJson.sections.find((section) => section.heading === "Core Workflows").body, /transactional binary COPY/);
+    assert.match(productJson.sections.find((section) => section.heading === "Product Invariants").body, /Full hosted queue service operations/);
+
+    const guidelinesJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "product_guidelines.json"), "utf8"));
+    assert.match(guidelinesJson.sections.find((section) => section.heading === "Product Principles").body, /explicit error handling around queue persistence/);
+    assert.match(guidelinesJson.sections.find((section) => section.heading === "Review Checklist").body, /SQL schema\/function contracts/);
+
+    const workflowJson = JSON.parse(fs.readFileSync(path.join(root, "cadre", "workflow.json"), "utf8"));
+    assert.match(workflowJson.sections.find((section) => section.heading === "Quality Gates").body, /cargo test/);
+    assert.match(workflowJson.sections.find((section) => section.heading === "Development Commands").body, /cargo test/);
+
+    const product = fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8");
+    assert.match(product, /## Users And Personas/);
+    assert.match(product, /Rust services that need buffered event ingestion/);
+    assert.match(product, /## Core Workflows/);
+    assert.match(product, /transactional binary COPY/);
+    assert.match(product, /## Product Invariants/);
+
+    const guidelines = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
+    assert.match(guidelines, /## Product Principles/);
+    assert.match(guidelines, /explicit error handling around queue persistence/);
+    assert.match(guidelines, /## Review Checklist/);
+    assert.match(guidelines, /SQL schema\/function contracts/);
+
+    const workflow = fs.readFileSync(path.join(root, "cadre", "workflow.md"), "utf8");
+    assert.match(workflow, /## Development Commands/);
+    assert.match(workflow, /cargo test/);
+    assert.match(workflow, /## Quality Gates/);
+
+    const techStack = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"));
+    assert.equal(techStack.language, "Rust");
+    assert.deepEqual(techStack.majorDependencies, ["deadpool-postgres", "tokio-postgres", "cbor-data"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workspace health defaults to compact summaries and detail mode exposes full inventory", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workspace-health-test-"));
   try {
