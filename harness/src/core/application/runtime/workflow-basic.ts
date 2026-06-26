@@ -26,6 +26,7 @@ import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedT
 import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
+import { branchSetForTrack } from "./branch-set";
 import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
@@ -83,6 +84,10 @@ export function workflowReview(root: string, args: RuntimeArgs = {}): CoreResult
 
 export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResult {
   const summary = workflowSummary(root, "validate", args);
+  const branchSets = listTracks(root).map((track) => ({
+    track_id: track.track_id,
+    branch_set: branchSetForTrack(root, track),
+  }));
   return {
     ...summary,
     ok: true,
@@ -91,6 +96,7 @@ export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResu
     integrity: planIntegrity(root, args.trackId || args.track_id || null),
     collisions: collisionScan(root),
     fleet: fleetStatus(root, { includeCollisions: false }),
+    branch_sets: branchSets,
     native_state: nativeStateSummary(root),
   };
 }

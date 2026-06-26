@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Present the packet dry-run revert scope, planned git actions, affected canonical JSON artifacts, generated projections, warnings, and review_bundle manifest/path list."
+      "instruction": "Present the packet dry-run revert scope, planned branch-set-aware git actions, affected canonical JSON artifacts, generated projections, warnings, and review_bundle manifest/path list. In polyrepo, explicit commit reverts require repo evidence when multiple repos are affected."
     },
     {
       "step": 4,

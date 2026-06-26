@@ -15,6 +15,7 @@ import { CoreResult } from "./contracts";
 import { fileExists, safeName } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { repoEntriesError, repoEntriesForTrack, unresolvedPlanRepos } from "./repo-resolution";
+import { branchSetForTrack, ensureIntegrationWorktree } from "./branch-set";
 import { findTrack } from "./track-context";
 import { listTracks, parsePlanFile, parsePlanJson, phaseSchedule } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson } from "./workflow-response";
@@ -170,49 +171,39 @@ export function worktreePlan(root: string, args: RuntimeArgs = {}): CoreResult {
   const repoError = repoEntriesError(root, track, args);
   if (repoError) return repoError;
   const topology = loadTopology(root);
-  const branch = args.branch || track.metadata.git_branch || `track/${track.track_id}`;
-  const entries = topology.polyrepo
-    ? repoEntriesForTrack(root, track, args)
-    : [{
-      repo: ".",
-      root,
-      path: ".",
-      source: "project-root",
-      base: args.base || "main",
-      head: branch,
-    }];
-  const plans = entries.map((entry) => {
-    const repo = asString(entry.repo, ".");
-    const repoBranch = args.branch || entry.head || branch;
-    const base = args.base || entry.base || "main";
-    const relWorktree = topology.polyrepo
-      ? `.worktrees/${track.track_id}/${safeName(repo)}`
-      : asOptionalString(track.metadata.worktree_path) || `.worktrees/${track.track_id}`;
-    const absWorktree = path.resolve(root, relWorktree);
+  const branchSet = branchSetForTrack(root, track, args);
+  const execute = args.execute === true;
+  const setup_results = execute ? branchSet.map((entry) => ensureIntegrationWorktree(entry)) : [];
+  const plans = branchSet.map((entry, index) => {
+    const result = setup_results[index];
+    const resultEntry = isRecord(result?.entry) ? asJsonObject(result.entry) : entry;
     return {
-      repo,
-      source_root: entry.root,
-      source_path: entry.path,
-      worktree_path: relWorktree,
-      branch: repoBranch,
-      base,
-      exists: fileExists(absWorktree),
-      commands: [
-        {
-          command: "git",
-          args: ["worktree", "add", "-B", repoBranch, absWorktree, base],
-          cwd: entry.root,
-        },
-      ],
+      repo: entry.repo,
+      source_root: entry.source_root,
+      source_path: entry.source_path,
+      worktree_path: entry.integration_worktree_path,
+      integration_worktree: entry.integration_worktree,
+      worker_root: entry.worker_root,
+      branch: entry.track_branch,
+      base: entry.base_branch,
+      exists: result ? result.ok === true : entry.exists,
+      current_branch: result ? asOptionalString(resultEntry.current_branch) : entry.current_branch,
+      health: result ? asOptionalString(resultEntry.health) || entry.health : entry.health,
+      branch_exists: entry.branch_exists,
+      commands: entry.commands,
+      setup_result: result || null,
     };
   });
   return {
-    ok: true,
+    ok: setup_results.every((result) => result.ok !== false) && branchSet.every((entry) => entry.health === "ready" || entry.health === "missing"),
     root,
     track_id: track.track_id,
-    execute: false,
+    execute,
+    dry_run: !execute,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
+    branch_set: branchSet,
     plans,
+    setup_results,
   };
 }
 

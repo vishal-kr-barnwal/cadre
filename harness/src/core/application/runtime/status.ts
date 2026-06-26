@@ -17,6 +17,7 @@ import { nativeStateSummary, readCadreMessages } from "./native-state";
 import { trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
 import { commandExists, gitIdentity, runCommand } from "../../infrastructure/runtime/system";
+import { branchSetForTrack } from "./branch-set";
 import { holdInfo, listTracks, parsePlanFile, taskCounts } from "./track-schedule";
 
 export const TRACKS_INDEX_SCHEMA = "cadre.tracks_index.v1";
@@ -37,6 +38,7 @@ export function liveStatus(root: string): CoreResult {
         owner: track.metadata.owner || null,
         git_branch: track.metadata.git_branch || `track/${track.track_id}`,
         task_counts: taskCounts(plan),
+        branch_set: branchSetForTrack(root, track),
       });
     }
   }
@@ -73,6 +75,7 @@ export function teamStatus(root: string): CoreResult {
       owner: track.metadata.owner || null,
       reviewer: track.metadata.reviewer || null,
       review_verdict: track.metadata.review ? track.metadata.review.verdict : null,
+      branch_set_health: branchSetForTrack(root, track).map((entry) => ({ repo: entry.repo, health: entry.health, branch: entry.track_branch })),
     })),
   };
 }
@@ -328,6 +331,16 @@ export function fleetStatus(root: string, args: RuntimeArgs = {}): CoreResult {
     root,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     repos,
+    branch_sets: listTracks(root).map((track) => ({
+      track_id: track.track_id,
+      entries: branchSetForTrack(root, track).map((entry) => ({
+        repo: entry.repo,
+        branch: entry.track_branch,
+        integration_worktree: entry.integration_worktree_path,
+        worker_root: entry.worker_root_path,
+        health: entry.health,
+      })),
+    })),
     provider: providerMcpAvailability(root, args),
     lsp: lspRuntimeSummary(root),
     collisions: args.includeCollisions === false ? null : collisionScan(root),

@@ -39,7 +39,7 @@
     },
     {
       "step": 5,
-      "instruction": "For parallel work, use `cadre_parallel` packets for planning, worker setup, finish recording, merge-back, and cleanup."
+      "instruction": "For parallel work, use `cadre_parallel` packets for planning, integration/worker worktree setup, finish recording, merge-back, and cleanup. Merge-back targets packet-returned integration worktrees; worker worktrees are sibling paths."
     },
     {
       "step": 6,

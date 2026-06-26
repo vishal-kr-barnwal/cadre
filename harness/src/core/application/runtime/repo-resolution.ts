@@ -18,6 +18,7 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { implementationStyleGuides } from "./review-bundles";
 import { asArray, availableWork, teamStatus } from "./status";
 import { gitIdentity, runCommand } from "../../infrastructure/runtime/system";
+import { branchSetEntryForRepo, branchSetForTrack, MONOREPO_REPO_KEY, taskRepo } from "./branch-set";
 import { trackContext } from "./track-context";
 import { claimTrack } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
@@ -117,62 +118,63 @@ export function repoEntriesError(root: string, track: CadreTrack, args: RuntimeA
 }
 
 export function resolveTaskWorkingRoot(root: string, track: CadreTrack, task: PlanTask | null = null, args: RuntimeArgs = {}): WorkingRootResolution {
-  if (args.workingRoot) {
-    const candidate = path.isAbsolute(args.workingRoot)
-      ? args.workingRoot
-      : path.resolve(root, args.workingRoot);
-    return { repo: args.repo || task?.repo || ".", path: candidate, source: "argument.workingRoot" };
+  const explicitWorkingRoot = asOptionalString(args.workingRoot || args.workerRoot || args.worker_root || args.worktree);
+  if (explicitWorkingRoot) {
+    const candidate = path.isAbsolute(explicitWorkingRoot)
+      ? explicitWorkingRoot
+      : path.resolve(root, explicitWorkingRoot);
+    return { repo: taskRepo(root, task, args), path: candidate, source: "argument.workingRoot" };
+  }
+  const repo = taskRepo(root, task, args);
+  const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+  if (branchEntry && branchEntry.exists && branchEntry.health === "ready") {
+    return {
+      repo: branchEntry.repo,
+      path: branchEntry.integration_worktree,
+      source: "branch-set.integration_worktree",
+      branch_set: branchEntry,
+    };
   }
   const topology = loadTopology(root);
   if (topology.polyrepo) {
-    const repo = args.repo || task?.repo || topology.defaultRepo;
     const info = typeof repo === "string" ? trackRepoEntries(root, track)[repo] || {} : {};
     if (Object.keys(info).length > 0) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
+        ok: true,
         repo,
         path: rel ? path.resolve(root, rel) : root,
-        source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path",
+        source: branchEntry ? "branch-set.integration_missing_fallback" : (info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path"),
+        ...(branchEntry ? { branch_set: branchEntry } : {}),
       };
     }
     return unresolvedWorkingRoot(root, track, String(repo || ""), task);
   }
-  if (track.metadata.worktree_path) {
+  if (track.metadata.worktree_path && !branchEntry) {
     const candidate = path.resolve(root, track.metadata.worktree_path);
     if (fileExists(candidate)) {
       return { repo: ".", path: candidate, source: "metadata.worktree_path" };
     }
   }
-  return { repo: ".", path: root, source: "project-root" };
+  return {
+    ok: true,
+    repo: MONOREPO_REPO_KEY,
+    path: root,
+    source: branchEntry ? "branch-set.integration_missing_fallback" : "project-root",
+    ...(branchEntry ? { branch_set: branchEntry } : {}),
+  };
 }
 
 export function repoEntriesForTrack(root: string, track: CadreTrack, args: RuntimeArgs = {}): RepoExecutionEntry[] {
-  const topology = loadTopology(root);
-  if (topology.polyrepo) {
-    const repos = trackRepoEntries(root, track);
-    return Object.entries(repos)
-      .filter(([repo]) => !args.repo || args.repo === repo)
-      .map(([repo, rawInfo]) => {
-        const info = asJsonObject(rawInfo) as RepoRuntimeInfo;
-        const rel = info.worktree_path || info.submodule_path || "";
-        return {
-          repo,
-          root: rel ? path.resolve(root, rel) : root,
-          path: rel,
-          base: args.base || info.base_branch || "main",
-          head: args.head || info.git_branch || track.metadata.git_branch || `track/${track.track_id}`,
-          source: info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path",
-        };
-      });
-  }
-  return [{
-    repo: args.repo || ".",
-    root: args.workingRoot ? path.resolve(root, args.workingRoot) : root,
-    path: args.workingRoot || ".",
-    base: args.base || "main",
-    head: args.head || track.metadata.git_branch || `track/${track.track_id}`,
-    source: args.workingRoot ? "argument.workingRoot" : "project-root",
-  }];
+  return branchSetForTrack(root, track, args).map((entry) => ({
+    repo: entry.repo,
+    root: entry.exists && entry.health === "ready" ? entry.integration_worktree : entry.source_root,
+    path: entry.exists && entry.health === "ready" ? entry.integration_worktree_path : entry.source_path,
+    base: entry.base_branch,
+    head: entry.track_branch,
+    source: entry.exists && entry.health === "ready" ? "branch-set.integration_worktree" : "branch-set.source_root",
+    branch_set: entry,
+  }));
 }
 
 export function gitRevParse(root: string, ref: string | null | undefined): string | null {

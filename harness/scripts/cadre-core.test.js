@@ -180,7 +180,7 @@ function writeTrack(root, id, plan, metadata = {}) {
     depends_on: [],
     description: id,
     git_branch: `track/${id}`,
-    worktree_path: `.worktrees/${id}`,
+    worktree_path: `.worktrees/cadre/tracks/${id}/integrate/root`,
     ...metadata,
   }, null, 2));
   const planJson = typeof plan === "string" ? samplePlan(id) : plan;
@@ -411,13 +411,14 @@ test("commit trace records setup, newtrack, and task completion commits", () => 
       trackId,
       phaseIndex: 1,
       taskIndex: 1,
+      workingRoot: root,
       command: "printf '%s\\n' 'Statements : 91%'",
       coverageThreshold: 80,
     });
     assert.equal(completed.ok, true);
     assert.ok(completed.product_commit.commit_sha);
     assert.ok(completed.control_commit.commit_sha);
-    assert.equal(gitSubject(root, completed.product_commit.commit_sha), "feat(task): Implement traceable core");
+    assert.equal(gitSubject(root, completed.product_commit.commit_sha), "feat(root): Implement traceable core");
     assert.equal(gitSubject(root, completed.control_commit.commit_sha), `cadre(complete): record ${trackId} phase 1 task 1`);
     assert.equal(gitNote(root, completed.product_commit.commit_sha).kind, "product");
     assert.equal(gitNote(root, completed.control_commit.commit_sha).product_commit_sha, completed.product_commit.commit_sha);
@@ -696,8 +697,110 @@ test("planAssist and worktreePlan return bounded planning evidence", () => {
     const worktrees = core.worktreePlan(root, { trackId: "assist_20260617" });
     assert.equal(worktrees.ok, true);
     assert.equal(worktrees.execute, false);
-    assert.equal(worktrees.plans[0].repo, ".");
-    assert.ok(worktrees.plans[0].commands[0].args.includes(path.join(root, ".worktrees", "assist_20260617")));
+    assert.equal(worktrees.plans[0].repo, "root");
+    assert.ok(worktrees.plans[0].commands[0].args.includes(path.join(root, ".worktrees", "cadre", "tracks", "assist_20260617", "integrate", "root")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("worktreePlan uses branch-set paths and preserves existing track branches", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-worktree-branch-set-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "owner@example.com"]);
+    git(root, ["config", "user.name", "Owner"]);
+    write(path.join(root, "README.md"), "base\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "base"]);
+    git(root, ["branch", "track/branch_set_20260626"]);
+    const before = git(root, ["rev-parse", "track/branch_set_20260626"]).stdout.trim();
+    writeTrack(root, "branch_set_20260626", samplePlan("branch_set_20260626"));
+
+    const planned = core.worktreePlan(root, { trackId: "branch_set_20260626" });
+    assert.equal(planned.ok, true);
+    assert.equal(planned.branch_set[0].repo, "root");
+    assert.equal(planned.branch_set[0].track_branch, "track/branch_set_20260626");
+    assert.equal(planned.branch_set[0].integration_worktree_path, ".worktrees/cadre/tracks/branch_set_20260626/integrate/root");
+    assert.equal(planned.plans[0].commands[0].args.includes("-B"), false);
+
+    const created = core.worktreePlan(root, { trackId: "branch_set_20260626", execute: true });
+    assert.equal(created.ok, true);
+    assert.equal(fs.existsSync(path.join(root, ".worktrees", "cadre", "tracks", "branch_set_20260626", "integrate", "root")), true);
+    assert.equal(git(root, ["rev-parse", "track/branch_set_20260626"]).stdout.trim(), before);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("worker worktrees must be siblings of integration worktrees", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-worker-sibling-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "owner@example.com"]);
+    git(root, ["config", "user.name", "Owner"]);
+    write(path.join(root, "file.txt"), "base\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "base"]);
+    const integrate = path.join(root, ".worktrees", "cadre", "tracks", "nested_demo", "integrate", "root");
+    const nestedWorker = path.join(integrate, "workers", "root", "task-a");
+    git(root, ["worktree", "add", "-b", "track/nested_demo", integrate, "HEAD"]);
+    fs.mkdirSync(path.dirname(nestedWorker), { recursive: true });
+    git(root, ["worktree", "add", "-b", "worker/nested_demo", nestedWorker, "HEAD"]);
+    write(path.join(nestedWorker, "worker.txt"), "worker\n");
+    assert.match(git(integrate, ["status", "--porcelain", "--untracked-files=all"]).stdout, /\?\? workers\/root\/task-a\//);
+
+    const siblingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-worker-sibling-clean-test-"));
+    git(siblingRoot, ["init"]);
+    git(siblingRoot, ["config", "user.email", "owner@example.com"]);
+    git(siblingRoot, ["config", "user.name", "Owner"]);
+    write(path.join(siblingRoot, "file.txt"), "base\n");
+    git(siblingRoot, ["add", "."]);
+    git(siblingRoot, ["commit", "-m", "base"]);
+    const siblingIntegrate = path.join(siblingRoot, ".worktrees", "cadre", "tracks", "sibling_demo", "integrate", "root");
+    const siblingWorker = path.join(siblingRoot, ".worktrees", "cadre", "tracks", "sibling_demo", "workers", "root", "task-a");
+    fs.mkdirSync(path.dirname(siblingIntegrate), { recursive: true });
+    fs.mkdirSync(path.dirname(siblingWorker), { recursive: true });
+    git(siblingRoot, ["worktree", "add", "-b", "track/sibling_demo", siblingIntegrate, "HEAD"]);
+    git(siblingRoot, ["worktree", "add", "-b", "worker/sibling_demo", siblingWorker, "HEAD"]);
+    write(path.join(siblingWorker, "worker.txt"), "worker\n");
+    assert.equal(git(siblingIntegrate, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim(), "");
+    fs.rmSync(siblingRoot, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("polyrepo branch-set planning includes only affected repos", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-branch-set-test-"));
+  try {
+    git(root, ["init"]);
+    const repos = ["web", "api", "mobile"];
+    for (const repo of repos) {
+      const repoRoot = path.join(root, "repos", repo);
+      fs.mkdirSync(repoRoot, { recursive: true });
+      git(repoRoot, ["init"]);
+      git(repoRoot, ["config", "user.email", `${repo}@example.com`]);
+      git(repoRoot, ["config", "user.name", repo]);
+      write(path.join(repoRoot, "README.md"), repo);
+      git(repoRoot, ["add", "."]);
+      git(repoRoot, ["commit", "-m", `init ${repo}`]);
+    }
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "web",
+      repos: repos.map((repo) => ({ name: repo, submodule_path: `repos/${repo}`, default_branch: "master" })),
+    }, null, 2));
+    const plan = planFromPhases("poly_branch_set_20260626", [
+      { phase_index: 1, title: "Phase 1", execution_mode: "parallel", depends_on: [], tasks: [
+        planTask(1, 1, "Web", ["src/web.js"], { repo: "web" }),
+        planTask(1, 2, "API", ["src/api.js"], { repo: "api" }),
+      ] },
+    ]);
+    writeTrack(root, "poly_branch_set_20260626", plan, { worktree_path: undefined });
+    const planned = core.worktreePlan(root, { trackId: "poly_branch_set_20260626" });
+    assert.deepEqual(planned.branch_set.map((entry) => entry.repo).sort(), ["api", "web"]);
+    assert.equal(planned.branch_set.some((entry) => entry.repo === "mobile"), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -982,10 +1085,23 @@ test("completeTask gates plan mutation on measured coverage", () => {
     git(root, ["init"]);
     writeTrack(root, "complete_20260617", samplePlan("complete_20260617"));
 
+    const blocked = core.completeTask(root, {
+      trackId: "complete_20260617",
+      phaseIndex: 1,
+      taskIndex: 1,
+      commitSha: "abcdef123456",
+      command: "printf 'Statements : 86%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "worktree_setup");
+    assert.equal(blocked.worktree_plan.branch_set[0].repo, "root");
+
     const low = core.completeTask(root, {
       trackId: "complete_20260617",
       phaseIndex: 1,
       taskIndex: 1,
+      workingRoot: root,
       commitSha: "abcdef123456",
       command: "printf 'Statements : 72%%\\n'",
       coverageThreshold: 80,
@@ -997,6 +1113,7 @@ test("completeTask gates plan mutation on measured coverage", () => {
       trackId: "complete_20260617",
       phaseIndex: 1,
       taskIndex: 1,
+      workingRoot: root,
       commitSha: "abcdef123456",
       command: "printf 'Statements : 86%%\\n'",
       coverageThreshold: 80,
@@ -1022,6 +1139,7 @@ test("completeTask requires explicit approval for manual verification tasks", ()
       trackId: "manual_approval_20260619",
       phaseIndex: 1,
       taskIndex: 2,
+      workingRoot: root,
       manualVerificationSummary: "User verified the changed behavior.",
       manualVerificationChecks: [{ id: "phase1-check-1", status: "passed" }],
     });
@@ -1045,6 +1163,7 @@ test("completeTask records approved offline manual verification evidence", () =>
       trackId: "manual_offline_20260619",
       phaseIndex: 1,
       taskIndex: 2,
+      workingRoot: root,
       approvalComplete: true,
       manualVerificationMode: "offline",
       manualVerificationSummary: "Ran the checkout flow by hand and confirmed the new behavior.",
@@ -1078,6 +1197,7 @@ test("completeTask autorun manual verification returns approval evidence without
       trackId: "manual_autorun_preview_20260619",
       phaseIndex: 1,
       taskIndex: 2,
+      workingRoot: root,
       manualVerificationMode: "autorun",
       manualVerificationCommand: "node -e \"require('fs').writeFileSync('manual-autorun.txt','ok')\"",
     });
@@ -1103,6 +1223,7 @@ test("completeTask records approved autorun manual verification evidence", () =>
       trackId: "manual_autorun_approve_20260619",
       phaseIndex: 1,
       taskIndex: 2,
+      workingRoot: root,
       manualVerificationMode: "autorun",
       manualVerificationCommand: "printf 'manual ok\\n'",
     });
@@ -1112,6 +1233,7 @@ test("completeTask records approved autorun manual verification evidence", () =>
       trackId: "manual_autorun_approve_20260619",
       phaseIndex: 1,
       taskIndex: 2,
+      workingRoot: root,
       approvalComplete: true,
       manualVerificationMode: "autorun",
       manualVerificationCommand: "printf 'manual ok\\n'",
@@ -1143,6 +1265,7 @@ test("completeTask writes completion journal and native events on retry", () => 
       trackId: "journal_20260617",
       phaseIndex: 1,
       taskIndex: 1,
+      workingRoot: root,
       commitSha: "abcdef123456",
       command: "printf 'Statements : 87%%\\n'",
       coverageThreshold: 80,
@@ -1162,6 +1285,47 @@ test("completeTask writes completion journal and native events on retry", () => 
       .map((line) => JSON.parse(line));
     assert.ok(events.some((event) => event.kind === "task_result_recorded"));
     assert.ok(events.some((event) => event.kind === "task_completed"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask commits explicit control-plane files when an active claim is dirty", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-claim-dirty-test-"));
+  try {
+    setupTraceableProject(root);
+    const trackId = "claim_dirty_complete_20260625";
+    const plan = planFromPhases(trackId, [
+      { phase_index: 1, title: "Phase 1: Build", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement claim dirty core", ["src/core.js"])] },
+    ]);
+    const created = approveWorkflow(root, {
+      workflow: "newtrack",
+      execute: true,
+      approvalComplete: true,
+      responseMode: "detail",
+      trackId,
+      spec: sampleSpec(trackId),
+      plan,
+    });
+    assert.equal(created.ok, true);
+
+    const claimed = core.claimTrack(root, trackId, { identity: "claimant@example.invalid", takeover: true });
+    assert.equal(claimed.ok, true);
+    assert.match(git(root, ["status", "--porcelain"]).stdout, new RegExp(`cadre/tracks/${trackId}/metadata.json`));
+
+    write(path.join(root, "src", "core.js"), "module.exports = function core() { return 'claim-dirty'; };\n");
+    const completed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: root,
+      command: "printf '%s\\n' 'Statements : 92%'",
+      coverageThreshold: 80,
+    });
+    assert.equal(completed.ok, true);
+    assert.ok(completed.control_commit.commit_sha);
+    assert.equal(completed.control_commit.stage, undefined);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

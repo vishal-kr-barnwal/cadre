@@ -17,11 +17,11 @@
     },
     {
       "heading": "Task Repository Routing",
-      "body": "Plan tasks may carry repo annotations, and polyrepo metadata may carry per-repo\nbranch and worktree information. Agents consume this routing only through packet\nresults such as:\n\n- `cadre_track` with `action: \"context\"`\n- `cadre_track` with `action: \"worktree_plan\"`\n- `cadre_parallel` worker packets\n- `cadre_workflow` with `workflow: \"ship\"`, `workflow: \"land\"`, or\n  `workflow: \"validate\"`\n\nTask completion, commit evidence, repo-specific SHA evidence, and progress\nrecording go through `cadre_complete_task` or the packet named by the current\nworkflow result."
+      "body": "Plan tasks may carry repo annotations, and polyrepo metadata may carry per-repo\nbranch and worktree information. Agents consume this routing only through packet\nresults such as:\n\n- `cadre_track` with `action: \"context\"`\n- `cadre_track` with `action: \"worktree_plan\"`\n- `cadre_parallel` worker packets\n- `cadre_workflow` with `workflow: \"ship\"`, `workflow: \"land\"`, or\n  `workflow: \"validate\"`\n\nPacket results expose a branch set for each affected repo. Durable track branches\nare authoritative; integration worktrees are checked-out merge targets and worker\nworktrees are siblings under the worker root, never children of integration\nworktrees. Task completion, commit evidence, repo-specific SHA evidence, and\nprogress recording go through `cadre_complete_task` or the packet named by the\ncurrent workflow result."
     },
     {
       "heading": "Product Commands",
-      "body": "Workers may run product implementation, verification, and commit commands inside\nthe repo/worktree path provided by a packet. These commands are for target\nproject code only. They must not mutate Cadre control-plane files, native Cadre event/message state,\nworktree topology, merge state, or cleanup state."
+      "body": "Workers may run product implementation, verification, and commit commands inside\nthe repo/worktree path provided by a packet. These commands are for target\nproject code only. `repos/<repo>` checkouts are source/topology evidence and are\nnot worker merge targets when an integration worktree is provided. Workers must\nnot mutate Cadre control-plane files, native Cadre event/message state, worktree\ntopology, merge state, or cleanup state."
     },
     {
       "heading": "Ship, Land, Revert, And Cleanup",

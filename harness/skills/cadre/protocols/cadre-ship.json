@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned review gate, git actions, provider actions, CI evidence, warnings, and review_bundle manifest/path list."
+      "instruction": "Use the returned review gate, branch-set-aware git actions, provider actions, CI evidence, warnings, and review_bundle manifest/path list. Ship actions run from the monorepo integration worktree when it exists."
     },
     {
       "step": 4,

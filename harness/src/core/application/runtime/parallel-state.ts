@@ -70,6 +70,7 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
     repo: args.repo || existingWorker?.repo || null,
     worktree: args.worktree || existingWorker?.worktree || null,
     branch: args.branch || existingWorker?.branch || null,
+    worker_ref: asOptionalString(args.workerRef || args.worker_ref) || existingWorker?.worker_ref || null,
     commit_sha: args.commitSha || existingWorker?.commit_sha || null,
     coverage: typeof args.coverage === "number" ? args.coverage : existingWorker?.coverage ?? null,
     evidence: args.evidence || existingWorker?.evidence || null,
@@ -107,6 +108,7 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
       reason: args.reason || `merged ${workerId}`,
       repo: nextWorker.repo || args.repo,
       workingRoot: args.workingRoot || nextWorker.worktree || args.worktree,
+      workerRef: nextWorker.worker_ref || args.workerRef || args.worker_ref,
       lock: false,
     });
     if (!completion.ok) return { ok: false, stage: "complete_task", state_path: statePath, worker: nextWorker, completion };
@@ -132,6 +134,7 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
         phase_index: nextWorker.phase_index ?? null,
         task_index: nextWorker.task_index ?? null,
         commit_sha: nextWorker.commit_sha || null,
+        worker_ref: nextWorker.worker_ref || null,
       },
     })
     : { ok: true, skipped: true, reason: "parallel worker setup is transient" };

@@ -13,6 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { CoreResult, RepoRuntimeInfo } from "./contracts";
 import { fileExists } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
+import { branchSetForTrack } from "./branch-set";
 import { holdInfo, listTracks, parsePlanFile, taskCounts } from "./track-schedule";
 
 export function findTrack(root: string, trackId: string | null | undefined): CadreTrack | null {
@@ -35,6 +36,7 @@ export function trackContext(root: string, trackId: string | null | undefined): 
   const topology = loadTopology(root);
   const plan = parsePlanFile(track.plan_path);
   const hold = holdInfo(track);
+  const branchSet = branchSetForTrack(root, track);
   const worktrees: CoreResult[] = [];
   if (track.metadata.worktree_path) {
     const abs = path.resolve(root, track.metadata.worktree_path);
@@ -87,6 +89,7 @@ export function trackContext(root: string, trackId: string | null | undefined): 
     hold,
     task_counts: taskCounts(plan),
     plan,
+    branch_set: branchSet,
     worktrees,
   };
 }

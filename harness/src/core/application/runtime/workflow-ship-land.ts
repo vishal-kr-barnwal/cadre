@@ -34,7 +34,7 @@ export function providerActionsForTrack(root: string, workflow: "ship" | "land",
   if (provider === "local") return [];
   const entries = workflow === "land"
     ? repoEntriesForTrack(root, track, args)
-    : repoEntriesForTrack(root, track, { ...args, repo: args.repo || "." }).filter((entry) => entry.repo === "." || !loadTopology(root).polyrepo);
+    : repoEntriesForTrack(root, track, { ...args, repo: args.repo || "root" }).filter((entry) => entry.repo === "root" || entry.repo === "." || !loadTopology(root).polyrepo);
   const label = `cadre-track:${track.track_id}`;
   return entries.map((entry) => {
     const repo = asString(entry.repo, ".");
@@ -63,11 +63,13 @@ export function providerActionsForTrack(root: string, workflow: "ship" | "land",
 export function shipGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
   const remote = args.remote || "origin";
   const base = args.base || "main";
-  const branch = args.branch || track.metadata.git_branch || `track/${track.track_id}`;
+  const entry = repoEntriesForTrack(root, track, { ...args, repo: "root" })[0];
+  const branch = args.branch || entry?.head || track.metadata.git_branch || `track/${track.track_id}`;
+  const cwd = asString(entry?.root, root);
   return [
-    plannedGitAction("ship-fetch", "fetch_base", ".", root, ["fetch", String(remote), String(base)], `Fetch ${remote}/${base}`),
-    plannedGitAction("ship-rebase", "rebase_base", ".", root, ["rebase", `${remote}/${base}`], `Rebase ${branch} onto ${remote}/${base}`),
-    plannedGitAction("ship-push", "push_branch", ".", root, ["push", "-u", String(remote), String(branch)], `Push ${branch}`),
+    plannedGitAction("ship-fetch", "fetch_base", "root", cwd, ["fetch", String(remote), String(base)], `Fetch ${remote}/${base}`),
+    plannedGitAction("ship-rebase", "rebase_base", "root", cwd, ["rebase", `${remote}/${base}`], `Rebase ${branch} onto ${remote}/${base}`),
+    plannedGitAction("ship-push", "push_branch", "root", cwd, ["push", "-u", String(remote), String(branch)], `Push ${branch}`),
   ];
 }
 
@@ -126,7 +128,7 @@ function publicationLedger(root: string, workflow: "ship" | "land", track: Cadre
 
 function runPublicationGit(root: string, workflow: "ship" | "land", track: CadreTrack, args: RuntimeArgs, gitActions: PlannedGitAction[], providerActions: PlannedProviderAction[]): CoreResult {
   const remote = asOptionalString(args.remote) || "origin";
-  const pushKinds = new Set(["push_branch", "push_control_branch"]);
+  const pushKinds = new Set(["push_branch", "push_repo_branch", "push_control_branch"]);
   const beforePush = gitActions.filter((action) => !pushKinds.has(action.kind));
   const pushActions = gitActions.filter((action) => pushKinds.has(action.kind));
   const beforePushResults = runPlannedGitActions(beforePush);

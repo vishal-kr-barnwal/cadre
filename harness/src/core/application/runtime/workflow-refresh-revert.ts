@@ -71,12 +71,17 @@ export function refreshReviewFiles(root: string): ReviewFile[] {
 export function revertGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
   const plan = parsePlanFile(track.plan_path);
   const requestedCommit = asOptionalString(args.commitSha || args.commit);
-  const commits = requestedCommit
-    ? [requestedCommit]
-    : Array.from(new Set(plan.tasks.flatMap((task) => asStringArray(task.commit_shas || []).concat(task.commit ? [task.commit] : [])))).filter(Boolean);
   const topology = loadTopology(root);
-  return commits.reverse().map((commit, index) => {
-    const repo = asOptionalString(args.repo) || (topology.polyrepo ? topology.defaultRepo : ".");
+  const commitEntries = requestedCommit
+    ? [{ commit: requestedCommit, repo: asOptionalString(args.repo) || (topology.polyrepo ? topology.defaultRepo : "root") }]
+    : plan.tasks.flatMap((task) => {
+      const taskCommits = asStringArray(task.commit_shas || []).concat(task.commit ? [task.commit] : []);
+      const repo = asOptionalString(args.repo) || task.repo || (topology.polyrepo ? topology.defaultRepo : "root");
+      return taskCommits.map((commit) => ({ commit, repo }));
+    });
+  return commitEntries.reverse().map((entryInfo, index) => {
+    const commit = entryInfo.commit;
+    const repo = asOptionalString(entryInfo.repo) || (topology.polyrepo ? topology.defaultRepo : "root");
     const entry = repoEntriesForTrack(root, track, { ...args, repo }).find((item) => item.repo === repo);
     return plannedGitAction(
       `revert-${index + 1}`,
@@ -97,6 +102,17 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
   if (!track) return { ...summary, ok: false, phase_state: "blocked", error: `Track not found: ${trackId}` };
   const repoError = repoEntriesError(root, track, args);
   if (repoError) return { ...summary, ok: false, phase_state: "blocked", stage: "polyrepo_repo_resolution", repo_error: repoError };
+  const affectedRepos = repoEntriesForTrack(root, track, args).map((entry) => entry.repo);
+  if ((args.commitSha || args.commit) && loadTopology(root).polyrepo && !args.repo && affectedRepos.length > 1) {
+    return {
+      ...summary,
+      ok: false,
+      phase_state: "blocked",
+      stage: "polyrepo_repo_resolution",
+      reason: "Explicit polyrepo revert requires repo when a track affects multiple repos",
+      affected_repos: affectedRepos,
+    };
+  }
   const gitActions = revertGitActions(root, track, args);
   if (gitActions.length === 0) {
     return {

@@ -17,12 +17,14 @@ import { likelyTestCandidatesForFile } from "./planning";
 import { readParallelState, recordParallelWorker } from "./parallel-state";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
+import { branchSetEntryForRepo, ensureIntegrationWorktree, workerRef, workerWorktreePath } from "./branch-set";
 import { asArray } from "./status";
 import { runCommand } from "../../infrastructure/runtime/system";
 import { findTrack } from "./track-context";
 import { parsePlanFile, phaseSchedule } from "./track-schedule";
 import { withSharedControlPlaneSync } from "./workflow-response";
-import { AGENT_IDENTIFIERS, AgentIdentifier, dispatchAdapterFor, isAgentIdentifier } from "./dispatch-adapters";
+import { AGENT_IDENTIFIERS, isAgentIdentifier } from "./dispatch-adapters";
+import { workerDispatchPayload } from "./parallel-dispatch";
 
 function positiveInt(value: unknown, fallback: number, max = 20): number {
   const parsed = Number(value);
@@ -201,6 +203,7 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
       repo: asString(task.repo, loadTopology(root).defaultRepo || "."),
       files: asStringArray(task.files),
       branch: `${track.metadata.git_branch || `track/${track.track_id}`}-${safeName(task.task_key)}`,
+      worker_ref: workerRef(track.track_id, asString(task.repo, loadTopology(root).defaultRepo || "."), asString(task.task_key)),
     })))
     .filter((worker) => !["x", "-"].includes(worker.marker));
   const workers = candidateWorkers.slice(0, availableSlots);
@@ -228,78 +231,6 @@ export function runPlannedCommands(commands: CoreResult[]): CommandResult[] {
   return commands.map((entry) => runCommand(asString(entry.command), asStringArray(entry.args), { cwd: asString(entry.cwd) }));
 }
 
-export function workerDispatchPayload(root: string, track: CadreTrack, worker: JsonObject, worktree: string, sourceRoot: string, agentIdentifier: AgentIdentifier): JsonObject {
-  const workerId = asString(worker.worker_id);
-  const taskKey = asString(worker.task_key);
-  const repo = asString(worker.repo, ".");
-  const ownedFiles = asStringArray(worker.files);
-  const prompt = [
-    `You are a Cadre parallel worker for track ${track.track_id}.`,
-    `Worker: ${workerId}`,
-    `Task: ${taskKey} - ${asString(worker.title)}`,
-    `Repo: ${repo}`,
-    `Source root: ${sourceRoot}`,
-    `Worker worktree: ${worktree}`,
-    ownedFiles.length > 0 ? `Owned files: ${ownedFiles.join(", ")}` : "Owned files: none declared; inspect the task plan before editing.",
-    "Use only Cadre packets for Cadre, provider, index, and worker-state mutations.",
-    "Change only the assigned product files unless the task requires a narrowly related test or manifest update.",
-    "Run the smallest relevant tests first, then the configured project gate when practical.",
-    "Commit the worker worktree changes and return the structured result JSON.",
-  ].join("\n");
-  const recordFinishArguments = {
-    root,
-    action: "record_finish",
-    trackId: track.track_id,
-    workerId,
-    status: "awaiting_merge",
-    phaseIndex: worker.phase_index,
-    taskIndex: worker.task_index,
-    repo,
-    commitSha: "<commit-sha>",
-    coverage: "<coverage-number-or-null>",
-    filesChanged: ["<changed-file>"],
-    tests: [{ command: "<test-command>", cwd: worktree, ok: true, status: 0 }],
-    summary: "<worker-summary>",
-    blockers: [],
-  };
-  return {
-    prompt,
-    canonical_worker_contract: "cadre_parallel.dispatch.v1",
-    repo,
-    worktree,
-    source_root: sourceRoot,
-    owned_files: ownedFiles,
-    agent_identifier: agentIdentifier,
-    selected_dispatch: dispatchAdapterFor(agentIdentifier),
-    expected_result_schema: {
-      type: "object",
-      required: ["worker_id", "task_key", "repo", "status", "summary", "files_changed", "tests", "commit_sha"],
-      properties: {
-        worker_id: { type: "string" },
-        task_key: { type: "string" },
-        repo: { type: "string" },
-        status: { type: "string", enum: ["awaiting_merge", "blocked"] },
-        summary: { type: "string" },
-        files_changed: { type: "array", items: { type: "string" } },
-        tests: { type: "array", items: { type: "object" } },
-        coverage: { type: ["number", "null"] },
-        commit_sha: { type: ["string", "null"] },
-        blockers: { type: "array", items: { type: "string" } },
-      },
-    },
-    evidence_requirements: {
-      commit: "Required unless blocked before code changes; record the commit SHA in record_finish.",
-      tests: "Include every command run, cwd, exit status, and relevant stdout/stderr tail.",
-      coverage: "Include parsed coverage when available or a reason coverage was not produced.",
-    },
-    record_finish_packet: {
-      tool: "cadre_parallel",
-      arguments: recordFinishArguments,
-    },
-    finish_evidence_fields: Object.keys(recordFinishArguments),
-  };
-}
-
 export function parallelSetupWorkers(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const agentIdentifier = asOptionalString(args.agentIdentifier);
   if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_parallel setup_workers requires agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
@@ -311,23 +242,39 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
   const workers: JsonObject[] = asArray(wave.workers).map((rawWorker): JsonObject => {
     const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
+    const branchEntry = branchSetEntryForRepo(root, track, repo, args);
     const entry = entries.get(repo) || { root, base: args.base || "main" };
-    const worktree = path.resolve(root, ".worktrees", track.track_id, safeName(repo), safeName(worker.task_key));
-    const sourceRoot = asString(entry.root || root);
+    const worktree = workerWorktreePath(root, track.track_id, repo, asString(worker.task_key));
+    const sourceRoot = asString(branchEntry?.source_root || entry.root || root);
+    const trackBranch = asString(branchEntry?.track_branch || asOptionalString(asJsonObject(entry).head) || track.metadata.git_branch || `track/${track.track_id}`);
+    const ref = asOptionalString(worker.worker_ref) || workerRef(track.track_id, repo, asString(worker.task_key));
+    const integration = args.execute === true && branchEntry ? ensureIntegrationWorktree(branchEntry) : null;
+    const integrationCommand = branchEntry?.commands?.[0] || null;
+    const integrationOk = !integration || integration.ok !== false;
+    const commandCwd = branchEntry?.source_root || sourceRoot;
     commands.push(plannedCommand(
       "git",
-      ["worktree", "add", "-B", asString(worker.branch), worktree, asString(entry.base || args.base || "main")],
-      sourceRoot
+      ["worktree", "add", "--detach", worktree, trackBranch],
+      commandCwd
     ));
     return {
       ...worker,
       worktree,
+      branch: trackBranch,
+      worker_ref: ref,
       source_root: sourceRoot,
+      integration_worktree: branchEntry?.integration_worktree || null,
+      integration_setup: integrationCommand,
+      integration_setup_result: integration ? asJsonObject(integration) : null,
+      integration_ready: integrationOk,
       dispatch: workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentIdentifier),
     };
   });
   const execute = args.execute === true;
-  const results = execute ? runPlannedCommands(commands) : [];
+  const runnableCommands = workers
+    .map((worker, index) => worker.integration_ready !== false ? commands[index] : null)
+    .filter((command): command is CoreResult => Boolean(command));
+  const results = execute ? runPlannedCommands(runnableCommands.filter((command): command is CoreResult => Boolean(command))) : [];
   const stateRecords: CoreResult[] = [];
   if (execute) {
     workers.forEach((worker, index) => {
@@ -344,6 +291,7 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
           repo: asString(worker.repo, "."),
           worktree: asString(worker.worktree),
           branch: asString(worker.branch),
+          workerRef: asString(worker.worker_ref),
         }));
       }
     });
@@ -364,8 +312,8 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
 
 export function workerRepoRoot(root: string, track: CadreTrack, worker: ParallelWorker, args: RuntimeArgs = {}): string {
   const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
-  const entry = repoEntriesForTrack(root, track, { ...args, repo }).find((item) => item.repo === repo);
-  return asString(entry?.root, root);
+  const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+  return asString(branchEntry?.integration_worktree || branchEntry?.source_root || root);
 }
 
 export function parallelMergeBack(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
@@ -380,8 +328,31 @@ export function parallelMergeBack(root: string, track: CadreTrack, args: Runtime
     .map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not awaiting_merge" }));
   const commands = workers
     .filter((worker) => worker.branch || worker.commit_sha)
-    .map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.branch)], workerRepoRoot(root, track, worker, args)));
+    .map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.worker_ref || worker.branch)], workerRepoRoot(root, track, worker, args)));
   const execute = args.execute === true;
+  const branchChecks = workers.map((worker) => {
+    const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
+    const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+    if (!branchEntry) return { ok: false, worker_id: worker.worker_id, repo, error: "No branch-set entry for worker repo" };
+    if (!branchEntry.exists) return { ok: false, worker_id: worker.worker_id, repo, error: "Integration worktree is missing", branch_set: branchEntry };
+    if (branchEntry.health !== "ready") return { ok: false, worker_id: worker.worker_id, repo, error: `Integration worktree is ${branchEntry.health}`, branch_set: branchEntry };
+    return { ok: true, worker_id: worker.worker_id, repo, branch_set: branchEntry };
+  });
+  if (execute && branchChecks.some((check) => check.ok === false)) {
+    return {
+      ok: false,
+      track_id: track.track_id,
+      action: "merge_back",
+      execute,
+      dry_run: false,
+      workers,
+      skipped,
+      branch_checks: branchChecks,
+      commands,
+      results: [],
+      state_records: [],
+    };
+  }
   const results = execute ? runPlannedCommands(commands) : [];
   const stateRecords: CoreResult[] = [];
   if (execute) {
@@ -400,6 +371,7 @@ export function parallelMergeBack(root: string, track: CadreTrack, args: Runtime
         if (worker.repo) recordArgs.repo = worker.repo;
         if (worker.worktree) recordArgs.worktree = worker.worktree;
         if (worker.branch) recordArgs.branch = worker.branch;
+        if (worker.worker_ref) recordArgs.workerRef = worker.worker_ref;
         if (worker.commit_sha) recordArgs.commitSha = worker.commit_sha;
         stateRecords.push(recordParallelWorker(root, recordArgs));
       }
@@ -413,6 +385,7 @@ export function parallelMergeBack(root: string, track: CadreTrack, args: Runtime
     dry_run: !execute,
     workers,
     skipped,
+    branch_checks: branchChecks,
     commands,
     results,
     state_records: stateRecords,
@@ -427,8 +400,15 @@ export function parallelCleanup(root: string, track: CadreTrack, args: RuntimeAr
     .filter((worker) => worker.worktree && !workers.includes(worker))
     .map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not merged" }));
   const commands = workers.map((worker) => plannedCommand("git", ["worktree", "remove", asString(worker.worktree)], workerRepoRoot(root, track, worker, args)));
+  const refCommands = workers
+    .filter((worker) => worker.worker_ref)
+    .map((worker) => {
+      const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
+      const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+      return plannedCommand("git", ["update-ref", "-d", asString(worker.worker_ref)], asString(branchEntry?.source_root || root));
+    });
   const execute = args.execute === true;
-  const results = execute ? runPlannedCommands(commands) : [];
+  const results = execute ? runPlannedCommands([...commands, ...refCommands]) : [];
   return {
     ok: results.every((result) => result.ok),
     track_id: track.track_id,
@@ -438,6 +418,7 @@ export function parallelCleanup(root: string, track: CadreTrack, args: RuntimeAr
     workers,
     skipped,
     commands,
+    ref_commands: refCommands,
     results,
   };
 }
@@ -483,7 +464,20 @@ export function parallelWorkflow(root: string, args: RuntimeArgs = {}): CoreResu
       };
     }
     if (evidenceValidation.ok === false) return evidenceValidation;
-    return recordParallelWorker(root, { ...args, trackId: track.track_id, status: args.status || "awaiting_merge" });
+    const task = planTaskForWorker(track, args);
+    const repo = asOptionalString(args.repo) || task?.repo || loadTopology(root).defaultRepo || ".";
+    const ref = asOptionalString(args.workerRef || args.worker_ref) || (task ? workerRef(track.track_id, repo, task.task_key) : null);
+    const branchEntry = ref ? branchSetEntryForRepo(root, track, repo, args) : null;
+    let refRecord: CoreResult | null = null;
+    const commitSha = asOptionalString(args.commitSha || args.commit);
+    if (ref && branchEntry && commitSha) {
+      const exists = runCommand("git", ["cat-file", "-e", `${commitSha}^{commit}`], { cwd: branchEntry.source_root });
+      refRecord = exists.ok
+        ? { ok: runCommand("git", ["update-ref", ref, commitSha], { cwd: branchEntry.source_root }).ok, ref, commit_sha: commitSha, source_root: branchEntry.source_root }
+        : { ok: true, skipped: true, ref, commit_sha: commitSha, reason: "commit is not available in local repo; worker ref not created" };
+    }
+    const recorded = recordParallelWorker(root, { ...args, trackId: track.track_id, status: args.status || "awaiting_merge", workerRef: ref || undefined });
+    return { ...recorded, worker_ref_record: refRecord };
   }
   if (action === "merge_back") return parallelMergeBack(root, track, args);
   if (action === "cleanup") return parallelCleanup(root, track, args);

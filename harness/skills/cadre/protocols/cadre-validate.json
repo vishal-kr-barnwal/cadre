@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned doctor report, team inventory, plan integrity, collision scan, provider status, and review_bundle manifest/path list."
+      "instruction": "Use the returned doctor report, team inventory, plan integrity, branch-set health, collision scan, provider status, and review_bundle manifest/path list."
     },
     {
       "step": 4,

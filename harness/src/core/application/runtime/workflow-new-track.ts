@@ -144,7 +144,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     owner: gitIdentity(root) || null,
     reviewer: null,
     git_branch: `track/${trackId}`,
-    worktree_path: `.worktrees/${trackId}`,
+    worktree_path: `.worktrees/cadre/tracks/${safeName(trackId)}/integrate/root`,
     ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
   };
   const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);

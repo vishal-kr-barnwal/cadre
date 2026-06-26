@@ -191,6 +191,7 @@ const complete = core.completeTask(root, {
   trackId,
   phaseIndex: 1,
   taskIndex: 1,
+  workingRoot: root,
   commitSha: ("feedface" + String(index).padStart(4, "0")).slice(0, 12),
   command: "printf 'Statements : 91%%\\\\n'",
   coverageThreshold: 80

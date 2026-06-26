@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned topology, polyrepo preflight, review gate, fleet status, provider actions, git actions, and review_bundle manifest/path list."
+      "instruction": "Use the returned topology, polyrepo preflight, review gate, fleet status, branch-set entries, provider actions, git actions, and review_bundle manifest/path list. Land publishes only affected repo track branches plus required control-plane publication state."
     },
     {
       "step": 4,

@@ -18,6 +18,7 @@ import { completionJournalPath, patchCompletionJournal, prepareManualVerificatio
 import { appendCadreEvent } from "./native-state";
 import { isManualVerificationTaskObject, trackPlanJsonPath } from "./plan-docs";
 import { isWorkingRootError, resolveTaskWorkingRoot } from "./repo-resolution";
+import { worktreePlan } from "./planning";
 import { findTrack } from "./track-context";
 import { recordTaskResultUnlocked } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
@@ -46,6 +47,20 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
       blocked: true,
       working_root: workingRoot,
       reason: workingRoot.error,
+    };
+  }
+  if (workingRoot.source !== "argument.workingRoot" && workingRoot.source !== "branch-set.integration_worktree" && workingRoot.branch_set) {
+    const branchSet = workingRoot.branch_set;
+    return {
+      ok: false,
+      stage: "worktree_setup",
+      blocked: true,
+      working_root: workingRoot,
+      branch_set: branchSet,
+      reason: branchSet.exists
+        ? `Integration worktree for ${branchSet.repo} is ${branchSet.health}; complete_task requires the expected track branch or an explicit worker root`
+        : `Integration worktree for ${branchSet.repo} is missing; run worktree_plan with execute before complete_task or pass an explicit worker root`,
+      worktree_plan: worktreePlan(root, { trackId: track.track_id, repo: branchSet.repo }),
     };
   }
   const manualVerificationTask = isManualVerificationTaskObject(task);
@@ -226,8 +241,10 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
       path.relative(root, trackPlanJsonPath(track)),
       path.relative(root, completionJournalPath(track)),
       path.relative(root, `${completionJournalPath(track)}l`),
+      path.relative(root, path.join(track.dir, "implement_state.json")),
       "cadre/events.jsonl",
     ],
+    allowDirty: true,
     trackId: track.track_id,
     repo: ".",
     note: {

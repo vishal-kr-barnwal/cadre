@@ -163,6 +163,7 @@ export interface WorkingRoot extends JsonObject {
   repo: string;
   path: string;
   source: string;
+  branch_set?: BranchSetEntry;
 }
 
 export interface WorkingRootError extends JsonObject {
@@ -198,6 +199,7 @@ export interface ParallelWorker extends UnknownRecord {
   repo?: string | null;
   worktree?: string | null;
   branch?: string | null;
+  worker_ref?: string | null;
   commit_sha?: string | null;
   coverage?: number | null;
   evidence?: JsonObject | string | null;
@@ -205,6 +207,25 @@ export interface ParallelWorker extends UnknownRecord {
   merged_at?: string;
   conflict_at?: string;
   updated_at: string;
+}
+
+export interface BranchSetEntry extends JsonObject {
+  repo: string;
+  repo_segment: string;
+  source_root: string;
+  source_path: string;
+  base_branch: string;
+  track_branch: string;
+  integration_worktree: string;
+  integration_worktree_path: string;
+  worker_root: string;
+  worker_root_path: string;
+  affected: boolean;
+  exists: boolean;
+  current_branch: string | null;
+  health: string;
+  branch_exists: boolean;
+  commands: JsonObject[];
 }
 
 export interface ParallelState extends UnknownRecord {

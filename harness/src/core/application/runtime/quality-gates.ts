@@ -370,7 +370,7 @@ export function reviewAssist(root: string, args: RuntimeArgs = {}): CoreResult {
     source: entry.source,
     ...diffSurface(entry.root, entry.base || base, entry.head || head),
   }));
-  const diff = repoDiffs.find((entry) => entry.repo === ".") || diffSurface(root, base, head);
+  const diff = repoDiffs.find((entry) => entry.repo === "root" || entry.repo === ".") || diffSurface(root, base, head);
   const incompleteTasks: JsonObject[] = [];
   for (const phase of plan.phases) {
     for (const task of phase.tasks) {
@@ -421,6 +421,7 @@ export function reviewAssist(root: string, args: RuntimeArgs = {}): CoreResult {
     head,
     diff,
     repo_diffs: repoDiffs,
+    branch_set: context.branch_set || [],
     task_counts: context.task_counts,
     incomplete_tasks: incompleteTasks,
     coverage: track.metadata.last_coverage ?? null,

@@ -35,7 +35,7 @@
     },
     {
       "step": 4,
-      "instruction": "Summarize active track, ownership, blockers, review queue, fleet health, canonical JSON state, generated projection status, and next packet."
+      "instruction": "Summarize active track, ownership, blockers, review queue, branch-set health, fleet health, canonical JSON state, generated projection status, and next packet."
     }
   ],
   "confirmation": {
