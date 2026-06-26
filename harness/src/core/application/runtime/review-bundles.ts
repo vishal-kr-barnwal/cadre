@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
-import { spawnSync } from "node:child_process";
 import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
 import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
 import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
@@ -21,6 +20,7 @@ import { humanReviewConfirmed, requestedStyleGuideIds, styleGuideIdsForTechStack
 import { findTrack } from "./track-context";
 import { parsePlanFile } from "./track-schedule";
 import { normalizeProjectDoc, templateJson } from "./workflow-response";
+import { reviewOutputMode, targetReviewBundle } from "./review-output";
 
 export function reviewStats(text: string): JsonObject {
   const normalized = text.replace(/\n*$/, "\n");
@@ -188,6 +188,7 @@ export function workflowReviewBundle(root: string, workflow: string, args: Runti
     || rawArgs.reviewBundle === false
     || rawArgs.reviewFiles === false
   ) return null;
+  if (reviewOutputMode(args) === "target") return targetReviewBundle(root, workflow, args, reviewFiles, manifestExtras);
   const explicitDir = asOptionalString(rawArgs.reviewBundleDir || rawArgs.review_bundle_dir || rawArgs.reviewDir || rawArgs.review_dir);
   const rootHash = crypto.createHash("sha256").update(root).digest("hex").slice(0, 12);
   const defaultDirectory = path.join(os.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(path.basename(root))}-${rootHash}`);
@@ -221,19 +222,23 @@ export function workflowReviewBundle(root: string, workflow: string, args: Runti
   const manifest: JsonObject = {
     version: 1,
     kind: `cadre_${safeName(workflow)}_review`,
+    mode: "bundle",
     workflow,
     root,
     generated_at: utcNow(),
     content_in_response: false,
+    mutates_worktree: false,
     warnings,
     files,
     ...manifestExtras,
   };
   writeJson(manifestPath, manifest);
   return {
+    mode: "bundle",
     directory,
     manifest_path: manifestPath,
     content_in_response: false,
+    mutates_worktree: false,
     warnings,
     files,
   };

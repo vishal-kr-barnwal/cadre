@@ -2293,6 +2293,7 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
       execute: true,
       approvalComplete: true,
       providerMode: "local",
+      force: true,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2327,6 +2328,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
       execute: true,
       approvalComplete: true,
       providerMode: "local",
+      force: true,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2353,7 +2355,7 @@ test("workflow setup warns on unknown explicit style guide ids without dropping 
     assert.deepEqual(setup.styleGuides.missing, ["not-a-guide"]);
     assert.ok(setup.styleGuides.selected.includes("typescript"));
     assert.match(setup.warnings[0], /Unknown setup style guide id/);
-    assert.equal(fs.existsSync(path.join(root, "cadre")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2664,7 +2666,7 @@ test("workflow revise reviews proposed track files before writing", () => {
     });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.stage, "staged_approval");
-    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
 
     const written = approveWorkflow(root, {
       workflow: "revise",
@@ -2673,10 +2675,61 @@ test("workflow revise reviews proposed track files before writing", () => {
       trackId: "revise_20260618",
       reason: "Implementation discovery requires an extra follow-up task.",
       plan: revisedPlan,
+      force: true,
     });
     assert.equal(written.ok, true);
     assert.equal(written.phase_state, "executed");
     assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("target staged review previews appear in git diff and reject drift", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-target-review-drift-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "target_preview_20260626", samplePlan("target_preview_20260626"));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed track"]);
+    const revisedPlan = samplePlan("target_preview_20260626");
+    revisedPlan.phases.splice(2, 0, {
+      phase_index: 3,
+      title: "Phase 3: Target preview",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [planTask(3, 1, "Inspect git diff", [])],
+    });
+    const args = {
+      workflow: "revise",
+      trackId: "target_preview_20260626",
+      reason: "Exercise target-path staged review.",
+      plan: revisedPlan,
+    };
+    const preview = core.workflowPacket(root, args);
+    assert.equal(preview.ok, true);
+    assert.equal(preview.review_bundle.mode, "target");
+    assert.equal(preview.review_bundle.mutates_worktree, true);
+    assert.match(git(root, ["diff", "--", "cadre/tracks/target_preview_20260626/plan.md"]).stdout, /Target preview/);
+
+    const approved = core.workflowPacket(root, {
+      ...args,
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "plan_changes",
+      approvedStages: ["plan_changes"],
+    });
+    assert.equal(approved.ok, true);
+    fs.appendFileSync(path.join(root, "cadre", "tracks", "target_preview_20260626", "plan.md"), "\nlocal drift\n");
+    const execute = core.workflowPacket(root, {
+      ...args,
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: ["plan_changes"],
+    });
+    assert.equal(execute.ok, false);
+    assert.equal(execute.stage, "staged_review_drift");
+    assert.match(execute.error, /changed after review/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2754,12 +2807,12 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     });
     assert.equal(handoffBlocked.ok, false);
     assert.equal(handoffBlocked.stage, "staged_approval");
-    const handoffArtifact = handoffBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/workflow_20260618/HANDOFF.md");
+    const handoffArtifact = handoffBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/workflow_20260618/handoff.json");
     assert.ok(handoffArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(handoffArtifact, "content"), false);
     assert.equal(handoffBlocked.review_bundle.content_in_response, false);
-    assert.ok(fs.existsSync(path.join(handoffBlocked.review_bundle.directory, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")));
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")), false);
+    assert.ok(fs.existsSync(path.join(handoffBlocked.review_bundle.directory, "cadre", "tracks", "workflow_20260618", "handoff.json")));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")), true);
 
     const handoff = approveWorkflow(root, {
       workflow: "handoff",
@@ -2767,6 +2820,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       handoffText: "# Handoff\n\nContinue with the next task.\n",
       execute: true,
       approvalComplete: true,
+      force: true,
     });
     assert.equal(handoff.ok, true);
     assert.equal(handoff.phase_state, "executed");
@@ -3452,6 +3506,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       approvalComplete: true,
       refreshScope: "all",
       lsp: true,
+      force: true,
     });
     assert.equal(refresh.ok, true);
     assert.equal(refresh.phase_state, "executed");

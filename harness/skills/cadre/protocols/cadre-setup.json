@@ -31,11 +31,11 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, selected JSON style guides, and any `intent_prompts` or `native_prompts`. When prompts are present, load the `native-prompts` reference and answer those prompts first with the client native selection affordance before review-bundle approval."
+      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, selected JSON style guides, and any `intent_prompts` or `native_prompts`. When prompts are present, load the `native-prompts` reference and answer those prompts first with the client native selection affordance before staged review approval."
     },
     {
       "step": 4,
-      "instruction": "After prompt answers have been mapped back to structured setup arguments, review only `approval.current_stage` using the returned review_bundle manifest/path list. When the user approves that single stage, call setup again with `approvalSessionId`, `approvalStage` set to the current stage, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
+      "instruction": "After prompt answers have been mapped back to structured setup arguments, review only `approval.current_stage` using the returned review_bundle target/review paths; manifest_path may be null in target mode. When the user approves that single stage, call setup again with `approvalSessionId`, `approvalStage` set to the current stage, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
     },
     {
       "step": 5,

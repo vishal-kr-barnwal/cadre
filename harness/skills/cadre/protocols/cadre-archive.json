@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Present the dry-run `tracks` list, packet warnings, cleanup scope, and any review_bundle manifest/path list without inlining large artifact contents into model context."
+      "instruction": "Present the dry-run `tracks` list, packet warnings, cleanup scope, and any review_bundle target/review paths without inlining large artifact contents into model context."
     },
     {
       "step": 4,

@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Review only `approval.current_stage` using the returned canonical JSON artifact, generated Markdown projection preview, plan assistance when relevant, and review_bundle manifest/path list. When the user approves that stage, call newtrack again with `approvalSessionId`, `approvalStage`, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
+      "instruction": "Review only `approval.current_stage` using the returned canonical JSON artifact, generated Markdown projection preview, plan assistance when relevant, and review_bundle target/review paths; manifest_path may be null in target mode. When the user approves that stage, call newtrack again with `approvalSessionId`, `approvalStage`, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
     },
     {
       "step": 4,

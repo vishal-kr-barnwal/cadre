@@ -28,7 +28,7 @@ import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-st
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
-import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { setupGenerationWarnings } from "./generation-quality";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -164,10 +164,28 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       error: approvalError || "Staged approval is required before writing setup artifacts",
     };
   }
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
+  if (reviewValidation.ok === false) {
+    return {
+      ...result,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      review_validation: reviewValidation,
+      error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
+    };
+  }
+  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
   const written: string[] = [];
   const skipped: string[] = [];
   const writeText = (relativePath: string, text: string): void => {
+    const reviewPath = `cadre/${relativePath}`;
+    if (reusedReviewFiles.has(reviewPath)) {
+      written.push(reviewPath);
+      return;
+    }
     const file = path.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
       skipped.push(path.relative(root, file));
@@ -178,6 +196,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     written.push(path.relative(root, file));
   };
   const writeSetupJson = (relativePath: string, value: JsonObject): void => {
+    const reviewPath = `cadre/${relativePath}`;
+    if (reusedReviewFiles.has(reviewPath)) {
+      written.push(reviewPath);
+      return;
+    }
     const file = path.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
       skipped.push(path.relative(root, file));
@@ -188,6 +211,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     written.push(path.relative(root, file));
   };
   const writeSetupJsonlEntry = (relativePath: string, value: JsonObject): void => {
+    const reviewPath = `cadre/${relativePath}`;
+    if (reusedReviewFiles.has(reviewPath)) {
+      written.push(reviewPath);
+      return;
+    }
     const file = path.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
       skipped.push(path.relative(root, file));
@@ -327,6 +355,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     subject: "initialize control plane",
     before: traceBefore,
     forceEnabled: true,
+    allowDirty: true,
+    includeDirtyFiles: asStringArray(reviewValidation.files),
     note: {
       event_id: asOptionalString(asJsonObject(setupEvent.event).id) || null,
       topology: polyrepoRequested ? "polyrepo" : "monorepo",
@@ -351,6 +381,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     native_state: nativeState,
     event: setupEvent,
     control_commit: controlCommit,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(reviewValidation.files),
     gitattributes,
     ci_setup: ciSetup,
     polyrepo_setup: polyrepoSetup,

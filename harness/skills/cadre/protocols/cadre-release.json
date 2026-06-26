@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Review returned completed tracks, release evidence, warnings, proposed artifacts, and current `approval.current_stage` review_bundle manifest/path list without inlining large artifacts into model context."
+      "instruction": "Review returned completed tracks, release evidence, warnings, proposed artifacts, and current `approval.current_stage` review_bundle target/review paths without inlining large artifacts into model context; manifest_path may be null in target mode."
     },
     {
       "step": 4,

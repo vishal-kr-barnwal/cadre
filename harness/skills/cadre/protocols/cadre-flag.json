@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Present the dry-run status change, selected track, reason, warnings, and review_bundle manifest/path list when returned."
+      "instruction": "Present the dry-run status change, selected track, reason, warnings, and any review_bundle target/review paths when returned."
     },
     {
       "step": 4,

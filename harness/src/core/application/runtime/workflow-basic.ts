@@ -31,7 +31,7 @@ import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
-import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const prep = implementationPrep(root, {
@@ -250,10 +250,25 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
       error: approvalError || "Staged approval is required before writing handoff artifacts",
     };
   }
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
+  if (reviewValidation.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      review_validation: reviewValidation,
+      error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
+    };
+  }
+  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
   if (args.execute === true) {
-    writeJsonEnsured(handoffJsonPath, handoffJson);
-    fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, path.relative(root, handoffJsonPath))));
+    if (!reusedReviewFiles.has(path.relative(root, handoffJsonPath))) writeJsonEnsured(handoffJsonPath, handoffJson);
+    if (!reusedReviewFiles.has(path.relative(root, handoffPath))) {
+      fs.writeFileSync(handoffPath, withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, path.relative(root, handoffJsonPath))));
+    }
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
   const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
@@ -281,6 +296,8 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     subject: `record ${trackId} handoff`,
     before: traceBefore,
     trackId,
+    allowDirty: true,
+    includeDirtyFiles: asStringArray(reviewValidation.files),
     note: {
       event_id: asOptionalString(asJsonObject(event.event).id) || null,
       message_id: asOptionalString(asJsonObject(message.message).id) || null,
@@ -295,5 +312,7 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     message,
     event,
     control_commit: controlCommit,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(reviewValidation.files),
   };
 }

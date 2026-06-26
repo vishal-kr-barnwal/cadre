@@ -35,7 +35,7 @@
     },
     {
       "step": 4,
-      "instruction": "Review the current `approval.current_stage` when present. The staged review_bundle contains a manifest/path list for proposed projection artifacts so large Markdown projections stay out of model context."
+      "instruction": "Review the current `approval.current_stage` when present. The staged review_bundle contains target/review paths for proposed projection artifacts so large Markdown projections stay out of model context; manifest_path may be null in target mode."
     },
     {
       "step": 5,

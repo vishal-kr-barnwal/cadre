@@ -9,7 +9,8 @@ order: 5
 
 This repository is the Cadre harness/package repository. It builds the runtime,
 skill shim, MCP-served contracts, references, templates, tests, and install-time
-thin plugin bundles that users install into Claude Code and OpenAI Codex.
+thin plugin bundles that users install into Claude Code, OpenAI Codex, GitHub
+Copilot, and Google Antigravity.
 
 ## Repository Shape
 

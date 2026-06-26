@@ -128,6 +128,8 @@ const PROPS: Record<string, JsonObject> = {
   reviewFiles: { type: "boolean" },
   reviewBundleDir: { type: "string" },
   review_bundle_dir: { type: "string" },
+  reviewOutputMode: { type: "string", enum: ["target", "bundle"] },
+  review_output_mode: { type: "string", enum: ["target", "bundle"] },
   spec: { type: "object" },
   plan: { type: "object" },
   args: { type: "object" },

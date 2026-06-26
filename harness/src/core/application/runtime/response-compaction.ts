@@ -65,15 +65,18 @@ function compactReviewBundle(value: unknown): JsonObject | null {
   const bundle = asJsonObject(value);
   const files = Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
   return {
+    mode: asOptionalString(bundle.mode) || "bundle",
     directory: asOptionalString(bundle.directory) || null,
     manifest_path: asOptionalString(bundle.manifest_path) || null,
     content_in_response: false,
+    mutates_worktree: bundle.mutates_worktree === true,
     warnings: asStringArray(bundle.warnings),
     file_count: files.length,
     total_bytes: files.reduce((sum, file) => sum + Number(file.bytes || 0), 0),
     files: files.slice(0, 30).map((file) => ({
       path: asOptionalString(file.path) || null,
       review_path: asOptionalString(file.review_path) || null,
+      target_path: asOptionalString(file.target_path) || null,
       title: asOptionalString(file.title) || null,
       kind: asOptionalString(file.kind) || null,
     })),
@@ -247,7 +250,9 @@ function compactSetupResponse(result: CoreResult): CoreResult {
     ? {
       directory: reviewBundle.directory,
       manifest_path: reviewBundle.manifest_path,
+      mode: reviewBundle.mode,
       content_in_response: false,
+      mutates_worktree: reviewBundle.mutates_worktree,
       warnings: reviewBundle.warnings,
       file_count: reviewBundle.file_count,
       total_bytes: reviewBundle.total_bytes,

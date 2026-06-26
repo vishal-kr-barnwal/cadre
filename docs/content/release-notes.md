@@ -7,12 +7,48 @@ order: 9
 
 # Release Notes
 
-## Unreleased
+## 2.0.0 - 2026-06-26
 
-Cadre adds install-time support for GitHub Copilot and Google Antigravity
-alongside Codex and Claude. The new bundles stay thin MCP entrypoints, Copilot
-project scope writes `.github/skills/cadre/SKILL.md`, and Antigravity CLI gets
-the Cadre-only `mcp(cadre/*)` allow rule.
+Cadre 2.0.0 makes staged review output land directly at the intended target
+paths by default. A dry-run review now writes only the active approval stage to
+files such as `cadre/product.md` or `cadre/tracks/<id>/plan.json`, so the review
+loop can use normal `git diff`. Bundle output is still available for callers
+that need a non-mutating preview.
+
+### Compared With 1.1.2
+
+| Area | What changed |
+|------|--------------|
+| Target previews | Staged review dry-runs default to `review_bundle.mode:"target"` and write the current stage to its real path for ordinary `git diff` review. |
+| Bundle compatibility | Pass `reviewOutputMode:"bundle"` / `review_output_mode:"bundle"` or an explicit `reviewBundleDir` to keep the old temp-bundle behavior. |
+| Approval order | Target mode writes only `approval.current_stage`; later stages are materialized only after earlier stages are explicitly approved. |
+| Drift protection | Final `execute:true` validates that approved target files still match the regenerated payload and fails closed if a preview was edited after approval. |
+| Dirty-file safety | Existing dirty target files are protected unless their content already matches the generated preview or the caller intentionally uses `force:true`. |
+| Client installs | `cadre install` supports GitHub Copilot and Google Antigravity alongside Codex and Claude with thin MCP entrypoints. |
+| Optional clients | `cadre install --target all` writes Copilot plugin files even when the Copilot CLI is missing, reports skipped native registration, and continues validating installed native clients. |
+| Release validation | Harness validation covers target-path preview diffs, staged approval ordering, drift failure, target-preview final execution, and bundle-mode compatibility. |
+
+### Upgrade Notes
+
+Existing installs can update with the normal npm path:
+
+```bash
+npm install -g cadre-ai@2.0.0
+cadre install
+```
+
+Dry-run review can now mutate the worktree by writing reviewed target previews.
+This does not approve or execute the workflow; approval remains explicit for the
+current stage. Use `git diff -- cadre/...` to inspect the returned paths. For
+automation or workflows that require non-mutating review output, pass
+`reviewOutputMode:"bundle"` or provide `reviewBundleDir`.
+
+Target-mode responses can have `review_bundle.manifest_path:null`. Read
+`review_bundle.files[].target_path` or `review_path` for the reviewed files.
+
+The GitHub release for `release-2.0.0` publishes `cadre-ai@2.0.0` through npm
+Trusted Publishing after the release workflow validates the harness package and
+native plugin install paths.
 
 ## 1.1.2 - 2026-06-23
 

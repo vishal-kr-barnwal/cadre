@@ -277,7 +277,7 @@ test("Workflow templates include JSON canonical and task-level commit guidance",
   assert.deepEqual(failures, []);
 });
 
-test("Artifact workflow protocols require token-safe review bundles", () => {
+test("Artifact workflow protocols require token-safe review output", () => {
   const required = new Map([
     ["cadre-setup.json", "setup"],
     ["cadre-newtrack.json", "newtrack"],
@@ -294,7 +294,8 @@ test("Artifact workflow protocols require token-safe review bundles", () => {
       const protocol = readJson(file);
       const flow = protocol.packetFlow.map((step) => step.instruction).join("\n");
       if (!/review_bundle/.test(flow)) failures.push(`${path.relative(root, file)}: missing review_bundle for ${workflow}`);
-      if (!/manifest\/path list/.test(flow)) failures.push(`${path.relative(root, file)}: missing manifest/path list guidance for ${workflow}`);
+      if (!/target\/review paths/.test(flow)) failures.push(`${path.relative(root, file)}: missing target/review path guidance for ${workflow}`);
+      if (!/manifest_path may be null in target mode/.test(flow)) failures.push(`${path.relative(root, file)}: missing nullable target-mode manifest guidance for ${workflow}`);
       if (!/model\s+context/.test(flow)) failures.push(`${path.relative(root, file)}: missing model-context avoidance for ${workflow}`);
       if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run-first confirmation for ${workflow}`);
       if (protocol.confirmation.stagedApproval === true) {

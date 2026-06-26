@@ -20,7 +20,7 @@ import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
-import { applyStagedApprovalSessionPayload, artifactApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, artifactApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args)
@@ -216,6 +216,25 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       error: approvalError || "Staged approval is required before syncing artifacts",
     };
   }
+  const reviewValidation = execute ? validateApprovedTargetReviewFiles(root, args) : { ok: true, skipped: true };
+  if (execute && reviewValidation.ok === false) {
+    return {
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      artifacts,
+      approval,
+      human_review: humanReview,
+      review_artifacts: stageReviewArtifacts,
+      review_bundle: stageReviewBundle,
+      review_validation: reviewValidation,
+      warnings,
+      errors: asStringArray(asJsonObject(reviewValidation).errors),
+      error: asOptionalString(asJsonObject(reviewValidation).error) || "Approved review files changed after staged approval",
+    };
+  }
+  const reusedReviewFiles = new Set(asStringArray(asJsonObject(reviewValidation).files));
   const traceBefore = execute ? beginTrace(root) : null;
   if (execute) {
     for (const def of defs) {
@@ -229,7 +248,7 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
         continue;
       }
       ensureParent(projectionFile);
-      fs.writeFileSync(projectionFile, rendered.content);
+      if (!reusedReviewFiles.has(def.projection)) fs.writeFileSync(projectionFile, rendered.content);
       written.push(def.projection);
     }
   }
@@ -240,6 +259,8 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       subject: "sync projections",
       before: traceBefore,
       files: written,
+      allowDirty: true,
+      includeDirtyFiles: asStringArray(asJsonObject(reviewValidation).files),
       note: {
         scope: args.scope || "all",
         artifact: args.artifact || null,
@@ -261,6 +282,8 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     written,
     skipped,
     control_commit: controlCommit,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(asJsonObject(reviewValidation).files),
     warnings,
     errors,
   };

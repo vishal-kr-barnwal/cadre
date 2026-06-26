@@ -1396,7 +1396,10 @@ function commitTrace(root, args, options) {
   if (snapshot.skipped) return { ok: true, skipped: true, reason: snapshot.reason || "git unavailable" };
   const gitRoot2 = asOptionalString(snapshot.git_root) || cwd;
   const after = statusEntries(gitRoot2);
-  const requestedFiles = options.files ? uniqueFiles(options.files) : changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile2(file) : isControlPlaneFile2(file));
+  const requestedFiles = options.files ? uniqueFiles(options.files) : uniqueFiles([
+    ...changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile2(file) : isControlPlaneFile2(file)),
+    ...options.includeDirtyFiles || []
+  ]);
   const files = requestedFiles.filter((file) => after[file]);
   if (files.length === 0) return { ok: true, skipped: true, reason: "no changed files to commit" };
   const beforeEntries = asJsonObject(snapshot.entries);

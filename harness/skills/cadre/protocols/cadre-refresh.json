@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned doctor, workspace diagnostics, dependency graph, LSP evidence, selected scope, and current `approval.current_stage` review_bundle manifest/path list to identify stale canonical JSON/JSONL context without inlining large artifacts into model context."
+      "instruction": "Use the returned doctor, workspace diagnostics, dependency graph, LSP evidence, selected scope, and current `approval.current_stage` review_bundle target/review paths to identify stale canonical JSON/JSONL context without inlining large artifacts into model context; manifest_path may be null in target mode."
     },
     {
       "step": 4,

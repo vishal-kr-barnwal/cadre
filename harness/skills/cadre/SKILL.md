@@ -11,7 +11,7 @@ description: |
   - User mentions documentation is outdated or wants to sync context with codebase changes
   - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
 
-  Interoperable across Claude Code and OpenAI Codex.
+  Interoperable across Claude Code, OpenAI Codex, Copilot, and Antigravity.
   Uses native Cadre state for persistent task memory across sessions.
 ---
 
@@ -28,7 +28,8 @@ load `cadre://workflow-protocol?workflow=<name>` for the active workflow.
 References and template inventory are also MCP-served through Cadre resources.
 
 For staged approvals, stay on Cadre's packet-led review path: use the returned
-`approval.current_stage`, review bundle manifest, and specific review paths
-first. Ask the user for explicit approval of the current stage before sending
-approval fields. Avoid extra local inspection or validation commands unless a
-concrete review question cannot be answered from the packet evidence.
+`approval.current_stage` and current review output first. Target mode may have
+`manifest_path:null`, `mutates_worktree:true`, and `files[].target_path` /
+`review_path`; bundle mode uses the manifest and temp review paths. Ask for
+explicit user approval before sending approval fields. Avoid extra inspection
+unless packet evidence cannot answer the current stage question.

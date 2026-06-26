@@ -5,7 +5,7 @@
   "title": "Cadre Template Assets",
   "markdownUse": "human_projection_only",
   "rules": [
-    "`cadre_workflow` with reviewable dry-runs reports review artifacts and a",
+    "`cadre_workflow` with reviewable dry-runs reports review artifacts and staged",
     "`cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes",
     "`cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including",
     "`cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks",
@@ -14,7 +14,7 @@
   "sections": [
     {
       "heading": "Packet Ownership",
-      "body": "- `cadre_workflow` with reviewable dry-runs reports review artifacts and a\n  token-safe `review_bundle` with full proposed files on disk. Setup, new-track,\n  revise, refresh document updates, release artifacts, and handoff artifacts use\n  this pattern.\n- `cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes\n  the setup scaffold from bundled templates and confirmed setup payload.\n- `cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including\n  template-backed track learnings.\n- `cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks.\n- `cadre_mutate` owns derived index refreshes and other Cadre state mutations."
+      "body": "- `cadre_workflow` with reviewable dry-runs reports review artifacts and staged\n  `review_bundle` output. Target mode writes the current stage to real target\n  paths for worktree diff review; bundle mode writes temp review files. Setup,\n  new-track, revise, refresh document updates, release artifacts, and handoff\n  artifacts use this pattern.\n- `cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes\n  the setup scaffold from bundled templates and confirmed setup payload.\n- `cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including\n  template-backed track learnings.\n- `cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks.\n- `cadre_mutate` owns derived index refreshes and other Cadre state mutations."
     },
     {
       "heading": "Style Guides",
@@ -22,7 +22,7 @@
     },
     {
       "heading": "Workflow Review Bundles",
-      "body": "Reviewable workflow dry-runs return `review_artifacts` as metadata only and\n`review_bundle` with a manifest path plus absolute review file paths. Review bundles intentionally do not include command recipes; use packet-provided summaries and the returned paths for human review instead of running ad hoc inspection commands by default."
+      "body": "Reviewable workflow dry-runs return `review_artifacts` as metadata only and\n`review_bundle` with returned target/review paths. In target mode, `manifest_path`\nmay be null and the current stage is written to the real target path; in bundle\nmode, the packet returns a manifest path plus absolute temp review file paths.\nReview output intentionally does not include command recipes; use packet-provided\nsummaries and the returned paths for human review instead of running ad hoc\ninspection commands by default."
     },
     {
       "heading": "Agent Use",

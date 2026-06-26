@@ -31,11 +31,11 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned track context, impact analysis, revision reason, and current `approval.current_stage` review_bundle manifest/path list to review proposed canonical JSON changes and generated Markdown projection previews."
+      "instruction": "Use the returned track context, impact analysis, revision reason, and current `approval.current_stage` review_bundle target/review paths to review proposed canonical JSON changes and generated Markdown projection previews; manifest_path may be null in target mode."
     },
     {
       "step": 4,
-      "instruction": "When packet-supported mutation is requested, call the workflow packet again with `execute: true` and `approvalComplete: true` after reviewing the review_bundle manifest/path list without inlining large artifacts into model context."
+      "instruction": "When packet-supported mutation is requested, call the workflow packet again with `execute: true` and `approvalComplete: true` after reviewing the current review_bundle target/review paths without inlining large artifacts into model context."
     },
     {
       "step": 5,

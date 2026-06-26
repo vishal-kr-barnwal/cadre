@@ -30,7 +30,7 @@ import { parsePlanFile } from "./track-schedule";
 import { templateJson, workflowSummary } from "./workflow-response";
 import { doctor, lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
-import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 
 export function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
@@ -252,13 +252,39 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       error: approvalError || "Staged approval is required before refreshing Cadre context documents",
     };
   }
+  const reviewValidation = args.execute === true && reviewArtifacts.length > 0
+    ? validateApprovedTargetReviewFiles(root, args)
+    : { ok: true, skipped: true };
+  if (args.execute === true && reviewValidation.ok === false) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      doctor: doctor(root, { hasCadreProject: true }),
+      workspace: workspaceDiagnostics(root, { execute: false }),
+      dependency_graph: dependencyGraph(root),
+      lsp: lspConfigStatus(root),
+      lsp_setup: lsp,
+      scope: scopeIds,
+      approval,
+      human_review: humanReview,
+      review_artifacts: stageReviewArtifacts,
+      review_bundle: stageReviewBundle,
+      review_validation: reviewValidation,
+      warnings,
+      error: asOptionalString(asJsonObject(reviewValidation).error) || "Approved review files changed after staged approval",
+    };
+  }
+  const reusedReviewFiles = new Set(asStringArray(asJsonObject(reviewValidation).files));
   const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
   let patterns: CoreResult | null = null;
   if (args.execute === true && refreshPatterns) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
-      fs.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      fs.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      if (!reusedReviewFiles.has(path.relative(root, refreshed.jsonlPath))) fs.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      if (!reusedReviewFiles.has(path.relative(root, refreshed.projectionPath))) fs.writeFileSync(refreshed.projectionPath, refreshed.projection);
       patterns = {
         ok: true,
         path: path.relative(root, refreshed.jsonlPath),
@@ -273,6 +299,8 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       workflow: "refresh",
       subject: "refresh project context",
       before: traceBefore,
+      allowDirty: true,
+      includeDirtyFiles: asStringArray(asJsonObject(reviewValidation).files),
       note: {
         patterns: patterns ? asJsonObject(patterns) : null,
         lsp_setup: asJsonObject(lsp),
@@ -297,6 +325,8 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     human_review: humanReview,
     review_artifacts: stageReviewArtifacts,
     review_bundle: stageReviewBundle,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(asJsonObject(reviewValidation).files),
     warnings,
   };
 }

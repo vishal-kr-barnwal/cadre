@@ -167,6 +167,28 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   assert.match(commandLog, /agy plugin install/);
 });
 
+test("cadre install --target all tolerates missing optional client command", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-install-missing-"));
+  const bin = path.join(home, "bin");
+  const log = path.join(home, "commands.log");
+  const cadreHome = path.join(home, ".cadre");
+  fs.mkdirSync(bin, { recursive: true });
+  installFakeClient(bin, "codex", log);
+  installFakeClient(bin, "claude", log);
+  installFakeClient(bin, "agy", log);
+
+  const result = runCli(["install", "--target", "all", "--scope", "user", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stderr, /copilot command not found; plugin files were written but native registration was skipped/);
+  assert.equal(fs.existsSync(path.join(cadreHome, "marketplaces", "copilot", "plugins", "cadre", "skills", "cadre", "SKILL.md")), true);
+  const commandLog = fs.readFileSync(log, "utf8");
+  assert.match(commandLog, /codex plugin add cadre@cadre/);
+  assert.match(commandLog, /claude plugin install --scope user cadre@cadre/);
+  assert.match(commandLog, /agy plugin install/);
+  assert.doesNotMatch(commandLog, /copilot plugin install/);
+});
+
 test("cadre uninstall --dry-run plans native and file cleanup", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-uninstall-dry-"));
   const bin = path.join(home, "bin");

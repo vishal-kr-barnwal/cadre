@@ -6,27 +6,27 @@
   "markdownUse": "human_projection_only",
   "rules": [
     "Durable Cadre artifact generation must use structured JSON fields, not Markdown payloads.",
-    "Dry-run review comes before mutation for every workflow that writes Cadre control-plane artifacts.",
+    "Dry-run review comes before final execution for every workflow that writes Cadre control-plane artifacts.",
     "Staged workflows approve exactly one returned current_stage per packet call.",
     "Never approve a staged workflow from agent judgment alone; each stage requires explicit user approval.",
     "If the client does not provide a native approval prompt, ask the user manually in chat and wait before sending approvalStage or approvedStages.",
     "Never auto-approve all stages or call approvalComplete:true until the packet-issued approval state reports no pending stages and every stage has explicit user approval.",
     "Pass the packet-issued approvalSessionId on every staged approval follow-up and final execute call.",
     "If the generated payload changes, restart review from the returned current stage.",
-    "Stay on the packet-led review path: use Cadre packet summaries and returned review paths first, and avoid extra inspection tooling unless the packet evidence is insufficient for the current stage."
+    "Stay on the packet-led review path: use Cadre packet summaries and returned target/review paths first, and avoid extra inspection tooling unless the packet evidence is insufficient for the current stage."
   ],
   "sections": [
     {
       "heading": "Staged Approval Contract",
-      "body": "For workflows that return approval.kind=cadre.staged_approval.v1, review only approval.current_stage and its current_review_bundle. Then ask the user for explicit approval of that single stage. If native prompts are unavailable, use approval.manual_approval_prompt or ask manually in chat, and wait. Only after the user approves, call the same workflow again with approvalSessionId, approvalStage set to that current stage, and approvedStages containing exactly one additional stage in order. After all stages are approved in dry-run calls, call execute:true with approvalComplete:true and the same approvalSessionId."
+      "body": "For workflows that return approval.kind=cadre.staged_approval.v1, review only approval.current_stage and its current_review_bundle. In target mode, the current stage may already be written to its returned target_path for worktree diff review; in bundle mode, use the returned manifest and temp review paths. Then ask the user for explicit approval of that single stage. If native prompts are unavailable, use approval.manual_approval_prompt or ask manually in chat, and wait. Only after the user approves, call the same workflow again with approvalSessionId, approvalStage set to that current stage, and approvedStages containing exactly one additional stage in order. After all stages are approved in dry-run calls, call execute:true with approvalComplete:true and the same approvalSessionId."
     },
     {
       "heading": "Generation Contract",
       "body": "When drafting setup, spec, plan, release, handoff, or revised artifacts, fill canonical JSON from repo evidence and user intent. Prefer concrete fields, domain nouns, commands, contracts, boundaries, risks, and verification details. Do not send shallow summary-only payloads unless the user explicitly requests minimal setup."
     },
     {
-      "heading": "Review Bundle Contract",
-      "body": "Use returned review_bundle paths and manifests for review. Do not inline large generated artifacts into model context and do not manually write generated Markdown projections as canonical state. Prefer packet-provided summaries and read only the specific returned file path needed for the current stage; use extra local inspection tools only when they are necessary to resolve a concrete review question."
+      "heading": "Review Output Contract",
+      "body": "Use returned review_bundle target paths, review paths, and manifests for review. Target mode may return manifest_path:null and mutates_worktree:true, meaning the current stage is already written to the real target file for worktree diff review. Do not inline large generated artifacts into model context and do not manually rewrite generated Markdown projections as canonical state. Prefer packet-provided summaries and read only the specific returned file path needed for the current stage; use extra local inspection tools only when they are necessary to resolve a concrete review question."
     }
   ]
 }

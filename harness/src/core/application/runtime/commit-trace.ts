@@ -28,6 +28,7 @@ export interface CommitTraceOptions {
   scope?: string;
   body?: string;
   files?: string[];
+  includeDirtyFiles?: string[];
   cwd?: string;
   before?: TraceSnapshot | null;
   forceEnabled?: boolean;
@@ -174,7 +175,10 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
   const after = statusEntries(gitRoot);
   const requestedFiles = options.files
     ? uniqueFiles(options.files)
-    : changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile(file) : isControlPlaneFile(file));
+    : uniqueFiles([
+      ...changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile(file) : isControlPlaneFile(file)),
+      ...(options.includeDirtyFiles || []),
+    ]);
   const files = requestedFiles.filter((file) => after[file]);
   if (files.length === 0) return { ok: true, skipped: true, reason: "no changed files to commit" };
 

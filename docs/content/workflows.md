@@ -26,6 +26,23 @@ Support workflows can happen along the way:
 status, debug, validate, handoff, refresh, revise, revert, flag, formula, artifacts
 ```
 
+## Staged Review Output
+
+Reviewable staged workflows write target-path previews by default. A dry-run
+returns `approval.current_stage` plus a `review_bundle` whose
+`mode:"target"` and `mutates_worktree:true` fields mean the current stage has
+been written to the intended root-relative path. Review the returned
+`target_path` or `review_path` with normal `git diff`.
+
+Only the active stage is written in target mode. Later stages appear only after
+the previous stage has explicit user approval. Final `execute:true` regenerates
+the payload, verifies approved target files still match the reviewed preview,
+and fails if a preview drifted after approval.
+
+Use `reviewOutputMode:"bundle"`, `review_output_mode:"bundle"`, or an explicit
+`reviewBundleDir` for the older non-mutating temp-bundle review behavior.
+Existing `reviewBundle:false` / `reviewFiles:false` still disables review files.
+
 ## `cadre-setup`
 
 Initializes the project control plane.
@@ -46,7 +63,7 @@ native selection UI when available, then pass the selected ids or custom "Other"
 text back as structured setup arguments such as `providerMode`, `syncMode`,
 `styleGuideIds`, `writeLsp`, and `integrations`. Prompt answers are not stored
 as standalone Cadre state. Answer setup prompts before asking the user to
-approve the setup review bundle.
+approve the current setup review stage.
 
 What setup writes:
 
@@ -85,9 +102,9 @@ The new-track packet previews or creates:
 - Planning evidence such as likely tests, semantic impact, and parallel
   candidates.
 
-Dry runs expose full proposed files through a review bundle on disk, so agents
-can show the manifest and file paths without pasting generated specs or plans
-into chat.
+Dry runs write the active stage to the intended track path by default, so agents
+can point at the returned target files and normal `git diff` without pasting
+generated specs or plans into chat.
 Generated Markdown projections include readable review sections plus the
 canonical JSON detail block, so human review can inspect the same structured
 fields Cadre agents use.
@@ -229,8 +246,8 @@ Handoff can include:
 Handoff artifacts are per-track, so two tracks do not clobber each other's
 handoff context.
 
-Writing a handoff requires reviewing the packet-generated `HANDOFF.md` bundle
-and confirming the packet write.
+Writing a handoff requires reviewing the packet-generated handoff target
+preview and confirming the packet write.
 
 ## `cadre-refresh`
 
@@ -250,8 +267,8 @@ When refresh scope is unclear, Cadre asks first with an `intent_prompts`
 selection for patterns, LSP, docs/projections, diagnostics, or all supported
 refreshes.
 
-Document refreshes use review bundles for proposed context files and require
-confirmation before writing.
+Document refreshes use staged target previews for proposed context files and
+require confirmation before final execution.
 
 ## `cadre-revise`
 
@@ -266,8 +283,8 @@ Revise should preserve track history and reason about:
 - Native dependency and event updates.
 - Review or implementation state that may be invalidated.
 
-Revised specs and plans are reviewed from packet-generated bundle files before
-the confirmed write.
+Revised specs and plans are reviewed from packet-generated target previews
+before the confirmed write.
 
 When the revision reason or target is unclear, `cadre-revise` returns
 `intent_prompts` instead of generating changes. Agents should ask what changed
@@ -284,7 +301,7 @@ Artifact sync can:
 - Return JSON schemas for spec, plan, style guide, release, journal, and
   evidence artifacts.
 - Validate canonicals and preview generated projections.
-- Return diffs and a review bundle before any confirmed mutation.
+- Return diffs and staged review output before any confirmed mutation.
 
 Common scopes:
 
@@ -295,7 +312,7 @@ Common scopes:
 - `project`: product context, product guidelines, workflow policy, patterns,
   and project-level projections.
 
-Confirmed sync requires the dry-run review bundle first, then `execute:true`
+Confirmed sync requires the staged dry-run preview first, then `execute:true`
 and `approvalComplete:true`. Unmarked generated projections are skipped unless
 the user explicitly approves `force:true`.
 
@@ -329,8 +346,8 @@ Release summarizes shipped or landed tracks, review state, version notes, and
 changelog-ready entries. It does not replace project-specific release policy;
 it provides structured Cadre evidence for it.
 
-Release notes and metadata are reviewed from bundle files before the confirmed
-write or optional tag action.
+Release notes and metadata are reviewed from packet-generated target previews
+before the confirmed write or optional tag action.
 
 ## `cadre-validate`
 

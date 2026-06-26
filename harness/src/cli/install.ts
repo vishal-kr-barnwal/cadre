@@ -116,6 +116,10 @@ function printUninstallPlan(target: Target, paths: { marketplaceRoot?: string; p
   if (!pathsExist(paths) && commands.length === 0) process.stdout.write(`No Cadre ${target} files or native uninstall commands found.\n`);
 }
 
+function missingInstallCommandIsWarning(options: ParsedInstall, target: Target, optional?: boolean): boolean {
+  return optional === true || (options.target === "all" && target === "copilot");
+}
+
 function runInstall(argv: string[], context: CliContext): number {
   const options = parseInstall(argv);
   const runtime = runtimePaths();
@@ -161,7 +165,7 @@ function runInstall(argv: string[], context: CliContext): number {
     for (const command of commands) {
       if (!commandExists(command.command)) {
         const message = `${command.command} command not found; plugin files were written but native registration was skipped.\n`;
-        if (command.optional) process.stderr.write(message);
+        if (missingInstallCommandIsWarning(options, target, command.optional)) process.stderr.write(message);
         else {
           targetOk = false;
           ok = false;

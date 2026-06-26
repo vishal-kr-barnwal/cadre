@@ -26,7 +26,7 @@ import { reviseIntentPrompts } from "./intent-prompts";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
-import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { trackGenerationWarnings } from "./generation-quality";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
@@ -140,10 +140,25 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
       error: approvalError || "Staged approval is required before writing release artifacts",
     };
   }
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
+  if (reviewValidation.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      dry_run: true,
+      review_validation: reviewValidation,
+      error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
+    };
+  }
+  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
   fs.mkdirSync(plan.releaseDir, { recursive: true });
-  fs.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}\n`);
-  writeJson(plan.releaseJson, plan.metadata);
+  if (!reusedReviewFiles.has(path.relative(root, plan.releaseMd))) {
+    fs.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}\n`);
+  }
+  if (!reusedReviewFiles.has(path.relative(root, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
   const indexPatch = patchJsonFile(path.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: plan.version,
@@ -160,6 +175,8 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     workflow: "release",
     subject: `prepare ${plan.version}`,
     before: traceBefore,
+    allowDirty: true,
+    includeDirtyFiles: asStringArray(reviewValidation.files),
     note: {
       release_version: plan.version,
       completed_tracks: plan.completed.map((track) => asOptionalString(track.track_id)).filter((trackId): trackId is string => Boolean(trackId)),
@@ -176,6 +193,8 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     setup_state: indexPatch,
     control_commit: controlCommit,
     git_results: gitResults,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(reviewValidation.files),
   };
 }
 
@@ -304,18 +323,35 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       error: approvalError || "Staged approval is required before revising track artifacts",
     };
   }
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
+  if (reviewValidation.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      review_validation: reviewValidation,
+      error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
+    };
+  }
+  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
   const writeResult = withTrackLock(root, track.track_id, () => {
     const written: string[] = [];
     if (revisedSpec) {
-      writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track)))));
+      if (!reusedReviewFiles.has(path.relative(root, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
+      if (!reusedReviewFiles.has(path.relative(root, track.spec_path))) {
+        fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track)))));
+      }
       written.push(path.relative(root, trackSpecJsonPath(track)));
       written.push(path.relative(root, track.spec_path));
     }
     if (revisedPlan) {
-      writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track)))));
+      if (!reusedReviewFiles.has(path.relative(root, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
+      if (!reusedReviewFiles.has(path.relative(root, track.plan_path))) {
+        fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track)))));
+      }
       written.push(path.relative(root, trackPlanJsonPath(track)));
       written.push(path.relative(root, track.plan_path));
     }
@@ -329,6 +365,8 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       subject: `update ${trackId}`,
       before: traceBefore,
       trackId,
+      allowDirty: true,
+      includeDirtyFiles: asStringArray(reviewValidation.files),
       note: {
         revised_spec: Boolean(revisedSpec),
         revised_plan: Boolean(revisedPlan),
@@ -343,5 +381,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     write: writeResult,
     regen,
     control_commit: controlCommit,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(reviewValidation.files),
   };
 }

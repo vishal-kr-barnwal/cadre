@@ -30,6 +30,26 @@ Agents should not mutate `metadata.json`, `plan.json`, `tracks.json`, generated
 projections, event/message logs, local wisps, parallel state, review verdicts,
 or provider evidence by hand.
 
+## Staged Review Previews
+
+For workflows that require staged approval, Cadre separates review output from
+final execution. Dry-run review writes only the active stage's generated files
+to their intended target paths by default, such as `cadre/product.md` or
+`cadre/tracks/<id>/plan.json`. The response marks this with
+`review_bundle.mode:"target"` and `mutates_worktree:true`, and each file reports
+its `target_path` or `review_path`.
+
+That target preview is intentionally worktree-mutating so humans and agents can
+use ordinary `git diff`. It is not approval. Each stage still requires explicit
+approval, and later-stage files are not written until earlier stages are
+approved.
+
+Final `execute:true` regenerates the payload, verifies the approved target files
+still match the reviewed content, and fails closed when preview output drifted
+after approval. Callers that need non-mutating review can pass
+`reviewOutputMode:"bundle"` or `reviewBundleDir`; bundle responses keep the
+legacy manifest and temp file paths.
+
 ## MCP Runtime
 
 The `cadre-ai` npm package installs a dependency-free stdio MCP server:

@@ -24,7 +24,7 @@ import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
-import { applyStagedApprovalSessionPayload, newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { trackGenerationWarnings } from "./generation-quality";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
@@ -181,9 +181,6 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       ],
     };
   }
-  if (findTrack(root, trackId)) {
-    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
-  }
   if (!stagedApprovalReady(approval)) {
     return {
       ...summary,
@@ -205,6 +202,30 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       error: approvalError || "Staged approval is required before creating track artifacts",
     };
   }
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
+  if (reviewValidation.ok === false) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "staged_review_drift",
+      track_id: trackId,
+      metadata,
+      plan_assist: assist,
+      approval,
+      review_artifacts: stageReviewArtifacts || reviewArtifacts,
+      review_bundle: stageReviewBundle,
+      review_validation: reviewValidation,
+      warnings,
+      error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
+    };
+  }
+  const existingTrack = findTrack(root, trackId);
+  if (existingTrack && asStringArray(reviewValidation.files).length === 0) {
+    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
+  }
+  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
   const dir = path.join(root, "cadre", "tracks", safeName(trackId));
   const learningsEntry: JsonObject = {
@@ -215,14 +236,22 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     recorded_at: utcNow(),
     text: trackLearningsText(String(trackId)),
   };
+  const writeReviewedJson = (relativePath: string, value: JsonObject): void => {
+    if (reusedReviewFiles.has(relativePath)) return;
+    writeJson(path.join(root, relativePath), value);
+  };
+  const writeReviewedText = (relativePath: string, text: string): void => {
+    if (reusedReviewFiles.has(relativePath)) return;
+    fs.writeFileSync(path.join(root, relativePath), text);
+  };
   fs.mkdirSync(dir, { recursive: true });
-  writeJson(path.join(dir, "metadata.json"), metadata);
-  writeJson(path.join(dir, "spec.json"), specJson);
-  writeJson(path.join(dir, "plan.json"), planJson);
-  fs.writeFileSync(path.join(dir, "spec.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
-  fs.writeFileSync(path.join(dir, "plan.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
-  fs.writeFileSync(path.join(dir, "learnings.jsonl"), `${JSON.stringify(learningsEntry)}\n`);
-  fs.writeFileSync(path.join(dir, "learnings.md"), withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
+  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/metadata.json`, metadata);
+  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/spec.json`, specJson);
+  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/plan.json`, planJson);
+  writeReviewedText(`cadre/tracks/${safeName(trackId)}/spec.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
+  writeReviewedText(`cadre/tracks/${safeName(trackId)}/plan.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
+  writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, `${JSON.stringify(learningsEntry)}\n`);
+  writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);
   const event = appendCadreEvent(root, {
     kind: "track_created",
@@ -234,12 +263,14 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "newtrack",
-    subject: `create ${trackId}`,
-    before: traceBefore,
-    trackId: String(trackId),
-    note: {
-      event_id: asOptionalString(asJsonObject(event.event).id) || null,
-      formula_id: asOptionalString(args.formulaId || args.formula_id) || null,
+      subject: `create ${trackId}`,
+      before: traceBefore,
+      trackId: String(trackId),
+      allowDirty: true,
+      includeDirtyFiles: asStringArray(reviewValidation.files),
+      note: {
+        event_id: asOptionalString(asJsonObject(event.event).id) || null,
+        formula_id: asOptionalString(args.formulaId || args.formula_id) || null,
       wisp_id: asOptionalString(args.wispId || args.wisp_id) || null,
     },
   });
@@ -252,6 +283,8 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     regen,
     event,
     control_commit: controlCommit,
+    review_validation: reviewValidation,
+    reused_review_files: asStringArray(reviewValidation.files),
     phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
     approval,
     worktree_plan: worktreePlan(root, { trackId }),

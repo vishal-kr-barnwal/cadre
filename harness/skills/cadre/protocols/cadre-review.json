@@ -31,7 +31,7 @@
     },
     {
       "step": 3,
-      "instruction": "Use the returned track context, review assistance, machine gate, review gate, provider evidence state, and review_bundle manifest/path list."
+      "instruction": "Use the returned track context, review assistance, machine gate, review gate, provider evidence state, and any review_bundle target/review paths; manifest_path may be null in target mode."
     },
     {
       "step": 4,
