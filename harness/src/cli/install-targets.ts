@@ -132,3 +132,25 @@ export function installCommands(target: Target, paths: TargetPaths, scope: Scope
   }
   return [];
 }
+
+export function uninstallCommands(target: Target, paths: TargetPaths, scope: Scope): CommandPlan[] {
+  if (target === "codex") {
+    return [
+      { command: "codex", args: ["plugin", "remove", "cadre@cadre"], optional: true },
+      { command: "codex", args: ["plugin", "marketplace", "remove", PACKAGE_PLUGIN_NAME], optional: true },
+    ];
+  }
+  if (target === "claude") {
+    return [
+      { command: "claude", args: ["plugin", "uninstall", "--scope", scope, "--yes", "cadre@cadre"], optional: true },
+      { command: "claude", args: ["plugin", "marketplace", "remove", "--scope", scope, PACKAGE_PLUGIN_NAME], optional: true },
+    ];
+  }
+  if (target === "copilot" && scope === "user") {
+    return [{ command: "copilot", args: ["plugin", "uninstall", paths.primaryRoot], optional: true }];
+  }
+  if (target === "antigravity" && scope === "user") {
+    return [{ command: "agy", args: ["plugin", "uninstall", PACKAGE_PLUGIN_NAME], optional: true }];
+  }
+  return [];
+}

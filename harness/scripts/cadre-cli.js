@@ -27,6 +27,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/cli/install.ts
+var import_node_fs4 = __toESM(require("node:fs"));
 var import_node_os3 = __toESM(require("node:os"));
 var import_node_path5 = __toESM(require("node:path"));
 
@@ -116,6 +117,27 @@ function installCommands(target, paths, scope) {
   }
   if (target === "antigravity" && scope === "user") {
     return [{ command: "agy", args: ["plugin", "install", paths.primaryRoot], optional: true }];
+  }
+  return [];
+}
+function uninstallCommands(target, paths, scope) {
+  if (target === "codex") {
+    return [
+      { command: "codex", args: ["plugin", "remove", "cadre@cadre"], optional: true },
+      { command: "codex", args: ["plugin", "marketplace", "remove", PACKAGE_PLUGIN_NAME], optional: true }
+    ];
+  }
+  if (target === "claude") {
+    return [
+      { command: "claude", args: ["plugin", "uninstall", "--scope", scope, "--yes", "cadre@cadre"], optional: true },
+      { command: "claude", args: ["plugin", "marketplace", "remove", "--scope", scope, PACKAGE_PLUGIN_NAME], optional: true }
+    ];
+  }
+  if (target === "copilot" && scope === "user") {
+    return [{ command: "copilot", args: ["plugin", "uninstall", paths.primaryRoot], optional: true }];
+  }
+  if (target === "antigravity" && scope === "user") {
+    return [{ command: "agy", args: ["plugin", "uninstall", PACKAGE_PLUGIN_NAME], optional: true }];
   }
   return [];
 }
@@ -597,6 +619,19 @@ function writeTarget(target, paths, runtime, skillShim) {
     writeJson(paths.marketplaceFile, marketplace(target, runtime));
   }
 }
+function removeTarget(paths) {
+  const roots = /* @__PURE__ */ new Set();
+  if (paths.marketplaceRoot) roots.add(paths.marketplaceRoot);
+  for (const pluginRoot of paths.pluginRoots) roots.add(pluginRoot);
+  for (const skillRoot of paths.skillRoots) roots.add(skillRoot);
+  const removed = [];
+  for (const root of roots) {
+    if (!import_node_fs3.default.existsSync(root)) continue;
+    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    removed.push(root);
+  }
+  return removed;
+}
 
 // src/cli/install.ts
 function usage() {
@@ -605,6 +640,7 @@ function usage() {
     "",
     "Usage:",
     "  cadre install [--target codex|claude|copilot|antigravity|all] [--scope user|project|local] [--dry-run] [--check] [--force] [--yes]",
+    "  cadre uninstall [--target codex|claude|copilot|antigravity|all] [--scope user|project|local] [--dry-run] [--yes]",
     "  cadre doctor",
     "  cadre help"
   ].join("\n");
@@ -663,6 +699,30 @@ function printApprovalResult(target, path6, configured) {
 }
 function installedNoun(paths) {
   return paths.pluginRoots.length > 0 ? "plugin" : "skill";
+}
+function pathsExist(paths) {
+  return Boolean(
+    paths.marketplaceRoot && import_node_fs4.default.existsSync(paths.marketplaceRoot) || paths.pluginRoots.some((root) => import_node_fs4.default.existsSync(root)) || paths.skillRoots.some((root) => import_node_fs4.default.existsSync(root))
+  );
+}
+function selectedUninstallTargets(options) {
+  if (options.target !== "auto" && options.target !== "all") return [options.target];
+  if (options.target === "all") return [...INSTALL_TARGETS];
+  return INSTALL_TARGETS.filter(
+    (target) => commandExists(target === "antigravity" ? "agy" : target) || pathsExist(targetPaths(options.cadreHome, target, options.scope))
+  );
+}
+function printUninstallPlan(target, paths, commands) {
+  if (paths.marketplaceRoot) process.stdout.write(`Would remove: ${paths.marketplaceRoot}
+`);
+  for (const pluginRoot of paths.pluginRoots) process.stdout.write(`Would remove: ${pluginRoot}
+`);
+  for (const skillRoot of paths.skillRoots) process.stdout.write(`Would remove: ${skillRoot}
+`);
+  for (const command of commands) process.stdout.write(`Would run: ${command.command} ${command.args.join(" ")}
+`);
+  if (!pathsExist(paths) && commands.length === 0) process.stdout.write(`No Cadre ${target} files or native uninstall commands found.
+`);
 }
 function runInstall(argv, context) {
   const options = parseInstall(argv);
@@ -738,6 +798,43 @@ function runInstall(argv, context) {
   }
   return ok ? 0 : 1;
 }
+function runUninstall(argv) {
+  const options = parseInstall(argv);
+  const targets = selectedUninstallTargets(options);
+  if (targets.length === 0) {
+    process.stderr.write("No Cadre client install found. Pass --target codex|claude|copilot|antigravity to remove a specific generated target.\n");
+    return 1;
+  }
+  for (const target of targets) {
+    const paths = targetPaths(options.cadreHome, target, options.scope);
+    const commands = uninstallCommands(target, paths, options.scope);
+    if (options.dryRun) {
+      printUninstallPlan(target, paths, commands);
+      continue;
+    }
+    for (const command of commands) {
+      if (!commandExists(command.command)) {
+        process.stderr.write(`${command.command} command not found; removing generated Cadre ${target} files only.
+`);
+        continue;
+      }
+      const result = runCommand(command);
+      if (!result.ok) {
+        process.stderr.write(`${command.command} ${command.args.join(" ")} failed; continuing local cleanup: ${result.stderr}
+`);
+      }
+    }
+    const removed = removeTarget(paths);
+    if (removed.length > 0) {
+      process.stdout.write(`Uninstalled Cadre ${target} ${installedNoun(paths)} and removed ${removed.join(", ")}
+`);
+    } else {
+      process.stdout.write(`No generated Cadre ${target} files found to remove.
+`);
+    }
+  }
+  return 0;
+}
 function runDoctor() {
   const runtime = runtimePaths();
   const ping = pingMcp(runtime);
@@ -755,6 +852,7 @@ async function runCli(argv, context) {
   const command = argv[0] || "help";
   let code = 0;
   if (command === "install") code = runInstall(argv.slice(1), context);
+  else if (command === "uninstall" || command === "remove") code = runUninstall(argv.slice(1));
   else if (command === "doctor") code = runDoctor();
   else if (command === "help" || command === "--help" || command === "-h") process.stdout.write(`${usage()}
 `);

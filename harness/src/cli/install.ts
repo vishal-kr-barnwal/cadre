@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { approvalSummary, bootstrapClientApprovals, checkClientApprovals } from "./client-approvals";
@@ -12,8 +13,9 @@ import {
   runtimePaths,
   selectedTargets,
   targetPaths,
+  uninstallCommands,
 } from "./install-targets";
-import { writeTarget } from "./install-writers";
+import { removeTarget, writeTarget } from "./install-writers";
 
 interface CliContext {
   skillShim: string;
@@ -25,6 +27,7 @@ function usage(): string {
     "",
     "Usage:",
     "  cadre install [--target codex|claude|copilot|antigravity|all] [--scope user|project|local] [--dry-run] [--check] [--force] [--yes]",
+    "  cadre uninstall [--target codex|claude|copilot|antigravity|all] [--scope user|project|local] [--dry-run] [--yes]",
     "  cadre doctor",
     "  cadre help",
   ].join("\n");
@@ -86,6 +89,31 @@ function printApprovalResult(target: Target, path: string, configured: boolean):
 
 function installedNoun(paths: { pluginRoots: string[] }): string {
   return paths.pluginRoots.length > 0 ? "plugin" : "skill";
+}
+
+function pathsExist(paths: { marketplaceRoot?: string; pluginRoots: string[]; skillRoots: string[] }): boolean {
+  return Boolean(
+    (paths.marketplaceRoot && fs.existsSync(paths.marketplaceRoot))
+    || paths.pluginRoots.some((root) => fs.existsSync(root))
+    || paths.skillRoots.some((root) => fs.existsSync(root))
+  );
+}
+
+function selectedUninstallTargets(options: ParsedInstall): Target[] {
+  if (options.target !== "auto" && options.target !== "all") return [options.target];
+  if (options.target === "all") return [...INSTALL_TARGETS];
+  return INSTALL_TARGETS.filter((target) =>
+    commandExists(target === "antigravity" ? "agy" : target)
+    || pathsExist(targetPaths(options.cadreHome, target, options.scope))
+  );
+}
+
+function printUninstallPlan(target: Target, paths: { marketplaceRoot?: string; pluginRoots: string[]; skillRoots: string[] }, commands: ReturnType<typeof uninstallCommands>): void {
+  if (paths.marketplaceRoot) process.stdout.write(`Would remove: ${paths.marketplaceRoot}\n`);
+  for (const pluginRoot of paths.pluginRoots) process.stdout.write(`Would remove: ${pluginRoot}\n`);
+  for (const skillRoot of paths.skillRoots) process.stdout.write(`Would remove: ${skillRoot}\n`);
+  for (const command of commands) process.stdout.write(`Would run: ${command.command} ${command.args.join(" ")}\n`);
+  if (!pathsExist(paths) && commands.length === 0) process.stdout.write(`No Cadre ${target} files or native uninstall commands found.\n`);
 }
 
 function runInstall(argv: string[], context: CliContext): number {
@@ -156,6 +184,40 @@ function runInstall(argv: string[], context: CliContext): number {
   return ok ? 0 : 1;
 }
 
+function runUninstall(argv: string[]): number {
+  const options = parseInstall(argv);
+  const targets = selectedUninstallTargets(options);
+  if (targets.length === 0) {
+    process.stderr.write("No Cadre client install found. Pass --target codex|claude|copilot|antigravity to remove a specific generated target.\n");
+    return 1;
+  }
+  for (const target of targets) {
+    const paths = targetPaths(options.cadreHome, target, options.scope);
+    const commands = uninstallCommands(target, paths, options.scope);
+    if (options.dryRun) {
+      printUninstallPlan(target, paths, commands);
+      continue;
+    }
+    for (const command of commands) {
+      if (!commandExists(command.command)) {
+        process.stderr.write(`${command.command} command not found; removing generated Cadre ${target} files only.\n`);
+        continue;
+      }
+      const result = runCommand(command);
+      if (!result.ok) {
+        process.stderr.write(`${command.command} ${command.args.join(" ")} failed; continuing local cleanup: ${result.stderr}\n`);
+      }
+    }
+    const removed = removeTarget(paths);
+    if (removed.length > 0) {
+      process.stdout.write(`Uninstalled Cadre ${target} ${installedNoun(paths)} and removed ${removed.join(", ")}\n`);
+    } else {
+      process.stdout.write(`No generated Cadre ${target} files found to remove.\n`);
+    }
+  }
+  return 0;
+}
+
 function runDoctor(): number {
   const runtime = runtimePaths();
   const ping = pingMcp(runtime);
@@ -173,6 +235,7 @@ export async function runCli(argv: string[], context: CliContext): Promise<void>
   const command = argv[0] || "help";
   let code = 0;
   if (command === "install") code = runInstall(argv.slice(1), context);
+  else if (command === "uninstall" || command === "remove") code = runUninstall(argv.slice(1));
   else if (command === "doctor") code = runDoctor();
   else if (command === "help" || command === "--help" || command === "-h") process.stdout.write(`${usage()}\n`);
   else {

@@ -148,3 +148,17 @@ export function writeTarget(target: Target, paths: TargetPaths, runtime: Runtime
     writeJson(paths.marketplaceFile, marketplace(target, runtime));
   }
 }
+
+export function removeTarget(paths: TargetPaths): string[] {
+  const roots = new Set<string>();
+  if (paths.marketplaceRoot) roots.add(paths.marketplaceRoot);
+  for (const pluginRoot of paths.pluginRoots) roots.add(pluginRoot);
+  for (const skillRoot of paths.skillRoots) roots.add(skillRoot);
+  const removed: string[] = [];
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    fs.rmSync(root, { recursive: true, force: true });
+    removed.push(root);
+  }
+  return removed;
+}

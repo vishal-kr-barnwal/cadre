@@ -33,6 +33,12 @@ npm install -g cadre-ai
 cadre install
 ```
 
+Remove generated client wiring with:
+
+```bash
+cadre uninstall --target codex
+```
+
 Start with the [Cadre documentation](https://cadre-docs.pages.dev/) for
 installation, workflow, architecture, team, polyrepo, and troubleshooting
 details, or run the docs website locally from `docs/`.

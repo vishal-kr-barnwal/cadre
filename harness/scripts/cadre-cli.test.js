@@ -167,6 +167,58 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   assert.match(commandLog, /agy plugin install/);
 });
 
+test("cadre uninstall --dry-run plans native and file cleanup", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-uninstall-dry-"));
+  const bin = path.join(home, "bin");
+  const log = path.join(home, "commands.log");
+  const cadreHome = path.join(home, ".cadre");
+  fs.mkdirSync(bin, { recursive: true });
+  installFakeClient(bin, "codex", log);
+  const pluginRoot = path.join(cadreHome, "marketplaces", "codex", "plugins", "cadre");
+  write(path.join(pluginRoot, "skills", "cadre", "SKILL.md"), "# Cadre\n");
+
+  const result = runCli(["uninstall", "--target", "codex", "--dry-run"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Would remove: .*marketplaces\/codex/);
+  assert.match(result.stdout, /Would run: codex plugin remove cadre@cadre/);
+  assert.match(result.stdout, /Would run: codex plugin marketplace remove cadre/);
+  assert.equal(fs.existsSync(pluginRoot), true);
+  assert.equal(fs.existsSync(log), false);
+});
+
+test("cadre uninstall removes thin plugins and invokes native uninstallers", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-uninstall-"));
+  const bin = path.join(home, "bin");
+  const log = path.join(home, "commands.log");
+  const cadreHome = path.join(home, ".cadre");
+  fs.mkdirSync(bin, { recursive: true });
+  installFakeClient(bin, "codex", log);
+  installFakeClient(bin, "claude", log);
+  installFakeClient(bin, "copilot", log);
+  installFakeClient(bin, "agy", log);
+
+  const install = runCli(["install", "--target", "all", "--scope", "user", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(install.status, 0, install.stderr || install.stdout);
+
+  const uninstall = runCli(["uninstall", "--target", "all", "--scope", "user", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(uninstall.status, 0, uninstall.stderr || uninstall.stdout);
+
+  assert.equal(fs.existsSync(path.join(cadreHome, "marketplaces", "codex")), false);
+  assert.equal(fs.existsSync(path.join(cadreHome, "marketplaces", "claude")), false);
+  assert.equal(fs.existsSync(path.join(cadreHome, "marketplaces", "copilot")), false);
+  assert.equal(fs.existsSync(path.join(home, ".gemini", "antigravity-cli", "plugins", "cadre")), false);
+  assert.equal(fs.existsSync(path.join(home, ".gemini", "config", "plugins", "cadre")), false);
+
+  const commandLog = fs.readFileSync(log, "utf8");
+  assert.match(commandLog, /codex plugin remove cadre@cadre/);
+  assert.match(commandLog, /codex plugin marketplace remove cadre/);
+  assert.match(commandLog, /claude plugin uninstall --scope user --yes cadre@cadre/);
+  assert.match(commandLog, /claude plugin marketplace remove --scope user cadre/);
+  assert.match(commandLog, /copilot plugin uninstall/);
+  assert.match(commandLog, /agy plugin uninstall cadre/);
+});
+
 test("cadre install --check validates existing thin plugin", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-check-"));
   const bin = path.join(home, "bin");
