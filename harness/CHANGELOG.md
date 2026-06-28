@@ -40,6 +40,8 @@ Major review-output and client-install release.
 - Changed documentation, workflow protocols, agent references, and skill
   guidance to teach target previews, nullable bundle manifests, worktree
   mutation during dry-run review, and bundle-mode opt-in.
+- Added copyable public workflow docs templates for canonical
+  `cadre.spec.v1` and `cadre.plan.v1` new-track payloads.
 
 ### Fixed
 

@@ -121,6 +121,131 @@ instead of generating review artifacts.
 Good tracks have testable acceptance criteria, explicit dependencies, clear file
 annotations, and a plan that can be resumed by another session.
 
+### Spec JSON Template
+
+Use canonical snake_case fields when drafting a new-track spec:
+
+```json
+{
+  "version": 1,
+  "schema": "cadre.spec.v1",
+  "kind": "spec",
+  "track_id": "track-id-here",
+  "title": "Short track title",
+  "description": "Describe the goal, user or maintainer value, and problem being solved.",
+  "functional_requirements": [
+    {
+      "heading": "Concrete behavior",
+      "body": "What must change and who benefits."
+    }
+  ],
+  "non_functional_requirements": [
+    {
+      "heading": "Quality or constraint",
+      "body": "Performance, security, reliability, accessibility, compatibility, or maintainability expectation."
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "heading": "Verifiable outcome",
+      "body": "Specific test, command, UI check, or manual verification that proves completion."
+    }
+  ],
+  "out_of_scope": [
+    {
+      "heading": "Boundary",
+      "body": "Related work intentionally excluded from this track."
+    }
+  ]
+}
+```
+
+Required fields are `schema`, `track_id`, `title`, `description`,
+`functional_requirements`, `acceptance_criteria`, and `out_of_scope`.
+
+### Plan JSON Template
+
+Tasks live under `phases[].tasks`, and task dependencies reference
+`task_key` values:
+
+```json
+{
+  "version": 1,
+  "schema": "cadre.plan.v1",
+  "track_id": "track-id-here",
+  "title": "Plan: Short track title",
+  "execution_mode": "sequential",
+  "dependencies": [],
+  "files": [
+    "expected/file.ext"
+  ],
+  "repo": ".",
+  "status": "pending",
+  "phases": [
+    {
+      "phase_index": 1,
+      "title": "Phase 1: Implement behavior",
+      "execution_mode": "sequential",
+      "depends_on": [],
+      "annotations": {},
+      "tasks": [
+        {
+          "task_index": 1,
+          "task_key": "phase1_task1",
+          "title": "Specific implementation task",
+          "status": "pending",
+          "files": [
+            "expected/file.ext"
+          ],
+          "depends_on": [],
+          "repo": ".",
+          "annotations": {},
+          "commit_shas": [],
+          "repo_shas": {}
+        }
+      ]
+    },
+    {
+      "phase_index": 2,
+      "title": "Phase 2: Verify behavior",
+      "execution_mode": "sequential",
+      "depends_on": [
+        "phase1"
+      ],
+      "annotations": {},
+      "tasks": [
+        {
+          "task_index": 1,
+          "task_key": "phase2_task1",
+          "title": "Run tests and record verification",
+          "status": "pending",
+          "files": [],
+          "depends_on": [
+            "phase1_task1"
+          ],
+          "repo": ".",
+          "annotations": {
+            "verification": "Run the relevant test, lint, typecheck, or manual check."
+          },
+          "commit_shas": [],
+          "repo_shas": {}
+        }
+      ]
+    }
+  ],
+  "commit_shas": [],
+  "test_expectations": [
+    {
+      "command": "npm test",
+      "purpose": "Verify changed behavior."
+    }
+  ],
+  "completion_evidence": {}
+}
+```
+
+Required fields are `schema`, `track_id`, and `phases`.
+
 ## `cadre-implement`
 
 Starts or resumes implementation.

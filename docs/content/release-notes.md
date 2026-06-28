@@ -26,6 +26,7 @@ that need a non-mutating preview.
 | Dirty-file safety | Existing dirty target files are protected unless their content already matches the generated preview or the caller intentionally uses `force:true`. |
 | Client installs | `cadre install` supports GitHub Copilot and Google Antigravity alongside Codex and Claude with thin MCP entrypoints. |
 | Optional clients | `cadre install --target all` writes Copilot plugin files even when the Copilot CLI is missing, reports skipped native registration, and continues validating installed native clients. |
+| Docs templates | Workflow docs now include copyable canonical `cadre.spec.v1` and `cadre.plan.v1` JSON templates for drafting new tracks. |
 | Release validation | Harness validation covers target-path preview diffs, staged approval ordering, drift failure, target-preview final execution, and bundle-mode compatibility. |
 
 ### Upgrade Notes
