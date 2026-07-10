@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"revise\"`, the requested `trackId`, revision `reason`, and proposed structured `spec` or `plan` JSON fields. If reason or spec/plan scope is unclear, the packet returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`; load `native-prompts`, ask those questions, and do not invent revised requirements."
+      "instruction": "Load `cadre://project-skills?root=<root>&workflow=revise&trackId=<trackId>` before drafting changes. Apply selected instructions, then call `cadre_workflow` with `workflow: \"revise\"`, the requested `trackId`, revision `reason`, and proposed structured `spec` or `plan` JSON fields. If reason or spec/plan scope is unclear, the packet returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`; load `native-prompts`, ask those questions, and do not invent revised requirements."
     },
     {
       "step": 3,

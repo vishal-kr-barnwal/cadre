@@ -484,8 +484,8 @@ test("MCP root resolution rejects harness skill directories without project stat
       }
     }
     const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
-    assert.ok(fieldsFor("cadre_workflow").length <= 40, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
-    assert.ok(advertisedFieldCount <= 170, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
+    assert.ok(fieldsFor("cadre_workflow").length <= 42, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
+    assert.ok(advertisedFieldCount <= 172, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
     const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
     for (const action of ["setup", "newtrack", "implement", "debug", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
       assert.ok(workflowActions.includes(action), `expected ${action} workflow`);
@@ -505,6 +505,8 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "workflowPolicy"), true);
     assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "providerEvidence"), true);
     assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "mcpCapabilities"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "skillIds"), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "skillMaxChars"), true);
     const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
     const projectActions = projectTool.inputSchema.properties.action.enum;
     assert.ok(projectActions.includes("tech_stack_summary"));
@@ -576,6 +578,8 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.ok(uris.includes("cadre://artifact-sync-plan"));
     assert.ok(uris.includes("cadre://track-spec"));
     assert.ok(uris.includes("cadre://styleguide-selection"));
+    assert.ok(uris.includes("cadre://project-skills"));
+    assert.ok(uris.includes("cadre://project-skill"));
     const templates = await request("resources/templates/list", {});
     const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
     assert.ok(templateUris.includes("cadre://skill-contract"));
@@ -605,6 +609,8 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://artifact-preview").required, ["root", "artifact"]);
     assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
     assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
+    assert.deepEqual(templateByUri.get("cadre://project-skills").required, ["root", "workflow"]);
+    assert.deepEqual(templateByUri.get("cadre://project-skill").required, ["root", "id"]);
 
     const skillContract = await request("resources/read", { uri: "cadre://skill-contract" });
     const skillContractTool = parseTextJson(await request("tools/call", {
@@ -657,6 +663,12 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(freshProjectRoot.root, freshRoot);
     assert.equal(freshProjectRoot.has_cadre, false);
     assert.equal(freshProjectRoot.setup_candidate, true);
+    write(path.join(freshRoot, "cadre", "skills", "setup-rules", "SKILL.md"), `---\nname: setup-rules\ndescription: Setup rules\nworkflows: [setup]\n---\n# Setup rules\n\nPreserve the repository layout.\n`);
+    const setupSkills = JSON.parse((await request("resources/read", {
+      uri: `cadre://project-skills?root=${encodeURIComponent(freshRoot)}&workflow=setup`,
+    })).contents[0].text);
+    assert.equal(setupSkills.data.ok, true);
+    assert.deepEqual(setupSkills.data.selected_ids, ["setup-rules"]);
 
     const freshTechStack = parseTextJson(await request("tools/call", {
       name: "cadre_project",
@@ -714,6 +726,19 @@ test("MCP root resolution rejects harness skill directories without project stat
       arguments: { action: "root", root: path.join(root, "project", "cadre") },
     });
     assert.equal(parseTextJson(valid).data.root, path.join(root, "project"));
+    write(path.join(root, "project", "cadre", "skills", "project-rules", "SKILL.md"), `---\nname: project-rules\ndescription: Project rules\nworkflows: [implement]\nreferences: [references/rules.md]\n---\n# Project rules\n\nApply the local rules.\n`);
+    write(path.join(root, "project", "cadre", "skills", "project-rules", "references", "rules.md"), "Keep changes scoped.\n");
+    const projectSkills = JSON.parse((await request("resources/read", {
+      uri: `cadre://project-skills?root=${encodeURIComponent(path.join(root, "project"))}&workflow=implement`,
+    })).contents[0].text);
+    assert.equal(projectSkills.data.ok, true);
+    assert.deepEqual(projectSkills.data.selected_ids, ["project-rules"]);
+    assert.match(projectSkills.data.selected[0].instructions, /Apply the local rules/);
+    const projectSkill = JSON.parse((await request("resources/read", {
+      uri: `cadre://project-skill?root=${encodeURIComponent(path.join(root, "project"))}&id=project-rules`,
+    })).contents[0].text);
+    assert.equal(projectSkill.data.ok, true);
+    assert.equal(projectSkill.data.skill.references[0].content, "Keep changes scoped.\n");
 
     const integrations = await request("tools/call", {
       name: "cadre_project",

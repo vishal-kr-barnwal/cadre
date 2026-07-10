@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Before the first setup packet, scan repository evidence such as README/docs, manifests, source entrypoints, schemas, tests, and commands. Then call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, and full structured `product`, `productGuidelines`, `workflowPolicy`, and `techStack` JSON fields. Do not pass only summary/goals/repoNotes unless the user explicitly requested minimal setup."
+      "instruction": "Before the first setup packet, load `cadre://project-skills?root=<root>&workflow=setup` when the candidate already contains repository-owned Cadre skills, then apply those instructions while scanning repository evidence such as README/docs, manifests, source entrypoints, schemas, tests, and commands. Then call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, and full structured `product`, `productGuidelines`, `workflowPolicy`, and `techStack` JSON fields. Do not pass only summary/goals/repoNotes unless the user explicitly requested minimal setup."
     },
     {
       "step": 3,

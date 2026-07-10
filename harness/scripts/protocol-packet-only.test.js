@@ -125,7 +125,7 @@ test("Skill shim is minimal and points at MCP contract resources", () => {
     assert.match(text, /cadre:\/\/workflow-protocols/);
     assert.match(text, /cadre:\/\/workflow-protocol\?workflow=<name>/);
     assert.doesNotMatch(text, /Load `skill\.json`/);
-    assert.ok(text.length < 2200, path.relative(root, shim));
+    assert.ok(text.length < 2400, path.relative(root, shim));
   }
   assert.equal(fs.existsSync(path.join(masterSkillDir, "skill.json")), true);
   for (const dir of generatedSkillDirs) {
@@ -326,6 +326,27 @@ test("Action workflow protocols require packet dry-run confirmation", () => {
     }
   }
   assert.deepEqual(failures, []);
+});
+
+test("Workflow contracts teach repository-owned project skills", () => {
+  const skill = readJson(path.join(masterSkillDir, "skill.json"));
+  assert.ok(skill.lazyContext.canonicalArtifacts.includes("cadre/skills/*/SKILL.md"));
+  assert.ok(skill.operatingDefaults.some((rule) => /workflow-selected project skills/.test(rule)));
+  for (const workflow of ["setup", "newtrack", "revise", "handoff", "release"]) {
+    const protocol = readJson(path.join(masterSkillDir, "protocols", `cadre-${workflow}.json`));
+    assert.match(protocol.packetFlow.map((step) => step.instruction).join("\n"), /cadre:\/\/project-skills/);
+  }
+  for (const workflow of ["implement", "review", "ship", "land"]) {
+    const protocol = readJson(path.join(masterSkillDir, "protocols", `cadre-${workflow}.json`));
+    assert.match(protocol.packetFlow.map((step) => step.instruction).join("\n"), /project_skills/);
+  }
+  for (const file of [
+    path.join(publicDocsRoot, "getting-started.md"),
+    path.join(publicDocsRoot, "workflows.md"),
+    path.join(publicDocsRoot, "team-and-polyrepo.md"),
+  ]) {
+    assert.match(fs.readFileSync(file, "utf8"), /cadre\/skills/);
+  }
 });
 
 test("Generated Codex and Claude skill bundles are identical JSON contracts", () => {

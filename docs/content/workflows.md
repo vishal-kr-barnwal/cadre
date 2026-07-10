@@ -81,8 +81,15 @@ What setup writes:
 - optional `cadre/repos.json`
 - optional `cadre/lsp.json`
 - selected `cadre/styleguides/*.json` and generated `cadre/code_styleguides/*.md`
+- matching repository-owned `cadre/skills/*/SKILL.md` instructions when present
 
 Setup has no external task-memory CLI prerequisite.
+
+Every workflow packet reports its `project_skills` selection. Agents load the
+selection resource before drafting setup, new-track, revision, handoff, or
+release payloads, and apply the returned instructions before implementation,
+review, ship, or land actions. Callers can pass `skillIds` for an explicit
+selection and `skillMaxChars` to adjust the bounded inline instruction limit.
 
 ## `cadre-newtrack`
 

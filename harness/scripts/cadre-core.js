@@ -72,6 +72,10 @@ __export(cadre_core_exports, {
   planIntegrity: () => planIntegrity,
   polyrepoPreflight: () => polyrepoPreflight,
   prCiStatus: () => prCiStatus,
+  projectSkillDetail: () => projectSkillDetail,
+  projectSkillDiagnostics: () => projectSkillDiagnostics,
+  projectSkillSelection: () => projectSkillSelection,
+  projectSkillTargetRepos: () => projectSkillTargetRepos,
   providerEvidence: () => providerEvidence,
   readCadreEvents: () => readCadreEvents,
   readCadreMessages: () => readCadreMessages,
@@ -3369,6 +3373,34 @@ function packagedTemplateSource(relativePath) {
   return packagedTemplatePath(normalized);
 }
 
+// src/core/application/runtime/project-skill-response.ts
+function compactProjectSkills(value) {
+  const skills = asJsonObject(value);
+  const selected = Array.isArray(skills.selected) ? skills.selected.map(asJsonObject) : [];
+  return {
+    ok: skills.ok !== false,
+    source: asOptionalString(skills.source) || "cadre/skills",
+    workflow: asOptionalString(skills.workflow) || null,
+    requested: asStringArray(skills.requested),
+    installed: asStringArray(skills.installed),
+    selected_ids: asStringArray(skills.selected_ids),
+    target_repos: asStringArray(skills.target_repos),
+    selected: selected.map((skill) => ({
+      id: asOptionalString(skill.id) || null,
+      name: asOptionalString(skill.name) || null,
+      description: asOptionalString(skill.description) || null,
+      path: asOptionalString(skill.path) || null,
+      reasons: asStringArray(skill.reasons),
+      instructions: asOptionalString(skill.instructions) || "",
+      truncated: skill.truncated === true,
+      references: Array.isArray(skill.references) ? skill.references : [],
+      resource_uri: asOptionalString(skill.resource_uri) || null
+    })),
+    warnings: asStringArray(skills.warnings),
+    errors: asStringArray(skills.errors)
+  };
+}
+
 // src/core/application/runtime/response-compaction.ts
 function jsonByteLength(value) {
   return Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
@@ -3645,6 +3677,7 @@ function compactSetupResponse(result) {
     integrations: compactSetupIntegrations(result.integrations),
     styleGuides,
     styleguide_ids: asStringArray(styleGuides.selected),
+    project_skills: compactProjectSkills(result.project_skills),
     templates: compactTemplateManifest(result.templates),
     techStackSummary: isRecord(result.techStackSummary) ? {
       ok: asJsonObject(result.techStackSummary).ok !== false,
@@ -3782,6 +3815,7 @@ function compactReviewResponse(result) {
     generated_at: result.generated_at,
     track_context: compactTrackContext(result.track_context),
     review_assist: compactReviewAssist(result.review_assist),
+    project_skills: compactProjectSkills(result.project_skills),
     gate: result.gate,
     provider: compactProvider(result.provider),
     required_provider_mcp: result.required_provider_mcp,
@@ -3901,7 +3935,8 @@ function workflowResourceUris(root, workflow, result) {
     `cadre://workspace-health?root=${encodedRoot}`,
     `cadre://mcp-readiness?root=${encodedRoot}`,
     `cadre://team-board?root=${encodedRoot}`,
-    `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`
+    `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
+    `cadre://project-skills?root=${encodedRoot}&workflow=${encodeURIComponent(workflow)}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`
   ];
   if (trackId) {
     uris.push(`cadre://track-context?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
@@ -6767,6 +6802,20 @@ function artifactDefinitions(root, args = {}) {
   for (const id of Array.from(styleIds).sort()) {
     defs.push({ id: `styleguide:${id}`, title: `Style guide: ${id}`, canonical: `cadre/styleguides/${id}.json`, projection: `cadre/code_styleguides/${id}.md`, schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
   }
+  const skillsDir = import_node_path29.default.join(root, "cadre", "skills");
+  for (const id of safeReadDir(skillsDir)) {
+    const skillPath = import_node_path29.default.join(skillsDir, id, "SKILL.md");
+    if (!fileExists(skillPath)) continue;
+    defs.push({
+      id: `skill:${id}`,
+      title: `Project skill: ${id}`,
+      canonical: import_node_path29.default.relative(root, skillPath).split(import_node_path29.default.sep).join("/"),
+      schema: "cadre.project_skill.v1",
+      scope: "skill",
+      sourceFormat: "markdown",
+      projectionFormat: "none"
+    });
+  }
   for (const track of listTracks(root)) {
     defs.push(
       { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: import_node_path29.default.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
@@ -6829,6 +6878,7 @@ function artifactMatches(def, args = {}) {
   if (scope === "project") return def.scope === "project";
   if (scope === "tracks") return def.scope === "track" || def.id === "tracks-index";
   if (scope === "styleguides" || scope === "styleguide") return def.scope === "styleguide";
+  if (scope === "skills" || scope === "skill") return def.scope === "skill";
   if (scope === "release") return def.scope === "release";
   if (scope === "spec") return def.id.endsWith(":spec");
   if (scope === "plan") return def.id.endsWith(":plan");
@@ -7400,7 +7450,10 @@ function renderArtifact(root, def, args = {}) {
   let raw = null;
   let body = "";
   let missingCanonical = false;
-  if (def.sourceFormat === "jsonl") {
+  if (def.sourceFormat === "markdown") {
+    if (!fileExists(canonicalPath)) missingCanonical = true;
+    else body = import_node_fs17.default.readFileSync(canonicalPath, "utf8");
+  } else if (def.sourceFormat === "jsonl") {
     const entries = readJsonl(canonicalPath);
     if (entries.length === 0) missingCanonical = true;
     const title = def.title;
@@ -7419,7 +7472,7 @@ function renderArtifact(root, def, args = {}) {
     missingCanonical = true;
   }
   if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
-  const content = withGeneratedMarker(def.canonical, def.schema, body);
+  const content = def.sourceFormat === "markdown" ? body : withGeneratedMarker(def.canonical, def.schema, body);
   const existing = projectionPath && fileExists(projectionPath) ? import_node_fs17.default.readFileSync(projectionPath, "utf8") : "";
   return {
     ok: true,
@@ -7456,6 +7509,7 @@ function artifactValidate(root, args = {}) {
     const file = import_node_path31.default.join(root, def.canonical);
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
     if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
+    if (def.sourceFormat === "markdown") return { artifact_id: def.id, ok: import_node_fs17.default.readFileSync(file, "utf8").trim().length > 0, canonical_path: def.canonical };
     const value = readJson(file, null);
     return { artifact_id: def.id, ok: Boolean(value), canonical_path: def.canonical };
   });
@@ -11148,9 +11202,398 @@ function parallelWorkflow(root, args = {}) {
   return { ok: false, error: `Unknown parallel action: ${action}` };
 }
 
-// src/core/application/runtime/workflow-basic.ts
+// src/core/domain/project-skill-policy.ts
+var PROJECT_SKILL_WORKFLOWS = /* @__PURE__ */ new Set([
+  "setup",
+  "newtrack",
+  "implement",
+  "debug",
+  "status",
+  "review",
+  "validate",
+  "archive",
+  "handoff",
+  "ship",
+  "land",
+  "release",
+  "revise",
+  "refresh",
+  "flag",
+  "revert",
+  "formula",
+  "artifacts"
+]);
+var PROJECT_SKILL_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+var PROJECT_SKILL_REFERENCE_EXTENSIONS = /* @__PURE__ */ new Set([".json", ".md", ".txt", ".yaml", ".yml"]);
+var PROJECT_SKILL_MAX_FILE_BYTES = 128 * 1024;
+var PROJECT_SKILL_DEFAULT_MAX_CHARS = 6e3;
+var PROJECT_SKILL_MAX_CHARS = 2e4;
+function canonicalWorkflow(value) {
+  if (value === "new_track") return "newtrack";
+  if (value === "setup_assist" || value === "setup_scaffold") return "setup";
+  if (value === "artifact_sync") return "artifacts";
+  return value;
+}
+
+// src/core/infrastructure/runtime/project-skills-store.ts
 var import_node_fs22 = __toESM(require("node:fs"));
 var import_node_path42 = __toESM(require("node:path"));
+function scalar(value) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return String(JSON.parse(trimmed));
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) return trimmed.slice(1, -1).replace(/''/g, "'");
+  return trimmed;
+}
+function inlineList(value) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
+  const body = trimmed.slice(1, -1).trim();
+  if (!body) return [];
+  const values = [];
+  let token = "";
+  let quote = "";
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index] || "";
+    if ((character === '"' || character === "'") && body[index - 1] !== "\\") {
+      quote = quote === character ? "" : quote || character;
+      token += character;
+    } else if (character === "," && !quote) {
+      values.push(scalar(token));
+      token = "";
+    } else {
+      token += character;
+    }
+  }
+  if (quote) return null;
+  values.push(scalar(token));
+  return values.map((entry) => entry.trim()).filter(Boolean);
+}
+function parseSkillFrontmatter(text2) {
+  const normalized = text2.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return { data: {}, content: "", errors: ["SKILL.md must start with YAML frontmatter"] };
+  const end = normalized.indexOf("\n---\n", 4);
+  if (end < 0) return { data: {}, content: "", errors: ["SKILL.md frontmatter is not closed"] };
+  const lines = normalized.slice(4, end).split("\n");
+  const data = {};
+  const errors = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] || "";
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const match = line.match(/^([a-zA-Z][a-zA-Z0-9_-]*):(?:\s*(.*))?$/);
+    if (!match?.[1]) {
+      errors.push(`unsupported frontmatter syntax on line ${index + 1}`);
+      continue;
+    }
+    const key = match[1];
+    const raw = match[2] || "";
+    if (Object.prototype.hasOwnProperty.call(data, key)) errors.push(`duplicate frontmatter field: ${key}`);
+    if (raw === "|" || raw === ">") {
+      const parts = [];
+      while (index + 1 < lines.length && /^\s+/.test(lines[index + 1] || "")) {
+        index += 1;
+        parts.push((lines[index] || "").replace(/^\s{2}/, ""));
+      }
+      data[key] = raw === ">" ? parts.join(" ").trim() : parts.join("\n").trim();
+      continue;
+    }
+    const parsedInline = inlineList(raw);
+    if (parsedInline) {
+      data[key] = parsedInline;
+      continue;
+    }
+    if (!raw.trim()) {
+      const values = [];
+      while (index + 1 < lines.length && /^\s+-\s+/.test(lines[index + 1] || "")) {
+        index += 1;
+        values.push(scalar((lines[index] || "").replace(/^\s+-\s+/, "")));
+      }
+      data[key] = values;
+      continue;
+    }
+    data[key] = scalar(raw);
+  }
+  return { data, content: normalized.slice(end + 5), errors };
+}
+function isInside(parent, candidate) {
+  const relative = import_node_path42.default.relative(parent, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path42.default.isAbsolute(relative);
+}
+function stringList2(value) {
+  if (typeof value === "string") return [value.trim()].filter(Boolean);
+  return asStringArray(value).map((entry) => entry.trim()).filter(Boolean);
+}
+function referenceRecord(skillDir, rawPath) {
+  const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized || import_node_path42.default.isAbsolute(rawPath) || normalized.split("/").includes("..")) {
+    return { error: `reference must stay inside the skill directory: ${rawPath}` };
+  }
+  const extension = import_node_path42.default.extname(normalized).toLowerCase();
+  if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(extension)) {
+    return { error: `unsupported reference type: ${rawPath}` };
+  }
+  const absolutePath = import_node_path42.default.resolve(skillDir, normalized);
+  if (!import_node_fs22.default.existsSync(absolutePath)) return { error: `reference not found: ${rawPath}` };
+  let realSkillDir;
+  let realReference;
+  try {
+    realSkillDir = import_node_fs22.default.realpathSync(skillDir);
+    realReference = import_node_fs22.default.realpathSync(absolutePath);
+  } catch (error) {
+    return { error: `reference cannot be resolved (${rawPath}): ${errorMessage(error)}` };
+  }
+  if (!isInside(realSkillDir, realReference)) return { error: `reference escapes the skill directory: ${rawPath}` };
+  const stat = import_node_fs22.default.statSync(realReference);
+  if (!stat.isFile()) return { error: `reference is not a file: ${rawPath}` };
+  if (stat.size > PROJECT_SKILL_MAX_FILE_BYTES) return { error: `reference exceeds ${PROJECT_SKILL_MAX_FILE_BYTES} bytes: ${rawPath}` };
+  const sample = import_node_fs22.default.readFileSync(realReference).subarray(0, 8192);
+  if (sample.includes(0)) return { error: `binary reference is not supported: ${rawPath}` };
+  return { reference: { path: normalized, absolutePath: realReference, bytes: stat.size } };
+}
+function projectSkillIds(root) {
+  const dir = import_node_path42.default.join(root, "cadre", "skills");
+  try {
+    return import_node_fs22.default.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  } catch {
+    return [];
+  }
+}
+function loadProjectSkill(root, id, knownRepos) {
+  const errors = [];
+  if (!PROJECT_SKILL_ID_PATTERN.test(id)) return { id, ok: false, errors: [`invalid skill id: ${id}`] };
+  const skillDir = import_node_path42.default.join(root, "cadre", "skills", id);
+  const file = import_node_path42.default.join(skillDir, "SKILL.md");
+  if (!import_node_fs22.default.existsSync(file)) return { id, ok: false, errors: [`skill not found: ${id}`] };
+  let realSkillDir;
+  let realFile;
+  let realCatalogDir;
+  try {
+    realCatalogDir = import_node_fs22.default.realpathSync(import_node_path42.default.join(root, "cadre", "skills"));
+    realSkillDir = import_node_fs22.default.realpathSync(skillDir);
+    realFile = import_node_fs22.default.realpathSync(file);
+  } catch (error) {
+    return { id, ok: false, errors: [`skill cannot be resolved: ${errorMessage(error)}`] };
+  }
+  if (!isInside(realCatalogDir, realSkillDir)) return { id, ok: false, errors: [`skill directory escapes cadre/skills: ${id}`] };
+  if (!isInside(realSkillDir, realFile)) return { id, ok: false, errors: [`SKILL.md escapes the skill directory: ${id}`] };
+  const stat = import_node_fs22.default.statSync(realFile);
+  if (!stat.isFile()) return { id, ok: false, errors: [`SKILL.md is not a file: ${id}`] };
+  if (stat.size > PROJECT_SKILL_MAX_FILE_BYTES) {
+    return { id, ok: false, errors: [`SKILL.md exceeds ${PROJECT_SKILL_MAX_FILE_BYTES} bytes: ${id}`] };
+  }
+  const parsed = parseSkillFrontmatter(import_node_fs22.default.readFileSync(realFile, "utf8"));
+  errors.push(...parsed.errors);
+  const data = parsed.data;
+  const name = asOptionalString(data.name)?.trim() || "";
+  const description = asOptionalString(data.description)?.trim() || "";
+  const workflows = Array.from(new Set(stringList2(data.workflows).map(canonicalWorkflow))).sort();
+  const repos = Array.from(new Set(stringList2(data.repos))).sort();
+  const referencePaths = Array.from(new Set(stringList2(data.references))).sort();
+  const instructions = parsed.content.trim();
+  if (!name) errors.push("frontmatter.name is required");
+  if (name && name !== id) errors.push(`frontmatter.name must match directory id ${id}`);
+  if (!description) errors.push("frontmatter.description is required");
+  if (workflows.length === 0) errors.push("frontmatter.workflows must contain at least one workflow or *");
+  for (const workflow of workflows) {
+    if (workflow !== "*" && !PROJECT_SKILL_WORKFLOWS.has(workflow)) errors.push(`unknown workflow: ${workflow}`);
+  }
+  for (const repo of repos) {
+    if (!knownRepos.has(repo)) errors.push(`unknown repo: ${repo}`);
+  }
+  if (!instructions) errors.push("SKILL.md instructions are required");
+  const references = [];
+  for (const referencePath of referencePaths) {
+    const result = referenceRecord(skillDir, referencePath);
+    if (result.error) errors.push(result.error);
+    else if (result.reference) references.push(result.reference);
+  }
+  if (errors.length > 0) return { id, ok: false, errors };
+  return {
+    id,
+    ok: true,
+    errors: [],
+    skill: {
+      id,
+      name,
+      description,
+      workflows,
+      repos,
+      references,
+      instructions,
+      path: import_node_path42.default.relative(root, file).split(import_node_path42.default.sep).join("/"),
+      bytes: stat.size
+    }
+  };
+}
+function projectSkillReferenceContent(reference, maxChars) {
+  const content = import_node_fs22.default.readFileSync(reference.absolutePath, "utf8");
+  return {
+    path: reference.path,
+    bytes: reference.bytes,
+    content: content.slice(0, maxChars),
+    truncated: content.length > maxChars
+  };
+}
+
+// src/core/application/runtime/project-skills.ts
+function requestedSkillIds(value) {
+  const values = typeof value === "string" ? value.split(/[,\s]+/) : asStringArray(value);
+  return Array.from(new Set(values.map((value2) => value2.trim()).filter(Boolean))).sort();
+}
+function boundedMaxChars(value, fallback) {
+  const requested = Number(value);
+  const selected = Number.isFinite(requested) && requested > 0 ? requested : fallback;
+  return Math.max(1e3, Math.min(selected, PROJECT_SKILL_MAX_CHARS));
+}
+function knownRepoNames(root) {
+  const topology = loadTopology(root);
+  const known = /* @__PURE__ */ new Set([".", "root"]);
+  for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
+    const name = asOptionalString(asJsonObject(raw).name);
+    if (name) known.add(name);
+  }
+  return known;
+}
+function reposFromPlan(value) {
+  const plan = asJsonObject(value);
+  const phases = Array.isArray(plan.phases) ? plan.phases.map(asJsonObject) : [];
+  const repos = [];
+  for (const phase of phases) {
+    const tasks = Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : [];
+    for (const task of tasks) {
+      const repo = asOptionalString(task.repo);
+      if (repo) repos.push(repo);
+    }
+  }
+  return repos;
+}
+function projectSkillTargetRepos(root, args = {}) {
+  const topology = loadTopology(root);
+  const explicit = [
+    asOptionalString(args.repo),
+    ...asStringArray(args.repos),
+    ...reposFromPlan(args.plan)
+  ].filter((repo) => Boolean(repo));
+  if (explicit.length > 0) return Array.from(new Set(explicit)).sort();
+  const trackId = asOptionalString(args.trackId || args.track_id);
+  const track = findTrack(root, trackId);
+  if (track) {
+    const repos = parsePlanFile(track.plan_path).tasks.map((task) => task.repo || (topology.polyrepo ? topology.defaultRepo : ".")).filter((repo) => Boolean(repo));
+    if (repos.length > 0) return Array.from(new Set(repos)).sort();
+  }
+  return topology.polyrepo ? [] : ["."];
+}
+function referenceDescriptors(root, skill) {
+  const uri = `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}`;
+  return skill.references.map((reference) => ({
+    path: reference.path,
+    bytes: reference.bytes,
+    resource_uri: uri,
+    content_in_response: false
+  }));
+}
+function selectedSkill(root, skill, reasons, maxChars) {
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    path: skill.path,
+    workflows: skill.workflows,
+    repos: skill.repos,
+    reasons,
+    instructions: skill.instructions.slice(0, maxChars),
+    truncated: skill.instructions.length > maxChars,
+    bytes: skill.bytes,
+    references: referenceDescriptors(root, skill),
+    resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}`
+  };
+}
+function projectSkillSelection(root, workflowValue, args = {}) {
+  const workflow = canonicalWorkflow(workflowValue);
+  const requested = requestedSkillIds(args.skillIds);
+  const requestedSet = new Set(requested);
+  const targetRepos = projectSkillTargetRepos(root, args);
+  const targetSet = new Set(targetRepos);
+  const knownRepos = knownRepoNames(root);
+  const maxChars = boundedMaxChars(args.skillMaxChars, PROJECT_SKILL_DEFAULT_MAX_CHARS);
+  const warnings = [];
+  const errors = [];
+  const selected = [];
+  const installed = projectSkillIds(root);
+  const installedSet = new Set(installed);
+  for (const id of requested) {
+    if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installedSet.has(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
+  }
+  for (const id of installed) {
+    const loaded = loadProjectSkill(root, id, knownRepos);
+    if (!loaded.ok || !loaded.skill) {
+      const messages = loaded.errors.map((error) => `${id}: ${error}`);
+      if (requestedSet.has(id)) errors.push(...messages);
+      else warnings.push(...messages);
+      continue;
+    }
+    const skill = loaded.skill;
+    const explicit = requestedSet.has(id);
+    const workflowMatch = skill.workflows.includes("*") || skill.workflows.includes(workflow);
+    const repoMatch = skill.repos.length === 0 || skill.repos.some((repo) => targetSet.has(repo));
+    if (!explicit && (!workflowMatch || !repoMatch)) continue;
+    const reasons = [
+      explicit ? "explicit" : null,
+      workflowMatch ? "workflow" : null,
+      skill.repos.length === 0 ? "project" : repoMatch ? "repo" : null
+    ].filter((reason) => Boolean(reason));
+    selected.push(selectedSkill(root, skill, reasons, maxChars));
+  }
+  return {
+    ok: errors.length === 0,
+    source: "cadre/skills",
+    workflow,
+    requested,
+    installed,
+    selected,
+    selected_ids: selected.map((skill) => skill.id),
+    target_repos: targetRepos,
+    max_chars_per_skill: maxChars,
+    warnings,
+    errors
+  };
+}
+function projectSkillDetail(root, id, args = {}) {
+  const knownRepos = knownRepoNames(root);
+  const loaded = loadProjectSkill(root, id, knownRepos);
+  if (!loaded.ok || !loaded.skill) return { ok: false, id, source: "cadre/skills", errors: loaded.errors };
+  const skill = loaded.skill;
+  const maxChars = boundedMaxChars(args.skillMaxChars, PROJECT_SKILL_MAX_CHARS);
+  return {
+    ok: true,
+    source: "cadre/skills",
+    skill: {
+      ...selectedSkill(root, skill, ["resource"], maxChars),
+      references: skill.references.map((reference) => projectSkillReferenceContent(reference, maxChars))
+    }
+  };
+}
+function projectSkillDiagnostics(root) {
+  const knownRepos = knownRepoNames(root);
+  const skills = projectSkillIds(root).map((id) => loadProjectSkill(root, id, knownRepos));
+  const invalid = skills.filter((skill) => !skill.ok);
+  return {
+    ok: invalid.length === 0,
+    source: "cadre/skills",
+    count: skills.length,
+    valid: skills.filter((skill) => skill.ok).map((skill) => skill.id),
+    invalid: invalid.map((skill) => ({ id: skill.id, errors: skill.errors }))
+  };
+}
+
+// src/core/application/runtime/workflow-basic.ts
+var import_node_fs23 = __toESM(require("node:fs"));
+var import_node_path43 = __toESM(require("node:path"));
 function workflowImplement(root, args = {}) {
   const prep = implementationPrep(root, {
     ...args,
@@ -11212,7 +11655,8 @@ function workflowValidate(root, args = {}) {
     collisions: collisionScan(root),
     fleet: fleetStatus(root, { includeCollisions: false }),
     branch_sets: branchSets,
-    native_state: nativeStateSummary(root)
+    native_state: nativeStateSummary(root),
+    project_skill_diagnostics: projectSkillDiagnostics(root)
   };
 }
 function workflowArchive(root, args = {}) {
@@ -11255,16 +11699,16 @@ function workflowArchive(root, args = {}) {
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
   const traceBefore = beginTrace(root);
   const archived = [];
-  const archiveRoot = import_node_path42.default.join(root, "cadre", "archive");
-  import_node_fs22.default.mkdirSync(archiveRoot, { recursive: true });
+  const archiveRoot = import_node_path43.default.join(root, "cadre", "archive");
+  import_node_fs23.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target2 = import_node_path42.default.join(archiveRoot, track.track_id);
+    const target2 = import_node_path43.default.join(archiveRoot, track.track_id);
     if (fileExists(target2)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs22.default.renameSync(track.dir, target2);
-    archived.push({ track_id: track.track_id, ok: true, path: import_node_path42.default.relative(root, target2) });
+    import_node_fs23.default.renameSync(track.dir, target2);
+    archived.push({ track_id: track.track_id, ok: true, path: import_node_path43.default.relative(root, target2) });
   }
   const regen = regenIndex(root);
   const controlCommit = commitTrace(root, args, {
@@ -11307,16 +11751,16 @@ function workflowHandoff(root, args = {}) {
     "",
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
-  const handoffPath = import_node_path42.default.join(track.dir, "HANDOFF.md");
+  const handoffPath = import_node_path43.default.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
   const handoffJson = markdownDocJson("handoff", text2, { track_id: trackId });
   const reviewFiles = [
-    jsonReviewFile(import_node_path42.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    jsonReviewFile(import_node_path43.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
     textReviewFile(
-      import_node_path42.default.relative(root, handoffPath),
+      import_node_path43.default.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(import_node_path42.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path42.default.relative(root, handoffJsonPath)))
+      withGeneratedMarker(import_node_path43.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path43.default.relative(root, handoffJsonPath)))
     )
   ];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -11334,7 +11778,7 @@ function workflowHandoff(root, args = {}) {
     ...summary,
     track_id: trackId,
     track_context: context,
-    handoff_path: import_node_path42.default.relative(root, handoffPath),
+    handoff_path: import_node_path43.default.relative(root, handoffPath),
     approval,
     human_review: humanReview,
     review_artifacts: stageReviewArtifacts,
@@ -11375,9 +11819,9 @@ function workflowHandoff(root, args = {}) {
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
   if (args.execute === true) {
-    if (!reusedReviewFiles.has(import_node_path42.default.relative(root, handoffJsonPath))) writeJsonEnsured(handoffJsonPath, handoffJson);
-    if (!reusedReviewFiles.has(import_node_path42.default.relative(root, handoffPath))) {
-      import_node_fs22.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path42.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path42.default.relative(root, handoffJsonPath))));
+    if (!reusedReviewFiles.has(import_node_path43.default.relative(root, handoffJsonPath))) writeJsonEnsured(handoffJsonPath, handoffJson);
+    if (!reusedReviewFiles.has(import_node_path43.default.relative(root, handoffPath))) {
+      import_node_fs23.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path43.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path43.default.relative(root, handoffJsonPath))));
     }
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
@@ -11389,8 +11833,8 @@ function workflowHandoff(root, args = {}) {
     to: recipient,
     subject,
     body: asOptionalString(args.body) || text2,
-    handoff_path: import_node_path42.default.relative(root, handoffPath),
-    handoff_json_path: import_node_path42.default.relative(root, handoffJsonPath)
+    handoff_path: import_node_path43.default.relative(root, handoffPath),
+    handoff_json_path: import_node_path43.default.relative(root, handoffJsonPath)
   });
   const event = appendCadreEvent(root, {
     kind: "handoff_created",
@@ -11398,7 +11842,7 @@ function workflowHandoff(root, args = {}) {
     track_id: trackId,
     to: recipient,
     subject,
-    handoff_path: import_node_path42.default.relative(root, handoffPath)
+    handoff_path: import_node_path43.default.relative(root, handoffPath)
   });
   const controlCommit = commitTrace(root, args, {
     kind: "control",
@@ -11428,8 +11872,8 @@ function workflowHandoff(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-refresh-revert.ts
-var import_node_fs23 = __toESM(require("node:fs"));
-var import_node_path43 = __toESM(require("node:path"));
+var import_node_fs24 = __toESM(require("node:fs"));
+var import_node_path44 = __toESM(require("node:path"));
 function refreshedPatternsText(text2, now = utcNow()) {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
   const next = /Last refreshed:\s*.*/.test(text2) ? text2.replace(/Last refreshed:\s*.*/, stamp) : `${text2.replace(/\n*$/, "\n\n")}${stamp}
@@ -11437,7 +11881,7 @@ function refreshedPatternsText(text2, now = utcNow()) {
   return { text: next, stamp };
 }
 function refreshedPatternsArtifacts(root) {
-  const jsonlPath = import_node_path43.default.join(root, "cadre", "patterns.jsonl");
+  const jsonlPath = import_node_path44.default.join(root, "cadre", "patterns.jsonl");
   if (!fileExists(jsonlPath)) return null;
   const entries = readJsonl(jsonlPath);
   const seed = entries[0] || templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
@@ -11446,11 +11890,11 @@ function refreshedPatternsArtifacts(root) {
   const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
   const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
   const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries));
-  const projectionPath = import_node_path43.default.join(root, "cadre", "patterns.md");
+  const projectionPath = import_node_path44.default.join(root, "cadre", "patterns.md");
   return {
     files: [
-      plainReviewFile(import_node_path43.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
-      textReviewFile(import_node_path43.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
+      plainReviewFile(import_node_path44.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
+      textReviewFile(import_node_path44.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
     ],
     jsonlPath,
     projectionPath,
@@ -11667,12 +12111,12 @@ function workflowRefresh(root, args = {}) {
   if (args.execute === true && refreshPatterns) {
     const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
-      if (!reusedReviewFiles.has(import_node_path43.default.relative(root, refreshed.jsonlPath))) import_node_fs23.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      if (!reusedReviewFiles.has(import_node_path43.default.relative(root, refreshed.projectionPath))) import_node_fs23.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      if (!reusedReviewFiles.has(import_node_path44.default.relative(root, refreshed.jsonlPath))) import_node_fs24.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      if (!reusedReviewFiles.has(import_node_path44.default.relative(root, refreshed.projectionPath))) import_node_fs24.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
       patterns = {
         ok: true,
-        path: import_node_path43.default.relative(root, refreshed.jsonlPath),
-        projection: import_node_path43.default.relative(root, refreshed.projectionPath),
+        path: import_node_path44.default.relative(root, refreshed.jsonlPath),
+        projection: import_node_path44.default.relative(root, refreshed.projectionPath),
         refreshed_at: refreshed.stamp
       };
     }
@@ -11714,17 +12158,17 @@ function workflowRefresh(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-release-revise.ts
-var import_node_fs24 = __toESM(require("node:fs"));
-var import_node_path44 = __toESM(require("node:path"));
+var import_node_fs25 = __toESM(require("node:fs"));
+var import_node_path45 = __toESM(require("node:path"));
 function releaseArtifactPlan(root, args = {}) {
   const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
   const rawArgs3 = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
   const generatedAt = asOptionalString(rawArgs3.generatedAt || rawArgs3.generated_at) || utcNow();
-  const releaseDir = import_node_path44.default.join(root, "cadre", "releases");
+  const releaseDir = import_node_path45.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
-  const releaseMd = import_node_path44.default.join(releaseDir, `${releaseSlug}.md`);
-  const releaseJson = import_node_path44.default.join(releaseDir, `${releaseSlug}.json`);
+  const releaseMd = import_node_path45.default.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = import_node_path45.default.join(releaseDir, `${releaseSlug}.json`);
   const notes = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release - ${version}`,
     "",
@@ -11755,14 +12199,14 @@ function releaseArtifactPlan(root, args = {}) {
 function releaseReviewFiles(root, plan) {
   return [
     textReviewFile(
-      import_node_path44.default.relative(root, plan.releaseMd),
+      import_node_path45.default.relative(root, plan.releaseMd),
       "Release notes",
       "releaseNotes",
       plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `
     ),
     jsonReviewFile(
-      import_node_path44.default.relative(root, plan.releaseJson),
+      import_node_path45.default.relative(root, plan.releaseJson),
       "Release metadata",
       "releaseMetadata",
       plan.metadata
@@ -11794,7 +12238,7 @@ function workflowRelease(root, args = {}) {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
-    release_artifacts: [import_node_path44.default.relative(root, plan.releaseMd), import_node_path44.default.relative(root, plan.releaseJson)],
+    release_artifacts: [import_node_path45.default.relative(root, plan.releaseMd), import_node_path45.default.relative(root, plan.releaseJson)],
     git_actions: plan.gitActions,
     approval,
     human_review: humanReview,
@@ -11835,17 +12279,17 @@ function workflowRelease(root, args = {}) {
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
-  import_node_fs24.default.mkdirSync(plan.releaseDir, { recursive: true });
-  if (!reusedReviewFiles.has(import_node_path44.default.relative(root, plan.releaseMd))) {
-    import_node_fs24.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+  import_node_fs25.default.mkdirSync(plan.releaseDir, { recursive: true });
+  if (!reusedReviewFiles.has(import_node_path45.default.relative(root, plan.releaseMd))) {
+    import_node_fs25.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `);
   }
-  if (!reusedReviewFiles.has(import_node_path44.default.relative(root, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
-  const indexPatch = patchJsonFile(import_node_path44.default.join(root, "cadre", "setup_state.json"), (current) => {
+  if (!reusedReviewFiles.has(import_node_path45.default.relative(root, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
+  const indexPatch = patchJsonFile(import_node_path45.default.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: plan.version,
-      path: import_node_path44.default.relative(root, plan.releaseMd),
-      metadata: import_node_path44.default.relative(root, plan.releaseJson),
+      path: import_node_path45.default.relative(root, plan.releaseMd),
+      metadata: import_node_path45.default.relative(root, plan.releaseJson),
       completed_tracks: plan.completed.length,
       released_at: plan.generatedAt
     };
@@ -11923,21 +12367,21 @@ function workflowRevise(root, args = {}) {
     };
   }
   if (track && revisedSpec) {
-    reviewFiles.push(jsonReviewFile(import_node_path44.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
+    reviewFiles.push(jsonReviewFile(import_node_path45.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
     reviewFiles.push(textReviewFile(
-      import_node_path44.default.relative(root, track.spec_path),
+      import_node_path45.default.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(import_node_path44.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path44.default.relative(root, trackSpecJsonPath(track))))
+      withGeneratedMarker(import_node_path45.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path45.default.relative(root, trackSpecJsonPath(track))))
     ));
   }
   if (track && revisedPlan) {
-    reviewFiles.push(jsonReviewFile(import_node_path44.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
+    reviewFiles.push(jsonReviewFile(import_node_path45.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
     reviewFiles.push(textReviewFile(
-      import_node_path44.default.relative(root, track.plan_path),
+      import_node_path45.default.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(import_node_path44.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path44.default.relative(root, trackPlanJsonPath(track))))
+      withGeneratedMarker(import_node_path45.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path45.default.relative(root, trackPlanJsonPath(track))))
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
@@ -12017,20 +12461,20 @@ function workflowRevise(root, args = {}) {
   const writeResult = withTrackLock(root, track.track_id, () => {
     const written = [];
     if (revisedSpec) {
-      if (!reusedReviewFiles.has(import_node_path44.default.relative(root, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      if (!reusedReviewFiles.has(import_node_path44.default.relative(root, track.spec_path))) {
-        import_node_fs24.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path44.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path44.default.relative(root, trackSpecJsonPath(track)))));
+      if (!reusedReviewFiles.has(import_node_path45.default.relative(root, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
+      if (!reusedReviewFiles.has(import_node_path45.default.relative(root, track.spec_path))) {
+        import_node_fs25.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path45.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path45.default.relative(root, trackSpecJsonPath(track)))));
       }
-      written.push(import_node_path44.default.relative(root, trackSpecJsonPath(track)));
-      written.push(import_node_path44.default.relative(root, track.spec_path));
+      written.push(import_node_path45.default.relative(root, trackSpecJsonPath(track)));
+      written.push(import_node_path45.default.relative(root, track.spec_path));
     }
     if (revisedPlan) {
-      if (!reusedReviewFiles.has(import_node_path44.default.relative(root, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      if (!reusedReviewFiles.has(import_node_path44.default.relative(root, track.plan_path))) {
-        import_node_fs24.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path44.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path44.default.relative(root, trackPlanJsonPath(track)))));
+      if (!reusedReviewFiles.has(import_node_path45.default.relative(root, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
+      if (!reusedReviewFiles.has(import_node_path45.default.relative(root, track.plan_path))) {
+        import_node_fs25.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path45.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path45.default.relative(root, trackPlanJsonPath(track)))));
       }
-      written.push(import_node_path44.default.relative(root, trackPlanJsonPath(track)));
-      written.push(import_node_path44.default.relative(root, track.plan_path));
+      written.push(import_node_path45.default.relative(root, trackPlanJsonPath(track)));
+      written.push(import_node_path45.default.relative(root, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
   });
@@ -12062,8 +12506,8 @@ function workflowRevise(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-setup.ts
-var import_node_fs25 = __toESM(require("node:fs"));
-var import_node_path45 = __toESM(require("node:path"));
+var import_node_fs26 = __toESM(require("node:fs"));
+var import_node_path46 = __toESM(require("node:path"));
 function workflowSetup(root, args = {}) {
   args = applyStagedApprovalSessionPayload(args, "setup");
   const summary = workflowSummary(root, "setup", args);
@@ -12159,7 +12603,7 @@ function workflowSetup(root, args = {}) {
     };
   }
   if (args.execute !== true) return result;
-  const cadreDir = import_node_path45.default.join(root, "cadre");
+  const cadreDir = import_node_path46.default.join(root, "cadre");
   const force = asBoolean(rawArgs3.force, false);
   const missingPayload = [
     ...!isRecord(rawArgs3.product) ? ["product"] : [],
@@ -12206,14 +12650,14 @@ function workflowSetup(root, args = {}) {
       written.push(reviewPath);
       return;
     }
-    const file = import_node_path45.default.join(cadreDir, relativePath);
+    const file = import_node_path46.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path45.default.relative(root, file));
+      skipped.push(import_node_path46.default.relative(root, file));
       return;
     }
-    import_node_fs25.default.mkdirSync(import_node_path45.default.dirname(file), { recursive: true });
-    import_node_fs25.default.writeFileSync(file, text2);
-    written.push(import_node_path45.default.relative(root, file));
+    import_node_fs26.default.mkdirSync(import_node_path46.default.dirname(file), { recursive: true });
+    import_node_fs26.default.writeFileSync(file, text2);
+    written.push(import_node_path46.default.relative(root, file));
   };
   const writeSetupJson = (relativePath, value) => {
     const reviewPath = `cadre/${relativePath}`;
@@ -12221,14 +12665,14 @@ function workflowSetup(root, args = {}) {
       written.push(reviewPath);
       return;
     }
-    const file = import_node_path45.default.join(cadreDir, relativePath);
+    const file = import_node_path46.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path45.default.relative(root, file));
+      skipped.push(import_node_path46.default.relative(root, file));
       return;
     }
-    import_node_fs25.default.mkdirSync(import_node_path45.default.dirname(file), { recursive: true });
+    import_node_fs26.default.mkdirSync(import_node_path46.default.dirname(file), { recursive: true });
     writeJson(file, value);
-    written.push(import_node_path45.default.relative(root, file));
+    written.push(import_node_path46.default.relative(root, file));
   };
   const writeSetupJsonlEntry = (relativePath, value) => {
     const reviewPath = `cadre/${relativePath}`;
@@ -12236,21 +12680,21 @@ function workflowSetup(root, args = {}) {
       written.push(reviewPath);
       return;
     }
-    const file = import_node_path45.default.join(cadreDir, relativePath);
+    const file = import_node_path46.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path45.default.relative(root, file));
+      skipped.push(import_node_path46.default.relative(root, file));
       return;
     }
     appendJsonl(file, value);
-    written.push(import_node_path45.default.relative(root, file));
+    written.push(import_node_path46.default.relative(root, file));
   };
   const writeProjectDoc = (relativePath, kind, value, title) => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
     writeSetupJson(jsonPath, value);
     writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title, `cadre/${jsonPath}`)));
   };
-  import_node_fs25.default.mkdirSync(import_node_path45.default.join(cadreDir, "tracks"), { recursive: true });
-  import_node_fs25.default.mkdirSync(import_node_path45.default.join(cadreDir, "archive"), { recursive: true });
+  import_node_fs26.default.mkdirSync(import_node_path46.default.join(cadreDir, "tracks"), { recursive: true });
+  import_node_fs26.default.mkdirSync(import_node_path46.default.join(cadreDir, "archive"), { recursive: true });
   const nativeState = ensureNativeState(root);
   const nativeIgnorePath = asOptionalString(nativeState.ignore_path);
   if (nativeIgnorePath) written.push(nativeIgnorePath);
@@ -12406,7 +12850,7 @@ function workflowSetup(root, args = {}) {
 }
 
 // src/core/application/runtime/workflow-ship-land.ts
-var import_node_path46 = __toESM(require("node:path"));
+var import_node_path47 = __toESM(require("node:path"));
 function providerActionKind(workflow, provider) {
   if (provider === "gitlab") return workflow === "land" ? "open_merge_request_group" : "open_merge_request";
   return workflow === "land" ? "open_pull_request_group" : "open_pull_request";
@@ -12487,7 +12931,7 @@ function publicationLedger(root, workflow, track, args, data) {
     continuation_token: asOptionalString(data.continuation_token) || null,
     ...data
   };
-  const file = import_node_path46.default.join(root, "cadre", "operations", "publication.jsonl");
+  const file = import_node_path47.default.join(root, "cadre", "operations", "publication.jsonl");
   appendJsonl(file, entry);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
@@ -12495,12 +12939,12 @@ function publicationLedger(root, workflow, track, args, data) {
     subject: `publish ${track.track_id}`,
     before,
     files: [
-      import_node_path46.default.relative(root, file)
+      import_node_path47.default.relative(root, file)
     ],
     trackId: track.track_id,
     note: entry
   });
-  return { ok: controlCommit.ok !== false, path: import_node_path46.default.relative(root, file), entry, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, path: import_node_path47.default.relative(root, file), entry, control_commit: controlCommit };
 }
 function runPublicationGit(root, workflow, track, args, gitActions, providerActions) {
   const remote = asOptionalString(args.remote) || "origin";
@@ -12631,6 +13075,19 @@ function workflowPacket(root, args = {}) {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const markdownError = markdownPayloadError(args);
   if (markdownError) return shapeWorkflowResponse(root, workflow, args, { ...workflowSummary(root, workflow, args), ...markdownError });
+  const projectSkills = projectSkillSelection(root, workflow, args);
+  if (projectSkills.ok === false) {
+    return shapeWorkflowResponse(root, workflow, args, {
+      ...workflowSummary(root, workflow, args),
+      ok: false,
+      phase_state: "blocked",
+      stage: "project_skills",
+      project_skills: projectSkills,
+      error: "Explicit project skill selection failed",
+      warnings: projectSkills.warnings,
+      errors: projectSkills.errors
+    });
+  }
   const mutating = args.execute === true && [
     "newtrack",
     "new_track",
@@ -12818,7 +13275,14 @@ function workflowPacket(root, args = {}) {
         };
     }
   })();
-  return shapeWorkflowResponse(root, workflow, args, result);
+  return shapeWorkflowResponse(root, workflow, args, {
+    ...result,
+    project_skills: projectSkills,
+    warnings: Array.from(/* @__PURE__ */ new Set([
+      ...Array.isArray(result.warnings) ? result.warnings.map(String) : [],
+      ...Array.isArray(projectSkills.warnings) ? projectSkills.warnings.map(String) : []
+    ]))
+  });
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
@@ -12861,6 +13325,10 @@ function workflowPacket(root, args = {}) {
   planIntegrity,
   polyrepoPreflight,
   prCiStatus,
+  projectSkillDetail,
+  projectSkillDiagnostics,
+  projectSkillSelection,
+  projectSkillTargetRepos,
   providerEvidence,
   readCadreEvents,
   readCadreMessages,

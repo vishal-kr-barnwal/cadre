@@ -15,6 +15,11 @@ function write(file, content) {
   fs.writeFileSync(file, content);
 }
 
+function writeProjectSkill(root, id, { description = `${id} guidance`, workflows = ["implement"], repos = [], references = [], instructions = `# ${id}\n\nApply ${id}.` } = {}) {
+  const list = (name, values) => values.length > 0 ? `${name}:\n${values.map((value) => `  - ${JSON.stringify(value)}`).join("\n")}\n` : "";
+  write(path.join(root, "cadre", "skills", id, "SKILL.md"), `---\nname: ${id}\ndescription: ${JSON.stringify(description)}\n${list("workflows", workflows)}${list("repos", repos)}${list("references", references)}---\n${instructions}\n`);
+}
+
 function git(root, args) {
   const result = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -3512,6 +3517,135 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     assert.equal(refresh.phase_state, "executed");
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.jsonl"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project skills select by workflow, expose bounded references, and attach to workflow packets", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-project-skills-test-"));
+  try {
+    const trackId = "skills_20260710";
+    writeTrack(root, trackId, samplePlan(trackId));
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ sync_mode: "local", provider_mode: "local" }));
+    writeProjectSkill(root, "architecture", {
+      workflows: ["implement", "review"],
+      references: ["references/boundaries.md"],
+      instructions: `# Architecture\n\n${"Use the boundary. ".repeat(500)}`,
+    });
+    write(path.join(root, "cadre", "skills", "architecture", "references", "boundaries.md"), "Keep domain code pure.\n");
+    writeProjectSkill(root, "always-on", { workflows: ["*"] });
+
+    const selection = core.projectSkillSelection(root, "implement", { trackId, skillMaxChars: 1000 });
+    assert.equal(selection.ok, true);
+    assert.deepEqual(selection.selected_ids, ["always-on", "architecture"]);
+    assert.deepEqual(selection.target_repos, ["."]);
+    const architecture = selection.selected.find((skill) => skill.id === "architecture");
+    assert.equal(architecture.truncated, true);
+    assert.equal(architecture.instructions.length, 1000);
+    assert.equal(architecture.references[0].content_in_response, false);
+    assert.match(architecture.references[0].resource_uri, /cadre:\/\/project-skill/);
+
+    const detail = core.projectSkillDetail(root, "architecture");
+    assert.equal(detail.ok, true);
+    assert.equal(detail.skill.references[0].content, "Keep domain code pure.\n");
+    const packet = core.workflowPacket(root, { workflow: "implement", trackId });
+    assert.deepEqual(packet.project_skills.selected_ids, ["always-on", "architecture"]);
+    assert.ok(packet.resource_uris.some((uri) => uri.includes("cadre://project-skills")));
+    const catalog = core.artifactCatalog(root, { scope: "skills" });
+    assert.deepEqual(catalog.artifacts.map((artifact) => artifact.id), ["skill:always-on", "skill:architecture"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project skills use the control catalog and target affected polyrepo repos", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-skills-test-"));
+  try {
+    const trackId = "poly_skills_20260710";
+    const plan = samplePlan(trackId);
+    for (const phase of plan.phases) {
+      for (const task of phase.tasks) task.repo = "api";
+    }
+    writeTrack(root, trackId, plan);
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "api",
+      repos: [
+        { name: "api", submodule_path: "repos/api", enabled: true },
+        { name: "web", submodule_path: "repos/web", enabled: true },
+      ],
+    }, null, 2));
+    writeProjectSkill(root, "api-rules", { workflows: ["implement"], repos: ["api"] });
+    writeProjectSkill(root, "web-rules", { workflows: ["implement"], repos: ["web"] });
+    writeProjectSkill(path.join(root, "repos", "api"), "product-only", { workflows: ["implement"] });
+
+    const automatic = core.projectSkillSelection(root, "implement", { trackId });
+    assert.deepEqual(automatic.target_repos, ["api"]);
+    assert.deepEqual(automatic.selected_ids, ["api-rules"]);
+    assert.equal(automatic.installed.includes("product-only"), false);
+
+    const explicit = core.projectSkillSelection(root, "implement", { trackId, skillIds: ["web-rules"] });
+    assert.equal(explicit.ok, true);
+    assert.deepEqual(explicit.selected_ids, ["api-rules", "web-rules"]);
+    assert.ok(explicit.selected.find((skill) => skill.id === "web-rules").reasons.includes("explicit"));
+
+    const noTarget = core.projectSkillSelection(root, "status", {});
+    assert.deepEqual(noTarget.target_repos, []);
+    assert.deepEqual(noTarget.selected_ids, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project skill validation warns for automatic failures and fails explicit selection", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-invalid-skills-test-"));
+  try {
+    write(path.join(root, "cadre", "config.json"), "{}\n");
+    writeProjectSkill(root, "valid-skill", { workflows: ["implement"] });
+    writeProjectSkill(root, "unknown-workflow", { workflows: ["deploy"] });
+    writeProjectSkill(root, "unknown-repo", { workflows: ["implement"], repos: ["missing"] });
+    writeProjectSkill(root, "traversal", { workflows: ["implement"], references: ["../secret.md"] });
+    write(path.join(root, "cadre", "skills", "secret.md"), "secret\n");
+    writeProjectSkill(root, "binary-ref", { workflows: ["implement"], references: ["reference.txt"] });
+    write(path.join(root, "cadre", "skills", "binary-ref", "reference.txt"), Buffer.from([0, 1, 2]));
+    writeProjectSkill(root, "unsupported-ref", { workflows: ["implement"], references: ["script.sh"] });
+    write(path.join(root, "cadre", "skills", "unsupported-ref", "script.sh"), "exit 0\n");
+    writeProjectSkill(root, "large-ref", { workflows: ["implement"], references: ["large.txt"] });
+    write(path.join(root, "cadre", "skills", "large-ref", "large.txt"), "x".repeat(128 * 1024 + 1));
+    writeProjectSkill(root, "symlink-ref", { workflows: ["implement"], references: ["linked.md"] });
+    const outside = path.join(root, "outside.md");
+    write(outside, "outside\n");
+    fs.symlinkSync(outside, path.join(root, "cadre", "skills", "symlink-ref", "linked.md"));
+    writeProjectSkill(root, "large-skill", { workflows: ["implement"], instructions: "x".repeat(128 * 1024 + 1) });
+    const outsideSkill = path.join(root, "outside-skill");
+    writeProjectSkill(outsideSkill, "linked-skill", { workflows: ["implement"] });
+    fs.symlinkSync(path.join(outsideSkill, "cadre", "skills", "linked-skill"), path.join(root, "cadre", "skills", "linked-skill"));
+
+    const automatic = core.projectSkillSelection(root, "implement");
+    assert.equal(automatic.ok, true);
+    assert.deepEqual(automatic.selected_ids, ["valid-skill"]);
+    assert.ok(automatic.warnings.some((warning) => warning.includes("unknown workflow")));
+    assert.ok(automatic.warnings.some((warning) => warning.includes("unknown repo")));
+    assert.ok(automatic.warnings.some((warning) => warning.includes("escapes the skill directory")));
+    assert.ok(automatic.warnings.some((warning) => warning.includes("binary reference")));
+    assert.ok(automatic.warnings.some((warning) => warning.includes("unsupported reference type")));
+    assert.ok(automatic.warnings.some((warning) => warning.includes("exceeds")));
+    assert.equal(core.projectSkillDetail(root, "linked-skill").ok, false);
+
+    const missing = core.projectSkillSelection(root, "implement", { skillIds: "does-not-exist" });
+    assert.equal(missing.ok, false);
+    const invalid = core.projectSkillSelection(root, "implement", { skillIds: ["unknown-workflow"] });
+    assert.equal(invalid.ok, false);
+    const packet = core.workflowPacket(root, { workflow: "status", skillIds: "does-not-exist" });
+    assert.equal(packet.ok, false);
+    assert.equal(packet.stage, "project_skills");
+    const diagnostics = core.projectSkillDiagnostics(root);
+    assert.equal(diagnostics.ok, false);
+    assert.equal(diagnostics.invalid.length, 8);
+    const validate = core.workflowPacket(root, { workflow: "validate" });
+    assert.equal(validate.project_skill_diagnostics.ok, false);
+    assert.equal(validate.project_skills.ok, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

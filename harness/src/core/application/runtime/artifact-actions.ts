@@ -73,7 +73,10 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
   let raw: JsonObject | null = null;
   let body = "";
   let missingCanonical = false;
-  if (def.sourceFormat === "jsonl") {
+  if (def.sourceFormat === "markdown") {
+    if (!fileExists(canonicalPath)) missingCanonical = true;
+    else body = fs.readFileSync(canonicalPath, "utf8");
+  } else if (def.sourceFormat === "jsonl") {
     const entries = readJsonl(canonicalPath);
     if (entries.length === 0) missingCanonical = true;
     const title = def.title;
@@ -92,7 +95,7 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
     missingCanonical = true;
   }
   if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
-  const content = withGeneratedMarker(def.canonical, def.schema, body);
+  const content = def.sourceFormat === "markdown" ? body : withGeneratedMarker(def.canonical, def.schema, body);
   const existing = projectionPath && fileExists(projectionPath) ? fs.readFileSync(projectionPath, "utf8") : "";
   return {
     ok: true,
@@ -132,6 +135,7 @@ export function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResu
     const file = path.join(root, def.canonical);
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
     if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
+    if (def.sourceFormat === "markdown") return { artifact_id: def.id, ok: fs.readFileSync(file, "utf8").trim().length > 0, canonical_path: def.canonical };
     const value = readJson<JsonObject | null>(file, null);
     return { artifact_id: def.id, ok: Boolean(value), canonical_path: def.canonical };
   });

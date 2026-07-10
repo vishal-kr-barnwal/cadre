@@ -108,6 +108,7 @@ Successful setup creates:
 | `cadre/repos.json` | Polyrepo topology when enabled. |
 | `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
 | `cadre/styleguides/*.json` and `cadre/code_styleguides/*.md` | Canonical style guidance plus generated guide projections. |
+| `cadre/skills/<skill-id>/SKILL.md` | Optional repository-authored instructions selected by Cadre workflows. |
 
 Track directories later live under `cadre/tracks/<track_id>/` and contain
 `metadata.json`, canonical `spec.json` and `plan.json`, generated `spec.md` and
@@ -118,6 +119,41 @@ Use `cadre-artifacts sync` when generated projections need refreshing or you
 want a staged target preview showing canonical artifact drift before applying
 confirmed changes.
 Markdown-only projects are not supported by this migration path.
+
+## Add Project Skills
+
+Repository maintainers can add workflow guidance without installing another
+global plugin. Create `cadre/skills/<skill-id>/SKILL.md` and commit it normally:
+
+```markdown
+---
+name: payments-api
+description: Repository rules for payment API work
+workflows: [newtrack, implement, review]
+repos: [api]
+references:
+  - references/contracts.md
+---
+
+# Payment API rules
+
+Preserve idempotency keys and review all public response changes.
+```
+
+`name` must match the directory name. `workflows` accepts Cadre workflow names
+or `*`; `repos` optionally targets names from `cadre/repos.json`. References
+must be text, Markdown, JSON, or YAML files inside the skill directory.
+
+Cadre loads matching instructions before workflow payloads are drafted and
+echoes the selection as `project_skills` in workflow packets. Use
+`cadre://project-skills?root=<root>&workflow=<workflow>` to inspect a selection
+and `cadre://project-skill?root=<root>&id=<skill-id>` to load bounded reference
+content. Invalid automatically discovered skills produce warnings; an invalid
+or missing skill named explicitly through `skillIds` blocks the packet.
+
+Project skills are trusted guidance, not executable automation. Cadre does not
+run scripts from skill bundles and does not search a global project-skill
+catalog.
 
 ## Verify The Runtime
 

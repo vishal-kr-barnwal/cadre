@@ -44,12 +44,14 @@ export interface ResourceQuery extends JsonObject {
   symbol: string | null;
   workflow: string | null;
   name: string | null;
+  id: string | null;
   artifact: string | null;
   scope: string | null;
   jobId: string | null;
   baseRef: string | null;
   headRef: string | null;
   files: string[];
+  repos: string[];
   responseMode: string | null;
   response_mode: string | null;
   detail: boolean | null;

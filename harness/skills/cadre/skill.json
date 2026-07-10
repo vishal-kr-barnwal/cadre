@@ -41,7 +41,8 @@
       "cadre/patterns.jsonl",
       "cadre/tracks.json",
       "track metadata.json/spec.json/plan.json/learnings.jsonl/handoff.json",
-      "cadre/styleguides/*.json"
+      "cadre/styleguides/*.json",
+      "cadre/skills/*/SKILL.md"
     ],
     "humanProjections": [
       "cadre/product.md",
@@ -54,7 +55,8 @@
     "rules": [
       "Do not read Markdown projections as canonical truth",
       "Do not eagerly read the whole cadre/ tree on activation",
-      "Resolve live status from MCP packets and track metadata, not generated indexes"
+      "Resolve live status from MCP packets and track metadata, not generated indexes",
+      "Treat cadre/skills/*/SKILL.md as repository-authored guidance, not generated Markdown projection state"
     ]
   },
   "workflows": {
@@ -167,10 +169,11 @@
     "Setup writes native Cadre event, message, formula, and local wisp state through packets",
     "Shared sync is recommended for teams and packet-owned",
     "Hosted provider evidence must come through official provider MCPs and be written back through Cadre packets",
-    "LSP/code-intelligence packets should be used for repo maps, impact checks, review assistance, diagnostics, test-impact hints, and bounded DAP debugging snapshots"
+    "LSP/code-intelligence packets should be used for repo maps, impact checks, review assistance, diagnostics, test-impact hints, and bounded DAP debugging snapshots",
+    "Load and apply workflow-selected project skills from the active repository; project skills do not consult a global catalog or execute scripts automatically"
   ],
   "forbidden": [
-    "Do not mutate cadre/, provider state, indexes, worker state, event/message state, or merge/cleanup state outside Cadre packets",
+    "Do not mutate packet-owned cadre/ state, provider state, indexes, worker state, event/message state, or merge/cleanup state outside Cadre packets; repository maintainers may author cadre/skills/ through normal reviewed Git changes",
     "Do not use Markdown as alternate input, legacy import source, or runtime state",
     "Do not manually edit generated Markdown projections as workflow state"
   ]

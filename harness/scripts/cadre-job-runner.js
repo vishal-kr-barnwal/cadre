@@ -3299,6 +3299,9 @@ function completeTaskInner(root, args = {}) {
   };
 }
 
+// src/core/domain/project-skill-policy.ts
+var PROJECT_SKILL_MAX_FILE_BYTES = 128 * 1024;
+
 // src/cadre-job-runner.ts
 function readStdin() {
   return new Promise((resolve, reject) => {

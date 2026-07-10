@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"handoff\"` and any `trackId`, recipient, audience, or scope arguments as structured JSON fields."
+      "instruction": "Load `cadre://project-skills?root=<root>&workflow=handoff&trackId=<trackId>` before drafting the handoff. Apply selected instructions, then call `cadre_workflow` with `workflow: \"handoff\"` and any `trackId`, recipient, audience, or scope arguments as structured JSON fields."
     },
     {
       "step": 3,

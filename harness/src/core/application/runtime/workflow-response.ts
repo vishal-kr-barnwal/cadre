@@ -131,6 +131,7 @@ export function workflowResourceUris(root: string, workflow: string, result: Cor
     `cadre://mcp-readiness?root=${encodedRoot}`,
     `cadre://team-board?root=${encodedRoot}`,
     `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
+    `cadre://project-skills?root=${encodedRoot}&workflow=${encodeURIComponent(workflow)}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
   ];
   if (trackId) {
     uris.push(`cadre://track-context?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);

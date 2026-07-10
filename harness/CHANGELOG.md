@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added repository-owned project skills under `cadre/skills/<id>/SKILL.md` with
+  workflow and optional polyrepo targeting, bounded inline instructions, lazy
+  reference resources, explicit `skillIds` selection, validation diagnostics,
+  and workflow-packet integration.
+- Added `cadre://project-skills` and `cadre://project-skill` MCP resources.
+
+### Changed
+
+- Updated Cadre workflow protocols to load applicable project skills before
+  drafting workflow payloads and to apply returned guidance during
+  implementation, review, and publication.
+
 ## [2.0.0] - 2026-06-26
 
 Major review-output and client-install release.

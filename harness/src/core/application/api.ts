@@ -16,6 +16,7 @@ export { prCiStatus, reviewAssist, reviewMachineGate, testCoverage } from "./run
 export { repoMap } from "./runtime/repo-map";
 export { implementationPrep } from "./runtime/repo-resolution";
 export { providerEvidence, recordReview, reviewEvidence, syncControlPlane } from "./runtime/review-records";
+export { projectSkillDetail, projectSkillDiagnostics, projectSkillSelection, projectSkillTargetRepos } from "./runtime/project-skills";
 export { lspSetup } from "./runtime/setup-infrastructure";
 export { availableWork, fleetStatus, liveStatus, teamBoard, teamStatus } from "./runtime/status";
 export { isCadreProjectRoot } from "../infrastructure/runtime/system";

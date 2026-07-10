@@ -72,6 +72,7 @@ maintain Cadre state by hand.
 - `cadre/styleguides/*.json` plus generated `cadre/code_styleguides/*.md`
 - optional `cadre/repos.json` for polyrepo topology
 - optional `cadre/lsp.json` for LSP recommendations
+- repository-authored `cadre/skills/<skill-id>/SKILL.md` bundles when a project adds workflow guidance
 
 Setup also initializes native Cadre state, can configure shared-sync merge
 attributes, and can scaffold hosted CI checks when requested.
@@ -82,6 +83,12 @@ Cadre supports monorepos and polyrepo control repos. For teams, use shared sync
 so ownership, leases, review state, blockers, and available work are visible to
 everyone. Product code publication still happens through ship/land workflows;
 shared sync is for the Cadre control plane.
+
+Project skills are local to the active repository. Maintainers add them through
+normal reviewed Git changes; Cadre selects them by workflow and optional
+polyrepo `repos` targeting, returns bounded instructions in workflow packets,
+and exposes references lazily through MCP resources. Project skills never fall
+back to a global catalog and never execute scripts automatically.
 
 Compact MCP resources provide bounded views for larger teams:
 

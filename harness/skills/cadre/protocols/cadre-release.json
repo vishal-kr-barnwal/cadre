@@ -27,7 +27,7 @@
     },
     {
       "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"release\"` and any requested version, date, or scope arguments as structured JSON fields."
+      "instruction": "Load `cadre://project-skills?root=<root>&workflow=release` before drafting release material. Apply selected instructions, then call `cadre_workflow` with `workflow: \"release\"` and any requested version, date, or scope arguments as structured JSON fields."
     },
     {
       "step": 3,

@@ -252,6 +252,8 @@ export interface RuntimeArgs extends JsonObject {
   manualVerificationEvidence?: JsonObject;
   styleGuideIds?: string[] | string;
   styleGuideMaxChars?: number;
+  skillIds?: string[] | string;
+  skillMaxChars?: number;
   metadata?: TrackMetadata;
   lock?: boolean;
   lockName?: string;
@@ -292,6 +294,7 @@ export interface RuntimeArgs extends JsonObject {
   reviewedShas?: JsonObject;
   reviewed_shas?: JsonObject;
   repo?: string | null | undefined;
+  repos?: string[];
   workingRoot?: string | null | undefined;
   claim?: boolean;
   threshold?: number;

@@ -12,6 +12,12 @@ skill shim, MCP-served contracts, references, templates, tests, and install-time
 thin plugin bundles that users install into Claude Code, OpenAI Codex, GitHub
 Copilot, and Google Antigravity.
 
+The installed Cadre `SKILL.md` is only a global activation shim for the MCP
+runtime. A target repository may separately own `cadre/skills/<id>/SKILL.md`
+bundles. Those project skills are discovered from the active control repo,
+selected by workflow and repo context, and returned through MCP packets and
+resources; they are not installed or resolved globally.
+
 ## Repository Shape
 
 ```text

@@ -17,6 +17,7 @@ import { markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markd
 import { appendCadreEvent, appendCadreMessage, nativeStateSummary } from "./native-state";
 import { trackHandoffJsonPath } from "./plan-docs";
 import { planIntegrity } from "./planning";
+import { projectSkillDiagnostics } from "./project-skills";
 import { regenIndex } from "./project-maintenance";
 import { prCiStatus, reviewAssist } from "./quality-gates";
 import { implementationPrep } from "./repo-resolution";
@@ -98,6 +99,7 @@ export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResu
     fleet: fleetStatus(root, { includeCollisions: false }),
     branch_sets: branchSets,
     native_state: nativeStateSummary(root),
+    project_skill_diagnostics: projectSkillDiagnostics(root),
   };
 }
 

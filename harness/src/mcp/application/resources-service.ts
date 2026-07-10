@@ -55,9 +55,11 @@ function normalizeResourceArgs(resource: ReturnType<typeof parseResourceUri>): R
   if (resource.trackId != null) args.trackId = resource.trackId;
   if (resource.symbol != null) args.symbol = resource.symbol;
   if (resource.workflow != null) args.workflow = resource.workflow;
+  if (resource.id != null) args.id = resource.id;
   if (resource.artifact != null) args.artifact = resource.artifact;
   if (resource.scope != null) args.scope = resource.scope;
   if (resource.jobId != null) args.jobId = resource.jobId;
+  if (resource.repos.length > 0) args.repos = resource.repos;
   if (resource.baseRef != null) args.baseRef = resource.baseRef;
   if (resource.headRef != null) args.headRef = resource.headRef;
   const responseMode = resource.responseMode ?? resource.response_mode;
@@ -148,7 +150,11 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
   else if (resource.base === "cadre://agent-reference") value = agentReference(resource.name);
   else if (resource.base === "cadre://template-inventory") value = templateInventory();
   else {
-    const root = deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
+    const setupSafeProjectSkillResource = resource.base === "cadre://project-skills" || resource.base === "cadre://project-skill";
+    const candidate = setupSafeProjectSkillResource && resource.root
+      ? deps.rootResolver.rootFromCandidate(resource.root)
+      : null;
+    const root = candidate?.root || deps.rootResolver.requireCadreRoot(resource.root ? { root: resource.root } : {});
     if (resource.base === "cadre://team-board") value = deps.core.teamBoard(root);
   else if (resource.base === "cadre://fleet-board") value = deps.core.fleetStatus(root);
   else if (resource.base === "cadre://workspace-health") value = workspaceHealth(root, normalizedResource);
@@ -255,6 +261,14 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
       files: resource.files,
       catalog: deps.core.artifactCatalog(root, { ...normalizedResource, scope: "styleguides" }),
     };
+  }
+  else if (resource.base === "cadre://project-skills") {
+    value = deps.core.projectSkillSelection(root, resource.workflow || "", normalizedResource);
+  }
+  else if (resource.base === "cadre://project-skill") {
+    value = resource.id
+      ? deps.core.projectSkillDetail(root, resource.id, normalizedResource)
+      : { ok: false, error: "id is required" };
   }
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   }

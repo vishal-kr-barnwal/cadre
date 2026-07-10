@@ -21,6 +21,7 @@ import { selectedTrackId } from "./status";
 import { humanReviewConfirmed } from "./tech-stack";
 import { trackContext } from "./track-context";
 import { metadataPatch, setTrackStatus } from "./track-mutations";
+import { projectSkillSelection } from "./project-skills";
 import { workflowArchive, workflowHandoff, workflowImplement, workflowReview, workflowStatus, workflowValidate } from "./workflow-basic";
 import { workflowNewTrack } from "./workflow-new-track";
 import { workflowRefresh, workflowRevert } from "./workflow-refresh-revert";
@@ -34,6 +35,19 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const markdownError = markdownPayloadError(args);
   if (markdownError) return shapeWorkflowResponse(root, workflow, args, { ...workflowSummary(root, workflow, args), ...markdownError });
+  const projectSkills = projectSkillSelection(root, workflow, args);
+  if (projectSkills.ok === false) {
+    return shapeWorkflowResponse(root, workflow, args, {
+      ...workflowSummary(root, workflow, args),
+      ok: false,
+      phase_state: "blocked",
+      stage: "project_skills",
+      project_skills: projectSkills,
+      error: "Explicit project skill selection failed",
+      warnings: projectSkills.warnings,
+      errors: projectSkills.errors,
+    });
+  }
   const mutating = args.execute === true && [
     "newtrack",
     "new_track",
@@ -221,5 +235,12 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
       };
   }
   })();
-  return shapeWorkflowResponse(root, workflow, args, result);
+  return shapeWorkflowResponse(root, workflow, args, {
+    ...result,
+    project_skills: projectSkills,
+    warnings: Array.from(new Set([
+      ...(Array.isArray(result.warnings) ? result.warnings.map(String) : []),
+      ...(Array.isArray(projectSkills.warnings) ? projectSkills.warnings.map(String) : []),
+    ])),
+  });
 }

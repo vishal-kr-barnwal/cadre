@@ -40,8 +40,8 @@ export interface ArtifactDefinition {
   canonical: string;
   projection?: string;
   schema: string;
-  scope: "project" | "track" | "styleguide" | "release" | "external";
-  sourceFormat: "json" | "jsonl";
+  scope: "project" | "track" | "styleguide" | "skill" | "release" | "external";
+  sourceFormat: "json" | "jsonl" | "markdown";
   projectionFormat?: "markdown" | "yaml" | "none";
 }
 

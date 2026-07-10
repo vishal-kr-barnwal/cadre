@@ -244,6 +244,20 @@ export function artifactDefinitions(root: string, args: RuntimeArgs = {}): Artif
   for (const id of Array.from(styleIds).sort()) {
     defs.push({ id: `styleguide:${id}`, title: `Style guide: ${id}`, canonical: `cadre/styleguides/${id}.json`, projection: `cadre/code_styleguides/${id}.md`, schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
   }
+  const skillsDir = path.join(root, "cadre", "skills");
+  for (const id of safeReadDir(skillsDir)) {
+    const skillPath = path.join(skillsDir, id, "SKILL.md");
+    if (!fileExists(skillPath)) continue;
+    defs.push({
+      id: `skill:${id}`,
+      title: `Project skill: ${id}`,
+      canonical: path.relative(root, skillPath).split(path.sep).join("/"),
+      schema: "cadre.project_skill.v1",
+      scope: "skill",
+      sourceFormat: "markdown",
+      projectionFormat: "none",
+    });
+  }
   for (const track of listTracks(root)) {
     defs.push(
       { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: path.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
@@ -307,6 +321,7 @@ export function artifactMatches(def: ArtifactDefinition, args: RuntimeArgs = {})
   if (scope === "project") return def.scope === "project";
   if (scope === "tracks") return def.scope === "track" || def.id === "tracks-index";
   if (scope === "styleguides" || scope === "styleguide") return def.scope === "styleguide";
+  if (scope === "skills" || scope === "skill") return def.scope === "skill";
   if (scope === "release") return def.scope === "release";
   if (scope === "spec") return def.id.endsWith(":spec");
   if (scope === "plan") return def.id.endsWith(":plan");

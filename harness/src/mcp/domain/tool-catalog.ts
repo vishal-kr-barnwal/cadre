@@ -100,6 +100,8 @@ const PROPS: Record<string, JsonObject> = {
   completeTask: { type: "boolean" },
   styleGuideIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
   styleGuideMaxChars: { type: "number" },
+  skillIds: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
+  skillMaxChars: { type: "number" },
   techStack: { type: "object" },
   product: { type: "object" },
   productGuidelines: { type: "object" },
@@ -258,7 +260,7 @@ export const TOOLS = [
     description: "Packet-only Cadre workflow coordinator for setup, newtrack, implement, debug, status, review, validate, archive, handoff, ship, land, release, refresh, flag, revert, revise, formula, and artifact sync flows.",
     workflowEnum: WORKFLOWS,
     actionEnum: [...WORKFLOWS, ...FORMULA_ACTIONS],
-    fields: ["workflow", "action", "id", "formulaId", "variables", "wispId", "stepId", "stepIndex", "execute", "approvalStage", "approvalSessionId", "approvedStages", "approvalComplete", "trackId", "detail", "providerMode", "providerEvidence", "mcpCapabilities", "product", "productGuidelines", "workflowPolicy", "techStack", "spec", "plan", "description", "artifact", "scope", "status", "summary", "evidence", "config", "configurationId", "configuration", "breakpoints", "files", "testCommand", "async", "timeoutMs"],
+    fields: ["workflow", "action", "id", "formulaId", "variables", "wispId", "stepId", "stepIndex", "execute", "approvalStage", "approvalSessionId", "approvedStages", "approvalComplete", "trackId", "detail", "providerMode", "providerEvidence", "mcpCapabilities", "product", "productGuidelines", "workflowPolicy", "techStack", "spec", "plan", "description", "artifact", "scope", "status", "summary", "evidence", "config", "configurationId", "configuration", "breakpoints", "files", "skillIds", "skillMaxChars", "testCommand", "async", "timeoutMs"],
     required: ["root"],
     anyOf: [{ required: ["workflow"] }, { required: ["action"] }],
     allOf: [{

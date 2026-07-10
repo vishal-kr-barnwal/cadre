@@ -2,6 +2,7 @@ import type { JsonObject } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
 
 import { CoreResult } from "./contracts";
+import { compactProjectSkills } from "./project-skill-response";
 
 function jsonByteLength(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
@@ -300,6 +301,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
     integrations: compactSetupIntegrations(result.integrations),
     styleGuides,
     styleguide_ids: asStringArray(styleGuides.selected),
+    project_skills: compactProjectSkills(result.project_skills),
     templates: compactTemplateManifest(result.templates),
     techStackSummary: isRecord(result.techStackSummary)
       ? {
@@ -453,6 +455,7 @@ function compactReviewResponse(result: CoreResult): CoreResult {
     generated_at: result.generated_at,
     track_context: compactTrackContext(result.track_context),
     review_assist: compactReviewAssist(result.review_assist),
+    project_skills: compactProjectSkills(result.project_skills),
     gate: result.gate,
     provider: compactProvider(result.provider),
     required_provider_mcp: result.required_provider_mcp,
