@@ -550,6 +550,21 @@ test("Target-project CI templates do not bundle harness-only checks", () => {
   }
 });
 
+test("Monorepo CI templates slurp metadata streams before rebuilding the track index", () => {
+  const targetTemplates = [
+    path.join(root, "templates", "ci", "cadre-monorepo-check.github.yml"),
+    path.join(root, "templates", "ci", "cadre-monorepo-check.gitlab.yml"),
+  ];
+  for (const file of targetTemplates) {
+    const text = fs.readFileSync(file, "utf8");
+    assert.match(
+      text,
+      /jq -sS '\{[\s\S]*?tracks: \(sort_by\(\.track_id\)\)[\s\S]*?\}' "\$entries" > "\$expected"/,
+      `${path.relative(root, file)} must slurp the newline-delimited metadata objects into an array`,
+    );
+  }
+});
+
 test("Hidden local skill discovery dirs contain only Cadre output", () => {
   for (const dir of [path.join(generatedRoot, ".agents", "skills"), path.join(generatedRoot, ".claude", "skills")]) {
     const entries = fs.readdirSync(dir, { withFileTypes: true })

@@ -36,7 +36,7 @@ cadre-monorepo-check:
           done
         fi
         jq -S 'del(.generated_at)' cadre/tracks.json > "$actual"
-        jq -S '{
+        jq -sS '{
           version: 1,
           schema: "cadre.tracks_index.v1",
           counts: (reduce .[] as $t ({new:0,in_progress:0,completed:0,blocked:0,skipped:0}; .[$t.status] = ((.[$t.status] // 0) + 1))),
