@@ -3390,6 +3390,8 @@ function compactProjectSkills(value) {
     target_files: asStringArray(skills.target_files),
     inline_rule_chars: Number(skills.inline_rule_chars || 0),
     inline_rule_budget: Number(skills.inline_rule_budget || 2400),
+    ...asOptionalString(skills.inline_rule_budget_source) && skills.inline_rule_budget_source !== "default" ? { inline_rule_budget_source: skills.inline_rule_budget_source } : {},
+    ...typeof skills.inline_rule_budget_requested === "number" ? { inline_rule_budget_requested: skills.inline_rule_budget_requested } : {},
     decision: skills.decision || null,
     selected: selected.map((skill) => ({
       id: asOptionalString(skill.id) || null,
@@ -11230,6 +11232,8 @@ var PROJECT_SKILL_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 var PROJECT_SKILL_REFERENCE_EXTENSIONS = /* @__PURE__ */ new Set([".json", ".md", ".txt", ".yaml", ".yml"]);
 var PROJECT_SKILL_MAX_FILE_BYTES = 128 * 1024;
 var PROJECT_SKILL_INLINE_RULE_BUDGET = 2400;
+var PROJECT_SKILL_MIN_INLINE_RULE_BUDGET = 1e3;
+var PROJECT_SKILL_MAX_INLINE_RULE_BUDGET = 2e4;
 function canonicalWorkflow(value) {
   if (value === "new_track") return "newtrack";
   if (value === "setup_assist" || value === "setup_scaffold") return "setup";
@@ -11368,6 +11372,30 @@ function requestedSkillIds(value) {
   const values = typeof value === "string" ? value.split(/[,\s]+/) : asStringArray(value);
   return Array.from(new Set(values.map((entry) => entry.trim()).filter(Boolean))).sort();
 }
+function inlineRuleBudget(root2, args) {
+  const config = asJsonObject(loadTopology(root2).config.project_skills);
+  const argumentValue = args.skillRuleBudget ?? args.skill_rule_budget;
+  const configuredValue = config.inline_rule_budget;
+  const source = argumentValue !== void 0 ? "argument" : configuredValue !== void 0 ? "config" : "default";
+  const raw = argumentValue ?? configuredValue;
+  if (raw === void 0) return { value: PROJECT_SKILL_INLINE_RULE_BUDGET, source, requested: null, warnings: [] };
+  const requested = Number(raw);
+  if (!Number.isFinite(requested) || requested <= 0) {
+    return {
+      value: PROJECT_SKILL_INLINE_RULE_BUDGET,
+      source,
+      requested: Number.isFinite(requested) ? requested : null,
+      warnings: [`Invalid project skill inline rule budget from ${source}; using default ${PROJECT_SKILL_INLINE_RULE_BUDGET}`]
+    };
+  }
+  const value = Math.max(PROJECT_SKILL_MIN_INLINE_RULE_BUDGET, Math.min(Math.floor(requested), PROJECT_SKILL_MAX_INLINE_RULE_BUDGET));
+  return {
+    value,
+    source,
+    requested,
+    warnings: value === requested ? [] : [`Project skill inline rule budget from ${source} was clamped to ${value}`]
+  };
+}
 function knownRepoNames(root2) {
   const topology = loadTopology(root2);
   const known = /* @__PURE__ */ new Set([".", "root"]);
@@ -11429,10 +11457,11 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
   const requestedSet = new Set(requested);
   const repos = projectSkillTargetRepos(root2, args);
   const files = targetFiles(root2, args);
+  const budget = inlineRuleBudget(root2, args);
   const knownRepos = knownRepoNames(root2);
   const installed = projectSkillIds(root2);
   const errors = [];
-  const warnings = [];
+  const warnings = [...budget.warnings];
   const selected = [];
   let inlineChars = 0;
   for (const id of requested) if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installed.includes(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
@@ -11451,8 +11480,8 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
     const rules = [];
     for (const rule of applicable) {
       const cost = rule.text.length;
-      if (inlineChars + cost > PROJECT_SKILL_INLINE_RULE_BUDGET) {
-        const message = `${id}/${rule.id} exceeds the ${PROJECT_SKILL_INLINE_RULE_BUDGET}-character inline rule budget`;
+      if (inlineChars + cost > budget.value) {
+        const message = `${id}/${rule.id} exceeds the ${budget.value}-character inline rule budget`;
         if (rule.required) errors.push(message);
         else warnings.push(`${message}; load the targeted project-skill resource if needed`);
         continue;
@@ -11483,7 +11512,9 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
     target_repos: repos,
     target_files: files,
     inline_rule_chars: inlineChars,
-    inline_rule_budget: PROJECT_SKILL_INLINE_RULE_BUDGET,
+    inline_rule_budget: budget.value,
+    inline_rule_budget_source: budget.source,
+    inline_rule_budget_requested: budget.requested,
     decision: errors.length > 0 ? { kind: "narrow_scope", required: ["repos", "files"], reason: "Required project-skill rules exceed the inline context budget or a requested skill is invalid." } : null,
     warnings,
     errors

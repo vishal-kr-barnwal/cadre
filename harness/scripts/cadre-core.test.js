@@ -3585,6 +3585,33 @@ test("project skills block instead of truncating required rules over the inline 
   }
 });
 
+test("project skill inline rule budget supports config, call overrides, and guarded caps", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-project-skill-config-budget-test-"));
+  try {
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ project_skills: { inline_rule_budget: 3000 } }, null, 2));
+    writeProjectSkill(root, "large-rules", { instructions: "x".repeat(2800) });
+
+    const configured = core.projectSkillSelection(root, "implement");
+    assert.equal(configured.ok, true);
+    assert.equal(configured.inline_rule_budget, 3000);
+    assert.equal(configured.inline_rule_budget_source, "config");
+    assert.equal(configured.inline_rule_budget_requested, 3000);
+
+    const overridden = core.projectSkillSelection(root, "implement", { skillRuleBudget: 2000 });
+    assert.equal(overridden.ok, false);
+    assert.equal(overridden.inline_rule_budget, 2000);
+    assert.equal(overridden.inline_rule_budget_source, "argument");
+
+    const capped = core.projectSkillSelection(root, "implement", { skillRuleBudget: 99999 });
+    assert.equal(capped.ok, true);
+    assert.equal(capped.inline_rule_budget, 20000);
+    assert.equal(capped.inline_rule_budget_requested, 99999);
+    assert.ok(capped.warnings.some((warning) => warning.includes("clamped")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("project skills match workflow and file selectors before exposing conditional references", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-project-skill-selector-test-"));
   try {

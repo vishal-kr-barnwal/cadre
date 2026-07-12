@@ -57,6 +57,7 @@ function normalizeResourceArgs(resource: ReturnType<typeof parseResourceUri>): R
   if (resource.workflow != null) args.workflow = resource.workflow;
   if (resource.id != null) args.id = resource.id;
   if (resource.reference != null) args.reference = resource.reference;
+  if (resource.skillRuleBudget != null) args.skillRuleBudget = resource.skillRuleBudget;
   if (resource.artifact != null) args.artifact = resource.artifact;
   if (resource.scope != null) args.scope = resource.scope;
   if (resource.jobId != null) args.jobId = resource.jobId;

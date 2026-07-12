@@ -15,6 +15,12 @@ export function compactProjectSkills(value: unknown): JsonObject {
     target_files: asStringArray(skills.target_files),
     inline_rule_chars: Number(skills.inline_rule_chars || 0),
     inline_rule_budget: Number(skills.inline_rule_budget || 2400),
+    ...(asOptionalString(skills.inline_rule_budget_source) && skills.inline_rule_budget_source !== "default"
+      ? { inline_rule_budget_source: skills.inline_rule_budget_source }
+      : {}),
+    ...(typeof skills.inline_rule_budget_requested === "number"
+      ? { inline_rule_budget_requested: skills.inline_rule_budget_requested }
+      : {}),
     decision: skills.decision || null,
     selected: selected.map((skill) => ({
       id: asOptionalString(skill.id) || null,

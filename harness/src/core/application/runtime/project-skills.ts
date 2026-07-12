@@ -1,6 +1,6 @@
 import type { JsonObject, RuntimeArgs } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
-import { PROJECT_SKILL_ID_PATTERN, PROJECT_SKILL_INLINE_RULE_BUDGET, canonicalWorkflow } from "../../domain/project-skill-policy";
+import { PROJECT_SKILL_ID_PATTERN, PROJECT_SKILL_INLINE_RULE_BUDGET, PROJECT_SKILL_MAX_INLINE_RULE_BUDGET, PROJECT_SKILL_MIN_INLINE_RULE_BUDGET, canonicalWorkflow } from "../../domain/project-skill-policy";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { loadProjectSkill, projectSkillIds, projectSkillReferenceContent, type ProjectSkillRecord, type ProjectSkillRule } from "../../infrastructure/runtime/project-skills-store";
 import type { CoreResult } from "./contracts";
@@ -10,6 +10,31 @@ import { parsePlanFile } from "./track-schedule";
 function requestedSkillIds(value: unknown): string[] {
   const values = typeof value === "string" ? value.split(/[,\s]+/) : asStringArray(value);
   return Array.from(new Set(values.map((entry) => entry.trim()).filter(Boolean))).sort();
+}
+
+function inlineRuleBudget(root: string, args: RuntimeArgs): { value: number; source: "argument" | "config" | "default"; requested: number | null; warnings: string[] } {
+  const config = asJsonObject(loadTopology(root).config.project_skills);
+  const argumentValue = args.skillRuleBudget ?? args.skill_rule_budget;
+  const configuredValue = config.inline_rule_budget;
+  const source = argumentValue !== undefined ? "argument" : configuredValue !== undefined ? "config" : "default";
+  const raw = argumentValue ?? configuredValue;
+  if (raw === undefined) return { value: PROJECT_SKILL_INLINE_RULE_BUDGET, source, requested: null, warnings: [] };
+  const requested = Number(raw);
+  if (!Number.isFinite(requested) || requested <= 0) {
+    return {
+      value: PROJECT_SKILL_INLINE_RULE_BUDGET,
+      source,
+      requested: Number.isFinite(requested) ? requested : null,
+      warnings: [`Invalid project skill inline rule budget from ${source}; using default ${PROJECT_SKILL_INLINE_RULE_BUDGET}`],
+    };
+  }
+  const value = Math.max(PROJECT_SKILL_MIN_INLINE_RULE_BUDGET, Math.min(Math.floor(requested), PROJECT_SKILL_MAX_INLINE_RULE_BUDGET));
+  return {
+    value,
+    source,
+    requested,
+    warnings: value === requested ? [] : [`Project skill inline rule budget from ${source} was clamped to ${value}`],
+  };
 }
 
 function knownRepoNames(root: string): Set<string> {
@@ -86,10 +111,11 @@ export function projectSkillSelection(root: string, workflowValue: string, args:
   const requestedSet = new Set(requested);
   const repos = projectSkillTargetRepos(root, args);
   const files = targetFiles(root, args);
+  const budget = inlineRuleBudget(root, args);
   const knownRepos = knownRepoNames(root);
   const installed = projectSkillIds(root);
   const errors: string[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...budget.warnings];
   const selected: JsonObject[] = [];
   let inlineChars = 0;
   for (const id of requested) if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installed.includes(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
@@ -107,8 +133,8 @@ export function projectSkillSelection(root: string, workflowValue: string, args:
     const rules: JsonObject[] = [];
     for (const rule of applicable) {
       const cost = rule.text.length;
-      if (inlineChars + cost > PROJECT_SKILL_INLINE_RULE_BUDGET) {
-        const message = `${id}/${rule.id} exceeds the ${PROJECT_SKILL_INLINE_RULE_BUDGET}-character inline rule budget`;
+      if (inlineChars + cost > budget.value) {
+        const message = `${id}/${rule.id} exceeds the ${budget.value}-character inline rule budget`;
         if (rule.required) errors.push(message); else warnings.push(`${message}; load the targeted project-skill resource if needed`);
         continue;
       }
@@ -138,7 +164,9 @@ export function projectSkillSelection(root: string, workflowValue: string, args:
     target_repos: repos,
     target_files: files,
     inline_rule_chars: inlineChars,
-    inline_rule_budget: PROJECT_SKILL_INLINE_RULE_BUDGET,
+    inline_rule_budget: budget.value,
+    inline_rule_budget_source: budget.source,
+    inline_rule_budget_requested: budget.requested,
     decision: errors.length > 0 ? { kind: "narrow_scope", required: ["repos", "files"], reason: "Required project-skill rules exceed the inline context budget or a requested skill is invalid." } : null,
     warnings,
     errors,

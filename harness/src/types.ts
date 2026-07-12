@@ -160,6 +160,8 @@ export interface RuntimeArgs extends JsonObject {
   root?: string | undefined;
   action?: string | undefined;
   workflow?: string | undefined;
+  skillRuleBudget?: number | undefined;
+  skill_rule_budget?: number | undefined;
   execute?: boolean | undefined;
   async?: boolean;
   trackId?: string | undefined;

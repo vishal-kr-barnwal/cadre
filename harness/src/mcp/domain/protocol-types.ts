@@ -46,6 +46,7 @@ export interface ResourceQuery extends JsonObject {
   name: string | null;
   id: string | null;
   reference: string | null;
+  skillRuleBudget: number | null;
   artifact: string | null;
   scope: string | null;
   jobId: string | null;

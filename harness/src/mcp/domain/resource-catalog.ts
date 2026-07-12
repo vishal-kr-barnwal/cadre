@@ -93,7 +93,7 @@ const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
   "cadre://artifact-sync-plan": { required: ["root"], optional: ["scope", "artifact", "includeArchive"] },
   "cadre://track-spec": { required: ["root", "trackId"] },
   "cadre://styleguide-selection": { required: ["root"], optional: ["trackId", "files"] },
-  "cadre://project-skills": { required: ["root", "workflow"], optional: ["trackId", "repos"] },
+  "cadre://project-skills": { required: ["root", "workflow"], optional: ["trackId", "repos", "files", "skillRuleBudget"] },
   "cadre://project-skill": { required: ["root", "id"], optional: ["reference"] },
 };
 
@@ -140,6 +140,7 @@ export function parseResourceUri(uri: string): ResourceQuery {
     name: params.get("name"),
     id: params.get("id"),
     reference: params.get("reference"),
+    skillRuleBudget: params.has("skillRuleBudget") ? Number(params.get("skillRuleBudget")) : null,
     artifact: params.get("artifact"),
     scope: params.get("scope"),
     jobId: params.get("jobId"),

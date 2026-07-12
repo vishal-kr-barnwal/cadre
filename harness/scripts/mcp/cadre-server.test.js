@@ -483,6 +483,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
     assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
     assert.deepEqual(templateByUri.get("cadre://project-skills").required, ["root", "workflow"]);
+    assert.deepEqual(templateByUri.get("cadre://project-skills").optional, ["trackId", "repos", "files", "skillRuleBudget"]);
     assert.deepEqual(templateByUri.get("cadre://project-skill").required, ["root", "id"]);
 
     const skillContract = await request("resources/read", { uri: "cadre://skill-contract" });
@@ -541,10 +542,12 @@ test("MCP root resolution rejects harness skill directories without project stat
       selectors: { workflows: ["setup"] }, rules: [{ id: "layout", text: "Preserve the repository layout.", priority: 10, required: true }], references: [],
     }, null, 2));
     const setupSkills = JSON.parse((await request("resources/read", {
-      uri: `cadre://project-skills?root=${encodeURIComponent(freshRoot)}&workflow=setup`,
+      uri: `cadre://project-skills?root=${encodeURIComponent(freshRoot)}&workflow=setup&skillRuleBudget=5000`,
     })).contents[0].text);
     assert.equal(setupSkills.data.ok, true);
     assert.deepEqual(setupSkills.data.selected_ids, ["setup-rules"]);
+    assert.equal(setupSkills.data.inline_rule_budget, 5000);
+    assert.equal(setupSkills.data.inline_rule_budget_source, "argument");
 
     const freshTechStack = parseTextJson(await request("tools/call", {
       name: "cadre_project",

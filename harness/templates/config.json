@@ -11,6 +11,9 @@
   "control_branch": "main",
   "pull_on_command_start": true,
   "coverage_command": "",
+  "project_skills": {
+    "inline_rule_budget": 2400
+  },
   "traceability": {
     "auto_product_commits": true,
     "auto_control_commits": true,
