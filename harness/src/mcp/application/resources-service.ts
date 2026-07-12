@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import * as core from "../../cadre-core";
@@ -57,6 +58,7 @@ function normalizeResourceArgs(resource: ReturnType<typeof parseResourceUri>): R
   if (resource.workflow != null) args.workflow = resource.workflow;
   if (resource.id != null) args.id = resource.id;
   if (resource.reference != null) args.reference = resource.reference;
+  if (resource.path != null) args.path = resource.path;
   if (resource.skillRuleBudget != null) args.skillRuleBudget = resource.skillRuleBudget;
   if (resource.artifact != null) args.artifact = resource.artifact;
   if (resource.scope != null) args.scope = resource.scope;
@@ -152,7 +154,7 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
   else if (resource.base === "cadre://agent-reference") value = agentReference(resource.name);
   else if (resource.base === "cadre://template-inventory") value = templateInventory();
   else {
-    const setupSafeProjectSkillResource = resource.base === "cadre://project-skills" || resource.base === "cadre://project-skill";
+    const setupSafeProjectSkillResource = resource.base === "cadre://project-skills" || resource.base === "cadre://project-skill" || resource.base === "cadre://project-skill-source";
     const candidate = setupSafeProjectSkillResource && resource.root
       ? deps.rootResolver.rootFromCandidate(resource.root)
       : null;
@@ -279,6 +281,20 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
       : resource.id
       ? detail
       : { ok: false, error: "id is required" };
+  }
+  else if (resource.base === "cadre://project-skill-source") {
+    const relative = resource.path || "";
+    const absolute = path.resolve(root, relative);
+    const lexicalInside = relative && !path.isAbsolute(relative) && !path.relative(root, absolute).startsWith("..");
+    const realInside = lexicalInside && fs.existsSync(absolute) && !path.relative(fs.realpathSync(root), fs.realpathSync(absolute)).startsWith("..");
+    if (!realInside) value = { ok: false, error: "path must identify an existing project-local file" };
+    else {
+      const stat = fs.statSync(absolute);
+      const content = stat.isFile() && stat.size <= 128 * 1024 ? fs.readFileSync(absolute, "utf8") : null;
+      value = content !== null && !Buffer.from(content).subarray(0, 8192).includes(0)
+        ? { ok: true, path: relative, bytes: stat.size, content }
+        : { ok: false, error: "source must be a text file no larger than 128 KiB" };
+    }
   }
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
   }

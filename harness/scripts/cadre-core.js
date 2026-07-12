@@ -3831,11 +3831,44 @@ function compactReviewResponse(result) {
     resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : []
   };
 }
+function compactSkillResponse(result) {
+  const reviewBundle = compactReviewBundle(result.review_bundle);
+  return {
+    ok: result.ok,
+    workflow: result.workflow,
+    operation: result.operation,
+    skill_id: result.skill_id,
+    new_skill_id: result.new_skill_id,
+    dry_run: result.dry_run,
+    phase_state: result.phase_state,
+    stage: result.stage,
+    error: result.error,
+    errors: Array.isArray(result.errors) ? result.errors : [],
+    valid: result.valid,
+    invalid: result.invalid,
+    manifest: result.manifest,
+    diagnostics: result.diagnostics,
+    projection_path: result.projection_path,
+    references: result.references,
+    source_requests: result.source_requests,
+    decision: result.decision,
+    approval: compactApproval(result.approval),
+    review_bundle: reviewBundle,
+    written: result.written,
+    removed: result.removed,
+    control_commit: result.control_commit,
+    detail_resources: asStringArray(result.detail_resources).slice(0, 6),
+    resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : [],
+    response_mode: result.response_mode,
+    detail_available: true
+  };
+}
 function compactWorkflowResponse(workflow, result) {
   if (workflow === "setup" || workflow === "setup_assist" || workflow === "setup_scaffold") {
     return compactSetupResponse(result);
   }
   if (workflow === "review") return compactReviewResponse(result);
+  if (workflow === "skill") return compactSkillResponse(result);
   return null;
 }
 
@@ -3936,6 +3969,7 @@ function compactObject(value, depth = 0) {
 }
 function workflowResourceUris(root2, workflow, result) {
   const encodedRoot = encodeURIComponent(root2);
+  if (workflow === "skill") return Array.from(new Set(asStringArray(result.detail_resources)));
   const trackId = asOptionalString(result.track_id) || asOptionalString(asJsonObject(result.track || {}).track_id) || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
   const uris = [
     `cadre://workspace-health?root=${encodedRoot}`,
@@ -11267,10 +11301,10 @@ function referenceRecord(skillDir, value) {
   if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) return { error: `invalid reference id: ${id || "(missing)"}` };
   if (!normalized || import_node_path42.default.isAbsolute(rawPath) || normalized.split("/").includes("..")) return { error: `reference must stay inside the skill directory: ${rawPath}` };
   if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path42.default.extname(normalized).toLowerCase())) return { error: `unsupported reference type: ${rawPath}` };
-  const absolutePath = import_node_path42.default.resolve(skillDir, normalized);
+  const absolutePath2 = import_node_path42.default.resolve(skillDir, normalized);
   try {
     const realSkillDir = import_node_fs22.default.realpathSync(skillDir);
-    const realReference = import_node_fs22.default.realpathSync(absolutePath);
+    const realReference = import_node_fs22.default.realpathSync(absolutePath2);
     if (!isInside(realSkillDir, realReference)) return { error: `reference escapes the skill directory: ${rawPath}` };
     const stat = import_node_fs22.default.statSync(realReference);
     if (!stat.isFile() || stat.size > PROJECT_SKILL_MAX_FILE_BYTES) return { error: `invalid or oversized reference: ${rawPath}` };
@@ -11288,7 +11322,7 @@ function projectSkillIds(root2) {
     return [];
   }
 }
-function loadProjectSkill(root2, id, knownRepos) {
+function loadProjectSkill(root2, id, knownRepos2) {
   const errors = [];
   if (!PROJECT_SKILL_ID_PATTERN.test(id)) return { id, ok: false, errors: [`invalid skill id: ${id}`] };
   const skillDir = import_node_path42.default.join(root2, "cadre", "skills", id);
@@ -11316,7 +11350,7 @@ function loadProjectSkill(root2, id, knownRepos) {
   const baseSelectors = selectors(raw.selectors);
   if (baseSelectors.workflows.length === 0) errors.push("selectors.workflows must contain at least one workflow or *");
   for (const workflow of baseSelectors.workflows) if (workflow !== "*" && !PROJECT_SKILL_WORKFLOWS.has(workflow)) errors.push(`unknown workflow: ${workflow}`);
-  for (const repo of baseSelectors.repos) if (!knownRepos.has(repo)) errors.push(`unknown repo: ${repo}`);
+  for (const repo of baseSelectors.repos) if (!knownRepos2.has(repo)) errors.push(`unknown repo: ${repo}`);
   const rules = (Array.isArray(raw.rules) ? raw.rules : []).map((value, index) => {
     const rule = asJsonObject(value);
     const ruleId = asOptionalString(rule.id)?.trim() || `rule-${index + 1}`;
@@ -11458,7 +11492,7 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
   const repos = projectSkillTargetRepos(root2, args);
   const files = targetFiles(root2, args);
   const budget = inlineRuleBudget(root2, args);
-  const knownRepos = knownRepoNames(root2);
+  const knownRepos2 = knownRepoNames(root2);
   const installed = projectSkillIds(root2);
   const errors = [];
   const warnings = [...budget.warnings];
@@ -11466,7 +11500,7 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
   let inlineChars = 0;
   for (const id of requested) if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installed.includes(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
   for (const id of installed) {
-    const loaded = loadProjectSkill(root2, id, knownRepos);
+    const loaded = loadProjectSkill(root2, id, knownRepos2);
     if (!loaded.ok || !loaded.skill) {
       const messages = loaded.errors.map((error) => `${id}: ${error}`);
       if (requestedSet.has(id)) errors.push(...messages);
@@ -13028,11 +13062,474 @@ function workflowLand(root2, args = {}) {
   };
 }
 
+// src/core/application/runtime/workflow-skill.ts
+var import_node_crypto5 = __toESM(require("node:crypto"));
+var import_node_fs28 = __toESM(require("node:fs"));
+var import_node_path49 = __toESM(require("node:path"));
+
+// src/core/domain/project-skill-management.ts
+function absolutePath(value) {
+  return value.startsWith("/") || value.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(value);
+}
+function extension(value) {
+  const name = value.replace(/\\/g, "/").split("/").pop() || "";
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot).toLowerCase();
+}
+function strings2(value) {
+  return Array.from(new Set(asStringArray(value).map((item) => item.trim()).filter(Boolean)));
+}
+function selector(value) {
+  const raw = asJsonObject(value);
+  return {
+    workflows: strings2(raw.workflows).map(canonicalWorkflow),
+    repos: strings2(raw.repos),
+    file_patterns: strings2(raw.file_patterns || raw.files)
+  };
+}
+function upsert(items, item) {
+  const id = asOptionalString(item.id);
+  const index = items.findIndex((entry) => asOptionalString(entry.id) === id);
+  if (index < 0) return [...items, item];
+  return items.map((entry, position) => position === index ? item : entry);
+}
+function emptyManagedManifest(id) {
+  return { version: 1, schema: "cadre.project-skill.v1", id, name: "", description: "", selectors: { workflows: [], repos: [], file_patterns: [] }, rules: [], references: [] };
+}
+function applySkillChanges(base, changes) {
+  let manifest = structuredClone(base);
+  const referenceContent = /* @__PURE__ */ new Map();
+  const removedReferences = /* @__PURE__ */ new Set();
+  const errors = [];
+  const sourceRequests = [];
+  for (const [index, value] of (Array.isArray(changes) ? changes : []).entries()) {
+    const change = asJsonObject(value);
+    const type = asOptionalString(change.type) || "";
+    const id = asOptionalString(change.id)?.trim() || "";
+    if (type === "metadata.set") {
+      if (change.name !== void 0) manifest.name = asOptionalString(change.name)?.trim() || "";
+      if (change.description !== void 0) manifest.description = asOptionalString(change.description)?.trim() || "";
+    } else if (type === "selectors.set") {
+      manifest.selectors = selector(change.selectors || change);
+    } else if (type === "rule.upsert") {
+      const rule = asJsonObject(change.rule || change);
+      const ruleId = asOptionalString(rule.id)?.trim() || id;
+      manifest.rules = upsert(manifest.rules, {
+        id: ruleId,
+        text: asOptionalString(rule.text)?.trim() || "",
+        priority: Number.isFinite(Number(rule.priority)) ? Number(rule.priority) : 100,
+        required: rule.required !== false,
+        when: selector(rule.when),
+        references: strings2(rule.references)
+      });
+    } else if (type === "rule.remove") {
+      manifest.rules = manifest.rules.filter((rule) => asOptionalString(rule.id) !== id);
+    } else if (type === "reference.upsert") {
+      const reference = asJsonObject(change.reference || change);
+      const referenceId = asOptionalString(reference.id)?.trim() || id;
+      const referencePath = asOptionalString(reference.path)?.trim() || "";
+      const content = asOptionalString(reference.content);
+      const sourcePath = asOptionalString(reference.source_path || change.source_path);
+      if (sourcePath && content === void 0) sourceRequests.push({ change_index: index, id: referenceId, source_path: sourcePath, target_path: referencePath });
+      manifest.references = upsert(manifest.references, { id: referenceId, path: referencePath, when: selector(reference.when) });
+      if (content !== void 0) referenceContent.set(referenceId, content);
+      removedReferences.delete(referenceId);
+    } else if (type === "reference.remove") {
+      manifest.references = manifest.references.filter((reference) => asOptionalString(reference.id) !== id);
+      removedReferences.add(id);
+    } else errors.push(`change ${index + 1} has unknown type: ${type || "(missing)"}`);
+  }
+  return { manifest, referenceContent, removedReferences, errors, sourceRequests };
+}
+function validateManagedManifest(manifest, knownRepos2) {
+  const errors = [];
+  if (manifest.schema !== "cadre.project-skill.v1" || manifest.version !== 1) errors.push("skill.json must use cadre.project-skill.v1 version 1");
+  if (!PROJECT_SKILL_ID_PATTERN.test(manifest.id)) errors.push(`invalid skill id: ${manifest.id}`);
+  if (!asOptionalString(manifest.name)?.trim()) errors.push("name is required");
+  if (!asOptionalString(manifest.description)?.trim()) errors.push("description is required");
+  const validateSelector = (value, label) => {
+    const selected = selector(value);
+    for (const workflow of asStringArray(selected.workflows)) if (workflow !== "*" && !PROJECT_SKILL_WORKFLOWS.has(workflow)) errors.push(`${label} has unknown workflow: ${workflow}`);
+    for (const repo of asStringArray(selected.repos)) if (!knownRepos2.has(repo)) errors.push(`${label} has unknown repo: ${repo}`);
+  };
+  const selectors2 = selector(manifest.selectors);
+  const workflows = asStringArray(selectors2.workflows);
+  if (workflows.length === 0) errors.push("selectors.workflows must contain at least one workflow or *");
+  for (const workflow of workflows) if (workflow !== "*" && !PROJECT_SKILL_WORKFLOWS.has(workflow)) errors.push(`unknown workflow: ${workflow}`);
+  for (const repo of asStringArray(selectors2.repos)) if (!knownRepos2.has(repo)) errors.push(`unknown repo: ${repo}`);
+  const ruleIds = /* @__PURE__ */ new Set();
+  const referenceIds = /* @__PURE__ */ new Set();
+  const referencePaths = /* @__PURE__ */ new Set();
+  for (const reference of manifest.references) {
+    const id = asOptionalString(reference.id) || "";
+    const file = asOptionalString(reference.path) || "";
+    if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) errors.push(`invalid reference id: ${id || "(missing)"}`);
+    if (referenceIds.has(id)) errors.push(`duplicate reference id: ${id}`);
+    else referenceIds.add(id);
+    if (referencePaths.has(file)) errors.push(`duplicate reference path: ${file}`);
+    else referencePaths.add(file);
+    if (!file || absolutePath(file) || file.replace(/\\/g, "/").split("/").includes("..")) errors.push(`reference must stay inside the skill directory: ${file}`);
+    if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(extension(file))) errors.push(`unsupported reference type: ${file}`);
+    validateSelector(reference.when, `reference ${id}`);
+  }
+  if (manifest.rules.length === 0) errors.push("rules must contain at least one atomic rule");
+  for (const rule of manifest.rules) {
+    const id = asOptionalString(rule.id) || "";
+    if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) errors.push(`invalid rule id: ${id || "(missing)"}`);
+    if (ruleIds.has(id)) errors.push(`duplicate rule id: ${id}`);
+    else ruleIds.add(id);
+    if (!asOptionalString(rule.text)?.trim()) errors.push(`rule ${id || "(missing)"} text is required`);
+    validateSelector(rule.when, `rule ${id}`);
+    for (const reference of asStringArray(rule.references)) if (!referenceIds.has(reference)) errors.push(`rule ${id} references unknown id: ${reference}`);
+  }
+  return Array.from(new Set(errors));
+}
+
+// src/core/infrastructure/runtime/project-skill-mutations.ts
+var import_node_fs27 = __toESM(require("node:fs"));
+var import_node_os4 = __toESM(require("node:os"));
+var import_node_path48 = __toESM(require("node:path"));
+function normalizeReferenceContent(file, content) {
+  let normalized = content.replace(/\r\n?/g, "\n");
+  if (Buffer.byteLength(normalized, "utf8") > PROJECT_SKILL_MAX_FILE_BYTES) throw new Error(`reference exceeds ${PROJECT_SKILL_MAX_FILE_BYTES} bytes: ${file}`);
+  if (Buffer.from(normalized).subarray(0, 8192).includes(0)) throw new Error(`binary reference is not supported: ${file}`);
+  if (import_node_path48.default.extname(file).toLowerCase() === ".json") {
+    try {
+      normalized = JSON.stringify(JSON.parse(normalized), null, 2);
+    } catch {
+      throw new Error(`invalid JSON reference: ${file}`);
+    }
+  }
+  return `${normalized.replace(/\n*$/, "")}
+`;
+}
+function copyIfExists(source, target2) {
+  if (import_node_fs27.default.existsSync(source)) import_node_fs27.default.cpSync(source, target2, { recursive: true });
+}
+function atomicSkillMutation(root2, sourceId, targetId, files) {
+  const catalog2 = import_node_path48.default.join(root2, "cadre", "skills");
+  const source = import_node_path48.default.join(catalog2, sourceId);
+  const target2 = targetId ? import_node_path48.default.join(catalog2, targetId) : null;
+  const backup = import_node_fs27.default.mkdtempSync(import_node_path48.default.join(import_node_os4.default.tmpdir(), "cadre-skill-backup-"));
+  copyIfExists(source, import_node_path48.default.join(backup, "source"));
+  if (target2 && target2 !== source) copyIfExists(target2, import_node_path48.default.join(backup, "target"));
+  const rollback = () => {
+    import_node_fs27.default.rmSync(source, { recursive: true, force: true });
+    if (target2 && target2 !== source) import_node_fs27.default.rmSync(target2, { recursive: true, force: true });
+    copyIfExists(import_node_path48.default.join(backup, "source"), source);
+    if (target2 && target2 !== source) copyIfExists(import_node_path48.default.join(backup, "target"), target2);
+  };
+  try {
+    import_node_fs27.default.mkdirSync(catalog2, { recursive: true });
+    if (!target2) import_node_fs27.default.rmSync(source, { recursive: true, force: true });
+    else {
+      if (source !== target2 && import_node_fs27.default.existsSync(source)) import_node_fs27.default.renameSync(source, target2);
+      import_node_fs27.default.mkdirSync(target2, { recursive: true });
+      const desired = new Set(files.keys());
+      for (const [relative, content] of files) {
+        const destination = import_node_path48.default.join(target2, relative);
+        import_node_fs27.default.mkdirSync(import_node_path48.default.dirname(destination), { recursive: true });
+        const temporary = `${destination}.tmp-${process.pid}`;
+        import_node_fs27.default.writeFileSync(temporary, content);
+        import_node_fs27.default.renameSync(temporary, destination);
+      }
+      for (const existing of walkFiles(target2)) {
+        const relative = import_node_path48.default.relative(target2, existing).split(import_node_path48.default.sep).join("/");
+        if (!desired.has(relative)) import_node_fs27.default.rmSync(existing, { force: true });
+      }
+    }
+  } catch (error) {
+    rollback();
+    import_node_fs27.default.rmSync(backup, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    written: target2 ? Array.from(files.keys()).map((file) => `cadre/skills/${targetId}/${file}`).sort() : [],
+    removed: !target2 ? [`cadre/skills/${sourceId}`] : sourceId !== targetId ? [`cadre/skills/${sourceId}`] : [],
+    rollback,
+    finish: () => import_node_fs27.default.rmSync(backup, { recursive: true, force: true })
+  };
+}
+function walkFiles(directory) {
+  if (!import_node_fs27.default.existsSync(directory)) return [];
+  return import_node_fs27.default.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = import_node_path48.default.join(directory, entry.name);
+    return entry.isDirectory() ? walkFiles(file) : [file];
+  });
+}
+
+// src/core/application/runtime/project-skill-projection.ts
+function list(values) {
+  return values.length ? values.map((value) => `\`${value}\``).join(", ") : "Any";
+}
+function renderProjectSkillProjection(manifest) {
+  const selectors2 = asJsonObject(manifest.selectors);
+  const lines = [
+    `<!-- cadre:generated from="cadre/skills/${manifest.id}/skill.json" schema="cadre.project-skill.v1" -->`,
+    `# ${manifest.name}`,
+    "",
+    manifest.description,
+    "",
+    "## Selectors",
+    "",
+    `- Workflows: ${list(asStringArray(selectors2.workflows))}`,
+    `- Repositories: ${list(asStringArray(selectors2.repos))}`,
+    `- Files: ${list(asStringArray(selectors2.file_patterns))}`,
+    "",
+    "## Rules",
+    ""
+  ];
+  for (const value of manifest.rules) {
+    const rule = asJsonObject(value);
+    lines.push(`### ${asOptionalString(rule.id) || "rule"}`, "", asOptionalString(rule.text) || "", "", `Priority: ${Number(rule.priority || 100)} \xB7 Required: ${rule.required !== false ? "yes" : "no"}`);
+    const references = asStringArray(rule.references);
+    if (references.length) lines.push(`References: ${list(references)}`);
+    lines.push("");
+  }
+  lines.push("## Reference inventory", "");
+  if (manifest.references.length === 0) lines.push("No references.", "");
+  for (const value of manifest.references) {
+    const reference = asJsonObject(value);
+    lines.push(`- \`${asOptionalString(reference.id) || "reference"}\`: \`${asOptionalString(reference.path) || ""}\``);
+  }
+  return `${lines.join("\n").replace(/\n+$/, "")}
+`;
+}
+
+// src/core/application/runtime/workflow-skill.ts
+function knownRepos(root2) {
+  const known = /* @__PURE__ */ new Set([".", "root"]);
+  for (const value of Array.isArray(loadTopology(root2).repos.repos) ? loadTopology(root2).repos.repos : []) {
+    const name = asOptionalString(asJsonObject(value).name);
+    if (name) known.add(name);
+  }
+  return known;
+}
+function readManifest(root2, id) {
+  const file = import_node_path49.default.join(root2, "cadre", "skills", id, "skill.json");
+  try {
+    const raw = asJsonObject(JSON.parse(import_node_fs28.default.readFileSync(file, "utf8")));
+    return { manifest: raw };
+  } catch (error) {
+    return { error: `skill manifest cannot be read: ${errorMessage(error)}` };
+  }
+}
+function hashDirectory(directory) {
+  const hash = import_node_crypto5.default.createHash("sha256");
+  const visit = (current) => {
+    if (!import_node_fs28.default.existsSync(current)) {
+      hash.update("missing");
+      return;
+    }
+    for (const entry of import_node_fs28.default.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const file = import_node_path49.default.join(current, entry.name);
+      hash.update(import_node_path49.default.relative(directory, file));
+      if (entry.isDirectory()) visit(file);
+      else hash.update(import_node_fs28.default.readFileSync(file));
+    }
+  };
+  visit(directory);
+  return hash.digest("hex");
+}
+function catalog(root2) {
+  const repos = knownRepos(root2);
+  const loaded = projectSkillIds(root2).map((id) => loadProjectSkill(root2, id, repos));
+  return {
+    ok: true,
+    operation: "list",
+    valid: loaded.filter((entry) => entry.ok && entry.skill).map((entry) => ({ id: entry.id, name: entry.skill.name, description: entry.skill.description, workflows: entry.skill.workflows })),
+    invalid: loaded.filter((entry) => !entry.ok).map((entry) => ({ id: entry.id, diagnostics: entry.errors }))
+  };
+}
+function show(root2, id) {
+  const loaded = loadProjectSkill(root2, id, knownRepos(root2));
+  const raw = readManifest(root2, id);
+  if (!raw.manifest) return { ok: false, operation: "show", skill_id: id, diagnostics: [raw.error], projection_path: `cadre/skills/${id}/SKILL.md`, references: [] };
+  return {
+    ok: loaded.ok,
+    operation: "show",
+    skill_id: id,
+    manifest: raw.manifest,
+    diagnostics: loaded.errors,
+    projection_path: `cadre/skills/${id}/SKILL.md`,
+    references: (Array.isArray(raw.manifest.references) ? raw.manifest.references : []).map((value) => {
+      const reference = asJsonObject(value);
+      const relative = asOptionalString(reference.path) || "";
+      const file = import_node_path49.default.join(root2, "cadre", "skills", id, relative);
+      return { id: reference.id, path: relative, bytes: import_node_fs28.default.existsSync(file) ? import_node_fs28.default.statSync(file).size : null, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root2)}&id=${encodeURIComponent(id)}&reference=${encodeURIComponent(String(reference.id || ""))}` };
+    })
+  };
+}
+function validateCatalog(root2, id) {
+  if (id) {
+    const loaded = loadProjectSkill(root2, id, knownRepos(root2));
+    return { ok: loaded.ok, operation: "validate", skill_id: id, diagnostics: loaded.errors };
+  }
+  const result = catalog(root2);
+  const invalid = Array.isArray(result.invalid) ? result.invalid : [];
+  return { ...result, operation: "validate", ok: invalid.length === 0 };
+}
+function inside(parent, candidate) {
+  const relative = import_node_path49.default.relative(parent, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path49.default.isAbsolute(relative);
+}
+function sourcePause(root2, skillId, requests) {
+  const resources = [];
+  const errors = [];
+  for (const request of requests) {
+    const source = asOptionalString(request.source_path) || "";
+    const absolute = import_node_path49.default.resolve(root2, source);
+    const relative = import_node_path49.default.relative(root2, absolute);
+    if (!source || relative.startsWith("..") || import_node_path49.default.isAbsolute(relative)) errors.push(`source_path must stay inside the project: ${source}`);
+    else if (!import_node_fs28.default.existsSync(absolute) || !import_node_fs28.default.statSync(absolute).isFile()) errors.push(`source_path is not a file: ${source}`);
+    else if (!inside(import_node_fs28.default.realpathSync(root2), import_node_fs28.default.realpathSync(absolute))) errors.push(`source_path escapes the project through a link: ${source}`);
+    else if (import_node_path49.default.resolve(root2, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === absolute) errors.push(`source_path collides with its managed target: ${source}`);
+    else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root2)}&path=${encodeURIComponent(source)}`);
+  }
+  return errors.length ? { ok: false, phase_state: "blocked", errors, error: errors[0] } : {
+    ok: true,
+    phase_state: "awaiting_formatting",
+    decision: { kind: "format_reference", required: ["formatted inline content"] },
+    detail_resources: resources,
+    source_requests: requests
+  };
+}
+function desiredFiles(root2, sourceId, manifest, contents) {
+  const files = /* @__PURE__ */ new Map();
+  const errors = [];
+  files.set("skill.json", `${JSON.stringify(manifest, null, 2)}
+`);
+  files.set("SKILL.md", renderProjectSkillProjection(manifest));
+  for (const value of manifest.references) {
+    const reference = asJsonObject(value);
+    const id = asOptionalString(reference.id) || "";
+    const relative = asOptionalString(reference.path) || "";
+    let content = contents.get(id);
+    if (content === void 0) {
+      const existing = import_node_path49.default.join(root2, "cadre", "skills", sourceId, relative);
+      if (import_node_fs28.default.existsSync(existing)) content = import_node_fs28.default.readFileSync(existing, "utf8");
+      else {
+        errors.push(`reference content is required: ${id}`);
+        continue;
+      }
+    }
+    try {
+      files.set(relative, normalizeReferenceContent(relative, content));
+    } catch (error) {
+      errors.push(errorMessage(error));
+    }
+  }
+  return { files, errors };
+}
+function reviewFilesFor(operation, sourceId, targetId, files, removedReferencePaths) {
+  if (!targetId) return [
+    { path: `cadre/skills/${sourceId}/.delete`, title: `Remove project skill ${sourceId}`, kind: "text", source: "skill.remove", content: `Delete cadre/skills/${sourceId}/
+`, missing: true },
+    ...removedReferencePaths.map((relative) => ({ path: `cadre/skills/${sourceId}/${relative}.delete`, title: `Remove reference ${relative}`, kind: "text", source: "skill.reference.remove", content: `Delete cadre/skills/${sourceId}/${relative}
+`, missing: true }))
+  ];
+  const output = [];
+  if (operation === "create" || operation === "rename") output.push({ path: `cadre/skills/${targetId}/.identity`, title: `${operation} project skill`, kind: "text", source: `skill.${operation}`, content: `${sourceId} -> ${targetId}
+` });
+  for (const [relative, content] of files) output.push({ path: `cadre/skills/${targetId}/${relative}`, title: relative, kind: relative.endsWith(".json") ? "json" : relative.endsWith(".md") ? "markdown" : "text", source: "skill.desired_state", content });
+  for (const relative of removedReferencePaths) output.push({ path: `cadre/skills/${targetId}/${relative}.delete`, title: `Remove reference ${relative}`, kind: "text", source: "skill.reference.remove", content: `Delete cadre/skills/${targetId}/${relative}
+`, missing: true });
+  return output;
+}
+function approvalStages(operation, referenceReviewPaths) {
+  return [
+    ...["create", "rename", "remove"].includes(operation) ? [{ id: "identity", title: "Skill Identity", description: "Skill directory creation, move, or deletion.", fileMatches: [".identity", ".delete"] }] : [],
+    ...operation !== "remove" ? [{ id: "manifest", title: "Manifest And Projection", description: "Canonical skill.json and generated SKILL.md.", fileMatches: ["skill.json", "SKILL.md"] }] : [],
+    ...referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", fileMatches: referenceReviewPaths }] : []
+  ];
+}
+function workflowSkill(root2, args) {
+  const operation = asOptionalString(args.operation) || "list";
+  const id = asOptionalString(args.skillId || args.skill_id || args.id)?.trim() || "";
+  if (operation === "list") return catalog(root2);
+  if (operation === "show") return id ? show(root2, id) : { ok: false, error: "skillId is required" };
+  if (operation === "validate") return validateCatalog(root2, id || null);
+  if (!["create", "update", "rename", "remove"].includes(operation)) return { ok: false, error: `unknown skill operation: ${operation}` };
+  if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) return { ok: false, error: `invalid skillId: ${id || "(missing)"}` };
+  const existing = readManifest(root2, id);
+  if (operation === "create" && import_node_fs28.default.existsSync(import_node_path49.default.join(root2, "cadre", "skills", id))) return { ok: false, error: `skill already exists: ${id}` };
+  if (operation !== "create" && !existing.manifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
+  if (operation === "remove" && !import_node_fs28.default.existsSync(import_node_path49.default.join(root2, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
+  const newId = operation === "rename" ? asOptionalString(args.newSkillId || args.new_skill_id)?.trim() || "" : id;
+  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || import_node_fs28.default.existsSync(import_node_path49.default.join(root2, "cadre", "skills", newId)))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  const base = operation === "create" ? emptyManagedManifest(id) : existing.manifest || emptyManagedManifest(id);
+  const changed = applySkillChanges(base, args.changes);
+  if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root2, id, changed.sourceRequests) };
+  const manifest = changed.manifest;
+  manifest.id = newId;
+  const errors = [...changed.errors, ...operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root2))];
+  const desired = operation === "remove" ? { files: /* @__PURE__ */ new Map(), errors: [] } : desiredFiles(root2, id, manifest, changed.referenceContent);
+  errors.push(...desired.errors);
+  if (errors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: errors[0], errors };
+  const existingReferences = (Array.isArray(existing.manifest?.references) ? existing.manifest.references : []).map(asJsonObject);
+  const existingReferencePaths = existingReferences.map((value) => asOptionalString(value.path)).filter((value) => Boolean(value));
+  const targetReferencePaths = manifest.references.map((value) => asOptionalString(asJsonObject(value).path)).filter((value) => Boolean(value));
+  const upsertedPaths = Array.from(changed.referenceContent.keys()).flatMap((referenceId) => manifest.references.filter((value) => asOptionalString(asJsonObject(value).id) === referenceId).map((value) => asOptionalString(asJsonObject(value).path) || ""));
+  const replacedPaths = existingReferences.filter((reference) => changed.referenceContent.has(asOptionalString(reference.id) || "")).map((reference) => asOptionalString(reference.path) || "");
+  const removedPaths = existingReferences.filter((reference) => changed.removedReferences.has(asOptionalString(reference.id) || "")).map((reference) => asOptionalString(reference.path) || "");
+  const changedReferencePaths = Array.from(new Set(operation === "rename" || operation === "remove" ? [...existingReferencePaths, ...targetReferencePaths] : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
+  const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
+  const reviews = reviewFilesFor(operation, id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
+    const base2 = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
+    return deletedReferencePaths.includes(relative) ? [`${base2}.delete`] : [base2];
+  });
+  const stages = approvalStages(operation, referenceReviewPaths);
+  const snapshot = hashDirectory(import_node_path49.default.join(root2, "cadre", "skills", id));
+  const reviewArgs = { ...args, reviewOutputMode: "bundle" };
+  const approval = stagedApprovalState(root2, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot });
+  const approvalError = stagedApprovalError(approval);
+  if (args.execute !== true || !stagedApprovalReady(approval)) return {
+    ok: !approvalError,
+    operation,
+    skill_id: id,
+    new_skill_id: newId,
+    dry_run: true,
+    phase_state: "awaiting_staged_approval",
+    approval,
+    review_bundle: asJsonObject(approval).current_review_bundle,
+    ...approvalError ? { error: approvalError } : {}
+  };
+  const traceBefore = beginTrace(root2);
+  try {
+    const mutation = atomicSkillMutation(root2, id, operation === "remove" ? null : newId, desired.files);
+    if (operation !== "remove") {
+      const final = loadProjectSkill(root2, newId, knownRepos(root2));
+      if (!final.ok) {
+        mutation.rollback();
+        mutation.finish();
+        return { ok: false, phase_state: "recovery_required", stage: "final_validation", errors: final.errors };
+      }
+    }
+    mutation.finish();
+    const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
+    const event = appendCadreEvent(root2, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null });
+    const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
+    const controlCommit = commitTrace(root2, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
+    if (controlCommit.ok === false) return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit };
+    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval };
+  } catch (error) {
+    return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "filesystem", error: errorMessage(error) };
+  }
+}
+
 // src/core/application/runtime/workflow-packet.ts
 function workflowPacket(root2, args = {}) {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const markdownError = markdownPayloadError(args);
   if (markdownError) return shapeWorkflowResponse(root2, workflow, args, { ...workflowSummary(root2, workflow, args), ...markdownError });
+  if (workflow === "skill") {
+    if (args.execute === true && args.skipSync !== true) {
+      const result2 = withSharedControlPlaneSync(root2, args, "workflow:skill", () => workflowSkill(root2, { ...args, skipSync: true }));
+      return shapeWorkflowResponse(root2, workflow, args, result2);
+    }
+    return shapeWorkflowResponse(root2, workflow, args, workflowSkill(root2, args));
+  }
   const projectSkills = projectSkillSelection(root2, workflow, args);
   if (projectSkills.ok === false) {
     return shapeWorkflowResponse(root2, workflow, args, {
@@ -13342,6 +13839,7 @@ function approvalDecision(result) {
   };
 }
 function decision(result) {
+  if (result.decision) return asJsonObject(result.decision);
   const skills = asJsonObject(result.project_skills);
   if (skills.decision) return asJsonObject(skills.decision);
   const prompts = Array.isArray(result.intent_prompts) ? result.intent_prompts : Array.isArray(result.native_prompts) ? result.native_prompts : [];
@@ -13373,7 +13871,7 @@ function reviewFiles(value) {
 }
 function artifacts(result) {
   const files = reviewFiles(result.review_bundle);
-  for (const path48 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) files.push({ path: path48, kind: "changed" });
+  for (const path50 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) files.push({ path: path50, kind: "changed" });
   return files;
 }
 function relevantResources(workflow, result) {
@@ -13390,12 +13888,21 @@ function relevantResources(workflow, result) {
     ship: ["provider-actions", "quality-gate"],
     land: ["provider-actions", "quality-gate"],
     release: ["release-plan"],
-    artifacts: ["artifact-"]
+    artifacts: ["artifact-"],
+    skill: ["project-skill-source", "project-skill"]
   };
   const needles = keep[workflow] || [];
   return Array.from(new Set(candidates.filter((uri) => needles.some((needle) => uri.includes(needle))))).slice(0, 6);
 }
-function nextCall(root2, workflow, result, resources) {
+function nextCall(root2, workflow, result, resources, args) {
+  if (workflow === "skill" && result.phase_state === "awaiting_formatting" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
+  if (workflow === "skill") {
+    const approval = asJsonObject(result.approval);
+    if (asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
+      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !["root", "workflow", "execute", "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id", "approvedStages", "approved_stages", "approvalComplete", "approval_complete"].includes(key)));
+      return { tool: "cadre_workflow", arguments: { root: root2, workflow, input, execute: true, approval: { session_id: approval.session_id, approved_stages: approval.approved_stages, complete: true } } };
+    }
+  }
   if (result.phase_state === "pending_provider" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
   const snapshot = asJsonObject(result.snapshot_packet);
   if (snapshot.tool) {
@@ -13422,6 +13929,7 @@ function workflowData(workflow, result) {
     status: ["status", "project_skills"],
     review: ["track_context", "review_assist", "gate", "provider", "project_skills"],
     validate: ["doctor", "team", "integrity", "collisions", "fleet", "project_skill_diagnostics"],
+    skill: ["operation", "skill_id", "new_skill_id", "valid", "invalid", "manifest", "diagnostics", "projection_path", "references", "source_requests", "control_commit"],
     ship: ["track_id", "gate", "provider", "provider_actions", "git_actions"],
     land: ["track_id", "gate", "provider", "provider_actions", "git_actions"]
   };
@@ -13440,7 +13948,7 @@ function workflowEnvelope(root2, args, value) {
     phase: asOptionalString(result.phase_state) || (ok ? "ready" : "blocked"),
     decision: decision(result),
     required: required(result),
-    next: nextCall(root2, workflow, result, resources),
+    next: nextCall(root2, workflow, result, resources, args),
     artifacts: artifacts(result),
     resources,
     data: workflowData(workflow, result),

@@ -123,6 +123,7 @@ export function compactObject(value: unknown, depth = 0): unknown {
 
 export function workflowResourceUris(root: string, workflow: string, result: CoreResult): string[] {
   const encodedRoot = encodeURIComponent(root);
+  if (workflow === "skill") return Array.from(new Set(asStringArray(result.detail_resources)));
   const trackId = asOptionalString(result.track_id)
     || asOptionalString(asJsonObject(result.track || {}).track_id)
     || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);

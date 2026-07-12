@@ -45,6 +45,7 @@ function approvalDecision(result: JsonObject): JsonObject | null {
 }
 
 function decision(result: JsonObject): JsonObject {
+  if (result.decision) return asJsonObject(result.decision);
   const skills = asJsonObject(result.project_skills);
   if (skills.decision) return asJsonObject(skills.decision);
   const prompts = Array.isArray(result.intent_prompts) ? result.intent_prompts : Array.isArray(result.native_prompts) ? result.native_prompts : [];
@@ -98,12 +99,21 @@ function relevantResources(workflow: string, result: JsonObject): string[] {
     land: ["provider-actions", "quality-gate"],
     release: ["release-plan"],
     artifacts: ["artifact-"],
+    skill: ["project-skill-source", "project-skill"],
   };
   const needles = keep[workflow] || [];
   return Array.from(new Set(candidates.filter((uri) => needles.some((needle) => uri.includes(needle))))).slice(0, 6);
 }
 
-function nextCall(root: string, workflow: string, result: JsonObject, resources: string[]): JsonObject | null {
+function nextCall(root: string, workflow: string, result: JsonObject, resources: string[], args: RuntimeArgs): JsonObject | null {
+  if (workflow === "skill" && result.phase_state === "awaiting_formatting" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
+  if (workflow === "skill") {
+    const approval = asJsonObject(result.approval);
+    if (asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
+      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !["root", "workflow", "execute", "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id", "approvedStages", "approved_stages", "approvalComplete", "approval_complete"].includes(key)));
+      return { tool: "cadre_workflow", arguments: { root, workflow, input, execute: true, approval: { session_id: approval.session_id, approved_stages: approval.approved_stages, complete: true } } };
+    }
+  }
   if (result.phase_state === "pending_provider" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
   const snapshot = asJsonObject(result.snapshot_packet);
   if (snapshot.tool) {
@@ -131,6 +141,7 @@ function workflowData(workflow: string, result: JsonObject): JsonObject {
     status: ["status", "project_skills"],
     review: ["track_context", "review_assist", "gate", "provider", "project_skills"],
     validate: ["doctor", "team", "integrity", "collisions", "fleet", "project_skill_diagnostics"],
+    skill: ["operation", "skill_id", "new_skill_id", "valid", "invalid", "manifest", "diagnostics", "projection_path", "references", "source_requests", "control_commit"],
     ship: ["track_id", "gate", "provider", "provider_actions", "git_actions"],
     land: ["track_id", "gate", "provider", "provider_actions", "git_actions"],
   };
@@ -150,7 +161,7 @@ export function workflowEnvelope(root: string, args: RuntimeArgs, value: unknown
     phase: asOptionalString(result.phase_state) || (ok ? "ready" : "blocked"),
     decision: decision(result),
     required: required(result),
-    next: nextCall(root, workflow, result, resources),
+    next: nextCall(root, workflow, result, resources, args),
     artifacts: artifacts(result),
     resources,
     data: workflowData(workflow, result),

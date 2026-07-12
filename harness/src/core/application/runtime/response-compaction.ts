@@ -466,10 +466,34 @@ function compactReviewResponse(result: CoreResult): CoreResult {
   };
 }
 
+function compactSkillResponse(result: CoreResult): CoreResult {
+  const reviewBundle = compactReviewBundle(result.review_bundle);
+  return {
+    ok: result.ok, workflow: result.workflow, operation: result.operation,
+    skill_id: result.skill_id, new_skill_id: result.new_skill_id,
+    dry_run: result.dry_run, phase_state: result.phase_state, stage: result.stage, error: result.error,
+    errors: Array.isArray(result.errors) ? result.errors : [],
+    valid: result.valid,
+    invalid: result.invalid,
+    manifest: result.manifest,
+    diagnostics: result.diagnostics,
+    projection_path: result.projection_path, references: result.references, source_requests: result.source_requests,
+    decision: result.decision,
+    approval: compactApproval(result.approval),
+    review_bundle: reviewBundle,
+    written: result.written, removed: result.removed,
+    control_commit: result.control_commit,
+    detail_resources: asStringArray(result.detail_resources).slice(0, 6),
+    resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : [],
+    response_mode: result.response_mode, detail_available: true,
+  };
+}
+
 export function compactWorkflowResponse(workflow: string, result: CoreResult): CoreResult | null {
   if (workflow === "setup" || workflow === "setup_assist" || workflow === "setup_scaffold") {
     return compactSetupResponse(result);
   }
   if (workflow === "review") return compactReviewResponse(result);
+  if (workflow === "skill") return compactSkillResponse(result);
   return null;
 }

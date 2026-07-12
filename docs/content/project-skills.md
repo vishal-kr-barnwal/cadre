@@ -455,3 +455,101 @@ cadre://project-skill?root=/path/to/monorepo&id=web-ui&reference=accessibility-c
 
 Project skills are trusted declarative guidance. Cadre does not execute scripts
 from a skill directory and does not search a global project-skill catalog.
+
+## Managing Skills with `cadre-skill`
+
+The MCP-first `cadre-skill` workflow manages repository-owned skills without a
+separate local editor. Its wire workflow name is `skill`. Read operations run
+immediately; every mutation produces review artifacts, waits for explicit
+stage-by-stage approval, writes the approved desired state, records a Cadre
+event, and creates one traced local commit. It never pushes.
+
+List, inspect, or validate the catalog:
+
+```json
+{ "root": "/path/to/project", "workflow": "skill", "input": { "operation": "list" } }
+```
+
+Use `operation: "show"` with `skillId` to inspect one manifest, diagnostics,
+projection path, and reference descriptors. Use `operation: "validate"` with
+an optional `skillId` to validate one skill or the complete catalog. These
+operations also work when another skill is invalid because management bypasses
+ordinary project-skill selection.
+
+Create a skill with ordered semantic changes:
+
+```json
+{
+  "root": "/path/to/project",
+  "workflow": "skill",
+  "input": {
+    "operation": "create",
+    "skillId": "web-ui",
+    "changes": [
+      { "type": "metadata.set", "name": "Web UI", "description": "Rules for the web application." },
+      { "type": "selectors.set", "workflows": ["implement", "review"], "file_patterns": ["apps/web/**"] },
+      { "type": "rule.upsert", "id": "semantic-html", "text": "Use semantic HTML before adding ARIA roles.", "priority": 20, "required": true }
+    ]
+  }
+}
+```
+
+`create` must end with a name, description, at least one workflow selector,
+and at least one rule. `update` applies the same ordered changes to an existing
+parseable manifest. Supported change types are `metadata.set`, `selectors.set`,
+`rule.upsert`, `rule.remove`, `reference.upsert`, and `reference.remove`.
+Removing a reference that is still named by a rule is rejected.
+
+Selector replacement and rule updates are explicit rather than JSON patches:
+
+```json
+{
+  "operation": "update",
+  "skillId": "web-ui",
+  "changes": [
+    { "type": "selectors.set", "workflows": ["implement", "review"], "repos": [], "file_patterns": ["apps/web/**", "packages/ui/**"] },
+    { "type": "rule.upsert", "id": "semantic-html", "text": "Prefer native semantic elements; add ARIA only when native semantics cannot express the interaction.", "priority": 10, "required": true, "when": { "workflows": ["implement"] }, "references": ["accessibility"] }
+  ]
+}
+```
+
+References accept polished inline content. Cadre normalizes line endings and a
+final newline, pretty-prints valid JSON, and rejects invalid JSON, binary data,
+unsupported extensions, path escapes, and files over 128 KiB:
+
+```json
+{
+  "type": "reference.upsert",
+  "id": "accessibility",
+  "path": "references/accessibility.md",
+  "when": { "workflows": ["implement", "review"], "file_patterns": ["apps/web/**"] },
+  "content": "# Accessibility\n\nUse the project checklist when changing interactive UI.\n"
+}
+```
+
+For an unformatted project-local source, send `source_path` without `content`.
+Cadre returns `phase: "awaiting_formatting"` and exactly the targeted
+`cadre://project-skill-source` read. The agent reads it, formats the material,
+and resubmits the same `reference.upsert` with inline `content`; no review files
+or target files are created during the formatting pause.
+
+Rename with `operation: "rename"`, `skillId`, and `newSkillId`. Remove with
+`operation: "remove"` and `skillId`. Rename collisions are rejected. A malformed
+JSON manifest may be listed, shown with diagnostics, validated, or removed, but
+must be removed and recreated rather than silently repaired or renamed.
+
+Mutation review stages are dynamic:
+
+- `identity` reviews directory creation, rename, or removal.
+- `manifest` reviews canonical `skill.json` and generated `SKILL.md`.
+- `references` appears when reference files are added, changed, moved, or removed.
+
+Approve only the packet's current stage using its session ID and returned
+approval arguments. After every stage is recorded, call the same semantic
+request with `execute: true` and `approvalComplete: true`. If reviewed files or
+the source skill change during approval, Cadre rejects the stale session.
+
+`SKILL.md` is regenerated deterministically after every successful create,
+update, or rename. It is a human projection of metadata, selectors, rules, and
+the reference inventory; reference bodies are never copied into it and runtime
+selection continues to use `skill.json`.

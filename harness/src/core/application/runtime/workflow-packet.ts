@@ -29,12 +29,20 @@ import { workflowRelease, workflowRevise } from "./workflow-release-revise";
 import { markdownPayloadError, shapeWorkflowResponse, withSharedControlPlaneSync, workflowSummary } from "./workflow-response";
 import { workflowSetup } from "./workflow-setup";
 import { workflowLand, workflowShip } from "./workflow-ship-land";
+import { workflowSkill } from "./workflow-skill";
 import { dapSetup, dapStatus } from "../../../dap/config";
 
 export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const markdownError = markdownPayloadError(args);
   if (markdownError) return shapeWorkflowResponse(root, workflow, args, { ...workflowSummary(root, workflow, args), ...markdownError });
+  if (workflow === "skill") {
+    if (args.execute === true && (args as UnknownRecord).skipSync !== true) {
+      const result = withSharedControlPlaneSync(root, args, "workflow:skill", () => workflowSkill(root, { ...args, skipSync: true }));
+      return shapeWorkflowResponse(root, workflow, args, result);
+    }
+    return shapeWorkflowResponse(root, workflow, args, workflowSkill(root, args));
+  }
   const projectSkills = projectSkillSelection(root, workflow, args);
   if (projectSkills.ok === false) {
     return shapeWorkflowResponse(root, workflow, args, {

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "schema": "cadre.protocol.v1",
+  "id": "cadre-skill",
+  "workflow": "skill",
+  "inputs": ["operation", "skillId?", "newSkillId?", "changes?"],
+  "transitions": ["inspect", "format_references", "review_identity", "review_manifest", "review_references", "execute", "commit"],
+  "approval": "staged_for_mutations",
+  "references": [
+    { "id": "approval-and-generation", "when": "decision:approval" }
+  ]
+}

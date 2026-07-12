@@ -53,6 +53,7 @@ const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
   { uri: "cadre://styleguide-selection", name: "Cadre styleguide selection", description: "Selected style guidance for a track or file list. Read with ?root=/path&trackId=<id>&files=a,b." },
   { uri: "cadre://project-skills", name: "Cadre project skills", description: "Repository-owned skill selection for a workflow. Read with ?root=/path&workflow=<name>." },
   { uri: "cadre://project-skill", name: "Cadre project skill", description: "Project skill manifest or one targeted reference. Read with ?root=/path&id=<skill-id>&reference=<id>." },
+  { uri: "cadre://project-skill-source", name: "Cadre project skill source", description: "Project-local text source requested for model formatting. Read with ?root=/path&path=<relative-path>." },
 ];
 
 const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
@@ -95,6 +96,7 @@ const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
   "cadre://styleguide-selection": { required: ["root"], optional: ["trackId", "files"] },
   "cadre://project-skills": { required: ["root", "workflow"], optional: ["trackId", "repos", "files", "skillRuleBudget"] },
   "cadre://project-skill": { required: ["root", "id"], optional: ["reference"] },
+  "cadre://project-skill-source": { required: ["root", "path"] },
 };
 
 function contractQueryParams(contract: ResourceContract): string[] {
@@ -140,6 +142,7 @@ export function parseResourceUri(uri: string): ResourceQuery {
     name: params.get("name"),
     id: params.get("id"),
     reference: params.get("reference"),
+    path: params.get("path"),
     skillRuleBudget: params.has("skillRuleBudget") ? Number(params.get("skillRuleBudget")) : null,
     artifact: params.get("artifact"),
     scope: params.get("scope"),

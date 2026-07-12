@@ -32,7 +32,8 @@
     "refresh",
     "revert",
     "formula",
-    "artifacts"
+    "artifacts",
+    "skill"
   ],
   "references": [
     { "id": "native-prompts", "when": "decision.kind == 'clarification'" },
