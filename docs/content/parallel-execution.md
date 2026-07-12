@@ -1,8 +1,8 @@
 ---
 title: Parallel Execution
 description: Phase annotations, worker waves, file claims, merge-back, and failure recovery.
-section: Scale
-order: 7
+section: User Guide
+order: 80
 ---
 
 # Parallel Execution

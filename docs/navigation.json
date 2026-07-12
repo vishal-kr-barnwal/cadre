@@ -1,0 +1,19 @@
+[
+  { "section": "Start Here", "slugs": ["overview", "getting-started", "quickstart"] },
+  {
+    "section": "User Guide",
+    "slugs": ["capabilities", "how-cadre-works", "workflows", "project-skills", "parallel-execution"]
+  },
+  {
+    "section": "Operations",
+    "slugs": ["configuration", "tuning", "operations", "team-and-polyrepo", "troubleshooting"]
+  },
+  {
+    "section": "Contributor Guide",
+    "slugs": ["architecture", "runtime-and-mcp", "workflow-engine", "state-and-artifacts", "development", "testing-and-release"]
+  },
+  {
+    "section": "Reference",
+    "slugs": ["configuration-reference", "workflow-reference", "mcp-reference", "project-skill-reference", "release-notes"]
+  }
+]

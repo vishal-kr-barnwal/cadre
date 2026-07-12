@@ -1,8 +1,8 @@
 ---
 title: Troubleshooting
 description: Common install, MCP, provider, LSP, DAP, and plugin-generation failures.
-section: Support
-order: 8
+section: Operations
+order: 130
 ---
 
 # Troubleshooting

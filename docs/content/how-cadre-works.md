@@ -1,11 +1,11 @@
 ---
-title: How Cadre Works
+title: Core Concepts
 description: Packet-owned workflows, MCP runtime, native Cadre memory, review gates, provider evidence, and code intelligence.
-section: Core Concepts
-order: 3
+section: User Guide
+order: 50
 ---
 
-# How Cadre Works
+# Core Concepts
 
 Cadre separates human-readable project context from deterministic state
 operations. Agents read enough context to understand the work, but they use

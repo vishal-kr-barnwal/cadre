@@ -24,12 +24,23 @@ export function SearchCommand({
   enableShortcut = true,
 }: {
   docs: DocMeta[]
-  mode?: "full" | "icon"
+  mode?: "full" | "icon" | "responsive"
   className?: string
   enableShortcut?: boolean
 }) {
   const [open, setOpen] = React.useState(false)
+  const [query, setQuery] = React.useState("")
   const router = useRouter()
+  const filteredDocs = React.useMemo(() => {
+    const terms = normalizeSearchValue(query).split(/\s+/).filter(Boolean)
+    if (!terms.length) return docs
+    return docs.filter((doc) => {
+      const haystack = normalizeSearchValue(
+        `${doc.title} ${doc.navTitle} ${doc.description} ${doc.section} ${doc.searchText}`
+      )
+      return terms.every((term) => haystack.includes(term))
+    })
+  }, [docs, query])
 
   React.useEffect(() => {
     if (!enableShortcut) return
@@ -53,30 +64,40 @@ export function SearchCommand({
         size={mode === "icon" ? "icon" : "default"}
         className={cn(
           mode === "full" && "w-52 justify-start text-muted-foreground",
+          mode === "responsive" && "size-11 text-muted-foreground xl:h-9 xl:w-64 xl:justify-start",
           className
         )}
         aria-label="Search docs"
         onClick={() => setOpen(true)}
       >
-        <SearchIcon data-icon={mode === "full" ? "inline-start" : "only"} />
-        {mode === "full" ? <span>Search docs</span> : <span className="sr-only">Search docs</span>}
+        <SearchIcon data-icon={mode === "icon" ? "only" : "inline-start"} />
+        {mode === "full" ? <span>Search docs</span> : null}
+        {mode === "responsive" ? <span className="hidden xl:inline">Search docs</span> : null}
+        {mode === "icon" ? <span className="sr-only">Search docs</span> : null}
       </Button>
       <CommandDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+          if (!nextOpen) setQuery("")
+        }}
         title="Search Cadre docs"
         description="Find guides, workflow references, and architecture pages."
         className="max-w-xl"
       >
-        <Command>
-          <CommandInput placeholder="Search Cadre docs..." />
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search Cadre docs..."
+            value={query}
+            onValueChange={setQuery}
+          />
           <CommandList>
             <CommandEmpty>No results found.</CommandEmpty>
             <CommandGroup heading="Documentation">
-              {docs.map((doc) => (
+              {filteredDocs.map((doc) => (
                 <CommandItem
                   key={doc.slug}
-                  value={`${doc.title} ${doc.description} ${doc.section}`}
+                  value={doc.slug}
                   onSelect={() => {
                     setOpen(false)
                     router.push(doc.href)
@@ -97,4 +118,8 @@ export function SearchCommand({
       </CommandDialog>
     </>
   )
+}
+
+function normalizeSearchValue(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }

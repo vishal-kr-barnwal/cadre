@@ -1,8 +1,8 @@
 ---
 title: Team And Polyrepo
 description: Shared sync, ownership, leases, team boards, polyrepo control repos, and merge trains.
-section: Scale
-order: 6
+section: Operations
+order: 120
 ---
 
 # Team And Polyrepo

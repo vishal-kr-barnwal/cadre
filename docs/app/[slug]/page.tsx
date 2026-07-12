@@ -5,12 +5,12 @@ import Link from "next/link"
 
 import { DocsShell } from "@/components/docs-shell"
 import { Markdown } from "@/components/markdown"
+import { InlineOnThisPage } from "@/components/on-this-page"
 import {
   getAllDocs,
   getAllSlugs,
   getDocBySlug,
 } from "@/lib/docs"
-import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -19,8 +19,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 
 type PageProps = {
@@ -58,11 +56,11 @@ export default async function DocPage({ params }: PageProps) {
 
   return (
     <DocsShell docs={docs} headings={doc.headings}>
-      <div className="flex max-w-4xl flex-col gap-8">
+      <div className="mx-auto flex max-w-3xl flex-col gap-8 xl:mx-0">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href="/" />}>Home</BreadcrumbLink>
+              <BreadcrumbLink render={<Link href={doc.sectionHref} />}>{doc.section}</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
@@ -72,51 +70,42 @@ export default async function DocPage({ params }: PageProps) {
         </Breadcrumb>
 
         <div className="flex flex-col gap-4">
-          <Badge variant="secondary" className="w-fit">
-            {doc.section}
-          </Badge>
-          <div className="flex flex-col gap-3">
-            <h1 className="text-4xl leading-tight font-semibold tracking-normal text-cadre-ink sm:text-5xl">
-              {doc.title}
-            </h1>
-            <p className="max-w-3xl text-lg leading-8 text-muted-foreground">
-              {doc.description}
-            </p>
-          </div>
+          <h1 className="text-[2.55rem] leading-[1.08] font-semibold tracking-tight text-cadre-ink sm:text-5xl lg:text-[3.25rem]">
+            {doc.title}
+          </h1>
+          <p className="max-w-3xl text-lg leading-8 text-muted-foreground">
+            {doc.description}
+          </p>
         </div>
 
-        <Separator />
+        <InlineOnThisPage headings={doc.headings} />
 
         <Markdown content={doc.content} />
 
         <Separator className="mt-8" />
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <nav aria-label="Documentation pagination" className="grid gap-5 sm:grid-cols-2">
           {doc.previous ? (
-            <Card>
-              <CardContent className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">Previous</p>
-                <Button variant="outline" className="justify-start" render={<Link href={doc.previous.href} />}>
-                  <ArrowLeftIcon data-icon="inline-start" />
-                  {doc.previous.title}
-                </Button>
-              </CardContent>
-            </Card>
+            <Link className="group flex min-h-16 items-center gap-3 rounded-xl border p-4 transition-colors hover:bg-muted" href={doc.previous.href}>
+              <ArrowLeftIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-0.5" />
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Previous</span>
+                <span className="font-medium text-foreground">{doc.previous.title}</span>
+              </span>
+            </Link>
           ) : (
             <div />
           )}
           {doc.next ? (
-            <Card>
-              <CardContent className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">Next</p>
-                <Button variant="outline" className="justify-start" render={<Link href={doc.next.href} />}>
-                  {doc.next.title}
-                  <ArrowRightIcon data-icon="inline-end" />
-                </Button>
-              </CardContent>
-            </Card>
+            <Link className="group flex min-h-16 items-center justify-end gap-3 rounded-xl border p-4 text-right transition-colors hover:bg-muted" href={doc.next.href}>
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Next</span>
+                <span className="font-medium text-foreground">{doc.next.title}</span>
+              </span>
+              <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+            </Link>
           ) : null}
-        </div>
+        </nav>
       </div>
     </DocsShell>
   )

@@ -1,8 +1,8 @@
 ---
 title: Project Skills
 description: Repository-owned Cadre rules, selectors, references, and multi-skill loading.
-section: Core Concepts
-order: 5
+section: User Guide
+order: 70
 ---
 
 # Project Skills

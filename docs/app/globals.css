@@ -124,6 +124,9 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --cadre-teal: oklch(0.72 0.105 190);
+    --cadre-teal-soft: oklch(0.25 0.035 190);
+    --cadre-ink: oklch(0.96 0.01 210);
 }
 
 @layer base {
@@ -140,7 +143,7 @@
 
 @layer utilities {
   .docs-prose {
-    @apply text-[0.98rem] leading-7 text-foreground;
+    @apply min-w-0 max-w-3xl text-base leading-7 text-foreground;
   }
 
   .docs-prose > * + * {
@@ -152,7 +155,7 @@
   }
 
   .docs-prose h2 {
-    @apply mt-12 scroll-m-24 border-t pt-8 text-2xl leading-snug font-semibold tracking-normal text-cadre-ink;
+    @apply mt-12 scroll-m-24 text-2xl leading-snug font-semibold tracking-tight text-cadre-ink;
   }
 
   .docs-prose h3 {
@@ -198,7 +201,7 @@
   }
 
   .docs-prose pre {
-    @apply overflow-x-auto rounded-xl border bg-cadre-ink p-4 text-sm leading-6 text-white shadow-sm;
+    @apply m-0 overflow-x-auto rounded-xl border bg-muted/45 p-5 pr-14 text-sm leading-6 text-foreground shadow-xs;
   }
 
   .docs-prose pre code {
@@ -229,8 +232,20 @@
     @apply m-0 size-4;
   }
 
+  .docs-code-block {
+    @apply relative min-w-0;
+  }
+
+  .docs-code-copy {
+    @apply absolute top-3 right-3 z-10 bg-background/90;
+  }
+
+  .docs-table-wrap {
+    @apply max-w-full overflow-x-auto rounded-xl border outline-none focus-visible:ring-3 focus-visible:ring-ring/50;
+  }
+
   .docs-prose table {
-    @apply w-full overflow-hidden rounded-xl border text-sm;
+    @apply w-full min-w-[34rem] border-collapse text-sm;
   }
 
   .docs-prose thead {
@@ -251,5 +266,69 @@
 
   .docs-prose img {
     @apply max-h-36 rounded-xl border bg-background object-contain p-4;
+  }
+
+  @media (max-width: 639px) {
+    .docs-prose {
+      @apply leading-7;
+    }
+
+    .docs-prose h2 {
+      @apply mt-10 text-[1.65rem];
+    }
+
+    .docs-prose h3 {
+      @apply mt-8 text-xl;
+    }
+
+    .docs-prose pre {
+      @apply p-4 pr-12 text-[0.82rem];
+    }
+
+    .docs-table-wrap {
+      @apply overflow-visible border-0;
+    }
+
+    .docs-prose table,
+    .docs-prose tbody,
+    .docs-prose tr,
+    .docs-prose td {
+      display: block;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .docs-prose thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .docs-prose tbody {
+      @apply flex flex-col gap-3;
+    }
+
+    .docs-prose tr {
+      @apply overflow-hidden rounded-xl border bg-background;
+    }
+
+    .docs-prose td {
+      @apply grid grid-cols-[minmax(7rem,0.42fr)_1fr] gap-3 border-t-0 border-b px-4 py-3;
+    }
+
+    .docs-prose td:last-child {
+      @apply border-b-0;
+    }
+
+    .docs-prose td::before {
+      content: attr(data-label);
+      @apply font-semibold text-foreground;
+    }
   }
 }

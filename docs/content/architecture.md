@@ -1,8 +1,8 @@
 ---
 title: Architecture
 description: Harness package layout, thin install-time plugin bundles, source files, and development flow.
-section: Internals
-order: 5
+section: Contributor Guide
+order: 140
 ---
 
 # Architecture

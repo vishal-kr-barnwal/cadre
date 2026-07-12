@@ -1,11 +1,11 @@
 ---
-title: Getting Started
-description: Install the Cadre plugin and initialize a target project.
-section: Start
-order: 2
+title: Installation
+description: Install, upgrade, verify, and remove Cadre across supported coding clients.
+section: Start Here
+order: 20
 ---
 
-# Getting Started
+# Installation
 
 This guide gets Cadre installed in Claude Code, OpenAI Codex, GitHub Copilot,
 or Google Antigravity and initializes the first target project.

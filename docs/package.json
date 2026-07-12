@@ -10,6 +10,8 @@
     "preview:pages": "pnpm build && wrangler pages dev out",
     "start": "next start",
     "lint": "eslint",
+    "check:content": "node scripts/check-content.mjs",
+    "check": "pnpm check:content && pnpm lint && pnpm typecheck && pnpm build",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit"
   },

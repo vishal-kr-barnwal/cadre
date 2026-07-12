@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ArrowRightIcon, BookOpenIcon, BoxesIcon, GitBranchIcon, Layers3Icon, LifeBuoyIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react"
+import { ArrowRightIcon, BookOpenIcon, BoxesIcon, GitBranchIcon, Layers3Icon, LifeBuoyIcon, MenuIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react"
 
 import { Brand } from "@/components/brand"
 import { WorkflowVisual } from "@/components/home/workflow-visual"
@@ -14,6 +14,14 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import type { DocMeta } from "@/lib/docs"
 
 const featureCards = [
@@ -48,31 +56,53 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-5 px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-[68px] max-w-screen-2xl items-center gap-5 px-4 sm:px-6 lg:px-8">
           <Brand />
-          <nav className="hidden items-center gap-5 text-sm font-medium text-muted-foreground md:flex">
+          <nav className="hidden items-center gap-7 text-sm font-medium text-foreground xl:flex">
             <Link className="hover:text-foreground" href="/overview">
               Docs
             </Link>
             <Link className="hover:text-foreground" href="/getting-started">
               Getting Started
             </Link>
-            <Link className="hover:text-foreground" href="/architecture">
-              Architecture
+            <Link className="hover:text-cadre-teal" href="/architecture">
+              Contributor Guide
             </Link>
             <Link className="hover:text-foreground" href="https://github.com/vishal-kr-barnwal/cadre">
               GitHub
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-2">
-            <SearchCommand docs={docs} className="hidden sm:inline-flex" />
-            <SearchCommand
-              docs={docs}
-              mode="icon"
-              className="sm:hidden"
-              enableShortcut={false}
-            />
-            <Button render={<Link href="/getting-started" />}>Install</Button>
+            <SearchCommand docs={docs} mode="responsive" />
+            <Button className="hidden bg-cadre-teal text-white hover:bg-cadre-teal/90 xl:inline-flex" render={<Link href="/getting-started" />}>Install</Button>
+            <Sheet>
+              <SheetTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-lg"
+                    className="size-11 xl:hidden"
+                    aria-label="Open site navigation"
+                  />
+                }
+              >
+                <MenuIcon />
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[min(90vw,22rem)] p-0">
+                <SheetHeader className="border-b">
+                  <SheetTitle>Cadre documentation</SheetTitle>
+                  <SheetDescription>Choose a guide or reference section.</SheetDescription>
+                </SheetHeader>
+                <nav className="flex flex-col gap-2 p-4 text-sm">
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/overview">Docs overview</Link>
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/getting-started">Getting Started</Link>
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/operations">Operations</Link>
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/architecture">Contributor Guide</Link>
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/workflow-reference">Reference</Link>
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="https://github.com/vishal-kr-barnwal/cadre">GitHub</Link>
+                </nav>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
       </header>
@@ -193,7 +223,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               <Card key={doc.slug} size="sm">
                 <CardHeader>
                   <Badge variant="outline">{doc.section}</Badge>
-                  <CardTitle>{doc.title}</CardTitle>
+                  <CardTitle>{doc.navTitle}</CardTitle>
                   <CardDescription>{doc.description}</CardDescription>
                 </CardHeader>
                 <CardFooter>

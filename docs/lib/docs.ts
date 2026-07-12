@@ -3,12 +3,15 @@ import path from "node:path"
 
 import matter from "gray-matter"
 
+import { DOC_NAVIGATION, getNavigationPosition, type DocSection } from "@/lib/navigation"
+
 const contentDir = path.join(process.cwd(), "content")
 
 export type DocFrontmatter = {
   title: string
+  navTitle?: string
   description: string
-  section: string
+  section: DocSection
   order: number
 }
 
@@ -21,6 +24,11 @@ export type Heading = {
 export type DocMeta = DocFrontmatter & {
   slug: string
   href: string
+  sectionOrder: number
+  navOrder: number
+  searchText: string
+  sectionHref: string
+  navTitle: string
 }
 
 export type DocPage = DocMeta & {
@@ -31,7 +39,7 @@ export type DocPage = DocMeta & {
 }
 
 export function getAllDocs(): DocMeta[] {
-  return fs
+  const docs = fs
     .readdirSync(contentDir)
     .filter((file) => file.endsWith(".md"))
     .map((file) => {
@@ -39,17 +47,44 @@ export function getAllDocs(): DocMeta[] {
       const source = fs.readFileSync(path.join(contentDir, file), "utf8")
       const parsed = matter(source)
       const data = parsed.data as Partial<DocFrontmatter>
+      const position = getNavigationPosition(slug)
+
+      if (!position) {
+        throw new Error(`Document is missing from the navigation registry: ${slug}`)
+      }
+
+      const title = data.title ?? titleFromSlug(slug)
+      const sectionGroup = DOC_NAVIGATION[position.sectionOrder]
 
       return {
         slug,
         href: `/${slug}`,
-        title: data.title ?? titleFromSlug(slug),
+        title,
+        navTitle: data.navTitle ?? title,
         description: data.description ?? "",
-        section: data.section ?? "Docs",
+        section: position.section,
         order: Number(data.order ?? 999),
+        sectionOrder: position.sectionOrder,
+        navOrder: position.navOrder,
+        searchText: createSearchText(parsed.content),
+        sectionHref: `/${sectionGroup.slugs[0]}`,
       }
     })
-    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
+    .sort(
+      (a, b) =>
+        a.sectionOrder - b.sectionOrder ||
+        a.navOrder - b.navOrder ||
+        a.title.localeCompare(b.title)
+    )
+
+  const expectedCount = DOC_NAVIGATION.reduce((count, group) => count + group.slugs.length, 0)
+  if (docs.length !== expectedCount) {
+    throw new Error(
+      `Navigation registry contains ${expectedCount} entries but ${docs.length} Markdown documents were found.`
+    )
+  }
+
+  return docs
 }
 
 export function getDocBySlug(slug: string): DocPage {
@@ -68,8 +103,9 @@ export function getDocBySlug(slug: string): DocPage {
   return {
     ...current,
     title: data.title ?? current.title,
+    navTitle: data.navTitle ?? current.navTitle,
     description: data.description ?? current.description,
-    section: data.section ?? current.section,
+    section: current.section,
     order: Number(data.order ?? current.order),
     content: stripTopLevelTitle(parsed.content),
     headings: extractHeadings(parsed.content),
@@ -79,11 +115,22 @@ export function getDocBySlug(slug: string): DocPage {
 }
 
 export function getDocsBySection(docs = getAllDocs()) {
-  return docs.reduce<Record<string, DocMeta[]>>((acc, doc) => {
-    acc[doc.section] ??= []
-    acc[doc.section].push(doc)
+  return docs.reduce<Partial<Record<DocSection, DocMeta[]>>>((acc, doc) => {
+    const sectionDocs = acc[doc.section] ?? []
+    sectionDocs.push(doc)
+    acc[doc.section] = sectionDocs
     return acc
   }, {})
+}
+
+function createSearchText(content: string) {
+  return content
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_>#|{}[\]-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 export function getAllSlugs() {

@@ -1,8 +1,8 @@
 ---
 title: Workflows
 description: Detailed guide to the Cadre workflow lifecycle and every cadre-* command.
-section: Core Concepts
-order: 4
+section: User Guide
+order: 60
 ---
 
 # Workflows

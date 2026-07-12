@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown"
 import rehypeSlug from "rehype-slug"
 import remarkGfm from "remark-gfm"
 
+import { CodeBlock } from "@/components/code-block"
 import { MermaidDiagram } from "@/components/mermaid-diagram"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
@@ -42,13 +43,52 @@ export function Markdown({ content }: { content: string }) {
               return <MermaidDiagram chart={String(child.props.children).trim()} />
             }
 
-            return <pre>{children}</pre>
+            const code = child ? textContent(child.props.children).replace(/\n$/, "") : ""
+            return <CodeBlock code={code} className={child?.props.className} />
           },
+          table: ({ children }) => <ResponsiveTable>{children}</ResponsiveTable>,
         }}
       >
         {content}
       </ReactMarkdown>
     </article>
+  )
+}
+
+function ResponsiveTable({ children }: { children: React.ReactNode }) {
+  const sections = React.Children.toArray(children)
+  const head = sections.find((section) => isTag(section, "thead"))
+  const headRow = head ? React.Children.toArray(head.props.children).find((row) => isTag(row, "tr")) : null
+  const headers = headRow
+    ? React.Children.toArray(headRow.props.children)
+        .filter((cell) => isTag(cell, "th"))
+        .map((cell) => textContent(cell.props.children))
+    : []
+
+  const enhanced = React.Children.map(children, (section) => {
+    if (!isTag(section, "tbody")) return section
+
+    const rows = React.Children.map(section.props.children, (row) => {
+      if (!isTag(row, "tr")) return row
+
+      const cells = React.Children.map(row.props.children, (cell, index) => {
+        if (!isTag(cell, "td")) return cell
+        return React.cloneElement(
+          cell as React.ReactElement<Record<string, unknown>>,
+          { "data-label": headers[index] ?? "Value" }
+        )
+      })
+
+      return React.cloneElement(row, undefined, cells)
+    })
+
+    return React.cloneElement(section, undefined, rows)
+  })
+
+  return (
+    <div className="docs-table-wrap" role="region" aria-label="Scrollable table" tabIndex={0}>
+      <table>{enhanced}</table>
+    </div>
   )
 }
 
@@ -71,4 +111,22 @@ function getOnlyElement(children: React.ReactNode) {
     className?: string
     children?: React.ReactNode
   }>
+}
+
+function isTag(
+  value: React.ReactNode,
+  tag: string
+): value is React.ReactElement<{ children?: React.ReactNode }> {
+  return React.isValidElement(value) && value.type === tag
+}
+
+function textContent(value: React.ReactNode): string {
+  return React.Children.toArray(value)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child)
+      return React.isValidElement<{ children?: React.ReactNode }>(child)
+        ? textContent(child.props.children)
+        : ""
+    })
+    .join("")
 }

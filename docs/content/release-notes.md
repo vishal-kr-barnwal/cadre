@@ -2,7 +2,7 @@
 title: Release Notes
 description: Changes in the latest Cadre release.
 section: Reference
-order: 9
+order: 240
 ---
 
 # Release Notes

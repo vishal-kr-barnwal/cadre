@@ -1,8 +1,9 @@
 ---
 title: Cadre
+navTitle: Overview
 description: Context-driven development harness for AI coding agents.
-section: Overview
-order: 1
+section: Start Here
+order: 10
 ---
 
 # Cadre
