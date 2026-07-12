@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## [2.1.0] - 2026-07-12
+
+Project-skill, token-efficiency, and documentation release.
 
 ### Added
 
@@ -8,13 +10,60 @@
   workflow and optional polyrepo targeting, bounded inline instructions, lazy
   reference resources, explicit `skillIds` selection, validation diagnostics,
   and workflow-packet integration.
-- Added `cadre://project-skills` and `cadre://project-skill` MCP resources.
+- Added `cadre://project-skills`, `cadre://project-skill`, and
+  `cadre://project-skill-source` MCP resources for selection diagnostics,
+  validated lazy references, and source-formatting requests.
+- Added the `cadre-skill` workflow for packet-owned project-skill inspection,
+  creation, update, formatting, enable/disable, validation, and removal.
+- Added `project_skills.inline_rule_budget` with a default of `2400`, compact
+  budget-source diagnostics, deterministic optional-rule allocation, and a
+  fail-closed contract for required rules that cannot fit safely.
+- Added project-skill and token-efficiency regression suites, including bounded
+  baseline fixtures for tools, resources, workflows, packets, and references.
+- Added a complete public user/operator and contributor documentation system:
+  24 registry-ordered pages, exhaustive workflow/configuration/MCP references,
+  content coverage checks, body-aware search, responsive tables and code
+  blocks, and desktop/tablet/mobile navigation.
 
 ### Changed
 
+- Replaced the older broad MCP tool catalog with token-efficient v1 public
+  contracts centered on `cadre_workflow`, `cadre_action`, and `cadre_read`.
+- Added compact workflow envelopes with an explicit decision, bounded required
+  evidence, at most one deterministic next call, changed artifacts, targeted
+  resources, and workflow-specific data.
+- Reduced the packaged `cadre.skill.v1` contract to activation, invariants,
+  workflow IDs, and conditional references. Normal workflow calls no longer
+  require eager protocol or reference reads.
+- Updated workflow protocols and agent references for packet-led activation,
+  lazy evidence, namespaced actions, targeted resource reads, and compact
+  project-skill summaries.
 - Updated Cadre workflow protocols to load applicable project skills before
   drafting workflow payloads and to apply returned guidance during
   implementation, review, and publication.
+
+### Fixed
+
+- Fixed monorepo GitHub and GitLab CI aggregation so failed workspace package
+  checks are combined correctly instead of being masked by the final `jq`
+  expression.
+
+### Migration Notes
+
+- Re-run `cadre install` after upgrading so Codex, Claude Code, Copilot, and
+  Antigravity use the new three-tool activation contract and current MCP
+  configuration.
+- Custom MCP callers must start workflows through `cadre_workflow`, run only the
+  namespaced `cadre_action` returned by a packet, and read only relevant
+  `cadre_read` resource URIs. Older direct Cadre tool names are no longer the
+  public client contract.
+- Custom callers should branch on structured workflow `decision`, `required`,
+  `next`, `artifacts`, and `resources` fields rather than parsing legacy packet
+  prose or assuming a workflow-specific direct tool.
+- Project skills are repository-local and opt-in by selection. Existing target
+  projects continue without a `cadre/skills/` directory; teams that add skills
+  should validate workflow/repo selectors and inspect budget diagnostics before
+  widening `inline_rule_budget`.
 
 ## [2.0.0] - 2026-06-26
 

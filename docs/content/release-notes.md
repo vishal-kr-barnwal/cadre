@@ -7,6 +7,129 @@ order: 240
 
 # Release Notes
 
+## 2.1.0 - 2026-07-12
+
+Cadre 2.1.0 makes the agent-facing runtime smaller while making repository
+guidance substantially more capable. Workflows now enter through three
+token-efficient public tools, load project-owned skills when relevant, and
+return compact decision envelopes with lazy evidence. The public docs have also
+been reorganized into complete user/operator and contributor journeys.
+
+### Compared With 2.0.0
+
+| Area | What changed |
+|---|---|
+| MCP surface | The older broad direct-tool catalog is replaced by `cadre_workflow`, `cadre_action`, and `cadre_read`. |
+| Workflow responses | A compact envelope reports the current decision, required evidence, at most one next call, changed artifacts, targeted resources, and bounded workflow data. |
+| Skill activation | The packaged `cadre.skill.v1` contract now contains a small activation contract, invariants, workflow IDs, and conditional references instead of eager operating detail. |
+| Project skills | Repositories can own workflow- and repo-targeted engineering guidance under `cadre/skills/<id>/`. |
+| Skill management | The new `cadre-skill` workflow inspects, creates, updates, formats, validates, enables/disables, and removes project skills through packet-owned review. |
+| Context tuning | `project_skills.inline_rule_budget` defaults to `2400` and bounds optional inline rules while required rules remain fail-closed. |
+| Lazy resources | New project-skill selection, reference, and source resources keep long context out of the hot workflow response. |
+| CI | Monorepo GitHub and GitLab workspace-check aggregation no longer lets the final `jq` operation mask a failed package check. |
+| Documentation | The site now has 24 registry-ordered pages with separate operator/contributor guides, complete references, body search, content coverage tests, and responsive navigation/tables/code. |
+
+### Token-Efficient V1 Contract
+
+Installed agents now start or continue every Cadre workflow with
+`cadre_workflow`. A packet may return one namespaced `cadre_action` for the next
+operation or a targeted URI for `cadre_read`. This reduces tool-schema and
+always-on instruction cost while preserving packet ownership of state,
+approvals, provider actions, workers, and generated projections.
+
+The workflow envelope is designed for deterministic client behavior:
+
+- `decision` identifies ready, clarification, approval, blocked, or complete
+  state;
+- `required` lists missing evidence or payload requirements;
+- `next` contains at most one exact tool call;
+- `artifacts` identifies current review or changed files;
+- `resources` points to bounded detail that is relevant now;
+- `data` contains only workflow-specific summary fields.
+
+### Repository-Owned Project Skills
+
+Projects can add reviewed engineering rules without publishing another global
+plugin. A skill can target specific workflows and, in a polyrepo, specific
+declared repositories. Rules can be selected automatically or explicitly with
+`skillIds`; longer references remain lazy until a packet exposes them.
+
+The `cadre-skill` workflow provides packet-owned management and validation.
+Cadre rejects unsafe paths, schema/version mismatch, duplicate IDs, invalid
+selectors, unresolved repo targets, unsupported reference files, and required
+rule overflow. Project skills never execute scripts automatically and never
+fall back to a global catalog.
+
+### Context Budget And Tuning
+
+New projects receive:
+
+```json
+{
+  "project_skills": {
+    "inline_rule_budget": 2400
+  }
+}
+```
+
+The budget applies to optional inline rules across selected skills. Required
+rules are not silently truncated. Packets expose the effective budget, its
+source, the requested value, selected skills, and optional omissions so teams
+can narrow selectors before increasing context.
+
+### Documentation Overhaul
+
+The documentation is now organized into Start Here, User Guide, Operations,
+Contributor Guide, and Reference sections. New material covers capabilities,
+quickstart, configuration, tuning, daily operation, runtime/MCP internals,
+workflow engine design, canonical state and artifacts, development, testing,
+release, and exhaustive public references.
+
+The responsive docs shell provides a persistent three-rail desktop layout,
+sheet navigation and inline outlines below desktop widths, body-aware search,
+copyable code, labelled mobile table rows, section breadcrumbs, and accessible
+previous/next navigation.
+
+### Upgrade Notes
+
+Upgrade the package and refresh every detected native client:
+
+```bash
+npm install -g cadre-ai@2.1.0
+cadre install
+cadre install --check
+```
+
+Restart clients that cache plugin or MCP configuration. Verify that the
+installed `cadre@cadre` plugin is enabled at 2.1.0 and that its MCP command
+resolves the current `cadre-mcp` runtime.
+
+Custom integrations that called older direct Cadre tools must migrate to the
+three-tool contract. Start with `cadre_workflow`, execute only the returned
+namespaced action, read only relevant resource URIs, and branch on structured
+decision fields rather than workflow prose.
+
+Existing target projects do not need to create project skills. When adopting
+them, start with narrow workflow/repository selectors, validate selection with
+`cadre-skill` or `cadre://project-skills`, and raise the inline budget only when
+diagnostics show a real optional-rule omission.
+
+### Operating Cautions
+
+- The new MCP surface is a client contract migration for custom integrations,
+  even though normal native users refresh it through `cadre install`.
+- Required project-skill rules fail closed rather than disappearing when they
+  exceed the safe packet contract.
+- Hosted provider evidence still comes from supported provider integrations;
+  the compact envelope does not introduce a CLI evidence fallback.
+- Target-path staged review behavior from 2.0.0 is unchanged: a written preview
+  is reviewable worktree output, not approval.
+
+The local `release-2.1.0` tag prepares this candidate without pushing,
+publishing npm, creating a GitHub release, or deploying the docs. Publishing a
+GitHub release remains the separate action that triggers Trusted Publishing and
+the documentation deployment pipeline.
+
 ## 2.0.0 - 2026-06-26
 
 Cadre 2.0.0 makes staged review output land directly at the intended target
