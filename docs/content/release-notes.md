@@ -125,10 +125,9 @@ diagnostics show a real optional-rule omission.
 - Target-path staged review behavior from 2.0.0 is unchanged: a written preview
   is reviewable worktree output, not approval.
 
-The local `release-2.1.0` tag prepares this candidate without pushing,
-publishing npm, creating a GitHub release, or deploying the docs. Publishing a
-GitHub release remains the separate action that triggers Trusted Publishing and
-the documentation deployment pipeline.
+The signed `release-2.1.0` tag is the source of the GitHub release. Publishing
+that release triggers the repository's Trusted Publishing and documentation
+deployment pipeline after its release checks pass.
 
 ## 2.0.0 - 2026-06-26
 
