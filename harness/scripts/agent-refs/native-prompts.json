@@ -2,47 +2,30 @@
   "version": 1,
   "schema": "cadre.reference.v1",
   "id": "native-prompts",
-  "title": "Native Recommendation Prompts",
+  "title": "Native prompts",
   "markdownUse": "human_projection_only",
   "rules": [
-    "Use `native_prompts` only as host-client interaction guidance; do not persist prompt answers directly.",
-    "Map selected choice ids and custom text to the prompt `responseTarget` before calling the next Cadre packet.",
-    "Keep Cadre mutation packet-owned: prompt answers become structured packet arguments, not handwritten Cadre state."
+    "Use the client's native selector when available.",
+    "Return answers as structured workflow input; never write prompt-response files."
   ],
   "sections": [
     {
-      "heading": "Prompt Contract",
-      "body": "Cadre may return `native_prompts` entries with schema `cadre.native_prompt.v1`. Each prompt includes an id, title, question, `selectionMode`, choices, `allowCustom`, an optional custom argument, and a `responseTarget` that names the next packet argument to populate. Single-select prompts produce one choice id; multi-select prompts produce an ordered list of selected ids plus optional custom text."
-    },
-    {
-      "heading": "Setup Usage",
-      "body": "`cadre-setup` dry-runs can return prompts for provider mode, sync mode, style guides, LSP setup, optional MCP integrations, and missing setup intent. Answer prompts before asking for setup approval. After the user answers, call `cadre_workflow` for setup again with the selected values as structured JSON fields such as `providerMode`, `syncMode`, `styleGuideIds`, `writeLsp`, and `integrations`. Then review the current staged review output and request approval for `execute:true`. Do not write a prompt response file or edit generated projections."
-    },
-    {
-      "heading": "Intent Clarification",
-      "body": "Cadre workflows may return `intent_prompts` with the same `cadre.native_prompt.v1` schema and `phase_state:\"awaiting_clarification\"`. This means the packet is intentionally refusing to generate artifacts until the human clarifies intent. Use the prompt answers to call the same workflow again with structured arguments. Do not synthesize missing product, track, refresh, or revision requirements from guesswork."
-    },
-    {
-      "heading": "Client Adapters",
-      "body": "<!-- AGENT:codex -->\nUse Codex native user-input affordances such as `request_user_input` when available. Preserve the prompt choices and recommended defaults, and pass custom text through the prompt custom argument.\n<!-- /AGENT:codex -->\n<!-- AGENT:claude -->\nUse Claude Code's native ask/select affordance when available. If no native selector is exposed, present the choices compactly in chat and accept selected ids plus optional custom text.\n<!-- /AGENT:claude -->\n<!-- AGENT:copilot -->\nUse Copilot's native prompt or quick-pick/select affordance when available. If unavailable, render the same choices in chat and map the user's selected ids to the `responseTarget`.\n<!-- /AGENT:copilot -->\n<!-- AGENT:antigravity -->\nUse Antigravity's native prompt/select affordance when available. If unavailable, render the same choices in chat and map the user's selected ids to the `responseTarget`.\n<!-- /AGENT:antigravity -->"
+      "heading": "Clarification",
+      "body": "When decision.kind is clarification, ask only the returned prompts. Continue the same workflow with answers under `input`."
     }
   ],
   "platforms": {
     "codex": {
-      "adapter": "request_user_input",
-      "alternate": "Render choices in chat and accept selected ids plus custom text."
+      "adapter": "request_user_input"
     },
     "claude": {
-      "adapter": "native ask/select",
-      "alternate": "Render choices in chat and accept selected ids plus custom text."
+      "adapter": "AskUserQuestion"
     },
     "copilot": {
-      "adapter": "native prompt or quick pick",
-      "alternate": "Render choices in chat and accept selected ids plus custom text."
+      "adapter": "chat"
     },
     "antigravity": {
-      "adapter": "native prompt/select",
-      "alternate": "Render choices in chat and accept selected ids plus custom text."
+      "adapter": "chat"
     }
   }
 }

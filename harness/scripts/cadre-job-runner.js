@@ -3302,6 +3302,13 @@ function completeTaskInner(root, args = {}) {
 // src/core/domain/project-skill-policy.ts
 var PROJECT_SKILL_MAX_FILE_BYTES = 128 * 1024;
 
+// src/mcp/domain/tool-catalog.ts
+var SERVER_INSTRUCTIONS = [
+  "Cadre is a packet-led runtime. Call cadre_workflow first for workflows, cadre_action for a packet named by a workflow response, and cadre_read only for a relevant resource URI.",
+  "Pass a root candidate to project-scoped calls. Cadre resolves it internally; setup accepts an uninitialized directory.",
+  "Cadre owns control-plane, provider, worker, approval, merge, and generated projection state."
+].join(" ");
+
 // src/cadre-job-runner.ts
 function readStdin() {
   return new Promise((resolve, reject) => {

@@ -2,114 +2,26 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-newtrack",
-  "description": "Create a new feature or bug track with spec and plan",
   "workflow": "newtrack",
-  "markdownUse": "human_projection_only",
-  "preconditions": [
-    {
-      "tool": "cadre_project",
-      "arguments": {
-        "action": "ping"
-      },
-      "requirement": "Cadre MCP must be available"
-    },
-    {
-      "requirement": "Every project-scoped packet call includes root"
-    },
-    {
-      "requirement": "If a required packet returns ok:false, halt and report the packet error"
-    }
+  "inputs": [
+    "trackId",
+    "spec",
+    "plan"
   ],
-  "packetFlow": [
-    {
-      "step": 1,
-      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`. Include concrete examples in your draft: `spec.functional_requirements` and `spec.acceptance_criteria` should be arrays of `{ heading, body }`; `spec.out_of_scope` should state boundaries; `plan.phases[].tasks[]` should include specific titles, expected file claims, dependencies, and manual verification tasks when behavior is user-facing or integration-heavy."
-    },
-    {
-      "step": 2,
-      "instruction": "Before drafting, load `cadre://project-skills?root=<root>&workflow=newtrack` and the Cadre artifact schemas for `spec` and `plan` with `cadre_artifact` action `schema` or `cadre://artifact-schema?artifact=spec|plan`. Apply selected project-skill instructions while drafting structured `spec` and `plan` JSON from the user request and current project context only when minimum intent is clear: goal, outcome, acceptance criteria, and scope. Include the literal schema identifiers `spec.schema:\"cadre.spec.v1\"` and `plan.schema:\"cadre.plan.v1\"`. Use canonical snake_case fields such as `functional_requirements`, `acceptance_criteria`, `out_of_scope`, and `phases`; put task objects under `plan.phases[].tasks`, not top-level `plan.tasks`. Do not invent missing product or track requirements, and do not send Markdown fields such as `specText`, `planText`, or `planPath`."
-    },
-    {
-      "step": 3,
-      "instruction": "Review only `approval.current_stage` using the returned canonical JSON artifact, generated Markdown projection preview, plan assistance when relevant, and review_bundle target/review paths; manifest_path may be null in target mode. When the user approves that stage, call newtrack again with `approvalSessionId`, `approvalStage`, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
-    },
-    {
-      "step": 4,
-      "instruction": "To create the track only after spec, plan, metadata, and learnings stages are approved, call `cadre_workflow` again with `workflow: \"newtrack\"`, `execute: true`, `approvalComplete: true`, and the same `approvalSessionId` using the same JSON payload."
-    },
-    {
-      "step": 5,
-      "instruction": "To create the track only after spec, plan, metadata, and learnings stages are approved, call `cadre_workflow` again with `workflow: \"newtrack\"`, `execute: true`, and `approvalComplete: true` using the same JSON payload."
-    },
-    {
-      "step": 6,
-      "instruction": "Summarize created track id, native event record, worktree plan, changed canonical JSON artifacts, generated human projections, and next packet."
-    }
+  "transitions": [
+    "clarify",
+    "review_spec_plan",
+    "execute"
   ],
-  "confirmation": {
-    "requiredForMutation": true,
-    "dryRunFirst": true,
-    "executeArgument": "execute",
-    "approvalArgument": "approvalComplete",
-    "stagedApproval": true
-  },
-  "forbiddenActions": [
-    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
-    "Do not read or write Markdown projections as canonical state",
-    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
-  ],
-  "responseSummary": [
-    "packet ok/error state",
-    "selected track or scope",
-    "warnings and blockers",
-    "changed canonical JSON/JSONL artifacts",
-    "generated human projections when relevant",
-    "next recommended packet"
-  ],
+  "approval": "staged",
   "references": [
-    "mcp-contract",
-    "native-prompts",
-    "approval-and-generation"
-  ],
-  "generationContract": {
-    "specExamples": {
-      "functional_requirements": [
-        {
-          "heading": "Concrete behavior",
-          "body": "What must change and who benefits."
-        }
-      ],
-      "acceptance_criteria": [
-        {
-          "heading": "Verifiable outcome",
-          "body": "Specific test, command, or manual check that proves completion."
-        }
-      ],
-      "out_of_scope": [
-        {
-          "heading": "Boundary",
-          "body": "Tempting related work intentionally excluded."
-        }
-      ]
+    {
+      "id": "native-prompts",
+      "when": "decision:clarification"
     },
-    "planExamples": {
-      "phases": [
-        {
-          "phase_index": 1,
-          "title": "Phase 1: Implement behavior",
-          "tasks": [
-            {
-              "task_index": 1,
-              "task_key": "phase1_task1",
-              "title": "Specific implementation task",
-              "files": [
-                "expected/file.ext"
-              ],
-              "depends_on": []
-            }
-          ]
-        }
-      ]
+    {
+      "id": "approval-and-generation",
+      "when": "decision:approval"
     }
-  }
+  ]
 }

@@ -22,9 +22,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
     "Run the smallest relevant tests first, then the configured project gate when practical.",
     "Commit the worker worktree changes and return the structured result JSON.",
   ].join("\n");
-  const recordFinishArguments = {
-    root,
-    action: "record_finish",
+  const recordFinishInput = {
     trackId: track.track_id,
     workerId,
     status: "awaiting_merge",
@@ -41,7 +39,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
   };
   return {
     prompt,
-    canonical_worker_contract: "cadre_parallel.dispatch.v1",
+    canonical_worker_contract: "cadre.parallel-dispatch.v1",
     repo,
     worktree,
     source_root: sourceRoot,
@@ -72,9 +70,9 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
       coverage: "Include parsed coverage when available or a reason coverage was not produced.",
     },
     record_finish_packet: {
-      tool: "cadre_parallel",
-      arguments: recordFinishArguments,
+      tool: "cadre_action",
+      arguments: { root, action: "parallel.record_finish", input: recordFinishInput, execute: true },
     },
-    finish_evidence_fields: Object.keys(recordFinishArguments),
+    finish_evidence_fields: Object.keys(recordFinishInput),
   };
 }

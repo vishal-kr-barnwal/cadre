@@ -2,53 +2,39 @@
   "version": 1,
   "schema": "cadre.reference.v1",
   "id": "parallel-execution",
-  "title": "Parallel Worker Dispatch",
+  "title": "Parallel execution",
   "markdownUse": "human_projection_only",
   "rules": [
-    "Work only on the product files assigned in the packet payload.",
-    "Run product tests, builds, linters, and commits according to the worker prompt.",
-    "Do not mutate Cadre control-plane files, native Cadre event/message state, provider state, worktree",
-    "Return structured evidence to the coordinator: worker id, task id, repo,",
-    "If product implementation fails, return the failure evidence. The coordinator",
-    "Use only `cadre_parallel`, `cadre_complete_task`, and other Cadre MCP packets",
-    "Treat `parallel_state.json` and native Cadre event/message state as packet-owned artifacts.",
-    "A worker conflict, failed test, missing commit, low coverage, or missing native task evidence",
-    "Product shell commands are allowed only for product implementation,"
+    "Run only parallel.* actions returned by cadre_workflow.",
+    "Dispatch exactly the returned workers.",
+    "Merge into packet-owned integration worktrees and clean up only when the packet allows it."
   ],
   "sections": [
     {
-      "heading": "Packet Flow",
-      "body": "1. Call `cadre_workflow` with `workflow: \"implement\"` and the selected `trackId`\n   to obtain implementation prep and the phase schedule.\n2. For a parallel phase, call `cadre_parallel` with `action: \"plan\"` or\n   `action: \"next_wave\"` to obtain the ready worker set.\n3. Call `cadre_parallel` with `action: \"setup_workers\"` and the current client\n   `agentIdentifier` (`\"claude\"`, `\"codex\"`, `\"copilot\"`, or `\"antigravity\"`) to get the packet-owned\n   integration worktree, sibling worker worktree, worker ref, and selected dispatch adapter. Add `execute:true` only\n   when the user or workflow has authorized mutation.\n4. Dispatch exactly the workers returned by the packet. Do not add, remove,\n   reorder, split, or merge workers outside the packet result.\n5. As each worker finishes, call `cadre_parallel` with `action: \"record_finish\"`\n   and the worker result evidence. Use `execute:true` when recording completion.\n6. After the wave finishes, call `cadre_parallel` with `action: \"merge_back\"` for\n   the packet-owned merge plan. Merge-back targets the repo integration worktree,\n   not `repos/<repo>` or a worker worktree. Add `execute:true` only when ready to mutate.\n7. Call `cadre_parallel` with `action: \"cleanup\"` for packet-owned cleanup. Add\n   `execute:true` only after merge-back is clean or the packet explicitly marks a\n   worker safe to clean.\n8. Repeat `next_wave` until the packet reports no ready workers.\n\nAll dependency gates, file collision checks, repo routing, event/message updates,\nparallel audit state, merge conflict state, task completion, and cleanup are\npacket-owned."
+      "heading": "Loop",
+      "body": "Call `cadre_action` with `parallel.next_wave`, `parallel.setup_workers`, `parallel.record_finish`, `parallel.merge_back`, and `parallel.cleanup` in the returned order. Put action fields in `input` and set `execute:true` only for authorized mutations."
     },
     {
-      "heading": "Dispatching Each Worker",
-      "body": "<!-- AGENT:claude -->\nPass `agentIdentifier:\"claude\"` to `cadre_parallel` when setting up workers.\nThen call the **`Task` tool** once per packet worker using the MCP-returned\n`selected_dispatch`, worker prompt, worktree, owned files, and expected result\nschema. Worker calls are awaitable; wait for every worker in the wave before\ncalling the next Cadre packet.\n<!-- /AGENT:claude -->\n<!-- AGENT:codex -->\nPass `agentIdentifier:\"codex\"` to `cadre_parallel` when setting up workers.\nThen use Codex multi-agent tools from the MCP-returned `selected_dispatch`.\nSearch tool discovery for `multi_agent_v1.spawn_agent`, spawn one worker agent\nper packet worker, pass the worker prompt and dispatch payload, and wait with\nthe corresponding multi-agent wait tool before calling the next Cadre packet.\nIf the selected dispatch mechanism is unavailable, halt with a clear\n`dispatch-unavailable` message instead of simulating worker state locally.\n<!-- /AGENT:codex -->\n<!-- AGENT:copilot -->\nPass `agentIdentifier:\"copilot\"` to `cadre_parallel` when setting up workers.\nInvoke the installed Cadre worker custom agent for each packet worker, passing\nthe MCP-returned prompt, dispatch payload, worktree, owned files, and expected\nresult schema. Copilot `/fleet` may be used only when it preserves the Cadre\nrecord_finish contract for each returned worker.\n<!-- /AGENT:copilot -->\n<!-- AGENT:antigravity -->\nPass `agentIdentifier:\"antigravity\"` to `cadre_parallel` when setting up workers.\nUse `invoke_subagent`, or define and invoke a Cadre worker subagent, once per\npacket worker with the MCP-returned prompt and dispatch payload. Wait for every\nsubagent before calling the next Cadre packet.\n<!-- /AGENT:antigravity -->"
-    },
-    {
-      "heading": "Worker Rules",
-      "body": "- Work only on the product files assigned in the packet payload.\n- Run product tests, builds, linters, and commits according to the worker prompt.\n- Use the worker worktree returned by the packet. Worker worktrees are siblings\n  of integration worktrees and must not be created inside integration worktrees.\n- Do not mutate Cadre control-plane files, native Cadre event/message state, provider state, worktree\n  topology, merge state, or cleanup state directly.\n- Return structured evidence to the coordinator: worker id, task id, repo,\n  commit evidence, worker ref when supplied, tests run, coverage when available,\n  files changed, summary, and blockers.\n- If product implementation fails, return the failure evidence. The coordinator\n  records it through Cadre packets."
-    },
-    {
-      "heading": "Coordinator Rules",
-      "body": "- Use only `cadre_parallel`, `cadre_complete_task`, and other Cadre MCP packets\n  named by packet results for Cadre state changes.\n- Treat `parallel_state.json` and native Cadre event/message state as packet-owned artifacts.\n- A worker conflict, failed test, missing commit, low coverage, or missing native\n  task evidence is handled by the packet result. Report the packet error and halt when\n  it is blocking.\n- Product shell commands are allowed only for product implementation,\n  verification, and commits inside worker scope."
+      "heading": "Evidence",
+      "body": "Record each worker's commit, changed files, tests, coverage, summary, and blockers. A failed or conflicting worker remains packet-owned and blocks unsafe merge or cleanup."
     }
   ],
   "platforms": {
-    "codex": {
-      "agentIdentifier": "codex",
-      "dispatch": "Pass agentIdentifier:\"codex\" to setup_workers. Use the returned selected_dispatch to discover multi_agent_v1.spawn_agent, spawn one worker per packet worker, wait for all workers, then call the next Cadre packet. If unavailable, halt with dispatch-unavailable."
-    },
     "claude": {
       "agentIdentifier": "claude",
-      "dispatch": "Pass agentIdentifier:\"claude\" to setup_workers. Use the returned selected_dispatch to call the Task tool once per MCP-provided worker prompt. Pass dispatch payload, worktree, owned files, expected result schema, and wait for every worker before calling the next Cadre packet."
+      "dispatch": "Use the returned Claude dispatch adapter once per worker."
+    },
+    "codex": {
+      "agentIdentifier": "codex",
+      "dispatch": "Use the returned Codex multi-agent dispatch once per worker."
     },
     "copilot": {
       "agentIdentifier": "copilot",
-      "dispatch": "Pass agentIdentifier:\"copilot\" to setup_workers. Invoke the installed Cadre worker custom agent once per packet worker, or use /fleet only when each worker still returns the Cadre record_finish contract."
+      "dispatch": "Use the returned Copilot worker dispatch once per worker."
     },
     "antigravity": {
       "agentIdentifier": "antigravity",
-      "dispatch": "Pass agentIdentifier:\"antigravity\" to setup_workers. Use invoke_subagent or a dynamically defined Cadre worker subagent once per packet worker, then wait for all subagents before the next Cadre packet."
+      "dispatch": "Use the returned Antigravity subagent dispatch once per worker."
     }
   }
 }

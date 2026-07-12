@@ -69,12 +69,12 @@ the Markdown and spawn workers on its own.
 The coordinator loop is:
 
 ```text
-cadre_parallel { action: "next_wave" }
-cadre_parallel { action: "setup_workers", agentIdentifier: "codex", execute: true }
+cadre_action { action: "parallel.next_wave", input: {...} }
+cadre_action { action: "parallel.setup_workers", input: {agentIdentifier: "codex"}, execute: true }
 dispatch exactly the returned workers
-cadre_parallel { action: "record_finish", execute: true, ...workerEvidence }
-cadre_parallel { action: "merge_back", execute: true }
-cadre_parallel { action: "cleanup", execute: true }
+cadre_action { action: "parallel.record_finish", input: workerEvidence, execute: true }
+cadre_action { action: "parallel.merge_back", input: {...}, execute: true }
+cadre_action { action: "parallel.cleanup", input: {...}, execute: true }
 ```
 
 Cadre returns ready groups only when dependencies, file claims, repo routing,

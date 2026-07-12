@@ -19,17 +19,67 @@ import type { RuntimeDependencies } from "./ports";
 
 function resourceUriFromToolArgs(args: RuntimeArgs): string {
   const uri = asOptionalString(args.uri);
-  if (!uri) throw Object.assign(new Error("cadre_resource requires uri"), { code: -32602 });
-  const responseMode = asOptionalString(args.responseMode || args.response_mode);
-  if (!responseMode || /[?&](responseMode|response_mode)=/.test(uri)) return uri;
-  const separator = uri.includes("?") ? "&" : "?";
-  return `${uri}${separator}responseMode=${encodeURIComponent(responseMode)}`;
+  if (!uri) throw Object.assign(new Error("cadre_read requires uri"), { code: -32602 });
+  return uri;
+}
+
+function workflowArgs(args: RuntimeArgs): RuntimeArgs {
+  const input = asJsonObject(args.input);
+  const approval = asJsonObject(args.approval);
+  return {
+    ...input,
+    root: args.root,
+    workflow: args.workflow,
+    execute: args.execute === true,
+    ...(Object.keys(approval).length > 0 ? {
+      approvalStage: approval.stage,
+      approvalSessionId: approval.session_id,
+      approvedStages: approval.approved_stages,
+      approvalComplete: approval.complete === true,
+    } : {}),
+  } as RuntimeArgs;
+}
+
+function actionArgs(args: RuntimeArgs, action: string): RuntimeArgs {
+  return {
+    ...asJsonObject(args.input),
+    root: args.root,
+    action,
+    execute: args.execute === true,
+  } as RuntimeArgs;
+}
+
+async function actionCall(deps: RuntimeDependencies, args: RuntimeArgs): Promise<TextJsonResult> {
+  const namespaced = asOptionalString(args.action);
+  if (!namespaced || !namespaced.includes(".")) {
+    throw Object.assign(new Error("cadre_action requires a namespaced action"), { code: -32602 });
+  }
+  const [packet, ...rest] = namespaced.split(".");
+  const action = rest.join(".");
+  const normalized = actionArgs(args, action);
+  if (packet === "project") return asTextJson(await projectPacket(deps, normalized));
+  if (packet === "status") return asTextJson(statusPacket(deps, normalized));
+  if (packet === "track") return asTextJson(trackPacket(deps, normalized));
+  if (packet === "parallel") return asTextJson(parallelPacket(deps, normalized));
+  if (packet === "mutate") return asTextJson(mutatePacket(deps, normalized));
+  if (packet === "job") return asTextJson(jobPacket(deps, normalized));
+  if (packet === "review") return asTextJson(await reviewPacket(deps, normalized));
+  if (packet === "intel") return asTextJson(await intelPacket(deps, normalized));
+  if (packet === "artifact") return asTextJson(artifactPacket(deps, normalized));
+  if (packet === "task" && action === "complete") {
+    const root = deps.rootResolver.requireCadreRoot(normalized);
+    if (normalized.async === true) return asTextJson(envelope({ ok: true, job: deps.jobs.start("complete_task", root, normalized) }));
+    return asTextJson(syncedEnvelope(root, "complete_task", () => deps.core.completeTask(root, { ...normalized, execute: false })));
+  }
+  throw Object.assign(new Error(`Unknown cadre_action namespace: ${namespaced}`), { code: -32602 });
 }
 
 function createToolCall(deps: RuntimeDependencies) {
   return async function toolCall(name: string, args: RuntimeArgs = {}): Promise<TextJsonResult> {
-    if (name === "cadre_resource") return asTextJson(resourceRead(resourceUriFromToolArgs(args), deps));
-    if (name === "cadre_workflow") return asTextJson(await workflowPacket(deps, args));
+    if (name === "cadre_read" || name === "cadre_resource") return asTextJson(resourceRead(resourceUriFromToolArgs(args), deps));
+    if (name === "cadre_workflow") return asTextJson(await workflowPacket(deps, args.input || args.approval ? workflowArgs(args) : args));
+    if (name === "cadre_action") return actionCall(deps, args);
+    // Legacy packet names remain internal routing aliases but are not advertised.
     if (name === "cadre_project") return asTextJson(await projectPacket(deps, args));
     if (name === "cadre_status") return asTextJson(statusPacket(deps, args));
     if (name === "cadre_track") return asTextJson(trackPacket(deps, args));

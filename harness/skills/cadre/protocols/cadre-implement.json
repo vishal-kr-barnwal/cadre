@@ -2,77 +2,26 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-implement",
-  "description": "Execute tasks from a track's implementation plan",
   "workflow": "implement",
-  "markdownUse": "human_projection_only",
-  "preconditions": [
-    {
-      "tool": "cadre_project",
-      "arguments": {
-        "action": "ping"
-      },
-      "requirement": "Cadre MCP must be available"
-    },
-    {
-      "requirement": "Every project-scoped packet call includes root"
-    },
-    {
-      "requirement": "If a required packet returns ok:false, halt and report the packet error"
-    }
+  "inputs": [
+    "trackId?",
+    "phaseIndex?",
+    "taskIndex?"
   ],
-  "packetFlow": [
-    {
-      "step": 1,
-      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
-    },
-    {
-      "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"implement\"`, the resolved root, and optional track/task selectors as structured JSON fields."
-    },
-    {
-      "step": 3,
-      "instruction": "Use the returned `project_skills` instructions and `prepare_implementation.styleGuides` JSON context before product edits; load project-skill references through their resource URIs, and treat Markdown style-guide projections as human-readable only."
-    },
-    {
-      "step": 4,
-      "instruction": "Use the returned `prepare_implementation` and `phase_schedule` to choose the next ready task while respecting ownership, repo, and dependency JSON fields."
-    },
-    {
-      "step": 5,
-      "instruction": "For parallel work, use `cadre_parallel` packets for planning, integration/worker worktree setup, finish recording, merge-back, and cleanup. Merge-back targets packet-returned integration worktrees; worker worktrees are sibling paths."
-    },
-    {
-      "step": 6,
-      "instruction": "After each task, call `cadre_complete_task` with coverage, verification, changed files, and summary evidence as structured JSON fields. If no commit SHA is supplied, Cadre creates the task product commit, records the Cadre control-plane commit, and writes `refs/notes/cadre` trace notes."
-    },
-    {
-      "step": 7,
-      "instruction": "Summarize completed work, style guides used, tests run, coverage, commits, changed canonical JSON artifacts, generated human projections, and next packet."
-    }
+  "transitions": [
+    "select_ready_task",
+    "apply_project_rules",
+    "complete_task"
   ],
-  "confirmation": {
-    "requiredForMutation": true,
-    "dryRunFirst": false,
-    "executeArgument": "execute",
-    "approvalArgument": "approvalComplete"
-  },
-  "forbiddenActions": [
-    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
-    "Do not read or write Markdown projections as canonical state",
-    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
-  ],
-  "responseSummary": [
-    "packet ok/error state",
-    "selected track or scope",
-    "warnings and blockers",
-    "changed canonical JSON/JSONL artifacts",
-    "generated human projections when relevant",
-    "next recommended packet"
-  ],
+  "approval": "task_completion",
   "references": [
-    "parallel-execution",
-    "mcp-contract",
-    "ownership-guard",
-    "approval-and-generation"
+    {
+      "id": "parallel-execution",
+      "when": "next:parallel.*"
+    },
+    {
+      "id": "ownership-guard",
+      "when": "decision:ownership_conflict"
+    }
   ]
 }

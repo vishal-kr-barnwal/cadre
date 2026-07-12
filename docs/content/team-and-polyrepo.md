@@ -152,10 +152,10 @@ Polyrepo implementation behavior:
 - Status and LSP/code-intelligence output are repo-qualified.
 
 Project skills remain owned by the control repo under `cadre/skills/`. A skill
-may declare `repos: [api, web]`; Cadre selects it only when the current packet
+manifest may declare `selectors.repos: [api, web]`; Cadre selects it only when the current packet
 or track targets one of those repository names. It does not merge skill
 catalogs from product submodules. Lookup-only versus change-oriented behavior
-belongs in the skill instructions and is not treated as an authorization rule.
+belongs in atomic manifest rules and is not treated as an authorization rule.
 
 ## Ship Vs Land
 

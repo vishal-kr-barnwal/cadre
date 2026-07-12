@@ -56,6 +56,7 @@ function normalizeResourceArgs(resource: ReturnType<typeof parseResourceUri>): R
   if (resource.symbol != null) args.symbol = resource.symbol;
   if (resource.workflow != null) args.workflow = resource.workflow;
   if (resource.id != null) args.id = resource.id;
+  if (resource.reference != null) args.reference = resource.reference;
   if (resource.artifact != null) args.artifact = resource.artifact;
   if (resource.scope != null) args.scope = resource.scope;
   if (resource.jobId != null) args.jobId = resource.jobId;
@@ -266,8 +267,16 @@ export function resourceRead(uri: string, deps: Pick<RuntimeDependencies, "core"
     value = deps.core.projectSkillSelection(root, resource.workflow || "", normalizedResource);
   }
   else if (resource.base === "cadre://project-skill") {
-    value = resource.id
-      ? deps.core.projectSkillDetail(root, resource.id, normalizedResource)
+    const detail = resource.id ? deps.core.projectSkillDetail(root, resource.id) : null;
+    const skill = asJsonObject(asJsonObject(detail).skill);
+    const references = Array.isArray(skill.references) ? skill.references.map(asJsonObject) : [];
+    const selectedReference = resource.reference ? references.find((entry) => entry.id === resource.reference) : null;
+    value = resource.reference && detail
+      ? selectedReference
+        ? { ok: true, skill_id: resource.id, reference: selectedReference }
+        : { ok: false, skill_id: resource.id, error: `Unknown project-skill reference: ${resource.reference}` }
+      : resource.id
+      ? detail
       : { ok: false, error: "id is required" };
   }
   else throw Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });

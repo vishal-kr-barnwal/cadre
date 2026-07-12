@@ -62,20 +62,18 @@ The installed plugins are thin client entrypoints. They point Claude Code and
 OpenAI Codex at the global `cadre-mcp` runtime, which embeds Cadre contracts,
 workflow protocols, references, and target-project templates.
 
-The server exposes workflow tools and compact resources. Important tool groups
-include:
+The server exposes three packet-led tools:
 
 | Surface | What it owns |
 |---------|--------------|
 | `cadre_workflow` | High-level setup, newtrack, implement, debug, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, and artifact-sync aliases. |
-| `cadre_project` | Runtime ping, doctor output, root resolution, integrations inventory, shared sync, and polyrepo preflight. |
-| `cadre_track` | Track context, plan parsing, phase scheduling, integrity checks, and worktree planning. |
-| `cadre_mutate` | Controlled state updates such as claim, heartbeat, metadata patch, review record, task result, worker state, status, and index regeneration. |
-| `cadre_complete_task` | Verification, coverage gate, product commit, plan progress, metadata, journals, native events, and commit trace notes in one path. |
-| `cadre_parallel` | Worker waves, setup, finish records, merge-back, and cleanup. |
-| `cadre_review` | Review assist, machine gate, provider evidence, PR/CI status, and final gate evaluation. |
-| `cadre_intel` | Repo map, workspace diagnostics, dependency graph, test impact, LSP setup, LSP impact, warm review, DAP setup/status, and bounded DAP snapshots. |
-| `cadre_artifact` | Canonical artifact catalog, schema, validation, projection rendering, diff, and sync. |
+| `cadre_action` | Namespaced actions returned by workflows, including task completion, parallel coordination, review, intelligence, jobs, and artifact operations. |
+| `cadre_read` | One targeted resource URI returned by a packet. |
+
+Workflow packets use a compact common envelope with `phase`, `decision`,
+`required`, at most one deterministic `next` call, artifact descriptors, and
+relevant resource URIs. Detailed evidence is fetched explicitly rather than
+embedded in every response.
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
 `cadre://review-queue`, `cadre://handoff-inbox`, `cadre://quality-gate`,
@@ -85,9 +83,8 @@ Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`
 `cadre://workspace-health`, `cadre://lsp-status`, `cadre://dap-status`, and
 `cadre://integrations`.
 
-`cadre://workspace-health` is compact by default. Use
-`responseMode=detail` when you need the full workspace, dependency graph, and
-LSP inventory.
+Read the specific workspace, dependency, or LSP resource returned by the
+workflow when detailed evidence is needed.
 
 ## Native Memory
 

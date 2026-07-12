@@ -117,15 +117,15 @@ test("Cadre JSON contracts stay packet-only", () => {
   assert.deepEqual(failures, []);
 });
 
-test("Skill shim is minimal and points at MCP contract resources", () => {
+test("Skill shim is a self-contained packet-led bootstrap", () => {
   for (const dir of skillDirs) {
     const shim = path.join(dir, "SKILL.md");
     const text = fs.readFileSync(shim, "utf8");
-    assert.match(text, /cadre:\/\/skill-contract/);
-    assert.match(text, /cadre:\/\/workflow-protocols/);
-    assert.match(text, /cadre:\/\/workflow-protocol\?workflow=<name>/);
-    assert.doesNotMatch(text, /Load `skill\.json`/);
-    assert.ok(text.length < 2400, path.relative(root, shim));
+    assert.match(text, /Call `cadre_workflow` directly/);
+    assert.match(text, /`cadre_action`/);
+    assert.match(text, /`cadre_read`/);
+    assert.doesNotMatch(text, /cadre:\/\/skill-contract/);
+    assert.ok(Math.ceil(text.length / 4) <= 1000, path.relative(root, shim));
   }
   assert.equal(fs.existsSync(path.join(masterSkillDir, "skill.json")), true);
   for (const dir of generatedSkillDirs) {
@@ -133,19 +133,14 @@ test("Skill shim is minimal and points at MCP contract resources", () => {
   }
 });
 
-test("Master skill JSON routes workflows and references through MCP resources", () => {
+test("Master skill JSON is a conditional v1 reference contract", () => {
   const skill = readJson(path.join(masterSkillDir, "skill.json"));
   assert.equal(skill.schema, "cadre.skill.v1");
-  assert.equal(skill.markdownUse, "human_projection_only");
-  assert.equal(skill.activation.requiredRuntime, "Cadre MCP");
-  assert.ok(skill.forbidden.some((rule) => /Markdown as alternate input/.test(rule)));
-  for (const [workflowName, workflow] of Object.entries(skill.workflows)) {
-    assert.equal(workflow.protocol, `cadre://workflow-protocol?workflow=${workflowName}`);
-  }
-  for (const reference of Object.values(skill.references)) {
-    assert.equal(Object.prototype.hasOwnProperty.call(reference, "path"), false);
-    assert.match(reference.uri, /^cadre:\/\/agent-reference\?name=[a-z-]+$/);
-  }
+  assert.equal(skill.activation.tool, "cadre_workflow");
+  assert.equal(skill.activation.protocol_reads_required, false);
+  assert.ok(skill.invariants.some((rule) => /never truncated/.test(rule)));
+  assert.ok(skill.workflows.includes("implement"));
+  assert.ok(skill.references.every((reference) => reference.id && reference.when));
 });
 
 test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
@@ -209,32 +204,18 @@ test("Protocol files are structured JSON workflow definitions", () => {
       const rel = path.relative(root, file);
       for (const key of [
         "id",
-        "description",
         "workflow",
-        "preconditions",
-        "packetFlow",
-        "confirmation",
-        "forbiddenActions",
-        "responseSummary",
+        "inputs",
+        "transitions",
+        "approval",
         "references",
       ]) {
         if (!Object.prototype.hasOwnProperty.call(protocol, key)) failures.push(`${rel}: missing ${key}`);
       }
-      if (protocol.schema !== "cadre.protocol.v1") failures.push(`${rel}: wrong schema`);
-      if (protocol.markdownUse !== "human_projection_only") failures.push(`${rel}: wrong markdownUse`);
-      if (!Array.isArray(protocol.packetFlow) || protocol.packetFlow.length < 3) failures.push(`${rel}: short packetFlow`);
-      for (const [index, step] of (protocol.packetFlow || []).entries()) {
-        if (step.step !== index + 1) failures.push(`${rel}: bad packet step ${index + 1}`);
-        if (typeof step.instruction !== "string" || step.instruction.length < 40) failures.push(`${rel}: incomplete packet instruction ${index + 1}`);
-      }
-      if (protocol.confirmation.executeArgument !== "execute") failures.push(`${rel}: missing execute confirmation argument`);
-      if (protocol.confirmation.stagedApproval === true) {
-        if (protocol.confirmation.approvalArgument !== "approvalComplete") failures.push(`${rel}: missing staged approval argument`);
-      } else if (protocol.confirmation.approvalArgument !== "approvalComplete") {
-        failures.push(`${rel}: missing staged approval argument`);
-      }
-      if (!protocol.forbiddenActions.some((rule) => /Markdown/.test(rule))) failures.push(`${rel}: missing Markdown prohibition`);
-      if (!protocol.responseSummary.some((item) => /canonical JSON/.test(item))) failures.push(`${rel}: missing canonical JSON response summary`);
+      if (protocol.schema !== "cadre.protocol.v1" || protocol.version !== 1) failures.push(`${rel}: wrong schema`);
+      if (!Array.isArray(protocol.transitions) || protocol.transitions.length < 2) failures.push(`${rel}: short transitions`);
+      if (!protocol.references.every((reference) => reference.id && reference.when)) failures.push(`${rel}: unconditional reference`);
+      if (JSON.stringify(protocol).length > 1200) failures.push(`${rel}: protocol exceeds compact budget`);
     }
   }
   assert.deepEqual(failures, []);
@@ -277,7 +258,7 @@ test("Workflow templates include JSON canonical and task-level commit guidance",
   assert.deepEqual(failures, []);
 });
 
-test("Artifact workflow protocols require token-safe review output", () => {
+test("Artifact workflow protocols require compact staged review", () => {
   const required = new Map([
     ["cadre-setup.json", "setup"],
     ["cadre-newtrack.json", "newtrack"],
@@ -292,23 +273,15 @@ test("Artifact workflow protocols require token-safe review output", () => {
     for (const [fileName, workflow] of required.entries()) {
       const file = path.join(dir, fileName);
       const protocol = readJson(file);
-      const flow = protocol.packetFlow.map((step) => step.instruction).join("\n");
-      if (!/review_bundle/.test(flow)) failures.push(`${path.relative(root, file)}: missing review_bundle for ${workflow}`);
-      if (!/target\/review paths/.test(flow)) failures.push(`${path.relative(root, file)}: missing target/review path guidance for ${workflow}`);
-      if (!/manifest_path may be null in target mode/.test(flow)) failures.push(`${path.relative(root, file)}: missing nullable target-mode manifest guidance for ${workflow}`);
-      if (!/model\s+context/.test(flow)) failures.push(`${path.relative(root, file)}: missing model-context avoidance for ${workflow}`);
-      if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run-first confirmation for ${workflow}`);
-      if (protocol.confirmation.stagedApproval === true) {
-        if (!/approvalComplete: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing approvalComplete:true execute guidance for ${workflow}`);
-      } else if (!/approvalComplete: true/.test(flow)) {
-        failures.push(`${path.relative(root, file)}: missing approvalComplete:true execute guidance for ${workflow}`);
-      }
+      if (protocol.approval !== "staged") failures.push(`${path.relative(root, file)}: missing staged approval for ${workflow}`);
+      if (!protocol.transitions.some((step) => /review/.test(step))) failures.push(`${path.relative(root, file)}: missing review transition for ${workflow}`);
+      if (!protocol.references.some((reference) => reference.id === "approval-and-generation" && reference.when)) failures.push(`${path.relative(root, file)}: missing conditional approval reference for ${workflow}`);
     }
   }
   assert.deepEqual(failures, []);
 });
 
-test("Action workflow protocols require packet dry-run confirmation", () => {
+test("Action workflow protocols require explicit approval", () => {
   const required = new Map([
     ["cadre-archive.json", "archive"],
     ["cadre-revert.json", "revert"],
@@ -319,10 +292,8 @@ test("Action workflow protocols require packet dry-run confirmation", () => {
     for (const [fileName, workflow] of required.entries()) {
       const file = path.join(dir, fileName);
       const protocol = readJson(file);
-      const flow = protocol.packetFlow.map((step) => step.instruction).join("\n");
-      if (protocol.confirmation.dryRunFirst !== true) failures.push(`${path.relative(root, file)}: missing dry-run review for ${workflow}`);
-      if (!/approvalComplete: true/.test(flow)) failures.push(`${path.relative(root, file)}: missing approvalComplete:true execute guidance for ${workflow}`);
-      if (!protocol.forbiddenActions.some((rule) => /Markdown/.test(rule))) failures.push(`${path.relative(root, file)}: missing no-manual-mutation guidance for ${workflow}`);
+      if (protocol.approval !== "explicit") failures.push(`${path.relative(root, file)}: missing explicit approval for ${workflow}`);
+      if (!protocol.transitions.includes("execute")) failures.push(`${path.relative(root, file)}: missing execute transition for ${workflow}`);
     }
   }
   assert.deepEqual(failures, []);
@@ -330,16 +301,9 @@ test("Action workflow protocols require packet dry-run confirmation", () => {
 
 test("Workflow contracts teach repository-owned project skills", () => {
   const skill = readJson(path.join(masterSkillDir, "skill.json"));
-  assert.ok(skill.lazyContext.canonicalArtifacts.includes("cadre/skills/*/SKILL.md"));
-  assert.ok(skill.operatingDefaults.some((rule) => /workflow-selected project skills/.test(rule)));
-  for (const workflow of ["setup", "newtrack", "revise", "handoff", "release"]) {
-    const protocol = readJson(path.join(masterSkillDir, "protocols", `cadre-${workflow}.json`));
-    assert.match(protocol.packetFlow.map((step) => step.instruction).join("\n"), /cadre:\/\/project-skills/);
-  }
-  for (const workflow of ["implement", "review", "ship", "land"]) {
-    const protocol = readJson(path.join(masterSkillDir, "protocols", `cadre-${workflow}.json`));
-    assert.match(protocol.packetFlow.map((step) => step.instruction).join("\n"), /project_skills/);
-  }
+  assert.ok(skill.invariants.some((rule) => /project-skill rules/.test(rule)));
+  const implement = readJson(path.join(masterSkillDir, "protocols", "cadre-implement.json"));
+  assert.ok(implement.transitions.includes("apply_project_rules"));
   for (const file of [
     path.join(publicDocsRoot, "getting-started.md"),
     path.join(publicDocsRoot, "workflows.md"),

@@ -16,8 +16,18 @@ function write(file, content) {
 }
 
 function writeProjectSkill(root, id, { description = `${id} guidance`, workflows = ["implement"], repos = [], references = [], instructions = `# ${id}\n\nApply ${id}.` } = {}) {
-  const list = (name, values) => values.length > 0 ? `${name}:\n${values.map((value) => `  - ${JSON.stringify(value)}`).join("\n")}\n` : "";
-  write(path.join(root, "cadre", "skills", id, "SKILL.md"), `---\nname: ${id}\ndescription: ${JSON.stringify(description)}\n${list("workflows", workflows)}${list("repos", repos)}${list("references", references)}---\n${instructions}\n`);
+  const refs = references.map((reference, index) => ({ id: `ref-${index + 1}`, path: reference }));
+  write(path.join(root, "cadre", "skills", id, "skill.json"), JSON.stringify({
+    version: 1,
+    schema: "cadre.project-skill.v1",
+    id,
+    name: id,
+    description,
+    selectors: { workflows, repos },
+    rules: [{ id: "core", text: instructions, priority: 100, required: true, references: refs.map((reference) => reference.id) }],
+    references: refs,
+  }, null, 2));
+  write(path.join(root, "cadre", "skills", id, "SKILL.md"), `${instructions}\n`);
 }
 
 function git(root, args) {
@@ -835,15 +845,16 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.equal(setup.results.length, 0);
     assert.equal(typeof setup.workers[0].dispatch.prompt, "string");
     assert.ok(setup.workers[0].dispatch.prompt.includes("parallel_20260617"));
-    assert.equal(setup.workers[0].dispatch.canonical_worker_contract, "cadre_parallel.dispatch.v1");
+    assert.equal(setup.workers[0].dispatch.canonical_worker_contract, "cadre.parallel-dispatch.v1");
     assert.deepEqual(setup.workers[0].dispatch.owned_files, ["src/core.js"]);
     assert.equal(setup.workers[0].dispatch.agent_identifier, "codex");
     assert.equal(setup.workers[0].dispatch.selected_dispatch.agent_identifier, "codex");
     assert.equal(setup.workers[0].dispatch.selected_dispatch.mechanism, "multi_agent_v1.spawn_agent");
     assert.equal(Object.prototype.hasOwnProperty.call(setup.workers[0].dispatch, "platform_dispatch"), false);
     assert.ok(setup.workers[0].dispatch.expected_result_schema.required.includes("commit_sha"));
-    assert.equal(setup.workers[0].dispatch.record_finish_packet.tool, "cadre_parallel");
-    assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.trackId, "parallel_20260617");
+    assert.equal(setup.workers[0].dispatch.record_finish_packet.tool, "cadre_action");
+    assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.action, "parallel.record_finish");
+    assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.input.trackId, "parallel_20260617");
     assert.ok(setup.workers[0].dispatch.finish_evidence_fields.includes("filesChanged"));
 
     const claudeSetup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "claude" });
@@ -3531,20 +3542,20 @@ test("project skills select by workflow, expose bounded references, and attach t
     writeProjectSkill(root, "architecture", {
       workflows: ["implement", "review"],
       references: ["references/boundaries.md"],
-      instructions: `# Architecture\n\n${"Use the boundary. ".repeat(500)}`,
+      instructions: "Keep domain code behind the documented architecture boundary.",
     });
     write(path.join(root, "cadre", "skills", "architecture", "references", "boundaries.md"), "Keep domain code pure.\n");
     writeProjectSkill(root, "always-on", { workflows: ["*"] });
 
-    const selection = core.projectSkillSelection(root, "implement", { trackId, skillMaxChars: 1000 });
+    const selection = core.projectSkillSelection(root, "implement", { trackId });
     assert.equal(selection.ok, true);
     assert.deepEqual(selection.selected_ids, ["always-on", "architecture"]);
     assert.deepEqual(selection.target_repos, ["."]);
     const architecture = selection.selected.find((skill) => skill.id === "architecture");
-    assert.equal(architecture.truncated, true);
-    assert.equal(architecture.instructions.length, 1000);
-    assert.equal(architecture.references[0].content_in_response, false);
-    assert.match(architecture.references[0].resource_uri, /cadre:\/\/project-skill/);
+    assert.equal(architecture.rules.length, 1);
+    assert.match(architecture.rules[0].text, /architecture boundary/);
+    assert.match(architecture.rules[0].references[0].resource_uri, /cadre:\/\/project-skill/);
+    assert.ok(selection.inline_rule_chars <= selection.inline_rule_budget);
 
     const detail = core.projectSkillDetail(root, "architecture");
     assert.equal(detail.ok, true);
@@ -3554,6 +3565,52 @@ test("project skills select by workflow, expose bounded references, and attach t
     assert.ok(packet.resource_uris.some((uri) => uri.includes("cadre://project-skills")));
     const catalog = core.artifactCatalog(root, { scope: "skills" });
     assert.deepEqual(catalog.artifacts.map((artifact) => artifact.id), ["skill:always-on", "skill:architecture"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project skills block instead of truncating required rules over the inline budget", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-project-skill-budget-test-"));
+  try {
+    write(path.join(root, "cadre", "config.json"), "{}\n");
+    writeProjectSkill(root, "oversized", { instructions: "x".repeat(2401) });
+    const selection = core.projectSkillSelection(root, "implement");
+    assert.equal(selection.ok, false);
+    assert.equal(selection.inline_rule_chars, 0);
+    assert.equal(selection.decision.kind, "narrow_scope");
+    assert.ok(selection.errors.some((error) => error.includes("inline rule budget")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project skills match workflow and file selectors before exposing conditional references", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-project-skill-selector-test-"));
+  try {
+    write(path.join(root, "cadre", "config.json"), "{}\n");
+    write(path.join(root, "cadre", "skills", "payments", "skill.json"), JSON.stringify({
+      version: 1,
+      schema: "cadre.project-skill.v1",
+      id: "payments",
+      name: "payments",
+      description: "Payment rules",
+      selectors: { workflows: ["implement"], file_patterns: ["src/payments/**"] },
+      rules: [{ id: "contract", text: "Preserve payment contracts.", priority: 1, required: true, references: ["contracts", "admin"] }],
+      references: [
+        { id: "contracts", path: "references/contracts.md", when: { file_patterns: ["src/payments/**"] } },
+        { id: "admin", path: "references/admin.md", when: { file_patterns: ["docs/**"] } }
+      ],
+    }, null, 2));
+    write(path.join(root, "cadre", "skills", "payments", "references", "contracts.md"), "Contract details.\n");
+    write(path.join(root, "cadre", "skills", "payments", "references", "admin.md"), "Admin details.\n");
+
+    assert.deepEqual(core.projectSkillSelection(root, "implement", { files: ["src/other.ts"] }).selected_ids, []);
+    assert.deepEqual(core.projectSkillSelection(root, "review", { files: ["src/payments/api.ts"] }).selected_ids, []);
+    const matching = core.projectSkillSelection(root, "implement", { files: ["src/payments/api.ts"] });
+    assert.deepEqual(matching.selected_ids, ["payments"]);
+    assert.equal(matching.selected[0].rules[0].references[0].id, "contracts");
+    assert.equal(matching.selected[0].rules[0].references.length, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

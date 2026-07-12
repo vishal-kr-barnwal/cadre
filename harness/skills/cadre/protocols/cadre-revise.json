@@ -2,73 +2,27 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-revise",
-  "description": "Update spec/plan when implementation reveals issues",
   "workflow": "revise",
-  "markdownUse": "human_projection_only",
-  "preconditions": [
-    {
-      "tool": "cadre_project",
-      "arguments": {
-        "action": "ping"
-      },
-      "requirement": "Cadre MCP must be available"
-    },
-    {
-      "requirement": "Every project-scoped packet call includes root"
-    },
-    {
-      "requirement": "If a required packet returns ok:false, halt and report the packet error"
-    }
+  "inputs": [
+    "trackId",
+    "reason",
+    "spec?",
+    "plan?"
   ],
-  "packetFlow": [
-    {
-      "step": 1,
-      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
-    },
-    {
-      "step": 2,
-      "instruction": "Load `cadre://project-skills?root=<root>&workflow=revise&trackId=<trackId>` before drafting changes. Apply selected instructions, then call `cadre_workflow` with `workflow: \"revise\"`, the requested `trackId`, revision `reason`, and proposed structured `spec` or `plan` JSON fields. If reason or spec/plan scope is unclear, the packet returns `phase_state:\"awaiting_clarification\"` with `intent_prompts`; load `native-prompts`, ask those questions, and do not invent revised requirements."
-    },
-    {
-      "step": 3,
-      "instruction": "Use the returned track context, impact analysis, revision reason, and current `approval.current_stage` review_bundle target/review paths to review proposed canonical JSON changes and generated Markdown projection previews; manifest_path may be null in target mode."
-    },
-    {
-      "step": 4,
-      "instruction": "When packet-supported mutation is requested, call the workflow packet again with `execute: true` and `approvalComplete: true` after reviewing the current review_bundle target/review paths without inlining large artifacts into model context."
-    },
-    {
-      "step": 5,
-      "instruction": "For staged revision review, approve only the current revised spec or plan stage with approvalSessionId and one new approved stage; do not approve both spec and plan in one call."
-    },
-    {
-      "step": 6,
-      "instruction": "Summarize changed requirements, affected tasks, tests to update, changed canonical JSON artifacts, generated human projections, and packet warnings."
-    }
+  "transitions": [
+    "clarify",
+    "review_revision",
+    "execute"
   ],
-  "confirmation": {
-    "requiredForMutation": true,
-    "dryRunFirst": true,
-    "executeArgument": "execute",
-    "approvalArgument": "approvalComplete",
-    "stagedApproval": true
-  },
-  "forbiddenActions": [
-    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
-    "Do not read or write Markdown projections as canonical state",
-    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
-  ],
-  "responseSummary": [
-    "packet ok/error state",
-    "selected track or scope",
-    "warnings and blockers",
-    "changed canonical JSON/JSONL artifacts",
-    "generated human projections when relevant",
-    "next recommended packet"
-  ],
+  "approval": "staged",
   "references": [
-    "mcp-contract",
-    "native-prompts",
-    "approval-and-generation"
+    {
+      "id": "native-prompts",
+      "when": "decision:clarification"
+    },
+    {
+      "id": "approval-and-generation",
+      "when": "decision:approval"
+    }
   ]
 }

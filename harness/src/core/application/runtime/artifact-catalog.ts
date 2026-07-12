@@ -246,16 +246,17 @@ export function artifactDefinitions(root: string, args: RuntimeArgs = {}): Artif
   }
   const skillsDir = path.join(root, "cadre", "skills");
   for (const id of safeReadDir(skillsDir)) {
-    const skillPath = path.join(skillsDir, id, "SKILL.md");
+    const skillPath = path.join(skillsDir, id, "skill.json");
     if (!fileExists(skillPath)) continue;
     defs.push({
       id: `skill:${id}`,
       title: `Project skill: ${id}`,
       canonical: path.relative(root, skillPath).split(path.sep).join("/"),
-      schema: "cadre.project_skill.v1",
+      ...(fileExists(path.join(skillsDir, id, "SKILL.md")) ? { projection: `cadre/skills/${id}/SKILL.md` } : {}),
+      schema: "cadre.project-skill.v1",
       scope: "skill",
-      sourceFormat: "markdown",
-      projectionFormat: "none",
+      sourceFormat: "json",
+      projectionFormat: fileExists(path.join(skillsDir, id, "SKILL.md")) ? "markdown" : "none",
     });
   }
   for (const track of listTracks(root)) {

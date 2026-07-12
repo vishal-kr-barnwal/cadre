@@ -53,7 +53,7 @@
     "check:runtime": "pnpm build:runtime",
     "check:generated": "bash scripts/generate-skills.sh --check",
     "check:test": "pnpm test",
-    "test": "node --test scripts/source-architecture.test.js scripts/cadre-core.test.js scripts/cadre-cli.test.js scripts/mcp/cadre-server.test.js scripts/protocol-packet-only.test.js && node scripts/cadre-team-scale-sim.js",
+    "test": "node --test scripts/source-architecture.test.js scripts/cadre-core.test.js scripts/cadre-cli.test.js scripts/mcp/cadre-server.test.js scripts/protocol-packet-only.test.js scripts/token-efficiency.test.js && node scripts/cadre-team-scale-sim.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

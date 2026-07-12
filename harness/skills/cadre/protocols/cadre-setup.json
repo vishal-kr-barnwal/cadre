@@ -2,176 +2,31 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-setup",
-  "description": "Initialize project with Cadre context-driven development",
   "workflow": "setup",
-  "markdownUse": "human_projection_only",
-  "preconditions": [
-    {
-      "tool": "cadre_project",
-      "arguments": {
-        "action": "ping"
-      },
-      "requirement": "Cadre MCP must be available"
-    },
-    {
-      "requirement": "Every project-scoped packet call includes root"
-    },
-    {
-      "requirement": "If a required packet returns ok:false, halt and report the packet error"
-    }
+  "inputs": [
+    "product",
+    "productGuidelines",
+    "techStack",
+    "workflowPolicy"
   ],
-  "packetFlow": [
-    {
-      "step": 1,
-      "instruction": "Call `cadre_project` with `action: \"ping\"` to confirm MCP availability. If the client asks for repeated approval on Cadre MCP tools, tell the user to rerun `cadre install`; the installer bootstraps Cadre-only MCP approval rules for Codex and Claude without approving shell commands or non-Cadre tools."
-    },
-    {
-      "step": 2,
-      "instruction": "Before the first setup packet, load `cadre://project-skills?root=<root>&workflow=setup` when the candidate already contains repository-owned Cadre skills, then apply those instructions while scanning repository evidence such as README/docs, manifests, source entrypoints, schemas, tests, and commands. Then call `cadre_workflow` with `workflow: \"setup\"`, the root candidate, and full structured `product`, `productGuidelines`, `workflowPolicy`, and `techStack` JSON fields. Do not pass only summary/goals/repoNotes unless the user explicitly requested minimal setup."
-    },
-    {
-      "step": 3,
-      "instruction": "Use the returned doctor report, workspace diagnostics, dependency graph, LSP evidence, template inventory, selected JSON style guides, and any `intent_prompts` or `native_prompts`. When prompts are present, load the `native-prompts` reference and answer those prompts first with the client native selection affordance before staged review approval."
-    },
-    {
-      "step": 4,
-      "instruction": "After prompt answers have been mapped back to structured setup arguments, review only `approval.current_stage` using the returned review_bundle target/review paths; manifest_path may be null in target mode. When the user approves that single stage, call setup again with `approvalSessionId`, `approvalStage` set to the current stage, and `approvedStages` containing exactly one additional stage in order. Do not inline large generated artifacts into model context."
-    },
-    {
-      "step": 5,
-      "instruction": "When the packet reports all setup stages approved, call `cadre_workflow` again with `workflow: \"setup\"`, `execute: true`, `approvalComplete: true`, and the same `approvalSessionId` using the same structured payload."
-    },
-    {
-      "step": 6,
-      "instruction": "Summarize created canonical JSON/JSONL files, generated human projections, selected code style guides, native state initialization, warnings, and next packet."
-    }
+  "transitions": [
+    "collect_intent",
+    "review_stages",
+    "execute"
   ],
-  "confirmation": {
-    "requiredForMutation": true,
-    "dryRunFirst": true,
-    "executeArgument": "execute",
-    "approvalArgument": "approvalComplete",
-    "stagedApproval": true
-  },
-  "forbiddenActions": [
-    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
-    "Do not read or write Markdown projections as canonical state",
-    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
-  ],
-  "responseSummary": [
-    "packet ok/error state",
-    "selected track or scope",
-    "warnings and blockers",
-    "changed canonical JSON/JSONL artifacts",
-    "generated human projections when relevant",
-    "next recommended packet"
-  ],
+  "approval": "staged",
   "references": [
-    "template-locator",
-    "mcp-contract",
-    "native-prompts",
-    "approval-and-generation"
-  ],
-  "generationContract": {
-    "requiredEvidence": [
-      "README/docs",
-      "project manifests",
-      "source entrypoints",
-      "schemas/contracts",
-      "tests or configured commands"
-    ],
-    "expectedProductFields": [
-      "name",
-      "summary",
-      "users",
-      "personas",
-      "coreWorkflows",
-      "setupWorkflow",
-      "supportWorkflow",
-      "domainModel",
-      "entities",
-      "relationships",
-      "stateMachines",
-      "invariants",
-      "nonGoals",
-      "boundaries",
-      "dataStores",
-      "schemaFiles",
-      "integrations",
-      "observability",
-      "openQuestions"
-    ],
-    "expectedGuidelineFields": [
-      "principles",
-      "userPromises",
-      "trustAndSafety",
-      "domainRules",
-      "workflowRules",
-      "dataOwnership",
-      "nonGoals",
-      "decisionRules",
-      "reviewChecklist"
-    ],
-    "expectedWorkflowFields": [
-      "principles",
-      "taskLifecycle",
-      "commitPolicy",
-      "testCommand",
-      "formatCommand",
-      "buildCommand",
-      "commands",
-      "reviewFocus",
-      "qualityBar",
-      "manualVerification"
-    ],
-    "example": {
-      "product": {
-        "name": "Project name from repo evidence",
-        "summary": "Concrete product behavior implemented by this repository.",
-        "users": [
-          "Primary user or integrator"
-        ],
-        "coreWorkflows": [
-          "Create or ingest a domain object",
-          "Process, review, publish, or recover it"
-        ],
-        "domainModel": {
-          "entities": [
-            "Entity"
-          ],
-          "relationships": [
-            "Entity owns related record"
-          ]
-        },
-        "invariants": [
-          "Stable behavior that must not regress"
-        ],
-        "dataStores": [
-          "Detected database or storage layer"
-        ],
-        "openQuestions": [
-          "Unknown product assumption to confirm"
-        ]
-      },
-      "techStack": {
-        "languages": [
-          "Detected language"
-        ],
-        "frameworks": [
-          "Detected framework"
-        ],
-        "packageManagers": [
-          "Detected package manager"
-        ],
-        "testCommand": "repo test command when discoverable"
-      },
-      "workflowPolicy": {
-        "testCommand": "repo test command",
-        "formatCommand": "repo format command",
-        "reviewFocus": [
-          "Product-specific correctness concern"
-        ]
-      }
+    {
+      "id": "native-prompts",
+      "when": "decision:clarification"
+    },
+    {
+      "id": "template-locator",
+      "when": "resources:template"
+    },
+    {
+      "id": "approval-and-generation",
+      "when": "decision:approval"
     }
-  }
+  ]
 }

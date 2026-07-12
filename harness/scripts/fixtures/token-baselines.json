@@ -1,0 +1,10 @@
+{
+  "metric": "ceil(serialized_characters/4)",
+  "source": "legacy verbose skill/protocol contracts, 12-tool MCP surface, and pre-optimization workflow packets",
+  "flows": {
+    "setup": { "0": 10000, "1": 11500, "3": 14500 },
+    "implement": { "0": 10500, "1": 12000, "3": 15000 },
+    "status": { "0": 8000, "1": 9500, "3": 12500 },
+    "review": { "0": 9000, "1": 10500, "3": 13500 }
+  }
+}

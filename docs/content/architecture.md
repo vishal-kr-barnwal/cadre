@@ -12,9 +12,9 @@ skill shim, MCP-served contracts, references, templates, tests, and install-time
 thin plugin bundles that users install into Claude Code, OpenAI Codex, GitHub
 Copilot, and Google Antigravity.
 
-The installed Cadre `SKILL.md` is only a global activation shim for the MCP
-runtime. A target repository may separately own `cadre/skills/<id>/SKILL.md`
-bundles. Those project skills are discovered from the active control repo,
+The installed Cadre `SKILL.md` is a self-contained activation shim for the MCP
+runtime. A target repository may separately own `cadre/skills/<id>/skill.json`
+manifests with optional `SKILL.md` human projections. Those project skills are discovered from the active control repo,
 selected by workflow and repo context, and returned through MCP packets and
 resources; they are not installed or resolved globally.
 
@@ -48,8 +48,8 @@ need to be materialized.
 
 | Source | Owns |
 |--------|------|
-| `harness/skills/cadre/SKILL.md` | Cadre skill activation shim that points agents at MCP contract resources. |
-| `harness/skills/cadre/skill.json` | Master `cadre.skill.v1` contract embedded into `cadre-mcp` and served by MCP resources. |
+| `harness/skills/cadre/SKILL.md` | Self-contained packet-led Cadre activation shim. |
+| `harness/skills/cadre/skill.json` | Optional master `cadre.skill.v1` reference contract embedded into `cadre-mcp`. |
 | `harness/skills/cadre/protocols/` | Master workflow protocol bodies embedded into `cadre-mcp` and served by MCP resources. |
 | `harness/scripts/agent-refs/` | Reference material embedded into `cadre-mcp` and served by MCP reference resources. |
 | `harness/templates/` | Target-project templates embedded into `cadre-mcp` and written by `cadre-setup`. |

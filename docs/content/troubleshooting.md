@@ -32,7 +32,7 @@ Symptoms:
 
 - The agent cannot call Cadre MCP tools.
 - A workflow says Cadre MCP is required.
-- `cadre_project` ping fails.
+- A direct `cadre_workflow` call is unavailable or fails before returning an envelope.
 
 Fix:
 
@@ -166,7 +166,7 @@ Symptoms:
 Fix:
 
 ```text
-cadre_intel action: "dap_setup"
+cadre_action { action: "intel.dap_setup", input: {...} }
 ```
 
 Review the recommended adapter entries, install missing adapter commands, then

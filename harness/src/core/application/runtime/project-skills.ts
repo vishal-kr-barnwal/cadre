@@ -1,31 +1,15 @@
 import type { JsonObject, RuntimeArgs } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
-import {
-  PROJECT_SKILL_DEFAULT_MAX_CHARS,
-  PROJECT_SKILL_ID_PATTERN,
-  PROJECT_SKILL_MAX_CHARS,
-  canonicalWorkflow,
-} from "../../domain/project-skill-policy";
+import { PROJECT_SKILL_ID_PATTERN, PROJECT_SKILL_INLINE_RULE_BUDGET, canonicalWorkflow } from "../../domain/project-skill-policy";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
-import {
-  loadProjectSkill,
-  projectSkillIds,
-  projectSkillReferenceContent,
-  type ProjectSkillRecord,
-} from "../../infrastructure/runtime/project-skills-store";
+import { loadProjectSkill, projectSkillIds, projectSkillReferenceContent, type ProjectSkillRecord, type ProjectSkillRule } from "../../infrastructure/runtime/project-skills-store";
 import type { CoreResult } from "./contracts";
 import { findTrack } from "./track-context";
 import { parsePlanFile } from "./track-schedule";
 
 function requestedSkillIds(value: unknown): string[] {
   const values = typeof value === "string" ? value.split(/[,\s]+/) : asStringArray(value);
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
-}
-
-function boundedMaxChars(value: unknown, fallback: number): number {
-  const requested = Number(value);
-  const selected = Number.isFinite(requested) && requested > 0 ? requested : fallback;
-  return Math.max(1000, Math.min(selected, PROJECT_SKILL_MAX_CHARS));
+  return Array.from(new Set(values.map((entry) => entry.trim()).filter(Boolean))).sort();
 }
 
 function knownRepoNames(root: string): Set<string> {
@@ -39,62 +23,60 @@ function knownRepoNames(root: string): Set<string> {
 }
 
 function reposFromPlan(value: unknown): string[] {
-  const plan = asJsonObject(value);
-  const phases = Array.isArray(plan.phases) ? plan.phases.map(asJsonObject) : [];
-  const repos: string[] = [];
-  for (const phase of phases) {
-    const tasks = Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : [];
-    for (const task of tasks) {
-      const repo = asOptionalString(task.repo);
-      if (repo) repos.push(repo);
-    }
-  }
-  return repos;
+  return (Array.isArray(asJsonObject(value).phases) ? asJsonObject(value).phases as unknown[] : [])
+    .flatMap((phase) => Array.isArray(asJsonObject(phase).tasks) ? asJsonObject(phase).tasks as unknown[] : [])
+    .map((task) => asOptionalString(asJsonObject(task).repo))
+    .filter((repo): repo is string => Boolean(repo));
+}
+
+function filesFromPlan(value: unknown): string[] {
+  return (Array.isArray(asJsonObject(value).phases) ? asJsonObject(value).phases as unknown[] : [])
+    .flatMap((phase) => Array.isArray(asJsonObject(phase).tasks) ? asJsonObject(phase).tasks as unknown[] : [])
+    .flatMap((task) => asStringArray(asJsonObject(task).files));
 }
 
 export function projectSkillTargetRepos(root: string, args: RuntimeArgs = {}): string[] {
   const topology = loadTopology(root);
-  const explicit = [
-    asOptionalString(args.repo),
-    ...asStringArray(args.repos),
-    ...reposFromPlan(args.plan),
-  ].filter((repo): repo is string => Boolean(repo));
+  const explicit = [asOptionalString(args.repo), ...asStringArray(args.repos), ...reposFromPlan(args.plan)].filter((repo): repo is string => Boolean(repo));
   if (explicit.length > 0) return Array.from(new Set(explicit)).sort();
-  const trackId = asOptionalString(args.trackId || args.track_id);
-  const track = findTrack(root, trackId);
+  const track = findTrack(root, asOptionalString(args.trackId || args.track_id));
   if (track) {
-    const repos = parsePlanFile(track.plan_path).tasks
-      .map((task) => task.repo || (topology.polyrepo ? topology.defaultRepo : "."))
-      .filter((repo): repo is string => Boolean(repo));
+    const repos = parsePlanFile(track.plan_path).tasks.map((task) => task.repo || (topology.polyrepo ? topology.defaultRepo : ".")).filter(Boolean);
     if (repos.length > 0) return Array.from(new Set(repos)).sort();
   }
   return topology.polyrepo ? [] : ["."];
 }
 
-function referenceDescriptors(root: string, skill: ProjectSkillRecord): JsonObject[] {
-  const uri = `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}`;
-  return skill.references.map((reference) => ({
-    path: reference.path,
-    bytes: reference.bytes,
-    resource_uri: uri,
-    content_in_response: false,
-  }));
+function targetFiles(root: string, args: RuntimeArgs): string[] {
+  const explicit = [...asStringArray(args.files), ...asStringArray(args.filesChanged || args.files_changed), ...filesFromPlan(args.plan)];
+  if (explicit.length > 0) return Array.from(new Set(explicit)).sort();
+  const track = findTrack(root, asOptionalString(args.trackId || args.track_id));
+  return track ? Array.from(new Set(parsePlanFile(track.plan_path).tasks.flatMap((task) => task.files))).sort() : [];
 }
 
-function selectedSkill(root: string, skill: ProjectSkillRecord, reasons: string[], maxChars: number): JsonObject {
+function globMatch(pattern: string, file: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\0").replace(/\*/g, "[^/]*").replace(/\0/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(file);
+}
+
+function selectorMatch(workflows: string[], repos: string[], patterns: string[], workflow: string, targets: string[], files: string[]): boolean {
+  const workflowOk = workflows.length === 0 || workflows.includes("*") || workflows.includes(workflow);
+  const repoOk = repos.length === 0 || repos.some((repo) => targets.includes(repo));
+  const filesOk = patterns.length === 0 || files.some((file) => patterns.some((pattern) => globMatch(pattern, file)));
+  return workflowOk && repoOk && filesOk;
+}
+
+function selectedRule(skill: ProjectSkillRecord, rule: ProjectSkillRule, root: string, workflow: string, repos: string[], files: string[]): JsonObject {
   return {
-    id: skill.id,
-    name: skill.name,
-    description: skill.description,
-    path: skill.path,
-    workflows: skill.workflows,
-    repos: skill.repos,
-    reasons,
-    instructions: skill.instructions.slice(0, maxChars),
-    truncated: skill.instructions.length > maxChars,
-    bytes: skill.bytes,
-    references: referenceDescriptors(root, skill),
-    resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}`,
+    id: rule.id,
+    text: rule.text,
+    priority: rule.priority,
+    required: rule.required,
+    references: rule.references.flatMap((id) => {
+      const reference = skill.references.find((entry) => entry.id === id);
+      if (!reference || !selectorMatch(reference.workflows, reference.repos, reference.filePatterns, workflow, repos, files)) return [];
+      return [{ id, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}&reference=${encodeURIComponent(id)}` }];
+    }),
   };
 }
 
@@ -102,80 +84,93 @@ export function projectSkillSelection(root: string, workflowValue: string, args:
   const workflow = canonicalWorkflow(workflowValue);
   const requested = requestedSkillIds(args.skillIds);
   const requestedSet = new Set(requested);
-  const targetRepos = projectSkillTargetRepos(root, args);
-  const targetSet = new Set(targetRepos);
+  const repos = projectSkillTargetRepos(root, args);
+  const files = targetFiles(root, args);
   const knownRepos = knownRepoNames(root);
-  const maxChars = boundedMaxChars(args.skillMaxChars, PROJECT_SKILL_DEFAULT_MAX_CHARS);
-  const warnings: string[] = [];
-  const errors: string[] = [];
-  const selected: JsonObject[] = [];
   const installed = projectSkillIds(root);
-  const installedSet = new Set(installed);
-
-  for (const id of requested) {
-    if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installedSet.has(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
-  }
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const selected: JsonObject[] = [];
+  let inlineChars = 0;
+  for (const id of requested) if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installed.includes(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
   for (const id of installed) {
     const loaded = loadProjectSkill(root, id, knownRepos);
     if (!loaded.ok || !loaded.skill) {
       const messages = loaded.errors.map((error) => `${id}: ${error}`);
-      if (requestedSet.has(id)) errors.push(...messages);
-      else warnings.push(...messages);
+      if (requestedSet.has(id)) errors.push(...messages); else warnings.push(...messages);
       continue;
     }
     const skill = loaded.skill;
     const explicit = requestedSet.has(id);
-    const workflowMatch = skill.workflows.includes("*") || skill.workflows.includes(workflow);
-    const repoMatch = skill.repos.length === 0 || skill.repos.some((repo) => targetSet.has(repo));
-    if (!explicit && (!workflowMatch || !repoMatch)) continue;
-    const reasons = [
-      explicit ? "explicit" : null,
-      workflowMatch ? "workflow" : null,
-      skill.repos.length === 0 ? "project" : (repoMatch ? "repo" : null),
-    ].filter((reason): reason is string => Boolean(reason));
-    selected.push(selectedSkill(root, skill, reasons, maxChars));
+    if (!explicit && !selectorMatch(skill.workflows, skill.repos, skill.filePatterns, workflow, repos, files)) continue;
+    const applicable = skill.rules.filter((rule) => selectorMatch(rule.workflows, rule.repos, rule.filePatterns, workflow, repos, files));
+    const rules: JsonObject[] = [];
+    for (const rule of applicable) {
+      const cost = rule.text.length;
+      if (inlineChars + cost > PROJECT_SKILL_INLINE_RULE_BUDGET) {
+        const message = `${id}/${rule.id} exceeds the ${PROJECT_SKILL_INLINE_RULE_BUDGET}-character inline rule budget`;
+        if (rule.required) errors.push(message); else warnings.push(`${message}; load the targeted project-skill resource if needed`);
+        continue;
+      }
+      inlineChars += cost;
+      rules.push(selectedRule(skill, rule, root, workflow, repos, files));
+    }
+    selected.push({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      path: skill.path,
+      projection_path: skill.projectionPath,
+      reasons: [explicit ? "explicit" : "selector"],
+      rules,
+      resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}`,
+    });
   }
-
   return {
     ok: errors.length === 0,
-    source: "cadre/skills",
+    source: "cadre/skills/*/skill.json",
+    schema: "cadre.project-skill-selection.v1",
     workflow,
     requested,
     installed,
     selected,
     selected_ids: selected.map((skill) => skill.id),
-    target_repos: targetRepos,
-    max_chars_per_skill: maxChars,
+    target_repos: repos,
+    target_files: files,
+    inline_rule_chars: inlineChars,
+    inline_rule_budget: PROJECT_SKILL_INLINE_RULE_BUDGET,
+    decision: errors.length > 0 ? { kind: "narrow_scope", required: ["repos", "files"], reason: "Required project-skill rules exceed the inline context budget or a requested skill is invalid." } : null,
     warnings,
     errors,
   };
 }
 
-export function projectSkillDetail(root: string, id: string, args: RuntimeArgs = {}): CoreResult {
-  const knownRepos = knownRepoNames(root);
-  const loaded = loadProjectSkill(root, id, knownRepos);
+export function projectSkillDetail(root: string, id: string): CoreResult {
+  const loaded = loadProjectSkill(root, id, knownRepoNames(root));
   if (!loaded.ok || !loaded.skill) return { ok: false, id, source: "cadre/skills", errors: loaded.errors };
   const skill = loaded.skill;
-  const maxChars = boundedMaxChars(args.skillMaxChars, PROJECT_SKILL_MAX_CHARS);
   return {
     ok: true,
     source: "cadre/skills",
     skill: {
-      ...selectedSkill(root, skill, ["resource"], maxChars),
-      references: skill.references.map((reference) => projectSkillReferenceContent(reference, maxChars)),
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      selectors: { workflows: skill.workflows, repos: skill.repos, file_patterns: skill.filePatterns },
+      rules: skill.rules,
+      references: skill.references.map(projectSkillReferenceContent),
+      projection_path: skill.projectionPath,
     },
   };
 }
 
 export function projectSkillDiagnostics(root: string): CoreResult {
-  const knownRepos = knownRepoNames(root);
-  const skills = projectSkillIds(root).map((id) => loadProjectSkill(root, id, knownRepos));
-  const invalid = skills.filter((skill) => !skill.ok);
+  const loaded = projectSkillIds(root).map((id) => loadProjectSkill(root, id, knownRepoNames(root)));
   return {
-    ok: invalid.length === 0,
+    ok: loaded.every((skill) => skill.ok),
     source: "cadre/skills",
-    count: skills.length,
-    valid: skills.filter((skill) => skill.ok).map((skill) => skill.id),
-    invalid: invalid.map((skill) => ({ id: skill.id, errors: skill.errors })),
+    count: loaded.length,
+    valid: loaded.filter((skill) => skill.ok).map((skill) => skill.id),
+    invalid: loaded.filter((skill) => !skill.ok).map((skill) => ({ id: skill.id, errors: skill.errors })),
   };
 }

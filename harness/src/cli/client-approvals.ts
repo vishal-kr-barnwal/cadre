@@ -16,18 +16,9 @@ export interface ApprovalResult {
 }
 
 export const CADRE_MCP_TOOLS = [
-  "cadre_resource",
   "cadre_workflow",
-  "cadre_project",
-  "cadre_status",
-  "cadre_track",
-  "cadre_parallel",
-  "cadre_mutate",
-  "cadre_complete_task",
-  "cadre_job",
-  "cadre_review",
-  "cadre_intel",
-  "cadre_artifact",
+  "cadre_action",
+  "cadre_read",
 ] as const;
 
 const CLAUDE_CADRE_ALLOW_RULES = [

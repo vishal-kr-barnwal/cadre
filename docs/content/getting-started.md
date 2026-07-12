@@ -108,7 +108,7 @@ Successful setup creates:
 | `cadre/repos.json` | Polyrepo topology when enabled. |
 | `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
 | `cadre/styleguides/*.json` and `cadre/code_styleguides/*.md` | Canonical style guidance plus generated guide projections. |
-| `cadre/skills/<skill-id>/SKILL.md` | Optional repository-authored instructions selected by Cadre workflows. |
+| `cadre/skills/<skill-id>/skill.json` | Structured repository-authored rules selected by Cadre workflows. An optional `SKILL.md` may document them for humans. |
 
 Track directories later live under `cadre/tracks/<track_id>/` and contain
 `metadata.json`, canonical `spec.json` and `plan.json`, generated `spec.md` and
@@ -123,32 +123,45 @@ Markdown-only projects are not supported by this migration path.
 ## Add Project Skills
 
 Repository maintainers can add workflow guidance without installing another
-global plugin. Create `cadre/skills/<skill-id>/SKILL.md` and commit it normally:
+global plugin. Create `cadre/skills/<skill-id>/skill.json` and commit it normally:
 
-```markdown
----
-name: payments-api
-description: Repository rules for payment API work
-workflows: [newtrack, implement, review]
-repos: [api]
-references:
-  - references/contracts.md
----
-
-# Payment API rules
-
-Preserve idempotency keys and review all public response changes.
+```json
+{
+  "version": 1,
+  "schema": "cadre.project-skill.v1",
+  "id": "payments-api",
+  "name": "payments-api",
+  "description": "Repository rules for payment API work",
+  "selectors": {
+    "workflows": ["newtrack", "implement", "review"],
+    "repos": ["api"],
+    "file_patterns": ["src/payments/**"]
+  },
+  "rules": [
+    {
+      "id": "idempotency",
+      "text": "Preserve idempotency keys and review public response changes.",
+      "priority": 10,
+      "required": true,
+      "references": ["contracts"]
+    }
+  ],
+  "references": [
+    { "id": "contracts", "path": "references/contracts.md" }
+  ]
+}
 ```
 
-`name` must match the directory name. `workflows` accepts Cadre workflow names
-or `*`; `repos` optionally targets names from `cadre/repos.json`. References
-must be text, Markdown, JSON, or YAML files inside the skill directory.
+`id` must match the directory name. Selectors may constrain workflow, repo, and
+affected file patterns. Rules are prioritized and atomic; required rules are
+never truncated. References must remain inside the skill directory.
 
-Cadre loads matching instructions before workflow payloads are drafted and
-echoes the selection as `project_skills` in workflow packets. Use
+Cadre loads matching rules before workflow payloads are drafted and returns the
+selection in workflow packets. Inline rules share a 2,400-character budget;
+an oversized required set blocks and requests narrower repo/file scope. Use
 `cadre://project-skills?root=<root>&workflow=<workflow>` to inspect a selection
-and `cadre://project-skill?root=<root>&id=<skill-id>` to load bounded reference
-content. Invalid automatically discovered skills produce warnings; an invalid
+and `cadre://project-skill?root=<root>&id=<skill-id>&reference=<reference-id>`
+to load one targeted reference. Invalid automatically discovered skills produce warnings; an invalid
 or missing skill named explicitly through `skillIds` blocks the packet.
 
 Project skills are trusted guidance, not executable automation. Cadre does not
@@ -195,7 +208,7 @@ cadre-implement
 The implementation packet selects or claims a track, returns bounded context,
 runs collision checks, chooses style-guide context, and computes the next phase
 schedule. If the next work can run in parallel, Cadre returns worker payloads
-through `cadre_parallel`; otherwise the agent proceeds sequentially.
+through returned `cadre_action` `parallel.*` calls; otherwise the agent proceeds sequentially.
 
 ## Review And Deliver
 

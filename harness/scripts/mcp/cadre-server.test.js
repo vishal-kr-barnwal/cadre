@@ -140,39 +140,36 @@ function parseTextJson(result) {
 
 async function callApprovedWorkflow(request, args) {
   const clone = (value) => JSON.parse(JSON.stringify(value));
-  const base = { ...clone(args), execute: false };
-  delete base.approvalComplete;
-  delete base.approvedStages;
-  delete base.approvalStage;
-  delete base.approvalSessionId;
+  const input = clone(args);
+  delete input.root;
+  delete input.workflow;
+  delete input.execute;
+  delete input.approvalComplete;
+  const base = { root: args.root, workflow: args.workflow, input, execute: false };
   let preview = parseTextJson(await request("tools/call", {
     name: "cadre_workflow",
     arguments: base,
   }));
-  assert.equal(preview.data.ok, true, preview.data.error || JSON.stringify(preview.data.approval || {}));
-  const approval = preview.data.approval;
   const approved = [];
-  for (const stage of approval?.stages || []) {
-    approved.push(stage.id);
+  let sessionId = null;
+  while (preview.decision?.kind === "approval" && preview.decision.stage) {
+    sessionId = preview.decision.session_id || sessionId;
+    approved.push(preview.decision.stage);
     preview = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: {
         ...clone(base),
-        approvalSessionId: approval.session_id,
-        approvalStage: stage.id,
-        approvedStages: approved,
+        approval: { session_id: sessionId, stage: approved.at(-1), approved_stages: approved },
       },
     }));
-    assert.equal(preview.data.ok, true, preview.data.error || JSON.stringify(preview.data.approval || {}));
+    assert.equal(preview.ok, true, JSON.stringify(preview.errors));
   }
   return parseTextJson(await request("tools/call", {
     name: "cadre_workflow",
     arguments: {
-      ...clone(args),
+      ...clone(base),
       execute: true,
-      approvalComplete: true,
-      approvalSessionId: approval?.session_id,
-      approvedStages: approved,
+      approval: { session_id: sessionId, approved_stages: approved, complete: true },
     },
   }));
 }
@@ -365,9 +362,9 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
         workflowPolicy: { title: "Workflow", summary: "Use Cadre packets." },
         techStack: { languages: ["TypeScript"], frameworks: ["React"] },
     });
-    assert.equal(setup.data.ok, true);
-    assert.ok(setup.data.written.includes("cadre/product.json"));
-    assert.ok(setup.data.written.includes("cadre/workflow.json"));
+    assert.equal(setup.ok, true);
+    assert.ok(setup.artifacts.some((artifact) => artifact.path === "cadre/product.json"));
+    assert.ok(setup.artifacts.some((artifact) => artifact.path === "cadre/workflow.json"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), true);
     assert.equal(fs.existsSync(path.join(root, ".github", "workflows", "cadre-monorepo-check.yml")), true);
 
@@ -393,7 +390,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
           }],
         },
     });
-    assert.equal(created.data.ok, true);
+    assert.equal(created.ok, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", trackId, "learnings.jsonl")), true);
     const learnings = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "learnings.jsonl"), "utf8").trim());
     assert.equal(learnings.kind, "learnings_seed");
@@ -410,143 +407,19 @@ test("MCP root resolution rejects harness skill directories without project stat
   try {
     const initialized = await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
     assert.match(initialized.instructions, /root/);
-    assert.match(initialized.instructions, /compact/);
-    assert.match(initialized.instructions, /packet-owned/);
+    assert.match(initialized.instructions, /packet-led/);
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
-    for (const name of [
-      "cadre_resource",
-      "cadre_workflow",
-      "cadre_project",
-      "cadre_status",
-      "cadre_track",
-      "cadre_parallel",
-      "cadre_mutate",
-      "cadre_complete_task",
-      "cadre_job",
-      "cadre_review",
-      "cadre_intel",
-      "cadre_artifact",
-    ]) {
-      assert.ok(names.includes(name), `expected ${name} in tools/list`);
-    }
+    assert.deepEqual(names, ["cadre_workflow", "cadre_action", "cadre_read"]);
     const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
     const fieldsFor = (name) => Object.keys(byName.get(name).inputSchema.properties).sort();
-    const hiddenFields = [
-      "allowDirty",
-      "artifact_action",
-      "artifactAction",
-      "command",
-      "commitBody",
-      "commitMode",
-      "commitScope",
-      "commitSubject",
-      "commitType",
-      "compact",
-      "continuationToken",
-      "continuation_token",
-      "files_changed",
-      "formula_id",
-      "approval_complete",
-      "includeHeavy",
-      "include_archive",
-      "manual_verification_checks",
-      "manual_verification_command",
-      "manual_verification_mode",
-      "manual_verification_result",
-      "manual_verification_summary",
-      "mcp_capabilities",
-      "notesRef",
-      "operation",
-      "product_guidelines",
-      "provider_evidence",
-      "provider_mode",
-      "responseMode",
-      "response_mode",
-      "reviewBundle",
-      "reviewBundleDir",
-      "reviewFiles",
-      "review_bundle_dir",
-      "step_id",
-      "step_index",
-      "track_id",
-      "wisp_id",
-      "worker_id",
-      "workflow_policy",
-    ];
-    let advertisedFieldCount = 0;
-    for (const tool of tools.tools) {
-      assert.equal(tool.inputSchema.additionalProperties, true, `${tool.name} should preserve hidden field compatibility`);
-      const fields = Object.keys(tool.inputSchema.properties);
-      advertisedFieldCount += fields.length;
-      for (const field of hiddenFields) {
-        assert.equal(fields.includes(field), false, `${tool.name} should not advertise ${field}`);
-      }
-    }
-    const workflowTool = tools.tools.find((tool) => tool.name === "cadre_workflow");
-    assert.ok(fieldsFor("cadre_workflow").length <= 42, `cadre_workflow advertises too many fields: ${fieldsFor("cadre_workflow").length}`);
-    assert.ok(advertisedFieldCount <= 172, `MCP schema advertises too many fields: ${advertisedFieldCount}`);
-    const workflowActions = workflowTool.inputSchema.properties.workflow.enum;
-    for (const action of ["setup", "newtrack", "implement", "debug", "status", "review", "validate", "ship", "land", "archive", "handoff", "artifacts", "artifact_sync"]) {
-      assert.ok(workflowActions.includes(action), `expected ${action} workflow`);
-    }
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "configurationId"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "breakpoints"), true);
-    const artifactTool = tools.tools.find((tool) => tool.name === "cadre_artifact");
-    const artifactActions = artifactTool.inputSchema.properties.action.enum;
-    for (const action of ["catalog", "schema", "validate", "render", "diff", "sync"]) {
-      assert.ok(artifactActions.includes(action), `expected ${action} artifact action`);
-    }
-    assert.equal(artifactActions.includes("import"), false);
-    assert.ok(workflowTool.inputSchema.allOf.some((entry) => entry.not?.anyOf?.some((item) => item.required?.includes("planText"))));
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "formulaId"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "wispId"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "productGuidelines"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "workflowPolicy"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "providerEvidence"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "mcpCapabilities"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "skillIds"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(workflowTool.inputSchema.properties, "skillMaxChars"), true);
-    const projectTool = tools.tools.find((tool) => tool.name === "cadre_project");
-    const projectActions = projectTool.inputSchema.properties.action.enum;
-    assert.ok(projectActions.includes("tech_stack_summary"));
-    assert.ok(projectActions.includes("integrations"));
-    const trackTool = tools.tools.find((tool) => tool.name === "cadre_track");
-    const trackActions = trackTool.inputSchema.properties.action.enum;
-    assert.ok(trackActions.includes("plan_assist"));
-    assert.ok(trackActions.includes("worktree_plan"));
-    const parallelTool = tools.tools.find((tool) => tool.name === "cadre_parallel");
-    const parallelActions = parallelTool.inputSchema.properties.action.enum;
-    assert.ok(parallelActions.includes("next_wave"));
-    assert.ok(parallelActions.includes("setup_workers"));
-    assert.deepEqual(parallelTool.inputSchema.properties.agentIdentifier.enum, ["claude", "codex", "copilot", "antigravity"]);
-    assert.equal(Object.prototype.hasOwnProperty.call(parallelTool.inputSchema.properties, "coverage"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(parallelTool.inputSchema.properties, "filesChanged"), true);
-    assert.ok(parallelTool.inputSchema.required.includes("root"));
-    assert.ok(parallelTool.inputSchema.required.includes("action"));
-    assert.ok(parallelTool.inputSchema.anyOf.some((entry) => entry.required.includes("trackId")));
-    assert.ok(parallelTool.inputSchema.allOf.some((entry) => entry.then?.required?.includes("agentIdentifier")));
-    const completeTaskTool = tools.tools.find((tool) => tool.name === "cadre_complete_task");
-    assert.equal(Object.prototype.hasOwnProperty.call(completeTaskTool.inputSchema.properties, "filesChanged"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(completeTaskTool.inputSchema.properties, "summary"), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(completeTaskTool.inputSchema.properties, "manualVerificationMode"), true);
-    const reviewTool = tools.tools.find((tool) => tool.name === "cadre_review");
-    const reviewActions = reviewTool.inputSchema.properties.action.enum;
-    assert.ok(reviewActions.includes("provider_evidence"));
-    assert.ok(reviewTool.inputSchema.allOf.some((entry) => entry.then && entry.then.anyOf));
-    const intelTool = tools.tools.find((tool) => tool.name === "cadre_intel");
-    const intelActions = intelTool.inputSchema.properties.action.enum;
-    assert.ok(intelActions.includes("lsp_setup"));
-    assert.ok(intelActions.includes("workspace_diagnostics"));
-    assert.ok(intelActions.includes("dap_setup"));
-    assert.ok(intelActions.includes("dap_status"));
-    assert.ok(intelActions.includes("dap_snapshot"));
-    assert.ok(intelActions.includes("test_impact"));
-    assert.ok(intelActions.includes("dependency_graph"));
-    assert.ok(intelActions.includes("mcp_readiness"));
-    const statusTool = tools.tools.find((tool) => tool.name === "cadre_status");
-    const statusActions = statusTool.inputSchema.properties.action.enum;
-    assert.ok(statusActions.includes("fleet"));
+    assert.deepEqual(fieldsFor("cadre_workflow"), ["approval", "execute", "input", "root", "workflow"]);
+    assert.deepEqual(fieldsFor("cadre_action"), ["action", "execute", "input", "root"]);
+    assert.deepEqual(fieldsFor("cadre_read"), ["uri"]);
+    assert.ok(Math.ceil(JSON.stringify(tools.tools).length / 4) <= 1700);
+    assert.ok(tools.tools.every((tool) => tool.inputSchema.additionalProperties === false));
+    const ping = parseTextJson(await request("tools/call", { name: "cadre_action", arguments: { action: "project.ping" } }));
+    assert.equal(ping.data.ok, true);
     const resources = await request("resources/list", {});
     const uris = resources.resources.map((resource) => resource.uri);
     assert.ok(uris.includes("cadre://skill-contract"));
@@ -614,7 +487,7 @@ test("MCP root resolution rejects harness skill directories without project stat
 
     const skillContract = await request("resources/read", { uri: "cadre://skill-contract" });
     const skillContractTool = parseTextJson(await request("tools/call", {
-      name: "cadre_resource",
+      name: "cadre_read",
       arguments: { uri: "cadre://skill-contract" },
     }));
     assert.equal(skillContractTool.contents[0].text, skillContract.contents[0].text);
@@ -622,7 +495,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const parsedSkillContract = JSON.parse(skillContract.contents[0].text);
     assert.equal(parsedSkillContract.ok, true);
     assert.equal(parsedSkillContract.data.skill.schema, "cadre.skill.v1");
-    assert.equal(parsedSkillContract.data.skill.workflows.setup.protocol, "cadre://workflow-protocol?workflow=setup");
+    assert.equal(parsedSkillContract.data.skill.activation.protocol_reads_required, false);
 
     const workflowProtocols = await request("resources/read", { uri: "cadre://workflow-protocols" });
     const parsedWorkflowProtocols = JSON.parse(workflowProtocols.contents[0].text);
@@ -663,7 +536,10 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(freshProjectRoot.root, freshRoot);
     assert.equal(freshProjectRoot.has_cadre, false);
     assert.equal(freshProjectRoot.setup_candidate, true);
-    write(path.join(freshRoot, "cadre", "skills", "setup-rules", "SKILL.md"), `---\nname: setup-rules\ndescription: Setup rules\nworkflows: [setup]\n---\n# Setup rules\n\nPreserve the repository layout.\n`);
+    write(path.join(freshRoot, "cadre", "skills", "setup-rules", "skill.json"), JSON.stringify({
+      version: 1, schema: "cadre.project-skill.v1", id: "setup-rules", name: "setup-rules", description: "Setup rules",
+      selectors: { workflows: ["setup"] }, rules: [{ id: "layout", text: "Preserve the repository layout.", priority: 10, required: true }], references: [],
+    }, null, 2));
     const setupSkills = JSON.parse((await request("resources/read", {
       uri: `cadre://project-skills?root=${encodeURIComponent(freshRoot)}&workflow=setup`,
     })).contents[0].text);
@@ -726,14 +602,19 @@ test("MCP root resolution rejects harness skill directories without project stat
       arguments: { action: "root", root: path.join(root, "project", "cadre") },
     });
     assert.equal(parseTextJson(valid).data.root, path.join(root, "project"));
-    write(path.join(root, "project", "cadre", "skills", "project-rules", "SKILL.md"), `---\nname: project-rules\ndescription: Project rules\nworkflows: [implement]\nreferences: [references/rules.md]\n---\n# Project rules\n\nApply the local rules.\n`);
+    write(path.join(root, "project", "cadre", "skills", "project-rules", "skill.json"), JSON.stringify({
+      version: 1, schema: "cadre.project-skill.v1", id: "project-rules", name: "project-rules", description: "Project rules",
+      selectors: { workflows: ["implement"] },
+      rules: [{ id: "local", text: "Apply the local rules.", priority: 10, required: true, references: ["rules"] }],
+      references: [{ id: "rules", path: "references/rules.md" }],
+    }, null, 2));
     write(path.join(root, "project", "cadre", "skills", "project-rules", "references", "rules.md"), "Keep changes scoped.\n");
     const projectSkills = JSON.parse((await request("resources/read", {
       uri: `cadre://project-skills?root=${encodeURIComponent(path.join(root, "project"))}&workflow=implement`,
     })).contents[0].text);
     assert.equal(projectSkills.data.ok, true);
     assert.deepEqual(projectSkills.data.selected_ids, ["project-rules"]);
-    assert.match(projectSkills.data.selected[0].instructions, /Apply the local rules/);
+    assert.match(projectSkills.data.selected[0].rules[0].text, /Apply the local rules/);
     const projectSkill = JSON.parse((await request("resources/read", {
       uri: `cadre://project-skill?root=${encodeURIComponent(path.join(root, "project"))}&id=project-rules`,
     })).contents[0].text);
@@ -757,9 +638,11 @@ test("MCP root resolution rejects harness skill directories without project stat
       arguments: { workflow: "setup", root: path.join(root, "uninitialized") },
     });
     const parsedSetupAssist = parseTextJson(setupAssist);
-    assert.equal(parsedSetupAssist.data.ok, true);
-    assert.equal(parsedSetupAssist.data.packet_only, true);
-    assert.equal(parsedSetupAssist.data.workflow, "setup");
+    assert.equal(parsedSetupAssist.ok, true);
+    assert.equal(parsedSetupAssist.workflow, "setup");
+    for (const key of ["phase", "decision", "required", "next", "artifacts", "resources", "warnings", "errors"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(parsedSetupAssist, key), true, `missing workflow envelope key ${key}`);
+    }
 
     const job = await request("tools/call", {
       name: "cadre_job",
@@ -1006,8 +889,8 @@ test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async
       name: "cadre_workflow",
       arguments: { root, workflow: "debug", configurationId: "fake-launch" },
     }));
-    assert.equal(dryRun.data.ok, true);
-    assert.equal(dryRun.data.snapshot_packet.tool, "cadre_intel");
+    assert.equal(dryRun.ok, true);
+    assert.equal(dryRun.next.arguments.action, "intel.dap_snapshot");
 
     const snapshotArgs = {
       root,
@@ -1030,14 +913,14 @@ test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async
       name: "cadre_workflow",
       arguments: { ...snapshotArgs, workflow: "debug", action: undefined, execute: true },
     }));
-    assert.equal(workflowSnapshot.data.ok, true);
-    assert.equal(workflowSnapshot.data.snapshot.event, "stopped");
+    assert.equal(workflowSnapshot.ok, true);
+    assert.equal(workflowSnapshot.phase, "ready");
 
     const asyncStart = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: { ...snapshotArgs, workflow: "debug", action: undefined, execute: true, async: true },
     }));
-    const jobId = asyncStart.data.job.id;
+    const jobId = asyncStart.next.arguments.input.jobId;
     const completed = await waitForJob(request, jobId);
     assert.equal(completed.ok, true);
     assert.equal(completed.data.result.snapshot.event, "stopped");
@@ -1114,16 +997,14 @@ test("MCP team-scale workflow packets compose on one track", async () => {
       name: "cadre_workflow",
       arguments: { root, workflow: "status", mode: "fleet", includeCollisions: false },
     }));
-    assert.equal(workflowStatus.data.ok, true);
-    assert.equal(workflowStatus.data.packet_only, true);
+    assert.equal(workflowStatus.ok, true);
     assert.equal(workflowStatus.data.status.ok, true);
 
     const workflowValidate = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: { root, workflow: "validate", trackId: "packets_20260618" },
     }));
-    assert.equal(workflowValidate.data.ok, true);
-    assert.equal(workflowValidate.data.packet_only, true);
+    assert.equal(workflowValidate.ok, true);
     assert.equal(workflowValidate.data.integrity.ok, true);
 
     const artifactCatalog = parseTextJson(await request("tools/call", {

@@ -2,63 +2,17 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-formula",
-  "description": "Manage native Cadre formulas and local wisps",
   "workflow": "formula",
-  "markdownUse": "human_projection_only",
-  "preconditions": [
-    {
-      "tool": "cadre_project",
-      "arguments": {
-        "action": "ping"
-      },
-      "requirement": "Cadre MCP must be available"
-    },
-    {
-      "requirement": "Every project-scoped packet call includes root"
-    },
-    {
-      "requirement": "If a required packet returns ok:false, halt and report the packet error"
-    }
+  "inputs": [
+    "operation",
+    "formulaId?",
+    "variables?"
   ],
-  "packetFlow": [
-    {
-      "step": 1,
-      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
-    },
-    {
-      "step": 2,
-      "instruction": "Call `cadre_workflow` with `workflow: \"formula\"` and the requested native formula operation as structured JSON arguments: list, show, cook, wisp_create, wisp_list, wisp_update_step, wisp_squash, wisp_burn, or pour."
-    },
-    {
-      "step": 3,
-      "instruction": "Use `pour` for reviewed persistent output; it routes generated spec and plan JSON through normal staged `cadre-newtrack` creation with formula trace fields. Local wisps remain under `cadre/local/wisps/` until squashed or burned; `wisp_squash` records a durable digest and control commit."
-    },
-    {
-      "step": 4,
-      "instruction": "Summarize available formulas, generated draft tracks, canonical JSON artifacts, or packet errors."
-    }
+  "transitions": [
+    "run_operation",
+    "review_pour_if_needed",
+    "summarize"
   ],
-  "confirmation": {
-    "requiredForMutation": true,
-    "dryRunFirst": false,
-    "executeArgument": "execute",
-    "approvalArgument": "approvalComplete"
-  },
-  "forbiddenActions": [
-    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
-    "Do not read or write Markdown projections as canonical state",
-    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
-  ],
-  "responseSummary": [
-    "packet ok/error state",
-    "selected track or scope",
-    "warnings and blockers",
-    "changed canonical JSON/JSONL artifacts",
-    "generated human projections when relevant",
-    "next recommended packet"
-  ],
-  "references": [
-    "mcp-contract",
-    "approval-and-generation"
-  ]
+  "approval": "operation_dependent",
+  "references": []
 }

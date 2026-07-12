@@ -2,77 +2,25 @@
   "version": 1,
   "schema": "cadre.protocol.v1",
   "id": "cadre-artifacts",
-  "description": "Sync canonical Cadre artifacts with generated human projections",
   "workflow": "artifacts",
-  "markdownUse": "human_projection_only",
-  "preconditions": [
-    {
-      "tool": "cadre_project",
-      "arguments": {
-        "action": "ping"
-      },
-      "requirement": "Cadre MCP must be available"
-    },
-    {
-      "requirement": "Every project-scoped packet call includes root"
-    },
-    {
-      "requirement": "If a required packet returns ok:false, halt and report the packet error"
-    }
+  "inputs": [
+    "scope?",
+    "artifact?"
   ],
-  "packetFlow": [
-    {
-      "step": 1,
-      "instruction": "Resolve the project root with `cadre_project` using `action: \"root\"`."
-    },
-    {
-      "step": 2,
-      "instruction": "For discovery, call `cadre_artifact` with `action: \"catalog\"`, `\"schema\"`, `\"validate\"`, `\"render\"`, or `\"diff\"` and structured JSON arguments."
-    },
-    {
-      "step": 3,
-      "instruction": "For preview, call `cadre_artifact` with `action: \"sync\"`, the requested scope, and no legacy Markdown import fields."
-    },
-    {
-      "step": 4,
-      "instruction": "Review the current `approval.current_stage` when present. The staged review_bundle contains target/review paths for proposed projection artifacts so large Markdown projections stay out of model context; manifest_path may be null in target mode."
-    },
-    {
-      "step": 5,
-      "instruction": "To apply reviewed synchronization, call `cadre_artifact` again with `action: \"sync\"`, `execute: true`, and `approvalComplete: true`."
-    },
-    {
-      "step": 6,
-      "instruction": "For staged artifact sync review, approve only the generated projection stage with approvalSessionId. Projections must come from canonical JSON/JSONL artifacts, not agent-authored Markdown."
-    },
-    {
-      "step": 7,
-      "instruction": "Summarize changed canonical JSON/JSONL artifacts, regenerated human projections, skipped unmarked projections, warnings, and next recommended packet."
-    }
+  "transitions": [
+    "preview",
+    "review_projection",
+    "execute"
   ],
-  "confirmation": {
-    "requiredForMutation": true,
-    "dryRunFirst": true,
-    "executeArgument": "execute",
-    "approvalArgument": "approvalComplete",
-    "stagedApproval": true
-  },
-  "forbiddenActions": [
-    "Do not recreate Cadre control-plane, native event/message state, index, worktree, provider, merge, or cleanup state with shell commands",
-    "Do not read or write Markdown projections as canonical state",
-    "Do not use Markdown payload fields, legacy Markdown import, or prompt-side state repair"
-  ],
-  "responseSummary": [
-    "packet ok/error state",
-    "selected track or scope",
-    "warnings and blockers",
-    "changed canonical JSON/JSONL artifacts",
-    "generated human projections when relevant",
-    "next recommended packet"
-  ],
+  "approval": "staged",
   "references": [
-    "mcp-contract",
-    "template-locator",
-    "approval-and-generation"
+    {
+      "id": "template-locator",
+      "when": "resources:template"
+    },
+    {
+      "id": "approval-and-generation",
+      "when": "decision:approval"
+    }
   ]
 }

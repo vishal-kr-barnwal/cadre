@@ -95,15 +95,17 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
           dap_status: dapStatus(root, args),
           dap_setup: dapSetup(root, { ...args, execute: false }),
           snapshot_packet: {
-            tool: "cadre_intel",
+            tool: "cadre_action",
             arguments: {
               root,
-              action: "dap_snapshot",
+              action: "intel.dap_snapshot",
+              input: {
               trackId: args.trackId || args.track_id,
               config: args.config,
               configurationId: args.configurationId || args.configuration_id || args.id,
               async: args.async === true,
               execute: args.execute === true,
+              },
             },
           },
         };

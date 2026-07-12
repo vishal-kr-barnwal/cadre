@@ -1,37 +1,20 @@
 ---
 name: cadre
-description: |
-  Context-driven development methodology for organized, spec-first coding. Use when:
-  - Project has a `cadre/` directory
-  - User mentions specs, plans, tracks, or context-driven development
-  - Files like `cadre/tracks.json`, `cadre/product.json`, or `cadre/workflow.json` exist
-  - User asks about project status, implementation progress, or track management
-  - User wants to organize development work with TDD practices
-  - User asks for a `cadre-*` workflow (setup, newtrack, implement, debug, status, revert, validate, flag, revise, review, ship, land, archive, release, handoff, refresh, formula, artifacts)
-  - User mentions documentation is outdated or wants to sync context with codebase changes
-  - Project is a polyrepo control repo (`cadre/repos.json` with mode "polyrepo") spanning git-submodule product repos
-
-  Interoperable across Claude Code, OpenAI Codex, Copilot, and Antigravity.
-  Uses native Cadre state for persistent task memory across sessions.
+description: Packet-led context-driven development for Cadre projects and workflows.
 ---
 
-# Cadre Skill Shim
+# Cadre
 
-Cadre MCP is required for every Cadre workflow. Before acting, verify the MCP
-runtime with `cadre_project` using `{"action":"ping"}`. If Cadre MCP tools or
-resources are unavailable, halt and ask the user to install, enable, or restart
-the Cadre plugin.
+Call `cadre_workflow` directly with the current root candidate, workflow name,
+and structured `input`. The call itself verifies Cadre and resolves the root.
+Follow the returned `decision`, load only returned resource URIs, and execute at
+most the single returned `next` call.
 
-Load `cadre://skill-contract` for the authoritative `cadre.skill.v1` contract.
-Use `cadre://workflow-protocols` to discover workflow protocol resources, then
-load `cadre://workflow-protocol?workflow=<name>` for the active workflow.
-References and template inventory are also MCP-served through Cadre resources.
-Load `cadre://project-skills` after resolving a root and apply its instructions;
-use `cadre://project-skill` for bounded references.
+Use `cadre_action` only for a namespaced action returned by a packet and
+`cadre_read` only for a relevant resource. Cadre owns control-plane, approval,
+provider, worker, merge, and generated-projection state. Never recreate that
+state with shell commands or treat Markdown projections as canonical.
 
-For staged approvals, stay on Cadre's packet-led review path: use the returned
-`approval.current_stage` and current review output first. Target mode may have
-`manifest_path:null`, `mutates_worktree:true`, and `files[].target_path` /
-`review_path`; bundle mode uses the manifest and temp review paths. Ask for
-explicit user approval before sending approval fields. Avoid extra inspection
-unless packet evidence cannot answer the current stage question.
+Send `approval` only after explicit user approval of the current stage. If a
+packet is blocked, report its error or requested narrowing; do not truncate or
+invent required project-skill rules.

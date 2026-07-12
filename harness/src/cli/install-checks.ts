@@ -22,7 +22,7 @@ export function pingMcp(runtime: RuntimePaths): { ok: boolean; reason?: string }
     jsonrpc: "2.0",
     id: 1,
     method: "tools/call",
-    params: { name: "cadre_project", arguments: { action: "ping" } },
+    params: { name: "cadre_action", arguments: { action: "project.ping" } },
   };
   const result = spawnSync(runtime.nodePath, [runtime.mcpServer], {
     cwd: runtime.runtimeRoot,

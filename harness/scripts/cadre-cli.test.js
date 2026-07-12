@@ -137,18 +137,9 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   assert.equal(claudeMarketplaceManifest.plugins[0].source, "./plugins/cadre");
   const codexConfig = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
   for (const tool of [
-    "cadre_resource",
     "cadre_workflow",
-    "cadre_project",
-    "cadre_status",
-    "cadre_track",
-    "cadre_parallel",
-    "cadre_mutate",
-    "cadre_complete_task",
-    "cadre_job",
-    "cadre_review",
-    "cadre_intel",
-    "cadre_artifact",
+    "cadre_action",
+    "cadre_read",
   ]) {
     assert.match(codexConfig, new RegExp(`\\[plugins\\."cadre@cadre"\\.mcp_servers\\.cadre\\.tools\\.${tool}\\]\\napproval_mode = "approve"`));
   }

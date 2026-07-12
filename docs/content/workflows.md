@@ -11,8 +11,9 @@ Cadre workflows are invoked by asking for the Cadre skill and then a
 `cadre-*` workflow. Text after the workflow name is treated as workflow
 arguments; there is no separate prompt expansion layer.
 
-Before any workflow, the agent verifies Cadre MCP with `cadre_project`
-`{ "action": "ping" }`. Every project-scoped packet receives a `root` argument.
+The agent calls `cadre_workflow` directly with a root candidate. The call
+verifies the runtime and resolves the root, so no separate ping or root lookup
+is required.
 
 ## Lifecycle
 
@@ -81,7 +82,7 @@ What setup writes:
 - optional `cadre/repos.json`
 - optional `cadre/lsp.json`
 - selected `cadre/styleguides/*.json` and generated `cadre/code_styleguides/*.md`
-- matching repository-owned `cadre/skills/*/SKILL.md` instructions when present
+- matching repository-owned `cadre/skills/*/skill.json` atomic rules when present
 
 Setup has no external task-memory CLI prerequisite.
 
@@ -265,13 +266,13 @@ The implementation packet:
 - Checks owner/lease state and cross-track collisions.
 - Parses the plan and computes ready phases.
 - Returns worktree and repo routing.
-- Dispatches parallel worker waves through `cadre_parallel` when safe.
+- Dispatches namespaced `parallel.*` actions through `cadre_action` when safe.
 
 Sequential phases run one unfinished task at a time. Parallel phases dispatch
 only tasks whose phase dependencies, task dependencies, worker state, and file
 claims are ready.
 
-Task completion should use `cadre_complete_task` so verification, coverage,
+Task completion should use the returned `cadre_action` `task.complete` call so verification, coverage,
 product commits, plan progress, metadata, journals, events, and git notes are
 recorded consistently. When no `commitSha` is supplied, Cadre creates the
 task-owned product commit automatically using a Conventional Commit subject,
@@ -285,11 +286,11 @@ The debug workflow:
 
 - Reads `cadre/dap.json` for configured debug adapters and launch/attach
   configurations.
-- Uses `cadre_intel action: "dap_status"` to report configured adapters,
+- Uses `cadre_action` with `action: "intel.dap_status"` to report configured adapters,
   missing commands, and detected languages that need manual adapter setup.
-- Uses `cadre_intel action: "dap_setup"` to recommend conservative adapter
+- Uses `cadre_action` with `action: "intel.dap_setup"` to recommend conservative adapter
   entries and optionally write `cadre/dap.json`.
-- Uses `cadre_intel action: "dap_snapshot"` or `cadre_workflow` with
+- Uses `cadre_action` with `action: "intel.dap_snapshot"` or `cadre_workflow` with
   `workflow: "debug"` and `execute:true` to launch or attach, set breakpoints,
   capture stack frames, variables, and output, then disconnect.
 

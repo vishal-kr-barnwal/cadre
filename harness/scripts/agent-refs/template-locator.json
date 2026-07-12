@@ -2,31 +2,24 @@
   "version": 1,
   "schema": "cadre.reference.v1",
   "id": "template-locator",
-  "title": "Cadre Template Assets",
+  "title": "Template and artifact lookup",
   "markdownUse": "human_projection_only",
   "rules": [
-    "`cadre_workflow` with reviewable dry-runs reports review artifacts and staged",
-    "`cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes",
-    "`cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including",
-    "`cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks",
-    "`cadre_mutate` owns derived index refreshes and other Cadre state mutations."
+    "Load templates only through returned resource URIs.",
+    "Review target or bundle paths instead of inlining artifact bodies."
   ],
   "sections": [
     {
-      "heading": "Packet Ownership",
-      "body": "- `cadre_workflow` with reviewable dry-runs reports review artifacts and staged\n  `review_bundle` output. Target mode writes the current stage to real target\n  paths for worktree diff review; bundle mode writes temp review files. Setup,\n  new-track, revise, refresh document updates, release artifacts, and handoff\n  artifacts use this pattern.\n- `cadre_workflow` with `workflow: \"setup_scaffold\"` and `execute:true` writes\n  the setup scaffold from bundled templates and confirmed setup payload.\n- `cadre_workflow` with `workflow: \"newtrack\"` writes per-track files, including\n  template-backed track learnings.\n- `cadre_intel` owns LSP setup/review and DAP setup/status/snapshot checks.\n- `cadre_mutate` owns derived index refreshes and other Cadre state mutations."
+      "heading": "Templates",
+      "body": "Use `cadre_read` for a returned template inventory or artifact schema resource."
     },
     {
-      "heading": "Style Guides",
-      "body": "Setup always selects the general style guide when available, adds guides derived\nfrom structured `techStack` JSON, and unions any explicit `styleGuideIds` passed\nto the packet.\nThe setup packet returns `styleGuides.detected`, `styleGuides.selected`,\n`styleGuides.written`, `styleGuides.skipped`, and `styleGuides.missing`.\n\nIf `styleGuides.missing` is non-empty, surface the packet warning and keep the\nvalid selected guides. Do not remove user-supplied `styleGuideIds` just to make a\ndry-run warning disappear. If the packet returns `ok:false`, halt and surface the\npacket error. Do not replace the packet with manual copying."
+      "heading": "Generation",
+      "body": "Setup, newtrack, revise, refresh, release, handoff, and artifact sync return staged artifact descriptors. Approve the current stage before execution."
     },
     {
-      "heading": "Workflow Review Bundles",
-      "body": "Reviewable workflow dry-runs return `review_artifacts` as metadata only and\n`review_bundle` with returned target/review paths. In target mode, `manifest_path`\nmay be null and the current stage is written to the real target path; in bundle\nmode, the packet returns a manifest path plus absolute temp review file paths.\nReview output intentionally does not include command recipes; use packet-provided\nsummaries and the returned paths for human review instead of running ad hoc\ninspection commands by default."
-    },
-    {
-      "heading": "Agent Use",
-      "body": "Use template references only to understand what the packet-created files mean.\nAll setup, new-track, LSP, style-guide, and index writes are packet-owned."
+      "heading": "Intelligence",
+      "body": "Use returned `intel.lsp_*` or `intel.dap_*` actions for setup and checks."
     }
   ]
 }

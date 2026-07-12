@@ -168,8 +168,8 @@ export function dapStatus(root: string, args: RuntimeArgs = {}): JsonObject {
     detected,
     recommended,
     manual,
-    setup_packet: "cadre_intel action dap_setup",
-    snapshot_packet: "cadre_intel action dap_snapshot",
+    setup_packet: "cadre_action action intel.dap_setup",
+    snapshot_packet: "cadre_action action intel.dap_snapshot",
   };
 }
 

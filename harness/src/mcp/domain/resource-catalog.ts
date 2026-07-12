@@ -14,9 +14,9 @@ type ResourceContract = {
 };
 
 const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
-  { uri: "cadre://skill-contract", name: "Cadre skill contract", description: "Packaged cadre.skill.v1 contract. Read without a project root." },
+  { uri: "cadre://skill-contract", name: "Cadre skill contract", description: "Optional packaged cadre.skill.v1 reference. Normal workflows do not load it." },
   { uri: "cadre://workflow-protocols", name: "Cadre workflow protocols", description: "Packaged workflow protocol catalog. Read without a project root." },
-  { uri: "cadre://workflow-protocol", name: "Cadre workflow protocol", description: "Packaged cadre.protocol.v1 body. Read with ?workflow=<name>." },
+  { uri: "cadre://workflow-protocol", name: "Cadre workflow protocol", description: "Optional compact cadre.protocol.v1 reference. Read with ?workflow=<name>." },
   { uri: "cadre://agent-references", name: "Cadre agent references", description: "Packaged Cadre agent reference catalog. Read without a project root." },
   { uri: "cadre://agent-reference", name: "Cadre agent reference", description: "Packaged Cadre agent reference JSON. Read with ?name=<reference-id>." },
   { uri: "cadre://template-inventory", name: "Cadre template inventory", description: "Packaged target-project template manifest. Read without a project root." },
@@ -52,7 +52,7 @@ const RESOURCE_DEFINITIONS: ResourceDefinition[] = [
   { uri: "cadre://track-spec", name: "Cadre track spec", description: "Canonical track spec and projection preview. Read with ?root=/path&trackId=<id>." },
   { uri: "cadre://styleguide-selection", name: "Cadre styleguide selection", description: "Selected style guidance for a track or file list. Read with ?root=/path&trackId=<id>&files=a,b." },
   { uri: "cadre://project-skills", name: "Cadre project skills", description: "Repository-owned skill selection for a workflow. Read with ?root=/path&workflow=<name>." },
-  { uri: "cadre://project-skill", name: "Cadre project skill", description: "Project skill instructions and bounded references. Read with ?root=/path&id=<skill-id>." },
+  { uri: "cadre://project-skill", name: "Cadre project skill", description: "Project skill manifest or one targeted reference. Read with ?root=/path&id=<skill-id>&reference=<id>." },
 ];
 
 const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
@@ -94,7 +94,7 @@ const RESOURCE_CONTRACTS: Record<string, ResourceContract> = {
   "cadre://track-spec": { required: ["root", "trackId"] },
   "cadre://styleguide-selection": { required: ["root"], optional: ["trackId", "files"] },
   "cadre://project-skills": { required: ["root", "workflow"], optional: ["trackId", "repos"] },
-  "cadre://project-skill": { required: ["root", "id"], optional: [] },
+  "cadre://project-skill": { required: ["root", "id"], optional: ["reference"] },
 };
 
 function contractQueryParams(contract: ResourceContract): string[] {
@@ -139,6 +139,7 @@ export function parseResourceUri(uri: string): ResourceQuery {
     workflow: params.get("workflow"),
     name: params.get("name"),
     id: params.get("id"),
+    reference: params.get("reference"),
     artifact: params.get("artifact"),
     scope: params.get("scope"),
     jobId: params.get("jobId"),

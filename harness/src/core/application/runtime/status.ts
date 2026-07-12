@@ -134,8 +134,8 @@ export function lspRuntimeSummary(root: string): CoreResult {
     missing_count: entries.filter((entry) => entry.available !== true).length,
     missing: entries.filter((entry) => entry.available !== true).map((entry) => entry.id),
     daemon: {
-      status_packet: "cadre_intel action lsp_daemon_status",
-      shutdown_packet: "cadre_intel action lsp_daemon_shutdown",
+      status_packet: "cadre_action action intel.lsp_daemon_status",
+      shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
       max_clients_default: 8,
       idle_eviction_ms_default: 600000,
     },

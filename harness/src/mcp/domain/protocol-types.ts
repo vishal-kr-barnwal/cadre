@@ -45,6 +45,7 @@ export interface ResourceQuery extends JsonObject {
   workflow: string | null;
   name: string | null;
   id: string | null;
+  reference: string | null;
   artifact: string | null;
   scope: string | null;
   jobId: string | null;

@@ -136,8 +136,8 @@ export function lspConfigStatus(root: string): CoreResult {
       servers: [],
       missing: [],
       daemon: {
-        status_packet: "cadre_intel action lsp_daemon_status",
-        shutdown_packet: "cadre_intel action lsp_daemon_shutdown",
+        status_packet: "cadre_action action intel.lsp_daemon_status",
+        shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
         max_clients_default: 8,
         idle_eviction_ms_default: 600000,
       },
@@ -163,8 +163,8 @@ export function lspConfigStatus(root: string): CoreResult {
       })
       .map((server) => asOptionalString(server.id) || asOptionalString(server.command) || "unknown"),
     daemon: {
-      status_packet: "cadre_intel action lsp_daemon_status",
-      shutdown_packet: "cadre_intel action lsp_daemon_shutdown",
+      status_packet: "cadre_action action intel.lsp_daemon_status",
+      shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
       max_clients_default: 8,
       idle_eviction_ms_default: 600000,
     },
