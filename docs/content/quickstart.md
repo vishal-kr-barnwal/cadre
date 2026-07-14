@@ -13,12 +13,20 @@ target project, not in the Cadre harness repository.
 
 ## 1. Initialize The Project
 
-Activate Cadre in your coding client, then ask for setup:
+Choose the setup workflow from your coding client's command picker:
 
 ```text
-$cadre
-cadre-setup
+# Codex
+$cadre:setup
+
+# Claude Code
+/cadre:setup
 ```
+
+Copilot and Antigravity retain the generic Cadre skill; activate it there and
+ask for `cadre-setup`. The remaining examples use portable `cadre-*` workflow
+IDs. In Codex, select `$cadre:<workflow>`; in Claude Code, select
+`/cadre:<workflow>`.
 
 Setup detects repository topology, provider remotes, build tools, and optional
 language services. It returns one review stage at a time. Inspect each generated
@@ -28,6 +36,15 @@ continues. A preview written into `cadre/` is not approval by itself.
 When setup finishes, verify the runtime:
 
 ```text
+# Codex
+$cadre:status
+$cadre:validate
+
+# Claude Code
+/cadre:status
+/cadre:validate
+
+# Copilot and Antigravity request names
 cadre-status
 cadre-validate
 ```

@@ -31,7 +31,7 @@ stronger failure behavior at every untrusted input boundary.
 | Parallel and jobs | Workers receive exact completion or recovery callbacks; merge, cleanup, restart, persistence, and job continuation all fail closed from observed state. |
 | LSP and DAP | Project-owned config namespaces, secure reads/writes, contained breakpoints, and configured adapter selection prevent path and command injection. |
 | Package | The npm publish set drops from 10 to 8 files, removes duplicate worker/daemon executables, and reduces the uncompressed payload by 20,456 bytes. |
-| Verification | Test declarations increase from 114 to 148, with new lifecycle, resource, packet, approval, command-picker, source-capability, job, parallel, and config-security coverage. |
+| Verification | Harness test cases increase from 114 to 148, with new lifecycle, resource, packet, approval, command-picker, source-capability, job, parallel, and config-security coverage. |
 
 ### Atomic Canonical And Projection Review
 
@@ -222,6 +222,9 @@ configuration namespaces before upgrading.
   the manual cleanup described above.
 - Removed MCP aliases, flat inputs, resource names, and standalone helper paths
   are not compatibility surfaces in 2.2.0.
+- Codex and Claude Code no longer expose generic Cadre umbrella commands. Use
+  `$cadre:<workflow>` in Codex or `/cadre:<workflow>` in Claude Code, including
+  `$cadre:setup` and `/cadre:setup` for first-time setup.
 - Hosted provider evidence still comes from supported provider integrations;
   this release does not introduce a CLI evidence fallback.
 

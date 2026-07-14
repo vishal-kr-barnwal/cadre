@@ -2,7 +2,8 @@
 
 ## [2.2.0] - 2026-07-14
 
-Atomic document review and hardened MCP runtime release.
+Atomic document review, hardened MCP runtime, and native workflow discovery
+release.
 
 ### Added
 
@@ -121,6 +122,9 @@ Atomic document review and hardened MCP runtime release.
   receive the explicit workflow-picker entries. Restart Codex or open a new
   task before typing `$cadre:`; run `/reload-plugins` in Claude Code or restart
   it before typing `/cadre:`.
+- Replace saved Codex `$cadre` or `$cadre:cadre` prompts with
+  `$cadre:<workflow>`, and replace Claude Code `/cadre:cadre` prompts with
+  `/cadre:<workflow>`. The generic umbrella entries are intentionally absent.
 - Regenerate styleguide projections under `cadre/styleguides/`, review the
   resulting diff, and remove the legacy `cadre/code_styleguides/` directory
   manually. Cadre diagnoses that legacy path but does not move or delete it.

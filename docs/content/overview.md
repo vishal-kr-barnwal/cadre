@@ -49,12 +49,19 @@ npm install -g cadre-ai
 cadre install
 ```
 
-In a target project, activate Cadre and run setup:
+In a target project, choose setup from the client picker:
 
 ```text
-$cadre
-cadre-setup
+# Codex
+$cadre:setup
+
+# Claude Code
+/cadre:setup
 ```
+
+Copilot and Antigravity retain the generic Cadre skill and accept
+`cadre-setup` as the workflow request. Codex and Claude Code expose all 19
+registered workflows directly and omit the redundant generic umbrella entry.
 
 Then use the normal lifecycle:
 
