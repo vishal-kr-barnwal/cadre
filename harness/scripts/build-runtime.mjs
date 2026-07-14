@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { loadWorkflowCommandSource } from "./workflow-command-skills.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -47,6 +48,7 @@ function collectTemplates() {
 const embeddedAssets = {
   templates: collectTemplates()
 };
+const embeddedCommandSource = loadWorkflowCommandSource(repoRoot);
 
 for (const outfile of obsoleteOutputs) {
   rmSync(path.join(repoRoot, outfile), { force: true });
@@ -62,7 +64,12 @@ await Promise.all(
     if (assetMode === "embedded") {
       entryBanner = `${banner}\nconst __CADRE_EMBEDDED_ASSETS__ = ${JSON.stringify(embeddedAssets)};`;
     } else if (assetMode === "cli") {
-      entryBanner = `${banner}\nconst __CADRE_SKILL_SHIM__ = ${JSON.stringify(readFileSync(path.join(repoRoot, "skills/cadre/SKILL.md"), "utf8"))};`;
+      entryBanner = [
+        banner,
+        `const __CADRE_SKILL_SHIM__ = ${JSON.stringify(readFileSync(path.join(repoRoot, "skills/cadre/SKILL.md"), "utf8"))};`,
+        `const __CADRE_COMMAND_SKILL_TEMPLATE__ = ${JSON.stringify(embeddedCommandSource.template)};`,
+        `const __CADRE_WORKFLOW_COMMANDS__ = ${JSON.stringify(embeddedCommandSource.workflows)};`
+      ].join("\n");
     }
     return (
     build({

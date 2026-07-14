@@ -25,7 +25,11 @@ cadre doctor
 
 The installed plugins contain only platform wiring:
 
-- `skills/cadre/SKILL.md` as the agent-facing skill entrypoint.
+- On Claude Code, Copilot, and Antigravity, `skills/cadre/SKILL.md` as the
+  agent-facing entrypoint.
+- On Codex, generated `skills/<workflow>/SKILL.md` entries plus explicit-only
+  `agents/openai.yaml` metadata for workflow discovery in the `$cadre:` picker;
+  no redundant umbrella entry is installed.
 - `.mcp.json` for Codex and Copilot, `mcp-config.json` for Claude, or
   `mcp_config.json` for Antigravity.
 
@@ -66,25 +70,49 @@ For source development, keep using the npm-first install path. Harness
 contributors can run `pnpm --filter cadre-ai generate` to create ignored local
 plugin fixtures for validation, but those generated files are not checked in.
 
-## First Project Setup
+### Codex Workflow Picker
 
-In the target project, activate the Cadre skill and run setup:
+After installing or upgrading, restart Codex or open a new task, type
+`$cadre:`, and choose a workflow directly. For example:
 
 ```text
-$cadre
-cadre-setup
+$cadre:setup
+$cadre:status
+$cadre:newtrack Add OAuth login
+$cadre:implement
+$cadre:review
+$cadre:ship
 ```
+
+Cadre generates one explicit-only picker entry for every registered workflow
+and deliberately omits a redundant `$cadre:cadre` entry. The picker entries
+all route through `cadre_workflow` and do not add tools or aliases to the MCP
+contract.
+
+## First Project Setup
+
+In Codex, select the setup workflow from the picker:
+
+```text
+$cadre:setup
+```
+
+In Claude Code, Copilot, or Antigravity, activate the Cadre skill and ask for
+`cadre-setup`.
 
 Setup asks for product context, tech stack, topology, sync mode, provider mode,
 quality gate, optional CI templates, and LSP setup. Setup dry-runs can return
 native recommendation prompts for Codex, Claude, Copilot, and Antigravity so
 you can select one or more recommended options, or type a custom "Other" value.
-Discovery packets can inspect the fresh repository before `cadre/` exists; Cadre
-staged dry-runs may write the complete deterministic review diff to intended target paths
-so you can inspect `git diff`, but durable execution, trace records, indexes,
-events, and side effects still require `execute:true`; explicit approval is
-reserved for the human-facing documents. Pass `reviewOutputMode:"bundle"` when you need the older
-non-mutating temp-bundle review.
+Discovery packets can inspect the fresh repository before `cadre/` exists.
+Cadre staged dry-runs may materialize the complete frozen review diff at its
+intended target paths so you can inspect `git diff`; that review output is the
+only pre-execution write. Durable state transitions, trace records, indexes,
+events, and non-review effects require `execute:true`. Explicit document
+approval applies to the current human-facing projection together with its
+corresponding canonical JSON or JSONL.
+Pass `reviewOutputMode:"bundle"` when you need the older non-mutating
+temp-bundle review.
 When language-server recommendations are detected, setup writes `cadre/lsp.json`
 by default unless you opt out. The workflow is packet-owned: the agent should
 call Cadre MCP, and Cadre MCP writes the control plane.

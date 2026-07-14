@@ -19,6 +19,7 @@ import { removeTarget, writeTarget } from "./install-writers";
 
 interface CliContext {
   skillShim: string;
+  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
 function usage(): string {
@@ -143,8 +144,8 @@ function runInstall(argv: string[], context: CliContext): number {
       process.stdout.write(`Would configure: ${approvalSummary(target)}\n`);
       continue;
     }
-    if (!options.check) writeTarget(target, paths, runtime, context.skillShim);
-    const errors = checkTarget(target, paths, runtime);
+    if (!options.check) writeTarget(target, paths, runtime, context.skillShim, context.commandSkills);
+    const errors = checkTarget(target, paths, runtime, context.commandSkills);
     if (!options.check) {
       const approvals = bootstrapClientApprovals(target);
       if (!approvals.ok) errors.push(`${target} approval bootstrap failed: ${approvals.error || approvals.path}`);

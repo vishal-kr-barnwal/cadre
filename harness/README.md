@@ -25,6 +25,8 @@ Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
   Google Antigravity plugins are thin MCP entrypoints. The global `cadre-mcp`
   runtime owns three public packet tools, the validated resource registry, and
   the setup templates needed at runtime.
+- **Codex workflow picker:** explicit `$cadre:*` entries make every
+  registered workflow discoverable without adding MCP tools.
 
 ## Install
 
@@ -38,16 +40,19 @@ cadre doctor
 
 ## Use
 
-In a target project, activate the Cadre skill and ask for the workflow you need:
+In Codex, type `$cadre:` and choose the workflow you need:
 
 ```text
-$cadre
-cadre-setup
-cadre-newtrack "Add OAuth login"
-cadre-implement
-cadre-review
-cadre-ship
+$cadre:setup
+$cadre:newtrack Add OAuth login
+$cadre:implement
+$cadre:review
+$cadre:ship
 ```
+
+Codex exposes only these workflow entries, without a redundant
+`$cadre:cadre` option. Other supported clients retain the single Cadre skill
+and accept the same `cadre-*` workflow names as requests.
 
 Cadre workflows are packet-owned. The agent verifies Cadre MCP, passes a
 per-call `root`, and lets the runtime perform state reads/writes, formula work,
@@ -113,8 +118,9 @@ pnpm --filter cadre-ai check
 ```
 
 Generated plugin bundles under `.agents/`, `.claude/`, and `plugins/` are
-rebuilt from master sources. They contain only platform manifests, MCP config,
-and `SKILL.md`; the embedded MCP runtime is built under `scripts/`.
+rebuilt from master sources. They contain platform manifests, MCP config, and
+thin skill shims; the Codex fixture also contains explicit-only generated
+workflow-picker skills. The embedded MCP runtime is built under `scripts/`.
 
 Public documentation lives in the repo-root `docs/` Next.js app. Markdown page
 source is in `docs/content/`:

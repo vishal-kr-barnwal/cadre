@@ -53,6 +53,10 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+const workflowCommands = readJson(path.join(root, "skills", "cadre", "skill.json"))
+  .workflows
+  .sort();
+
 test("cadre install --dry-run plans detected clients without mutating", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cli-dry-"));
   const bin = path.join(home, "bin");
@@ -96,6 +100,9 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   const result = runCli(["install", "--target", "all", "--scope", "user", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  const builtCli = fs.readFileSync(cli, "utf8");
+  assert.equal((builtCli.match(/const __CADRE_COMMAND_SKILL_TEMPLATE__ =/g) || []).length, 1);
+  assert.equal(builtCli.includes("const __CADRE_COMMAND_SKILLS__ ="), false, "CLI must not embed rendered command copies");
   const codexMarketplace = path.join(cadreHome, "marketplaces", "codex");
   const claudeMarketplace = path.join(cadreHome, "marketplaces", "claude");
   const copilotMarketplace = path.join(cadreHome, "marketplaces", "copilot");
@@ -104,13 +111,44 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   const copilotPlugin = path.join(copilotMarketplace, "plugins", "cadre");
   const antigravityCliPlugin = path.join(home, ".gemini", "antigravity-cli", "plugins", "cadre");
   const antigravityIdePlugin = path.join(home, ".gemini", "config", "plugins", "cadre");
+  assert.equal(fs.existsSync(path.join(codexPlugin, "skills", "cadre")), false);
   for (const plugin of [codexPlugin, claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
-    assert.equal(fs.existsSync(path.join(plugin, "skills", "cadre", "SKILL.md")), true);
     assert.equal(fs.existsSync(path.join(plugin, "assets")), false);
     assert.equal(fs.existsSync(path.join(plugin, "agents")), false);
     assert.equal(fs.existsSync(path.join(plugin, "scripts")), false);
     assert.equal(fs.existsSync(path.join(plugin, "references")), false);
     assert.equal(fs.existsSync(path.join(plugin, "templates")), false);
+  }
+  for (const plugin of [claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
+    assert.equal(fs.existsSync(path.join(plugin, "skills", "cadre", "SKILL.md")), true);
+  }
+  const codexSkillNames = fs.readdirSync(path.join(codexPlugin, "skills")).sort();
+  assert.deepEqual(codexSkillNames, workflowCommands);
+  for (const command of workflowCommands) {
+    const skill = fs.readFileSync(path.join(codexPlugin, "skills", command, "SKILL.md"), "utf8");
+    const metadata = fs.readFileSync(path.join(codexPlugin, "skills", command, "agents", "openai.yaml"), "utf8");
+    assert.match(skill, new RegExp(`name: "${command}"`));
+    assert.match(metadata, /interface:\n  display_name: "Cadre [^"]+"\n  short_description: "[^"]+"/);
+    assert.match(metadata, /allow_implicit_invocation: false/);
+  }
+  const expectedSkills = path.join(home, "expected-codex-skills");
+  const rendered = spawnSync(
+    process.execPath,
+    [path.join(root, "scripts", "workflow-command-skills.mjs"), "--write", expectedSkills],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(rendered.status, 0, rendered.stderr || rendered.stdout);
+  for (const command of workflowCommands) {
+    for (const relative of ["SKILL.md", path.join("agents", "openai.yaml")]) {
+      assert.equal(
+        fs.readFileSync(path.join(codexPlugin, "skills", command, relative), "utf8"),
+        fs.readFileSync(path.join(expectedSkills, command, relative), "utf8"),
+        `${command}/${relative} differs between build and source renderers`,
+      );
+    }
+  }
+  for (const plugin of [claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
+    assert.deepEqual(fs.readdirSync(path.join(plugin, "skills")).sort(), ["cadre"]);
   }
 
   const codexMcp = readJson(path.join(codexPlugin, ".mcp.json"));
@@ -249,6 +287,26 @@ test("cadre install --check validates existing thin plugin", () => {
   assert.equal(check.status, 0, check.stderr || check.stdout);
   assert.match(check.stdout, /Cadre codex plugin is installed/);
   assert.match(check.stdout, /Cadre codex MCP tool approvals are configured/);
+
+  const installedCodexPlugin = path.join(cadreHome, "marketplaces", "codex", "plugins", "cadre");
+  write(path.join(installedCodexPlugin, "skills", "cadre", "SKILL.md"), "# obsolete umbrella\n");
+  write(path.join(installedCodexPlugin, "skills", "cadre-setup", "SKILL.md"), "# obsolete prefixed command\n");
+  write(path.join(installedCodexPlugin, "skills", "setup", "scripts", "stale.md"), "stale\n");
+  const staleCheck = runCli(["install", "--check", "--target", "codex"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(staleCheck.status, 1);
+  assert.match(staleCheck.stderr, /unexpected Cadre command skill/);
+  assert.match(staleCheck.stderr, /unexpected Cadre command skill directory/);
+
+  const refresh = runCli(["install", "--target", "codex", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(refresh.status, 0, refresh.stderr || refresh.stdout);
+  assert.equal(fs.existsSync(path.join(installedCodexPlugin, "skills", "cadre")), false);
+  assert.equal(fs.existsSync(path.join(installedCodexPlugin, "skills", "cadre-setup")), false);
+  assert.equal(fs.existsSync(path.join(installedCodexPlugin, "skills", "setup", "scripts")), false);
+
+  fs.rmSync(path.join(installedCodexPlugin, "skills", "setup"), { recursive: true, force: true });
+  const missingCommand = runCli(["install", "--check", "--target", "codex"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(missingCommand.status, 1);
+  assert.match(missingCommand.stderr, /missing .*skills\/setup\/SKILL\.md/);
 
   const copilotInstall = runCli(["install", "--target", "copilot", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
   assert.equal(copilotInstall.status, 0, copilotInstall.stderr || copilotInstall.stdout);

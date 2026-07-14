@@ -106,20 +106,89 @@ function checkMcpConfig(target: Target, file: string, runtime: RuntimePaths): st
   return errors;
 }
 
-export function checkTarget(target: Target, paths: TargetPaths, runtime: RuntimePaths): string[] {
+function checkCommandSkills(
+  pluginRoot: string,
+  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): string[] {
+  const errors: string[] = [];
+  if (Object.keys(commandSkills).length === 0) return ["Cadre Codex workflow commands are missing"];
+  for (const [command, files] of Object.entries(commandSkills)) {
+    const commandRoot = path.join(pluginRoot, "skills", command);
+    if (fs.existsSync(commandRoot) && !fs.lstatSync(commandRoot).isDirectory()) {
+      errors.push(`invalid Cadre command skill directory ${commandRoot}`);
+      continue;
+    }
+    const expectedFiles = new Set(Object.keys(files).map((relative) => relative.replace(/\\/g, "/")));
+    const expectedDirectories = new Set<string>();
+    for (const relative of expectedFiles) {
+      const parts = relative.split("/");
+      for (let index = 1; index < parts.length; index += 1) {
+        expectedDirectories.add(parts.slice(0, index).join("/"));
+      }
+    }
+    for (const [relative, expected] of Object.entries(files)) {
+      const file = path.join(pluginRoot, "skills", command, ...relative.replace(/\\/g, "/").split("/"));
+      if (!fs.existsSync(file)) {
+        errors.push(`missing ${file}`);
+        continue;
+      }
+      if (!fs.lstatSync(file).isFile()) {
+        errors.push(`invalid Cadre command skill file ${file}`);
+        continue;
+      }
+      const actual = fs.readFileSync(file, "utf8");
+      const normalizedExpected = expected.endsWith("\n") ? expected : `${expected}\n`;
+      if (actual !== normalizedExpected) errors.push(`stale Cadre command skill ${file}`);
+    }
+    if (fs.existsSync(commandRoot)) {
+      const visit = (directory: string, relativeRoot = ""): void => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          const relative = path.posix.join(relativeRoot, entry.name);
+          if (entry.isDirectory()) {
+            if (expectedDirectories.has(relative)) visit(path.join(directory, entry.name), relative);
+            else errors.push(`unexpected Cadre command skill directory ${path.join(commandRoot, ...relative.split("/"))}`);
+          } else if (!expectedFiles.has(relative)) {
+            errors.push(`unexpected Cadre command skill file ${path.join(commandRoot, ...relative.split("/"))}`);
+          }
+        }
+      };
+      visit(commandRoot);
+    }
+  }
+  const skillsRoot = path.join(pluginRoot, "skills");
+  const expectedCommands = new Set(Object.keys(commandSkills));
+  if (fs.existsSync(skillsRoot)) {
+    for (const entry of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !expectedCommands.has(entry.name)) {
+        errors.push(`unexpected Cadre command skill ${path.join(skillsRoot, entry.name)}`);
+      }
+    }
+  }
+  return errors;
+}
+
+export function checkTarget(
+  target: Target,
+  paths: TargetPaths,
+  runtime: RuntimePaths,
+  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): string[] {
   const errors: string[] = [];
   for (const skillRoot of paths.skillRoots) {
     const skill = path.join(skillRoot, "SKILL.md");
     if (!fs.existsSync(skill)) errors.push(`missing ${skill}`);
   }
   for (const pluginRoot of paths.pluginRoots) {
-    const skill = path.join(pluginRoot, "skills", "cadre", "SKILL.md");
-    if (!fs.existsSync(skill)) errors.push(`missing ${skill}`);
+    if (target !== "codex") {
+      const skill = path.join(pluginRoot, "skills", "cadre", "SKILL.md");
+      if (!fs.existsSync(skill)) errors.push(`missing ${skill}`);
+    }
     const files = pluginConfigFiles(target, pluginRoot);
     if (!fs.existsSync(files.manifest)) errors.push(`missing ${files.manifest}`);
     if (!fs.existsSync(files.mcp)) errors.push(`missing ${files.mcp}`);
     errors.push(...forbiddenThinPayload(pluginRoot).map((entry) => `thin plugin contains forbidden payload ${entry}`));
     if (fs.existsSync(files.mcp)) errors.push(...checkMcpConfig(target, files.mcp, runtime));
+    if (target === "codex") errors.push(...checkCommandSkills(pluginRoot, commandSkills));
   }
   if (paths.marketplaceFile && !fs.existsSync(paths.marketplaceFile)) errors.push(`missing ${paths.marketplaceFile}`);
   return errors;

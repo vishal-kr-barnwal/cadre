@@ -120,9 +120,40 @@ function writeText(file: string, text: string): void {
   fs.writeFileSync(file, text.endsWith("\n") ? text : `${text}\n`);
 }
 
-function writePluginRoot(target: Target, pluginRoot: string, runtime: RuntimePaths, skillShim: string): void {
+function writeCommandSkills(
+  pluginRoot: string,
+  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): void {
+  for (const [command, files] of Object.entries(commandSkills)) {
+    if (command === "cadre" || !/^[a-z][a-z0-9-]*$/.test(command)) {
+      throw new Error(`Invalid Cadre command skill: ${command}`);
+    }
+    for (const [relative, content] of Object.entries(files)) {
+      const normalized = relative.replace(/\\/g, "/");
+      if (!normalized || normalized.startsWith("/") || normalized.split("/").some((part) => !part || part === "." || part === "..")) {
+        throw new Error(`Invalid Cadre command skill file: ${command}/${relative}`);
+      }
+      writeText(path.join(pluginRoot, "skills", command, ...normalized.split("/")), content);
+    }
+  }
+}
+
+function writePluginRoot(
+  target: Target,
+  pluginRoot: string,
+  runtime: RuntimePaths,
+  skillShim: string,
+  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): void {
+  if (target === "codex" && Object.keys(commandSkills).length === 0) {
+    throw new Error("Cadre Codex workflow commands are missing");
+  }
   fs.rmSync(pluginRoot, { recursive: true, force: true });
-  writeText(path.join(pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
+  if (target === "codex") {
+    writeCommandSkills(pluginRoot, commandSkills);
+  } else {
+    writeText(path.join(pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
+  }
   if (target === "codex") {
     writeJson(path.join(pluginRoot, ".codex-plugin", "plugin.json"), pluginManifest(target, runtime));
     writeJson(path.join(pluginRoot, ".mcp.json"), mcpConfig(target, runtime));
@@ -138,8 +169,14 @@ function writePluginRoot(target: Target, pluginRoot: string, runtime: RuntimePat
   }
 }
 
-export function writeTarget(target: Target, paths: TargetPaths, runtime: RuntimePaths, skillShim: string): void {
-  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim);
+export function writeTarget(
+  target: Target,
+  paths: TargetPaths,
+  runtime: RuntimePaths,
+  skillShim: string,
+  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): void {
+  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkills);
   for (const skillRoot of paths.skillRoots) {
     fs.rmSync(skillRoot, { recursive: true, force: true });
     writeText(path.join(skillRoot, "SKILL.md"), skillShim);

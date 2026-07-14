@@ -11,10 +11,11 @@
 #   - Copilot plugin fixture     -> plugins/cadre-copilot/
 #   - Antigravity plugin fixture -> plugins/cadre-antigravity/
 #
-# Edit the source skill in `skills/cadre/SKILL.md` and runtime TypeScript in
-# `src/`. Generated plugins are thin entrypoints for the global `cadre-mcp`
-# runtime. Runtime JavaScript under `scripts/` is built from `src/` by
-# `pnpm build`. Plugin and marketplace outputs are generated on demand for
+# Edit the source skill in `skills/cadre/SKILL.md`, its workflow command
+# template in `skills/cadre/workflow-command-template.md`, and runtime
+# TypeScript in `src/`. Generated plugins are thin entrypoints for the global
+# `cadre-mcp` runtime. Runtime JavaScript under `scripts/` is built from `src/`
+# by `pnpm build`. Plugin and marketplace outputs are generated on demand for
 # source validation and `cadre install`; they are not source files.
 #
 # Usage:
@@ -31,6 +32,8 @@ ROOT_REPO="$(cd "$REPO_ROOT/.." && pwd)"
 cd "$REPO_ROOT"
 
 SOURCE_SKILL_FILE="skills/cadre/SKILL.md"
+SOURCE_SKILL_CONTRACT="skills/cadre/skill.json"
+SOURCE_WORKFLOW_COMMAND_TEMPLATE="skills/cadre/workflow-command-template.md"
 CLAUDE_SKILL_DIR=".claude/skills/cadre"
 CODEX_SKILL_DIR=".agents/skills/cadre"
 CLAUDE_PLUGIN_DIR="plugins/cadre-claude"
@@ -379,6 +382,9 @@ const path = require("node:path");
 
 const root = process.env.CADRE_VALIDATE_ROOT || process.cwd();
 const repoRoot = process.env.CADRE_VALIDATE_REPO_ROOT || path.resolve(root, "..");
+const sourceRoot = process.cwd();
+const skillContract = JSON.parse(fs.readFileSync(path.join(sourceRoot, "skills/cadre/skill.json"), "utf8"));
+const workflowCommands = skillContract.workflows;
 const checks = [
   ["plugins/cadre/.codex-plugin/plugin.json", ["name", "version", "skills", "mcpServers"]],
   ["plugins/cadre/.mcp.json", ["mcpServers"]],
@@ -488,12 +494,39 @@ if (rootClaudeMarketplace.plugins?.[0]?.source !== "./harness/plugins/cadre-clau
 }
 
 for (const rel of [
-  "plugins/cadre/skills/cadre/SKILL.md",
   "plugins/cadre-claude/skills/cadre/SKILL.md",
   "plugins/cadre-copilot/skills/cadre/SKILL.md",
   "plugins/cadre-antigravity/skills/cadre/SKILL.md",
 ]) {
   if (!fs.existsSync(path.join(root, rel))) throw new Error(`missing ${rel}`);
+}
+const pluginSkillRoots = {
+  codex: path.join(root, "plugins/cadre/skills"),
+  claude: path.join(root, "plugins/cadre-claude/skills"),
+  copilot: path.join(root, "plugins/cadre-copilot/skills"),
+  antigravity: path.join(root, "plugins/cadre-antigravity/skills"),
+};
+if (fs.existsSync(path.join(pluginSkillRoots.codex, "cadre"))) {
+  throw new Error("Codex plugin must not expose a redundant cadre:cadre skill");
+}
+for (const command of workflowCommands) {
+  const commandRoot = path.join(pluginSkillRoots.codex, command);
+  const skillFile = path.join(commandRoot, "SKILL.md");
+  const metadataFile = path.join(commandRoot, "agents/openai.yaml");
+  if (!fs.existsSync(skillFile)) throw new Error(`missing Codex command skill: ${command}`);
+  if (!fs.existsSync(metadataFile)) throw new Error(`missing Codex command metadata: ${command}`);
+  const skill = fs.readFileSync(skillFile, "utf8");
+  if (!skill.includes(`name: "${command}"`)) throw new Error(`wrong command frontmatter: ${command}`);
+  const workflow = command;
+  if (!skill.includes(`workflow:\"${workflow}\"`)) throw new Error(`wrong workflow binding: ${command}`);
+  const metadata = fs.readFileSync(metadataFile, "utf8");
+  if (!metadata.includes('interface:\n  display_name: "Cadre ')) throw new Error(`missing command interface metadata: ${command}`);
+  if (!metadata.includes("allow_implicit_invocation: false")) throw new Error(`command must be explicit-only: ${command}`);
+  for (const [platform, skillsRoot] of Object.entries(pluginSkillRoots)) {
+    if (platform !== "codex" && fs.existsSync(path.join(skillsRoot, command))) {
+      throw new Error(`unexpected ${platform} workflow command skill: ${command}`);
+    }
+  }
 }
 for (const rel of [
   "plugins/cadre/README.md",
@@ -572,14 +605,18 @@ generate_plugins() {
   rm -rf "$(out_path "$CODEX_PLUGIN_DIR")" "$(out_path "$CLAUDE_PLUGIN_DIR")" "$(out_path "$COPILOT_PLUGIN_DIR")" "$(out_path "$ANTIGRAVITY_PLUGIN_DIR")"
 
   generate_plugin_bundle() {
-    local skill_dir="$1" plugin_dir="$2"
-    copy_skill_tree "$skill_dir" "$plugin_dir/skills/cadre"
+    local skill_dir="$1" plugin_dir="$2" platform="$3"
+    if [[ "$platform" == "codex" ]]; then
+      node "$REPO_ROOT/scripts/workflow-command-skills.mjs" --write "$(out_path "$plugin_dir/skills")"
+    else
+      copy_skill_tree "$skill_dir" "$plugin_dir/skills/cadre"
+    fi
   }
 
-  generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR"
-  generate_plugin_bundle "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR"
-  generate_plugin_bundle "$CODEX_SKILL_DIR" "$COPILOT_PLUGIN_DIR"
-  generate_plugin_bundle "$CODEX_SKILL_DIR" "$ANTIGRAVITY_PLUGIN_DIR"
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$CODEX_PLUGIN_DIR" "codex"
+  generate_plugin_bundle "$CLAUDE_SKILL_DIR" "$CLAUDE_PLUGIN_DIR" "claude"
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$COPILOT_PLUGIN_DIR" "copilot"
+  generate_plugin_bundle "$CODEX_SKILL_DIR" "$ANTIGRAVITY_PLUGIN_DIR" "antigravity"
 
   write_plugin_manifest "codex" "$CODEX_PLUGIN_DIR"
   write_plugin_mcp_config_for_platform "codex" "$CODEX_PLUGIN_DIR"
@@ -599,6 +636,10 @@ main() {
     echo "error: missing $SOURCE_SKILL_FILE" >&2
     exit 1
   fi
+  if [[ ! -f "$SOURCE_SKILL_CONTRACT" || ! -f "$SOURCE_WORKFLOW_COMMAND_TEMPLATE" ]]; then
+    echo "error: missing Cadre workflow command source" >&2
+    exit 1
+  fi
 
   build_runtime
 
@@ -608,11 +649,11 @@ main() {
 
   if [[ "$MODE" == "--check" ]]; then
     echo "✓ Generated plugin bundles can be produced from source."
-    echo "  Checked thin Codex/Claude/Copilot/Antigravity plugin manifests, MCP configs, and marketplaces."
+    echo "  Checked thin plugin manifests, MCP configs, Codex workflow commands, and marketplaces."
   else
     echo "✓ Generated Cadre skill and plugin fixtures."
     echo "  .claude/skills/cadre/ .agents/skills/cadre/ contain SKILL.md only"
-    echo "  plugins/cadre-claude/ plugins/cadre/ plugins/cadre-copilot/ plugins/cadre-antigravity/ are thin MCP entrypoints for global cadre-mcp"
+    echo "  plugins/cadre adds explicit workflow commands; all platform plugins remain thin global cadre-mcp entrypoints"
   fi
 }
 
