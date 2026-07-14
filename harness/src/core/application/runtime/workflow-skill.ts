@@ -10,7 +10,7 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { atomicSkillMutation, normalizeReferenceContent } from "../../infrastructure/runtime/project-skill-mutations";
 import { loadProjectSkill, projectSkillIds } from "../../infrastructure/runtime/project-skills-store";
 import { readProjectSourceFile } from "../../infrastructure/runtime/project-source-files";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs, unapprovedSkillTargetApproval } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { appendCadreEvent } from "./native-state";
@@ -112,7 +112,13 @@ function sourcePause(root: string, skillId: string, requests: JsonObject[]): Cor
   };
 }
 
-function desiredFiles(root: string, sourceId: string, manifest: ManagedManifest, contents: Map<string, string>): { files: Map<string, string>; errors: string[] } {
+function desiredFiles(
+  root: string,
+  sourceId: string,
+  manifest: ManagedManifest,
+  contents: Map<string, string>,
+  baselineContents: Map<string, string | null> | null = null,
+): { files: Map<string, string>; errors: string[] } {
   const files = new Map<string, string>();
   const errors: string[] = [];
   files.set("skill.json", `${JSON.stringify(manifest, null, 2)}\n`);
@@ -123,9 +129,12 @@ function desiredFiles(root: string, sourceId: string, manifest: ManagedManifest,
     const relative = asOptionalString(reference.path) || "";
     let content = contents.get(id);
     if (content === undefined) {
-      const existing = path.join(root, "cadre", "skills", sourceId, relative);
-      if (fs.existsSync(existing)) content = fs.readFileSync(existing, "utf8");
-      else { errors.push(`reference content is required: ${id}`); continue; }
+      if (baselineContents?.has(relative)) content = baselineContents.get(relative) ?? undefined;
+      else {
+        const existing = path.join(root, "cadre", "skills", sourceId, relative);
+        if (fs.existsSync(existing)) content = fs.readFileSync(existing, "utf8");
+      }
+      if (content === undefined) { errors.push(`reference content is required: ${id}`); continue; }
     }
     try { files.set(relative, normalizeReferenceContent(relative, content)); } catch (error) { errors.push(errorMessage(error)); }
   }
@@ -184,24 +193,38 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   if (operation === "validate") return validateCatalog(root, id || null);
   if (!["create", "update", "rename", "remove"].includes(operation)) return { ok: false, error: `unknown skill operation: ${operation}` };
   if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) return { ok: false, error: `invalid skillId: ${id || "(missing)"}` };
-  const existing = readManifest(root, id);
   const continuingApproval = Boolean(args.approvalSessionId || args.approval_session_id);
-  if (operation === "create" && fs.existsSync(path.join(root, "cadre", "skills", id)) && !continuingApproval) return { ok: false, error: `skill already exists: ${id}` };
-  if (operation !== "create" && !existing.manifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
-  if (operation === "remove" && !fs.existsSync(path.join(root, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
   const newId = operation === "rename" ? asOptionalString(args.newSkillId || args.new_skill_id)?.trim() || "" : id;
-  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || fs.existsSync(path.join(root, "cadre", "skills", newId)))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  const targetId = operation === "rename" ? newId : id;
+  const targetOwner = PROJECT_SKILL_ID_PATTERN.test(targetId) ? unapprovedSkillTargetApproval(root, targetId) : null;
+  const previewOwner = targetOwner
+    && asOptionalString(targetOwner.payload.operation) === operation
+    && asOptionalString(targetOwner.payload.skillId || targetOwner.payload.skill_id || targetOwner.payload.id) === id
+    ? targetOwner
+    : null;
+  const existing = readManifest(root, id);
+  if (operation === "create" && fs.existsSync(path.join(root, "cadre", "skills", id)) && !continuingApproval && !previewOwner) return { ok: false, error: `skill already exists: ${id}` };
+  if (operation !== "create" && !existing.manifest && !previewOwner?.sourceManifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
+  if (operation === "remove" && !fs.existsSync(path.join(root, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
+  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || (fs.existsSync(path.join(root, "cadre", "skills", newId)) && !previewOwner))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
   const sessionSource = (args as JsonObject).source_manifest;
+  const previewSource = previewOwner?.sourceManifest as unknown as ManagedManifest | null | undefined;
   const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource)
     ? asJsonObject(sessionSource) as unknown as ManagedManifest
-    : existing.manifest;
+    : previewSource || existing.manifest;
   const base = operation === "create" ? emptyManagedManifest(id) : sourceManifest || emptyManagedManifest(id);
   const changed = applySkillChanges(base, args.changes);
   if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root, id, changed.sourceRequests) };
   const manifest = changed.manifest;
   manifest.id = newId;
   const errors = [...changed.errors, ...(operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root)))];
-  const desired = operation === "remove" ? { files: new Map<string, string>(), errors: [] } : desiredFiles(root, id, manifest, changed.referenceContent);
+  const baselinePrefix = `cadre/skills/${id}/`;
+  const baselineContents = previewOwner && operation === "update"
+    ? new Map(previewOwner.baselineFiles
+      .filter((file) => file.path.startsWith(baselinePrefix))
+      .map((file): [string, string | null] => [file.path.slice(baselinePrefix.length), file.existed ? file.content : null]))
+    : null;
+  const desired = operation === "remove" ? { files: new Map<string, string>(), errors: [] } : desiredFiles(root, id, manifest, changed.referenceContent, baselineContents);
   errors.push(...desired.errors);
   if (errors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: errors[0], errors };
   const existingReferences = (Array.isArray(sourceManifest?.references) ? sourceManifest!.references : []).map(asJsonObject);
@@ -226,7 +249,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     return deletedReferencePaths.includes(relative) ? [`${base}.delete`] : [base];
   });
   const stages = approvalStages(operation, referenceReviewPaths);
-  const snapshot = asOptionalString((args as JsonObject).source_snapshot) || hashDirectory(path.join(root, "cadre", "skills", id));
+  const snapshot = asOptionalString((args as JsonObject).source_snapshot) || previewOwner?.sourceSnapshot || hashDirectory(path.join(root, "cadre", "skills", id));
   const reviewArgs = {
     ...args,
     source_snapshot: snapshot,

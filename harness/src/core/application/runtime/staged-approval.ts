@@ -231,13 +231,11 @@ function approvalTransitionError(
       existing
       && existing.workflow === workflow
       && existing.payload_hash === payloadHash
-      && (workflow !== "setup" || existing.preview_files.length > 0)
+      && existing.preview_files.length > 0
     ) return null;
-    if (workflow === "setup") {
-      const superseded = supersedeUnapprovedApprovalSessions(root, workflow, sessionId);
-      if (superseded.ok === false) {
-        return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
-      }
+    const superseded = supersedeUnapprovedApprovalSessions(root, workflow, sessionId, snapshotFiles);
+    if (superseded.ok === false) {
+      return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
     }
     writeApprovalSession(root, {
       session_id: sessionId,
@@ -283,6 +281,7 @@ function approvalTransitionError(
     });
     return "Approval session was not found for this payload; review the current stage before approving.";
   }
+  if (session.preview_files.length === 0) return "Approval preview was not materialized; restart staged review before approving.";
   const previous = session.approved_stages || [];
   const previousOrderError = approvalOrderError(stageIds, previous);
   if (previousOrderError) return previousOrderError;
@@ -344,7 +343,7 @@ export function stagedApprovalState(
         approval_error: "approvalSessionId is required to cancel staged review",
       };
     }
-    const cancellation = cancelApprovalSession(root, requestedSessionId);
+    const cancellation = cancelApprovalSession(root, requestedSessionId, workflow);
     return {
       version: 1,
       kind: "cadre.staged_approval.v1",
@@ -353,7 +352,9 @@ export function stagedApprovalState(
       session_id: requestedSessionId,
       cancelled: cancellation.cancelled === true,
       valid_for_execute: false,
-      approval_error: cancellation.ok === false && cancellation.cancelled !== true ? cancellation.error : null,
+      approval_error: cancellation.ok === false
+        ? asOptionalString(cancellation.error) || "Unable to cancel the staged approval session safely"
+        : null,
       cancellation: asJsonObject(cancellation),
       current_stage: null,
       approved_stages: [],
@@ -383,7 +384,9 @@ export function stagedApprovalState(
     })
     : null;
   if (active) recordApprovalPreview(root, sessionId, workflow, payloadHash, asJsonObject(stageBundle));
-  const bundleError = asOptionalString(asJsonObject(stageBundle).error);
+  const bundleError = active && !stageBundle
+    ? "Approval preview could not be materialized; review output must remain enabled for staged approval."
+    : asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
   const session = readApprovalSession(root, sessionId);
   const approvedFiles = approvedPreviewFiles(session, approvedIds);

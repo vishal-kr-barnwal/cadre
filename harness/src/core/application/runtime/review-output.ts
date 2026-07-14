@@ -176,17 +176,62 @@ function addIntentToAdd(root: string, relativePaths: string[]): { paths: string[
   return { paths, warnings };
 }
 
-export function removeReviewIntentToAdd(root: string, relativePaths: string[]): string[] {
-  if (!gitAvailable(root)) return [];
+export interface ReviewIntentMutation {
+  ok: boolean;
+  paths: string[];
+  error?: string;
+}
+
+export function restoreReviewIntentToAdd(root: string, relativePaths: string[]): ReviewIntentMutation {
+  if (!gitAvailable(root)) return { ok: true, paths: [] };
+  const restored: string[] = [];
+  for (const relativePath of Array.from(new Set(relativePaths))) {
+    if (git(root, ["ls-files", "--error-unmatch", "--", relativePath]).status === 0) continue;
+    const result = git(root, ["add", "-N", "--", relativePath]);
+    if (result.status === 0) {
+      restored.push(relativePath);
+      continue;
+    }
+    for (const restoredPath of restored) git(root, ["update-index", "--force-remove", "--", restoredPath]);
+    return {
+      ok: false,
+      paths: [],
+      error: String(result.stderr || "").trim() || `Unable to restore intent-to-add for ${relativePath}`,
+    };
+  }
+  return { ok: true, paths: restored };
+}
+
+export function removeReviewIntentToAddAtomic(root: string, relativePaths: string[]): ReviewIntentMutation {
+  if (!gitAvailable(root)) return { ok: true, paths: [] };
   const removed: string[] = [];
   for (const relativePath of Array.from(new Set(relativePaths))) {
     if (git(root, ["cat-file", "-e", `HEAD:${relativePath}`]).status === 0) continue;
     const stagedContent = git(root, ["diff", "--cached", "--quiet", "--ita-invisible-in-index", "--", relativePath]);
-    if (stagedContent.status !== 0) continue;
+    if (stagedContent.status !== 0) {
+      restoreReviewIntentToAdd(root, removed);
+      return { ok: false, paths: [], error: `Review target has staged Git content: ${relativePath}` };
+    }
+    if (git(root, ["ls-files", "--error-unmatch", "--", relativePath]).status !== 0) continue;
     const result = git(root, ["update-index", "--force-remove", "--", relativePath]);
-    if (result.status === 0) removed.push(relativePath);
+    if (result.status === 0) {
+      removed.push(relativePath);
+      continue;
+    }
+    const rollback = restoreReviewIntentToAdd(root, removed);
+    return {
+      ok: false,
+      paths: [],
+      error: String(result.stderr || "").trim()
+        || rollback.error
+        || `Unable to remove review intent-to-add for ${relativePath}`,
+    };
   }
-  return removed;
+  return { ok: true, paths: removed };
+}
+
+export function removeReviewIntentToAdd(root: string, relativePaths: string[]): string[] {
+  return removeReviewIntentToAddAtomic(root, relativePaths).paths;
 }
 
 function reviewStats(text: string): JsonObject {

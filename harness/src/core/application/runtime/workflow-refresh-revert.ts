@@ -1,65 +1,26 @@
-import fs from "node:fs";
-import path from "node:path";
 import { asJsonObject, asOptionalString, asString, asStringArray } from "../../../guards";
 import type { CadreTrack, RuntimeArgs } from "../../../types";
 
-import { fileExists, utcNow } from "../../infrastructure/runtime/json-store";
+import { utcNow } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
 import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
-import { artifactSync, readJsonl, renderJsonlMarkdown } from "./artifact-actions";
+import { artifactSync } from "./artifact-actions";
 import { beginTrace, commitTrace } from "./commit-trace";
-import type { CoreResult, PlannedGitAction, ReviewFile } from "./contracts";
-import { refreshIntentPrompts, refreshScopeIds } from "./intent-prompts";
-import { withGeneratedMarker } from "./markdown-docs";
-import { regenIndex } from "./project-maintenance";
+import type { CoreResult, PlannedGitAction } from "./contracts";
+import { refreshAnalysis, refreshLevelIds, refreshLevelPrompt, refreshSelectionProvided, unsupportedRefreshLevels } from "./refresh-analysis";
+import { missingRefreshEvidence, refreshReviewFiles } from "./refresh-documents";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
-import { documentReviewPair, humanReviewState, packetReviewArtifact, plainReviewFile, reviewArtifactsFromFiles, setupLspReviewArtifacts, setupLspWriteRequested, textReviewFile, workflowReviewBundle } from "./review-bundles";
+import { humanReviewState, packetReviewArtifact, reviewArtifactsFromFiles, setupLspReviewArtifacts, workflowReviewBundle } from "./review-bundles";
 import { lspSetup } from "./setup-infrastructure";
 import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { selectedTrackId } from "./status";
 import { findTrack, trackContext } from "./track-context";
 import { metadataPatch } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
-import { templateJson, workflowSummary } from "./workflow-response";
+import { workflowSummary } from "./workflow-response";
 import { doctor, lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
-
-export function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
-  const stamp = `Last refreshed: ${now.slice(0, 10)}`;
-  const next = /Last refreshed:\s*.*/.test(text)
-    ? text.replace(/Last refreshed:\s*.*/, stamp)
-    : `${text.replace(/\n*$/, "\n\n")}${stamp}\n`;
-  return { text: next, stamp };
-}
-
-export function refreshedPatternsArtifacts(root: string): { files: ReviewFile[]; jsonlPath: string; projectionPath: string; jsonl: string; projection: string; stamp: string } | null {
-  const jsonlPath = path.join(root, "cadre", "patterns.jsonl");
-  if (!fileExists(jsonlPath)) return null;
-  const entries = readJsonl(jsonlPath);
-  const seed = entries[0] || templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
-  const currentText = asOptionalString(seed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
-  const next = refreshedPatternsText(currentText);
-  const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
-  const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
-  const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries), { canonicalContent: jsonl, projection: "cadre/patterns.md" });
-  const projectionPath = path.join(root, "cadre", "patterns.md");
-  return {
-    files: documentReviewPair("patterns",
-      plainReviewFile(path.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
-      textReviewFile(path.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection),
-    ),
-    jsonlPath,
-    projectionPath,
-    jsonl,
-    projection,
-    stamp: next.stamp,
-  };
-}
-
-export function refreshReviewFiles(root: string): ReviewFile[] {
-  return refreshedPatternsArtifacts(root)?.files || [];
-}
 
 export function revertGitActions(root: string, track: CadreTrack, args: RuntimeArgs = {}): PlannedGitAction[] {
   const plan = parsePlanFile(track.plan_path);
@@ -177,33 +138,68 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
 export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
   args = applyStagedApprovalSessionPayload(root, args, "refresh");
   const summary = workflowSummary(root, "refresh", args);
-  const intentPrompts = refreshIntentPrompts(args);
-  if (intentPrompts.length > 0) {
+  const analysis = refreshAnalysis(root, args);
+  const recommended = asStringArray(analysis.recommended_levels);
+  const unsupported = unsupportedRefreshLevels(args);
+  if (unsupported.length > 0) {
     return {
       ...summary,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_clarification",
       stage: "intent_clarification",
-      intent_prompts: intentPrompts,
-      next_actions: [
-        "Answer refresh-scope before running refresh.",
-        "Call refresh again with refreshScope set to patterns, lsp, docs, diagnostics, or all.",
-      ],
-      error: "Refresh scope is unclear; Cadre will not generate refresh artifacts until the requested scope is selected.",
+      refresh_analysis: analysis,
+      intent_prompts: [refreshLevelPrompt(analysis)],
+      unsupported_levels: unsupported,
+      error: `Unsupported refresh level(s): ${unsupported.join(", ")}`,
     };
   }
-  const scopeIds = refreshScopeIds(args);
-  const refreshPatterns = scopeIds.some((scope) => ["all", "patterns", "docs", "projections"].includes(scope));
-  const lspScopeRequested = scopeIds.some((scope) => ["all", "lsp"].includes(scope));
-  const lspWriteRequested = lspScopeRequested && setupLspWriteRequested(args);
-  const mutatingRefresh = refreshPatterns || lspWriteRequested;
-  const reviewFiles = refreshPatterns ? refreshReviewFiles(root) : [];
+  if (!refreshSelectionProvided(args)) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "refresh_analysis",
+      refresh_analysis: analysis,
+      intent_prompts: [refreshLevelPrompt(analysis)],
+      next_actions: ["Select one or more evidence-backed refresh levels from the returned native prompt."],
+      error: "Cadre analyzed repository drift; select the refresh levels to continue.",
+    };
+  }
+  const levels = refreshLevelIds(args, recommended);
+  const missingEvidence = missingRefreshEvidence(args, levels);
+  if (missingEvidence.length > 0) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "refresh_evidence",
+      scope: levels,
+      selected_levels: levels,
+      refresh_analysis: analysis,
+      missing_payload: missingEvidence,
+      required_payload: missingEvidence,
+      error: `Selected semantic refresh levels require evidence-backed canonical input: ${missingEvidence.join(", ")}`,
+      next_actions: ["Use the refresh analysis to supply complete structured candidates under proposedContext; Cadre will not generate templates for missing evidence."],
+    };
+  }
+
+  const documents = refreshReviewFiles(root, args, levels);
+  const reviewFiles = documents.files;
+  const lspSelected = levels.includes("lsp");
+  const projectionsSelected = levels.includes("projections");
+  const diagnosticsOnly = levels.length === 0 || levels.every((level) => level === "diagnostics");
+  const mutatingRefresh = reviewFiles.length > 0 || lspSelected || projectionsSelected;
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  if (lspWriteRequested) reviewArtifacts.push(...setupLspReviewArtifacts(args));
+  if (lspSelected) reviewArtifacts.push(...setupLspReviewArtifacts(args, true));
   const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
   const approval = reviewFiles.length > 0
-    ? stagedApprovalState(root, "refresh", args, refreshApprovalStages(refreshPatterns, lspWriteRequested), reviewFiles, { final_only_files: ["cadre/tracks.json", "cadre/events.jsonl", ...(lspWriteRequested ? ["cadre/lsp.json"] : [])] })
+    ? stagedApprovalState(root, "refresh", args, refreshApprovalStages(levels), reviewFiles, {
+      selected_levels: levels,
+      final_only_files: [...(lspSelected ? ["cadre/lsp.json"] : [])],
+    })
     : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
@@ -214,9 +210,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     ...(approvalError ? [approvalError] : []),
   ];
   const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !stagedApprovalReady(approval);
-  const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
-  const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
-  const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
+  const lspPreview = lspSetup(root, { ...args, execute: false });
   if (awaitingDocumentReview) {
     return {
       ...summary,
@@ -224,12 +218,14 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
+      refresh_analysis: analysis,
       doctor: doctor(root, { hasCadreProject: true }),
       workspace: workspaceDiagnostics(root, { execute: false }),
       dependency_graph: dependencyGraph(root),
       lsp: lspConfigStatus(root),
-      lsp_setup: lsp,
-      scope: scopeIds,
+      lsp_setup: lspPreview,
+      scope: levels,
+      selected_levels: levels,
       approval,
       human_review: humanReview,
       review_artifacts: stageReviewArtifacts,
@@ -248,12 +244,14 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_review_drift",
+      refresh_analysis: analysis,
       doctor: doctor(root, { hasCadreProject: true }),
       workspace: workspaceDiagnostics(root, { execute: false }),
       dependency_graph: dependencyGraph(root),
       lsp: lspConfigStatus(root),
-      lsp_setup: lsp,
-      scope: scopeIds,
+      lsp_setup: lspPreview,
+      scope: levels,
+      selected_levels: levels,
       approval,
       human_review: humanReview,
       review_artifacts: stageReviewArtifacts,
@@ -263,26 +261,19 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       error: asOptionalString(asJsonObject(reviewValidation).error) || "Approved review files changed after staged approval",
     };
   }
-  const reusedReviewFiles = new Set(asStringArray(asJsonObject(reviewValidation).files));
-  const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
-  let patterns: CoreResult | null = null;
-  if (args.execute === true && refreshPatterns) {
-    const refreshed = refreshedPatternsArtifacts(root);
-    if (refreshed) {
-      if (!reusedReviewFiles.has(path.relative(root, refreshed.jsonlPath))) fs.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      if (!reusedReviewFiles.has(path.relative(root, refreshed.projectionPath))) fs.writeFileSync(refreshed.projectionPath, refreshed.projection);
-      patterns = {
-        ok: true,
-        path: path.relative(root, refreshed.jsonlPath),
-        projection: path.relative(root, refreshed.projectionPath),
-        refreshed_at: refreshed.stamp,
-      };
-    }
-  }
-  const approvalAudit = args.execute === true && reviewFiles.length > 0
+
+  const traceBefore = args.execute === true && mutatingRefresh ? beginTrace(root) : null;
+  const lsp = args.execute === true && lspSelected
+    ? lspSetup(root, { ...args, execute: true })
+    : lspPreview;
+  const projectionRepair = args.execute === true && projectionsSelected
+    ? artifactSync(root, { scope: "project", execute: true, commitMode: "off" })
+    : null;
+  const operationsOk = (!lspSelected || lsp.ok !== false) && (!projectionRepair || projectionRepair.ok !== false);
+  const approvalAudit = args.execute === true && reviewFiles.length > 0 && operationsOk
     ? recordApprovalCompletionFromArgs(root, args)
     : null;
-  const controlCommit = args.execute === true && mutatingRefresh
+  const controlCommit = args.execute === true && mutatingRefresh && operationsOk
     ? commitTrace(root, args, {
       kind: "control",
       workflow: "refresh",
@@ -291,27 +282,53 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       allowDirty: true,
       includeDirtyFiles: asStringArray(asJsonObject(reviewValidation).files),
       note: {
-        patterns: patterns ? asJsonObject(patterns) : null,
+        selected_levels: levels,
+        recommended_levels: recommended,
+        reviewed_paths: asStringArray(asJsonObject(reviewValidation).files),
         lsp_setup: asJsonObject(lsp),
+        projection_repair: projectionRepair ? asJsonObject(projectionRepair) : null,
       },
     })
     : null;
-  const approvalSessionClose = args.execute === true && reviewFiles.length > 0 && (!controlCommit || controlCommit.ok !== false)
+  const completedOk = operationsOk && (!controlCommit || controlCommit.ok !== false);
+  const approvalSessionClose = args.execute === true && reviewFiles.length > 0 && completedOk
     ? closeApprovalSessionFromArgs(root, args)
     : null;
+  const patterns = levels.includes("patterns")
+    ? {
+      ok: !approvalError && (args.execute !== true || completedOk),
+      paths: documents.paths.filter((file) => file === "cadre/patterns.jsonl" || file === "cadre/patterns.md"),
+      evidence_backed: true,
+    }
+    : null;
+  const phaseState = diagnosticsOnly
+    ? "complete"
+    : args.execute === true
+      ? (completedOk ? "executed" : "recovery_required")
+      : reviewFiles.length > 0
+        ? "awaiting_staged_approval"
+        : "ready";
   return {
     ...summary,
-    ok: (!approvalError || args.execute === true) && (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
-    phase_state: args.execute === true ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
+    ok: (!approvalError || args.execute === true) && (args.execute !== true || completedOk),
+    phase_state: phaseState,
+    dry_run: args.execute !== true || diagnosticsOnly,
     ...(approvalError && args.execute !== true ? { stage: "staged_approval", error: approvalError } : {}),
-    scope: scopeIds,
+    scope: levels,
+    selected_levels: levels,
+    refresh_analysis: analysis,
     doctor: doctor(root, { hasCadreProject: true }),
     workspace: workspaceDiagnostics(root, { execute: false }),
     dependency_graph: dependencyGraph(root),
     lsp: lspConfigStatus(root),
     lsp_setup: lsp,
-    regen,
+    refreshed_documents: {
+      selected: documents.documentIds,
+      paths: documents.paths,
+      applied: reviewFiles.length > 0 && args.execute === true && completedOk,
+    },
     patterns,
+    projection_repair: projectionRepair,
     control_commit: controlCommit,
     approval_audit: approvalAudit,
     approval_session_close: approvalSessionClose,
@@ -321,6 +338,10 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     review_bundle: stageReviewBundle,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(asJsonObject(reviewValidation).files),
-    warnings,
+    warnings: [
+      ...warnings,
+      ...(!operationsOk && lspSelected && lsp.ok === false ? [asOptionalString(lsp.error || lsp.reason) || "LSP refresh failed"] : []),
+      ...(!operationsOk && projectionRepair?.ok === false ? [asOptionalString(projectionRepair.error) || "Projection refresh failed"] : []),
+    ],
   };
 }

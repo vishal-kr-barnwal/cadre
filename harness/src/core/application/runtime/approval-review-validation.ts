@@ -3,9 +3,9 @@ import path from "node:path";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 
-import { readApprovalSession, previewFileRecords } from "./approval-session-store";
+import { approvalHeadExpectation, readApprovalSession, previewFileRecords } from "./approval-session-store";
 import { writeArtifactFilesAtomic } from "./artifact-pairs";
-import { reviewOutputMode } from "./review-output";
+import { inspectReviewGitState, reviewOutputMode } from "./review-output";
 import { reviewStats } from "./review-bundles";
 
 function approvalComplete(args: RuntimeArgs): boolean {
@@ -28,6 +28,27 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
   if (!sessionId) return { ok: false, stage: "staged_review_drift", error: "approvalSessionId is required to validate target review files" };
   const session = readApprovalSession(root, sessionId);
   if (!session) return { ok: false, stage: "staged_review_drift", error: "Approval session was not found for target review validation" };
+  const materializedPaths = session.snapshot_files.filter((file) => file.missing !== true).map((file) => file.path);
+  const materializedPathSet = new Set(materializedPaths);
+  const gitState = inspectReviewGitState(
+    root,
+    materializedPaths,
+    session.before_files.filter((before) => materializedPathSet.has(before.path)).map(approvalHeadExpectation),
+  );
+  if (!gitState.ok) {
+    const changed = Array.from(new Set([...gitState.stagedPaths, ...gitState.baselinePaths]));
+    return {
+      ok: false,
+      stage: "staged_review_git_drift",
+      error: gitState.error || (gitState.stagedPaths.length > 0
+        ? `Approved review target has staged Git content: ${gitState.stagedPaths[0]}`
+        : `Approved review baseline changed in Git: ${gitState.baselinePaths[0]}`),
+      errors: changed.map((file) => `Approved review Git state changed after preview: ${file}`),
+      files: changed,
+      staged_paths: gitState.stagedPaths,
+      baseline_paths: gitState.baselinePaths,
+    };
+  }
   if (reviewOutputMode(args) !== "target") {
     const driftedBefore = session.before_files.filter((before) => {
       const target = path.join(root, before.path);

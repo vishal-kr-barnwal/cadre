@@ -492,7 +492,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
           title: `Plan: ${trackId}`,
           phases: [{
             phase_index: 1,
-            title: "Phase 1: Build",
+            title: "Phase 1: Wire embedded runtime templates",
             execution_mode: "sequential",
             depends_on: [],
             tasks: [planTask(1, 1, "Implement embedded template path", ["src/index.ts"])],

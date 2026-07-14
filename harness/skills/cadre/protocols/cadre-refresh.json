@@ -4,14 +4,19 @@
   "id": "cadre-refresh",
   "workflow": "refresh",
   "inputs": [
-    "scope?"
+    "refreshLevels?",
+    "reason?",
+    "detectedChanges?",
+    "proposedContext?"
   ],
   "transitions": [
-    "clarify",
-    "review_changes",
+    "analyze",
+    "select_levels",
+    "collect_evidence",
+    "review_selected_documents",
     "execute"
   ],
-  "approval": "document_staged_when_patterns_change",
+  "approval": "document_staged_for_selected_semantic_levels",
   "references": [
     {
       "id": "native-prompts",

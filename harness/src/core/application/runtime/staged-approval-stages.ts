@@ -85,12 +85,43 @@ export function reviseApprovalStages(hasSpec: boolean, hasPlan: boolean): Approv
   ];
 }
 
-export function refreshApprovalStages(includePatterns = true, _includeLsp = false): ApprovalStage[] {
+export function refreshApprovalStages(levels: string[]): ApprovalStage[] {
+  const selected = new Set(levels);
   return [
-    ...(includePatterns ? [{
+    ...(selected.has("product") ? [{
+      id: "product",
+      title: "Product Context",
+      description: "Evidence-backed product summary, users, workflows, domain model, invariants, and boundaries.",
+      documentIds: ["product"],
+    }] : []),
+    ...(selected.has("product-guidelines") ? [{
+      id: "product_guidelines",
+      title: "Product Guidelines",
+      description: "Evidence-backed product principles, promises, trust boundaries, rules, and review checklist.",
+      documentIds: ["product_guidelines"],
+    }] : []),
+    ...(selected.has("tech-stack") ? [{
+      id: "tech_stack",
+      title: "Tech Stack",
+      description: "Detected languages, frameworks, runtimes, dependencies, platforms, and commands.",
+      documentIds: ["tech_stack"],
+    }] : []),
+    ...(selected.has("workflow") ? [{
+      id: "workflow",
+      title: "Workflow Policy",
+      description: "Development, verification, review, commit, and coordination expectations.",
+      documentIds: ["workflow"],
+    }] : []),
+    ...(selected.has("repository-topology") ? [{
+      id: "repos",
+      title: "Repository Topology",
+      description: "Configured repositories, enabled state, default repository, and polyrepo routing.",
+      documentIds: ["repos"],
+    }] : []),
+    ...(selected.has("patterns") ? [{
       id: "patterns",
       title: "Project Patterns",
-      description: "Refreshed project patterns canonical JSONL and generated projection.",
+      description: "Evidence-backed project patterns canonical JSONL and generated projection.",
       documentIds: ["patterns"],
     }] : []),
   ];

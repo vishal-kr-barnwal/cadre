@@ -308,7 +308,7 @@ test("Protocol approval matrix distinguishes documents, execution, and read-only
     ["implement", "execute"],
     ["land", "execute"],
     ["newtrack", "document_staged"],
-    ["refresh", "document_staged_when_patterns_change"],
+    ["refresh", "document_staged_for_selected_semantic_levels"],
     ["release", "document_staged"],
     ["revert", "execute"],
     ["review", "none"],

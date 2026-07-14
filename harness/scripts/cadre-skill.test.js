@@ -31,16 +31,21 @@ function project() {
   return root;
 }
 
-function approveAndExecute(root, input) {
-  let result = core.workflowPacket(root, { workflow: "skill", ...input });
-  const session = result.approval.session_id;
+function approvePreviewAndExecute(root, input, preview) {
+  let result = preview;
+  const session = preview.approval.session_id;
   const approved = [];
-  for (const stage of result.approval.stages) {
+  for (const stage of preview.approval.stages) {
     approved.push(stage.id);
     result = core.workflowPacket(root, { workflow: "skill", ...input, approvalSessionId: session, approvalStage: stage.id, approvedStages: [...approved] });
     assert.equal(result.ok, true, result.error);
   }
   return core.workflowPacket(root, { workflow: "skill", ...input, execute: true, approvalComplete: true, approvalSessionId: session, approvedStages: approved });
+}
+
+function approveAndExecute(root, input) {
+  const preview = core.workflowPacket(root, { workflow: "skill", ...input });
+  return approvePreviewAndExecute(root, input, preview);
 }
 
 function createInput() {
@@ -127,6 +132,70 @@ test("skill review defaults to target mode while explicit bundle mode stays non-
     assert.equal(targetCancel.approval.cancelled, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "skill.json")), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "SKILL.md")), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("changed skill create and update retries replace previews from their original baselines", () => {
+  const root = project();
+  try {
+    const firstCreateInput = createInput();
+    const firstCreate = core.workflowPacket(root, { workflow: "skill", ...firstCreateInput });
+    assert.equal(firstCreate.ok, true, firstCreate.error);
+    const firstCreateSession = path.join(root, "cadre", "local", "approval-sessions", `${firstCreate.approval.session_id}.json`);
+    assert.equal(fs.existsSync(firstCreateSession), true);
+
+    const replacementCreateInput = {
+      operation: "create",
+      skillId: "web-ui",
+      changes: [
+        { type: "metadata.set", name: "Web UI", description: "Replacement UI guidance" },
+        { type: "selectors.set", workflows: ["implement", "review"], file_patterns: ["apps/web/**"] },
+        { type: "rule.upsert", id: "semantic-html", text: "Use accessible semantic HTML.", priority: 20, required: true, references: ["guide"] },
+        { type: "reference.upsert", id: "guide", path: "references/guide.md", content: "# Guide\n\nUse accessible controls." },
+      ],
+    };
+    const replacementCreate = core.workflowPacket(root, { workflow: "skill", ...replacementCreateInput });
+    assert.equal(replacementCreate.ok, true, replacementCreate.error);
+    assert.notEqual(replacementCreate.approval.session_id, firstCreate.approval.session_id);
+    assert.equal(fs.existsSync(firstCreateSession), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "skill.json"), "utf8")).description, "Replacement UI guidance");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md"), "utf8"), "# Guide\n\nUse accessible controls.\n");
+    const created = approvePreviewAndExecute(root, replacementCreateInput, replacementCreate);
+    assert.equal(created.ok, true, created.error);
+
+    const firstUpdateInput = {
+      operation: "update",
+      skillId: "web-ui",
+      changes: [
+        { type: "metadata.set", name: "Preview Only Name", description: "This metadata belongs only to the abandoned preview" },
+      ],
+    };
+    const firstUpdate = core.workflowPacket(root, { workflow: "skill", ...firstUpdateInput });
+    assert.equal(firstUpdate.ok, true, firstUpdate.error);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "skill.json"), "utf8")).name, "Preview Only Name");
+    const firstUpdateSession = path.join(root, "cadre", "local", "approval-sessions", `${firstUpdate.approval.session_id}.json`);
+
+    const replacementUpdateInput = {
+      operation: "update",
+      skillId: "web-ui",
+      changes: [
+        { type: "selectors.set", workflows: ["review"], file_patterns: ["packages/ui/**"] },
+      ],
+    };
+    const replacementUpdate = core.workflowPacket(root, { workflow: "skill", ...replacementUpdateInput });
+    assert.equal(replacementUpdate.ok, true, replacementUpdate.error);
+    assert.notEqual(replacementUpdate.approval.session_id, firstUpdate.approval.session_id);
+    assert.equal(fs.existsSync(firstUpdateSession), false);
+    const replacementManifest = JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "skill.json"), "utf8"));
+    assert.equal(replacementManifest.name, "Web UI");
+    assert.equal(replacementManifest.description, "Replacement UI guidance");
+    assert.deepEqual(replacementManifest.selectors.workflows, ["review"]);
+    assert.deepEqual(replacementManifest.selectors.file_patterns, ["packages/ui/**"]);
+    const updated = approvePreviewAndExecute(root, replacementUpdateInput, replacementUpdate);
+    assert.equal(updated.ok, true, updated.error);
+    const finalManifest = JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "skill.json"), "utf8"));
+    assert.equal(finalManifest.name, "Web UI");
+    assert.deepEqual(finalManifest.selectors.workflows, ["review"]);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

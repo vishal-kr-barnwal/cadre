@@ -309,7 +309,7 @@ const WORKFLOW_DATA_FIELDS: Record<string, string[]> = {
   land: ["track_id", "topology", "preflight", "gate", "provider", "provider_actions", "git_actions", "git_results", "publication", "git_action_state", "provider_evidence_write", "continuation_token", "required_provider_mcp", "required_evidence", "unsupported_reason", "fleet"],
   release: ["release_version", "completed_tracks", "release_artifacts", "git_actions", "git_results", "bump", "setup_state", "review_validation", "reused_review_files"],
   revise: ["track_id", "track_context", "impact", "write", "regen", "review_validation", "reused_review_files"],
-  refresh: ["scope", "doctor", "workspace", "dependency_graph", "lsp", "lsp_setup", "regen", "patterns", "review_validation", "reused_review_files"],
+  refresh: ["scope", "selected_levels", "refresh_analysis", "doctor", "workspace", "dependency_graph", "lsp", "lsp_setup", "refreshed_documents", "patterns", "projection_repair", "review_validation", "reused_review_files"],
   artifacts: ["artifact_action", "artifact_scope", "artifacts", "written", "skipped", "mutation"],
   flag: ["track_id", "track_context", "proposed_status", "reason", "status_result", "metadata_patch", "event"],
   revert: ["track_id", "track_context", "affected_repos", "repo_error", "git_actions", "git_results", "metadata_patch", "projection_repair", "regen", "event"],

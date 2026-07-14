@@ -20,6 +20,7 @@ import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprova
 import { metadataTrackSummary, selectedTrackId } from "./status";
 import { findTrack, trackContext } from "./track-context";
 import { listTracks } from "./track-schedule";
+import { meaningfulReleaseNotes, releaseIntentPrompts } from "./workflow-evidence";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
 
@@ -95,6 +96,25 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
   args = applyStagedApprovalSessionPayload(root, args, "release");
   const summary = workflowSummary(root, "release", args);
   const plan = releaseArtifactPlan(root, args);
+  if (plan.completed.length === 0 && !meaningfulReleaseNotes(args)) {
+    const intentPrompts = releaseIntentPrompts(args);
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      release_version: plan.version,
+      completed_tracks: [],
+      ...(intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {}),
+      missing_payload: ["releaseNotes"],
+      next_actions: [
+        "Complete and review at least one Cadre track, or provide substantive releaseNotes.",
+        "Call release again after release evidence is available; Cadre has not generated release artifacts.",
+      ],
+      error: "Release evidence is missing; Cadre will not generate an empty default release.",
+    };
+  }
   const reviewFiles = releaseReviewFiles(root, plan);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   if (plan.gitActions.length > 0) {
@@ -214,8 +234,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   const summary = workflowSummary(root, "revise", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
-  const hasStructuredRevision = isRecord(args.spec) || isRecord(args.plan);
-  const initialPrompts = hasStructuredRevision ? [] : reviseIntentPrompts(args, trackId || null);
+  const initialPrompts = reviseIntentPrompts(args, trackId || null);
   if (initialPrompts.length > 0) {
     return {
       ...summary,

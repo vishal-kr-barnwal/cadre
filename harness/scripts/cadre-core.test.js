@@ -478,7 +478,7 @@ test("commit trace records setup, newtrack, and task completion commits", () => 
     setupTraceableProject(root);
     const trackId = "trace_task_20260623";
     const plan = planFromPhases(trackId, [
-      { phase_index: 1, title: "Phase 1: Build", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement traceable core", ["src/core.js"])] },
+      { phase_index: 1, title: "Phase 1: Traceable task execution", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement traceable core", ["src/core.js"])] },
     ]);
     const created = approveWorkflow(root, {
       workflow: "newtrack",
@@ -1627,7 +1627,7 @@ test("completeTask commits explicit control-plane files when an active claim is 
     setupTraceableProject(root);
     const trackId = "claim_dirty_complete_20260625";
     const plan = planFromPhases(trackId, [
-      { phase_index: 1, title: "Phase 1: Build", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement claim dirty core", ["src/core.js"])] },
+      { phase_index: 1, title: "Phase 1: Claimed task completion", execution_mode: "sequential", depends_on: [], tasks: [planTask(1, 1, "Implement claim dirty core", ["src/core.js"])] },
     ]);
     const created = approveWorkflow(root, {
       workflow: "newtrack",
@@ -1742,6 +1742,7 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
       schema: "cadre.formula.v1",
       id: "sample",
       title: "Sample Formula",
+      phase_title: "OAuth delivery and verification",
       defaults: { track: "formula_track" },
       steps: [
         { id: "build", title: "Build {{track}}", labels: ["formula"], files: ["src/{{track}}.ts"] },
@@ -1896,12 +1897,24 @@ test("review-heavy workflows expose staged approval bundles", () => {
     assert.equal(revised.approval.current_stage, "spec_changes");
     assert.ok(fs.existsSync(path.join(revised.review_bundle.directory, "cadre", "tracks", trackId, "spec.json")));
 
-    const handoff = core.workflowPacket(root, { workflow: "handoff", trackId });
+    const handoff = core.workflowPacket(root, {
+      workflow: "handoff",
+      trackId,
+      handoffText: "# Handoff\n\nThe revised spec and plan are ready for review. Resume by checking the staged artifacts, then run the focused workflow tests before implementation.",
+    });
     assert.equal(handoff.ok, true);
     assert.equal(handoff.approval.current_stage, "handoff");
 
-    const refresh = core.workflowPacket(root, { workflow: "refresh", refreshScope: "patterns" });
-    assert.equal(refresh.ok, true);
+    const refresh = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["patterns"],
+      proposedContext: {
+        patterns: {
+          text: "# Codebase Patterns\n\n## Review lifecycle\n\nUnapproved staged previews are replaced only after checking their target files for drift.",
+        },
+      },
+    });
+    assert.equal(refresh.ok, true, refresh.error);
     assert.equal(refresh.approval.current_stage, "patterns");
 
     const artifacts = core.artifactPacket(root, { action: "sync", scope: `track:${trackId}` });
@@ -2263,6 +2276,41 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.equal(Object.prototype.hasOwnProperty.call(vagueTrack, "review_bundle"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(vagueTrack, "review_artifacts"), false);
 
+    const emptyStructuredTrack = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: "empty_structured_20260625",
+      spec: {},
+      plan: {},
+    });
+    assert.equal(emptyStructuredTrack.ok, false);
+    assert.equal(emptyStructuredTrack.phase_state, "awaiting_clarification");
+    assert.equal(emptyStructuredTrack.stage, "schema_validation");
+    assert.equal(Object.prototype.hasOwnProperty.call(emptyStructuredTrack, "review_bundle"), false);
+
+    const schemaOnlyTrack = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: "schema_only_20260625",
+      spec: {
+        version: 1,
+        schema: "cadre.spec.v1",
+        kind: "spec",
+        track_id: "schema_only_20260625",
+        title: "Spec: schema_only_20260625",
+      },
+      plan: {
+        version: 1,
+        schema: "cadre.plan.v1",
+        track_id: "schema_only_20260625",
+        title: "Plan: schema_only_20260625",
+      },
+    });
+    assert.equal(schemaOnlyTrack.ok, false);
+    assert.equal(schemaOnlyTrack.phase_state, "awaiting_clarification");
+    assert.equal(schemaOnlyTrack.stage, "intent_clarification");
+    assert.ok(schemaOnlyTrack.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
+    assert.ok(schemaOnlyTrack.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
+    assert.equal(Object.prototype.hasOwnProperty.call(schemaOnlyTrack, "review_bundle"), false);
+
     const detailedPlanWeakSpec = core.workflowPacket(root, {
       workflow: "newtrack",
       trackId: "oauth_drift_20260625",
@@ -2289,11 +2337,14 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
         },
       ]),
     });
-    assert.equal(detailedPlanWeakSpec.ok, true);
-    assert.equal(detailedPlanWeakSpec.phase_state, "awaiting_staged_approval");
-    assert.ok(detailedPlanWeakSpec.warnings.some((warning) => /spec context is thin/.test(warning)));
-    assert.equal(detailedPlanWeakSpec.approval.current_stage, "spec");
-    assert.equal(detailedPlanWeakSpec.review_bundle.content_in_response, false);
+    assert.equal(detailedPlanWeakSpec.ok, false);
+    assert.equal(detailedPlanWeakSpec.phase_state, "awaiting_clarification");
+    assert.equal(detailedPlanWeakSpec.stage, "intent_clarification");
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-outcome"));
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-acceptance"));
+    assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
+    assert.equal(Object.prototype.hasOwnProperty.call(detailedPlanWeakSpec, "review_bundle"), false);
 
     const schemaDrift = core.workflowPacket(root, {
       workflow: "newtrack",
@@ -2392,11 +2443,89 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.ok(vagueRevise.intent_prompts.some((prompt) => prompt.id === "revise-scope"));
     assert.equal(Object.prototype.hasOwnProperty.call(vagueRevise, "review_bundle"), false);
 
+    const emptyRevision = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId: "clarify_20260625",
+      reason: "Repository evidence invalidated the existing requirements and execution plan.",
+      spec: {},
+      plan: {},
+    });
+    assert.equal(emptyRevision.ok, false);
+    assert.equal(emptyRevision.phase_state, "awaiting_clarification");
+    assert.equal(emptyRevision.stage, "intent_clarification");
+    assert.deepEqual(emptyRevision.intent_prompts.map((prompt) => prompt.id), ["revise-scope"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(emptyRevision, "review_bundle"), false);
+
+    const missingHandoff = core.workflowPacket(root, {
+      workflow: "handoff",
+      trackId: "clarify_20260625",
+    });
+    assert.equal(missingHandoff.ok, false);
+    assert.equal(missingHandoff.phase_state, "awaiting_clarification");
+    assert.deepEqual(missingHandoff.intent_prompts.map((prompt) => prompt.id), ["handoff-content"]);
+    assert.deepEqual(missingHandoff.missing_payload, ["handoffText"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(missingHandoff, "review_bundle"), false);
+
+    const genericHandoff = core.workflowPacket(root, {
+      workflow: "handoff",
+      trackId: "clarify_20260625",
+      handoffText: "# Handoff\n\nContinue with the next task.\n",
+    });
+    assert.equal(genericHandoff.ok, false);
+    assert.equal(genericHandoff.phase_state, "awaiting_clarification");
+    assert.deepEqual(genericHandoff.missing_payload, ["handoffText"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(genericHandoff, "review_bundle"), false);
+
+    const emptyRelease = core.workflowPacket(root, {
+      workflow: "release",
+      releaseVersion: "v0.0.0-empty",
+    });
+    assert.equal(emptyRelease.ok, false);
+    assert.equal(emptyRelease.phase_state, "awaiting_clarification");
+    assert.deepEqual(emptyRelease.intent_prompts.map((prompt) => prompt.id), ["release-evidence"]);
+    assert.deepEqual(emptyRelease.missing_payload, ["releaseNotes"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(emptyRelease, "review_bundle"), false);
+
+    const sessionsDir = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionsBeforeRefresh = fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).sort() : [];
+    const statusBeforeRefresh = git(root, ["status", "--porcelain=v1"]).stdout;
     const vagueRefresh = core.workflowPacket(root, { workflow: "refresh" });
     assert.equal(vagueRefresh.ok, false);
     assert.equal(vagueRefresh.phase_state, "awaiting_clarification");
-    assert.deepEqual(vagueRefresh.intent_prompts.map((prompt) => prompt.id), ["refresh-scope"]);
+    assert.equal(vagueRefresh.stage, "refresh_analysis");
+    assert.equal(vagueRefresh.refresh_analysis.kind, "cadre.refresh_analysis.v1");
+    assert.deepEqual(vagueRefresh.intent_prompts.map((prompt) => prompt.id), ["refresh-levels"]);
+    assert.equal(vagueRefresh.intent_prompts[0].selectionMode, "multi");
     assert.equal(Object.prototype.hasOwnProperty.call(vagueRefresh, "review_bundle"), false);
+    assert.deepEqual(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).sort() : [], sessionsBeforeRefresh);
+    assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBeforeRefresh);
+
+    const missingProductEvidence = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["product"],
+    });
+    assert.equal(missingProductEvidence.ok, false);
+    assert.equal(missingProductEvidence.phase_state, "awaiting_clarification");
+    assert.equal(missingProductEvidence.stage, "refresh_evidence");
+    assert.deepEqual(missingProductEvidence.selected_levels, ["product"]);
+    assert.deepEqual(missingProductEvidence.missing_payload, ["proposedContext.product"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(missingProductEvidence, "review_bundle"), false);
+    assert.deepEqual(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).sort() : [], sessionsBeforeRefresh);
+    assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBeforeRefresh);
+
+    const templateOnlyRefresh = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["product"],
+      proposedContext: {
+        product: JSON.parse(fs.readFileSync(path.join(__dirname, "..", "templates", "product.json"), "utf8")),
+      },
+    });
+    assert.equal(templateOnlyRefresh.ok, false);
+    assert.equal(templateOnlyRefresh.stage, "refresh_evidence");
+    assert.deepEqual(templateOnlyRefresh.missing_payload, ["proposedContext.product"]);
+    assert.equal(Object.prototype.hasOwnProperty.call(templateOnlyRefresh, "review_bundle"), false);
+    assert.deepEqual(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).sort() : [], sessionsBeforeRefresh);
+    assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBeforeRefresh);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -3222,6 +3351,192 @@ test("target staged review previews appear in git diff and reject drift", () => 
   }
 });
 
+test("a changed unapproved preview safely replaces its overlapping session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-preview-replacement-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "replace_preview_20260714";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed track"]);
+
+    const firstPlan = samplePlan(trackId);
+    firstPlan.phases[0].title = "Phase 1: First preview";
+    firstPlan.phases[0].tasks[0].title = "Materialize the first unapproved preview";
+    const first = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Test replacement of an unapproved target preview.",
+      plan: firstPlan,
+    });
+    assert.equal(first.ok, true, first.error);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.md"), "utf8"), /First preview/);
+    const firstSessionFile = path.join(root, "cadre", "local", "approval-sessions", `${first.approval.session_id}.json`);
+    assert.equal(fs.existsSync(firstSessionFile), true);
+
+    const replacementPlan = samplePlan(trackId);
+    replacementPlan.phases[0].title = "Phase 1: Replacement preview";
+    replacementPlan.phases[0].tasks[0].title = "Materialize the corrected unapproved preview";
+    const replacement = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Replace the earlier preview with corrected evidence.",
+      plan: replacementPlan,
+    });
+    assert.equal(replacement.ok, true, replacement.error);
+    assert.notEqual(replacement.approval.session_id, first.approval.session_id);
+    assert.equal(fs.existsSync(firstSessionFile), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${replacement.approval.session_id}.json`)), true);
+    const replacementProjection = fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.md"), "utf8");
+    assert.match(replacementProjection, /Replacement preview/);
+    assert.doesNotMatch(replacementProjection, /First preview/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a partial refresh replacement derives from the pre-preview canonical baseline", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-preview-baseline-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "product.json"), `${JSON.stringify({
+      version: 1,
+      schema: "cadre.product.v1",
+      kind: "product",
+      title: "Baseline Product",
+      summary: "Repository-backed baseline product context.",
+      sections: [
+        { id: "users_personas", heading: "Users And Personas", body: "- Baseline operators reviewing controlled changes." },
+        { id: "repository_evidence", heading: "Repository Evidence", body: "- Custom baseline evidence remains part of partial refreshes." },
+      ],
+    }, null, 2)}\n`);
+    write(path.join(root, "cadre", "product.md"), "# Baseline Product\n\nBaseline operators reviewing controlled changes.\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed product context"]);
+
+    const first = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["product"],
+      proposedContext: {
+        product: {
+          sections: [{ id: "users_personas", heading: "Users And Personas", body: "- First preview users that must not leak into a corrected payload." }],
+        },
+      },
+    });
+    assert.equal(first.ok, true, first.error);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"), /First preview users/);
+
+    const replacement = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["product"],
+      proposedContext: {
+        product: { summary: "Corrected repository evidence for the product refresh." },
+      },
+    });
+    assert.equal(replacement.ok, true, replacement.error);
+    assert.notEqual(replacement.approval.session_id, first.approval.session_id);
+    const canonical = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
+    assert.match(canonical, /Baseline operators/);
+    assert.match(canonical, /Custom baseline evidence/);
+    assert.match(canonical, /Corrected repository evidence/);
+    assert.doesNotMatch(canonical, /First preview users/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${first.approval.session_id}.json`)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("product refresh replaces a committed legacy template with evidence instead of preserving placeholders", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-legacy-template-test-"));
+  try {
+    git(root, ["init"]);
+    const legacyTemplate = fs.readFileSync(path.join(__dirname, "..", "templates", "product.json"), "utf8");
+    write(path.join(root, "cadre", "product.json"), legacyTemplate);
+    write(path.join(root, "cadre", "product.md"), "# Product Context\n\n- What the product is:\n- Who it serves:\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed legacy template"]);
+
+    const refresh = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["product"],
+      proposedContext: {
+        product: {
+          summary: "A repository-specific orchestration harness for evidence-backed agent workflows.",
+        },
+      },
+    });
+    assert.equal(refresh.ok, true, refresh.error);
+    const canonical = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
+    assert.match(canonical, /repository-specific orchestration harness/);
+    assert.match(canonical, /Project-Specific Product Notes/);
+    assert.doesNotMatch(canonical, /What the product is/);
+    assert.doesNotMatch(canonical, /Fill sections from repo evidence/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approved target execution rejects staged and committed HEAD drift while retaining the session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-preview-head-drift-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "head_drift_20260714";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed track"]);
+    const plan = samplePlan(trackId);
+    plan.phases[0].title = "Phase 1: Reviewed baseline";
+    plan.phases[0].tasks[0].title = "Detect a committed preview baseline change";
+    const args = {
+      workflow: "revise",
+      trackId,
+      reason: "Ensure approved content cannot execute after HEAD changes its baseline.",
+      plan,
+    };
+    const preview = core.workflowPacket(root, args);
+    assert.equal(preview.ok, true, preview.error);
+    const approved = core.workflowPacket(root, {
+      ...args,
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "plan_changes",
+      approvedStages: ["plan_changes"],
+    });
+    assert.equal(approved.ok, true, approved.error);
+
+    const reviewPaths = [`cadre/tracks/${trackId}/plan.json`, `cadre/tracks/${trackId}/plan.md`];
+    git(root, ["add", ...reviewPaths]);
+    const stagedExecution = core.workflowPacket(root, {
+      ...args,
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: ["plan_changes"],
+    });
+    assert.equal(stagedExecution.ok, false);
+    assert.equal(stagedExecution.stage, "staged_review_drift");
+    assert.match(stagedExecution.error, /staged Git content/);
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`);
+    assert.equal(fs.existsSync(sessionFile), true);
+
+    git(root, ["reset", "--", ...reviewPaths]);
+    git(root, ["add", ...reviewPaths]);
+    git(root, ["commit", "-m", "commit reviewed preview outside Cadre"]);
+    const executed = core.workflowPacket(root, {
+      ...args,
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: ["plan_changes"],
+    });
+    assert.equal(executed.ok, false);
+    assert.equal(executed.stage, "staged_review_drift");
+    assert.match(executed.error, /baseline changed in Git/);
+    assert.equal(fs.existsSync(sessionFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("target setup materializes the complete diff with intent-to-add and cancel restores it", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-target-setup-cancel-test-"));
   try {
@@ -3280,6 +3595,57 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
     assert.equal(fs.existsSync(sessionFile), false);
     assert.equal(git(root, ["diff", "--cached"]).stdout, "");
     assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approval cancellation rejects staged target drift atomically and retains the session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-target-cancel-drift-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "cancel_drift_20260714";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed cancellation track"]);
+    const plan = samplePlan(trackId);
+    plan.phases[0].title = "Phase 1: Cancellation drift";
+    plan.phases[0].tasks[0].title = "Keep staged review work intact";
+    const preview = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Verify cancellation retains a session when its target is staged.",
+      plan,
+    });
+    assert.equal(preview.ok, true, preview.error);
+    const reviewPaths = [`cadre/tracks/${trackId}/plan.json`, `cadre/tracks/${trackId}/plan.md`];
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`);
+    const previewProjection = fs.readFileSync(path.join(root, reviewPaths[1]), "utf8");
+    git(root, ["add", ...reviewPaths]);
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: preview.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.approval.cancelled, false);
+    assert.equal(blocked.approval.cancellation.session_retained, true);
+    assert.equal(blocked.approval.cancellation.stage, "approval_cancel_git_drift");
+    assert.equal(fs.existsSync(sessionFile), true);
+    assert.equal(fs.readFileSync(path.join(root, reviewPaths[1]), "utf8"), previewProjection);
+    assert.notEqual(git(root, ["diff", "--cached", "--", ...reviewPaths]).stdout, "");
+
+    git(root, ["reset", "--", ...reviewPaths]);
+    const cancelled = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: preview.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.approval.cancelled, true);
+    assert.equal(fs.existsSync(sessionFile), false);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, reviewPaths[1]), "utf8"), /Cancellation drift/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -3605,7 +3971,7 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     const handoffBlocked = core.workflowPacket(root, {
       workflow: "handoff",
       trackId: "workflow_20260618",
-      handoffText: "# Handoff\n\nContinue with the next task.\n",
+      handoffText: "# Handoff\n\nThe implementation track is active and waiting on credential access. Resume by validating the credential flow, then run the project test command before completing the task.\n",
       execute: true,
       reviewBundleDir: ".handoff-review",
     });
@@ -3616,19 +3982,19 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(handoffArtifact, "content"), false);
     assert.equal(handoffBlocked.review_bundle.content_in_response, false);
     assert.ok(fs.existsSync(path.join(handoffBlocked.review_bundle.directory, "cadre", "tracks", "workflow_20260618", "handoff.json")));
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md")), false);
 
     const handoff = approveWorkflow(root, {
       workflow: "handoff",
       trackId: "workflow_20260618",
-      handoffText: "# Handoff\n\nContinue with the next task.\n",
+      handoffText: "# Handoff\n\nThe implementation track is active and waiting on credential access. Resume by validating the credential flow, then run the project test command before completing the task.\n",
       execute: true,
       approvalComplete: true,
       force: true,
     });
     assert.equal(handoff.ok, true);
     assert.equal(handoff.phase_state, "executed");
-    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md"), "utf8"), /Continue with the next task/);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md"), "utf8"), /validating the credential flow/);
 
     const archived = core.workflowPacket(root, {
       workflow: "archive",
@@ -4265,6 +4631,7 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       execute: true,
       createTag: true,
       releaseVersion: "v1.2.3",
+      releaseNotes: "# Release v1.2.3\n\n## Highlights\n\nPrepare the reviewed application change for publication.\n",
       reviewBundleDir: ".release-review",
     });
     assert.equal(releaseBlocked.ok, false);
@@ -4300,15 +4667,24 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     const setupState = JSON.parse(fs.readFileSync(path.join(root, "cadre", "setup_state.json"), "utf8"));
     assert.equal(setupState.last_release.version, "v1.2.3");
 
-    const refreshBlocked = core.workflowPacket(root, {
+    const refreshArgs = {
       workflow: "refresh",
+      refreshLevels: ["patterns", "lsp"],
+      proposedContext: {
+        patterns: {
+          text: "# Codebase Patterns\n\n## Execution safety\n\nRefresh semantic documents from supplied repository evidence and execute the exact approved snapshot.",
+        },
+      },
+    };
+    const refreshBlocked = core.workflowPacket(root, {
+      ...refreshArgs,
       execute: true,
-      refreshScope: "all",
-      lsp: true,
       reviewBundleDir: ".refresh-review",
     });
     assert.equal(refreshBlocked.ok, false);
     assert.equal(refreshBlocked.stage, "staged_approval");
+    assert.deepEqual(refreshBlocked.selected_levels, ["patterns", "lsp"]);
+    assert.equal(refreshBlocked.refresh_analysis.kind, "cadre.refresh_analysis.v1");
     const patternsCanonicalArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.jsonl");
     assert.ok(patternsCanonicalArtifact);
     const patternsArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.md");
@@ -4318,17 +4694,18 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: YYYY-MM-DD/);
 
     const refresh = approveWorkflow(root, {
-      workflow: "refresh",
+      ...refreshArgs,
       execute: true,
       approvalComplete: true,
-      refreshScope: "all",
-      lsp: true,
       force: true,
     });
     assert.equal(refresh.ok, true);
     assert.equal(refresh.phase_state, "executed");
+    assert.deepEqual(refresh.selected_levels, ["patterns", "lsp"]);
+    assert.deepEqual(refresh.refreshed_documents.selected, ["patterns"]);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.jsonl"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -4340,11 +4717,12 @@ test("LSP-only refresh uses execution authorization without document approval", 
     git(root, ["init"]);
     write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
     write(path.join(root, "src", "index.ts"), "export const ready = true;\n");
-    const preview = core.workflowPacket(root, { workflow: "refresh", refreshScope: "lsp", lsp: true });
+    const preview = core.workflowPacket(root, { workflow: "refresh", refreshLevels: ["lsp"] });
     assert.equal(preview.ok, true, preview.error);
+    assert.deepEqual(preview.selected_levels, ["lsp"]);
     assert.equal(preview.approval.required, false);
     assert.equal(preview.review_bundle, null);
-    const executed = core.workflowPacket(root, { workflow: "refresh", refreshScope: "lsp", lsp: true, execute: true, commitMode: "off" });
+    const executed = core.workflowPacket(root, { workflow: "refresh", refreshLevels: ["lsp"], execute: true, commitMode: "off" });
     assert.equal(executed.ok, true, executed.error);
     assert.equal(executed.phase_state, "executed");
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);

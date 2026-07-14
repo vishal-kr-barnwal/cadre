@@ -3,7 +3,7 @@ import path from "node:path";
 import { asJsonObject, asOptionalString, asStringArray, errorMessage } from "../../../guards";
 import type { RuntimeArgs } from "../../../types";
 
-import { fileExists, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
+import { fileExists, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
 import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { artifactValidate, renderArtifact } from "./artifact-actions";
 import { artifactDefinitions } from "./artifact-catalog";
@@ -25,6 +25,7 @@ import { syncControlPlane } from "./review-records";
 import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
 import { findTrack, trackContext } from "./track-context";
+import { handoffIntentPrompts, meaningfulHandoffText } from "./workflow-evidence";
 import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
@@ -215,14 +216,26 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
   if (context.ok === false) return { ...summary, ok: false, track_context: context };
   const track = findTrack(root, trackId);
   if (!track) return { ...summary, ok: false, track_context: context, error: `Track not found: ${trackId}` };
-  const text = asOptionalString(args.handoffText)
-    || [
-      `# Handoff: ${trackId}`,
-      "",
-      `Updated: ${utcNow()}`,
-      "",
-      "Resume from the packet context returned by Cadre MCP.",
-    ].join("\n");
+  const text = meaningfulHandoffText(args);
+  if (!text) {
+    const intentPrompts = handoffIntentPrompts(args);
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "intent_clarification",
+      track_id: trackId,
+      track_context: context,
+      ...(intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {}),
+      missing_payload: ["handoffText"],
+      next_actions: [
+        "Provide substantive handoffText covering current state, blockers or decisions, and the exact next action.",
+        "Call handoff again after the handoff content is ready; Cadre has not generated handoff artifacts.",
+      ],
+      error: "Handoff content is missing or generic; Cadre will not generate a placeholder handoff.",
+    };
+  }
   const handoffPath = path.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
   const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });

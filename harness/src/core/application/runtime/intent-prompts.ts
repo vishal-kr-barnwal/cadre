@@ -1,8 +1,9 @@
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 
-import { choice, hasAnyArg, nativePrompt } from "./native-prompts";
+import { choice, nativePrompt } from "./native-prompts";
 import { setupIntentStrategyAnswered, setupMissingEvidence } from "./setup-evidence";
+import { meaningfulRevisionArtifact, meaningfulRevisionPayload } from "./workflow-evidence";
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
   return args as UnknownRecord;
@@ -80,11 +81,6 @@ function hasNamedValue(args: RuntimeArgs, names: string[]): boolean {
     const nested = nestedIntentValue(args, name);
     return textPresent(nested) || arrayPresent(nested) || isRecord(nested);
   });
-}
-
-function hasArrayField(record: JsonObject | null, names: string[]): boolean {
-  if (!record) return false;
-  return names.some((name) => arrayPresent(record[name]));
 }
 
 const SPEC_SCHEMA = "cadre.spec.v1";
@@ -257,19 +253,13 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
   const trackId = asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id);
   const spec = isRecord(rawArgs(args).spec) ? asJsonObject(rawArgs(args).spec) : null;
   const plan = isRecord(rawArgs(args).plan) ? asJsonObject(rawArgs(args).plan) : null;
-  const metadata = isRecord(rawArgs(args).metadata) ? asJsonObject(rawArgs(args).metadata) : null;
   const hasGoal = meaningfulSpecText(spec?.description, trackId || null)
-    || meaningfulSpecText(spec?.title, trackId || null)
-    || hasNamedValue(args, ["goal", "description"]);
-  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null)
-    || hasNamedValue(args, ["outcome", "outcomes"]);
-  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null)
-    || hasNamedValue(args, ["acceptanceCriteria", "acceptance_criteria"]);
+    || meaningfulSpecText(spec?.title, trackId || null);
+  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null);
+  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null);
   const hasScope = meaningfulSpecText(spec?.scope, trackId || null)
-    || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null)
-    || meaningfulSpecText(metadata?.scope, trackId || null)
-    || hasNamedValue(args, ["scope"]);
-  const hasPlan = hasArrayField(plan, ["phases"]);
+    || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null);
+  const hasPlan = meaningfulRevisionArtifact(plan, "plan", trackId || null);
 
   if (!trackId) {
     prompts.push(intentPrompt(
@@ -360,9 +350,9 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
 export function reviseIntentPrompts(args: RuntimeArgs = {}, trackId: string | null = null): JsonObject[] {
   const prompts: JsonObject[] = [];
   const hasTrack = Boolean(trackId || asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id));
-  const hasRevisionPayload = isRecord(rawArgs(args).spec) || isRecord(rawArgs(args).plan);
+  const hasRevisionPayload = meaningfulRevisionPayload(args, trackId);
   const hasReason = hasNamedValue(args, ["reason", "revisionReason", "revision_reason", "changeSummary", "change_summary"]);
-  const hasScope = hasRevisionPayload || hasNamedValue(args, ["scope", "revisionScope", "revision_scope", "reviseScope", "revise_scope"]);
+  const hasScope = hasRevisionPayload;
 
   if (!hasTrack) {
     prompts.push(intentPrompt(
@@ -414,43 +404,4 @@ export function reviseIntentPrompts(args: RuntimeArgs = {}, trackId: string | nu
     ));
   }
   return prompts;
-}
-
-export function refreshScopeIds(args: RuntimeArgs = {}): string[] {
-  const raw = rawArgs(args);
-  const direct = [
-    raw.refreshScope,
-    raw.refresh_scope,
-    raw.scope,
-  ].flatMap((value) => typeof value === "string" ? value.split(",") : []);
-  const listed = Array.isArray(raw.scopes) ? raw.scopes : [];
-  const ids = direct.concat(listed.map(String)).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
-  if (raw.all === true) ids.push("all");
-  if (raw.patterns === true) ids.push("patterns");
-  if (raw.docs === true || raw.projections === true) ids.push("docs");
-  if (raw.diagnostics === true) ids.push("diagnostics");
-  if (hasAnyArg(args, ["lsp", "writeLsp", "write_lsp", "setupLsp", "setup_lsp"])) ids.push("lsp");
-  return Array.from(new Set(ids));
-}
-
-export function refreshIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
-  if (refreshScopeIds(args).length > 0) return [];
-  return [
-    intentPrompt(
-      "refresh",
-      "refresh-scope",
-      "Refresh Scope",
-      "What Cadre context should refresh update or inspect?",
-      "single",
-      [
-        choice("patterns", "Patterns Only", "Refresh project pattern canonical data and projection.", true),
-        choice("lsp", "LSP Setup", "Inspect or write language-server setup recommendations."),
-        choice("docs", "Docs/Projections", "Regenerate supported human-readable projections."),
-        choice("diagnostics", "Diagnostics", "Report workspace diagnostics without document changes."),
-        choice("all", "All Supported", "Run all supported refresh checks and document updates."),
-      ],
-      "refreshScope",
-      "refreshScopeOther"
-    ),
-  ];
 }

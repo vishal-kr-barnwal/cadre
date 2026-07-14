@@ -111,8 +111,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped.",
     };
   }
-  const hasStructuredSpecAndPlan = isRecord(args.spec) && isRecord(args.plan);
-  const intentPrompts = hasStructuredSpecAndPlan ? [] : newTrackIntentPrompts(args);
+  const intentPrompts = newTrackIntentPrompts(args);
   if (intentPrompts.length > 0) {
     return {
       ...summary,

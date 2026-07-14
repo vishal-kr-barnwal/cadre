@@ -146,6 +146,8 @@ export function workflowResourceUris(root: string, workflow: string, result: Cor
     add(rooted("workspace-health"), rooted("workspace-diagnostics"), rooted("dependency-graph"), rooted("collisions"));
   } else if (workflow === "debug") {
     add(rooted("dap-status"), rooted("workspace-diagnostics"));
+  } else if (workflow === "refresh") {
+    add(rooted("workspace-health"), rooted("workspace-diagnostics"), rooted("dependency-graph"), rooted("artifact-catalog"));
   } else if (workflow === "newtrack") {
     add(`${rooted("artifact-schema")}&artifact=spec`, `${rooted("artifact-schema")}&artifact=plan`);
   }
