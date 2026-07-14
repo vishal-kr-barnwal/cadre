@@ -6597,6 +6597,16 @@ function gitRepository(cwd) {
 function branchExists(cwd, branch) {
   return runCommand("git", ["rev-parse", "--verify", "--quiet", branch], { cwd }).ok;
 }
+function inferredBaseBranch(cwd, trackBranch) {
+  for (const candidate of ["main", "master"]) {
+    if (candidate !== trackBranch && branchExists(cwd, candidate)) return candidate;
+  }
+  const remoteHead = runCommand("git", ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], { cwd });
+  const remoteBranch = remoteHead.ok ? remoteHead.stdout.trim() : "";
+  if (remoteBranch && remoteBranch !== trackBranch) return remoteBranch;
+  const currentBranch = gitBranch(cwd);
+  return currentBranch && currentBranch !== trackBranch ? currentBranch : "main";
+}
 function taskRepos(root2, track) {
   const topology = loadTopology(root2);
   if (!topology.polyrepo) return /* @__PURE__ */ new Set([MONOREPO_REPO_KEY]);
@@ -6657,8 +6667,8 @@ function branchSetEntry(root2, track, repo, info, args, polyrepo) {
   const segment = repoSegment(repo);
   const sourceRel = polyrepo ? asOptionalString(info.submodule_path) || "" : ".";
   const sourceRoot = polyrepo && sourceRel ? import_node_path28.default.resolve(root2, sourceRel) : root2;
-  const baseBranch = asOptionalString(args.base) || asOptionalString(info.base_branch) || "main";
   const trackBranch = asOptionalString(args.head) || asOptionalString(args.branch) || asOptionalString(info.git_branch) || asOptionalString(track.metadata.git_branch) || `track/${track.track_id}`;
+  const baseBranch = asOptionalString(args.base) || asOptionalString(info.base_branch) || inferredBaseBranch(sourceRoot, trackBranch);
   const legacyPath = repo === MONOREPO_REPO_KEY ? asOptionalString(track.metadata.worktree_path) : asOptionalString(info.worktree_path);
   const relIntegration = legacyPath || import_node_path28.default.join(".worktrees", "cadre", "tracks", safeName(track.track_id), "integrate", segment);
   const integrationWorktree = import_node_path28.default.resolve(root2, relIntegration);

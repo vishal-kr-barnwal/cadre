@@ -907,7 +907,7 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
 test("parallel merge completes canonical tasks before cleanup", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-parallel-merge-test-"));
   try {
-    git(root, ["init"]);
+    git(root, ["init", "--initial-branch=master"]);
     git(root, ["config", "user.email", "owner@example.com"]);
     git(root, ["config", "user.name", "Owner"]);
     write(path.join(root, "src", "core.js"), "export const value = 1;\n");
@@ -918,6 +918,7 @@ test("parallel merge completes canonical tasks before cleanup", () => {
 
     const integration = core.worktreePlan(root, { trackId, execute: true });
     assert.equal(integration.ok, true);
+    assert.equal(integration.plans[0].base, "master");
     const setup = core.parallelWorkflow(root, {
       action: "setup_workers",
       trackId,

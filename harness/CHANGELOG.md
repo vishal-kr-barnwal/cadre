@@ -79,6 +79,8 @@ Atomic document review and hardened MCP runtime release.
 - Fixed parallel recovery so unmerged or conflicting workers cannot be marked
   complete or cleaned, canonical tasks complete before cleanup, and worktree
   identity follows Git common-directory state.
+- Fixed unconfigured monorepo worktree planning to resolve an existing local or
+  remote default branch instead of assuming that every repository uses `main`.
 - Fixed DAP and LSP setup/review paths so absolute, traversing, cross-purpose,
   or symlink-selected configs are rejected before process creation. DAP callers
   can no longer inject inline adapter commands or escape project breakpoint

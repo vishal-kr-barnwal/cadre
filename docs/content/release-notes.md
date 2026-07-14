@@ -30,7 +30,7 @@ failure behavior at every untrusted input boundary.
 | Resources | One typed registry separates the only fixed resource from parameterized templates and validates every URI/query contract. |
 | Parallel and jobs | Workers receive exact completion or recovery callbacks; merge, cleanup, restart, persistence, and job continuation all fail closed from observed state. |
 | LSP and DAP | Project-owned config namespaces, secure reads/writes, contained breakpoints, and configured adapter selection prevent path and command injection. |
-| Package | The npm publish set drops from 10 to 8 files, removes duplicate worker/daemon executables, and reduces the uncompressed payload by 23,696 bytes. |
+| Package | The npm publish set drops from 10 to 8 files, removes duplicate worker/daemon executables, and reduces the uncompressed payload by 22,484 bytes. |
 | Verification | Test declarations increase from 114 to 148, with new lifecycle, resource, packet, approval, command-picker, source-capability, job, parallel, and config-security coverage. |
 
 ### Atomic Canonical And Projection Review
@@ -132,7 +132,8 @@ return to implementation. Completion callbacks remain self-contained when
 reissued. Cadre completes canonical tasks before cleanup, refuses to advance
 unmerged or conflicting work, derives repository identity from Git's common
 directory, and retains `cleaned_*` audit fields after idempotently clearing live
-worktree/ref state.
+worktree/ref state. Unconfigured monorepos now resolve an existing local or
+remote default branch for integration worktrees instead of assuming `main`.
 
 Async job results remain pollable and return an exact continuation after task
 completion. Persisted jobs are bound to one canonical project root, use atomic
@@ -162,7 +163,7 @@ The runtime build now emits five bundles instead of seven. Private job-runner
 and LSP-daemon modes remain embedded in `cadre-mcp`, while the duplicate
 standalone executables are removed from the package. The npm publish set drops
 from 10 files to 8 and its tracked uncompressed payload decreases from
-1,936,959 to 1,913,263 bytes despite the additional validation and generated
+1,936,959 to 1,914,475 bytes despite the additional validation and generated
 Codex workflow discovery.
 
 Flat MCP forwarding shims, obsolete source barrels and adapters, dead package
