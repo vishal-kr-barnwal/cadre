@@ -387,6 +387,8 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
 
 test("Generated plugin manifests and marketplace shims point at expected paths", () => {
   const codexManifest = readJson(path.join(generatedRoot, "plugins", "cadre", ".codex-plugin", "plugin.json"));
+  const packageVersion = readJson(path.join(root, "package.json")).version;
+  assert.equal(codexManifest.version, packageVersion);
   assert.equal(codexManifest.skills, "./skills/");
   assert.equal(codexManifest.mcpServers, "./.mcp.json");
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre", ".mcp.json")), true);
@@ -401,6 +403,7 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre", "scripts")), false);
 
   const claudeManifest = readJson(path.join(generatedRoot, "plugins", "cadre-claude", ".claude-plugin", "plugin.json"));
+  assert.equal(claudeManifest.version, packageVersion);
   assert.equal(claudeManifest.skills, "./skills/");
   assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
@@ -417,6 +420,7 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   const codexMcp = readJson(path.join(generatedRoot, "plugins", "cadre", ".mcp.json"));
   const claudeMcp = readJson(path.join(generatedRoot, "plugins", "cadre-claude", "mcp-config.json"));
   const copilotManifest = readJson(path.join(generatedRoot, "plugins", "cadre-copilot", "plugin.json"));
+  assert.equal(copilotManifest.version, packageVersion);
   assert.equal(copilotManifest.skills, "./skills/");
   assert.equal(copilotManifest.mcpServers, "./.mcp.json");
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-copilot", ".mcp.json")), true);
@@ -434,6 +438,7 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.deepEqual(copilotMcp.mcpServers.cadre.tools, ["*"]);
 
   const antigravityManifest = readJson(path.join(generatedRoot, "plugins", "cadre-antigravity", "plugin.json"));
+  assert.equal(antigravityManifest.version, packageVersion);
   assert.equal(antigravityManifest.$schema, "https://antigravity.google/schemas/v1/plugin.json");
   assert.equal(antigravityManifest.name, "cadre");
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-antigravity", "mcp_config.json")), true);
@@ -484,8 +489,11 @@ test("Generated plugins are thin MCP entrypoints", () => {
   }
   const server = path.join(root, "scripts", "mcp", "cadre-server.js");
   const text = fs.readFileSync(server, "utf8");
-  assert.ok(fs.statSync(server).size > 500 * 1024, "global cadre-mcp should embed Cadre assets");
-  assert.equal(/__CADRE_EMBEDDED_ASSETS__\s*=\s*\{/.test(text), true, "global cadre-mcp should embed Cadre assets");
+  const embeddedMatch = text.match(/^const __CADRE_EMBEDDED_ASSETS__ = (.+);$/m);
+  assert.ok(embeddedMatch, "global cadre-mcp should embed setup templates");
+  const embeddedAssets = JSON.parse(embeddedMatch[1]);
+  assert.deepEqual(Object.keys(embeddedAssets), ["templates"]);
+  assert.equal(typeof embeddedAssets.templates["manifest.json"], "string");
 });
 
 test("Install docs use the npm-first Cadre AI path", () => {
@@ -508,13 +516,14 @@ test("NPM packlist contains only publishable runtime files", () => {
     "package.json",
     "scripts/cadre-cli.js",
     "scripts/cadre-core.js",
-    "scripts/cadre-job-runner.js",
-    "scripts/cadre-lsp-daemon.js",
     "scripts/cadre-lsp-review.js",
     "scripts/cadre-lsp-setup.js",
     "scripts/mcp/cadre-server.js",
   ]) {
     assert.ok(files.includes(file), `packlist missing ${file}`);
+  }
+  for (const file of ["scripts/cadre-job-runner.js", "scripts/cadre-lsp-daemon.js"]) {
+    assert.equal(files.includes(file), false, `packlist should exclude obsolete standalone runtime ${file}`);
   }
   for (const prefix of ["src/", "plugins/", ".agents/", ".claude/", "templates/", "skills/", "scripts/mcp/cadre-server.external.js"]) {
     assert.equal(files.some((file) => file === prefix || file.startsWith(prefix)), false, `packlist should exclude ${prefix}`);

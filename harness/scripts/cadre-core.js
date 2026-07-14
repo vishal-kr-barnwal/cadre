@@ -63,7 +63,6 @@ __export(cadre_core_exports, {
   lspReview: () => lspReview,
   lspSetup: () => lspSetup,
   mcpReadiness: () => mcpReadiness,
-  mcpTools: () => TOOLS,
   metadataPatch: () => metadataPatch,
   nativeStateSummary: () => nativeStateSummary,
   parallelWorkflow: () => parallelWorkflow,
@@ -100,9 +99,10 @@ __export(cadre_core_exports, {
   testCoverage: () => testCoverage,
   testImpact: () => testImpact,
   trackContext: () => trackContext,
-  workflowEnvelope: () => workflowEnvelope,
   workflowFormula: () => workflowFormula,
   workflowPacket: () => workflowPacket,
+  workflowPacketEnvelopeV1: () => workflowPacketEnvelopeV1,
+  workflowPacketV1: () => workflowPacketV1,
   workspaceDiagnostics: () => workspaceDiagnostics,
   workspaceHealth: () => workspaceHealth,
   worktreePlan: () => worktreePlan,
@@ -140,6 +140,17 @@ function asBoolean(value, fallback = false) {
 function asStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 }
+function asJsonArray(value) {
+  return Array.isArray(value) ? value.filter(isJsonValue) : [];
+}
+function isJsonValue(value) {
+  if (value === null) return true;
+  const kind = typeof value;
+  if (kind === "string" || kind === "number" || kind === "boolean") return true;
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).every((entry) => entry === void 0 || isJsonValue(entry));
+}
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -147,30 +158,26 @@ function errorCode(error) {
   return isRecord(error) && typeof error.code === "string" ? error.code : void 0;
 }
 
-// src/core/application/runtime/artifact-catalog.ts
-var import_node_fs16 = __toESM(require("node:fs"));
-var import_node_path30 = __toESM(require("node:path"));
-
 // src/core/infrastructure/runtime/json-store.ts
+var import_node_crypto = __toESM(require("node:crypto"));
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
-var import_node_crypto = __toESM(require("node:crypto"));
 
 // src/core/infrastructure/runtime/locking.ts
 var import_node_fs = __toESM(require("node:fs"));
-var import_node_path2 = __toESM(require("node:path"));
 var import_node_os = __toESM(require("node:os"));
+var import_node_path2 = __toESM(require("node:path"));
 
 // src/core/domain/lease-policy.ts
 var STALE_LEASE_MS = 30 * 60 * 1e3;
 var LOCK_STALE_MS = STALE_LEASE_MS;
 
 // src/core/infrastructure/runtime/system.ts
-var import_node_path = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
+var import_node_path = __toESM(require("node:path"));
 var commandExistsCache = /* @__PURE__ */ new Map();
-function isCadreProjectRoot(root2) {
-  const cadreDir = import_node_path.default.join(root2, "cadre");
+function isCadreProjectRoot(root) {
+  const cadreDir = import_node_path.default.join(root, "cadre");
   if (!fileExists(cadreDir)) return false;
   return [
     "tracks.json",
@@ -182,10 +189,10 @@ function isCadreProjectRoot(root2) {
     "repos.json"
   ].some((name) => fileExists(import_node_path.default.join(cadreDir, name))) || fileExists(import_node_path.default.join(cadreDir, "tracks"));
 }
-function gitIdentity(root2) {
+function gitIdentity(root) {
   for (const key of ["user.email", "user.name"]) {
     const result = (0, import_node_child_process.spawnSync)("git", ["config", key], {
-      cwd: root2,
+      cwd: root,
       encoding: "utf8"
     });
     if (result.status === 0 && result.stdout.trim()) {
@@ -260,8 +267,8 @@ function isControlPlaneFile(file) {
   if (normalized.startsWith(".github/workflows/cadre-")) return true;
   return false;
 }
-function controlPlaneSyncSafety(root2, mode, remote, branch) {
-  const status = runCommand("git", ["status", "--porcelain"], { cwd: root2 });
+function controlPlaneSyncSafety(root, mode, remote, branch) {
+  const status = runCommand("git", ["status", "--porcelain"], { cwd: root });
   const dirtyFiles = parsePorcelainFiles(status.stdout);
   const unsafeDirtyFiles = dirtyFiles.filter((file) => !isControlPlaneFile(file));
   const safety = {
@@ -287,11 +294,11 @@ function controlPlaneSyncSafety(root2, mode, remote, branch) {
   }
   if (mode !== "post") return safety;
   const remoteRef = `${remote}/${branch}`;
-  const fetch = runCommand("git", ["fetch", "--quiet", remote, branch], { cwd: root2 });
-  const rev = runCommand("git", ["rev-parse", "--verify", remoteRef], { cwd: root2 });
+  const fetch = runCommand("git", ["fetch", "--quiet", remote, branch], { cwd: root });
+  const rev = runCommand("git", ["rev-parse", "--verify", remoteRef], { cwd: root });
   let diff;
   if (fetch.ok && rev.ok) {
-    diff = runCommand("git", ["diff", "--name-only", `${remoteRef}..HEAD`], { cwd: root2 });
+    diff = runCommand("git", ["diff", "--name-only", `${remoteRef}..HEAD`], { cwd: root });
   } else {
     return {
       ...safety,
@@ -330,8 +337,8 @@ function commandExists(command, cwd) {
 }
 
 // src/core/infrastructure/runtime/locking.ts
-function lockRoot(root2) {
-  return import_node_path2.default.join(root2, "cadre", ".locks");
+function lockRoot(root) {
+  return import_node_path2.default.join(root, "cadre", ".locks");
 }
 function processAlive(pid) {
   const numeric = Number(pid);
@@ -352,9 +359,9 @@ function lockIsStale(info, nowMs = Date.now()) {
   if (info.pid && !processAlive(info.pid)) return true;
   return false;
 }
-function acquireLock(root2, name, options = {}) {
+function acquireLock(root, name, options = {}) {
   const now = utcNow();
-  const dir = import_node_path2.default.join(lockRoot(root2), `${safeName(name)}.lock`);
+  const dir = import_node_path2.default.join(lockRoot(root), `${safeName(name)}.lock`);
   import_node_fs.default.mkdirSync(import_node_path2.default.dirname(dir), { recursive: true });
   for (let attempt = 1; attempt <= Number(options.retries || 3); attempt += 1) {
     try {
@@ -362,7 +369,7 @@ function acquireLock(root2, name, options = {}) {
       const info = {
         name,
         pid: process.pid,
-        owner: options.owner || gitIdentity(root2) || null,
+        owner: options.owner || gitIdentity(root) || null,
         acquired_at: now,
         updated_at: now,
         hostname: import_node_os.default.hostname()
@@ -412,8 +419,8 @@ function releaseLock(lock) {
     return { ok: false, error: errorMessage(error) };
   }
 }
-function withLock(root2, name, fn, options = {}) {
-  const lock = acquireLock(root2, name, options);
+function withLock(root, name, fn, options = {}) {
+  const lock = acquireLock(root, name, options);
   if (!lock.ok) return { ok: false, stage: "lock", lock };
   try {
     const value = fn(lock);
@@ -430,8 +437,8 @@ function withLock(root2, name, fn, options = {}) {
 function trackLockName(trackId) {
   return `track:${trackId}`;
 }
-function withTrackLock(root2, trackId, fn, options = {}) {
-  return withLock(root2, trackLockName(trackId), fn, options);
+function withTrackLock(root, trackId, fn, options = {}) {
+  return withLock(root, trackLockName(trackId), fn, options);
 }
 
 // src/core/infrastructure/runtime/json-store.ts
@@ -533,6 +540,65 @@ function appendJsonl(file, value) {
 `);
 }
 
+// src/core/application/runtime/artifact-catalog.ts
+var import_node_fs16 = __toESM(require("node:fs"));
+var import_node_path30 = __toESM(require("node:path"));
+
+// src/core/application/runtime/projection-registry.ts
+var PROJECTION_REGISTRY = [
+  { intent: "product", title: "Product context", canonical: "cadre/product.json", projection: "cadre/product.md", schema: "cadre.product.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
+  { intent: "product-guidelines", title: "Product guidelines", canonical: "cadre/product_guidelines.json", projection: "cadre/product_guidelines.md", schema: "cadre.product_guidelines.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
+  { intent: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", projection: "cadre/tech-stack.md", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
+  { intent: "workflow", title: "Workflow policy", canonical: "cadre/workflow.json", projection: "cadre/workflow.md", schema: "cadre.workflow.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
+  { intent: "repository-topology", title: "Repository topology", canonical: "cadre/repos.json", projection: "cadre/repos.md", schema: "cadre.repos.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
+  { intent: "patterns", title: "Project patterns", canonical: "cadre/patterns.jsonl", projection: "cadre/patterns.md", schema: "cadre.patterns.v1", scope: "project", sourceFormat: "jsonl", reviewRole: "generated" },
+  { intent: "styleguide-catalog", title: "Style guide catalog", canonical: "cadre/styleguides/index.json", projection: "cadre/styleguides/README.md", schema: "cadre.styleguide_index.v1", scope: "styleguide", sourceFormat: "json", reviewRole: "document" },
+  { intent: "styleguide", title: "Style guide", canonical: "cadre/styleguides/{id}.json", projection: "cadre/styleguides/{id}.md", schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", reviewRole: "document" },
+  { intent: "track-specification", title: "Track specification", canonical: "cadre/tracks/{trackId}/spec.json", projection: "cadre/tracks/{trackId}/spec.md", schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", reviewRole: "document" },
+  { intent: "track-plan", title: "Track plan", canonical: "cadre/tracks/{trackId}/plan.json", projection: "cadre/tracks/{trackId}/plan.md", schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", reviewRole: "document" },
+  { intent: "track-learnings", title: "Track learnings", canonical: "cadre/tracks/{trackId}/learnings.jsonl", projection: "cadre/tracks/{trackId}/learnings.md", schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", reviewRole: "generated" },
+  { intent: "track-handoff", title: "Track handoff", canonical: "cadre/tracks/{trackId}/handoff.json", projection: "cadre/tracks/{trackId}/HANDOFF.md", schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", reviewRole: "document" },
+  { intent: "release", title: "Release", canonical: "cadre/releases/{version}.json", projection: "cadre/releases/{version}.md", schema: "cadre.release.v1", scope: "release", sourceFormat: "json", reviewRole: "document" },
+  { intent: "project-skill", title: "Project skill", canonical: "cadre/skills/{id}/skill.json", projection: "cadre/skills/{id}/SKILL.md", schema: "cadre.project-skill.v1", scope: "skill", sourceFormat: "json", reviewRole: "document" }
+];
+function projectionRegistration(intent) {
+  const registration = PROJECTION_REGISTRY.find((entry) => entry.intent === intent);
+  if (!registration) throw new Error(`Unknown projection intent: ${intent}`);
+  return registration;
+}
+function resolveTemplate(template, parameters) {
+  const replacements = {
+    id: parameters.id,
+    trackId: parameters.trackId,
+    version: parameters.version
+  };
+  let resolved = template;
+  for (const [key, value] of Object.entries(replacements)) {
+    if (!resolved.includes(`{${key}}`)) continue;
+    if (!value) throw new Error(`Projection path parameter ${key} is required for ${template}`);
+    resolved = resolved.replaceAll(`{${key}}`, value);
+  }
+  if (parameters.archived && parameters.trackId) {
+    resolved = resolved.replace(`cadre/tracks/${parameters.trackId}/`, `cadre/archive/${parameters.trackId}/`);
+  }
+  return resolved;
+}
+function projectionDefinition(intent, id, parameters = {}, title) {
+  const registration = projectionRegistration(intent);
+  return {
+    id,
+    title: title || registration.title,
+    canonical: resolveTemplate(registration.canonical, parameters),
+    projection: resolveTemplate(registration.projection, parameters),
+    schema: registration.schema,
+    scope: registration.scope,
+    sourceFormat: registration.sourceFormat,
+    projectionFormat: "markdown",
+    reviewRole: registration.reviewRole,
+    projectionIntent: intent
+  };
+}
+
 // src/core/application/runtime/status.ts
 var import_node_path29 = __toESM(require("node:path"));
 
@@ -543,11 +609,11 @@ var import_node_path4 = __toESM(require("node:path"));
 var PROVIDER_MODES = /* @__PURE__ */ new Set(["local", "github", "gitlab"]);
 
 // src/core/infrastructure/runtime/project-config.ts
-function loadTopology(root2) {
-  const reposPath = import_node_path4.default.join(root2, "cadre", "repos.json");
-  const configPath2 = import_node_path4.default.join(root2, "cadre", "config.json");
+function loadTopology(root) {
+  const reposPath = import_node_path4.default.join(root, "cadre", "repos.json");
+  const configPath = import_node_path4.default.join(root, "cadre", "config.json");
   const repos = readJson(reposPath, null);
-  const config = readJson(configPath2, {});
+  const config = readJson(configPath, {});
   const polyrepo = Boolean(repos && repos.mode === "polyrepo");
   return {
     polyrepo,
@@ -556,8 +622,8 @@ function loadTopology(root2) {
     defaultRepo: polyrepo ? asString(repos?.default_repo, ".") : "."
   };
 }
-function loadPackageJson(root2) {
-  return readJson(import_node_path4.default.join(root2, "package.json"), null);
+function loadPackageJson(root) {
+  return readJson(import_node_path4.default.join(root, "package.json"), null);
 }
 function normalizeProviderMode(value) {
   const raw = String(value || "").trim().toLowerCase();
@@ -565,8 +631,8 @@ function normalizeProviderMode(value) {
   if (["none", "no", "off", "local-only", "local_only"].includes(raw)) return "local";
   return PROVIDER_MODES.has(raw) ? raw : null;
 }
-function gitRemoteUrls(root2) {
-  const result = runCommand("git", ["remote", "-v"], { cwd: root2 });
+function gitRemoteUrls(root) {
+  const result = runCommand("git", ["remote", "-v"], { cwd: root });
   if (!result.ok) return [];
   return Array.from(new Set(result.stdout.split(/\r?\n/).map((line) => line.trim().split(/\s+/)[1] || "").filter(Boolean))).sort();
 }
@@ -586,8 +652,8 @@ function providerModeForHost(host) {
   if (host.includes("gitlab")) return "gitlab";
   return null;
 }
-function detectedProviderFromRemotes(root2) {
-  const remotes = gitRemoteUrls(root2).map((url) => {
+function detectedProviderFromRemotes(root) {
+  const remotes = gitRemoteUrls(root).map((url) => {
     const host = remoteHost(url);
     return { url, host, provider_mode: providerModeForHost(host) };
   });
@@ -606,9 +672,9 @@ function detectedProviderFromRemotes(root2) {
     source: !hasRemotes ? "no_remote" : providerModes.length === 0 ? "unknown_remote" : "git_remote"
   };
 }
-function configuredProvider(root2, args = {}) {
-  const config = loadTopology(root2).config || {};
-  const detected = detectedProviderFromRemotes(root2);
+function configuredProvider(root, args = {}) {
+  const config = loadTopology(root).config || {};
+  const detected = detectedProviderFromRemotes(root);
   const explicit = normalizeProviderMode(args.providerMode || args.provider_mode || args.provider);
   const configured2 = normalizeProviderMode(config.provider_mode) || normalizeProviderMode(config.pr_provider);
   const providerMode = explicit || configured2 || (detected.ambiguous ? null : normalizeProviderMode(detected.provider_mode));
@@ -624,8 +690,8 @@ function configuredProvider(root2, args = {}) {
     requires_confirmation: !mode && detected.ambiguous === true
   };
 }
-function providerMcpAvailability(root2, args = {}) {
-  const provider = configuredProvider(root2, args);
+function providerMcpAvailability(root, args = {}) {
+  const provider = configuredProvider(root, args);
   const mode = asOptionalString(provider.provider_mode) || "local";
   if (mode === "local") {
     return { ...provider, available: true, skipped: true, reason: "provider_mode is local" };
@@ -644,9 +710,9 @@ function providerMcpAvailability(root2, args = {}) {
     }
   };
 }
-function configuredCoverageCommand(root2, args = {}, workingRoot = root2) {
+function configuredCoverageCommand(root, args = {}, workingRoot = root) {
   if (args.command) return String(args.command);
-  const topology = loadTopology(root2);
+  const topology = loadTopology(root);
   const config = topology.config || {};
   for (const key of ["coverage_command", "test_coverage_command", "test_command"]) {
     const value = config[key];
@@ -685,17 +751,21 @@ function parseCoveragePercent(text2) {
   return null;
 }
 
-// src/core/application/runtime/track-schedule.ts
+// src/core/application/runtime/branch-set.ts
 var import_node_fs15 = __toESM(require("node:fs"));
 var import_node_path28 = __toESM(require("node:path"));
+
+// src/core/application/runtime/track-schedule.ts
+var import_node_fs14 = __toESM(require("node:fs"));
+var import_node_path27 = __toESM(require("node:path"));
 
 // src/core/infrastructure/runtime/coverage.ts
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path5 = __toESM(require("node:path"));
-function parseLcovCoverage(root2) {
+function parseLcovCoverage(root) {
   const candidates = [
-    import_node_path5.default.join(root2, "coverage", "lcov.info"),
-    import_node_path5.default.join(root2, "lcov.info")
+    import_node_path5.default.join(root, "coverage", "lcov.info"),
+    import_node_path5.default.join(root, "lcov.info")
   ];
   for (const file of candidates) {
     if (!fileExists(file)) continue;
@@ -710,14 +780,14 @@ function parseLcovCoverage(root2) {
   }
   return null;
 }
-function coverageThreshold(root2) {
-  const topology = loadTopology(root2);
+function coverageThreshold(root) {
+  const topology = loadTopology(root);
   const config = topology.config || {};
   for (const key of ["coverage_threshold", "minimum_coverage", "min_coverage"]) {
     const value = Number(config[key]);
     if (Number.isFinite(value) && value >= 0) return value;
   }
-  const workflowPath = import_node_path5.default.join(root2, "cadre", "workflow.json");
+  const workflowPath = import_node_path5.default.join(root, "cadre", "workflow.json");
   const workflow = readJson(workflowPath, null);
   if (workflow) {
     const text2 = JSON.stringify(workflow);
@@ -726,8 +796,8 @@ function coverageThreshold(root2) {
   }
   return 80;
 }
-function runCoverage(root2, args = {}, workingRoot = root2) {
-  const command = configuredCoverageCommand(root2, args, workingRoot);
+function runCoverage(root, args = {}, workingRoot = root) {
+  const command = configuredCoverageCommand(root, args, workingRoot);
   if (!command) {
     return {
       ok: false,
@@ -738,7 +808,7 @@ function runCoverage(root2, args = {}, workingRoot = root2) {
       hints: [
         "Set cadre/config.json coverage_command",
         "Add package.json scripts.coverage or scripts.test:coverage",
-        "Pass { command } explicitly to cadre_complete_task"
+        "Pass { command } in cadre_action input for action task.complete"
       ]
     };
   }
@@ -781,6 +851,92 @@ function staleInfo(value, now = Date.now()) {
   return {
     stale: ageMs > STALE_LEASE_MS,
     age_minutes: Math.floor(ageMs / 6e4)
+  };
+}
+
+// src/core/application/runtime/collision.ts
+function normalizeClaimPath(file) {
+  return String(file || "").trim().replace(/^["']|["']$/g, "").replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+}
+function globToRegExp(glob) {
+  const normalized = normalizeClaimPath(glob);
+  let out = "^";
+  for (let i = 0; i < normalized.length; i += 1) {
+    const char = normalized[i];
+    const next = normalized[i + 1];
+    if (char === "*" && next === "*") {
+      out += ".*";
+      i += 1;
+    } else if (char === "*") {
+      out += "[^/]*";
+    } else if (char === "?") {
+      out += "[^/]";
+    } else if (char && "\\^$+?.()|{}[]".includes(char)) {
+      out += `\\${char}`;
+    } else {
+      out += char;
+    }
+  }
+  return new RegExp(`${out}$`);
+}
+function isGlobClaim(file) {
+  return /[*?]/.test(file);
+}
+function claimsOverlap(leftFile, rightFile) {
+  const left = normalizeClaimPath(leftFile);
+  const right = normalizeClaimPath(rightFile);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (right.startsWith(`${left}/`) || left.startsWith(`${right}/`)) return true;
+  if (isGlobClaim(left) && globToRegExp(left).test(right)) return true;
+  if (isGlobClaim(right) && globToRegExp(right).test(left)) return true;
+  return false;
+}
+function collisionScan(root) {
+  const topology = loadTopology(root);
+  const active = listTracks(root).filter(
+    (track) => ["new", "in_progress", "blocked"].includes(track.metadata.status || "new")
+  );
+  const claims = [];
+  for (const track of active) {
+    for (const claim of planClaims(root, track, topology)) {
+      claims.push({
+        ...claim,
+        file: normalizeClaimPath(claim.file)
+      });
+    }
+  }
+  const collisions = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let i = 0; i < claims.length; i += 1) {
+    for (let j = i + 1; j < claims.length; j += 1) {
+      const left = claims[i];
+      const right = claims[j];
+      if (!left || !right) continue;
+      if (left.track_id === right.track_id) continue;
+      if (left.repo !== right.repo) continue;
+      if (!claimsOverlap(left.file, right.file)) continue;
+      const trackIds = [left.track_id, right.track_id].sort();
+      const files = [left.file, right.file].sort();
+      const key = `${left.repo}\0${trackIds.join("\0")}\0${files.join("\0")}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const collisionClaims = [left, right];
+      collisions.push({
+        repo: left.repo,
+        file: left.file === right.file ? left.file : `${left.file} <-> ${right.file}`,
+        kind: left.file === right.file ? "exact" : "overlap",
+        claims: collisionClaims,
+        track_ids: trackIds,
+        owners: Array.from(new Set(collisionClaims.map((claim) => claim.owner).filter(Boolean))).sort()
+      });
+    }
+  }
+  collisions.sort((a, b) => `${asString(a.repo)}${asString(a.file)}`.localeCompare(`${asString(b.repo)}${asString(b.file)}`));
+  return {
+    root,
+    active_tracks: active.length,
+    collisions
   };
 }
 
@@ -1396,10 +1552,10 @@ function renderPlanMarkdown(raw, canonicalSource) {
 }
 
 // src/core/application/runtime/repo-resolution.ts
-var import_node_path27 = __toESM(require("node:path"));
+var import_node_path26 = __toESM(require("node:path"));
 
 // src/core/application/runtime/planning.ts
-var import_node_path23 = __toESM(require("node:path"));
+var import_node_path22 = __toESM(require("node:path"));
 
 // src/lsp/language-registry.ts
 var import_node_fs4 = __toESM(require("node:fs"));
@@ -1461,9 +1617,9 @@ var DEFAULT_IGNORE_PATHS = [
 function normalizeRel(file) {
   return file.split(import_node_path7.default.sep).join("/");
 }
-function shouldIgnore(root2, fullPath, name) {
+function shouldIgnore(root, fullPath, name) {
   if (DEFAULT_IGNORES.has(name)) return true;
-  const rel = normalizeRel(import_node_path7.default.relative(root2, fullPath));
+  const rel = normalizeRel(import_node_path7.default.relative(root, fullPath));
   return DEFAULT_IGNORE_PATHS.some(
     (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
   );
@@ -1550,23 +1706,23 @@ function fileLanguageId(file) {
 function languageForFile(file) {
   return fileLanguageId(file);
 }
-function normalizeWorkspaceFile(root2, rel) {
+function normalizeWorkspaceFile(root, rel) {
   const normalized = rel.replace(/\r/g, "").trim();
   if (!normalized) return null;
-  const full = import_node_path8.default.join(root2, normalized);
-  if (shouldIgnore(root2, full, import_node_path8.default.basename(normalized))) return null;
+  const full = import_node_path8.default.join(root, normalized);
+  if (shouldIgnore(root, full, import_node_path8.default.basename(normalized))) return null;
   return normalized;
 }
-function gitWorkspaceFiles(root2) {
+function gitWorkspaceFiles(root) {
   const result = (0, import_node_child_process2.spawnSync)("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
-    cwd: root2,
+    cwd: root,
     encoding: "buffer",
     maxBuffer: 30 * 1024 * 1024
   });
   if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return [];
-  return result.stdout.toString("utf8").split("\0").map((item) => normalizeWorkspaceFile(root2, item)).filter((item) => Boolean(item)).sort();
+  return result.stdout.toString("utf8").split("\0").map((item) => normalizeWorkspaceFile(root, item)).filter((item) => Boolean(item)).sort();
 }
-function walkWorkspaceFiles(root2) {
+function walkWorkspaceFiles(root) {
   const files = [];
   const visit = (dir) => {
     let entries;
@@ -1577,181 +1733,37 @@ function walkWorkspaceFiles(root2) {
     }
     for (const entry of entries) {
       const full = import_node_path8.default.join(dir, entry.name);
-      if (shouldIgnore(root2, full, entry.name)) continue;
+      if (shouldIgnore(root, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;
       }
-      if (entry.isFile()) files.push(import_node_path8.default.relative(root2, full).split(import_node_path8.default.sep).join("/"));
+      if (entry.isFile()) files.push(import_node_path8.default.relative(root, full).split(import_node_path8.default.sep).join("/"));
     }
   };
-  visit(root2);
+  visit(root);
   return files.sort();
 }
-function listWorkspaceFiles(root2) {
-  const gitFiles = gitWorkspaceFiles(root2);
-  return gitFiles.length > 0 ? gitFiles : walkWorkspaceFiles(root2);
-}
-
-// src/core/application/runtime/branch-set.ts
-var import_node_fs5 = __toESM(require("node:fs"));
-var import_node_path9 = __toESM(require("node:path"));
-var MONOREPO_REPO_KEY = "root";
-function repoSegment(repo) {
-  return safeName(repo === "." ? MONOREPO_REPO_KEY : repo);
-}
-function gitBranch(cwd) {
-  const result = runCommand("git", ["branch", "--show-current"], { cwd });
-  return result.ok ? result.stdout.trim() || null : null;
-}
-function gitRoot(cwd) {
-  const result = runCommand("git", ["rev-parse", "--show-toplevel"], { cwd });
-  return result.ok ? import_node_path9.default.resolve(result.stdout.trim() || cwd) : null;
-}
-function branchExists(cwd, branch) {
-  return runCommand("git", ["rev-parse", "--verify", "--quiet", branch], { cwd }).ok;
-}
-function taskRepos(root2, track) {
-  const topology = loadTopology(root2);
-  if (!topology.polyrepo) return /* @__PURE__ */ new Set([MONOREPO_REPO_KEY]);
-  const repos = /* @__PURE__ */ new Set();
-  const defaultRepo = asOptionalString(topology.defaultRepo);
-  for (const task of parsePlanFile(track.plan_path).tasks || []) {
-    const repo = asOptionalString(task.repo) || defaultRepo;
-    if (repo) repos.add(repo);
-  }
-  const metadataRepos = isRecord(track.metadata.repos) ? track.metadata.repos : null;
-  if (metadataRepos) {
-    for (const [repo, rawInfo] of Object.entries(metadataRepos)) {
-      const info = asJsonObject(rawInfo);
-      if (info.affected === true || info.git_branch || info.worktree_path) repos.add(repo);
-    }
-  }
-  return repos;
-}
-function workerRef(trackId, repo, taskKey) {
-  return `refs/cadre/workers/${safeName(trackId)}/${repoSegment(repo)}/${safeName(taskKey)}`;
-}
-function workerWorktreePath(root2, trackId, repo, taskKey) {
-  return import_node_path9.default.resolve(root2, ".worktrees", "cadre", "tracks", safeName(trackId), "workers", repoSegment(repo), safeName(taskKey));
-}
-function branchSetForTrack(root2, track, args = {}) {
-  const topology = loadTopology(root2);
-  const requestedRepo = asOptionalString(args.repo);
-  const affected = taskRepos(root2, track);
-  if (topology.polyrepo) {
-    const metadataRepos = isRecord(track.metadata.repos) ? track.metadata.repos : {};
-    const topoRepos = Array.isArray(topology.repos.repos) ? topology.repos.repos.map(asJsonObject) : [];
-    const byName = /* @__PURE__ */ new Map();
-    for (const rawRepo of topoRepos) {
-      const name = asOptionalString(rawRepo.name);
-      if (name) byName.set(name, rawRepo);
-    }
-    for (const [repo, rawInfo] of Object.entries(metadataRepos)) {
-      if (!byName.has(repo)) byName.set(repo, { name: repo, ...asJsonObject(rawInfo) });
-    }
-    const repoRows = Array.from(byName.values());
-    return repoRows.filter((rawRepo) => {
-      const repo = asOptionalString(rawRepo.name);
-      return Boolean(repo && (!requestedRepo || requestedRepo === repo) && affected.has(repo));
-    }).map((rawRepo) => {
-      const repo = asString(rawRepo.name);
-      const info = {
-        submodule_path: asOptionalString(rawRepo.submodule_path) || "",
-        base_branch: asOptionalString(rawRepo.default_branch) || asOptionalString(rawRepo.base_branch) || "main",
-        ...isRecord(metadataRepos[repo]) ? asJsonObject(metadataRepos[repo]) : {}
-      };
-      return branchSetEntry(root2, track, repo, info, args, true);
-    });
-  }
-  if (requestedRepo && requestedRepo !== "." && requestedRepo !== MONOREPO_REPO_KEY) return [];
-  return [branchSetEntry(root2, track, MONOREPO_REPO_KEY, {}, args, false)];
-}
-function branchSetEntry(root2, track, repo, info, args, polyrepo) {
-  const segment = repoSegment(repo);
-  const sourceRel = polyrepo ? asOptionalString(info.submodule_path) || "" : ".";
-  const sourceRoot = polyrepo && sourceRel ? import_node_path9.default.resolve(root2, sourceRel) : root2;
-  const baseBranch = asOptionalString(args.base) || asOptionalString(info.base_branch) || "main";
-  const trackBranch = asOptionalString(args.head) || asOptionalString(args.branch) || asOptionalString(info.git_branch) || asOptionalString(track.metadata.git_branch) || `track/${track.track_id}`;
-  const legacyPath = repo === MONOREPO_REPO_KEY ? asOptionalString(track.metadata.worktree_path) : asOptionalString(info.worktree_path);
-  const relIntegration = legacyPath || import_node_path9.default.join(".worktrees", "cadre", "tracks", safeName(track.track_id), "integrate", segment);
-  const integrationWorktree = import_node_path9.default.resolve(root2, relIntegration);
-  const workerRoot = import_node_path9.default.resolve(root2, ".worktrees", "cadre", "tracks", safeName(track.track_id), "workers", segment);
-  const exists = fileExists(integrationWorktree);
-  const currentBranch = exists ? gitBranch(integrationWorktree) : null;
-  const expectedRoot = gitRoot(sourceRoot);
-  const actualRoot = exists ? gitRoot(integrationWorktree) : null;
-  const wrongRepo = Boolean(exists && expectedRoot && actualRoot && expectedRoot !== actualRoot);
-  const wrongBranch = Boolean(exists && currentBranch && currentBranch !== trackBranch);
-  const health = !exists ? "missing" : wrongRepo ? "wrong_repo" : wrongBranch ? "wrong_branch" : "ready";
-  return {
-    repo,
-    repo_segment: segment,
-    source_root: sourceRoot,
-    source_path: sourceRel,
-    base_branch: baseBranch,
-    track_branch: trackBranch,
-    integration_worktree: integrationWorktree,
-    integration_worktree_path: import_node_path9.default.relative(root2, integrationWorktree) || ".",
-    worker_root: workerRoot,
-    worker_root_path: import_node_path9.default.relative(root2, workerRoot) || ".",
-    affected: true,
-    exists,
-    current_branch: currentBranch,
-    health,
-    branch_exists: branchExists(sourceRoot, trackBranch),
-    commands: integrationCommands(sourceRoot, integrationWorktree, trackBranch, baseBranch, exists)
-  };
-}
-function integrationCommands(sourceRoot, integrationWorktree, branch, base, exists) {
-  if (exists) return [];
-  return [{
-    command: "git",
-    args: ["worktree", "add", integrationWorktree, branch],
-    fallback_args: ["worktree", "add", "-b", branch, integrationWorktree, base],
-    cwd: sourceRoot
-  }];
-}
-function ensureIntegrationWorktree(entry) {
-  if (entry.exists) {
-    if (entry.health !== "ready") return { ok: false, stage: "integration_worktree_health", entry, error: `Integration worktree for ${entry.repo} is ${entry.health}` };
-    return { ok: true, entry, created: false };
-  }
-  import_node_fs5.default.mkdirSync(import_node_path9.default.dirname(entry.integration_worktree), { recursive: true });
-  const args = entry.branch_exists ? ["worktree", "add", entry.integration_worktree, entry.track_branch] : ["worktree", "add", "-b", entry.track_branch, entry.integration_worktree, entry.base_branch];
-  const result = runCommand("git", args, { cwd: entry.source_root });
-  return {
-    ok: result.ok,
-    entry: { ...entry, exists: result.ok, current_branch: result.ok ? entry.track_branch : entry.current_branch, health: result.ok ? "ready" : entry.health },
-    created: result.ok,
-    command: { command: "git", args, cwd: entry.source_root },
-    result
-  };
-}
-function branchSetEntryForRepo(root2, track, repo, args = {}) {
-  return branchSetForTrack(root2, track, { ...args, repo: repo === MONOREPO_REPO_KEY ? void 0 : repo }).find((entry) => entry.repo === repo || repo === "." && entry.repo === MONOREPO_REPO_KEY) || null;
-}
-function taskRepo(root2, task, args = {}) {
-  const topology = loadTopology(root2);
-  if (!topology.polyrepo) return MONOREPO_REPO_KEY;
-  return asString(args.repo || task?.repo || topology.defaultRepo);
+function listWorkspaceFiles(root) {
+  const gitFiles = gitWorkspaceFiles(root);
+  return gitFiles.length > 0 ? gitFiles : walkWorkspaceFiles(root);
 }
 
 // src/core/application/runtime/track-context.ts
-var import_node_path10 = __toESM(require("node:path"));
-function findTrack(root2, trackId) {
-  return listTracks(root2).find((item) => item.track_id === trackId) || null;
+var import_node_path9 = __toESM(require("node:path"));
+function findTrack(root, trackId) {
+  return listTracks(root).find((item) => item.track_id === trackId) || null;
 }
-function trackContext(root2, trackId) {
-  const track = findTrack(root2, trackId);
+function trackContext(root, trackId) {
+  const track = findTrack(root, trackId);
   if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  const topology = loadTopology(root2);
+  const topology = loadTopology(root);
   const plan = parsePlanFile(track.plan_path);
   const hold = holdInfo(track);
-  const branchSet = branchSetForTrack(root2, track);
+  const branchSet = branchSetForTrack(root, track);
   const worktrees = [];
   if (track.metadata.worktree_path) {
-    const abs = import_node_path10.default.resolve(root2, track.metadata.worktree_path);
+    const abs = import_node_path9.default.resolve(root, track.metadata.worktree_path);
     worktrees.push({
       repo: ".",
       path: track.metadata.worktree_path,
@@ -1769,7 +1781,7 @@ function trackContext(root2, trackId) {
         repo,
         submodule_path: submodulePath,
         path: worktreePath,
-        exists: worktreePath ? fileExists(import_node_path10.default.resolve(root2, worktreePath)) : false,
+        exists: worktreePath ? fileExists(import_node_path9.default.resolve(root, worktreePath)) : false,
         git_branch: info.git_branch || `track/${track.track_id}`,
         base_branch: info.base_branch || "main"
       });
@@ -1777,7 +1789,7 @@ function trackContext(root2, trackId) {
   }
   return {
     ok: true,
-    root: root2,
+    root,
     topology: {
       polyrepo: topology.polyrepo,
       default_repo: topology.defaultRepo,
@@ -1791,9 +1803,9 @@ function trackContext(root2, trackId) {
       owner: track.metadata.owner || null,
       reviewer: track.metadata.reviewer || null,
       git_branch: track.metadata.git_branch || `track/${track.track_id}`,
-      metadata_path: import_node_path10.default.relative(root2, track.metadata_path || import_node_path10.default.join(track.dir, "metadata.json")),
-      plan_path: import_node_path10.default.relative(root2, track.plan_path),
-      spec_path: import_node_path10.default.relative(root2, track.spec_path),
+      metadata_path: import_node_path9.default.relative(root, track.metadata_path || import_node_path9.default.join(track.dir, "metadata.json")),
+      plan_path: import_node_path9.default.relative(root, track.plan_path),
+      spec_path: import_node_path9.default.relative(root, track.spec_path),
       tags: asStringArray(track.metadata.tags),
       review: track.metadata.review || null,
       last_coverage: track.metadata.last_coverage ?? null
@@ -1806,1990 +1818,9 @@ function trackContext(root2, trackId) {
   };
 }
 
-// src/core/application/runtime/review-records.ts
-var import_node_path20 = __toESM(require("node:path"));
-
-// src/core/application/runtime/quality-gates.ts
-var import_node_fs11 = __toESM(require("node:fs"));
-var import_node_path19 = __toESM(require("node:path"));
-
-// src/core/application/runtime/mcp-readiness.ts
-var OPTIONAL_CATEGORIES = [
-  {
-    kind: "code_search",
-    label: "Code search",
-    aliases: ["code_search", "codeSearch", "sourcegraph", "search"],
-    purpose: "Cross-repo semantic or indexed code search for repo maps, impact analysis, and claim suggestions.",
-    required: false,
-    recommended: true
-  },
-  {
-    kind: "issue_tracker",
-    label: "Issue tracker",
-    aliases: ["issue_tracker", "issueTracker", "jira", "linear", "github_issues", "gitlab_issues"],
-    purpose: "Link Cadre tracks, native workflow state, and provider issues without forcing agents through local CLI fallbacks.",
-    required: false,
-    recommended: true
-  },
-  {
-    kind: "ci",
-    label: "CI/checks",
-    aliases: ["ci", "checks", "github_actions", "gitlab_ci", "buildkite", "circleci"],
-    purpose: "Fetch check, pipeline, and workflow evidence for review/ship gates.",
-    required: false,
-    recommended: true
-  },
-  {
-    kind: "observability",
-    label: "Observability",
-    aliases: ["observability", "logging", "telemetry", "sentry", "datadog", "honeycomb"],
-    purpose: "Pull production error, log, and telemetry context for review and release readiness.",
-    required: false,
-    recommended: true
-  },
-  {
-    kind: "knowledge_base",
-    label: "Knowledge base",
-    aliases: ["knowledge_base", "knowledgeBase", "kb", "docs", "confluence", "notion"],
-    purpose: "Retrieve team documentation and runbooks without embedding large docs in packet responses.",
-    required: false,
-    recommended: true
-  }
-];
-function capabilityEvidence(args) {
-  const raw = args.mcpCapabilities || args.mcp_capabilities || null;
-  return isRecord(raw) ? asJsonObject(raw) : {};
-}
-function valueAvailable(value) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const lower = value.trim().toLowerCase();
-    if (!lower) return null;
-    if (["false", "0", "no", "off", "missing", "unavailable", "disabled"].includes(lower)) return false;
-    return true;
-  }
-  if (!isRecord(value)) return null;
-  const object = asJsonObject(value);
-  if (typeof object.available === "boolean") return object.available;
-  if (typeof object.enabled === "boolean") return object.enabled;
-  if (typeof object.configured === "boolean") return object.configured;
-  if (object.server || object.tool || object.tools || object.capability) return true;
-  return null;
-}
-function probeNestedMap(map, aliases, source) {
-  for (const alias of aliases) {
-    if (!Object.prototype.hasOwnProperty.call(map, alias)) continue;
-    const value = map[alias];
-    return {
-      available: valueAvailable(value),
-      source: `${source}.${alias}`,
-      evidence: isRecord(value) ? asJsonObject(value) : { value },
-      missing: []
-    };
-  }
-  return null;
-}
-function probeTools(evidence, aliases) {
-  const tools = Array.isArray(evidence.tools) ? evidence.tools : [];
-  const servers = Array.isArray(evidence.servers) ? evidence.servers : [];
-  const values = [...tools, ...servers].map((item) => {
-    if (typeof item === "string") return item;
-    if (isRecord(item)) {
-      const object = asJsonObject(item);
-      return asOptionalString(object.name) || asOptionalString(object.id) || asOptionalString(object.server) || "";
-    }
-    return "";
-  }).filter(Boolean);
-  const found = values.find((value) => aliases.some((alias) => value.toLowerCase().includes(alias.toLowerCase())));
-  if (!found) return null;
-  return {
-    available: true,
-    source: "mcpCapabilities.tools",
-    evidence: { match: found },
-    missing: []
-  };
-}
-function probeCapability(args, aliases, argFallbacks = []) {
-  for (const fallback of argFallbacks) {
-    const value = args[fallback];
-    if (typeof value === "boolean") {
-      return {
-        available: value,
-        source: `args.${fallback}`,
-        evidence: { [fallback]: value },
-        missing: []
-      };
-    }
-  }
-  const evidence = capabilityEvidence(args);
-  if (Object.keys(evidence).length === 0) {
-    return {
-      available: null,
-      source: "not_provided",
-      evidence: null,
-      missing: ["mcpCapabilities"]
-    };
-  }
-  const direct = probeNestedMap(evidence, aliases, "mcpCapabilities");
-  if (direct) return direct;
-  for (const containerName of ["servers", "mcpServers", "capabilities", "apps", "connectors"]) {
-    const container = evidence[containerName];
-    if (isRecord(container)) {
-      const nested = probeNestedMap(asJsonObject(container), aliases, `mcpCapabilities.${containerName}`);
-      if (nested) return nested;
-    }
-  }
-  const tools = probeTools(evidence, aliases);
-  if (tools) return tools;
-  return {
-    available: null,
-    source: "not_detected",
-    evidence: null,
-    missing: aliases.map((alias) => `mcpCapabilities.${alias}`)
-  };
-}
-function configConfigured(root2, aliases) {
-  const config = loadTopology(root2).config || {};
-  const integrations = isRecord(config.integrations) ? asJsonObject(config.integrations) : {};
-  return aliases.some(
-    (alias) => Object.prototype.hasOwnProperty.call(config, alias) || Object.prototype.hasOwnProperty.call(integrations, alias)
-  );
-}
-function readinessEntry(root2, category, args) {
-  const probe = probeCapability(args, category.aliases);
-  return {
-    kind: category.kind,
-    label: category.label,
-    required: category.required,
-    recommended: category.recommended,
-    configured: configConfigured(root2, category.aliases),
-    available: probe.available,
-    evidence_source: probe.source,
-    detected_agent_capability_evidence: probe.evidence,
-    missing_evidence_fields: probe.available == null ? probe.missing : [],
-    purpose: category.purpose
-  };
-}
-function providerReadiness(root2, args = {}) {
-  const provider = providerMcpAvailability(root2, args);
-  const mode = asOptionalString(provider.provider_mode) || "local";
-  if (mode === "local") {
-    return {
-      kind: "provider",
-      label: "Provider MCP",
-      provider_mode: "local",
-      required: false,
-      recommended: false,
-      available: true,
-      evidence_source: "provider_mode_local",
-      detected_agent_capability_evidence: null,
-      missing_evidence_fields: [],
-      required_provider_mcp: null,
-      exact_write_back_packet: null,
-      reason: "provider_mode is local; provider MCP evidence is not required"
-    };
-  }
-  const probe = probeCapability(args, [mode, `${mode}_mcp`, `${mode}Mcp`, "provider", "provider_mcp"], [
-    "providerMcpAvailable",
-    "provider_mcp_available",
-    mode === "github" ? "githubMcpAvailable" : "gitlabMcpAvailable"
-  ]);
-  const available = probe.available ?? (typeof provider.available === "boolean" ? provider.available : null);
-  return {
-    kind: "provider",
-    label: "Provider MCP",
-    provider_mode: mode,
-    required: true,
-    recommended: true,
-    available,
-    evidence_source: probe.available == null && provider.available != null ? asOptionalString(provider.availability_source) || "caller" : probe.source,
-    detected_agent_capability_evidence: probe.evidence,
-    missing_evidence_fields: available == null ? probe.missing : [],
-    required_provider_mcp: isRecord(provider.required_provider_mcp) ? asJsonObject(provider.required_provider_mcp) : {
-      provider: mode,
-      server: mode,
-      purpose: "Fetch PR/MR metadata, reviews, CI/check status, and discussion evidence."
-    },
-    exact_write_back_packet: {
-      tool: "cadre_review",
-      action: "provider_evidence",
-      required_fields: ["root", "trackId", "providerEvidence"]
-    },
-    reason: available == null ? `${mode} provider mode requires packet-owned evidence that the agent can access the ${mode} MCP` : null
-  };
-}
-function mcpReadiness(root2, args = {}) {
-  const provider = providerReadiness(root2, args);
-  const optional = OPTIONAL_CATEGORIES.map((category) => readinessEntry(root2, category, args));
-  const all = [provider, ...optional];
-  const missingRequired = all.filter((entry) => entry.required === true && entry.available !== true);
-  const optionalAvailable = optional.filter((entry) => entry.available === true).length;
-  return {
-    ok: missingRequired.length === 0,
-    root: root2,
-    provider,
-    optional_mcps: optional,
-    summary: {
-      required_count: all.filter((entry) => entry.required === true).length,
-      missing_required_count: missingRequired.length,
-      optional_recommended_count: optional.length,
-      optional_available_count: optionalAvailable,
-      optional_configured_count: optional.filter((entry) => entry.configured === true).length,
-      packet_owned_evidence_only: true
-    },
-    recommendations: optional.filter((entry) => entry.available !== true).map((entry) => ({
-      kind: entry.kind,
-      label: entry.label,
-      required: false,
-      reason: "Optional MCP improves team-scale visibility but is not mandatory."
-    }))
-  };
-}
-
-// src/core/application/runtime/project-maintenance.ts
-var import_node_fs6 = __toESM(require("node:fs"));
-var import_node_path12 = __toESM(require("node:path"));
-var import_node_child_process3 = require("node:child_process");
-
-// src/runtime-paths.ts
-var import_node_path11 = __toESM(require("node:path"));
-function unique(values) {
-  return Array.from(new Set(values));
-}
-function mcpServerPathCandidates(root2) {
-  const candidates = [];
-  let dir = __dirname;
-  for (let depth = 0; depth < 8; depth += 1) {
-    candidates.push(import_node_path11.default.join(dir, "cadre-server.js"));
-    candidates.push(import_node_path11.default.join(dir, "mcp", "cadre-server.js"));
-    candidates.push(import_node_path11.default.join(dir, "scripts", "mcp", "cadre-server.js"));
-    const parent = import_node_path11.default.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  if (root2) candidates.push(import_node_path11.default.join(root2, "cadre", "scripts", "mcp", "cadre-server.js"));
-  return unique(candidates);
-}
-
-// src/core/application/runtime/project-maintenance.ts
-function lspReview(root2, args = {}) {
-  const candidates = mcpServerPathCandidates(root2);
-  const helper = candidates.find(fileExists);
-  if (!helper) return { available: false, reason: "No Cadre MCP runtime found for LSP review", checked: candidates };
-  const commandArgs = [helper, "--cadre-lsp-review", "--base", args.base || "main", "--head", args.head || "HEAD", "--json"];
-  if (args.config) commandArgs.push("--config", args.config);
-  const result = runCommand("node", commandArgs, { cwd: root2 });
-  if (!result.ok) {
-    return { available: false, reason: "LSP review helper failed", helper, result };
-  }
-  try {
-    return { helper, ...asJsonObject(JSON.parse(result.stdout || "{}")) };
-  } catch {
-    return { available: false, reason: "LSP review helper returned invalid JSON", helper, result };
-  }
-}
-function polyrepoPreflight(root2) {
-  const topology = loadTopology(root2);
-  if (!topology.polyrepo) {
-    return { ok: true, polyrepo: false, checks: ["monorepo mode"] };
-  }
-  const checks = [];
-  const errors = [];
-  const gitmodules = import_node_path12.default.join(root2, ".gitmodules");
-  for (const repo of topology.repos.repos || []) {
-    if (repo.enabled === false) continue;
-    const repoPath = import_node_path12.default.join(root2, repo.submodule_path || "");
-    if (!repo.name) errors.push("repo entry missing name");
-    if (!repo.submodule_path) errors.push(`repo ${repo.name || "?"} missing submodule_path`);
-    if (repo.submodule_path && !fileExists(repoPath)) {
-      errors.push(`repo ${repo.name} path is missing: ${repo.submodule_path}`);
-    }
-    if (fileExists(gitmodules) && repo.name) {
-      const result = (0, import_node_child_process3.spawnSync)(
-        "git",
-        ["config", "-f", ".gitmodules", "--get", `submodule.${repo.name}.path`],
-        { cwd: root2, encoding: "utf8" }
-      );
-      if (result.status === 0 && result.stdout.trim() !== repo.submodule_path) {
-        errors.push(
-          `repo ${repo.name} submodule_path mismatch: repos.json=${repo.submodule_path}, .gitmodules=${result.stdout.trim()}`
-        );
-      }
-    }
-    if (repo.name) checks.push(repo.name);
-  }
-  return { ok: errors.length === 0, polyrepo: true, checks, errors };
-}
-function regenIndex(root2, options = {}) {
-  if (options.lock !== false) {
-    return withLock(root2, "tracks-index", () => regenIndex(root2, { ...options, lock: false }));
-  }
-  const tracksFile = import_node_path12.default.join(root2, "cadre", "tracks.json");
-  const legacyMarkdownFile = import_node_path12.default.join(root2, "cadre", "tracks.md");
-  const tracks = listTracks(root2).sort((a, b) => a.track_id.localeCompare(b.track_id));
-  const payload = trackIndexPayload(root2, tracks);
-  import_node_fs6.default.mkdirSync(import_node_path12.default.dirname(tracksFile), { recursive: true });
-  writeJson(tracksFile, payload);
-  let removedLegacyMarkdown = null;
-  if (fileExists(legacyMarkdownFile)) {
-    const legacy = import_node_fs6.default.readFileSync(legacyMarkdownFile, "utf8");
-    if (hasGeneratedMarker(legacy) || legacy.includes("<!-- cadre:index:start -->") || legacy.includes("<!-- cadre:index:end -->")) {
-      import_node_fs6.default.rmSync(legacyMarkdownFile, { force: true });
-      removedLegacyMarkdown = import_node_path12.default.relative(root2, legacyMarkdownFile);
-    }
-  }
-  return {
-    ok: true,
-    tracks_file: tracksFile,
-    tracks: tracks.length,
-    removed_legacy_markdown: removedLegacyMarkdown,
-    stdout: `Regenerated ${tracksFile} index from ${tracks.length} tracks' metadata.
-`,
-    stderr: ""
-  };
-}
-
-// src/core/application/runtime/repo-map.ts
-var import_node_fs7 = __toESM(require("node:fs"));
-var import_node_path14 = __toESM(require("node:path"));
-
-// src/core/application/runtime/workspace-cache.ts
-var import_node_child_process4 = require("node:child_process");
-var import_node_path13 = __toESM(require("node:path"));
-var CACHE = /* @__PURE__ */ new Map();
-var DEFAULT_TTL_MS = 3e4;
-function gitHead(root2) {
-  const result = (0, import_node_child_process4.spawnSync)("git", ["rev-parse", "HEAD"], {
-    cwd: root2,
-    encoding: "utf8",
-    maxBuffer: 1024 * 1024
-  });
-  return result.status === 0 ? result.stdout.trim() || "unknown" : "nogit";
-}
-function workspaceCacheKey(root2, scope, discriminator = "") {
-  return JSON.stringify({
-    root: import_node_path13.default.resolve(root2),
-    head: gitHead(root2),
-    scope,
-    discriminator
-  });
-}
-function cachedWorkspaceValue(root2, scope, discriminator, producer, ttlMs = DEFAULT_TTL_MS) {
-  const key = workspaceCacheKey(root2, scope, discriminator);
-  const now = Date.now();
-  const existing = CACHE.get(key);
-  if (existing && now - existing.createdAt <= ttlMs) return existing.value;
-  const value = producer();
-  CACHE.set(key, { value, createdAt: now });
-  if (CACHE.size > 200) {
-    const oldest = Array.from(CACHE.entries()).sort((a, b) => a[1].createdAt - b[1].createdAt).slice(0, 40);
-    for (const [oldKey] of oldest) CACHE.delete(oldKey);
-  }
-  return value;
-}
-
-// src/core/application/runtime/repo-map.ts
-function isIgnoredRepoMapFile(file) {
-  const normalized = String(file || "").replace(/\\/g, "/");
-  if (!normalized) return true;
-  if (normalized.startsWith(".agents/")) return true;
-  if (normalized.startsWith(".claude/")) return true;
-  if (normalized.startsWith(".claude-plugin/")) return true;
-  if (normalized.startsWith(".copilot/")) return true;
-  if (normalized.startsWith(".gemini/")) return true;
-  if (normalized.startsWith("plugins/cadre/")) return true;
-  if (normalized.startsWith("plugins/cadre-claude/")) return true;
-  if (normalized.startsWith("plugins/cadre-copilot/")) return true;
-  if (normalized.startsWith("plugins/cadre-antigravity/")) return true;
-  return normalized.split("/").some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
-}
-function selectedRepoNames(args = {}) {
-  const values = [
-    asOptionalString(args.repo),
-    ...asStringArray(args.repos)
-  ].filter((value) => Boolean(value));
-  return values.length > 0 ? new Set(values) : null;
-}
-function intelRepoRoots(root2, args = {}) {
-  const selected = selectedRepoNames(args);
-  const topology = loadTopology(root2);
-  const control = {
-    repo: ".",
-    root: root2,
-    path: ".",
-    source: "control-root"
-  };
-  if (!topology.polyrepo) return selected && !selected.has(".") ? [] : [control];
-  const entries = [control];
-  for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
-    const repo = asJsonObject(raw);
-    if (repo.enabled === false) continue;
-    const name = asOptionalString(repo.name);
-    const rel = asOptionalString(repo.submodule_path);
-    if (!name || !rel) continue;
-    entries.push({
-      repo: name,
-      root: import_node_path14.default.resolve(root2, rel),
-      path: rel,
-      source: "repos.json"
-    });
-  }
-  return selected ? entries.filter((entry) => selected.has(entry.repo)) : entries;
-}
-function combineLanguageCounts(entries) {
-  const counts = {};
-  for (const entry of entries) {
-    const languages = asJsonObject(entry.by_language);
-    for (const [language, count] of Object.entries(languages)) {
-      counts[language] = (counts[language] || 0) + Number(count || 0);
-    }
-  }
-  return Object.fromEntries(Object.entries(counts).sort());
-}
-var GENERIC_SYMBOL_PATTERNS = [
-  /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
-  /\b(?:export\s+)?(?:class|interface|type|enum|struct|record|trait)\s+([A-Za-z_$][\w$]*)\b/g,
-  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g
-];
-var LANGUAGE_SYMBOL_PATTERNS = {
-  python: [/^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\b/gm, /^\s*class\s+([A-Za-z_][\w]*)\b/gm],
-  go: [/^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm, /^\s*type\s+([A-Za-z_][\w]*)\s+/gm],
-  rust: [/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:pub\s+)?(?:struct|enum|trait|type)\s+([A-Za-z_][\w]*)\b/gm],
-  java: [/^\s*(?:public|private|protected|static|final|abstract|sealed|non-sealed|\s)*(?:class|interface|enum|record)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|static|final|abstract|synchronized|native|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
-  kotlin: [/^\s*(?:public|private|protected|internal|open|final|abstract|data|sealed|\s)*(?:class|interface|object|enum|typealias)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|suspend|inline|tailrec|operator|infix|fun|\s)*fun\s+([A-Za-z_][\w]*)\b/gm],
-  swift: [/^\s*(?:public|private|internal|open|fileprivate|static|final|mutating|nonmutating|\s)*(?:func|class|struct|enum|protocol)\s+([A-Za-z_][\w]*)\b/gm],
-  csharp: [/^\s*(?:public|private|protected|internal|static|partial|sealed|abstract|virtual|override|\s)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|static|async|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
-  ruby: [/^\s*(?:class|module|def)\s+([A-Za-z_][\w!?=]*)\b/gm],
-  elixir: [/^\s*(?:defmodule|defp?|defmacro)\s+([A-Za-z_][\w!?]*)\b/gm],
-  lua: [/^\s*(?:local\s+)?function\s+([A-Za-z_][\w.]*)\b/gm],
-  terraform: [/^\s*(?:resource|module|variable|output|data)\s+"?([A-Za-z0-9_.-]+)"?/gim],
-  sql: [/^\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE)\s+([A-Za-z_][\w."]*)\b/gim],
-  shell: [/^\s*function\s+([A-Za-z_][\w-]*)\b/gm, /^\s*(?:local\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{/gm]
-};
-function symbolPatternsForLanguage(language) {
-  return [...GENERIC_SYMBOL_PATTERNS, ...LANGUAGE_SYMBOL_PATTERNS[language] || []].map(
-    (pattern) => new RegExp(pattern.source, pattern.flags)
-  );
-}
-function extractRepoSymbols(root2, file, limitPerFile = 40) {
-  const abs = import_node_path14.default.join(root2, file);
-  if (!fileExists(abs)) return [];
-  let stat;
-  try {
-    stat = import_node_fs7.default.statSync(abs);
-  } catch {
-    return [];
-  }
-  if (stat.size > 1024 * 1024) return [];
-  const language = languageForFile(file);
-  if (!language) return [];
-  const text2 = import_node_fs7.default.readFileSync(abs, "utf8");
-  const patterns = symbolPatternsForLanguage(language);
-  const symbols = [];
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text2)) && symbols.length < limitPerFile) {
-      const prefix = text2.slice(0, match.index);
-      const line = prefix.split(/\r?\n/).length;
-      const name = match[1];
-      if (name) symbols.push({ name, file, line, language });
-    }
-  }
-  return symbols;
-}
-function repoMap(root2, args = {}) {
-  const limit = Number(args.limit || 200);
-  const symbol = args.symbol ? String(args.symbol) : null;
-  const repos = intelRepoRoots(root2, args);
-  if (symbol) {
-    const repoResults = repos.map((entry) => {
-      const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: entry.root, maxBuffer: 10 * 1024 * 1024 });
-      const matches2 = result.stdout.split(/\r?\n/).filter(Boolean).filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || "")).slice(0, limit).map((line) => {
-        const [file, lineNo, ...rest] = line.split(":");
-        return { repo: entry.repo, file: file || "", line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
-      });
-      return { repo: entry.repo, root: entry.root, path: entry.path, ok: result.ok || matches2.length > 0, matches: matches2, truncated: matches2.length >= limit };
-    });
-    const matches = repoResults.flatMap((entry) => asArray(entry.matches)).slice(0, limit);
-    return { ok: repoResults.some((entry) => entry.ok) || matches.length > 0, root: root2, symbol, matches, repos: repoResults, truncated: matches.length >= limit };
-  }
-  return cachedWorkspaceValue(root2, "repo-map", JSON.stringify({ limit, repos: repos.map((entry) => entry.repo) }), () => {
-    const repoResults = repos.map((entry) => {
-      const files2 = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
-      const byLanguage = {};
-      const symbols2 = [];
-      for (const file of files2) {
-        const language = languageForFile(file);
-        if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
-        if (symbols2.length < limit) symbols2.push(...extractRepoSymbols(entry.root, file, 12).map((symbolEntry) => ({
-          ...symbolEntry,
-          repo: entry.repo
-        })));
-        if (symbols2.length > limit) symbols2.length = limit;
-      }
-      return {
-        ok: true,
-        repo: entry.repo,
-        root: entry.root,
-        path: entry.path,
-        files: files2.length,
-        by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
-        symbols: symbols2,
-        truncated: symbols2.length >= limit
-      };
-    });
-    const files = repoResults.reduce((sum, entry) => sum + Number(entry.files || 0), 0);
-    const symbols = repoResults.flatMap((entry) => asArray(entry.symbols)).slice(0, limit);
-    return {
-      ok: true,
-      root: root2,
-      files,
-      by_language: combineLanguageCounts(repoResults),
-      symbols,
-      repos: repoResults,
-      truncated: symbols.length >= limit
-    };
-  });
-}
-
-// src/core/application/runtime/track-mutations.ts
-var import_node_path18 = __toESM(require("node:path"));
-
-// src/core/domain/track-status.ts
-var STATUS_MARKERS = {
-  new: "[ ]",
-  in_progress: "[~]",
-  completed: "[x]",
-  blocked: "[!]",
-  skipped: "[-]"
-};
-var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
-
-// src/core/application/runtime/native-state.ts
-var import_node_fs8 = __toESM(require("node:fs"));
-var import_node_path15 = __toESM(require("node:path"));
-function nativeStatePaths(root2) {
-  return {
-    events: import_node_path15.default.join(root2, "cadre", "events.jsonl"),
-    formulas: import_node_path15.default.join(root2, "cadre", "formulas"),
-    operations: import_node_path15.default.join(root2, "cadre", "operations"),
-    messages: import_node_path15.default.join(root2, "cadre", "messages"),
-    inbox: import_node_path15.default.join(root2, "cadre", "messages", "inbox.jsonl"),
-    outbox: import_node_path15.default.join(root2, "cadre", "messages", "outbox.jsonl"),
-    wisps: import_node_path15.default.join(root2, "cadre", "local", "wisps")
-  };
-}
-function compactStamp(value) {
-  return value.replace(/[^0-9A-Za-z]+/g, "").slice(0, 16);
-}
-function nativeId(prefix, payload) {
-  const recordedAt = asOptionalString(payload.recorded_at) || utcNow();
-  return `${prefix}_${compactStamp(recordedAt)}_${textHash(JSON.stringify(payload)).slice(0, 12)}`;
-}
-function readJsonlObjects(file, limit = 200) {
-  if (!fileExists(file)) return [];
-  const lines = import_node_fs8.default.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
-  const selected = limit > 0 ? lines.slice(-limit) : lines;
-  const out = [];
-  for (const line of selected) {
-    try {
-      out.push(asJsonObject(JSON.parse(line)));
-    } catch {
-    }
-  }
-  return out;
-}
-function countJsonlLines(file) {
-  if (!fileExists(file)) return 0;
-  return import_node_fs8.default.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).length;
-}
-function ensureCadreLocalIgnored(root2) {
-  const cadreDir = import_node_path15.default.join(root2, "cadre");
-  const ignorePath = import_node_path15.default.join(cadreDir, ".gitignore");
-  import_node_fs8.default.mkdirSync(cadreDir, { recursive: true });
-  const current = fileExists(ignorePath) ? import_node_fs8.default.readFileSync(ignorePath, "utf8") : "";
-  const lines = current.split(/\r?\n/).filter(Boolean);
-  if (!lines.includes("/local/")) {
-    lines.push("/local/");
-    import_node_fs8.default.writeFileSync(ignorePath, `${lines.join("\n")}
-`);
-    return import_node_path15.default.relative(root2, ignorePath);
-  }
-  return null;
-}
-function ensureNativeState(root2) {
-  const paths = nativeStatePaths(root2);
-  for (const dir of [
-    asOptionalString(paths.formulas),
-    asOptionalString(paths.operations),
-    asOptionalString(paths.messages),
-    asOptionalString(paths.wisps)
-  ].filter((value) => Boolean(value))) {
-    import_node_fs8.default.mkdirSync(dir, { recursive: true });
-  }
-  const ignore_path = ensureCadreLocalIgnored(root2);
-  return {
-    ok: true,
-    paths: {
-      events: import_node_path15.default.relative(root2, String(paths.events)),
-      formulas: import_node_path15.default.relative(root2, String(paths.formulas)),
-      operations: import_node_path15.default.relative(root2, String(paths.operations)),
-      messages: import_node_path15.default.relative(root2, String(paths.messages)),
-      wisps: import_node_path15.default.relative(root2, String(paths.wisps))
-    },
-    ignore_path
-  };
-}
-function appendCadreEvent(root2, event) {
-  ensureNativeState(root2);
-  const recorded_at = asOptionalString(event.recorded_at) || utcNow();
-  const kind = asOptionalString(event.kind || event.type) || "event";
-  const actor = asOptionalString(event.actor) || gitIdentity(root2) || null;
-  const entry = {
-    ...event,
-    version: 1,
-    schema: "cadre.event.v1",
-    id: asOptionalString(event.id) || nativeId("evt", { ...event, recorded_at, kind }),
-    kind,
-    recorded_at,
-    actor
-  };
-  const file = import_node_path15.default.join(root2, "cadre", "events.jsonl");
-  appendJsonl(file, entry);
-  return { ok: true, path: import_node_path15.default.relative(root2, file), event: entry };
-}
-function readCadreEvents(root2, limit = 50) {
-  return readJsonlObjects(import_node_path15.default.join(root2, "cadre", "events.jsonl"), limit);
-}
-function appendCadreMessage(root2, box, message) {
-  ensureNativeState(root2);
-  const recorded_at = asOptionalString(message.recorded_at) || utcNow();
-  const direction = box === "outbox" ? "outgoing" : "incoming";
-  const entry = {
-    ...message,
-    version: 1,
-    schema: "cadre.message.v1",
-    id: asOptionalString(message.id) || nativeId(`msg_${box}`, { ...message, recorded_at, direction }),
-    box,
-    direction,
-    status: asOptionalString(message.status) || "pending",
-    recorded_at,
-    from: asOptionalString(message.from) || gitIdentity(root2) || null
-  };
-  const file = import_node_path15.default.join(root2, "cadre", "messages", `${box}.jsonl`);
-  appendJsonl(file, entry);
-  return { ok: true, path: import_node_path15.default.relative(root2, file), message: entry };
-}
-function readCadreMessages(root2, box, limit = 50) {
-  return readJsonlObjects(import_node_path15.default.join(root2, "cadre", "messages", `${box}.jsonl`), limit);
-}
-function nativeStateSummary(root2) {
-  const paths = nativeStatePaths(root2);
-  return {
-    ok: true,
-    paths: {
-      events: import_node_path15.default.relative(root2, String(paths.events)),
-      inbox: import_node_path15.default.relative(root2, String(paths.inbox)),
-      outbox: import_node_path15.default.relative(root2, String(paths.outbox)),
-      operations: import_node_path15.default.relative(root2, String(paths.operations)),
-      formulas: import_node_path15.default.relative(root2, String(paths.formulas)),
-      wisps: import_node_path15.default.relative(root2, String(paths.wisps))
-    },
-    counts: {
-      events: countJsonlLines(String(paths.events)),
-      inbox: countJsonlLines(String(paths.inbox)),
-      outbox: countJsonlLines(String(paths.outbox))
-    },
-    recent_events: readCadreEvents(root2, 8),
-    recent_inbox: readCadreMessages(root2, "inbox", 8),
-    recent_outbox: readCadreMessages(root2, "outbox", 8)
-  };
-}
-
-// src/core/application/runtime/commit-trace.ts
-var import_node_path16 = __toESM(require("node:path"));
-var import_node_fs9 = __toESM(require("node:fs"));
-var DEFAULT_NOTES_REF = "refs/notes/cadre";
-function configured(root2) {
-  return fileExists(import_node_path16.default.join(root2, "cadre", "config.json"));
-}
-function traceability(root2) {
-  return asJsonObject(loadTopology(root2).config.traceability);
-}
-function traceEnabled(root2, kind, args, force = false) {
-  const mode = asOptionalString(args.commitMode || args.commit_mode)?.toLowerCase();
-  if (["off", "none", "manual", "false"].includes(mode || "")) return false;
-  if (force) return true;
-  if (!configured(root2)) return false;
-  const trace = traceability(root2);
-  if (Object.keys(trace).length === 0) return false;
-  if (trace.enabled === false) return false;
-  if (kind === "product") return trace.auto_product_commits !== false;
-  if (kind === "control") return trace.auto_control_commits !== false;
-  return trace.auto_automation_commits !== false;
-}
-function notesRef(root2, args = {}) {
-  return asOptionalString(args.notesRef || args.notes_ref) || asOptionalString(traceability(root2).notes_ref) || DEFAULT_NOTES_REF;
-}
-function notesEnabled(root2) {
-  const trace = traceability(root2);
-  return trace.git_notes !== false && trace.notes !== false;
-}
-function notesPushEnabled(root2) {
-  return traceability(root2).push_notes !== false;
-}
-function statusEntries(cwd) {
-  const result = runCommand("git", ["status", "--porcelain", "--untracked-files=all"], { cwd });
-  if (!result.ok) return {};
-  const entries = {};
-  for (const line of result.stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const status = line.slice(0, 2);
-    const rawPath = line.slice(3).trim();
-    const file = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() || "" : rawPath;
-    const normalized = file.replace(/^"|"$/g, "");
-    if (normalized) entries[normalized] = status;
-  }
-  return entries;
-}
-function beginTrace(cwd) {
-  const gitRoot2 = runCommand("git", ["rev-parse", "--show-toplevel"], { cwd });
-  if (!gitRoot2.ok) {
-    return {
-      ok: true,
-      cwd,
-      entries: {},
-      dirty_files: [],
-      skipped: true,
-      reason: "not a git repository"
-    };
-  }
-  const root2 = gitRoot2.stdout.trim() || cwd;
-  const entries = statusEntries(root2);
-  return {
-    ok: true,
-    cwd: root2,
-    git_root: root2,
-    entries,
-    dirty_files: Object.keys(entries).sort()
-  };
-}
-function isControlPlaneFile2(file) {
-  const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (normalized.startsWith("cadre/local/")) return false;
-  if (normalized.startsWith("cadre/.locks/")) return false;
-  if (normalized.includes(".tmp")) return false;
-  return normalized.startsWith("cadre/") || normalized === ".gitattributes" || normalized === ".gitmodules" || normalized === ".gitlab-ci.yml" || normalized === "cadre-merge-train.gitlab-ci.yml" || normalized.startsWith(".github/workflows/cadre-");
-}
-function changedAfter(before, after) {
-  const beforeEntries = asJsonObject(before?.entries);
-  return Object.entries(after).filter(([file, status]) => beforeEntries[file] !== status).map(([file]) => file).sort();
-}
-function uniqueFiles(files) {
-  return Array.from(new Set(files.map((file) => file.replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean))).sort();
-}
-function projectionGuard(root2, files) {
-  const touched = new Set(uniqueFiles(files));
-  const errors = [];
-  const checked = [];
-  for (const definition of artifactDefinitions(root2, { includeArchive: true })) {
-    if (!definition.projection || !touched.has(definition.canonical)) continue;
-    const canonical = import_node_path16.default.join(root2, definition.canonical);
-    const projection = import_node_path16.default.join(root2, definition.projection);
-    checked.push(definition.canonical);
-    if (!fileExists(canonical) || !fileExists(projection)) {
-      errors.push(`Canonical/projection pair is incomplete: ${definition.canonical} -> ${definition.projection}`);
-      continue;
-    }
-    const marker = import_node_fs9.default.readFileSync(projection, "utf8").match(/<!--\s*cadre:generated\b[^>]*canonical_hash="([a-f0-9]+)"[^>]*-->/i);
-    const expected = textHash(import_node_fs9.default.readFileSync(canonical, "utf8")).slice(0, 16);
-    if (!marker?.[1] || marker[1] !== expected) {
-      errors.push(`Projection marker is stale for ${definition.canonical}: ${definition.projection}`);
-    }
-  }
-  return { ok: errors.length === 0, checked, errors, ...errors.length ? { error: errors[0] } : {} };
-}
-function conventionalSubject(type, scope, subject) {
-  const cleanType = type.replace(/[^a-z0-9-]/gi, "").toLowerCase() || "cadre";
-  const cleanScope = scope.replace(/[^a-z0-9_.-]/gi, "-").toLowerCase() || "trace";
-  return `${cleanType}(${cleanScope}): ${subject.trim() || "record trace"}`;
-}
-function messageBody(body, footers) {
-  const footerText = Object.entries(footers).filter((entry) => Boolean(entry[1])).map(([key, value]) => `${key}: ${value}`).join("\n");
-  return [body?.trim() || "", footerText].filter(Boolean).join("\n\n");
-}
-function commandOk(result) {
-  return result.ok === true;
-}
-function commitSha(cwd) {
-  const result = runCommand("git", ["rev-parse", "HEAD"], { cwd });
-  return result.ok ? result.stdout.trim() || null : null;
-}
-function writeNote(cwd, ref, sha2, note) {
-  return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}
-`, sha2], { cwd });
-}
-function commitTrace(root2, args, options) {
-  if (!traceEnabled(root2, options.kind, args, options.forceEnabled === true)) {
-    return { ok: true, skipped: true, reason: "traceability disabled or unconfigured" };
-  }
-  const cwd = options.cwd || root2;
-  const snapshot = options.before || beginTrace(cwd);
-  if (snapshot.skipped) return { ok: true, skipped: true, reason: snapshot.reason || "git unavailable" };
-  const gitRoot2 = asOptionalString(snapshot.git_root) || cwd;
-  const after = statusEntries(gitRoot2);
-  const requestedFiles = options.files ? uniqueFiles(options.files) : uniqueFiles([
-    ...changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile2(file) : isControlPlaneFile2(file)),
-    ...options.includeDirtyFiles || []
-  ]);
-  const files = requestedFiles.filter((file) => after[file]);
-  if (files.length === 0) return { ok: true, skipped: true, reason: "no changed files to commit" };
-  const projections = projectionGuard(root2, files);
-  if (projections.ok === false) return { ok: false, stage: "projection_drift", files, projection_validation: projections, error: projections.error };
-  const beforeEntries = asJsonObject(snapshot.entries);
-  const preexisting = files.filter((file) => beforeEntries[file]);
-  const allowDirty = options.allowDirty === true || args.allowDirty === true || args.allow_dirty === true;
-  if (preexisting.length > 0 && !allowDirty) {
-    return {
-      ok: false,
-      stage: "preexisting_dirty_files",
-      reason: "Refusing to commit files that were dirty before this packet",
-      files,
-      preexisting_dirty_files: preexisting
-    };
-  }
-  const add = runCommand("git", ["add", "-A", "--", ...files], { cwd: gitRoot2 });
-  if (!add.ok) return { ok: false, stage: "git_add", files, add };
-  const staged = runCommand("git", ["diff", "--cached", "--quiet"], { cwd: gitRoot2 });
-  if (staged.status === 0) return { ok: true, skipped: true, reason: "no staged changes", files };
-  const traceId = `trace_${textHash(JSON.stringify({ root: root2, files, now: utcNow(), workflow: options.workflow })).slice(0, 16)}`;
-  const type = asOptionalString(args.commitType || args.commit_type) || options.type || (options.kind === "product" ? "feat" : "cadre");
-  const scope = asOptionalString(args.commitScope || args.commit_scope) || options.scope || options.workflow;
-  const subject = asOptionalString(args.commitSubject || args.commit_subject) || options.subject;
-  const fullSubject = conventionalSubject(type, scope, subject);
-  const body = asOptionalString(args.commitBody || args.commit_body) || options.body;
-  const commitBody = messageBody(body, {
-    "Cadre-Trace-Id": traceId,
-    "Cadre-Workflow": options.workflow,
-    "Cadre-Track": options.trackId || null,
-    "Cadre-Repo": options.repo || null
-  });
-  const commit = runCommand("git", [
-    "-c",
-    "commit.gpgsign=false",
-    "-c",
-    "user.name=Cadre",
-    "-c",
-    "user.email=cadre@local.invalid",
-    "commit",
-    "-m",
-    fullSubject,
-    "-m",
-    commitBody
-  ], { cwd: gitRoot2 });
-  if (!commit.ok) return { ok: false, stage: "git_commit", files, commit };
-  const sha2 = commitSha(gitRoot2);
-  const notePayload = {
-    version: 1,
-    schema: "cadre.commit_trace.v1",
-    trace_id: traceId,
-    kind: options.kind,
-    workflow: options.workflow,
-    action: options.action || null,
-    track_id: options.trackId || null,
-    repo: options.repo || null,
-    files,
-    commit_sha: sha2,
-    recorded_at: utcNow(),
-    ...asJsonObject(options.note)
-  };
-  if (options.kind === "product") notePayload.product_commit_sha = sha2;
-  if (options.kind === "control") notePayload.control_commit_sha = sha2;
-  const ref = notesRef(root2, args);
-  const note = sha2 && notesEnabled(root2) ? writeNote(gitRoot2, ref, sha2, notePayload) : null;
-  return {
-    ok: !note || commandOk(note),
-    trace_id: traceId,
-    kind: options.kind,
-    workflow: options.workflow,
-    commit_sha: sha2,
-    subject: fullSubject,
-    files,
-    notes_ref: ref,
-    note
-  };
-}
-function notesPushAction(root2, repo, cwd, remote = "origin") {
-  return plannedGitAction(
-    `notes-push-${repo.replace(/[^A-Za-z0-9_.-]+/g, "-") || "root"}`,
-    "push_notes",
-    repo,
-    cwd,
-    ["push", remote, `${notesRef(root2)}:${notesRef(root2)}`],
-    `Push Cadre git notes for ${repo}`
-  );
-}
-
-// src/core/application/runtime/artifact-pairs.ts
-var import_node_fs10 = __toESM(require("node:fs"));
-var import_node_path17 = __toESM(require("node:path"));
-function normalizedPath(root2, file) {
-  const resolvedRoot = import_node_path17.default.resolve(root2);
-  const resolved = import_node_path17.default.resolve(root2, file);
-  const relative = import_node_path17.default.relative(resolvedRoot, resolved);
-  if (!relative || relative.startsWith("..") || import_node_path17.default.isAbsolute(relative)) return null;
-  return resolved;
-}
-function temporaryPath(file, index) {
-  return `${file}.${process.pid}.${Date.now()}.${index}.cadre-tmp`;
-}
-function restore(before) {
-  const errors = [];
-  for (const item of before.slice().reverse()) {
-    try {
-      if (!item.existed) {
-        import_node_fs10.default.rmSync(item.path, { force: true });
-      } else if (item.content) {
-        const temporary = temporaryPath(item.path, 0);
-        import_node_fs10.default.writeFileSync(temporary, item.content);
-        import_node_fs10.default.renameSync(temporary, item.path);
-      }
-    } catch (error) {
-      errors.push(`${item.path}: ${errorMessage(error)}`);
-    }
-  }
-  return errors;
-}
-function writeUnlocked(root2, files, options) {
-  const unique3 = /* @__PURE__ */ new Set();
-  const prepared = [];
-  for (const [index, file] of files.entries()) {
-    const target2 = normalizedPath(root2, file.path);
-    if (!target2) return { ok: false, stage: "artifact_path", error: `Unsafe or empty artifact path: ${file.path}` };
-    if (unique3.has(target2)) return { ok: false, stage: "artifact_path", error: `Duplicate artifact path: ${file.path}` };
-    unique3.add(target2);
-    prepared.push({ ...file, target: target2, temporary: temporaryPath(target2, index) });
-  }
-  const before = prepared.map((file) => ({
-    path: file.target,
-    existed: import_node_fs10.default.existsSync(file.target),
-    content: import_node_fs10.default.existsSync(file.target) ? import_node_fs10.default.readFileSync(file.target) : null
-  }));
-  try {
-    for (const file of prepared) {
-      import_node_fs10.default.mkdirSync(import_node_path17.default.dirname(file.target), { recursive: true });
-      import_node_fs10.default.writeFileSync(file.temporary, file.content);
-    }
-    for (const [index, file] of prepared.entries()) {
-      import_node_fs10.default.renameSync(file.temporary, file.target);
-      if (options.simulateFailureAfter === index + 1) throw new Error(`Simulated failure after ${index + 1} artifact write(s)`);
-    }
-    return {
-      ok: true,
-      files: prepared.map((file) => import_node_path17.default.relative(root2, file.target).split(import_node_path17.default.sep).join("/"))
-    };
-  } catch (error) {
-    for (const file of prepared) import_node_fs10.default.rmSync(file.temporary, { force: true });
-    const rollbackErrors = restore(before);
-    return {
-      ok: false,
-      stage: "artifact_pair_write",
-      error: errorMessage(error),
-      rolled_back: rollbackErrors.length === 0,
-      rollback_errors: rollbackErrors
-    };
-  }
-}
-function writeArtifactFilesAtomic(root2, files, options = {}) {
-  const operation = () => writeUnlocked(root2, files, options);
-  if (options.lock === false) return operation();
-  return withLock(root2, options.lockName || "artifact-projections", operation);
-}
-function writeArtifactPairAtomic(root2, canonicalPath, canonicalContent, projectionPath, projectionContent, options = {}) {
-  return writeArtifactFilesAtomic(root2, [
-    { path: canonicalPath, content: canonicalContent },
-    { path: projectionPath, content: projectionContent }
-  ], options);
-}
-function jsonContent(value) {
-  return `${JSON.stringify(value, null, 2)}
-`;
-}
-
-// src/core/application/runtime/track-mutations.ts
-function reviewGate(root2, trackId, options = {}) {
-  const track = listTracks(root2).find((item) => item.track_id === trackId);
-  if (!track) {
-    return { ok: false, track_id: trackId, reasons: [`Track not found: ${trackId}`] };
-  }
-  const config = loadTopology(root2).config || {};
-  const review = track.metadata.review || null;
-  const reasons = [];
-  const warnings = [];
-  if (!review) {
-    if (config.allow_unreviewed_ship === true) {
-      warnings.push("No recorded review verdict; allowed by config.allow_unreviewed_ship");
-    } else {
-      reasons.push("No recorded review verdict");
-    }
-  } else {
-    if (review.verdict !== "approved") {
-      reasons.push(`Review verdict is ${review.verdict || "absent"}`);
-    }
-    if ((review.blocking_count || 0) > 0) {
-      reasons.push(`Review has ${review.blocking_count} blocking finding(s)`);
-    }
-    if (config.require_second_reviewer === true && review.self_reviewed === true) {
-      reasons.push("Self-review is not sufficient when require_second_reviewer is true");
-    }
-    const hasPinnedReview = Boolean(review.reviewed_sha) || Boolean(review.reviewed_shas && Object.values(review.reviewed_shas).some(Boolean));
-    if (!hasPinnedReview) {
-      if (config.allow_unpinned_review_ship === true) {
-        warnings.push("Review does not record reviewed_sha/reviewed_shas; allowed by config.allow_unpinned_review_ship");
-      } else {
-        reasons.push("Review does not record reviewed_sha/reviewed_shas");
-      }
-    } else if (review.reviewed_sha && options.headSha && options.headSha !== review.reviewed_sha) {
-      reasons.push(`Head ${options.headSha} differs from reviewed_sha ${review.reviewed_sha}; re-review required`);
-    }
-    if (review.reviewed_shas && options.headShas && typeof options.headShas === "object") {
-      for (const [repo, reviewedSha] of Object.entries(review.reviewed_shas)) {
-        const headSha = options.headShas[repo];
-        if (typeof reviewedSha === "string" && typeof headSha === "string" && headSha !== reviewedSha) {
-          reasons.push(`Repo ${repo} head ${headSha} differs from reviewed_shas.${repo} ${reviewedSha}; re-review required`);
-        }
-      }
-    }
-  }
-  return {
-    ok: reasons.length === 0,
-    track_id: track.track_id,
-    review,
-    reasons,
-    warnings
-  };
-}
-function metadataPatch(root2, args = {}) {
-  const track = findTrack(root2, args.trackId || args.track_id);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  const patch = args.patch && typeof args.patch === "object" ? args.patch : null;
-  if (!patch) return { ok: false, error: "patch object is required" };
-  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }), {
-    root: root2,
-    lockName: trackLockName(track.track_id)
-  });
-  return {
-    ok: result.ok,
-    track_id: track.track_id,
-    metadata_path: import_node_path18.default.relative(root2, track.metadata_path),
-    patch_keys: Object.keys(patch).sort(),
-    result,
-    event: result.ok ? appendCadreEvent(root2, {
-      kind: "metadata_updated",
-      workflow: "metadata_patch",
-      track_id: track.track_id,
-      patch_keys: Object.keys(patch).sort(),
-      tags: asStringArray(asJsonObject(patch).tags),
-      depends_on: asStringArray(asJsonObject(patch).depends_on)
-    }) : null
-  };
-}
-function heartbeatTrack(root2, args = {}) {
-  const track = findTrack(root2, args.trackId || args.track_id);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  return withTrackLock(root2, track.track_id, () => heartbeatTrackUnlocked(root2, track, args));
-}
-function heartbeatTrackUnlocked(root2, track, args = {}) {
-  const identity = args.identity || gitIdentity(root2) || track.metadata.owner || null;
-  const now = asOptionalString(args.now) || utcNow();
-  const topology = loadTopology(root2);
-  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
-    if (topology.config.sync_mode === "shared") {
-      const existingLease = asJsonObject(metadata.lease);
-      metadata.lease = {
-        ...existingLease,
-        owner: identity,
-        acquired_at: asOptionalString(existingLease.acquired_at) || now,
-        heartbeat_at: now
-      };
-    }
-    metadata.owner = metadata.owner || identity;
-    metadata.updated_at = now;
-    return metadata;
-  }, { lock: false });
-  const statePath = import_node_path18.default.join(track.dir, "implement_state.json");
-  let stateResult = null;
-  if (fileExists(statePath)) {
-    stateResult = patchJsonFile(statePath, (state) => ({
-      ...state,
-      owner: state.owner || identity,
-      last_updated: now
-    }), { lock: false });
-  }
-  return {
-    ok: metadataResult.ok && (!stateResult || stateResult.ok),
-    track_id: track.track_id,
-    owner: identity,
-    heartbeat_at: now,
-    metadata: metadataResult,
-    state: stateResult
-  };
-}
-function claimTrack(root2, trackId, options = {}) {
-  const track = findTrack(root2, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  return withTrackLock(root2, track.track_id, () => claimTrackUnlocked(root2, track, options));
-}
-function claimTrackUnlocked(root2, track, options = {}) {
-  const identity = options.identity || gitIdentity(root2);
-  if (!identity) return { ok: false, error: "No git identity found for claim" };
-  const now = utcNow();
-  const hold = holdInfo(track);
-  const heldBy = hold.lease_owner || hold.owner;
-  const stale = hold.lease_stale || hold.state_stale || !heldBy || heldBy === identity;
-  if (heldBy && heldBy !== identity && !stale && options.takeover !== true) {
-    return { ok: false, claimed: false, reason: "foreign-held", held_by: heldBy, hold };
-  }
-  const topology = loadTopology(root2);
-  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
-    metadata.owner = identity;
-    metadata.updated_at = now;
-    if (topology.config.sync_mode === "shared") {
-      const existingLease = asJsonObject(metadata.lease);
-      metadata.lease = {
-        ...existingLease,
-        owner: identity,
-        acquired_at: existingLease.owner === identity ? asOptionalString(existingLease.acquired_at) || now : now,
-        heartbeat_at: now
-      };
-    }
-    return metadata;
-  }, { lock: false });
-  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult };
-  const statePath = import_node_path18.default.join(track.dir, "implement_state.json");
-  writeJson(statePath, {
-    status: "starting",
-    owner: identity,
-    track_id: track.track_id,
-    last_updated: now
-  });
-  const event = appendCadreEvent(root2, {
-    kind: "track_claimed",
-    workflow: "claim",
-    track_id: track.track_id,
-    owner: identity,
-    previous_owner: heldBy || null
-  });
-  return {
-    ok: true,
-    claimed: true,
-    track_id: track.track_id,
-    owner: identity,
-    previous_hold: hold,
-    metadata: metadataResult,
-    event
-  };
-}
-function setTrackStatus(root2, trackId, status, args = {}) {
-  if (!VALID_STATUSES.has(status)) {
-    return {
-      ok: false,
-      error: `Invalid status: ${status}`,
-      valid_statuses: Array.from(VALID_STATUSES)
-    };
-  }
-  const track = listTracks(root2).find((item) => item.track_id === trackId);
-  if (!track) {
-    return { ok: false, error: `Track not found: ${trackId}` };
-  }
-  return withTrackLock(root2, trackId, () => {
-    const traceBefore = beginTrace(root2);
-    const metadata = patchJsonFile(track.metadata_path, (current) => ({
-      ...current,
-      status
-    }), { lock: false });
-    if (!metadata.ok) {
-      return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
-    }
-    const regen = regenIndex(root2);
-    const event = appendCadreEvent(root2, {
-      kind: "status_changed",
-      workflow: "set_status",
-      track_id: trackId,
-      status
-    });
-    const controlCommit = commitTrace(root2, args, {
-      kind: "control",
-      workflow: "status",
-      subject: `mark ${trackId} ${status}`,
-      before: traceBefore,
-      files: [
-        import_node_path18.default.relative(root2, track.metadata_path),
-        "cadre/tracks.json",
-        "cadre/events.jsonl"
-      ],
-      trackId,
-      note: {
-        event_id: asOptionalString(asJsonObject(event.event).id) || null,
-        status
-      }
-    });
-    return {
-      ok: Boolean(regen.ok) && controlCommit.ok !== false,
-      track_id: trackId,
-      status,
-      metadata,
-      regen,
-      event,
-      control_commit: controlCommit
-    };
-  });
-}
-function recordTaskResultUnlocked(root2, args = {}) {
-  const track = findTrack(root2, args.trackId);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  const plan = parsePlanFile(track.plan_path);
-  const phaseIndex = Number(args.phaseIndex);
-  const taskIndex = Number(args.taskIndex);
-  const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
-  const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
-  if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
-  const planJsonPath = trackPlanJsonPath(track);
-  const commitSha2 = args.commitSha ? String(args.commitSha).trim() : "";
-  const recordedAt = utcNow();
-  const lastTaskResult = {
-    phase_index: phaseIndex,
-    task_index: taskIndex,
-    task_key: task.task_key,
-    status: args.status || "completed",
-    commit_sha: commitSha2 || null,
-    repo: args.repo || task.repo || null,
-    working_root: args.workingRoot || null,
-    recorded_at: recordedAt
-  };
-  const metadata = patchJsonFile(track.metadata_path, (current) => {
-    if (typeof args.coverage === "number") current.last_coverage = args.coverage;
-    if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
-    if (isRecord(args.manualVerificationEvidence)) current.last_manual_verification_result = asJsonObject(args.manualVerificationEvidence);
-    current.last_task_result = lastTaskResult;
-    return current;
-  });
-  if (!metadata.ok) {
-    return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
-  }
-  if (fileExists(planJsonPath)) {
-    const currentPlan = readJson(planJsonPath, null);
-    if (!currentPlan) return { ok: false, track_id: track.track_id, stage: "plan_json_read", error: `Invalid canonical plan JSON: ${planJsonPath}`, metadata };
-    const phases = asArray(currentPlan.phases).map((rawPhase) => {
-      const currentPhase = asJsonObject(rawPhase);
-      if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
-      return {
-        ...currentPhase,
-        tasks: asArray(currentPhase.tasks).map((rawTask) => {
-          const currentTask = asJsonObject(rawTask);
-          if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
-          const commitShas = Array.from(/* @__PURE__ */ new Set([
-            ...asStringArray(currentTask.commit_shas),
-            ...commitSha2 ? [commitSha2.slice(0, 12)] : []
-          ]));
-          return {
-            ...currentTask,
-            status: args.status || "completed",
-            commit_shas: commitShas,
-            completion_evidence: {
-              ...asJsonObject(currentTask.completion_evidence),
-              commit_sha: commitSha2 || null,
-              repo: args.repo || task.repo || null,
-              working_root: args.workingRoot || null,
-              coverage: typeof args.coverage === "number" ? args.coverage : null,
-              recorded_at: recordedAt,
-              ...isRecord(args.manualVerificationEvidence) ? { manual_verification: asJsonObject(args.manualVerificationEvidence) } : {}
-            }
-          };
-        })
-      };
-    });
-    const nextPlan = { ...currentPlan, phases, updated_at: recordedAt };
-    const canonicalPath = import_node_path18.default.relative(root2, planJsonPath);
-    const projectionPath = import_node_path18.default.relative(root2, track.plan_path);
-    const canonicalContent = jsonContent(nextPlan);
-    const projectionContent = withGeneratedMarker(
-      canonicalPath,
-      "cadre.plan.v1",
-      renderPlanMarkdown(nextPlan, canonicalPath),
-      { canonicalContent, projection: projectionPath }
-    );
-    const planPatch = writeArtifactPairAtomic(root2, canonicalPath, canonicalContent, projectionPath, projectionContent, { lock: false });
-    if (planPatch.ok === false) return { ok: false, track_id: track.track_id, stage: "plan_pair_write", metadata, plan_json: planPatch };
-    return {
-      ok: true,
-      track_id: track.track_id,
-      task_key: task.task_key,
-      line: task.line,
-      status: args.status || "completed",
-      commit_sha: commitSha2 || null,
-      event: appendCadreEvent(root2, {
-        kind: "task_result_recorded",
-        workflow: "record_task_result",
-        track_id: track.track_id,
-        phase_index: phaseIndex,
-        task_index: taskIndex,
-        task_key: task.task_key,
-        status: args.status || "completed",
-        commit_sha: commitSha2 || null,
-        repo: args.repo || task.repo || null
-      }),
-      metadata,
-      plan_json: planPatch
-    };
-  }
-  return {
-    ok: false,
-    track_id: track.track_id,
-    stage: "missing_plan_json",
-    error: `Missing canonical plan JSON: ${planJsonPath}`,
-    metadata
-  };
-}
-function recordTaskResult(root2, args = {}) {
-  const track = findTrack(root2, args.trackId);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  if (args.lock === false) return recordTaskResultUnlocked(root2, args);
-  return withTrackLock(root2, track.track_id, () => recordTaskResultUnlocked(root2, { ...args, lock: false }));
-}
-
-// src/core/application/runtime/quality-gates.ts
-function testCoverage(root2, args = {}) {
-  let track = null;
-  let task = null;
-  let workingRoot = {
-    repo: args.repo || ".",
-    path: args.workingRoot ? import_node_path19.default.resolve(root2, args.workingRoot) : root2,
-    source: args.workingRoot ? "argument.workingRoot" : "project-root"
-  };
-  if (args.trackId) {
-    track = findTrack(root2, args.trackId);
-    if (!track) {
-      return { ok: false, available: false, error: `Track not found: ${args.trackId}` };
-    }
-    if (args.phaseIndex != null && args.taskIndex != null) {
-      const plan = parsePlanFile(track.plan_path);
-      const phase = (plan.phases || []).find((item) => item.phase_index === Number(args.phaseIndex));
-      task = phase?.tasks.find((item) => item.task_index === Number(args.taskIndex)) || null;
-    }
-    workingRoot = resolveTaskWorkingRoot(root2, track, task, args);
-    if (isWorkingRootError(workingRoot)) {
-      return {
-        ok: false,
-        available: false,
-        stage: "polyrepo_repo_resolution",
-        working_root: workingRoot,
-        reason: workingRoot.error
-      };
-    }
-  }
-  const coverageRun = runCoverage(root2, args, workingRoot.path);
-  if (!coverageRun.available) return coverageRun;
-  const { command, coverage } = coverageRun;
-  let task_result = null;
-  let metadata = null;
-  if (track) {
-    const writeCoverage = () => {
-      metadata = patchJsonFile(track.metadata_path, (current) => {
-        current.last_test_run = {
-          command,
-          cwd: coverageRun.cwd || workingRoot.path,
-          ok: coverageRun.ok,
-          status: coverageRun.status,
-          signal: coverageRun.signal,
-          coverage,
-          measured_at: utcNow()
-        };
-        if (typeof coverage === "number") current.last_coverage = coverage;
-        return current;
-      }, { lock: false });
-      return metadata;
-    };
-    const metadataWrite = withTrackLock(root2, track.track_id, writeCoverage);
-    if (!metadataWrite.ok) return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_lock", metadata: metadataWrite };
-    const metadataResult = metadata ?? metadataWrite;
-    if (!metadataResult.ok) {
-      return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata: metadataResult };
-    }
-    if (args.phaseIndex != null && args.taskIndex != null) {
-      task_result = recordTaskResult(root2, {
-        trackId: args.trackId,
-        phaseIndex: args.phaseIndex,
-        taskIndex: args.taskIndex,
-        status: args.status || (coverageRun.ok ? "completed" : "blocked"),
-        commitSha: args.commitSha,
-        coverage,
-        repo: workingRoot.repo,
-        workingRoot: import_node_path19.default.relative(root2, workingRoot.path) || "."
-      });
-    }
-  }
-  return {
-    ok: coverageRun.ok,
-    available: true,
-    command,
-    cwd: coverageRun.cwd,
-    status: coverageRun.status,
-    signal: coverageRun.signal,
-    coverage,
-    coverage_source: coverageRun.coverage_source,
-    timed_out: coverageRun.signal === "SIGTERM" || coverageRun.signal === "SIGKILL",
-    stdout_tail: coverageRun.stdout_tail,
-    stderr_tail: coverageRun.stderr_tail,
-    working_root: workingRoot,
-    metadata,
-    task_result
-  };
-}
-function configuredMachineGateCommand(root2, args = {}, workingRoot = root2) {
-  const explicit = args.machineCommand || args.machine_command || args.command;
-  if (explicit) return String(explicit);
-  const config = loadTopology(root2).config || {};
-  for (const key of [
-    "review_machine_gate_command",
-    "machine_gate_command",
-    "review_check_command",
-    "typecheck_command",
-    "build_command",
-    "check_command"
-  ]) {
-    if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
-  }
-  const pkg = loadPackageJson(workingRoot);
-  const scripts = pkg ? asJsonObject(pkg.scripts) : {};
-  if (Object.keys(scripts).length > 0) {
-    for (const name of ["typecheck", "check", "build", "lint"]) {
-      if (scripts[name]) {
-        if (fileExists(import_node_path19.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
-        if (fileExists(import_node_path19.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
-        return `npm run ${name}`;
-      }
-    }
-  }
-  return null;
-}
-function runMachineGate(root2, args = {}, workingRoot = root2) {
-  const command = configuredMachineGateCommand(root2, args, workingRoot);
-  if (!command) {
-    return {
-      ok: true,
-      available: false,
-      reason: "No review machine-gate command configured or discovered",
-      hints: [
-        "Pass { machineCommand } explicitly",
-        "Set cadre/config.json review_machine_gate_command",
-        "Add a package script named typecheck, check, build, or lint"
-      ]
-    };
-  }
-  const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1e3);
-  const result = runCommand(command, [], {
-    cwd: workingRoot,
-    shell: true,
-    timeoutMs,
-    maxBuffer: 30 * 1024 * 1024
-  });
-  return {
-    ok: result.ok,
-    available: true,
-    command,
-    cwd: workingRoot,
-    status: result.status,
-    signal: result.signal,
-    timed_out: result.signal === "SIGTERM" || result.signal === "SIGKILL",
-    stdout_tail: result.stdout.slice(-4e3),
-    stderr_tail: result.stderr.slice(-4e3)
-  };
-}
-function reviewMachineGate(root2, args = {}) {
-  const trackId = args.trackId || args.track_id || null;
-  const track = trackId ? findTrack(root2, trackId) : null;
-  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
-  if (track) {
-    const repoError = repoEntriesError(root2, track, args);
-    if (repoError) return repoError;
-  }
-  const entries = track ? repoEntriesForTrack(root2, track, args) : [{
-    repo: args.repo || ".",
-    root: args.workingRoot ? import_node_path19.default.resolve(root2, args.workingRoot) : root2,
-    path: args.workingRoot || ".",
-    source: args.workingRoot ? "argument.workingRoot" : "project-root"
-  }];
-  const results = entries.map((entry) => {
-    const gate = runMachineGate(root2, args, entry.root);
-    return {
-      repo: entry.repo,
-      path: entry.path,
-      source: entry.source,
-      ...gate
-    };
-  });
-  const blocking = results.filter((result) => result.available === true && !result.ok);
-  return {
-    ok: blocking.length === 0,
-    available: results.some((result) => result.available === true),
-    track_id: trackId,
-    results,
-    blocking_count: blocking.length
-  };
-}
-function providerFromConfig(root2, args = {}) {
-  return asOptionalString(configuredProvider(root2, args).provider_mode) || "local";
-}
-function providerEvidenceRequirement(root2, args = {}) {
-  const providerInfo = configuredProvider(root2, args);
-  const provider = asOptionalString(providerInfo.provider_mode) || "local";
-  const readiness = providerReadiness(root2, args);
-  const track = args.trackId ? findTrack(root2, args.trackId) : null;
-  const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
-  const target2 = args.pr || args.prNumber || args.mr || branch || null;
-  const kind = provider === "gitlab" ? "gitlab_merge_request_status" : "github_pull_request_status";
-  const minimumFields = provider === "gitlab" ? ["url", "state", "source_branch", "target_branch", "head_sha", "approvals", "pipeline_status", "discussions"] : ["url", "state", "head_ref", "base_ref", "head_sha", "review_decision", "status_checks", "workflow_runs", "comments"];
-  return {
-    ok: false,
-    available: false,
-    provider,
-    target: target2,
-    branch,
-    provider_mode: provider,
-    required_provider_mcp: provider === "local" ? null : {
-      provider,
-      server: provider,
-      purpose: "Fetch provider evidence through the installed provider MCP. CLI fallback is intentionally disabled."
-    },
-    mcp_readiness: readiness,
-    detected_agent_capability_evidence: readiness.detected_agent_capability_evidence || null,
-    missing_evidence_fields: readiness.missing_evidence_fields || [],
-    required_evidence: provider === "local" ? null : {
-      kind,
-      provider,
-      target: target2,
-      branch,
-      minimum_fields: minimumFields,
-      write_back: {
-        tool: "cadre_review",
-        action: "provider_evidence",
-        trackId: args.trackId || args.track_id || null
-      }
-    },
-    exact_write_back_packet: provider === "local" ? null : {
-      tool: "cadre_review",
-      arguments: {
-        root: root2,
-        action: "provider_evidence",
-        trackId: args.trackId || args.track_id || null,
-        providerEvidence: `<${provider}-mcp-evidence>`
-      }
-    },
-    next_actions: provider === "local" ? [] : [
-      `Use the installed ${provider} MCP to fetch PR/MR metadata, reviews, checks or pipeline status, and discussion evidence for the target.`,
-      "Call cadre_review with action provider_evidence and the fetched evidence before recording review or shipping."
-    ],
-    reason: provider === "local" ? "provider_mode is local; provider evidence is not required" : `${provider} provider evidence must come from the ${provider} MCP; CLI fallback is disabled`,
-    unsupported_reason: provider === "local" ? null : `provider_mode ${provider} requires ${provider} MCP evidence; Cadre workflow packets do not use provider CLI fallback`
-  };
-}
-function prCiStatus(root2, args = {}) {
-  const provider = providerFromConfig(root2, args);
-  const evidence = args.evidence || args.providerEvidence || args.provider_evidence || null;
-  if (provider === "local") {
-    return {
-      ok: true,
-      available: false,
-      skipped: true,
-      provider,
-      provider_mode: "local",
-      reason: "provider_mode is local; no provider MCP evidence required"
-    };
-  }
-  if (provider !== "github" && provider !== "gitlab") {
-    return { ok: false, available: false, provider, reason: `Unsupported provider_mode: ${provider}` };
-  }
-  if (evidence) {
-    return {
-      ok: true,
-      available: true,
-      provider,
-      provider_mode: provider,
-      evidence_source: `${provider}_mcp`,
-      evidence: asJsonObject(evidence)
-    };
-  }
-  return providerEvidenceRequirement(root2, args);
-}
-function diffSurface(root2, base, head) {
-  const range = `${base}...${head}`;
-  const stat = runCommand("git", ["diff", "--stat", range], { cwd: root2, maxBuffer: 10 * 1024 * 1024 });
-  const names = runCommand("git", ["diff", "--name-only", range], { cwd: root2, maxBuffer: 10 * 1024 * 1024 });
-  return {
-    ok: stat.ok || names.ok,
-    base,
-    head,
-    stat: stat.stdout.trim(),
-    files: names.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
-    errors: [stat.stderr, names.stderr].filter(Boolean).join("\n").trim()
-  };
-}
-function scanReviewTodos(root2, files, limit = 100) {
-  const findings = [];
-  const patterns = [
-    /\bTODO\b/i,
-    /\bFIXME\b/i,
-    /\bstub\b/i,
-    /throw new Error\(["']not implemented/i
-  ];
-  for (const file of files || []) {
-    if (isIgnoredRepoMapFile(file)) continue;
-    const abs = import_node_path19.default.join(root2, file);
-    if (!fileExists(abs)) continue;
-    let stat;
-    try {
-      stat = import_node_fs11.default.statSync(abs);
-    } catch {
-      continue;
-    }
-    if (stat.size > 1024 * 1024) continue;
-    const lines = import_node_fs11.default.readFileSync(abs, "utf8").split(/\r?\n/);
-    for (let index = 0; index < lines.length && findings.length < limit; index += 1) {
-      const line = lines[index] || "";
-      if (patterns.some((pattern) => pattern.test(line))) {
-        findings.push({ file, line: index + 1, snippet: line.trim().slice(0, 180) });
-      }
-    }
-  }
-  return findings;
-}
-function reviewAssist(root2, args = {}) {
-  const trackId = args.trackId || args.track_id;
-  if (!trackId) return { ok: false, error: "trackId is required" };
-  const context = trackContext(root2, trackId);
-  if (!context.ok) return context;
-  const track = findTrack(root2, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  const repoError = repoEntriesError(root2, track, args);
-  if (repoError) return repoError;
-  const plan = parsePlanFile(track.plan_path);
-  const base = args.base || "main";
-  const head = args.head || track.metadata.git_branch || "HEAD";
-  const repoEntries = repoEntriesForTrack(root2, track, args);
-  const repoDiffs = repoEntries.map((entry) => ({
-    repo: entry.repo,
-    path: entry.path,
-    cwd: entry.root,
-    source: entry.source,
-    ...diffSurface(entry.root, entry.base || base, entry.head || head)
-  }));
-  const diff = repoDiffs.find((entry) => entry.repo === "root" || entry.repo === ".") || diffSurface(root2, base, head);
-  const incompleteTasks = [];
-  for (const phase of plan.phases) {
-    for (const task of phase.tasks) {
-      if (task.marker !== "x" && task.marker !== "-") {
-        incompleteTasks.push({
-          phase: phase.phase_index,
-          task: task.task_index,
-          task_key: task.task_key,
-          title: task.title,
-          marker: task.marker,
-          repo: task.repo || null
-        });
-      }
-    }
-  }
-  const todoLimit = Number(args.todoLimit || 100);
-  const repoTodos = repoDiffs.map((entry) => ({
-    repo: entry.repo,
-    path: entry.path,
-    cwd: entry.cwd,
-    todos: scanReviewTodos(entry.cwd || root2, entry.files, todoLimit)
-  }));
-  const todos = repoTodos.flatMap((entry) => entry.todos.map((todo) => ({ ...todo, repo: entry.repo }))).slice(0, todoLimit);
-  const lsp = args.includeLsp === false ? null : args.lspResult || args.lsp_result || lspReview(root2, { base, head, config: args.config });
-  const machineGate = args.includeMachine === false ? null : reviewMachineGate(root2, args);
-  const lspObject = asJsonObject(lsp);
-  const machineGateObject = asJsonObject(machineGate);
-  const blocking = [];
-  if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
-  if (todos.length > 0) blocking.push(`${todos.length} TODO/FIXME/stub marker(s) found in changed files`);
-  if (track.metadata.last_coverage == null) blocking.push("No measured coverage recorded on the track");
-  if (lsp && lspObject.available !== false && Array.isArray(lspObject.findings)) {
-    const lspBlocking = asArray(lspObject.findings).filter((finding) => finding.severity === "blocking" || finding.blocking === true);
-    if (lspBlocking.length > 0) blocking.push(`${lspBlocking.length} blocking LSP/code-intelligence finding(s)`);
-  }
-  const machineBlockingCount = asNumber(machineGateObject.blocking_count);
-  if (machineGate && machineBlockingCount > 0) {
-    blocking.push(`${machineBlockingCount} machine gate check(s) failed`);
-  }
-  const result = {
-    ok: true,
-    root: root2,
-    track_id: trackId,
-    base,
-    head,
-    diff,
-    repo_diffs: repoDiffs,
-    branch_set: context.branch_set || [],
-    task_counts: context.task_counts,
-    incomplete_tasks: incompleteTasks,
-    coverage: track.metadata.last_coverage ?? null,
-    todos,
-    repo_todos: repoTodos,
-    lsp,
-    machine_gate: machineGate,
-    suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
-    blocking_reasons: blocking
-  };
-  const mode = (asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null)) || "compact").toLowerCase();
-  if (["detail", "detailed", "full", "verbose"].includes(mode)) return result;
-  const lspSummary = asJsonObject(result.lsp);
-  const gateSummary = asJsonObject(result.machine_gate);
-  const diffSummary = asJsonObject(diff);
-  const diffFiles = Array.isArray(diffSummary.files) ? diffSummary.files : [];
-  return {
-    ok: true,
-    root: root2,
-    track_id: trackId,
-    base,
-    head,
-    task_counts: context.task_counts,
-    diff: {
-      repo: diffSummary.repo || ".",
-      file_count: diffFiles.length,
-      stat: asOptionalString(diffSummary.stat) || ""
-    },
-    repo_diffs: repoDiffs.slice(0, 20).map((entry) => ({
-      repo: entry.repo,
-      path: entry.path,
-      files: Array.isArray(entry.files) ? entry.files.slice(0, 50) : [],
-      file_count: Array.isArray(entry.files) ? entry.files.length : 0,
-      stat: entry.stat
-    })),
-    repo_diffs_count: repoDiffs.length,
-    incomplete_tasks: incompleteTasks.slice(0, 20),
-    incomplete_tasks_count: incompleteTasks.length,
-    coverage: track.metadata.last_coverage ?? null,
-    todos: todos.slice(0, 20),
-    todos_count: todos.length,
-    lsp: lsp ? {
-      available: lspSummary.available !== false,
-      degraded: lspSummary.degraded === true || lspSummary.fallback === "text_scan",
-      findings_count: Array.isArray(lspSummary.findings) ? lspSummary.findings.length : 0,
-      server_count: Array.isArray(lspSummary.servers) ? lspSummary.servers.length : 0,
-      polyrepo: lspSummary.polyrepo === true
-    } : null,
-    machine_gate: machineGate ? {
-      ok: gateSummary.ok !== false,
-      available: gateSummary.available !== false,
-      blocking_count: Number(gateSummary.blocking_count || 0),
-      result_count: Array.isArray(gateSummary.results) ? gateSummary.results.length : 0
-    } : null,
-    suggested_verdict: result.suggested_verdict,
-    blocking_reasons: blocking,
-    detail_available: true
-  };
-}
-
-// src/core/application/runtime/review-records.ts
-function recordReview(root2, args = {}) {
-  const track = findTrack(root2, args.trackId);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  return withTrackLock(root2, track.track_id, () => recordReviewUnlocked(root2, track, args));
-}
-function recordReviewUnlocked(root2, track, args = {}) {
-  const traceBefore = beginTrace(root2);
-  const verdict = args.verdict || "";
-  if (!["approved", "changes_requested"].includes(verdict)) {
-    return { ok: false, error: `Invalid review verdict: ${verdict}` };
-  }
-  const reviewer = args.reviewer || gitIdentity(root2);
-  const pins = reviewedShasForTrack(root2, track, args);
-  if (pins.ok === false) return pins;
-  const metadata = patchJsonFile(track.metadata_path, (current) => {
-    const existing = asJsonObject(current.review);
-    const existingReviewer = asOptionalString(existing.reviewer);
-    const existingVerdict = asOptionalString(existing.verdict);
-    const existingBlockingCount = Number(existing.blocking_count || 0);
-    if (verdict === "approved" && args.allowOverride !== true && existingReviewer && existingReviewer !== reviewer && (existingVerdict === "changes_requested" || existingBlockingCount > 0)) {
-      throw new Error("Approval would override another reviewer's open changes_requested verdict");
-    }
-    current.review = {
-      verdict,
-      blocking_count: Number(args.blockingCount || 0),
-      date: args.date || utcNow(),
-      reviewer: reviewer || null,
-      coverage: args.coverage ?? current.last_coverage ?? null,
-      self_reviewed: Boolean(reviewer && current.owner && reviewer === current.owner),
-      reviewed_sha: asOptionalString(pins.reviewed_sha) || null,
-      reviewed_shas: asJsonObject(pins.reviewed_shas),
-      review_seq: Number(existing.review_seq || 0) + 1
-    };
-    return current;
-  }, { lock: false });
-  if (!metadata.ok) {
-    return {
-      ok: false,
-      track_id: track.track_id,
-      stage: "metadata_patch",
-      error: metadata.error,
-      requires_override: /override another reviewer/.test(metadata.error || ""),
-      metadata
-    };
-  }
-  const gate = reviewGate(root2, track.track_id, args);
-  const controlCommit = commitTrace(root2, args, {
-    kind: "control",
-    workflow: "review",
-    subject: `record ${track.track_id} review`,
-    before: traceBefore,
-    files: [
-      import_node_path20.default.relative(root2, track.metadata_path)
-    ],
-    trackId: track.track_id,
-    note: {
-      verdict,
-      blocking_count: Number(args.blockingCount || 0)
-    }
-  });
-  return { ok: controlCommit.ok !== false, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate, control_commit: controlCommit };
-}
-function reviewEvidencePath(track) {
-  return import_node_path20.default.join(track.dir, "review-evidence.json");
-}
-function reviewEvidence(root2, trackId) {
-  const track = findTrack(root2, trackId);
-  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
-  const evidencePath = reviewEvidencePath(track);
-  const evidence = readJson(evidencePath, {
-    track_id: track.track_id,
-    entries: []
-  });
-  return {
-    ok: true,
-    track_id: track.track_id,
-    path: import_node_path20.default.relative(root2, evidencePath),
-    evidence
-  };
-}
-function providerEvidence(root2, args = {}) {
-  const track = findTrack(root2, args.trackId || args.track_id);
-  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  return withTrackLock(root2, track.track_id, () => providerEvidenceUnlocked(root2, track, args));
-}
-function providerEvidenceUnlocked(root2, track, args = {}) {
-  const traceBefore = beginTrace(root2);
-  const evidencePath = reviewEvidencePath(track);
-  const existing = readJson(evidencePath, {
-    track_id: track.track_id,
-    entries: []
-  });
-  const entries = Array.isArray(existing.entries) ? existing.entries.map(asJsonObject) : [];
-  const findings = Array.isArray(args.findings) ? args.findings.map(asJsonObject) : [];
-  const blockingCount = findings.filter(
-    (finding) => finding.blocking === true || asString(finding.severity) === "blocking"
-  ).length;
-  const provider = args.provider || providerFromConfig(root2, args);
-  const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
-  const providerStatus = fetched ? asJsonObject(fetched) : null;
-  if (!providerStatus && args.fetch !== false) {
-    return {
-      ok: false,
-      track_id: track.track_id,
-      stage: "provider_mcp_evidence_required",
-      provider,
-      requirement: providerEvidenceRequirement(root2, { ...args, trackId: track.track_id })
-    };
-  }
-  const entry = {
-    id: `review-${entries.length + 1}`,
-    recorded_at: utcNow(),
-    provider,
-    reviewer: args.reviewer || gitIdentity(root2) || null,
-    reviewed_sha: args.reviewedSha || args.reviewed_sha || gitRevParse(root2, "HEAD"),
-    blocking_count: Number(args.blockingCount ?? blockingCount),
-    verdict: args.verdict || null,
-    findings,
-    evidence: providerStatus,
-    notes: asOptionalString(args.notes) || null
-  };
-  const next = {
-    ...existing,
-    track_id: track.track_id,
-    entries: [...entries, entry],
-    updated_at: entry.recorded_at
-  };
-  writeJson(evidencePath, next);
-  appendJsonl(import_node_path20.default.join(track.dir, "review-evidence.jsonl"), entry);
-  const metadata = patchJsonFile(track.metadata_path, (current) => {
-    current.review_evidence = {
-      path: import_node_path20.default.relative(root2, evidencePath),
-      entries: asArray(next.entries).length || entries.length + 1,
-      latest_id: entry.id,
-      latest_recorded_at: entry.recorded_at,
-      provider,
-      blocking_count: entry.blocking_count
-    };
-    return current;
-  }, { lock: false });
-  if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
-  const controlCommit = commitTrace(root2, args, {
-    kind: "control",
-    workflow: "review",
-    action: "provider_evidence",
-    subject: `record ${track.track_id} evidence`,
-    before: traceBefore,
-    files: [
-      import_node_path20.default.relative(root2, evidencePath),
-      import_node_path20.default.relative(root2, import_node_path20.default.join(track.dir, "review-evidence.jsonl")),
-      import_node_path20.default.relative(root2, track.metadata_path)
-    ],
-    trackId: track.track_id,
-    note: {
-      provider,
-      evidence_id: entry.id,
-      blocking_count: entry.blocking_count,
-      reviewed_sha: entry.reviewed_sha
-    }
-  });
-  return {
-    ok: controlCommit.ok !== false,
-    track_id: track.track_id,
-    path: import_node_path20.default.relative(root2, evidencePath),
-    entry,
-    metadata,
-    control_commit: controlCommit
-  };
-}
-function syncControlPlane(root2, args = {}) {
-  const topology = loadTopology(root2);
-  if (topology.config.sync_mode !== "shared") {
-    return { ok: true, skipped: true, reason: "sync_mode is not shared", commands: [] };
-  }
-  const mode = args.mode || "pre";
-  const remote = asOptionalString(topology.config.control_remote) || "origin";
-  const branch = asOptionalString(topology.config.control_branch) || "main";
-  const commands = [];
-  commands.push(runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root2 }));
-  const safety = controlPlaneSyncSafety(root2, mode, remote, branch);
-  if (!safety.ok) {
-    return { ok: false, mode, remote, branch, safety, commands };
-  }
-  if (mode === "pre") {
-    commands.push(runCommand("git", ["pull", "--rebase", remote, branch], { cwd: root2 }));
-  } else if (mode === "post") {
-    commands.push(runCommand("git", ["push", remote, branch], { cwd: root2 }));
-  } else {
-    return { ok: false, error: `Invalid sync mode: ${mode}`, commands };
-  }
-  return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, safety, commands };
-}
-
 // src/core/application/runtime/packaged-assets.ts
-var import_node_fs12 = __toESM(require("node:fs"));
-var import_node_path21 = __toESM(require("node:path"));
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path10 = __toESM(require("node:path"));
 var SEARCH_DEPTH = 8;
 function embeddedAssets() {
   return typeof __CADRE_EMBEDDED_ASSETS__ !== "undefined" ? __CADRE_EMBEDDED_ASSETS__ : null;
@@ -3797,56 +1828,49 @@ function embeddedAssets() {
 function normalizeRelativePath(value) {
   return value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
 }
-function unique2(values) {
-  return Array.from(new Set(values));
-}
 function isFile(file) {
   try {
-    return import_node_fs12.default.statSync(file).isFile();
+    return import_node_fs5.default.statSync(file).isFile();
   } catch {
     return false;
   }
 }
-function walkingCandidates(factory) {
+function templateCandidates(relativePath) {
   const candidates = [];
   let dir = __dirname;
   for (let depth = 0; depth < SEARCH_DEPTH; depth += 1) {
-    candidates.push(...factory(dir));
-    const parent = import_node_path21.default.dirname(dir);
+    candidates.push(import_node_path10.default.join(dir, "templates", relativePath));
+    const parent = import_node_path10.default.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return unique2(candidates);
+  return candidates;
 }
 function findFile(candidates) {
   return candidates.find(isFile) || null;
 }
 function walkTemplateFiles(dir, base = dir) {
   const files = [];
-  for (const entry of import_node_fs12.default.readdirSync(dir, { withFileTypes: true })) {
-    const full = import_node_path21.default.join(dir, entry.name);
+  for (const entry of import_node_fs5.default.readdirSync(dir, { withFileTypes: true })) {
+    const full = import_node_path10.default.join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...walkTemplateFiles(full, base));
     } else if (entry.isFile()) {
-      files.push(import_node_path21.default.relative(base, full).split(import_node_path21.default.sep).join("/"));
+      files.push(import_node_path10.default.relative(base, full).split(import_node_path10.default.sep).join("/"));
     }
   }
   return files;
 }
 function packagedTemplatePath(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
-  return findFile(walkingCandidates((dir) => [
-    import_node_path21.default.join(dir, "assets", "cadre", "templates", normalized),
-    import_node_path21.default.join(dir, "templates", normalized),
-    import_node_path21.default.join(dir, "skills", "cadre", "templates", normalized)
-  ]));
+  return findFile(templateCandidates(normalized));
 }
 function packagedTemplateText(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
   const embedded = embeddedAssets()?.templates?.[normalized];
   if (typeof embedded === "string") return embedded;
   const file = packagedTemplatePath(normalized);
-  return file ? import_node_fs12.default.readFileSync(file, "utf8") : null;
+  return file ? import_node_fs5.default.readFileSync(file, "utf8") : null;
 }
 function packagedTemplateJson(relativePath) {
   const text2 = packagedTemplateText(relativePath);
@@ -3865,8 +1889,8 @@ function packagedTemplatePaths(prefix = "") {
   }
   const manifest = packagedTemplatePath("manifest.json");
   if (!manifest) return [];
-  const root2 = import_node_path21.default.dirname(manifest);
-  return walkTemplateFiles(root2).filter((file) => !normalizedPrefix || file === normalizedPrefix || file.startsWith(`${normalizedPrefix}/`)).sort();
+  const root = import_node_path10.default.dirname(manifest);
+  return walkTemplateFiles(root).filter((file) => !normalizedPrefix || file === normalizedPrefix || file.startsWith(`${normalizedPrefix}/`)).sort();
 }
 function packagedTemplateSource(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
@@ -3995,12 +2019,12 @@ function compactStyleGuides(value) {
   };
 }
 function compactReviewArtifacts(value) {
-  const artifacts2 = Array.isArray(value) ? value.map(asJsonObject) : [];
+  const artifacts = Array.isArray(value) ? value.map(asJsonObject) : [];
   return {
-    count: artifacts2.length,
-    total_bytes: artifacts2.reduce((sum, artifact) => sum + Number(artifact.bytes || 0), 0),
-    files: artifacts2.slice(0, 30).map((artifact) => ({ path: asOptionalString(artifact.path) || null })),
-    truncated: artifacts2.length > 30,
+    count: artifacts.length,
+    total_bytes: artifacts.reduce((sum, artifact) => sum + Number(artifact.bytes || 0), 0),
+    files: artifacts.slice(0, 30).map((artifact) => ({ path: asOptionalString(artifact.path) || null })),
+    truncated: artifacts.length > 30,
     content_in_response: false
   };
 }
@@ -4379,16 +2403,1995 @@ function compactWorkflowResponse(workflow, result) {
   return null;
 }
 
+// src/core/application/runtime/review-records.ts
+var import_node_path20 = __toESM(require("node:path"));
+
+// src/core/application/runtime/commit-trace.ts
+var import_node_fs6 = __toESM(require("node:fs"));
+var import_node_path11 = __toESM(require("node:path"));
+var DEFAULT_NOTES_REF = "refs/notes/cadre";
+function configured(root) {
+  return fileExists(import_node_path11.default.join(root, "cadre", "config.json"));
+}
+function traceability(root) {
+  return asJsonObject(loadTopology(root).config.traceability);
+}
+function traceEnabled(root, kind, args, force = false) {
+  const mode = asOptionalString(args.commitMode || args.commit_mode)?.toLowerCase();
+  if (["off", "none", "manual", "false"].includes(mode || "")) return false;
+  if (force) return true;
+  if (!configured(root)) return false;
+  const trace = traceability(root);
+  if (Object.keys(trace).length === 0) return false;
+  if (trace.enabled === false) return false;
+  if (kind === "product") return trace.auto_product_commits !== false;
+  if (kind === "control") return trace.auto_control_commits !== false;
+  return trace.auto_automation_commits !== false;
+}
+function notesRef(root, args = {}) {
+  return asOptionalString(args.notesRef || args.notes_ref) || asOptionalString(traceability(root).notes_ref) || DEFAULT_NOTES_REF;
+}
+function notesEnabled(root) {
+  const trace = traceability(root);
+  return trace.git_notes !== false && trace.notes !== false;
+}
+function notesPushEnabled(root) {
+  return traceability(root).push_notes !== false;
+}
+function statusEntries(cwd) {
+  const result = runCommand("git", ["status", "--porcelain", "--untracked-files=all"], { cwd });
+  if (!result.ok) return {};
+  const entries = {};
+  for (const line of result.stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const status = line.slice(0, 2);
+    const rawPath = line.slice(3).trim();
+    const file = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() || "" : rawPath;
+    const normalized = file.replace(/^"|"$/g, "");
+    if (normalized) entries[normalized] = status;
+  }
+  return entries;
+}
+function beginTrace(cwd) {
+  const gitRoot = runCommand("git", ["rev-parse", "--show-toplevel"], { cwd });
+  if (!gitRoot.ok) {
+    return {
+      ok: true,
+      cwd,
+      entries: {},
+      dirty_files: [],
+      skipped: true,
+      reason: "not a git repository"
+    };
+  }
+  const root = gitRoot.stdout.trim() || cwd;
+  const entries = statusEntries(root);
+  return {
+    ok: true,
+    cwd: root,
+    git_root: root,
+    entries,
+    dirty_files: Object.keys(entries).sort()
+  };
+}
+function isControlPlaneFile2(file) {
+  const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (normalized.startsWith("cadre/local/")) return false;
+  if (normalized.startsWith("cadre/.locks/")) return false;
+  if (normalized.includes(".tmp")) return false;
+  return normalized.startsWith("cadre/") || normalized === ".gitattributes" || normalized === ".gitmodules" || normalized === ".gitlab-ci.yml" || normalized === "cadre-merge-train.gitlab-ci.yml" || normalized.startsWith(".github/workflows/cadre-");
+}
+function changedAfter(before, after) {
+  const beforeEntries = asJsonObject(before?.entries);
+  return Object.entries(after).filter(([file, status]) => beforeEntries[file] !== status).map(([file]) => file).sort();
+}
+function uniqueFiles(files) {
+  return Array.from(new Set(files.map((file) => file.replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean))).sort();
+}
+function projectionGuard(root, files) {
+  const touched = new Set(uniqueFiles(files));
+  const errors = [];
+  const checked = [];
+  for (const definition of artifactDefinitions(root, { includeArchive: true })) {
+    if (!definition.projection || !touched.has(definition.canonical)) continue;
+    const canonical = import_node_path11.default.join(root, definition.canonical);
+    const projection = import_node_path11.default.join(root, definition.projection);
+    checked.push(definition.canonical);
+    if (!fileExists(canonical) || !fileExists(projection)) {
+      errors.push(`Canonical/projection pair is incomplete: ${definition.canonical} -> ${definition.projection}`);
+      continue;
+    }
+    const marker = import_node_fs6.default.readFileSync(projection, "utf8").match(/<!--\s*cadre:generated\b[^>]*canonical_hash="([a-f0-9]+)"[^>]*-->/i);
+    const expected = textHash(import_node_fs6.default.readFileSync(canonical, "utf8")).slice(0, 16);
+    if (!marker?.[1] || marker[1] !== expected) {
+      errors.push(`Projection marker is stale for ${definition.canonical}: ${definition.projection}`);
+    }
+  }
+  return { ok: errors.length === 0, checked, errors, ...errors.length ? { error: errors[0] } : {} };
+}
+function conventionalSubject(type, scope, subject) {
+  const cleanType = type.replace(/[^a-z0-9-]/gi, "").toLowerCase() || "cadre";
+  const cleanScope = scope.replace(/[^a-z0-9_.-]/gi, "-").toLowerCase() || "trace";
+  return `${cleanType}(${cleanScope}): ${subject.trim() || "record trace"}`;
+}
+function messageBody(body, footers) {
+  const footerText = Object.entries(footers).filter((entry) => Boolean(entry[1])).map(([key, value]) => `${key}: ${value}`).join("\n");
+  return [body?.trim() || "", footerText].filter(Boolean).join("\n\n");
+}
+function commandOk(result) {
+  return result.ok === true;
+}
+function commitSha(cwd) {
+  const result = runCommand("git", ["rev-parse", "HEAD"], { cwd });
+  return result.ok ? result.stdout.trim() || null : null;
+}
+function writeNote(cwd, ref, sha2, note) {
+  return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}
+`, sha2], { cwd });
+}
+function commitTrace(root, args, options) {
+  if (!traceEnabled(root, options.kind, args, options.forceEnabled === true)) {
+    return { ok: true, skipped: true, reason: "traceability disabled or unconfigured" };
+  }
+  const cwd = options.cwd || root;
+  const snapshot = options.before || beginTrace(cwd);
+  if (snapshot.skipped) return { ok: true, skipped: true, reason: snapshot.reason || "git unavailable" };
+  const gitRoot = asOptionalString(snapshot.git_root) || cwd;
+  const after = statusEntries(gitRoot);
+  const requestedFiles = options.files ? uniqueFiles(options.files) : uniqueFiles([
+    ...changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile2(file) : isControlPlaneFile2(file)),
+    ...options.includeDirtyFiles || []
+  ]);
+  const files = requestedFiles.filter((file) => after[file]);
+  if (files.length === 0) return { ok: true, skipped: true, reason: "no changed files to commit" };
+  const projections = projectionGuard(root, files);
+  if (projections.ok === false) return { ok: false, stage: "projection_drift", files, projection_validation: projections, error: projections.error };
+  const beforeEntries = asJsonObject(snapshot.entries);
+  const preexisting = files.filter((file) => beforeEntries[file]);
+  const allowDirty = options.allowDirty === true || args.allowDirty === true || args.allow_dirty === true;
+  if (preexisting.length > 0 && !allowDirty) {
+    return {
+      ok: false,
+      stage: "preexisting_dirty_files",
+      reason: "Refusing to commit files that were dirty before this packet",
+      files,
+      preexisting_dirty_files: preexisting
+    };
+  }
+  const add = runCommand("git", ["add", "-A", "--", ...files], { cwd: gitRoot });
+  if (!add.ok) return { ok: false, stage: "git_add", files, add };
+  const staged = runCommand("git", ["diff", "--cached", "--quiet"], { cwd: gitRoot });
+  if (staged.status === 0) return { ok: true, skipped: true, reason: "no staged changes", files };
+  const traceId = `trace_${textHash(JSON.stringify({ root, files, now: utcNow(), workflow: options.workflow })).slice(0, 16)}`;
+  const type = asOptionalString(args.commitType || args.commit_type) || options.type || (options.kind === "product" ? "feat" : "cadre");
+  const scope = asOptionalString(args.commitScope || args.commit_scope) || options.scope || options.workflow;
+  const subject = asOptionalString(args.commitSubject || args.commit_subject) || options.subject;
+  const fullSubject = conventionalSubject(type, scope, subject);
+  const body = asOptionalString(args.commitBody || args.commit_body) || options.body;
+  const commitBody = messageBody(body, {
+    "Cadre-Trace-Id": traceId,
+    "Cadre-Workflow": options.workflow,
+    "Cadre-Track": options.trackId || null,
+    "Cadre-Repo": options.repo || null
+  });
+  const commit = runCommand("git", [
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "user.name=Cadre",
+    "-c",
+    "user.email=cadre@local.invalid",
+    "commit",
+    "-m",
+    fullSubject,
+    "-m",
+    commitBody
+  ], { cwd: gitRoot });
+  if (!commit.ok) return { ok: false, stage: "git_commit", files, commit };
+  const sha2 = commitSha(gitRoot);
+  const notePayload = {
+    version: 1,
+    schema: "cadre.commit_trace.v1",
+    trace_id: traceId,
+    kind: options.kind,
+    workflow: options.workflow,
+    action: options.action || null,
+    track_id: options.trackId || null,
+    repo: options.repo || null,
+    files,
+    commit_sha: sha2,
+    recorded_at: utcNow(),
+    ...asJsonObject(options.note)
+  };
+  if (options.kind === "product") notePayload.product_commit_sha = sha2;
+  if (options.kind === "control") notePayload.control_commit_sha = sha2;
+  const ref = notesRef(root, args);
+  const note = sha2 && notesEnabled(root) ? writeNote(gitRoot, ref, sha2, notePayload) : null;
+  return {
+    ok: !note || commandOk(note),
+    trace_id: traceId,
+    kind: options.kind,
+    workflow: options.workflow,
+    commit_sha: sha2,
+    subject: fullSubject,
+    files,
+    notes_ref: ref,
+    note
+  };
+}
+function notesPushAction(root, repo, cwd, remote = "origin") {
+  return plannedGitAction(
+    `notes-push-${repo.replace(/[^A-Za-z0-9_.-]+/g, "-") || "root"}`,
+    "push_notes",
+    repo,
+    cwd,
+    ["push", remote, `${notesRef(root)}:${notesRef(root)}`],
+    `Push Cadre git notes for ${repo}`
+  );
+}
+
+// src/core/application/runtime/quality-gates.ts
+var import_node_fs11 = __toESM(require("node:fs"));
+var import_node_path19 = __toESM(require("node:path"));
+
+// src/core/application/runtime/mcp-readiness.ts
+var OPTIONAL_CATEGORIES = [
+  {
+    kind: "code_search",
+    label: "Code search",
+    aliases: ["code_search", "codeSearch", "sourcegraph", "search"],
+    purpose: "Cross-repo semantic or indexed code search for repo maps, impact analysis, and claim suggestions.",
+    required: false,
+    recommended: true
+  },
+  {
+    kind: "issue_tracker",
+    label: "Issue tracker",
+    aliases: ["issue_tracker", "issueTracker", "jira", "linear", "github_issues", "gitlab_issues"],
+    purpose: "Link Cadre tracks, native workflow state, and provider issues without forcing agents through local CLI fallbacks.",
+    required: false,
+    recommended: true
+  },
+  {
+    kind: "ci",
+    label: "CI/checks",
+    aliases: ["ci", "checks", "github_actions", "gitlab_ci", "buildkite", "circleci"],
+    purpose: "Fetch check, pipeline, and workflow evidence for review/ship gates.",
+    required: false,
+    recommended: true
+  },
+  {
+    kind: "observability",
+    label: "Observability",
+    aliases: ["observability", "logging", "telemetry", "sentry", "datadog", "honeycomb"],
+    purpose: "Pull production error, log, and telemetry context for review and release readiness.",
+    required: false,
+    recommended: true
+  },
+  {
+    kind: "knowledge_base",
+    label: "Knowledge base",
+    aliases: ["knowledge_base", "knowledgeBase", "kb", "docs", "confluence", "notion"],
+    purpose: "Retrieve team documentation and runbooks without embedding large docs in packet responses.",
+    required: false,
+    recommended: true
+  }
+];
+function capabilityEvidence(args) {
+  const raw = args.mcpCapabilities || args.mcp_capabilities || null;
+  return isRecord(raw) ? asJsonObject(raw) : {};
+}
+function valueAvailable(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lower = value.trim().toLowerCase();
+    if (!lower) return null;
+    if (["false", "0", "no", "off", "missing", "unavailable", "disabled"].includes(lower)) return false;
+    return true;
+  }
+  if (!isRecord(value)) return null;
+  const object = asJsonObject(value);
+  if (typeof object.available === "boolean") return object.available;
+  if (typeof object.enabled === "boolean") return object.enabled;
+  if (typeof object.configured === "boolean") return object.configured;
+  if (object.server || object.tool || object.tools || object.capability) return true;
+  return null;
+}
+function probeNestedMap(map, aliases, source) {
+  for (const alias of aliases) {
+    if (!Object.prototype.hasOwnProperty.call(map, alias)) continue;
+    const value = map[alias];
+    return {
+      available: valueAvailable(value),
+      source: `${source}.${alias}`,
+      evidence: isRecord(value) ? asJsonObject(value) : { value },
+      missing: []
+    };
+  }
+  return null;
+}
+function probeTools(evidence, aliases) {
+  const tools = Array.isArray(evidence.tools) ? evidence.tools : [];
+  const servers = Array.isArray(evidence.servers) ? evidence.servers : [];
+  const values = [...tools, ...servers].map((item) => {
+    if (typeof item === "string") return item;
+    if (isRecord(item)) {
+      const object = asJsonObject(item);
+      return asOptionalString(object.name) || asOptionalString(object.id) || asOptionalString(object.server) || "";
+    }
+    return "";
+  }).filter(Boolean);
+  const found = values.find((value) => aliases.some((alias) => value.toLowerCase().includes(alias.toLowerCase())));
+  if (!found) return null;
+  return {
+    available: true,
+    source: "mcpCapabilities.tools",
+    evidence: { match: found },
+    missing: []
+  };
+}
+function probeCapability(args, aliases, argFallbacks = []) {
+  for (const fallback of argFallbacks) {
+    const value = args[fallback];
+    if (typeof value === "boolean") {
+      return {
+        available: value,
+        source: `args.${fallback}`,
+        evidence: { [fallback]: value },
+        missing: []
+      };
+    }
+  }
+  const evidence = capabilityEvidence(args);
+  if (Object.keys(evidence).length === 0) {
+    return {
+      available: null,
+      source: "not_provided",
+      evidence: null,
+      missing: ["mcpCapabilities"]
+    };
+  }
+  const direct = probeNestedMap(evidence, aliases, "mcpCapabilities");
+  if (direct) return direct;
+  for (const containerName of ["servers", "mcpServers", "capabilities", "apps", "connectors"]) {
+    const container = evidence[containerName];
+    if (isRecord(container)) {
+      const nested = probeNestedMap(asJsonObject(container), aliases, `mcpCapabilities.${containerName}`);
+      if (nested) return nested;
+    }
+  }
+  const tools = probeTools(evidence, aliases);
+  if (tools) return tools;
+  return {
+    available: null,
+    source: "not_detected",
+    evidence: null,
+    missing: aliases.map((alias) => `mcpCapabilities.${alias}`)
+  };
+}
+function configConfigured(root, aliases) {
+  const config = loadTopology(root).config || {};
+  const integrations = isRecord(config.integrations) ? asJsonObject(config.integrations) : {};
+  return aliases.some(
+    (alias) => Object.prototype.hasOwnProperty.call(config, alias) || Object.prototype.hasOwnProperty.call(integrations, alias)
+  );
+}
+function readinessEntry(root, category, args) {
+  const probe = probeCapability(args, category.aliases);
+  return {
+    kind: category.kind,
+    label: category.label,
+    required: category.required,
+    recommended: category.recommended,
+    configured: configConfigured(root, category.aliases),
+    available: probe.available,
+    evidence_source: probe.source,
+    detected_agent_capability_evidence: probe.evidence,
+    missing_evidence_fields: probe.available == null ? probe.missing : [],
+    purpose: category.purpose
+  };
+}
+function providerReadiness(root, args = {}) {
+  const provider = providerMcpAvailability(root, args);
+  const mode = asOptionalString(provider.provider_mode) || "local";
+  if (mode === "local") {
+    return {
+      kind: "provider",
+      label: "Provider MCP",
+      provider_mode: "local",
+      required: false,
+      recommended: false,
+      available: true,
+      evidence_source: "provider_mode_local",
+      detected_agent_capability_evidence: null,
+      missing_evidence_fields: [],
+      required_provider_mcp: null,
+      write_back: null,
+      reason: "provider_mode is local; provider MCP evidence is not required"
+    };
+  }
+  const probe = probeCapability(args, [mode, `${mode}_mcp`, `${mode}Mcp`, "provider", "provider_mcp"], [
+    "providerMcpAvailable",
+    "provider_mcp_available",
+    mode === "github" ? "githubMcpAvailable" : "gitlabMcpAvailable"
+  ]);
+  const available = probe.available ?? (typeof provider.available === "boolean" ? provider.available : null);
+  return {
+    kind: "provider",
+    label: "Provider MCP",
+    provider_mode: mode,
+    required: true,
+    recommended: true,
+    available,
+    evidence_source: probe.available == null && provider.available != null ? asOptionalString(provider.availability_source) || "caller" : probe.source,
+    detected_agent_capability_evidence: probe.evidence,
+    missing_evidence_fields: available == null ? probe.missing : [],
+    required_provider_mcp: isRecord(provider.required_provider_mcp) ? asJsonObject(provider.required_provider_mcp) : {
+      provider: mode,
+      server: mode,
+      purpose: "Fetch PR/MR metadata, reviews, CI/check status, and discussion evidence."
+    },
+    write_back: {
+      tool: "cadre_action",
+      arguments: {
+        root,
+        action: "review.provider_evidence",
+        input: { trackId: "<track-id>", providerEvidence: `<${mode}-mcp-evidence>` },
+        execute: true
+      },
+      required_fields: ["root", "input.trackId", "input.providerEvidence"]
+    },
+    reason: available == null ? `${mode} provider mode requires packet-owned evidence that the agent can access the ${mode} MCP` : null
+  };
+}
+function mcpReadiness(root, args = {}) {
+  const provider = providerReadiness(root, args);
+  const optional = OPTIONAL_CATEGORIES.map((category) => readinessEntry(root, category, args));
+  const all = [provider, ...optional];
+  const missingRequired = all.filter((entry) => entry.required === true && entry.available !== true);
+  const optionalAvailable = optional.filter((entry) => entry.available === true).length;
+  return {
+    ok: missingRequired.length === 0,
+    root,
+    provider,
+    optional_mcps: optional,
+    summary: {
+      required_count: all.filter((entry) => entry.required === true).length,
+      missing_required_count: missingRequired.length,
+      optional_recommended_count: optional.length,
+      optional_available_count: optionalAvailable,
+      optional_configured_count: optional.filter((entry) => entry.configured === true).length,
+      packet_owned_evidence_only: true
+    },
+    recommendations: optional.filter((entry) => entry.available !== true).map((entry) => ({
+      kind: entry.kind,
+      label: entry.label,
+      required: false,
+      reason: "Optional MCP improves team-scale visibility but is not mandatory."
+    }))
+  };
+}
+
+// src/core/application/runtime/project-maintenance.ts
+var import_node_child_process3 = require("node:child_process");
+var import_node_fs7 = __toESM(require("node:fs"));
+var import_node_path13 = __toESM(require("node:path"));
+
+// src/runtime-paths.ts
+var import_node_path12 = __toESM(require("node:path"));
+function unique(values) {
+  return Array.from(new Set(values));
+}
+function mcpServerPathCandidates() {
+  const candidates = [];
+  let dir = __dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    candidates.push(import_node_path12.default.join(dir, "cadre-server.js"));
+    candidates.push(import_node_path12.default.join(dir, "mcp", "cadre-server.js"));
+    candidates.push(import_node_path12.default.join(dir, "scripts", "mcp", "cadre-server.js"));
+    const parent = import_node_path12.default.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return unique(candidates);
+}
+
+// src/core/application/runtime/project-maintenance.ts
+function lspReview(root, args = {}) {
+  const candidates = mcpServerPathCandidates();
+  const helper = candidates.find(fileExists);
+  if (!helper) return { available: false, reason: "No Cadre MCP runtime found for LSP review", checked: candidates };
+  const commandArgs = [helper, "--cadre-lsp-review", "--base", args.base || "main", "--head", args.head || "HEAD", "--json"];
+  if (args.config) commandArgs.push("--config", args.config);
+  const result = runCommand("node", commandArgs, { cwd: root });
+  if (!result.ok) {
+    return { available: false, reason: "LSP review helper failed", helper, result };
+  }
+  try {
+    return { helper, ...asJsonObject(JSON.parse(result.stdout || "{}")) };
+  } catch {
+    return { available: false, reason: "LSP review helper returned invalid JSON", helper, result };
+  }
+}
+function polyrepoPreflight(root) {
+  const topology = loadTopology(root);
+  if (!topology.polyrepo) {
+    return { ok: true, polyrepo: false, checks: ["monorepo mode"] };
+  }
+  const checks = [];
+  const errors = [];
+  const gitmodules = import_node_path13.default.join(root, ".gitmodules");
+  for (const repo of topology.repos.repos || []) {
+    if (repo.enabled === false) continue;
+    const repoPath = import_node_path13.default.join(root, repo.submodule_path || "");
+    if (!repo.name) errors.push("repo entry missing name");
+    if (!repo.submodule_path) errors.push(`repo ${repo.name || "?"} missing submodule_path`);
+    if (repo.submodule_path && !fileExists(repoPath)) {
+      errors.push(`repo ${repo.name} path is missing: ${repo.submodule_path}`);
+    }
+    if (fileExists(gitmodules) && repo.name) {
+      const result = (0, import_node_child_process3.spawnSync)(
+        "git",
+        ["config", "-f", ".gitmodules", "--get", `submodule.${repo.name}.path`],
+        { cwd: root, encoding: "utf8" }
+      );
+      if (result.status === 0 && result.stdout.trim() !== repo.submodule_path) {
+        errors.push(
+          `repo ${repo.name} submodule_path mismatch: repos.json=${repo.submodule_path}, .gitmodules=${result.stdout.trim()}`
+        );
+      }
+    }
+    if (repo.name) checks.push(repo.name);
+  }
+  return { ok: errors.length === 0, polyrepo: true, checks, errors };
+}
+function regenIndex(root, options = {}) {
+  if (options.lock !== false) {
+    return withLock(root, "tracks-index", () => regenIndex(root, { ...options, lock: false }));
+  }
+  const tracksFile = import_node_path13.default.join(root, "cadre", "tracks.json");
+  const legacyMarkdownFile = import_node_path13.default.join(root, "cadre", "tracks.md");
+  const tracks = listTracks(root).sort((a, b) => a.track_id.localeCompare(b.track_id));
+  const payload = trackIndexPayload(root, tracks);
+  import_node_fs7.default.mkdirSync(import_node_path13.default.dirname(tracksFile), { recursive: true });
+  writeJson(tracksFile, payload);
+  let removedLegacyMarkdown = null;
+  if (fileExists(legacyMarkdownFile)) {
+    const legacy = import_node_fs7.default.readFileSync(legacyMarkdownFile, "utf8");
+    if (hasGeneratedMarker(legacy) || legacy.includes("<!-- cadre:index:start -->") || legacy.includes("<!-- cadre:index:end -->")) {
+      import_node_fs7.default.rmSync(legacyMarkdownFile, { force: true });
+      removedLegacyMarkdown = import_node_path13.default.relative(root, legacyMarkdownFile);
+    }
+  }
+  return {
+    ok: true,
+    tracks_file: tracksFile,
+    tracks: tracks.length,
+    removed_legacy_markdown: removedLegacyMarkdown,
+    stdout: `Regenerated ${tracksFile} index from ${tracks.length} tracks' metadata.
+`,
+    stderr: ""
+  };
+}
+
+// src/core/application/runtime/repo-map.ts
+var import_node_fs8 = __toESM(require("node:fs"));
+var import_node_path15 = __toESM(require("node:path"));
+
+// src/core/application/runtime/workspace-cache.ts
+var import_node_child_process4 = require("node:child_process");
+var import_node_path14 = __toESM(require("node:path"));
+var CACHE = /* @__PURE__ */ new Map();
+var DEFAULT_TTL_MS = 3e4;
+function gitHead(root) {
+  const result = (0, import_node_child_process4.spawnSync)("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024
+  });
+  return result.status === 0 ? result.stdout.trim() || "unknown" : "nogit";
+}
+function workspaceCacheKey(root, scope, discriminator = "") {
+  return JSON.stringify({
+    root: import_node_path14.default.resolve(root),
+    head: gitHead(root),
+    scope,
+    discriminator
+  });
+}
+function cachedWorkspaceValue(root, scope, discriminator, producer, ttlMs = DEFAULT_TTL_MS) {
+  const key = workspaceCacheKey(root, scope, discriminator);
+  const now = Date.now();
+  const existing = CACHE.get(key);
+  if (existing && now - existing.createdAt <= ttlMs) return existing.value;
+  const value = producer();
+  CACHE.set(key, { value, createdAt: now });
+  if (CACHE.size > 200) {
+    const oldest = Array.from(CACHE.entries()).sort((a, b) => a[1].createdAt - b[1].createdAt).slice(0, 40);
+    for (const [oldKey] of oldest) CACHE.delete(oldKey);
+  }
+  return value;
+}
+
+// src/core/application/runtime/repo-map.ts
+function isIgnoredRepoMapFile(file) {
+  const normalized = String(file || "").replace(/\\/g, "/");
+  if (!normalized) return true;
+  if (normalized.startsWith(".agents/")) return true;
+  if (normalized.startsWith(".claude/")) return true;
+  if (normalized.startsWith(".claude-plugin/")) return true;
+  if (normalized.startsWith(".copilot/")) return true;
+  if (normalized.startsWith(".gemini/")) return true;
+  if (normalized.startsWith("plugins/cadre/")) return true;
+  if (normalized.startsWith("plugins/cadre-claude/")) return true;
+  if (normalized.startsWith("plugins/cadre-copilot/")) return true;
+  if (normalized.startsWith("plugins/cadre-antigravity/")) return true;
+  return normalized.split("/").some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
+}
+function selectedRepoNames(args = {}) {
+  const values = [
+    asOptionalString(args.repo),
+    ...asStringArray(args.repos)
+  ].filter((value) => Boolean(value));
+  return values.length > 0 ? new Set(values) : null;
+}
+function intelRepoRoots(root, args = {}) {
+  const selected = selectedRepoNames(args);
+  const topology = loadTopology(root);
+  const control = {
+    repo: ".",
+    root,
+    path: ".",
+    source: "control-root"
+  };
+  if (!topology.polyrepo) return selected && !selected.has(".") ? [] : [control];
+  const entries = [control];
+  for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
+    const repo = asJsonObject(raw);
+    if (repo.enabled === false) continue;
+    const name = asOptionalString(repo.name);
+    const rel = asOptionalString(repo.submodule_path);
+    if (!name || !rel) continue;
+    entries.push({
+      repo: name,
+      root: import_node_path15.default.resolve(root, rel),
+      path: rel,
+      source: "repos.json"
+    });
+  }
+  return selected ? entries.filter((entry) => selected.has(entry.repo)) : entries;
+}
+function combineLanguageCounts(entries) {
+  const counts = {};
+  for (const entry of entries) {
+    const languages = asJsonObject(entry.by_language);
+    for (const [language, count] of Object.entries(languages)) {
+      counts[language] = (counts[language] || 0) + Number(count || 0);
+    }
+  }
+  return Object.fromEntries(Object.entries(counts).sort());
+}
+var GENERIC_SYMBOL_PATTERNS = [
+  /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/g,
+  /\b(?:export\s+)?(?:class|interface|type|enum|struct|record|trait)\s+([A-Za-z_$][\w$]*)\b/g,
+  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[:=]/g
+];
+var LANGUAGE_SYMBOL_PATTERNS = {
+  python: [/^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\b/gm, /^\s*class\s+([A-Za-z_][\w]*)\b/gm],
+  go: [/^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\b/gm, /^\s*type\s+([A-Za-z_][\w]*)\s+/gm],
+  rust: [/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:pub\s+)?(?:struct|enum|trait|type)\s+([A-Za-z_][\w]*)\b/gm],
+  java: [/^\s*(?:public|private|protected|static|final|abstract|sealed|non-sealed|\s)*(?:class|interface|enum|record)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|static|final|abstract|synchronized|native|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
+  kotlin: [/^\s*(?:public|private|protected|internal|open|final|abstract|data|sealed|\s)*(?:class|interface|object|enum|typealias)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|suspend|inline|tailrec|operator|infix|fun|\s)*fun\s+([A-Za-z_][\w]*)\b/gm],
+  swift: [/^\s*(?:public|private|internal|open|fileprivate|static|final|mutating|nonmutating|\s)*(?:func|class|struct|enum|protocol)\s+([A-Za-z_][\w]*)\b/gm],
+  csharp: [/^\s*(?:public|private|protected|internal|static|partial|sealed|abstract|virtual|override|\s)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][\w]*)\b/gm, /^\s*(?:public|private|protected|internal|static|async|\s)*[\w<>\[\].?,\s]+\s+([A-Za-z_][\w]*)\s*\(/gm],
+  ruby: [/^\s*(?:class|module|def)\s+([A-Za-z_][\w!?=]*)\b/gm],
+  elixir: [/^\s*(?:defmodule|defp?|defmacro)\s+([A-Za-z_][\w!?]*)\b/gm],
+  lua: [/^\s*(?:local\s+)?function\s+([A-Za-z_][\w.]*)\b/gm],
+  terraform: [/^\s*(?:resource|module|variable|output|data)\s+"?([A-Za-z0-9_.-]+)"?/gim],
+  sql: [/^\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE)\s+([A-Za-z_][\w."]*)\b/gim],
+  shell: [/^\s*function\s+([A-Za-z_][\w-]*)\b/gm, /^\s*(?:local\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{/gm]
+};
+function symbolPatternsForLanguage(language) {
+  return [...GENERIC_SYMBOL_PATTERNS, ...LANGUAGE_SYMBOL_PATTERNS[language] || []].map(
+    (pattern) => new RegExp(pattern.source, pattern.flags)
+  );
+}
+function extractRepoSymbols(root, file, limitPerFile = 40) {
+  const abs = import_node_path15.default.join(root, file);
+  if (!fileExists(abs)) return [];
+  let stat;
+  try {
+    stat = import_node_fs8.default.statSync(abs);
+  } catch {
+    return [];
+  }
+  if (stat.size > 1024 * 1024) return [];
+  const language = languageForFile(file);
+  if (!language) return [];
+  const text2 = import_node_fs8.default.readFileSync(abs, "utf8");
+  const patterns = symbolPatternsForLanguage(language);
+  const symbols = [];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text2)) && symbols.length < limitPerFile) {
+      const prefix = text2.slice(0, match.index);
+      const line = prefix.split(/\r?\n/).length;
+      const name = match[1];
+      if (name) symbols.push({ name, file, line, language });
+    }
+  }
+  return symbols;
+}
+function repoMap(root, args = {}) {
+  const limit = Number(args.limit || 200);
+  const symbol = args.symbol ? String(args.symbol) : null;
+  const repos = intelRepoRoots(root, args);
+  if (symbol) {
+    const repoResults = repos.map((entry) => {
+      const result = runCommand("git", ["grep", "-n", "-w", "--", symbol], { cwd: entry.root, maxBuffer: 10 * 1024 * 1024 });
+      const matches2 = result.stdout.split(/\r?\n/).filter(Boolean).filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || "")).slice(0, limit).map((line) => {
+        const [file, lineNo, ...rest] = line.split(":");
+        return { repo: entry.repo, file: file || "", line: Number(lineNo), snippet: rest.join(":").trim().slice(0, 180) };
+      });
+      return { repo: entry.repo, root: entry.root, path: entry.path, ok: result.ok || matches2.length > 0, matches: matches2, truncated: matches2.length >= limit };
+    });
+    const matches = repoResults.flatMap((entry) => asArray(entry.matches)).slice(0, limit);
+    return { ok: repoResults.some((entry) => entry.ok) || matches.length > 0, root, symbol, matches, repos: repoResults, truncated: matches.length >= limit };
+  }
+  return cachedWorkspaceValue(root, "repo-map", JSON.stringify({ limit, repos: repos.map((entry) => entry.repo) }), () => {
+    const repoResults = repos.map((entry) => {
+      const files2 = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
+      const byLanguage = {};
+      const symbols2 = [];
+      for (const file of files2) {
+        const language = languageForFile(file);
+        if (language) byLanguage[language] = (byLanguage[language] || 0) + 1;
+        if (symbols2.length < limit) symbols2.push(...extractRepoSymbols(entry.root, file, 12).map((symbolEntry) => ({
+          ...symbolEntry,
+          repo: entry.repo
+        })));
+        if (symbols2.length > limit) symbols2.length = limit;
+      }
+      return {
+        ok: true,
+        repo: entry.repo,
+        root: entry.root,
+        path: entry.path,
+        files: files2.length,
+        by_language: Object.fromEntries(Object.entries(byLanguage).sort()),
+        symbols: symbols2,
+        truncated: symbols2.length >= limit
+      };
+    });
+    const files = repoResults.reduce((sum, entry) => sum + Number(entry.files || 0), 0);
+    const symbols = repoResults.flatMap((entry) => asArray(entry.symbols)).slice(0, limit);
+    return {
+      ok: true,
+      root,
+      files,
+      by_language: combineLanguageCounts(repoResults),
+      symbols,
+      repos: repoResults,
+      truncated: symbols.length >= limit
+    };
+  });
+}
+
+// src/core/application/runtime/track-mutations.ts
+var import_node_path18 = __toESM(require("node:path"));
+
+// src/core/domain/track-status.ts
+var STATUS_MARKERS = {
+  new: "[ ]",
+  in_progress: "[~]",
+  completed: "[x]",
+  blocked: "[!]",
+  skipped: "[-]"
+};
+var VALID_STATUSES = new Set(Object.keys(STATUS_MARKERS));
+
+// src/core/application/runtime/artifact-pairs.ts
+var import_node_fs9 = __toESM(require("node:fs"));
+var import_node_path16 = __toESM(require("node:path"));
+function normalizedPath(root, file) {
+  const resolvedRoot = import_node_path16.default.resolve(root);
+  const resolved = import_node_path16.default.resolve(root, file);
+  const relative = import_node_path16.default.relative(resolvedRoot, resolved);
+  if (!relative || relative.startsWith("..") || import_node_path16.default.isAbsolute(relative)) return null;
+  return resolved;
+}
+function temporaryPath(file, index) {
+  return `${file}.${process.pid}.${Date.now()}.${index}.cadre-tmp`;
+}
+function restore(before) {
+  const errors = [];
+  for (const item of before.slice().reverse()) {
+    try {
+      if (!item.existed) {
+        import_node_fs9.default.rmSync(item.path, { force: true });
+      } else if (item.content) {
+        const temporary = temporaryPath(item.path, 0);
+        import_node_fs9.default.writeFileSync(temporary, item.content);
+        import_node_fs9.default.renameSync(temporary, item.path);
+      }
+    } catch (error) {
+      errors.push(`${item.path}: ${errorMessage(error)}`);
+    }
+  }
+  return errors;
+}
+function writeUnlocked(root, files, options) {
+  const unique2 = /* @__PURE__ */ new Set();
+  const prepared = [];
+  for (const [index, file] of files.entries()) {
+    const target2 = normalizedPath(root, file.path);
+    if (!target2) return { ok: false, stage: "artifact_path", error: `Unsafe or empty artifact path: ${file.path}` };
+    if (unique2.has(target2)) return { ok: false, stage: "artifact_path", error: `Duplicate artifact path: ${file.path}` };
+    unique2.add(target2);
+    prepared.push({ ...file, target: target2, temporary: temporaryPath(target2, index) });
+  }
+  const before = prepared.map((file) => ({
+    path: file.target,
+    existed: import_node_fs9.default.existsSync(file.target),
+    content: import_node_fs9.default.existsSync(file.target) ? import_node_fs9.default.readFileSync(file.target) : null
+  }));
+  try {
+    for (const file of prepared) {
+      import_node_fs9.default.mkdirSync(import_node_path16.default.dirname(file.target), { recursive: true });
+      import_node_fs9.default.writeFileSync(file.temporary, file.content);
+    }
+    for (const [index, file] of prepared.entries()) {
+      import_node_fs9.default.renameSync(file.temporary, file.target);
+      if (options.simulateFailureAfter === index + 1) throw new Error(`Simulated failure after ${index + 1} artifact write(s)`);
+    }
+    return {
+      ok: true,
+      files: prepared.map((file) => import_node_path16.default.relative(root, file.target).split(import_node_path16.default.sep).join("/"))
+    };
+  } catch (error) {
+    for (const file of prepared) import_node_fs9.default.rmSync(file.temporary, { force: true });
+    const rollbackErrors = restore(before);
+    return {
+      ok: false,
+      stage: "artifact_pair_write",
+      error: errorMessage(error),
+      rolled_back: rollbackErrors.length === 0,
+      rollback_errors: rollbackErrors
+    };
+  }
+}
+function writeArtifactFilesAtomic(root, files, options = {}) {
+  const operation = () => writeUnlocked(root, files, options);
+  if (options.lock === false) return operation();
+  return withLock(root, options.lockName || "artifact-projections", operation);
+}
+function writeArtifactPairAtomic(root, canonicalPath, canonicalContent, projectionPath, projectionContent, options = {}) {
+  return writeArtifactFilesAtomic(root, [
+    { path: canonicalPath, content: canonicalContent },
+    { path: projectionPath, content: projectionContent }
+  ], options);
+}
+function jsonContent(value) {
+  return `${JSON.stringify(value, null, 2)}
+`;
+}
+
+// src/core/application/runtime/native-state.ts
+var import_node_fs10 = __toESM(require("node:fs"));
+var import_node_path17 = __toESM(require("node:path"));
+function nativeStatePaths(root) {
+  return {
+    events: import_node_path17.default.join(root, "cadre", "events.jsonl"),
+    formulas: import_node_path17.default.join(root, "cadre", "formulas"),
+    operations: import_node_path17.default.join(root, "cadre", "operations"),
+    messages: import_node_path17.default.join(root, "cadre", "messages"),
+    inbox: import_node_path17.default.join(root, "cadre", "messages", "inbox.jsonl"),
+    outbox: import_node_path17.default.join(root, "cadre", "messages", "outbox.jsonl"),
+    wisps: import_node_path17.default.join(root, "cadre", "local", "wisps")
+  };
+}
+function compactStamp(value) {
+  return value.replace(/[^0-9A-Za-z]+/g, "").slice(0, 16);
+}
+function nativeId(prefix, payload) {
+  const recordedAt = asOptionalString(payload.recorded_at) || utcNow();
+  return `${prefix}_${compactStamp(recordedAt)}_${textHash(JSON.stringify(payload)).slice(0, 12)}`;
+}
+function readJsonlObjects(file, limit = 200) {
+  if (!fileExists(file)) return [];
+  const lines = import_node_fs10.default.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
+  const selected = limit > 0 ? lines.slice(-limit) : lines;
+  const out = [];
+  for (const line of selected) {
+    try {
+      out.push(asJsonObject(JSON.parse(line)));
+    } catch {
+    }
+  }
+  return out;
+}
+function countJsonlLines(file) {
+  if (!fileExists(file)) return 0;
+  return import_node_fs10.default.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).length;
+}
+function ensureCadreLocalIgnored(root) {
+  const cadreDir = import_node_path17.default.join(root, "cadre");
+  const ignorePath = import_node_path17.default.join(cadreDir, ".gitignore");
+  import_node_fs10.default.mkdirSync(cadreDir, { recursive: true });
+  const current = fileExists(ignorePath) ? import_node_fs10.default.readFileSync(ignorePath, "utf8") : "";
+  const lines = current.split(/\r?\n/).filter(Boolean);
+  if (!lines.includes("/local/")) {
+    lines.push("/local/");
+    import_node_fs10.default.writeFileSync(ignorePath, `${lines.join("\n")}
+`);
+    return import_node_path17.default.relative(root, ignorePath);
+  }
+  return null;
+}
+function ensureNativeState(root) {
+  const paths = nativeStatePaths(root);
+  for (const dir of [
+    asOptionalString(paths.formulas),
+    asOptionalString(paths.operations),
+    asOptionalString(paths.messages),
+    asOptionalString(paths.wisps)
+  ].filter((value) => Boolean(value))) {
+    import_node_fs10.default.mkdirSync(dir, { recursive: true });
+  }
+  const ignore_path = ensureCadreLocalIgnored(root);
+  return {
+    ok: true,
+    paths: {
+      events: import_node_path17.default.relative(root, String(paths.events)),
+      formulas: import_node_path17.default.relative(root, String(paths.formulas)),
+      operations: import_node_path17.default.relative(root, String(paths.operations)),
+      messages: import_node_path17.default.relative(root, String(paths.messages)),
+      wisps: import_node_path17.default.relative(root, String(paths.wisps))
+    },
+    ignore_path
+  };
+}
+function appendCadreEvent(root, event) {
+  ensureNativeState(root);
+  const recorded_at = asOptionalString(event.recorded_at) || utcNow();
+  const kind = asOptionalString(event.kind || event.type) || "event";
+  const actor = asOptionalString(event.actor) || gitIdentity(root) || null;
+  const entry = {
+    ...event,
+    version: 1,
+    schema: "cadre.event.v1",
+    id: asOptionalString(event.id) || nativeId("evt", { ...event, recorded_at, kind }),
+    kind,
+    recorded_at,
+    actor
+  };
+  const file = import_node_path17.default.join(root, "cadre", "events.jsonl");
+  appendJsonl(file, entry);
+  return { ok: true, path: import_node_path17.default.relative(root, file), event: entry };
+}
+function readCadreEvents(root, limit = 50) {
+  return readJsonlObjects(import_node_path17.default.join(root, "cadre", "events.jsonl"), limit);
+}
+function appendCadreMessage(root, box, message) {
+  ensureNativeState(root);
+  const recorded_at = asOptionalString(message.recorded_at) || utcNow();
+  const direction = box === "outbox" ? "outgoing" : "incoming";
+  const entry = {
+    ...message,
+    version: 1,
+    schema: "cadre.message.v1",
+    id: asOptionalString(message.id) || nativeId(`msg_${box}`, { ...message, recorded_at, direction }),
+    box,
+    direction,
+    status: asOptionalString(message.status) || "pending",
+    recorded_at,
+    from: asOptionalString(message.from) || gitIdentity(root) || null
+  };
+  const file = import_node_path17.default.join(root, "cadre", "messages", `${box}.jsonl`);
+  appendJsonl(file, entry);
+  return { ok: true, path: import_node_path17.default.relative(root, file), message: entry };
+}
+function readCadreMessages(root, box, limit = 50) {
+  return readJsonlObjects(import_node_path17.default.join(root, "cadre", "messages", `${box}.jsonl`), limit);
+}
+function nativeStateSummary(root) {
+  const paths = nativeStatePaths(root);
+  return {
+    ok: true,
+    paths: {
+      events: import_node_path17.default.relative(root, String(paths.events)),
+      inbox: import_node_path17.default.relative(root, String(paths.inbox)),
+      outbox: import_node_path17.default.relative(root, String(paths.outbox)),
+      operations: import_node_path17.default.relative(root, String(paths.operations)),
+      formulas: import_node_path17.default.relative(root, String(paths.formulas)),
+      wisps: import_node_path17.default.relative(root, String(paths.wisps))
+    },
+    counts: {
+      events: countJsonlLines(String(paths.events)),
+      inbox: countJsonlLines(String(paths.inbox)),
+      outbox: countJsonlLines(String(paths.outbox))
+    },
+    recent_events: readCadreEvents(root, 8),
+    recent_inbox: readCadreMessages(root, "inbox", 8),
+    recent_outbox: readCadreMessages(root, "outbox", 8)
+  };
+}
+
+// src/core/application/runtime/track-mutations.ts
+function reviewGate(root, trackId, options = {}) {
+  const track = listTracks(root).find((item) => item.track_id === trackId);
+  if (!track) {
+    return { ok: false, track_id: trackId, reasons: [`Track not found: ${trackId}`] };
+  }
+  const config = loadTopology(root).config || {};
+  const review = track.metadata.review || null;
+  const reasons = [];
+  const warnings = [];
+  if (!review) {
+    if (config.allow_unreviewed_ship === true) {
+      warnings.push("No recorded review verdict; allowed by config.allow_unreviewed_ship");
+    } else {
+      reasons.push("No recorded review verdict");
+    }
+  } else {
+    if (review.verdict !== "approved") {
+      reasons.push(`Review verdict is ${review.verdict || "absent"}`);
+    }
+    if ((review.blocking_count || 0) > 0) {
+      reasons.push(`Review has ${review.blocking_count} blocking finding(s)`);
+    }
+    if (config.require_second_reviewer === true && review.self_reviewed === true) {
+      reasons.push("Self-review is not sufficient when require_second_reviewer is true");
+    }
+    const hasPinnedReview = Boolean(review.reviewed_sha) || Boolean(review.reviewed_shas && Object.values(review.reviewed_shas).some(Boolean));
+    if (!hasPinnedReview) {
+      if (config.allow_unpinned_review_ship === true) {
+        warnings.push("Review does not record reviewed_sha/reviewed_shas; allowed by config.allow_unpinned_review_ship");
+      } else {
+        reasons.push("Review does not record reviewed_sha/reviewed_shas");
+      }
+    } else if (review.reviewed_sha && options.headSha && options.headSha !== review.reviewed_sha) {
+      reasons.push(`Head ${options.headSha} differs from reviewed_sha ${review.reviewed_sha}; re-review required`);
+    }
+    if (review.reviewed_shas && options.headShas && typeof options.headShas === "object") {
+      for (const [repo, reviewedSha] of Object.entries(review.reviewed_shas)) {
+        const headSha = options.headShas[repo];
+        if (typeof reviewedSha === "string" && typeof headSha === "string" && headSha !== reviewedSha) {
+          reasons.push(`Repo ${repo} head ${headSha} differs from reviewed_shas.${repo} ${reviewedSha}; re-review required`);
+        }
+      }
+    }
+  }
+  return {
+    ok: reasons.length === 0,
+    track_id: track.track_id,
+    review,
+    reasons,
+    warnings
+  };
+}
+function metadataPatch(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const patch = args.patch && typeof args.patch === "object" ? args.patch : null;
+  if (!patch) return { ok: false, error: "patch object is required" };
+  const result = patchJsonFile(track.metadata_path, (metadata) => ({ ...metadata, ...patch }), {
+    root,
+    lockName: trackLockName(track.track_id)
+  });
+  return {
+    ok: result.ok,
+    track_id: track.track_id,
+    metadata_path: import_node_path18.default.relative(root, track.metadata_path),
+    patch_keys: Object.keys(patch).sort(),
+    result,
+    event: result.ok ? appendCadreEvent(root, {
+      kind: "metadata_updated",
+      workflow: "metadata_patch",
+      track_id: track.track_id,
+      patch_keys: Object.keys(patch).sort(),
+      tags: asStringArray(asJsonObject(patch).tags),
+      depends_on: asStringArray(asJsonObject(patch).depends_on)
+    }) : null
+  };
+}
+function heartbeatTrack(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => heartbeatTrackUnlocked(root, track, args));
+}
+function heartbeatTrackUnlocked(root, track, args = {}) {
+  const identity = args.identity || gitIdentity(root) || track.metadata.owner || null;
+  const now = asOptionalString(args.now) || utcNow();
+  const topology = loadTopology(root);
+  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
+    if (topology.config.sync_mode === "shared") {
+      const existingLease = asJsonObject(metadata.lease);
+      metadata.lease = {
+        ...existingLease,
+        owner: identity,
+        acquired_at: asOptionalString(existingLease.acquired_at) || now,
+        heartbeat_at: now
+      };
+    }
+    metadata.owner = metadata.owner || identity;
+    metadata.updated_at = now;
+    return metadata;
+  }, { lock: false });
+  const statePath = import_node_path18.default.join(track.dir, "implement_state.json");
+  let stateResult = null;
+  if (fileExists(statePath)) {
+    stateResult = patchJsonFile(statePath, (state) => ({
+      ...state,
+      owner: state.owner || identity,
+      last_updated: now
+    }), { lock: false });
+  }
+  return {
+    ok: metadataResult.ok && (!stateResult || stateResult.ok),
+    track_id: track.track_id,
+    owner: identity,
+    heartbeat_at: now,
+    metadata: metadataResult,
+    state: stateResult
+  };
+}
+function claimTrack(root, trackId, options = {}) {
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  return withTrackLock(root, track.track_id, () => claimTrackUnlocked(root, track, options));
+}
+function claimTrackUnlocked(root, track, options = {}) {
+  const identity = options.identity || gitIdentity(root);
+  if (!identity) return { ok: false, error: "No git identity found for claim" };
+  const now = utcNow();
+  const hold = holdInfo(track);
+  const heldBy = hold.lease_owner || hold.owner;
+  const stale = hold.lease_stale || hold.state_stale || !heldBy || heldBy === identity;
+  if (heldBy && heldBy !== identity && !stale && options.takeover !== true) {
+    return { ok: false, claimed: false, reason: "foreign-held", held_by: heldBy, hold };
+  }
+  const topology = loadTopology(root);
+  const metadataResult = patchJsonFile(track.metadata_path, (metadata) => {
+    metadata.owner = identity;
+    metadata.updated_at = now;
+    if (topology.config.sync_mode === "shared") {
+      const existingLease = asJsonObject(metadata.lease);
+      metadata.lease = {
+        ...existingLease,
+        owner: identity,
+        acquired_at: existingLease.owner === identity ? asOptionalString(existingLease.acquired_at) || now : now,
+        heartbeat_at: now
+      };
+    }
+    return metadata;
+  }, { lock: false });
+  if (!metadataResult.ok) return { ok: false, claimed: false, error: "Metadata claim patch failed", metadata: metadataResult };
+  const statePath = import_node_path18.default.join(track.dir, "implement_state.json");
+  writeJson(statePath, {
+    status: "starting",
+    owner: identity,
+    track_id: track.track_id,
+    last_updated: now
+  });
+  const event = appendCadreEvent(root, {
+    kind: "track_claimed",
+    workflow: "claim",
+    track_id: track.track_id,
+    owner: identity,
+    previous_owner: heldBy || null
+  });
+  return {
+    ok: true,
+    claimed: true,
+    track_id: track.track_id,
+    owner: identity,
+    previous_hold: hold,
+    metadata: metadataResult,
+    event
+  };
+}
+function setTrackStatus(root, trackId, status, args = {}) {
+  if (!VALID_STATUSES.has(status)) {
+    return {
+      ok: false,
+      error: `Invalid status: ${status}`,
+      valid_statuses: Array.from(VALID_STATUSES)
+    };
+  }
+  const track = listTracks(root).find((item) => item.track_id === trackId);
+  if (!track) {
+    return { ok: false, error: `Track not found: ${trackId}` };
+  }
+  return withTrackLock(root, trackId, () => {
+    const traceBefore = beginTrace(root);
+    const metadata = patchJsonFile(track.metadata_path, (current) => ({
+      ...current,
+      status
+    }), { lock: false });
+    if (!metadata.ok) {
+      return { ok: false, track_id: trackId, status, stage: "metadata_patch", metadata };
+    }
+    const regen = regenIndex(root);
+    const event = appendCadreEvent(root, {
+      kind: "status_changed",
+      workflow: "set_status",
+      track_id: trackId,
+      status
+    });
+    const controlCommit = commitTrace(root, args, {
+      kind: "control",
+      workflow: "status",
+      subject: `mark ${trackId} ${status}`,
+      before: traceBefore,
+      files: [
+        import_node_path18.default.relative(root, track.metadata_path),
+        "cadre/tracks.json",
+        "cadre/events.jsonl"
+      ],
+      trackId,
+      note: {
+        event_id: asOptionalString(asJsonObject(event.event).id) || null,
+        status
+      }
+    });
+    return {
+      ok: Boolean(regen.ok) && controlCommit.ok !== false,
+      track_id: trackId,
+      status,
+      metadata,
+      regen,
+      event,
+      control_commit: controlCommit
+    };
+  });
+}
+function recordTaskResultUnlocked(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  const plan = parsePlanFile(track.plan_path);
+  const phaseIndex = Number(args.phaseIndex);
+  const taskIndex = Number(args.taskIndex);
+  const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
+  const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
+  if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
+  const planJsonPath = trackPlanJsonPath(track);
+  const commitSha2 = args.commitSha ? String(args.commitSha).trim() : "";
+  const recordedAt = utcNow();
+  const lastTaskResult = {
+    phase_index: phaseIndex,
+    task_index: taskIndex,
+    task_key: task.task_key,
+    status: args.status || "completed",
+    commit_sha: commitSha2 || null,
+    repo: args.repo || task.repo || null,
+    working_root: args.workingRoot || null,
+    recorded_at: recordedAt
+  };
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    if (typeof args.coverage === "number") current.last_coverage = args.coverage;
+    if (args.lastTestRun && typeof args.lastTestRun === "object") current.last_test_run = args.lastTestRun;
+    if (isRecord(args.manualVerificationEvidence)) current.last_manual_verification_result = asJsonObject(args.manualVerificationEvidence);
+    current.last_task_result = lastTaskResult;
+    return current;
+  });
+  if (!metadata.ok) {
+    return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  }
+  if (fileExists(planJsonPath)) {
+    const currentPlan = readJson(planJsonPath, null);
+    if (!currentPlan) return { ok: false, track_id: track.track_id, stage: "plan_json_read", error: `Invalid canonical plan JSON: ${planJsonPath}`, metadata };
+    const phases = asArray(currentPlan.phases).map((rawPhase) => {
+      const currentPhase = asJsonObject(rawPhase);
+      if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
+      return {
+        ...currentPhase,
+        tasks: asArray(currentPhase.tasks).map((rawTask) => {
+          const currentTask = asJsonObject(rawTask);
+          if (Number(currentTask.task_index || currentTask.index) !== taskIndex) return currentTask;
+          const commitShas = Array.from(/* @__PURE__ */ new Set([
+            ...asStringArray(currentTask.commit_shas),
+            ...commitSha2 ? [commitSha2.slice(0, 12)] : []
+          ]));
+          return {
+            ...currentTask,
+            status: args.status || "completed",
+            commit_shas: commitShas,
+            completion_evidence: {
+              ...asJsonObject(currentTask.completion_evidence),
+              commit_sha: commitSha2 || null,
+              repo: args.repo || task.repo || null,
+              working_root: args.workingRoot || null,
+              coverage: typeof args.coverage === "number" ? args.coverage : null,
+              recorded_at: recordedAt,
+              ...isRecord(args.manualVerificationEvidence) ? { manual_verification: asJsonObject(args.manualVerificationEvidence) } : {}
+            }
+          };
+        })
+      };
+    });
+    const nextPlan = { ...currentPlan, phases, updated_at: recordedAt };
+    const canonicalPath = import_node_path18.default.relative(root, planJsonPath);
+    const projectionPath = import_node_path18.default.relative(root, track.plan_path);
+    const canonicalContent = jsonContent(nextPlan);
+    const projectionContent = withGeneratedMarker(
+      canonicalPath,
+      "cadre.plan.v1",
+      renderPlanMarkdown(nextPlan, canonicalPath),
+      { canonicalContent, projection: projectionPath }
+    );
+    const planPatch = writeArtifactPairAtomic(root, canonicalPath, canonicalContent, projectionPath, projectionContent, { lock: false });
+    if (planPatch.ok === false) return { ok: false, track_id: track.track_id, stage: "plan_pair_write", metadata, plan_json: planPatch };
+    return {
+      ok: true,
+      track_id: track.track_id,
+      task_key: task.task_key,
+      line: task.line,
+      status: args.status || "completed",
+      commit_sha: commitSha2 || null,
+      event: appendCadreEvent(root, {
+        kind: "task_result_recorded",
+        workflow: "record_task_result",
+        track_id: track.track_id,
+        phase_index: phaseIndex,
+        task_index: taskIndex,
+        task_key: task.task_key,
+        status: args.status || "completed",
+        commit_sha: commitSha2 || null,
+        repo: args.repo || task.repo || null
+      }),
+      metadata,
+      plan_json: planPatch
+    };
+  }
+  return {
+    ok: false,
+    track_id: track.track_id,
+    stage: "missing_plan_json",
+    error: `Missing canonical plan JSON: ${planJsonPath}`,
+    metadata
+  };
+}
+function recordTaskResult(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  if (args.lock === false) return recordTaskResultUnlocked(root, args);
+  return withTrackLock(root, track.track_id, () => recordTaskResultUnlocked(root, { ...args, lock: false }));
+}
+
+// src/core/application/runtime/quality-gates.ts
+function testCoverage(root, args = {}) {
+  let track = null;
+  let task = null;
+  let workingRoot = {
+    repo: args.repo || ".",
+    path: args.workingRoot ? import_node_path19.default.resolve(root, args.workingRoot) : root,
+    source: args.workingRoot ? "argument.workingRoot" : "project-root"
+  };
+  if (args.trackId) {
+    track = findTrack(root, args.trackId);
+    if (!track) {
+      return { ok: false, available: false, error: `Track not found: ${args.trackId}` };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      const plan = parsePlanFile(track.plan_path);
+      const phase = (plan.phases || []).find((item) => item.phase_index === Number(args.phaseIndex));
+      task = phase?.tasks.find((item) => item.task_index === Number(args.taskIndex)) || null;
+    }
+    workingRoot = resolveTaskWorkingRoot(root, track, task, args);
+    if (isWorkingRootError(workingRoot)) {
+      return {
+        ok: false,
+        available: false,
+        stage: "polyrepo_repo_resolution",
+        working_root: workingRoot,
+        reason: workingRoot.error
+      };
+    }
+  }
+  const coverageRun = runCoverage(root, args, workingRoot.path);
+  if (!coverageRun.available) return coverageRun;
+  const { command, coverage } = coverageRun;
+  let task_result = null;
+  let metadata = null;
+  if (track) {
+    const writeCoverage = () => {
+      metadata = patchJsonFile(track.metadata_path, (current) => {
+        current.last_test_run = {
+          command,
+          cwd: coverageRun.cwd || workingRoot.path,
+          ok: coverageRun.ok,
+          status: coverageRun.status,
+          signal: coverageRun.signal,
+          coverage,
+          measured_at: utcNow()
+        };
+        if (typeof coverage === "number") current.last_coverage = coverage;
+        return current;
+      }, { lock: false });
+      return metadata;
+    };
+    const metadataWrite = withTrackLock(root, track.track_id, writeCoverage);
+    if (!metadataWrite.ok) return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_lock", metadata: metadataWrite };
+    const metadataResult = metadata ?? metadataWrite;
+    if (!metadataResult.ok) {
+      return { ok: false, available: true, command, coverage, working_root: workingRoot, stage: "metadata_patch", metadata: metadataResult };
+    }
+    if (args.phaseIndex != null && args.taskIndex != null) {
+      task_result = recordTaskResult(root, {
+        trackId: args.trackId,
+        phaseIndex: args.phaseIndex,
+        taskIndex: args.taskIndex,
+        status: args.status || (coverageRun.ok ? "completed" : "blocked"),
+        commitSha: args.commitSha,
+        coverage,
+        repo: workingRoot.repo,
+        workingRoot: import_node_path19.default.relative(root, workingRoot.path) || "."
+      });
+    }
+  }
+  return {
+    ok: coverageRun.ok,
+    available: true,
+    command,
+    cwd: coverageRun.cwd,
+    status: coverageRun.status,
+    signal: coverageRun.signal,
+    coverage,
+    coverage_source: coverageRun.coverage_source,
+    timed_out: coverageRun.signal === "SIGTERM" || coverageRun.signal === "SIGKILL",
+    stdout_tail: coverageRun.stdout_tail,
+    stderr_tail: coverageRun.stderr_tail,
+    working_root: workingRoot,
+    metadata,
+    task_result
+  };
+}
+function configuredMachineGateCommand(root, args = {}, workingRoot = root) {
+  const explicit = args.machineCommand || args.machine_command || args.command;
+  if (explicit) return String(explicit);
+  const config = loadTopology(root).config || {};
+  for (const key of [
+    "review_machine_gate_command",
+    "machine_gate_command",
+    "review_check_command",
+    "typecheck_command",
+    "build_command",
+    "check_command"
+  ]) {
+    if (typeof config[key] === "string" && config[key].trim()) return config[key].trim();
+  }
+  const pkg = loadPackageJson(workingRoot);
+  const scripts = pkg ? asJsonObject(pkg.scripts) : {};
+  if (Object.keys(scripts).length > 0) {
+    for (const name of ["typecheck", "check", "build", "lint"]) {
+      if (scripts[name]) {
+        if (fileExists(import_node_path19.default.join(workingRoot, "pnpm-lock.yaml"))) return `pnpm ${name}`;
+        if (fileExists(import_node_path19.default.join(workingRoot, "yarn.lock"))) return `yarn ${name}`;
+        return `npm run ${name}`;
+      }
+    }
+  }
+  return null;
+}
+function runMachineGate(root, args = {}, workingRoot = root) {
+  const command = configuredMachineGateCommand(root, args, workingRoot);
+  if (!command) {
+    return {
+      ok: true,
+      available: false,
+      reason: "No review machine-gate command configured or discovered",
+      hints: [
+        "Pass { machineCommand } explicitly",
+        "Set cadre/config.json review_machine_gate_command",
+        "Add a package script named typecheck, check, build, or lint"
+      ]
+    };
+  }
+  const timeoutMs = Number(args.timeoutMs || 10 * 60 * 1e3);
+  const result = runCommand(command, [], {
+    cwd: workingRoot,
+    shell: true,
+    timeoutMs,
+    maxBuffer: 30 * 1024 * 1024
+  });
+  return {
+    ok: result.ok,
+    available: true,
+    command,
+    cwd: workingRoot,
+    status: result.status,
+    signal: result.signal,
+    timed_out: result.signal === "SIGTERM" || result.signal === "SIGKILL",
+    stdout_tail: result.stdout.slice(-4e3),
+    stderr_tail: result.stderr.slice(-4e3)
+  };
+}
+function reviewMachineGate(root, args = {}) {
+  const trackId = args.trackId || args.track_id || null;
+  const track = trackId ? findTrack(root, trackId) : null;
+  if (trackId && !track) return { ok: false, error: `Track not found: ${trackId}` };
+  if (track) {
+    const repoError = repoEntriesError(root, track, args);
+    if (repoError) return repoError;
+  }
+  const entries = track ? repoEntriesForTrack(root, track, args) : [{
+    repo: args.repo || ".",
+    root: args.workingRoot ? import_node_path19.default.resolve(root, args.workingRoot) : root,
+    path: args.workingRoot || ".",
+    source: args.workingRoot ? "argument.workingRoot" : "project-root"
+  }];
+  const results = entries.map((entry) => {
+    const gate = runMachineGate(root, args, entry.root);
+    return {
+      repo: entry.repo,
+      path: entry.path,
+      source: entry.source,
+      ...gate
+    };
+  });
+  const blocking = results.filter((result) => result.available === true && !result.ok);
+  return {
+    ok: blocking.length === 0,
+    available: results.some((result) => result.available === true),
+    track_id: trackId,
+    results,
+    blocking_count: blocking.length
+  };
+}
+function providerFromConfig(root, args = {}) {
+  return asOptionalString(configuredProvider(root, args).provider_mode) || "local";
+}
+function providerEvidenceRequirement(root, args = {}) {
+  const providerInfo = configuredProvider(root, args);
+  const provider = asOptionalString(providerInfo.provider_mode) || "local";
+  const readiness = providerReadiness(root, args);
+  const track = args.trackId ? findTrack(root, args.trackId) : null;
+  const branch = args.branch || track && (track.metadata.git_branch || `track/${track.track_id}`) || null;
+  const target2 = args.pr || args.prNumber || args.mr || branch || null;
+  const kind = provider === "gitlab" ? "gitlab_merge_request_status" : "github_pull_request_status";
+  const minimumFields = provider === "gitlab" ? ["url", "state", "source_branch", "target_branch", "head_sha", "approvals", "pipeline_status", "discussions"] : ["url", "state", "head_ref", "base_ref", "head_sha", "review_decision", "status_checks", "workflow_runs", "comments"];
+  return {
+    ok: false,
+    available: false,
+    provider,
+    target: target2,
+    branch,
+    provider_mode: provider,
+    required_provider_mcp: provider === "local" ? null : {
+      provider,
+      server: provider,
+      purpose: "Fetch provider evidence through the installed provider MCP. CLI fallback is intentionally disabled."
+    },
+    mcp_readiness: readiness,
+    detected_agent_capability_evidence: readiness.detected_agent_capability_evidence || null,
+    missing_evidence_fields: readiness.missing_evidence_fields || [],
+    required_evidence: provider === "local" ? null : {
+      kind,
+      provider,
+      target: target2,
+      branch,
+      minimum_fields: minimumFields,
+      write_back: {
+        tool: "cadre_action",
+        arguments: {
+          root,
+          action: "review.provider_evidence",
+          input: {
+            trackId: args.trackId || args.track_id || null,
+            providerEvidence: `<${provider}-mcp-evidence>`
+          },
+          execute: true
+        }
+      }
+    },
+    reason: provider === "local" ? "provider_mode is local; provider evidence is not required" : `${provider} provider evidence must come from the ${provider} MCP; CLI fallback is disabled`,
+    unsupported_reason: provider === "local" ? null : `provider_mode ${provider} requires ${provider} MCP evidence; Cadre workflow packets do not use provider CLI fallback`
+  };
+}
+function prCiStatus(root, args = {}) {
+  const provider = providerFromConfig(root, args);
+  const evidence = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  if (provider === "local") {
+    return {
+      ok: true,
+      available: false,
+      skipped: true,
+      provider,
+      provider_mode: "local",
+      reason: "provider_mode is local; no provider MCP evidence required"
+    };
+  }
+  if (provider !== "github" && provider !== "gitlab") {
+    return { ok: false, available: false, provider, reason: `Unsupported provider_mode: ${provider}` };
+  }
+  if (evidence) {
+    return {
+      ok: true,
+      available: true,
+      provider,
+      provider_mode: provider,
+      evidence_source: `${provider}_mcp`,
+      evidence: asJsonObject(evidence)
+    };
+  }
+  return providerEvidenceRequirement(root, args);
+}
+function diffSurface(root, base, head) {
+  const range = `${base}...${head}`;
+  const stat = runCommand("git", ["diff", "--stat", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  const names = runCommand("git", ["diff", "--name-only", range], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
+  return {
+    ok: stat.ok || names.ok,
+    base,
+    head,
+    stat: stat.stdout.trim(),
+    files: names.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+    errors: [stat.stderr, names.stderr].filter(Boolean).join("\n").trim()
+  };
+}
+function scanReviewTodos(root, files, limit = 100) {
+  const findings = [];
+  const patterns = [
+    /\bTODO\b/i,
+    /\bFIXME\b/i,
+    /\bstub\b/i,
+    /throw new Error\(["']not implemented/i
+  ];
+  for (const file of files || []) {
+    if (isIgnoredRepoMapFile(file)) continue;
+    const abs = import_node_path19.default.join(root, file);
+    if (!fileExists(abs)) continue;
+    let stat;
+    try {
+      stat = import_node_fs11.default.statSync(abs);
+    } catch {
+      continue;
+    }
+    if (stat.size > 1024 * 1024) continue;
+    const lines = import_node_fs11.default.readFileSync(abs, "utf8").split(/\r?\n/);
+    for (let index = 0; index < lines.length && findings.length < limit; index += 1) {
+      const line = lines[index] || "";
+      if (patterns.some((pattern) => pattern.test(line))) {
+        findings.push({ file, line: index + 1, snippet: line.trim().slice(0, 180) });
+      }
+    }
+  }
+  return findings;
+}
+function reviewAssist(root, args = {}) {
+  const trackId = args.trackId || args.track_id;
+  if (!trackId) return { ok: false, error: "trackId is required" };
+  const context = trackContext(root, trackId);
+  if (!context.ok) return context;
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const repoError = repoEntriesError(root, track, args);
+  if (repoError) return repoError;
+  const plan = parsePlanFile(track.plan_path);
+  const base = args.base || "main";
+  const head = args.head || track.metadata.git_branch || "HEAD";
+  const repoEntries = repoEntriesForTrack(root, track, args);
+  const repoDiffs = repoEntries.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    cwd: entry.root,
+    source: entry.source,
+    ...diffSurface(entry.root, entry.base || base, entry.head || head)
+  }));
+  const diff = repoDiffs.find((entry) => entry.repo === "root" || entry.repo === ".") || diffSurface(root, base, head);
+  const incompleteTasks = [];
+  for (const phase of plan.phases) {
+    for (const task of phase.tasks) {
+      if (task.marker !== "x" && task.marker !== "-") {
+        incompleteTasks.push({
+          phase: phase.phase_index,
+          task: task.task_index,
+          task_key: task.task_key,
+          title: task.title,
+          marker: task.marker,
+          repo: task.repo || null
+        });
+      }
+    }
+  }
+  const todoLimit = Number(args.todoLimit || 100);
+  const repoTodos = repoDiffs.map((entry) => ({
+    repo: entry.repo,
+    path: entry.path,
+    cwd: entry.cwd,
+    todos: scanReviewTodos(entry.cwd || root, entry.files, todoLimit)
+  }));
+  const todos = repoTodos.flatMap((entry) => entry.todos.map((todo) => ({ ...todo, repo: entry.repo }))).slice(0, todoLimit);
+  const lsp = args.includeLsp === false ? null : args.lspResult || args.lsp_result || lspReview(root, { base, head, config: args.config });
+  const machineGate = args.includeMachine === false ? null : reviewMachineGate(root, args);
+  const lspObject = asJsonObject(lsp);
+  const machineGateObject = asJsonObject(machineGate);
+  const blocking = [];
+  if (incompleteTasks.length > 0) blocking.push(`${incompleteTasks.length} plan task(s) are not completed or skipped`);
+  if (todos.length > 0) blocking.push(`${todos.length} TODO/FIXME/stub marker(s) found in changed files`);
+  if (track.metadata.last_coverage == null) blocking.push("No measured coverage recorded on the track");
+  if (lsp && lspObject.available !== false && Array.isArray(lspObject.findings)) {
+    const lspBlocking = asArray(lspObject.findings).filter((finding) => finding.severity === "blocking" || finding.blocking === true);
+    if (lspBlocking.length > 0) blocking.push(`${lspBlocking.length} blocking LSP/code-intelligence finding(s)`);
+  }
+  const machineBlockingCount = asNumber(machineGateObject.blocking_count);
+  if (machineGate && machineBlockingCount > 0) {
+    blocking.push(`${machineBlockingCount} machine gate check(s) failed`);
+  }
+  const result = {
+    ok: true,
+    root,
+    track_id: trackId,
+    base,
+    head,
+    diff,
+    repo_diffs: repoDiffs,
+    branch_set: context.branch_set || [],
+    task_counts: context.task_counts,
+    incomplete_tasks: incompleteTasks,
+    coverage: track.metadata.last_coverage ?? null,
+    todos,
+    repo_todos: repoTodos,
+    lsp,
+    machine_gate: machineGate,
+    suggested_verdict: blocking.length === 0 ? "approved" : "changes_requested",
+    blocking_reasons: blocking
+  };
+  const mode = (asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null)) || "compact").toLowerCase();
+  if (["detail", "detailed", "full", "verbose"].includes(mode)) return result;
+  const lspSummary = asJsonObject(result.lsp);
+  const gateSummary = asJsonObject(result.machine_gate);
+  const diffSummary = asJsonObject(diff);
+  const diffFiles = Array.isArray(diffSummary.files) ? diffSummary.files : [];
+  return {
+    ok: true,
+    root,
+    track_id: trackId,
+    base,
+    head,
+    task_counts: context.task_counts,
+    diff: {
+      repo: diffSummary.repo || ".",
+      file_count: diffFiles.length,
+      stat: asOptionalString(diffSummary.stat) || ""
+    },
+    repo_diffs: repoDiffs.slice(0, 20).map((entry) => ({
+      repo: entry.repo,
+      path: entry.path,
+      files: Array.isArray(entry.files) ? entry.files.slice(0, 50) : [],
+      file_count: Array.isArray(entry.files) ? entry.files.length : 0,
+      stat: entry.stat
+    })),
+    repo_diffs_count: repoDiffs.length,
+    incomplete_tasks: incompleteTasks.slice(0, 20),
+    incomplete_tasks_count: incompleteTasks.length,
+    coverage: track.metadata.last_coverage ?? null,
+    todos: todos.slice(0, 20),
+    todos_count: todos.length,
+    lsp: lsp ? {
+      available: lspSummary.available !== false,
+      degraded: lspSummary.degraded === true || lspSummary.fallback === "text_scan",
+      findings_count: Array.isArray(lspSummary.findings) ? lspSummary.findings.length : 0,
+      server_count: Array.isArray(lspSummary.servers) ? lspSummary.servers.length : 0,
+      polyrepo: lspSummary.polyrepo === true
+    } : null,
+    machine_gate: machineGate ? {
+      ok: gateSummary.ok !== false,
+      available: gateSummary.available !== false,
+      blocking_count: Number(gateSummary.blocking_count || 0),
+      result_count: Array.isArray(gateSummary.results) ? gateSummary.results.length : 0
+    } : null,
+    suggested_verdict: result.suggested_verdict,
+    blocking_reasons: blocking,
+    detail_available: true
+  };
+}
+
+// src/core/application/runtime/review-records.ts
+function recordReview(root, args = {}) {
+  const track = findTrack(root, args.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
+  return withTrackLock(root, track.track_id, () => recordReviewUnlocked(root, track, args));
+}
+function recordReviewUnlocked(root, track, args = {}) {
+  const traceBefore = beginTrace(root);
+  const verdict = args.verdict || "";
+  if (!["approved", "changes_requested"].includes(verdict)) {
+    return { ok: false, error: `Invalid review verdict: ${verdict}` };
+  }
+  const reviewer = args.reviewer || gitIdentity(root);
+  const pins = reviewedShasForTrack(root, track, args);
+  if (pins.ok === false) return pins;
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    const existing = asJsonObject(current.review);
+    const existingReviewer = asOptionalString(existing.reviewer);
+    const existingVerdict = asOptionalString(existing.verdict);
+    const existingBlockingCount = Number(existing.blocking_count || 0);
+    if (verdict === "approved" && args.allowOverride !== true && existingReviewer && existingReviewer !== reviewer && (existingVerdict === "changes_requested" || existingBlockingCount > 0)) {
+      throw new Error("Approval would override another reviewer's open changes_requested verdict");
+    }
+    current.review = {
+      verdict,
+      blocking_count: Number(args.blockingCount || 0),
+      date: args.date || utcNow(),
+      reviewer: reviewer || null,
+      coverage: args.coverage ?? current.last_coverage ?? null,
+      self_reviewed: Boolean(reviewer && current.owner && reviewer === current.owner),
+      reviewed_sha: asOptionalString(pins.reviewed_sha) || null,
+      reviewed_shas: asJsonObject(pins.reviewed_shas),
+      review_seq: Number(existing.review_seq || 0) + 1
+    };
+    return current;
+  }, { lock: false });
+  if (!metadata.ok) {
+    return {
+      ok: false,
+      track_id: track.track_id,
+      stage: "metadata_patch",
+      error: metadata.error,
+      requires_override: /override another reviewer/.test(metadata.error || ""),
+      metadata
+    };
+  }
+  const gate = reviewGate(root, track.track_id, args);
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "review",
+    subject: `record ${track.track_id} review`,
+    before: traceBefore,
+    files: [
+      import_node_path20.default.relative(root, track.metadata_path)
+    ],
+    trackId: track.track_id,
+    note: {
+      verdict,
+      blocking_count: Number(args.blockingCount || 0)
+    }
+  });
+  return { ok: controlCommit.ok !== false, track_id: track.track_id, review: asJsonObject(metadata.value).review, metadata, gate, control_commit: controlCommit };
+}
+function reviewEvidencePath(track) {
+  return import_node_path20.default.join(track.dir, "review-evidence.json");
+}
+function reviewEvidence(root, trackId) {
+  const track = findTrack(root, trackId);
+  if (!track) return { ok: false, error: `Track not found: ${trackId}` };
+  const evidencePath = reviewEvidencePath(track);
+  const evidence = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  return {
+    ok: true,
+    track_id: track.track_id,
+    path: import_node_path20.default.relative(root, evidencePath),
+    evidence
+  };
+}
+function providerEvidence(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
+  if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  return withTrackLock(root, track.track_id, () => providerEvidenceUnlocked(root, track, args));
+}
+function providerEvidenceUnlocked(root, track, args = {}) {
+  const traceBefore = beginTrace(root);
+  const evidencePath = reviewEvidencePath(track);
+  const existing = readJson(evidencePath, {
+    track_id: track.track_id,
+    entries: []
+  });
+  const entries = Array.isArray(existing.entries) ? existing.entries.map(asJsonObject) : [];
+  const findings = Array.isArray(args.findings) ? args.findings.map(asJsonObject) : [];
+  const blockingCount = findings.filter(
+    (finding) => finding.blocking === true || asString(finding.severity) === "blocking"
+  ).length;
+  const provider = args.provider || providerFromConfig(root, args);
+  const fetched = args.evidence || args.providerEvidence || args.provider_evidence || null;
+  const providerStatus = fetched ? asJsonObject(fetched) : null;
+  if (!providerStatus && args.fetch !== false) {
+    return {
+      ok: false,
+      track_id: track.track_id,
+      stage: "provider_mcp_evidence_required",
+      provider,
+      requirement: providerEvidenceRequirement(root, { ...args, trackId: track.track_id })
+    };
+  }
+  const entry = {
+    id: `review-${entries.length + 1}`,
+    recorded_at: utcNow(),
+    provider,
+    reviewer: args.reviewer || gitIdentity(root) || null,
+    reviewed_sha: args.reviewedSha || args.reviewed_sha || gitRevParse(root, "HEAD"),
+    blocking_count: Number(args.blockingCount ?? blockingCount),
+    verdict: args.verdict || null,
+    findings,
+    evidence: providerStatus,
+    notes: asOptionalString(args.notes) || null
+  };
+  const next = {
+    ...existing,
+    track_id: track.track_id,
+    entries: [...entries, entry],
+    updated_at: entry.recorded_at
+  };
+  writeJson(evidencePath, next);
+  appendJsonl(import_node_path20.default.join(track.dir, "review-evidence.jsonl"), entry);
+  const metadata = patchJsonFile(track.metadata_path, (current) => {
+    current.review_evidence = {
+      path: import_node_path20.default.relative(root, evidencePath),
+      entries: asArray(next.entries).length || entries.length + 1,
+      latest_id: entry.id,
+      latest_recorded_at: entry.recorded_at,
+      provider,
+      blocking_count: entry.blocking_count
+    };
+    return current;
+  }, { lock: false });
+  if (!metadata.ok) return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
+  const controlCommit = commitTrace(root, args, {
+    kind: "control",
+    workflow: "review",
+    action: "provider_evidence",
+    subject: `record ${track.track_id} evidence`,
+    before: traceBefore,
+    files: [
+      import_node_path20.default.relative(root, evidencePath),
+      import_node_path20.default.relative(root, import_node_path20.default.join(track.dir, "review-evidence.jsonl")),
+      import_node_path20.default.relative(root, track.metadata_path)
+    ],
+    trackId: track.track_id,
+    note: {
+      provider,
+      evidence_id: entry.id,
+      blocking_count: entry.blocking_count,
+      reviewed_sha: entry.reviewed_sha
+    }
+  });
+  return {
+    ok: controlCommit.ok !== false,
+    track_id: track.track_id,
+    path: import_node_path20.default.relative(root, evidencePath),
+    entry,
+    metadata,
+    control_commit: controlCommit
+  };
+}
+function syncControlPlane(root, args = {}) {
+  const topology = loadTopology(root);
+  if (topology.config.sync_mode !== "shared") {
+    return { ok: true, skipped: true, reason: "sync_mode is not shared", commands: [] };
+  }
+  const mode = args.mode || "pre";
+  const remote = asOptionalString(topology.config.control_remote) || "origin";
+  const branch = asOptionalString(topology.config.control_branch) || "main";
+  const commands = [];
+  commands.push(runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root }));
+  const safety = controlPlaneSyncSafety(root, mode, remote, branch);
+  if (!safety.ok) {
+    return { ok: false, mode, remote, branch, safety, commands };
+  }
+  if (mode === "pre") {
+    commands.push(runCommand("git", ["pull", "--rebase", remote, branch], { cwd: root }));
+  } else if (mode === "post") {
+    commands.push(runCommand("git", ["push", remote, branch], { cwd: root }));
+  } else {
+    return { ok: false, error: `Invalid sync mode: ${mode}`, commands };
+  }
+  return { ok: commands.every((cmd) => cmd.ok), mode, remote, branch, safety, commands };
+}
+
 // src/core/application/runtime/workflow-response.ts
 function workflowResponseMode(args = {}) {
   const raw = asOptionalString(args.responseMode || args.response_mode || (args.detail === true ? "detail" : null) || (args.compact === true ? "compact" : null))?.trim().toLowerCase();
   if (raw && ["detail", "detailed", "full", "verbose"].includes(raw)) return "detail";
   return "compact";
 }
-function workflowSummary(root2, workflow, args = {}) {
-  const identity = gitIdentity(root2);
+function workflowSummary(root, workflow, args = {}) {
+  const identity = gitIdentity(root);
   return {
-    root: root2,
+    root,
     workflow,
     packet_only: true,
     execute: args.execute === true,
@@ -4402,12 +4405,12 @@ function workflowSummary(root2, workflow, args = {}) {
 function resultOk(value) {
   return !value || value.ok !== false;
 }
-function withSharedControlPlaneSync(root2, args = {}, operation, fn) {
-  const topology = loadTopology(root2);
+function withSharedControlPlaneSync(root, args = {}, operation, fn) {
+  const topology = loadTopology(root);
   if (args.execute !== true || topology.config.sync_mode !== "shared" || args.skipSync === true) {
     return fn();
   }
-  const syncPre = syncControlPlane(root2, { mode: "pre" });
+  const syncPre = syncControlPlane(root, { mode: "pre" });
   if (syncPre.ok === false) {
     return {
       ok: false,
@@ -4425,7 +4428,7 @@ function withSharedControlPlaneSync(root2, args = {}, operation, fn) {
       sync_post: null
     };
   }
-  const syncPost = syncControlPlane(root2, { mode: "post" });
+  const syncPost = syncControlPlane(root, { mode: "post" });
   return {
     ...result,
     ok: resultOk(result) && syncPost.ok !== false,
@@ -4474,43 +4477,58 @@ function compactObject(value, depth = 0) {
   }
   return out;
 }
-function workflowResourceUris(root2, workflow, result) {
-  const encodedRoot = encodeURIComponent(root2);
+function workflowResourceUris(root, workflow, result) {
+  const encodedRoot = encodeURIComponent(root);
   if (workflow === "skill") return Array.from(new Set(asStringArray(result.detail_resources)));
   const trackId = asOptionalString(result.track_id) || asOptionalString(asJsonObject(result.track || {}).track_id) || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
-  const uris = [
-    `cadre://workspace-health?root=${encodedRoot}`,
-    `cadre://mcp-readiness?root=${encodedRoot}`,
-    `cadre://team-board?root=${encodedRoot}`,
-    `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
-    `cadre://project-skills?root=${encodedRoot}&workflow=${encodeURIComponent(workflow)}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`
-  ];
-  if (trackId) {
-    uris.push(`cadre://track-context?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
-    uris.push(`cadre://parallel-state?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
+  const encodedTrackId = trackId ? encodeURIComponent(trackId) : null;
+  const rooted = (resource) => `cadre://${resource}?root=${encodedRoot}`;
+  const tracked = (resource) => encodedTrackId ? `${rooted(resource)}&trackId=${encodedTrackId}` : null;
+  const uris = [];
+  const add = (...values) => {
+    for (const value of values) if (value) uris.push(value);
+  };
+  if (["setup", "setup_assist", "setup_scaffold"].includes(workflow)) {
+    add("cadre://template-inventory", rooted("workspace-diagnostics"), rooted("dependency-graph"), rooted("mcp-readiness"));
+  } else if (workflow === "status") {
+    add(rooted("team-board"), rooted("workspace-health"), rooted("my-next-actions"));
+  } else if (workflow === "implement") {
+    add(tracked("track-context"), tracked("parallel-state"), `${rooted("project-skills")}&workflow=implement${encodedTrackId ? `&trackId=${encodedTrackId}` : ""}`);
+  } else if (workflow === "review") {
+    add(tracked("quality-gate"), tracked("review-evidence"), `${rooted("project-skills")}&workflow=review${encodedTrackId ? `&trackId=${encodedTrackId}` : ""}`);
+  } else if (["ship", "land"].includes(workflow)) {
+    add(
+      encodedTrackId ? `${rooted("provider-actions")}&trackId=${encodedTrackId}&workflow=${workflow}` : null,
+      tracked("quality-gate"),
+      tracked(`${workflow}-plan`)
+    );
+  } else if (workflow === "validate") {
+    add(rooted("workspace-health"), rooted("workspace-diagnostics"), rooted("dependency-graph"), rooted("collisions"));
+  } else if (workflow === "debug") {
+    add(rooted("dap-status"), rooted("workspace-diagnostics"));
+  } else if (workflow === "newtrack") {
+    add(`${rooted("artifact-schema")}&artifact=spec`, `${rooted("artifact-schema")}&artifact=plan`);
   }
-  if (workflow === "ship" && trackId) uris.push(`cadre://ship-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
-  if (workflow === "land" && trackId) uris.push(`cadre://land-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
-  if (workflow === "release") uris.push(`cadre://release-plan?root=${encodedRoot}`);
   if (workflow === "artifacts" || workflow === "artifact_sync") {
     const scope = asOptionalString(result.scope || result.artifact_scope) || "all";
-    uris.push(`cadre://artifact-catalog?root=${encodedRoot}`);
-    uris.push(`cadre://artifact-sync-plan?root=${encodedRoot}&scope=${encodeURIComponent(scope)}`);
+    add(rooted("artifact-catalog"), `${rooted("artifact-sync-plan")}&scope=${encodeURIComponent(scope)}`);
     if (scope.startsWith("track:")) {
       const scopedTrackId = scope.slice("track:".length);
-      uris.push(`cadre://track-spec?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
-      uris.push(`cadre://track-plan?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
+      add(
+        `${rooted("track-spec")}&trackId=${encodeURIComponent(scopedTrackId)}`,
+        `${rooted("track-plan")}&trackId=${encodeURIComponent(scopedTrackId)}`
+      );
     }
   }
   return Array.from(new Set(uris));
 }
-function shapeWorkflowResponse(root2, workflow, args, result) {
+function shapeWorkflowResponse(root, workflow, args, result) {
   const mode = workflowResponseMode(args);
   const enriched = {
     ...result,
     response_mode: mode,
     detail_available: true,
-    resource_uris: workflowResourceUris(root2, workflow, result)
+    resource_uris: workflowResourceUris(root, workflow, result)
   };
   if (mode === "detail") return enriched;
   const workflowSpecific = compactWorkflowResponse(workflow, enriched);
@@ -4763,16 +4781,16 @@ function templateManifest() {
 }
 
 // src/core/application/runtime/workspace-intel.ts
-var import_node_path22 = __toESM(require("node:path"));
-function lspImpact(root2, args = {}) {
+var import_node_path21 = __toESM(require("node:path"));
+function lspImpact(root, args = {}) {
   const limit = Number(args.limit || 50);
   const symbols = Array.isArray(args.symbols) ? args.symbols : args.symbol ? [args.symbol] : [];
   const files = Array.isArray(args.files) ? args.files : [];
   const symbolResults = {};
   for (const symbol of symbols.filter(Boolean)) {
-    symbolResults[symbol] = repoMap(root2, { symbol, limit });
+    symbolResults[symbol] = repoMap(root, { symbol, limit });
   }
-  const repoEntries = intelRepoRoots(root2, args);
+  const repoEntries = intelRepoRoots(root, args);
   const repoFileSymbols = repoEntries.map((entry) => {
     const fileSymbols2 = {};
     for (const file of files) {
@@ -4791,10 +4809,10 @@ function lspImpact(root2, args = {}) {
       fileSymbols[key] = asArray(symbolsForFile);
     }
   }
-  const review = args.lspResult || args.lsp_result ? args.lspResult || args.lsp_result : args.base || args.head ? lspReview(root2, { base: args.base || "main", head: args.head || "HEAD", config: args.config }) : null;
+  const review = args.lspResult || args.lsp_result ? args.lspResult || args.lsp_result : args.base || args.head ? lspReview(root, { base: args.base || "main", head: args.head || "HEAD", config: args.config }) : null;
   return {
     ok: true,
-    root: root2,
+    root,
     symbols: symbolResults,
     files: fileSymbols,
     repos: repoFileSymbols,
@@ -4804,59 +4822,59 @@ function lspImpact(root2, args = {}) {
 function shellCommandPlan(command, cwd, adapter) {
   return { adapter, command, cwd };
 }
-function detectWorkspaceAdapters(root2) {
+function detectWorkspaceAdapters(root) {
   const adapters = [];
-  const pkg = loadPackageJson(root2);
+  const pkg = loadPackageJson(root);
   if (pkg) {
     const scripts = asJsonObject(pkg.scripts);
-    const runner = fileExists(import_node_path22.default.join(root2, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path22.default.join(root2, "yarn.lock")) ? "yarn" : "npm run";
+    const runner = fileExists(import_node_path21.default.join(root, "pnpm-lock.yaml")) ? "pnpm" : fileExists(import_node_path21.default.join(root, "yarn.lock")) ? "yarn" : "npm run";
     const scriptCommands = ["typecheck", "check", "test", "build", "lint"].filter((script) => scripts[script]).map((script) => runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`);
     adapters.push({
       id: "node",
       ecosystem: "javascript",
       manifest: "package.json",
-      available: commandExists(runner.split(" ")[0] || "npm", root2),
+      available: commandExists(runner.split(" ")[0] || "npm", root),
       commands: scriptCommands
     });
-    if (fileExists(import_node_path22.default.join(root2, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
+    if (fileExists(import_node_path21.default.join(root, "nx.json")) || asJsonObject(pkg.devDependencies).nx || asJsonObject(pkg.dependencies).nx) {
       adapters.push({
         id: "nx",
         ecosystem: "javascript",
-        manifest: fileExists(import_node_path22.default.join(root2, "nx.json")) ? "nx.json" : "package.json",
-        available: commandExists("nx", root2) || commandExists("pnpm", root2) || commandExists("npx", root2),
+        manifest: fileExists(import_node_path21.default.join(root, "nx.json")) ? "nx.json" : "package.json",
+        available: commandExists("nx", root) || commandExists("pnpm", root) || commandExists("npx", root),
         commands: ["nx affected -t test", "nx affected -t build"]
       });
     }
   }
-  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path22.default.join(root2, file)))) {
-    adapters.push({ id: "pytest", ecosystem: "python", manifest: "pyproject.toml", available: commandExists("pytest", root2), commands: ["pytest"] });
+  if (["pyproject.toml", "pytest.ini", "setup.cfg"].some((file) => fileExists(import_node_path21.default.join(root, file)))) {
+    adapters.push({ id: "pytest", ecosystem: "python", manifest: "pyproject.toml", available: commandExists("pytest", root), commands: ["pytest"] });
   }
-  if (fileExists(import_node_path22.default.join(root2, "go.mod"))) {
-    adapters.push({ id: "go", ecosystem: "go", manifest: "go.mod", available: commandExists("go", root2), commands: ["go test ./..."] });
+  if (fileExists(import_node_path21.default.join(root, "go.mod"))) {
+    adapters.push({ id: "go", ecosystem: "go", manifest: "go.mod", available: commandExists("go", root), commands: ["go test ./..."] });
   }
-  if (fileExists(import_node_path22.default.join(root2, "Cargo.toml"))) {
-    adapters.push({ id: "cargo", ecosystem: "rust", manifest: "Cargo.toml", available: commandExists("cargo", root2), commands: ["cargo test"] });
+  if (fileExists(import_node_path21.default.join(root, "Cargo.toml"))) {
+    adapters.push({ id: "cargo", ecosystem: "rust", manifest: "Cargo.toml", available: commandExists("cargo", root), commands: ["cargo test"] });
   }
-  if (fileExists(import_node_path22.default.join(root2, "pom.xml"))) {
-    adapters.push({ id: "maven", ecosystem: "java", manifest: "pom.xml", available: commandExists("mvn", root2), commands: ["mvn test"] });
+  if (fileExists(import_node_path21.default.join(root, "pom.xml"))) {
+    adapters.push({ id: "maven", ecosystem: "java", manifest: "pom.xml", available: commandExists("mvn", root), commands: ["mvn test"] });
   }
-  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path22.default.join(root2, file)));
+  const gradleManifest = ["build.gradle", "build.gradle.kts"].find((file) => fileExists(import_node_path21.default.join(root, file)));
   if (gradleManifest) {
-    const gradlew = fileExists(import_node_path22.default.join(root2, "gradlew")) ? "./gradlew" : "gradle";
-    adapters.push({ id: "gradle", ecosystem: "jvm", manifest: gradleManifest, available: gradlew === "./gradlew" || commandExists("gradle", root2), commands: [`${gradlew} test`] });
+    const gradlew = fileExists(import_node_path21.default.join(root, "gradlew")) ? "./gradlew" : "gradle";
+    adapters.push({ id: "gradle", ecosystem: "jvm", manifest: gradleManifest, available: gradlew === "./gradlew" || commandExists("gradle", root), commands: [`${gradlew} test`] });
   }
-  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path22.default.join(root2, file)))) {
-    adapters.push({ id: "bazel", ecosystem: "polyglot", manifest: "MODULE.bazel", available: commandExists("bazel", root2), commands: ["bazel test //..."] });
+  if (["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"].some((file) => fileExists(import_node_path21.default.join(root, file)))) {
+    adapters.push({ id: "bazel", ecosystem: "polyglot", manifest: "MODULE.bazel", available: commandExists("bazel", root), commands: ["bazel test //..."] });
   }
   return adapters;
 }
-function workspaceDiagnostics(root2, args = {}) {
+function workspaceDiagnostics(root, args = {}) {
   if (args.execute !== true && args.cacheBypass !== true) {
-    return cachedWorkspaceValue(root2, "workspace-diagnostics", JSON.stringify({
+    return cachedWorkspaceValue(root, "workspace-diagnostics", JSON.stringify({
       repos: asStringArray(args.repos).concat(asOptionalString(args.repo) || []).filter(Boolean)
-    }), () => workspaceDiagnostics(root2, { ...args, includeHeavy: false, cacheBypass: true }));
+    }), () => workspaceDiagnostics(root, { ...args, includeHeavy: false, cacheBypass: true }));
   }
-  const repoEntries = intelRepoRoots(root2, args);
+  const repoEntries = intelRepoRoots(root, args);
   const repoDiagnostics = repoEntries.map((entry) => {
     const adapters2 = detectWorkspaceAdapters(entry.root).map((rawAdapter) => {
       const adapter = asJsonObject(rawAdapter);
@@ -4881,42 +4899,42 @@ function workspaceDiagnostics(root2, args = {}) {
   const execute = args.execute === true;
   return {
     ok: true,
-    root: root2,
+    root,
     execute,
     dry_run: !execute,
     adapters,
     commands,
     repos: repoDiagnostics,
     results: execute ? commands.map((entry) => runCommand(asString(entry.command), [], {
-      cwd: asString(entry.cwd, root2),
+      cwd: asString(entry.cwd, root),
       shell: true,
       timeoutMs: Number(args.timeoutMs || 10 * 60 * 1e3),
       maxBuffer: 30 * 1024 * 1024
     })) : []
   };
 }
-function impactedFiles(root2, args = {}) {
+function impactedFiles(root, args = {}) {
   if (Array.isArray(args.files) && args.files.length > 0) return args.files.map(normalizeClaimPath).filter(Boolean);
   if (args.base || args.head) {
-    return diffSurface(root2, args.base || "main", args.head || "HEAD").files;
+    return diffSurface(root, args.base || "main", args.head || "HEAD").files;
   }
   return [];
 }
-function testImpact(root2, args = {}) {
-  const repoEntries = intelRepoRoots(root2, args);
+function testImpact(root, args = {}) {
+  const repoEntries = intelRepoRoots(root, args);
   const repoImpacts = repoEntries.map((entry) => {
     const files2 = impactedFiles(entry.root, args);
     const likelyTests = Object.fromEntries(files2.map((file) => [file, likelyTestCandidatesForFile(entry.root, file)]));
     const manifests = /* @__PURE__ */ new Set();
     for (const file of files2) {
-      let dir = import_node_path22.default.dirname(import_node_path22.default.join(entry.root, file));
+      let dir = import_node_path21.default.dirname(import_node_path21.default.join(entry.root, file));
       while (dir.startsWith(entry.root)) {
         for (const manifest of ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "MODULE.bazel", "nx.json"]) {
-          const candidate = import_node_path22.default.join(dir, manifest);
-          if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path22.default.relative(entry.root, candidate)));
+          const candidate = import_node_path21.default.join(dir, manifest);
+          if (fileExists(candidate)) manifests.add(normalizeClaimPath(import_node_path21.default.relative(entry.root, candidate)));
         }
         if (dir === entry.root) break;
-        dir = import_node_path22.default.dirname(dir);
+        dir = import_node_path21.default.dirname(dir);
       }
     }
     return {
@@ -4933,7 +4951,7 @@ function testImpact(root2, args = {}) {
   const files = asStringArray(primary.files);
   return {
     ok: true,
-    root: root2,
+    root,
     files,
     likely_tests: asJsonObject(primary.likely_tests),
     manifests: asStringArray(primary.manifests),
@@ -4941,13 +4959,13 @@ function testImpact(root2, args = {}) {
     repos: repoImpacts
   };
 }
-function dependencyGraph(root2, args = {}) {
+function dependencyGraph(root, args = {}) {
   if (args.cacheBypass !== true) {
-    return cachedWorkspaceValue(root2, "dependency-graph", JSON.stringify({
+    return cachedWorkspaceValue(root, "dependency-graph", JSON.stringify({
       repos: asStringArray(args.repos).concat(asOptionalString(args.repo) || []).filter(Boolean)
-    }), () => dependencyGraph(root2, { ...args, cacheBypass: true }));
+    }), () => dependencyGraph(root, { ...args, cacheBypass: true }));
   }
-  const repoEntries = intelRepoRoots(root2, args);
+  const repoEntries = intelRepoRoots(root, args);
   const manifestPatterns = /* @__PURE__ */ new Set([
     "package.json",
     "pyproject.toml",
@@ -4963,7 +4981,7 @@ function dependencyGraph(root2, args = {}) {
   ]);
   const repoGraphs = repoEntries.map((entry) => {
     const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
-    const manifests2 = files.filter((file) => manifestPatterns.has(import_node_path22.default.basename(file))).map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(import_node_path22.default.dirname(file)), kind: import_node_path22.default.basename(file) }));
+    const manifests2 = files.filter((file) => manifestPatterns.has(import_node_path21.default.basename(file))).map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(import_node_path21.default.dirname(file)), kind: import_node_path21.default.basename(file) }));
     return {
       repo: entry.repo,
       root: entry.root,
@@ -4982,7 +5000,7 @@ function dependencyGraph(root2, args = {}) {
   const edges = repoGraphs.flatMap((entry) => asArray(entry.edges));
   return {
     ok: true,
-    root: root2,
+    root,
     manifests,
     adapters: repoGraphs.flatMap((entry) => asArray(entry.adapters)),
     edges,
@@ -4991,18 +5009,18 @@ function dependencyGraph(root2, args = {}) {
 }
 
 // src/core/application/runtime/planning.ts
-function likelyTestCandidatesForFile(root2, file) {
+function likelyTestCandidatesForFile(root, file) {
   const normalized = normalizeClaimPath(file);
   if (!normalized) return [];
-  const parsed = import_node_path23.default.parse(normalized);
+  const parsed = import_node_path22.default.parse(normalized);
   const candidates = [
-    import_node_path23.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-    import_node_path23.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-    import_node_path23.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-    import_node_path23.default.join("test", normalized),
-    import_node_path23.default.join("tests", normalized)
+    import_node_path22.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+    import_node_path22.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+    import_node_path22.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+    import_node_path22.default.join("test", normalized),
+    import_node_path22.default.join("tests", normalized)
   ].map((candidate) => normalizeClaimPath(candidate));
-  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path23.default.join(root2, candidate)))));
+  return Array.from(new Set(candidates.filter((candidate) => fileExists(import_node_path22.default.join(root, candidate)))));
 }
 function taskSearchTokens(task) {
   return Array.from(new Set(String(task.title || "").toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 4).slice(0, 8)));
@@ -5017,8 +5035,8 @@ function suggestedRepoForFile(topology, file) {
   });
   return asOptionalString(match?.name) || asOptionalString(topology.repos.default_repo) || null;
 }
-function missingClaimSuggestions(root2, topology, tasks, limit) {
-  const workspaceFiles = listWorkspaceFiles(root2).filter((file) => languageForFile(file) !== "markdown").slice(0, 5e3);
+function missingClaimSuggestions(root, topology, tasks, limit) {
+  const workspaceFiles = listWorkspaceFiles(root).filter((file) => languageForFile(file) !== "markdown").slice(0, 5e3);
   return tasks.filter((task) => asStringArray(task.files).length === 0 || topology.polyrepo && !task.repo && !topology.repos.default_repo).map((task) => {
     const tokens = taskSearchTokens(task);
     const proposedFiles = workspaceFiles.filter((file) => {
@@ -5034,21 +5052,21 @@ function missingClaimSuggestions(root2, topology, tasks, limit) {
       missing_repo: topology.polyrepo && !task.repo && !topology.repos.default_repo,
       proposed_repo: task.repo || (proposedFiles[0] ? suggestedRepoForFile(topology, proposedFiles[0]) : asOptionalString(topology.repos.default_repo) || null),
       proposed_files: proposedFiles,
-      likely_tests: proposedFiles.flatMap((file) => likelyTestCandidatesForFile(root2, file)).slice(0, limit),
+      likely_tests: proposedFiles.flatMap((file) => likelyTestCandidatesForFile(root, file)).slice(0, limit),
       evidence: proposedFiles.length > 0 ? "workspace_file_name_match" : "no_workspace_filename_match"
     };
   });
 }
-function planAssist(root2, args = {}) {
+function planAssist(root, args = {}) {
   const markdownError = markdownPayloadError(args);
   if (markdownError) return markdownError;
   const trackId = args.trackId || args.track_id || null;
-  const track = trackId ? findTrack(root2, trackId) : null;
+  const track = trackId ? findTrack(root, trackId) : null;
   if (trackId && !track && !args.plan) return { ok: false, error: `Track not found: ${trackId}` };
-  const topology = loadTopology(root2);
+  const topology = loadTopology(root);
   const plan = args.plan ? parsePlanJson(normalizePlanJson(String(trackId || asOptionalString(args.plan.track_id) || "draft"), args.plan)) : track ? parsePlanFile(track.plan_path) : null;
   if (!plan) return { ok: false, error: "trackId or plan is required" };
-  const repoErrors = track ? unresolvedPlanRepos(root2, track, args) : [];
+  const repoErrors = track ? unresolvedPlanRepos(root, track, args) : [];
   const claims = (plan.tasks || []).map((task) => {
     const repo = topology.polyrepo ? task.repo || topology.defaultRepo : ".";
     return {
@@ -5059,7 +5077,7 @@ function planAssist(root2, args = {}) {
       repo,
       files: task.files || [],
       depends: task.depends || [],
-      likely_tests: (task.files || []).flatMap((file) => likelyTestCandidatesForFile(root2, file))
+      likely_tests: (task.files || []).flatMap((file) => likelyTestCandidatesForFile(root, file))
     };
   });
   const fileClaims = {};
@@ -5090,12 +5108,12 @@ function planAssist(root2, args = {}) {
     };
   });
   const files = Array.from(new Set(Object.values(fileClaims).flat())).slice(0, Number(args.limit || 50));
-  const semanticImpact = files.length > 0 ? lspImpact(root2, { files, limit: args.limit || 50 }) : null;
-  const schedule = track ? phaseSchedule(root2, { ...args, trackId: track.track_id }) : null;
+  const semanticImpact = files.length > 0 ? lspImpact(root, { files, limit: args.limit || 50 }) : null;
+  const schedule = track ? phaseSchedule(root, { ...args, trackId: track.track_id }) : null;
   const limit = Number(args.limit || 50);
   return {
     ok: repoErrors.length === 0 && plan.ok !== false,
-    root: root2,
+    root,
     track_id: track?.track_id || trackId,
     topology: {
       polyrepo: topology.polyrepo,
@@ -5108,18 +5126,18 @@ function planAssist(root2, args = {}) {
     phases,
     schedule,
     semantic_impact: semanticImpact,
-    missing_claim_suggestions: missingClaimSuggestions(root2, topology, plan.tasks || [], Math.min(limit, 25)),
+    missing_claim_suggestions: missingClaimSuggestions(root, topology, plan.tasks || [], Math.min(limit, 25)),
     errors: [...plan.errors || [], ...repoErrors],
     warnings: plan.warnings || []
   };
 }
-function worktreePlan(root2, args = {}) {
-  const track = findTrack(root2, args.trackId || args.track_id);
+function worktreePlan(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  const repoError = repoEntriesError(root2, track, args);
+  const repoError = repoEntriesError(root, track, args);
   if (repoError) return repoError;
-  const topology = loadTopology(root2);
-  const branchSet = branchSetForTrack(root2, track, args);
+  const topology = loadTopology(root);
+  const branchSet = branchSetForTrack(root, track, args);
   const execute = args.execute === true;
   const setup_results = execute ? branchSet.map((entry) => ensureIntegrationWorktree(entry)) : [];
   const plans = branchSet.map((entry, index) => {
@@ -5144,7 +5162,7 @@ function worktreePlan(root2, args = {}) {
   });
   return {
     ok: setup_results.every((result) => result.ok !== false) && branchSet.every((entry) => entry.health === "ready" || entry.health === "missing"),
-    root: root2,
+    root,
     track_id: track.track_id,
     execute,
     dry_run: !execute,
@@ -5154,10 +5172,10 @@ function worktreePlan(root2, args = {}) {
     setup_results
   };
 }
-function planIntegrity(root2, trackId = null) {
-  const topology = loadTopology(root2);
-  const foundTrack = trackId ? findTrack(root2, trackId) : null;
-  const tracks = trackId ? foundTrack ? [foundTrack] : [] : listTracks(root2);
+function planIntegrity(root, trackId = null) {
+  const topology = loadTopology(root);
+  const foundTrack = trackId ? findTrack(root, trackId) : null;
+  const tracks = trackId ? foundTrack ? [foundTrack] : [] : listTracks(root);
   if (trackId && tracks.length === 0) return { ok: false, error: `Track not found: ${trackId}` };
   const errors = [];
   const warnings = [];
@@ -5194,16 +5212,192 @@ function planIntegrity(root2, trackId = null) {
         }
       }
     }
-    errors.push(...unresolvedPlanRepos(root2, track));
+    errors.push(...unresolvedPlanRepos(root, track));
   }
-  return { ok: errors.length === 0, root: root2, checked_tracks: tracks.length, errors, warnings };
+  return { ok: errors.length === 0, root, checked_tracks: tracks.length, errors, warnings };
 }
 
 // src/core/application/runtime/review-bundles.ts
-var import_node_fs14 = __toESM(require("node:fs"));
-var import_node_path26 = __toESM(require("node:path"));
 var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_fs13 = __toESM(require("node:fs"));
 var import_node_os2 = __toESM(require("node:os"));
+var import_node_path25 = __toESM(require("node:path"));
+
+// src/core/application/runtime/review-output.ts
+var import_node_fs12 = __toESM(require("node:fs"));
+var import_node_path23 = __toESM(require("node:path"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_child_process5 = require("node:child_process");
+function reviewOutputMode(args = {}) {
+  const rawArgs3 = args;
+  const requested = asOptionalString(rawArgs3.reviewOutputMode || rawArgs3.review_output_mode)?.toLowerCase();
+  if (requested === "bundle" || requested === "temp" || requested === "temporary") return "bundle";
+  if (rawArgs3.reviewBundleDir || rawArgs3.review_bundle_dir || rawArgs3.reviewDir || rawArgs3.review_dir) return "bundle";
+  return "target";
+}
+function safeTargetPath(root, relativePath) {
+  const resolvedRoot = import_node_path23.default.resolve(root);
+  const target2 = import_node_path23.default.resolve(resolvedRoot, relativePath);
+  const relative = import_node_path23.default.relative(resolvedRoot, target2);
+  if (!relative || relative.startsWith("..") || import_node_path23.default.isAbsolute(relative)) return null;
+  return target2;
+}
+function targetFileDirty(root, relativePath) {
+  const result = (0, import_node_child_process5.spawnSync)("git", ["status", "--porcelain", "--", relativePath], { cwd: root, encoding: "utf8" });
+  return result.status !== 0 || result.stdout.trim().length > 0;
+}
+function git(root, args) {
+  return (0, import_node_child_process5.spawnSync)("git", args, { cwd: root, encoding: "utf8" });
+}
+function gitAvailable(root) {
+  return git(root, ["rev-parse", "--is-inside-work-tree"]).status === 0;
+}
+function addIntentToAdd(root, relativePaths) {
+  if (relativePaths.length === 0 || !gitAvailable(root)) return { paths: [], warnings: [] };
+  const paths = [];
+  const warnings = [];
+  for (const relativePath of relativePaths) {
+    if (git(root, ["check-ignore", "-q", "--", relativePath]).status === 0) {
+      warnings.push(`Review artifact is ignored and cannot be made visible with intent-to-add: ${relativePath}`);
+      continue;
+    }
+    if (git(root, ["ls-files", "--error-unmatch", "--", relativePath]).status === 0) continue;
+    const added = git(root, ["add", "-N", "--", relativePath]);
+    if (added.status !== 0) {
+      removeReviewIntentToAdd(root, paths);
+      return { paths: [], warnings, error: String(added.stderr || "").trim() || `Unable to mark ${relativePath} intent-to-add` };
+    }
+    paths.push(relativePath);
+  }
+  return { paths, warnings };
+}
+function removeReviewIntentToAdd(root, relativePaths) {
+  if (!gitAvailable(root)) return [];
+  const removed = [];
+  for (const relativePath of Array.from(new Set(relativePaths))) {
+    if (git(root, ["cat-file", "-e", `HEAD:${relativePath}`]).status === 0) continue;
+    const stagedContent = git(root, ["diff", "--cached", "--quiet", "--", relativePath]);
+    if (stagedContent.status !== 0) continue;
+    const result = git(root, ["update-index", "--force-remove", "--", relativePath]);
+    if (result.status === 0) removed.push(relativePath);
+  }
+  return removed;
+}
+function reviewStats(text2) {
+  const normalized = text2.replace(/\n*$/, "\n");
+  return {
+    bytes: Buffer.byteLength(normalized, "utf8"),
+    lines: normalized.split("\n").length - 1,
+    sha256: import_node_crypto2.default.createHash("sha256").update(normalized).digest("hex")
+  };
+}
+function targetReviewBundle(root, workflow, args, reviewFiles2, manifestExtras) {
+  const stage = asOptionalString(manifestExtras.approval_stage);
+  if (!stage) return null;
+  const warnings = [];
+  const errors = [];
+  const files = [];
+  const pendingWrites = [];
+  const before = /* @__PURE__ */ new Map();
+  const newPaths = [];
+  const continuingSession = Boolean(args.approvalSessionId || args.approval_session_id);
+  for (const file of reviewFiles2) {
+    const targetPath = safeTargetPath(root, file.path);
+    if (!targetPath) {
+      errors.push(`Refusing unsafe review target path: ${file.path}`);
+      continue;
+    }
+    const exists = fileExists(targetPath);
+    const existing = exists ? import_node_fs12.default.readFileSync(targetPath, "utf8") : "";
+    before.set(file.path, { existed: exists, content: existing });
+    const changed = file.missing !== true && (!exists || existing !== file.content);
+    const generatedProjection = exists && hasGeneratedMarker(existing);
+    if (continuingSession && changed) {
+      errors.push(`Review target changed after the approval snapshot was created: ${file.path}`);
+      files.push({
+        path: file.path,
+        review_path: targetPath,
+        target_path: targetPath,
+        title: file.title,
+        kind: file.kind,
+        source: file.source,
+        missing: file.missing === true,
+        conflict: true,
+        ...reviewStats(file.content)
+      });
+      continue;
+    }
+    if (exists && changed && targetFileDirty(root, file.path) && !generatedProjection && args.force !== true) {
+      errors.push(`Refusing to overwrite dirty review target ${file.path}`);
+      files.push({
+        path: file.path,
+        review_path: targetPath,
+        target_path: targetPath,
+        title: file.title,
+        kind: file.kind,
+        source: file.source,
+        missing: file.missing === true,
+        conflict: true,
+        ...reviewStats(file.content)
+      });
+      continue;
+    }
+    if (changed) pendingWrites.push({ path: file.path, content: file.content });
+    if (!exists && file.missing !== true) newPaths.push(file.path);
+    files.push({
+      path: file.path,
+      review_path: targetPath,
+      target_path: targetPath,
+      title: file.title,
+      kind: file.kind,
+      source: file.source,
+      document_id: file.documentId || null,
+      review_role: file.reviewRole || null,
+      canonical_path: file.canonicalPath || null,
+      projection_path: file.projectionPath || null,
+      approval_group: file.approvalGroup || null,
+      missing: file.missing === true,
+      changed,
+      ...reviewStats(file.content)
+    });
+  }
+  if (errors.length === 0 && pendingWrites.length > 0) {
+    const write = writeArtifactFilesAtomic(root, pendingWrites, { lockName: `review-${workflow}` });
+    if (write.ok === false) errors.push(asOptionalString(write.error) || "Unable to materialize review files atomically");
+  }
+  let intentPaths = [];
+  if (errors.length === 0) {
+    const intent = addIntentToAdd(root, newPaths);
+    warnings.push(...intent.warnings);
+    if (intent.error) {
+      errors.push(intent.error);
+      const restoreWrites = [];
+      for (const [relativePath, original] of before) {
+        if (original.existed) restoreWrites.push({ path: relativePath, content: original.content });
+        else import_node_fs12.default.rmSync(import_node_path23.default.join(root, relativePath), { force: true });
+      }
+      if (restoreWrites.length > 0) writeArtifactFilesAtomic(root, restoreWrites, { lockName: `review-${workflow}-rollback` });
+    } else {
+      intentPaths = intent.paths;
+    }
+  }
+  const error = errors[0] || null;
+  return {
+    ok: errors.length === 0,
+    mode: "target",
+    workflow,
+    directory: root,
+    manifest_path: null,
+    content_in_response: false,
+    mutates_worktree: true,
+    intent_to_add_paths: intentPaths,
+    warnings,
+    errors,
+    ...error ? { error } : {},
+    files,
+    ...manifestExtras
+  };
+}
 
 // src/core/application/runtime/tech-stack.ts
 var import_node_path24 = __toESM(require("node:path"));
@@ -5261,23 +5455,23 @@ function styleGuideIdsForTechStack(techStack) {
 function techStackFromArgs(args = {}) {
   return isRecord(args.techStack) ? asJsonObject(args.techStack) : null;
 }
-function loadTechStack(root2) {
-  return readJson(import_node_path24.default.join(root2, "cadre", "tech-stack.json"), null);
+function loadTechStack(root) {
+  return readJson(import_node_path24.default.join(root, "cadre", "tech-stack.json"), null);
 }
-function techStackForPacket(root2, args = {}) {
-  return techStackFromArgs(args) || loadTechStack(root2);
+function techStackForPacket(root, args = {}) {
+  return techStackFromArgs(args) || loadTechStack(root);
 }
 function summarizeList(label, value) {
   const values = collectTechStackTokens(value).filter((item) => item !== label).slice(0, 12);
   return values.length > 0 ? `${label}: ${values.join(", ")}` : null;
 }
-function techStackSummary(root2, args = {}) {
-  const techStack = techStackForPacket(root2, args);
+function techStackSummary(root, args = {}) {
+  const techStack = techStackForPacket(root, args);
   if (!techStack) {
     return {
       ok: false,
-      root: root2,
-      path: import_node_path24.default.relative(root2, import_node_path24.default.join(root2, "cadre", "tech-stack.json")),
+      root,
+      path: import_node_path24.default.relative(root, import_node_path24.default.join(root, "cadre", "tech-stack.json")),
       error: "Missing structured tech stack: cadre/tech-stack.json"
     };
   }
@@ -5295,16 +5489,16 @@ function techStackSummary(root2, args = {}) {
   ].filter((line) => Boolean(line));
   return {
     ok: true,
-    root: root2,
-    path: import_node_path24.default.relative(root2, import_node_path24.default.join(root2, "cadre", "tech-stack.json")),
+    root,
+    path: import_node_path24.default.relative(root, import_node_path24.default.join(root, "cadre", "tech-stack.json")),
     techStack,
     styleGuideIds: styleGuideIdsForTechStack(techStack),
     summary: lines.length > 0 ? lines.join("\n") : "No tech stack details recorded."
   };
 }
-function setupStyleGuides(root2, args = {}) {
+function setupStyleGuides(root, args = {}) {
   const available = new Set(availableStyleGuideIds());
-  const techStack = techStackForPacket(root2, args) || {};
+  const techStack = techStackForPacket(root, args) || {};
   const detected = styleGuideIdsForTechStack(techStack).filter((id) => available.has(id));
   const requested = requestedStyleGuideIds(args.styleGuideIds);
   const missing = requested.filter((id) => !available.has(id));
@@ -5329,182 +5523,6 @@ function setupStyleGuides(root2, args = {}) {
 function humanReviewConfirmed(args = {}) {
   const rawArgs3 = args;
   return rawArgs3.approvalComplete === true || rawArgs3.approval_complete === true;
-}
-
-// src/core/application/runtime/review-output.ts
-var import_node_fs13 = __toESM(require("node:fs"));
-var import_node_path25 = __toESM(require("node:path"));
-var import_node_crypto2 = __toESM(require("node:crypto"));
-var import_node_child_process5 = require("node:child_process");
-function reviewOutputMode(args = {}) {
-  const rawArgs3 = args;
-  const requested = asOptionalString(rawArgs3.reviewOutputMode || rawArgs3.review_output_mode)?.toLowerCase();
-  if (requested === "bundle" || requested === "temp" || requested === "temporary") return "bundle";
-  if (rawArgs3.reviewBundleDir || rawArgs3.review_bundle_dir || rawArgs3.reviewDir || rawArgs3.review_dir) return "bundle";
-  return "target";
-}
-function safeTargetPath(root2, relativePath) {
-  const resolvedRoot = import_node_path25.default.resolve(root2);
-  const target2 = import_node_path25.default.resolve(resolvedRoot, relativePath);
-  const relative = import_node_path25.default.relative(resolvedRoot, target2);
-  if (!relative || relative.startsWith("..") || import_node_path25.default.isAbsolute(relative)) return null;
-  return target2;
-}
-function targetFileDirty(root2, relativePath) {
-  const result = (0, import_node_child_process5.spawnSync)("git", ["status", "--porcelain", "--", relativePath], { cwd: root2, encoding: "utf8" });
-  return result.status !== 0 || result.stdout.trim().length > 0;
-}
-function git(root2, args) {
-  return (0, import_node_child_process5.spawnSync)("git", args, { cwd: root2, encoding: "utf8" });
-}
-function gitAvailable(root2) {
-  return git(root2, ["rev-parse", "--is-inside-work-tree"]).status === 0;
-}
-function addIntentToAdd(root2, relativePaths) {
-  if (relativePaths.length === 0 || !gitAvailable(root2)) return { paths: [], warnings: [] };
-  const paths = [];
-  const warnings = [];
-  for (const relativePath of relativePaths) {
-    if (git(root2, ["check-ignore", "-q", "--", relativePath]).status === 0) {
-      warnings.push(`Review artifact is ignored and cannot be made visible with intent-to-add: ${relativePath}`);
-      continue;
-    }
-    if (git(root2, ["ls-files", "--error-unmatch", "--", relativePath]).status === 0) continue;
-    const added = git(root2, ["add", "-N", "--", relativePath]);
-    if (added.status !== 0) {
-      removeReviewIntentToAdd(root2, paths);
-      return { paths: [], warnings, error: String(added.stderr || "").trim() || `Unable to mark ${relativePath} intent-to-add` };
-    }
-    paths.push(relativePath);
-  }
-  return { paths, warnings };
-}
-function removeReviewIntentToAdd(root2, relativePaths) {
-  if (!gitAvailable(root2)) return [];
-  const removed = [];
-  for (const relativePath of Array.from(new Set(relativePaths))) {
-    if (git(root2, ["cat-file", "-e", `HEAD:${relativePath}`]).status === 0) continue;
-    const stagedContent = git(root2, ["diff", "--cached", "--quiet", "--", relativePath]);
-    if (stagedContent.status !== 0) continue;
-    const result = git(root2, ["update-index", "--force-remove", "--", relativePath]);
-    if (result.status === 0) removed.push(relativePath);
-  }
-  return removed;
-}
-function reviewStats(text2) {
-  const normalized = text2.replace(/\n*$/, "\n");
-  return {
-    bytes: Buffer.byteLength(normalized, "utf8"),
-    lines: normalized.split("\n").length - 1,
-    sha256: import_node_crypto2.default.createHash("sha256").update(normalized).digest("hex")
-  };
-}
-function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras) {
-  const stage = asOptionalString(manifestExtras.approval_stage);
-  if (!stage) return null;
-  const warnings = [];
-  const errors = [];
-  const files = [];
-  const pendingWrites = [];
-  const before = /* @__PURE__ */ new Map();
-  const newPaths = [];
-  const continuingSession = Boolean(args.approvalSessionId || args.approval_session_id);
-  for (const file of reviewFiles2) {
-    const targetPath = safeTargetPath(root2, file.path);
-    if (!targetPath) {
-      errors.push(`Refusing unsafe review target path: ${file.path}`);
-      continue;
-    }
-    const exists = fileExists(targetPath);
-    const existing = exists ? import_node_fs13.default.readFileSync(targetPath, "utf8") : "";
-    before.set(file.path, { existed: exists, content: existing });
-    const changed = file.missing !== true && (!exists || existing !== file.content);
-    const generatedProjection = exists && hasGeneratedMarker(existing);
-    if (continuingSession && changed) {
-      errors.push(`Review target changed after the approval snapshot was created: ${file.path}`);
-      files.push({
-        path: file.path,
-        review_path: targetPath,
-        target_path: targetPath,
-        title: file.title,
-        kind: file.kind,
-        source: file.source,
-        missing: file.missing === true,
-        conflict: true,
-        ...reviewStats(file.content)
-      });
-      continue;
-    }
-    if (exists && changed && targetFileDirty(root2, file.path) && !generatedProjection && args.force !== true) {
-      errors.push(`Refusing to overwrite dirty review target ${file.path}`);
-      files.push({
-        path: file.path,
-        review_path: targetPath,
-        target_path: targetPath,
-        title: file.title,
-        kind: file.kind,
-        source: file.source,
-        missing: file.missing === true,
-        conflict: true,
-        ...reviewStats(file.content)
-      });
-      continue;
-    }
-    if (changed) pendingWrites.push({ path: file.path, content: file.content });
-    if (!exists && file.missing !== true) newPaths.push(file.path);
-    files.push({
-      path: file.path,
-      review_path: targetPath,
-      target_path: targetPath,
-      title: file.title,
-      kind: file.kind,
-      source: file.source,
-      document_id: file.documentId || null,
-      review_role: file.reviewRole || null,
-      canonical_path: file.canonicalPath || null,
-      projection_path: file.projectionPath || null,
-      approval_group: file.approvalGroup || null,
-      missing: file.missing === true,
-      changed,
-      ...reviewStats(file.content)
-    });
-  }
-  if (errors.length === 0 && pendingWrites.length > 0) {
-    const write = writeArtifactFilesAtomic(root2, pendingWrites, { lockName: `review-${workflow}` });
-    if (write.ok === false) errors.push(asOptionalString(write.error) || "Unable to materialize review files atomically");
-  }
-  let intentPaths = [];
-  if (errors.length === 0) {
-    const intent = addIntentToAdd(root2, newPaths);
-    warnings.push(...intent.warnings);
-    if (intent.error) {
-      errors.push(intent.error);
-      const restoreWrites = [];
-      for (const [relativePath, original] of before) {
-        if (original.existed) restoreWrites.push({ path: relativePath, content: original.content });
-        else import_node_fs13.default.rmSync(import_node_path25.default.join(root2, relativePath), { force: true });
-      }
-      if (restoreWrites.length > 0) writeArtifactFilesAtomic(root2, restoreWrites, { lockName: `review-${workflow}-rollback` });
-    } else {
-      intentPaths = intent.paths;
-    }
-  }
-  const error = errors[0] || null;
-  return {
-    ok: errors.length === 0,
-    mode: "target",
-    workflow,
-    directory: root2,
-    manifest_path: null,
-    content_in_response: false,
-    mutates_worktree: true,
-    intent_to_add_paths: intentPaths,
-    warnings,
-    errors,
-    ...error ? { error } : {},
-    files,
-    ...manifestExtras
-  };
 }
 
 // src/core/application/runtime/review-bundles.ts
@@ -5571,9 +5589,9 @@ function setupShouldWriteLsp(args, lspRecommendations) {
   if (setupLspWriteDisabled(args)) return false;
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
-function setupReviewFiles(root2, args, styleGuides, polyrepoRequested, machineFiles = []) {
+function setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles = []) {
   const rawArgs3 = args;
-  const techStack = techStackForPacket(root2, args);
+  const techStack = techStackForPacket(root, args);
   const techStackProjection = techStack || {};
   const productJson = normalizeProjectDoc("product", rawArgs3.product, "product.json", "Product Context", "Project-Specific Product Notes");
   const productGuidelinesJson = normalizeProjectDoc(
@@ -5706,7 +5724,7 @@ function reviewArtifactsFromFiles(reviewFiles2) {
   }));
 }
 function setupReviewArtifacts(reviewFiles2, styleGuides) {
-  const artifacts2 = [
+  const artifacts = [
     ...reviewArtifactsFromFiles(reviewFiles2),
     {
       path: "cadre/styleguides/*.json",
@@ -5718,30 +5736,30 @@ function setupReviewArtifacts(reviewFiles2, styleGuides) {
       warnings: asStringArray(styleGuides.warnings)
     }
   ];
-  return artifacts2;
+  return artifacts;
 }
-function workflowReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras = {}) {
+function workflowReviewBundle(root, workflow, args, reviewFiles2, manifestExtras = {}) {
   const rawArgs3 = args;
   if (reviewFiles2.length === 0) return null;
   if (args.execute === true && (humanReviewConfirmed(args) || rawArgs3.approvalComplete === true || rawArgs3.approval_complete === true) || rawArgs3.reviewBundle === false || rawArgs3.reviewFiles === false) return null;
-  if (reviewOutputMode(args) === "target") return targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras);
+  if (reviewOutputMode(args) === "target") return targetReviewBundle(root, workflow, args, reviewFiles2, manifestExtras);
   const explicitDir = asOptionalString(rawArgs3.reviewBundleDir || rawArgs3.review_bundle_dir || rawArgs3.reviewDir || rawArgs3.review_dir);
-  const rootHash = import_node_crypto3.default.createHash("sha256").update(root2).digest("hex").slice(0, 12);
-  const defaultDirectory = import_node_path26.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path26.default.basename(root2))}-${rootHash}`);
-  let directory = explicitDir ? import_node_path26.default.resolve(root2, explicitDir) : defaultDirectory;
-  const resolvedRoot = import_node_path26.default.resolve(root2);
-  const resolvedCadre = import_node_path26.default.join(resolvedRoot, "cadre");
-  const relativeToCadre = import_node_path26.default.relative(resolvedCadre, directory);
-  const insideCadre = relativeToCadre === "" || !relativeToCadre.startsWith("..") && !import_node_path26.default.isAbsolute(relativeToCadre);
+  const rootHash = import_node_crypto3.default.createHash("sha256").update(root).digest("hex").slice(0, 12);
+  const defaultDirectory = import_node_path25.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path25.default.basename(root))}-${rootHash}`);
+  let directory = explicitDir ? import_node_path25.default.resolve(root, explicitDir) : defaultDirectory;
+  const resolvedRoot = import_node_path25.default.resolve(root);
+  const resolvedCadre = import_node_path25.default.join(resolvedRoot, "cadre");
+  const relativeToCadre = import_node_path25.default.relative(resolvedCadre, directory);
+  const insideCadre = relativeToCadre === "" || !relativeToCadre.startsWith("..") && !import_node_path25.default.isAbsolute(relativeToCadre);
   const unsafeExplicitDir = Boolean(explicitDir) && (directory === resolvedRoot || insideCadre);
   const warnings = unsafeExplicitDir ? [`Ignored unsafe reviewBundleDir ${explicitDir}; using a temp review bundle outside the project control plane.`] : [];
   if (unsafeExplicitDir) directory = defaultDirectory;
-  if (!explicitDir || unsafeExplicitDir) import_node_fs14.default.rmSync(directory, { recursive: true, force: true });
-  import_node_fs14.default.mkdirSync(directory, { recursive: true });
+  if (!explicitDir || unsafeExplicitDir) import_node_fs13.default.rmSync(directory, { recursive: true, force: true });
+  import_node_fs13.default.mkdirSync(directory, { recursive: true });
   const files = reviewFiles2.map((file) => {
-    const reviewPath = import_node_path26.default.join(directory, file.path);
-    import_node_fs14.default.mkdirSync(import_node_path26.default.dirname(reviewPath), { recursive: true });
-    import_node_fs14.default.writeFileSync(reviewPath, file.content);
+    const reviewPath = import_node_path25.default.join(directory, file.path);
+    import_node_fs13.default.mkdirSync(import_node_path25.default.dirname(reviewPath), { recursive: true });
+    import_node_fs13.default.writeFileSync(reviewPath, file.content);
     return {
       path: file.path,
       review_path: reviewPath,
@@ -5752,13 +5770,13 @@ function workflowReviewBundle(root2, workflow, args, reviewFiles2, manifestExtra
       ...reviewStats2(file.content)
     };
   });
-  const manifestPath = import_node_path26.default.join(directory, "manifest.json");
+  const manifestPath = import_node_path25.default.join(directory, "manifest.json");
   const manifest = {
     version: 1,
     kind: `cadre_${safeName(workflow)}_review`,
     mode: "bundle",
     workflow,
-    root: root2,
+    root,
     generated_at: utcNow(),
     content_in_response: false,
     mutates_worktree: false,
@@ -5791,11 +5809,11 @@ function setupLspReviewArtifacts(args = {}, writeRequested = setupLspWriteReques
   }
   return [];
 }
-function appendLspReviewArtifacts(artifacts2, args = {}, writeRequested = setupLspWriteRequested(args)) {
-  artifacts2.push(...setupLspReviewArtifacts(args, writeRequested));
-  return artifacts2;
+function appendLspReviewArtifacts(artifacts, args = {}, writeRequested = setupLspWriteRequested(args)) {
+  artifacts.push(...setupLspReviewArtifacts(args, writeRequested));
+  return artifacts;
 }
-function humanReviewState(workflow, args, artifacts2, reviewBundle = null) {
+function humanReviewState(workflow, args, artifacts, reviewBundle = null) {
   return {
     required: true,
     confirmed: humanReviewConfirmed(args),
@@ -5809,7 +5827,7 @@ function humanReviewState(workflow, args, artifacts2, reviewBundle = null) {
       "intent clarification answers",
       "review bundle generation"
     ],
-    artifacts: artifacts2,
+    artifacts,
     review_bundle: reviewBundle
   };
 }
@@ -5828,11 +5846,11 @@ function trackLearningsText(trackId) {
   });
   return (asOptionalString(seed.text) || "# Track Learnings: {{track_id}}\n\n").replace(/\{\{track_id\}\}/g, trackId).replace(/\n*$/, "\n");
 }
-function installedStyleGuideIds(root2) {
-  const dir = import_node_path26.default.join(root2, "cadre", "styleguides");
+function installedStyleGuideIds(root) {
+  const dir = import_node_path25.default.join(root, "cadre", "styleguides");
   if (!fileExists(dir)) return [];
   try {
-    return import_node_fs14.default.readdirSync(dir).filter((file) => file.endsWith(".json") && file !== "index.json").map((file) => import_node_path26.default.basename(file, ".json")).sort();
+    return import_node_fs13.default.readdirSync(dir).filter((file) => file.endsWith(".json") && file !== "index.json").map((file) => import_node_path25.default.basename(file, ".json")).sort();
   } catch {
     return [];
   }
@@ -5841,8 +5859,8 @@ function styleGuideIdsForFiles(files) {
   const ids = /* @__PURE__ */ new Set();
   for (const rawFile of files) {
     const file = normalizeClaimPath(rawFile);
-    const ext = import_node_path26.default.extname(file).toLowerCase();
-    const base = import_node_path26.default.basename(file).toLowerCase();
+    const ext = import_node_path25.default.extname(file).toLowerCase();
+    const base = import_node_path25.default.basename(file).toLowerCase();
     if ([".ts", ".tsx"].includes(ext)) ids.add("typescript");
     if ([".js", ".jsx", ".mjs", ".cjs"].includes(ext)) ids.add("javascript");
     if ([".html", ".css", ".scss", ".sass", ".less", ".vue", ".svelte"].includes(ext)) ids.add("html-css");
@@ -5859,8 +5877,8 @@ function styleGuideIdsForFiles(files) {
   }
   return Array.from(ids).sort();
 }
-function implementationStyleGuides(root2, trackId, args = {}) {
-  const installed = installedStyleGuideIds(root2);
+function implementationStyleGuides(root, trackId, args = {}) {
+  const installed = installedStyleGuideIds(root);
   if (installed.length === 0) {
     return {
       ok: true,
@@ -5873,11 +5891,11 @@ function implementationStyleGuides(root2, trackId, args = {}) {
     };
   }
   const installedSet = new Set(installed);
-  const track = findTrack(root2, trackId);
+  const track = findTrack(root, trackId);
   const plan = track ? parsePlanFile(track.plan_path) : { tasks: [] };
   const taskFiles = asArray(plan.tasks).flatMap((task) => asStringArray(asJsonObject(task).files)).map(normalizeClaimPath).filter(Boolean);
   const taskFileIds = styleGuideIdsForFiles(taskFiles).filter((id) => installedSet.has(id));
-  const techStack = techStackForPacket(root2, args);
+  const techStack = techStackForPacket(root, args);
   if (!techStack) {
     return {
       ok: false,
@@ -5899,12 +5917,12 @@ function implementationStyleGuides(root2, trackId, args = {}) {
   ])).sort();
   const maxChars = Math.max(1e3, Math.min(Number(args.styleGuideMaxChars || 6e3), 2e4));
   const guides = selected.map((id) => {
-    const file = import_node_path26.default.join(root2, "cadre", "styleguides", `${id}.json`);
+    const file = import_node_path25.default.join(root, "cadre", "styleguides", `${id}.json`);
     const guide = readJson(file, null) || {};
     const text2 = JSON.stringify(guide, null, 2);
     return {
       id,
-      path: import_node_path26.default.relative(root2, file),
+      path: import_node_path25.default.relative(root, file),
       guide,
       content: text2.slice(0, maxChars),
       truncated: text2.length > maxChars,
@@ -5946,8 +5964,8 @@ function topologyRepoEntries(topology) {
   }
   return entries;
 }
-function trackRepoEntries(root2, track) {
-  const topology = loadTopology(root2);
+function trackRepoEntries(root, track) {
+  const topology = loadTopology(root);
   const entries = topologyRepoEntries(topology);
   const reposMetadata = isRecord(track.metadata.repos) ? track.metadata.repos : null;
   if (reposMetadata) {
@@ -5957,10 +5975,10 @@ function trackRepoEntries(root2, track) {
   }
   return entries;
 }
-function availableRepoNames(root2, track) {
-  return Object.keys(trackRepoEntries(root2, track)).sort();
+function availableRepoNames(root, track) {
+  return Object.keys(trackRepoEntries(root, track)).sort();
 }
-function unresolvedWorkingRoot(root2, track, repo, task = null) {
+function unresolvedWorkingRoot(root, track, repo, task = null) {
   return {
     ok: false,
     repo,
@@ -5968,7 +5986,7 @@ function unresolvedWorkingRoot(root2, track, repo, task = null) {
     source: "polyrepo-unresolved-repo",
     error: `Unknown polyrepo task repo "${repo}" for track ${track.track_id}`,
     unresolved_repo: repo,
-    available_repos: availableRepoNames(root2, track),
+    available_repos: availableRepoNames(root, track),
     track_id: track.track_id,
     task_key: task?.task_key
   };
@@ -5976,10 +5994,10 @@ function unresolvedWorkingRoot(root2, track, repo, task = null) {
 function isWorkingRootError(value) {
   return value.ok === false;
 }
-function unresolvedPlanRepos(root2, track, args = {}) {
-  const topology = loadTopology(root2);
+function unresolvedPlanRepos(root, track, args = {}) {
+  const topology = loadTopology(root);
   if (!topology.polyrepo) return [];
-  const entries = trackRepoEntries(root2, track);
+  const entries = trackRepoEntries(root, track);
   const known = new Set(Object.keys(entries));
   const plan = parsePlanFile(track.plan_path);
   const errors = [];
@@ -6001,12 +6019,12 @@ function unresolvedPlanRepos(root2, track, args = {}) {
   }
   return errors;
 }
-function repoEntriesError(root2, track, args = {}) {
-  const topology = loadTopology(root2);
+function repoEntriesError(root, track, args = {}) {
+  const topology = loadTopology(root);
   if (!topology.polyrepo) return null;
-  const entries = trackRepoEntries(root2, track);
+  const entries = trackRepoEntries(root, track);
   const requested = asOptionalString(args.repo);
-  const missing = requested ? entries[requested] ? [] : [{ repo: requested, message: `Unknown polyrepo repo "${requested}"` }] : unresolvedPlanRepos(root2, track, args);
+  const missing = requested ? entries[requested] ? [] : [{ repo: requested, message: `Unknown polyrepo repo "${requested}"` }] : unresolvedPlanRepos(root, track, args);
   if (missing.length === 0) return null;
   return {
     ok: false,
@@ -6016,14 +6034,14 @@ function repoEntriesError(root2, track, args = {}) {
     available_repos: Object.keys(entries).sort()
   };
 }
-function resolveTaskWorkingRoot(root2, track, task = null, args = {}) {
+function resolveTaskWorkingRoot(root, track, task = null, args = {}) {
   const explicitWorkingRoot = asOptionalString(args.workingRoot || args.workerRoot || args.worker_root || args.worktree);
   if (explicitWorkingRoot) {
-    const candidate = import_node_path27.default.isAbsolute(explicitWorkingRoot) ? explicitWorkingRoot : import_node_path27.default.resolve(root2, explicitWorkingRoot);
-    return { repo: taskRepo(root2, task, args), path: candidate, source: "argument.workingRoot" };
+    const candidate = import_node_path26.default.isAbsolute(explicitWorkingRoot) ? explicitWorkingRoot : import_node_path26.default.resolve(root, explicitWorkingRoot);
+    return { repo: taskRepo(root, task, args), path: candidate, source: "argument.workingRoot" };
   }
-  const repo = taskRepo(root2, task, args);
-  const branchEntry = branchSetEntryForRepo(root2, track, repo, args);
+  const repo = taskRepo(root, task, args);
+  const branchEntry = branchSetEntryForRepo(root, track, repo, args);
   if (branchEntry && branchEntry.exists && branchEntry.health === "ready") {
     return {
       repo: branchEntry.repo,
@@ -6032,23 +6050,23 @@ function resolveTaskWorkingRoot(root2, track, task = null, args = {}) {
       branch_set: branchEntry
     };
   }
-  const topology = loadTopology(root2);
+  const topology = loadTopology(root);
   if (topology.polyrepo) {
-    const info = typeof repo === "string" ? trackRepoEntries(root2, track)[repo] || {} : {};
+    const info = typeof repo === "string" ? trackRepoEntries(root, track)[repo] || {} : {};
     if (Object.keys(info).length > 0) {
       const rel = info.worktree_path || info.submodule_path || "";
       return {
         ok: true,
         repo,
-        path: rel ? import_node_path27.default.resolve(root2, rel) : root2,
+        path: rel ? import_node_path26.default.resolve(root, rel) : root,
         source: branchEntry ? "branch-set.integration_missing_fallback" : info.worktree_path ? "metadata.repos.worktree_path" : "metadata.repos.submodule_path",
         ...branchEntry ? { branch_set: branchEntry } : {}
       };
     }
-    return unresolvedWorkingRoot(root2, track, String(repo || ""), task);
+    return unresolvedWorkingRoot(root, track, String(repo || ""), task);
   }
   if (track.metadata.worktree_path && !branchEntry) {
-    const candidate = import_node_path27.default.resolve(root2, track.metadata.worktree_path);
+    const candidate = import_node_path26.default.resolve(root, track.metadata.worktree_path);
     if (fileExists(candidate)) {
       return { repo: ".", path: candidate, source: "metadata.worktree_path" };
     }
@@ -6056,13 +6074,13 @@ function resolveTaskWorkingRoot(root2, track, task = null, args = {}) {
   return {
     ok: true,
     repo: MONOREPO_REPO_KEY,
-    path: root2,
+    path: root,
     source: branchEntry ? "branch-set.integration_missing_fallback" : "project-root",
     ...branchEntry ? { branch_set: branchEntry } : {}
   };
 }
-function repoEntriesForTrack(root2, track, args = {}) {
-  return branchSetForTrack(root2, track, args).map((entry) => ({
+function repoEntriesForTrack(root, track, args = {}) {
+  return branchSetForTrack(root, track, args).map((entry) => ({
     repo: entry.repo,
     root: entry.exists && entry.health === "ready" ? entry.integration_worktree : entry.source_root,
     path: entry.exists && entry.health === "ready" ? entry.integration_worktree_path : entry.source_path,
@@ -6072,32 +6090,32 @@ function repoEntriesForTrack(root2, track, args = {}) {
     branch_set: entry
   }));
 }
-function gitRevParse(root2, ref) {
+function gitRevParse(root, ref) {
   if (!ref) return null;
-  const result = runCommand("git", ["rev-parse", ref], { cwd: root2 });
+  const result = runCommand("git", ["rev-parse", ref], { cwd: root });
   return result.ok ? result.stdout.trim() || null : null;
 }
-function reviewedShasForTrack(root2, track, args = {}) {
-  const repoError = repoEntriesError(root2, track, args);
+function reviewedShasForTrack(root, track, args = {}) {
+  const repoError = repoEntriesError(root, track, args);
   if (repoError) return repoError;
   const supplied = args.reviewedShas || args.reviewed_shas || null;
-  const entries = repoEntriesForTrack(root2, track, args);
+  const entries = repoEntriesForTrack(root, track, args);
   const reviewedShas = {};
-  const controlHead = supplied && asOptionalString(supplied["."]) || args.reviewedSha || args.reviewed_sha || gitRevParse(root2, track.metadata.git_branch || `track/${track.track_id}`) || gitRevParse(root2, "HEAD");
+  const controlHead = supplied && asOptionalString(supplied["."]) || args.reviewedSha || args.reviewed_sha || gitRevParse(root, track.metadata.git_branch || `track/${track.track_id}`) || gitRevParse(root, "HEAD");
   if (controlHead) reviewedShas["."] = controlHead;
   for (const entry of entries) {
     const repo = asString(entry.repo, ".");
-    reviewedShas[repo] = supplied && asOptionalString(supplied[repo]) || gitRevParse(asString(entry.root, root2), asString(entry.head, "HEAD")) || gitRevParse(asString(entry.root, root2), "HEAD");
+    reviewedShas[repo] = supplied && asOptionalString(supplied[repo]) || gitRevParse(asString(entry.root, root), asString(entry.head, "HEAD")) || gitRevParse(asString(entry.root, root), "HEAD");
   }
   return {
     reviewed_sha: controlHead || null,
     reviewed_shas: reviewedShas
   };
 }
-function implementationPrep(root2, args = {}) {
-  const identity = args.identity || gitIdentity(root2);
-  const team = teamStatus(root2);
-  const available = availableWork(root2);
+function implementationPrep(root, args = {}) {
+  const identity = args.identity || gitIdentity(root);
+  const team = teamStatus(root);
+  const available = availableWork(root);
   let trackId = args.trackId || args.track_id || null;
   const warnings = [];
   const availableTracks = asArray(available.available);
@@ -6113,7 +6131,7 @@ function implementationPrep(root2, args = {}) {
   if (!trackId) {
     return {
       ok: false,
-      root: root2,
+      root,
       identity,
       reason: "No available or incomplete track found",
       team,
@@ -6122,18 +6140,18 @@ function implementationPrep(root2, args = {}) {
   }
   let claim = null;
   if (args.claim === true) {
-    claim = claimTrack(root2, trackId, { identity, takeover: args.takeover === true });
+    claim = claimTrack(root, trackId, { identity, takeover: args.takeover === true });
     if (!claim.ok) {
-      return { ok: false, root: root2, identity, selected_track: trackId, claim, team, available };
+      return { ok: false, root, identity, selected_track: trackId, claim, team, available };
     }
   }
-  const context = trackContext(root2, trackId);
-  const styleGuides = implementationStyleGuides(root2, trackId, args);
-  const collisions = collisionScan(root2);
+  const context = trackContext(root, trackId);
+  const styleGuides = implementationStyleGuides(root, trackId, args);
+  const collisions = collisionScan(root);
   const selectedCollisions = asArray(collisions.collisions).filter(
     (collision) => asStringArray(collision.track_ids).includes(trackId)
   );
-  const integrity = planIntegrity(root2, trackId);
+  const integrity = planIntegrity(root, trackId);
   const foreignCollisions = selectedCollisions.filter(
     (collision) => asStringArray(collision.owners).some((owner) => owner && owner !== identity)
   );
@@ -6146,7 +6164,7 @@ function implementationPrep(root2, args = {}) {
   }
   return {
     ok: context.ok && integrity.ok,
-    root: root2,
+    root,
     identity,
     selected_track: trackId,
     claim,
@@ -6166,7 +6184,7 @@ function implementationPrep(root2, args = {}) {
 
 // src/core/application/runtime/track-schedule.ts
 function workStateForTrack(track) {
-  const statePath = import_node_path28.default.join(track.dir, "implement_state.json");
+  const statePath = import_node_path27.default.join(track.dir, "implement_state.json");
   return readJson(statePath, null);
 }
 function holdInfo(track, now = Date.now()) {
@@ -6207,28 +6225,28 @@ function taskCounts(plan) {
   counts.percent = counts.total === 0 ? 0 : Math.round(counts.completed / counts.total * 100);
   return counts;
 }
-function listTrackDirs(root2) {
-  const tracksDir = import_node_path28.default.join(root2, "cadre", "tracks");
+function listTrackDirs(root) {
+  const tracksDir = import_node_path27.default.join(root, "cadre", "tracks");
   if (!fileExists(tracksDir)) return [];
-  return import_node_fs15.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path28.default.join(tracksDir, entry.name)).sort();
+  return import_node_fs14.default.readdirSync(tracksDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => import_node_path27.default.join(tracksDir, entry.name)).sort();
 }
-function listTracks(root2) {
+function listTracks(root) {
   const tracks = [];
-  for (const dir of listTrackDirs(root2)) {
-    const metadataPath = import_node_path28.default.join(dir, "metadata.json");
+  for (const dir of listTrackDirs(root)) {
+    const metadataPath = import_node_path27.default.join(dir, "metadata.json");
     const metadata = readJson(metadataPath, null);
     if (!metadata) continue;
-    const trackId = metadata.track_id || import_node_path28.default.basename(dir);
+    const trackId = metadata.track_id || import_node_path27.default.basename(dir);
     tracks.push({
       track_id: trackId,
       dir,
       metadata_path: metadataPath,
-      plan_path: import_node_path28.default.join(dir, "plan.md"),
-      spec_path: import_node_path28.default.join(dir, "spec.md"),
-      plan_json_path: import_node_path28.default.join(dir, "plan.json"),
-      spec_json_path: import_node_path28.default.join(dir, "spec.json"),
-      learnings_jsonl_path: import_node_path28.default.join(dir, "learnings.jsonl"),
-      handoff_json_path: import_node_path28.default.join(dir, "handoff.json"),
+      plan_path: import_node_path27.default.join(dir, "plan.md"),
+      spec_path: import_node_path27.default.join(dir, "spec.md"),
+      plan_json_path: import_node_path27.default.join(dir, "plan.json"),
+      spec_json_path: import_node_path27.default.join(dir, "spec.json"),
+      learnings_jsonl_path: import_node_path27.default.join(dir, "learnings.jsonl"),
+      handoff_json_path: import_node_path27.default.join(dir, "handoff.json"),
       metadata
     });
   }
@@ -6251,7 +6269,7 @@ function parsePlanFile(file) {
     errors: [`Missing canonical plan JSON: ${planJsonPath}`]
   };
 }
-function planClaims(root2, track, topology = loadTopology(root2)) {
+function planClaims(root, track, topology = loadTopology(root)) {
   const plan = parsePlanFile(track.plan_path);
   const claims = [];
   for (const phase of plan.phases) {
@@ -6309,7 +6327,7 @@ function phaseStatus(phase) {
   if (tasks.some((task) => task.marker === "~" || task.marker === "x" || task.marker === "-")) return "in_progress";
   return "pending";
 }
-function claimsForPhase(root2, phase, topology = loadTopology(root2)) {
+function claimsForPhase(root, phase, topology = loadTopology(root)) {
   const claims = [];
   for (const task of phase.tasks || []) {
     const repo = topology.polyrepo ? task.repo || topology.defaultRepo : ".";
@@ -6395,11 +6413,11 @@ function topologicalPhaseWaves(phaseNodes) {
   }
   return waves;
 }
-function phaseSchedule(root2, args = {}) {
-  const track = findTrack(root2, args.trackId || args.track_id);
+function phaseSchedule(root, args = {}) {
+  const track = findTrack(root, args.trackId || args.track_id);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
   const plan = parsePlanFile(track.plan_path);
-  const topology = loadTopology(root2);
+  const topology = loadTopology(root);
   const aliasMap = /* @__PURE__ */ new Map();
   for (const phase of plan.phases || []) {
     for (const alias of phaseAliases(phase)) aliasMap.set(alias, phase);
@@ -6412,7 +6430,7 @@ function phaseSchedule(root2, args = {}) {
       errors.push({ phase_id: `phase${phase.phase_index}`, message: `Unknown phase dependency: ${dep}` });
     }
     const dependsOn = phaseDependencyIds(phase, all[index - 1], aliasMap);
-    const claims = claimsForPhase(root2, phase, topology);
+    const claims = claimsForPhase(root, phase, topology);
     return {
       phase_id: `phase${phase.phase_index}`,
       phase_index: phase.phase_index ?? index + 1,
@@ -6438,7 +6456,7 @@ function phaseSchedule(root2, args = {}) {
   for (const cycle of cycles) {
     errors.push({ phase_id: cycle[0] || null, message: `Phase dependency cycle: ${cycle.join(" -> ")}` });
   }
-  errors.push(...unresolvedPlanRepos(root2, track, args));
+  errors.push(...unresolvedPlanRepos(root, track, args));
   const completed = new Set(phases.filter((phase) => phase.status === "completed").map((phase) => phase.phase_id));
   const ready = errors.length === 0 ? phases.filter((phase) => !["completed", "blocked"].includes(phase.status)).filter((phase) => phase.depends_on.every((dep) => completed.has(dep))) : [];
   const { groups, conflicts } = groupReadyPhases(ready);
@@ -6461,97 +6479,159 @@ function phaseSchedule(root2, args = {}) {
   };
 }
 
-// src/core/application/runtime/collision.ts
-function normalizeClaimPath(file) {
-  return String(file || "").trim().replace(/^["']|["']$/g, "").replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+// src/core/application/runtime/branch-set.ts
+var MONOREPO_REPO_KEY = "root";
+function repoSegment(repo) {
+  return safeName(repo === "." ? MONOREPO_REPO_KEY : repo);
 }
-function globToRegExp(glob) {
-  const normalized = normalizeClaimPath(glob);
-  let out = "^";
-  for (let i = 0; i < normalized.length; i += 1) {
-    const char = normalized[i];
-    const next = normalized[i + 1];
-    if (char === "*" && next === "*") {
-      out += ".*";
-      i += 1;
-    } else if (char === "*") {
-      out += "[^/]*";
-    } else if (char === "?") {
-      out += "[^/]";
-    } else if (char && "\\^$+?.()|{}[]".includes(char)) {
-      out += `\\${char}`;
-    } else {
-      out += char;
+function gitBranch(cwd) {
+  const result = runCommand("git", ["branch", "--show-current"], { cwd });
+  return result.ok ? result.stdout.trim() || null : null;
+}
+function gitRepository(cwd) {
+  const result = runCommand("git", ["rev-parse", "--git-common-dir"], { cwd });
+  if (!result.ok) return null;
+  const candidate = import_node_path28.default.resolve(cwd, result.stdout.trim() || ".git");
+  try {
+    return import_node_fs15.default.realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
+}
+function branchExists(cwd, branch) {
+  return runCommand("git", ["rev-parse", "--verify", "--quiet", branch], { cwd }).ok;
+}
+function taskRepos(root, track) {
+  const topology = loadTopology(root);
+  if (!topology.polyrepo) return /* @__PURE__ */ new Set([MONOREPO_REPO_KEY]);
+  const repos = /* @__PURE__ */ new Set();
+  const defaultRepo = asOptionalString(topology.defaultRepo);
+  for (const task of parsePlanFile(track.plan_path).tasks || []) {
+    const repo = asOptionalString(task.repo) || defaultRepo;
+    if (repo) repos.add(repo);
+  }
+  const metadataRepos = isRecord(track.metadata.repos) ? track.metadata.repos : null;
+  if (metadataRepos) {
+    for (const [repo, rawInfo] of Object.entries(metadataRepos)) {
+      const info = asJsonObject(rawInfo);
+      if (info.affected === true || info.git_branch || info.worktree_path) repos.add(repo);
     }
   }
-  return new RegExp(`${out}$`);
+  return repos;
 }
-function isGlobClaim(file) {
-  return /[*?]/.test(file);
+function workerRef(trackId, repo, taskKey) {
+  return `refs/cadre/workers/${safeName(trackId)}/${repoSegment(repo)}/${safeName(taskKey)}`;
 }
-function claimsOverlap(leftFile, rightFile) {
-  const left = normalizeClaimPath(leftFile);
-  const right = normalizeClaimPath(rightFile);
-  if (!left || !right) return false;
-  if (left === right) return true;
-  if (right.startsWith(`${left}/`) || left.startsWith(`${right}/`)) return true;
-  if (isGlobClaim(left) && globToRegExp(left).test(right)) return true;
-  if (isGlobClaim(right) && globToRegExp(right).test(left)) return true;
-  return false;
+function workerWorktreePath(root, trackId, repo, taskKey) {
+  return import_node_path28.default.resolve(root, ".worktrees", "cadre", "tracks", safeName(trackId), "workers", repoSegment(repo), safeName(taskKey));
 }
-function collisionScan(root2) {
-  const topology = loadTopology(root2);
-  const active = listTracks(root2).filter(
-    (track) => ["new", "in_progress", "blocked"].includes(track.metadata.status || "new")
-  );
-  const claims = [];
-  for (const track of active) {
-    for (const claim of planClaims(root2, track, topology)) {
-      claims.push({
-        ...claim,
-        file: normalizeClaimPath(claim.file)
-      });
+function branchSetForTrack(root, track, args = {}) {
+  const topology = loadTopology(root);
+  const requestedRepo = asOptionalString(args.repo);
+  const affected = taskRepos(root, track);
+  if (topology.polyrepo) {
+    const metadataRepos = isRecord(track.metadata.repos) ? track.metadata.repos : {};
+    const topoRepos = Array.isArray(topology.repos.repos) ? topology.repos.repos.map(asJsonObject) : [];
+    const byName = /* @__PURE__ */ new Map();
+    for (const rawRepo of topoRepos) {
+      const name = asOptionalString(rawRepo.name);
+      if (name) byName.set(name, rawRepo);
     }
-  }
-  const collisions = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (let i = 0; i < claims.length; i += 1) {
-    for (let j = i + 1; j < claims.length; j += 1) {
-      const left = claims[i];
-      const right = claims[j];
-      if (!left || !right) continue;
-      if (left.track_id === right.track_id) continue;
-      if (left.repo !== right.repo) continue;
-      if (!claimsOverlap(left.file, right.file)) continue;
-      const trackIds = [left.track_id, right.track_id].sort();
-      const files = [left.file, right.file].sort();
-      const key = `${left.repo}\0${trackIds.join("\0")}\0${files.join("\0")}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const collisionClaims = [left, right];
-      collisions.push({
-        repo: left.repo,
-        file: left.file === right.file ? left.file : `${left.file} <-> ${right.file}`,
-        kind: left.file === right.file ? "exact" : "overlap",
-        claims: collisionClaims,
-        track_ids: trackIds,
-        owners: Array.from(new Set(collisionClaims.map((claim) => claim.owner).filter(Boolean))).sort()
-      });
+    for (const [repo, rawInfo] of Object.entries(metadataRepos)) {
+      if (!byName.has(repo)) byName.set(repo, { name: repo, ...asJsonObject(rawInfo) });
     }
+    const repoRows = Array.from(byName.values());
+    return repoRows.filter((rawRepo) => {
+      const repo = asOptionalString(rawRepo.name);
+      return Boolean(repo && (!requestedRepo || requestedRepo === repo) && affected.has(repo));
+    }).map((rawRepo) => {
+      const repo = asString(rawRepo.name);
+      const info = {
+        submodule_path: asOptionalString(rawRepo.submodule_path) || "",
+        base_branch: asOptionalString(rawRepo.default_branch) || asOptionalString(rawRepo.base_branch) || "main",
+        ...isRecord(metadataRepos[repo]) ? asJsonObject(metadataRepos[repo]) : {}
+      };
+      return branchSetEntry(root, track, repo, info, args, true);
+    });
   }
-  collisions.sort((a, b) => `${asString(a.repo)}${asString(a.file)}`.localeCompare(`${asString(b.repo)}${asString(b.file)}`));
+  if (requestedRepo && requestedRepo !== "." && requestedRepo !== MONOREPO_REPO_KEY) return [];
+  return [branchSetEntry(root, track, MONOREPO_REPO_KEY, {}, args, false)];
+}
+function branchSetEntry(root, track, repo, info, args, polyrepo) {
+  const segment = repoSegment(repo);
+  const sourceRel = polyrepo ? asOptionalString(info.submodule_path) || "" : ".";
+  const sourceRoot = polyrepo && sourceRel ? import_node_path28.default.resolve(root, sourceRel) : root;
+  const baseBranch = asOptionalString(args.base) || asOptionalString(info.base_branch) || "main";
+  const trackBranch = asOptionalString(args.head) || asOptionalString(args.branch) || asOptionalString(info.git_branch) || asOptionalString(track.metadata.git_branch) || `track/${track.track_id}`;
+  const legacyPath = repo === MONOREPO_REPO_KEY ? asOptionalString(track.metadata.worktree_path) : asOptionalString(info.worktree_path);
+  const relIntegration = legacyPath || import_node_path28.default.join(".worktrees", "cadre", "tracks", safeName(track.track_id), "integrate", segment);
+  const integrationWorktree = import_node_path28.default.resolve(root, relIntegration);
+  const workerRoot = import_node_path28.default.resolve(root, ".worktrees", "cadre", "tracks", safeName(track.track_id), "workers", segment);
+  const exists = fileExists(integrationWorktree);
+  const currentBranch = exists ? gitBranch(integrationWorktree) : null;
+  const expectedRepository = gitRepository(sourceRoot);
+  const actualRepository = exists ? gitRepository(integrationWorktree) : null;
+  const wrongRepo = Boolean(exists && expectedRepository && actualRepository && expectedRepository !== actualRepository);
+  const wrongBranch = Boolean(exists && currentBranch && currentBranch !== trackBranch);
+  const health = !exists ? "missing" : wrongRepo ? "wrong_repo" : wrongBranch ? "wrong_branch" : "ready";
   return {
-    root: root2,
-    active_tracks: active.length,
-    collisions
+    repo,
+    repo_segment: segment,
+    source_root: sourceRoot,
+    source_path: sourceRel,
+    base_branch: baseBranch,
+    track_branch: trackBranch,
+    integration_worktree: integrationWorktree,
+    integration_worktree_path: import_node_path28.default.relative(root, integrationWorktree) || ".",
+    worker_root: workerRoot,
+    worker_root_path: import_node_path28.default.relative(root, workerRoot) || ".",
+    affected: true,
+    exists,
+    current_branch: currentBranch,
+    health,
+    branch_exists: branchExists(sourceRoot, trackBranch),
+    commands: integrationCommands(sourceRoot, integrationWorktree, trackBranch, baseBranch, exists)
   };
+}
+function integrationCommands(sourceRoot, integrationWorktree, branch, base, exists) {
+  if (exists) return [];
+  return [{
+    command: "git",
+    args: ["worktree", "add", integrationWorktree, branch],
+    fallback_args: ["worktree", "add", "-b", branch, integrationWorktree, base],
+    cwd: sourceRoot
+  }];
+}
+function ensureIntegrationWorktree(entry) {
+  if (entry.exists) {
+    if (entry.health !== "ready") return { ok: false, stage: "integration_worktree_health", entry, error: `Integration worktree for ${entry.repo} is ${entry.health}` };
+    return { ok: true, entry, created: false };
+  }
+  import_node_fs15.default.mkdirSync(import_node_path28.default.dirname(entry.integration_worktree), { recursive: true });
+  const args = entry.branch_exists ? ["worktree", "add", entry.integration_worktree, entry.track_branch] : ["worktree", "add", "-b", entry.track_branch, entry.integration_worktree, entry.base_branch];
+  const result = runCommand("git", args, { cwd: entry.source_root });
+  return {
+    ok: result.ok,
+    entry: { ...entry, exists: result.ok, current_branch: result.ok ? entry.track_branch : entry.current_branch, health: result.ok ? "ready" : entry.health },
+    created: result.ok,
+    command: { command: "git", args, cwd: entry.source_root },
+    result
+  };
+}
+function branchSetEntryForRepo(root, track, repo, args = {}) {
+  return branchSetForTrack(root, track, { ...args, repo: repo === MONOREPO_REPO_KEY ? void 0 : repo }).find((entry) => entry.repo === repo || repo === "." && entry.repo === MONOREPO_REPO_KEY) || null;
+}
+function taskRepo(root, task, args = {}) {
+  const topology = loadTopology(root);
+  if (!topology.polyrepo) return MONOREPO_REPO_KEY;
+  return asString(args.repo || task?.repo || topology.defaultRepo);
 }
 
 // src/core/application/runtime/status.ts
 var TRACKS_INDEX_SCHEMA = "cadre.tracks_index.v1";
-function liveStatus(root2) {
-  const tracks = listTracks(root2);
-  const identity = gitIdentity(root2);
+function liveStatus(root) {
+  const tracks = listTracks(root);
+  const identity = gitIdentity(root);
   const byStatus = /* @__PURE__ */ new Map();
   const activeTracks = [];
   for (const track of tracks) {
@@ -6565,20 +6645,20 @@ function liveStatus(root2) {
         owner: track.metadata.owner || null,
         git_branch: track.metadata.git_branch || `track/${track.track_id}`,
         task_counts: taskCounts(plan),
-        branch_set: branchSetForTrack(root2, track)
+        branch_set: branchSetForTrack(root, track)
       });
     }
   }
   return {
-    root: root2,
+    root,
     identity,
     total_tracks: tracks.length,
     by_status: Object.fromEntries(Array.from(byStatus.entries()).sort()),
     active_tracks: activeTracks
   };
 }
-function teamStatus(root2) {
-  const tracks = listTracks(root2);
+function teamStatus(root) {
+  const tracks = listTracks(root);
   const byOwner = /* @__PURE__ */ new Map();
   const byStatus = /* @__PURE__ */ new Map();
   for (const track of tracks) {
@@ -6588,8 +6668,8 @@ function teamStatus(root2) {
     byStatus.set(status, (byStatus.get(status) || 0) + 1);
   }
   return {
-    root: root2,
-    identity: gitIdentity(root2),
+    root,
+    identity: gitIdentity(root),
     total_tracks: tracks.length,
     by_owner: Object.fromEntries(Array.from(byOwner.entries()).sort()),
     by_status: Object.fromEntries(Array.from(byStatus.entries()).sort()),
@@ -6601,7 +6681,7 @@ function teamStatus(root2) {
       owner: track.metadata.owner || null,
       reviewer: track.metadata.reviewer || null,
       review_verdict: track.metadata.review ? track.metadata.review.verdict : null,
-      branch_set_health: branchSetForTrack(root2, track).map((entry) => ({ repo: entry.repo, health: entry.health, branch: entry.track_branch }))
+      branch_set_health: branchSetForTrack(root, track).map((entry) => ({ repo: entry.repo, health: entry.health, branch: entry.track_branch }))
     }))
   };
 }
@@ -6634,34 +6714,34 @@ function metadataTrackSummary(track) {
     review: track.metadata.review ? asJsonObject(track.metadata.review) : null
   };
 }
-function lspRuntimeSummary(root2) {
-  const configPath2 = import_node_path29.default.join(root2, "cadre", "lsp.json");
-  const config = readJson(configPath2, null);
+function lspRuntimeSummary(root) {
+  const configPath = import_node_path29.default.join(root, "cadre", "lsp.json");
+  const config = readJson(configPath, null);
   const servers = isRecord(config) && Array.isArray(config.servers) ? config.servers.map((server) => asJsonObject(server)) : [];
   const entries = servers.map((server) => {
     const command = asOptionalString(server.command);
     return {
       id: asOptionalString(server.id) || command || "unknown",
       command: command || null,
-      available: command ? commandExists(command, root2) : false
+      available: command ? commandExists(command, root) : false
     };
   });
   return {
     configured: Boolean(config),
-    path: import_node_path29.default.relative(root2, configPath2),
+    path: import_node_path29.default.relative(root, configPath),
     server_count: entries.length,
     available_count: entries.filter((entry) => entry.available === true).length,
     missing_count: entries.filter((entry) => entry.available !== true).length,
     missing: entries.filter((entry) => entry.available !== true).map((entry) => entry.id),
     daemon: {
-      status_packet: "cadre_action action intel.lsp_daemon_status",
-      shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
+      status_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_status", input: {}, execute: false } },
+      shutdown_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_shutdown", input: {}, execute: true } },
       max_clients_default: 8,
       idle_eviction_ms_default: 6e5
     }
   };
 }
-function trackIndexPayload(root2, tracks = listTracks(root2)) {
+function trackIndexPayload(root, tracks = listTracks(root)) {
   const counts = {
     new: 0,
     in_progress: 0,
@@ -6675,9 +6755,9 @@ function trackIndexPayload(root2, tracks = listTracks(root2)) {
     counts[status] = (counts[status] || 0) + 1;
     return {
       ...summary,
-      metadata_path: import_node_path29.default.relative(root2, track.metadata_path),
-      spec_path: import_node_path29.default.relative(root2, trackSpecJsonPath(track)),
-      plan_path: import_node_path29.default.relative(root2, trackPlanJsonPath(track))
+      metadata_path: import_node_path29.default.relative(root, track.metadata_path),
+      spec_path: import_node_path29.default.relative(root, trackSpecJsonPath(track)),
+      plan_path: import_node_path29.default.relative(root, trackPlanJsonPath(track))
     };
   });
   return {
@@ -6688,9 +6768,9 @@ function trackIndexPayload(root2, tracks = listTracks(root2)) {
     tracks: entries
   };
 }
-function teamBoard(root2, args = {}) {
-  const tracks = listTracks(root2);
-  const identity = gitIdentity(root2);
+function teamBoard(root, args = {}) {
+  const tracks = listTracks(root);
+  const identity = gitIdentity(root);
   const scope = args.mine === true ? "mine" : "all";
   const byId = new Map(tracks.map((track) => [track.track_id, track]));
   const wip = [];
@@ -6739,7 +6819,7 @@ function teamBoard(root2, args = {}) {
       }
     }
   }
-  for (const message of readCadreMessages(root2, "inbox", 200)) {
+  for (const message of readCadreMessages(root, "inbox", 200)) {
     if (asOptionalString(message.kind) !== "handoff") continue;
     const recipient = asOptionalString(message.to || message.recipient) || null;
     if (scope === "mine" && recipient && recipient !== identity) continue;
@@ -6754,7 +6834,7 @@ function teamBoard(root2, args = {}) {
       recorded_at: asOptionalString(message.recorded_at) || null
     });
   }
-  for (const message of readCadreMessages(root2, "outbox", 200)) {
+  for (const message of readCadreMessages(root, "outbox", 200)) {
     if (asOptionalString(message.kind) !== "handoff") continue;
     const sender = asOptionalString(message.from) || null;
     if (scope === "mine" && sender && sender !== identity) continue;
@@ -6776,25 +6856,25 @@ function teamBoard(root2, args = {}) {
   }
   return {
     ok: true,
-    root: root2,
+    root,
     identity,
     scope,
     generated_at: utcNow(),
-    summary: teamStatus(root2),
+    summary: teamStatus(root),
     wip,
     incoming_handoffs: handoffs,
     outgoing_handoffs: outgoingHandoffs,
     review_queue: Array.from(dedupReview.values()),
     blockers,
-    native_state: nativeStateSummary(root2),
-    lsp: lspRuntimeSummary(root2)
+    native_state: nativeStateSummary(root),
+    lsp: lspRuntimeSummary(root)
   };
 }
-function gitSummary(root2) {
-  if (!fileExists(root2)) return { ok: false, exists: false };
-  const branch = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root2 });
-  const head = runCommand("git", ["rev-parse", "--short", "HEAD"], { cwd: root2 });
-  const status = runCommand("git", ["status", "--porcelain"], { cwd: root2 });
+function gitSummary(root) {
+  if (!fileExists(root)) return { ok: false, exists: false };
+  const branch = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root });
+  const head = runCommand("git", ["rev-parse", "--short", "HEAD"], { cwd: root });
+  const status = runCommand("git", ["status", "--porcelain"], { cwd: root });
   return {
     ok: branch.ok || head.ok || status.ok,
     exists: true,
@@ -6804,21 +6884,21 @@ function gitSummary(root2) {
     errors: [branch.stderr, head.stderr, status.stderr].filter(Boolean).join("\n").trim()
   };
 }
-function fleetStatus(root2, args = {}) {
-  const topology = loadTopology(root2);
+function fleetStatus(root, args = {}) {
+  const topology = loadTopology(root);
   const repos = [{
     name: ".",
     role: "control",
     path: ".",
-    root: root2,
-    ...gitSummary(root2)
+    root,
+    ...gitSummary(root)
   }];
   if (topology.polyrepo) {
     for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
       const repo = asJsonObject(raw);
       const name = asOptionalString(repo.name) || asOptionalString(repo.submodule_path) || "unknown";
       const rel = asOptionalString(repo.submodule_path) || "";
-      const repoRoot = rel ? import_node_path29.default.resolve(root2, rel) : root2;
+      const repoRoot = rel ? import_node_path29.default.resolve(root, rel) : root;
       repos.push({
         name,
         role: "product",
@@ -6831,12 +6911,12 @@ function fleetStatus(root2, args = {}) {
   }
   return {
     ok: true,
-    root: root2,
+    root,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     repos,
-    branch_sets: listTracks(root2).map((track) => ({
+    branch_sets: listTracks(root).map((track) => ({
       track_id: track.track_id,
-      entries: branchSetForTrack(root2, track).map((entry) => ({
+      entries: branchSetForTrack(root, track).map((entry) => ({
         repo: entry.repo,
         branch: entry.track_branch,
         integration_worktree: entry.integration_worktree_path,
@@ -6844,13 +6924,13 @@ function fleetStatus(root2, args = {}) {
         health: entry.health
       }))
     })),
-    provider: providerMcpAvailability(root2, args),
-    lsp: lspRuntimeSummary(root2),
-    collisions: args.includeCollisions === false ? null : collisionScan(root2)
+    provider: providerMcpAvailability(root, args),
+    lsp: lspRuntimeSummary(root),
+    collisions: args.includeCollisions === false ? null : collisionScan(root)
   };
 }
-function availableWork(root2) {
-  const tracks = listTracks(root2);
+function availableWork(root) {
+  const tracks = listTracks(root);
   const byId = new Map(tracks.map((track) => [track.track_id, track]));
   const available = [];
   const reclaimable = [];
@@ -6885,11 +6965,11 @@ function availableWork(root2) {
       });
     }
   }
-  return { root: root2, available, reclaimable };
+  return { root, available, reclaimable };
 }
-function activeTrackId(root2, identity = gitIdentity(root2)) {
-  const tracks = listTracks(root2);
-  const topology = loadTopology(root2);
+function activeTrackId(root, identity = gitIdentity(root)) {
+  const tracks = listTracks(root);
+  const topology = loadTopology(root);
   const active = tracks.filter((track) => (track.metadata.status || "new") === "in_progress");
   if (topology.config.sync_mode === "shared" && identity) {
     const mine = active.find((track) => track.metadata.owner === identity);
@@ -6897,63 +6977,8 @@ function activeTrackId(root2, identity = gitIdentity(root2)) {
   }
   return active[0]?.track_id || null;
 }
-function selectedTrackId(root2, args = {}) {
-  return args.trackId || args.track_id || activeTrackId(root2);
-}
-
-// src/core/application/runtime/projection-registry.ts
-var PROJECTION_REGISTRY = [
-  { intent: "product", title: "Product context", canonical: "cadre/product.json", projection: "cadre/product.md", schema: "cadre.product.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
-  { intent: "product-guidelines", title: "Product guidelines", canonical: "cadre/product_guidelines.json", projection: "cadre/product_guidelines.md", schema: "cadre.product_guidelines.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
-  { intent: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", projection: "cadre/tech-stack.md", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
-  { intent: "workflow", title: "Workflow policy", canonical: "cadre/workflow.json", projection: "cadre/workflow.md", schema: "cadre.workflow.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
-  { intent: "repository-topology", title: "Repository topology", canonical: "cadre/repos.json", projection: "cadre/repos.md", schema: "cadre.repos.v1", scope: "project", sourceFormat: "json", reviewRole: "document" },
-  { intent: "patterns", title: "Project patterns", canonical: "cadre/patterns.jsonl", projection: "cadre/patterns.md", schema: "cadre.patterns.v1", scope: "project", sourceFormat: "jsonl", reviewRole: "generated" },
-  { intent: "styleguide-catalog", title: "Style guide catalog", canonical: "cadre/styleguides/index.json", projection: "cadre/styleguides/README.md", schema: "cadre.styleguide_index.v1", scope: "styleguide", sourceFormat: "json", reviewRole: "document" },
-  { intent: "styleguide", title: "Style guide", canonical: "cadre/styleguides/{id}.json", projection: "cadre/styleguides/{id}.md", schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", reviewRole: "document" },
-  { intent: "track-specification", title: "Track specification", canonical: "cadre/tracks/{trackId}/spec.json", projection: "cadre/tracks/{trackId}/spec.md", schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", reviewRole: "document" },
-  { intent: "track-plan", title: "Track plan", canonical: "cadre/tracks/{trackId}/plan.json", projection: "cadre/tracks/{trackId}/plan.md", schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", reviewRole: "document" },
-  { intent: "track-learnings", title: "Track learnings", canonical: "cadre/tracks/{trackId}/learnings.jsonl", projection: "cadre/tracks/{trackId}/learnings.md", schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", reviewRole: "generated" },
-  { intent: "track-handoff", title: "Track handoff", canonical: "cadre/tracks/{trackId}/handoff.json", projection: "cadre/tracks/{trackId}/HANDOFF.md", schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", reviewRole: "document" },
-  { intent: "release", title: "Release", canonical: "cadre/releases/{version}.json", projection: "cadre/releases/{version}.md", schema: "cadre.release.v1", scope: "release", sourceFormat: "json", reviewRole: "document" },
-  { intent: "project-skill", title: "Project skill", canonical: "cadre/skills/{id}/skill.json", projection: "cadre/skills/{id}/SKILL.md", schema: "cadre.project-skill.v1", scope: "skill", sourceFormat: "json", reviewRole: "document" }
-];
-function projectionRegistration(intent) {
-  const registration = PROJECTION_REGISTRY.find((entry) => entry.intent === intent);
-  if (!registration) throw new Error(`Unknown projection intent: ${intent}`);
-  return registration;
-}
-function resolveTemplate(template, parameters) {
-  const replacements = {
-    id: parameters.id,
-    trackId: parameters.trackId,
-    version: parameters.version
-  };
-  let resolved = template;
-  for (const [key, value] of Object.entries(replacements)) {
-    if (!resolved.includes(`{${key}}`)) continue;
-    if (!value) throw new Error(`Projection path parameter ${key} is required for ${template}`);
-    resolved = resolved.replaceAll(`{${key}}`, value);
-  }
-  if (parameters.archived && parameters.trackId) {
-    resolved = resolved.replace(`cadre/tracks/${parameters.trackId}/`, `cadre/archive/${parameters.trackId}/`);
-  }
-  return resolved;
-}
-function projectionDefinition(intent, id, parameters = {}, title) {
-  const registration = projectionRegistration(intent);
-  return {
-    id,
-    title: title || registration.title,
-    canonical: resolveTemplate(registration.canonical, parameters),
-    projection: resolveTemplate(registration.projection, parameters),
-    schema: registration.schema,
-    scope: registration.scope,
-    sourceFormat: registration.sourceFormat,
-    projectionFormat: "markdown",
-    reviewRole: registration.reviewRole,
-    projectionIntent: intent
-  };
+function selectedTrackId(root, args = {}) {
+  return args.trackId || args.track_id || activeTrackId(root);
 }
 
 // src/core/application/runtime/artifact-catalog.ts
@@ -6966,9 +6991,9 @@ function safeReadDir(dir) {
 }
 function artifactSchema(artifact) {
   const id = String(artifact || "catalog").toLowerCase();
-  const objectSchema = (required2, properties) => ({
+  const objectSchema = (required, properties) => ({
     type: "object",
-    required: required2,
+    required,
     additionalProperties: true,
     properties
   });
@@ -7149,7 +7174,7 @@ function artifactSchema(artifact) {
     dialect: "https://json-schema.org/draft/2020-12/schema"
   };
 }
-function artifactDefinitions(root2, args = {}) {
+function artifactDefinitions(root, args = {}) {
   const defs = [
     projectionDefinition("product", "product"),
     projectionDefinition("product-guidelines", "product-guidelines"),
@@ -7160,13 +7185,13 @@ function artifactDefinitions(root2, args = {}) {
     { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "setup-state", title: "Setup state", canonical: "cadre/setup_state.json", schema: "cadre.setup_state.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" }
   ];
-  if (fileExists(import_node_path30.default.join(root2, "cadre", "repos.json")) || fileExists(import_node_path30.default.join(root2, "cadre", "repos.md"))) {
+  if (fileExists(import_node_path30.default.join(root, "cadre", "repos.json")) || fileExists(import_node_path30.default.join(root, "cadre", "repos.md"))) {
     defs.push(projectionDefinition("repository-topology", "repos"));
   }
-  if (fileExists(import_node_path30.default.join(root2, "cadre", "lsp.json"))) {
+  if (fileExists(import_node_path30.default.join(root, "cadre", "lsp.json"))) {
     defs.push({ id: "lsp-config", title: "LSP config", canonical: "cadre/lsp.json", schema: "cadre.lsp.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" });
   }
-  const styleJsonDir = import_node_path30.default.join(root2, "cadre", "styleguides");
+  const styleJsonDir = import_node_path30.default.join(root, "cadre", "styleguides");
   const styleIds = /* @__PURE__ */ new Set();
   for (const file of safeReadDir(styleJsonDir)) {
     if (file.endsWith(".json") && file !== "index.json") styleIds.add(import_node_path30.default.basename(file, ".json"));
@@ -7180,15 +7205,15 @@ function artifactDefinitions(root2, args = {}) {
   for (const id of Array.from(styleIds).sort()) {
     defs.push(projectionDefinition("styleguide", `styleguide:${id}`, { id }, `Style guide: ${id}`));
   }
-  const skillsDir = import_node_path30.default.join(root2, "cadre", "skills");
+  const skillsDir = import_node_path30.default.join(root, "cadre", "skills");
   for (const id of safeReadDir(skillsDir)) {
     const skillPath = import_node_path30.default.join(skillsDir, id, "skill.json");
     if (!fileExists(skillPath)) continue;
     defs.push(projectionDefinition("project-skill", `skill:${id}`, { id }, `Project skill: ${id}`));
   }
-  for (const track of listTracks(root2)) {
+  for (const track of listTracks(root)) {
     defs.push(
-      { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: import_node_path30.default.relative(root2, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
+      { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: import_node_path30.default.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
       projectionDefinition("track-specification", `track:${track.track_id}:spec`, { trackId: track.track_id }, `Spec: ${track.track_id}`),
       projectionDefinition("track-plan", `track:${track.track_id}:plan`, { trackId: track.track_id }, `Plan: ${track.track_id}`),
       projectionDefinition("track-learnings", `track:${track.track_id}:learnings`, { trackId: track.track_id }, `Learnings: ${track.track_id}`),
@@ -7200,35 +7225,35 @@ function artifactDefinitions(root2, args = {}) {
     const parallelState = import_node_path30.default.join(track.dir, "parallel_state.json");
     const implementState = import_node_path30.default.join(track.dir, "implement_state.json");
     if (fileExists(reviewEvidenceJsonl)) {
-      defs.push({ id: `track:${track.track_id}:review-evidence`, title: `Review evidence: ${track.track_id}`, canonical: import_node_path30.default.relative(root2, reviewEvidenceJsonl), schema: "cadre.review_evidence.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:review-evidence`, title: `Review evidence: ${track.track_id}`, canonical: import_node_path30.default.relative(root, reviewEvidenceJsonl), schema: "cadre.review_evidence.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
     }
     if (fileExists(reviewEvidenceJson)) {
-      defs.push({ id: `track:${track.track_id}:review-evidence-summary`, title: `Review evidence summary: ${track.track_id}`, canonical: import_node_path30.default.relative(root2, reviewEvidenceJson), schema: "cadre.review_evidence_summary.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:review-evidence-summary`, title: `Review evidence summary: ${track.track_id}`, canonical: import_node_path30.default.relative(root, reviewEvidenceJson), schema: "cadre.review_evidence_summary.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
     }
     if (fileExists(completionJournal)) {
-      defs.push({ id: `track:${track.track_id}:completion-journal`, title: `Completion journal: ${track.track_id}`, canonical: import_node_path30.default.relative(root2, completionJournal), schema: "cadre.completion_journal.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:completion-journal`, title: `Completion journal: ${track.track_id}`, canonical: import_node_path30.default.relative(root, completionJournal), schema: "cadre.completion_journal.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "none" });
     }
     if (fileExists(parallelState)) {
-      defs.push({ id: `track:${track.track_id}:parallel-state`, title: `Parallel state: ${track.track_id}`, canonical: import_node_path30.default.relative(root2, parallelState), schema: "cadre.parallel_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:parallel-state`, title: `Parallel state: ${track.track_id}`, canonical: import_node_path30.default.relative(root, parallelState), schema: "cadre.parallel_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
     }
     if (fileExists(implementState)) {
-      defs.push({ id: `track:${track.track_id}:implement-state`, title: `Implementation state: ${track.track_id}`, canonical: import_node_path30.default.relative(root2, implementState), schema: "cadre.implement_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
+      defs.push({ id: `track:${track.track_id}:implement-state`, title: `Implementation state: ${track.track_id}`, canonical: import_node_path30.default.relative(root, implementState), schema: "cadre.implement_state.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" });
     }
   }
-  const releasesDir = import_node_path30.default.join(root2, "cadre", "releases");
+  const releasesDir = import_node_path30.default.join(root, "cadre", "releases");
   for (const file of safeReadDir(releasesDir)) {
     if (!file.endsWith(".json")) continue;
     const version = import_node_path30.default.basename(file, ".json");
     defs.push(projectionDefinition("release", `release:${version}`, { version }, `Release - ${version}`));
   }
-  const jobsDir = import_node_path30.default.join(root2, "cadre", "jobs");
+  const jobsDir = import_node_path30.default.join(root, "cadre", "jobs");
   for (const file of safeReadDir(jobsDir)) {
     if (!file.endsWith(".json")) continue;
     const jobId = import_node_path30.default.basename(file, ".json");
     defs.push({ id: `job:${jobId}`, title: `Job ${jobId}`, canonical: `cadre/jobs/${file}`, schema: "cadre.job.v1", scope: "external", sourceFormat: "json", projectionFormat: "none" });
   }
   if (args.includeArchive === true || args.include_archive === true) {
-    const archiveDir = import_node_path30.default.join(root2, "cadre", "archive");
+    const archiveDir = import_node_path30.default.join(root, "cadre", "archive");
     for (const trackId of safeReadDir(archiveDir)) {
       const dir = import_node_path30.default.join(archiveDir, trackId);
       if (!fileExists(import_node_path30.default.join(dir, "metadata.json"))) continue;
@@ -7304,13 +7329,13 @@ function renderProjectSkillProjection(manifest) {
 }
 
 // src/core/application/runtime/artifact-actions.ts
-function artifactCatalog(root2, args = {}) {
-  const artifacts2 = artifactDefinitions(root2, args).filter((def) => artifactMatches(def, args)).map((def) => ({
+function artifactCatalog(root, args = {}) {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args)).map((def) => ({
     ...def,
-    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path31.default.join(root2, "cadre", "tracks")) : fileExists(import_node_path31.default.join(root2, def.canonical)),
-    projection_exists: def.projection ? fileExists(import_node_path31.default.join(root2, def.projection)) : false
+    canonical_exists: def.canonical === "cadre/tracks" ? fileExists(import_node_path31.default.join(root, "cadre", "tracks")) : fileExists(import_node_path31.default.join(root, def.canonical)),
+    projection_exists: def.projection ? fileExists(import_node_path31.default.join(root, def.projection)) : false
   }));
-  return { ok: true, root: root2, artifacts: artifacts2 };
+  return { ok: true, root, artifacts };
 }
 function renderJsonCodeblock(title, value) {
   return normalizedText(`# ${title}
@@ -7344,9 +7369,9 @@ function renderJsonlMarkdown(title, entries) {
   }
   return normalizedText(parts.join("\n"));
 }
-function renderArtifact(root2, def, args = {}) {
-  const canonicalPath = import_node_path31.default.join(root2, def.canonical);
-  const projectionPath = def.projection ? import_node_path31.default.join(root2, def.projection) : void 0;
+function renderArtifact(root, def) {
+  const canonicalPath = import_node_path31.default.join(root, def.canonical);
+  const projectionPath = def.projection ? import_node_path31.default.join(root, def.projection) : void 0;
   let raw = null;
   let canonicalContent = "";
   let body = "";
@@ -7406,22 +7431,22 @@ function releaseMarkdownFromMetadata(metadata) {
   appendCanonicalJsonReference(parts);
   return normalizedText(parts.join("\n"));
 }
-function artifactRender(root2, args = {}) {
+function artifactRender(root, args = {}) {
   const artifact = asOptionalString(args.artifact || args.id);
   if (!artifact) return { ok: false, error: "artifact is required" };
-  const def = artifactDefinitions(root2, args).find((item) => item.id === artifact || item.id.endsWith(`:${artifact}`));
+  const def = artifactDefinitions(root, args).find((item) => item.id === artifact || item.id.endsWith(`:${artifact}`));
   if (!def) return { ok: false, error: `Unknown artifact: ${artifact}` };
-  return renderArtifact(root2, def, args);
+  return renderArtifact(root, def);
 }
-function artifactValidate(root2, args = {}) {
-  const artifacts2 = artifactDefinitions(root2, args).filter((def) => artifactMatches(def, args));
-  const results = artifacts2.map((def) => {
-    const file = import_node_path31.default.join(root2, def.canonical);
+function artifactValidate(root, args = {}) {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const results = artifacts.map((def) => {
+    const file = import_node_path31.default.join(root, def.canonical);
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
     const canonicalOk = def.sourceFormat === "jsonl" ? readJsonl(file).length >= 0 : def.sourceFormat === "markdown" ? import_node_fs17.default.readFileSync(file, "utf8").trim().length > 0 : Boolean(readJson(file, null));
     if (!canonicalOk || !def.projection) return { artifact_id: def.id, ok: canonicalOk, canonical_path: def.canonical };
-    const rendered = renderArtifact(root2, def, args);
-    const projectionFile = import_node_path31.default.join(root2, def.projection);
+    const rendered = renderArtifact(root, def);
+    const projectionFile = import_node_path31.default.join(root, def.projection);
     const projectionExists = fileExists(projectionFile);
     const existing = projectionExists ? import_node_fs17.default.readFileSync(projectionFile, "utf8") : "";
     const generated = projectionExists && hasGeneratedMarker(existing);
@@ -7437,7 +7462,7 @@ function artifactValidate(root2, args = {}) {
       ...projectionExists && !generated ? { error: "Projection is user-owned or missing its Cadre generated marker" } : {}
     };
   });
-  const legacyStyleguides = fileExists(import_node_path31.default.join(root2, "cadre", "code_styleguides"));
+  const legacyStyleguides = fileExists(import_node_path31.default.join(root, "cadre", "code_styleguides"));
   if (legacyStyleguides) {
     results.push({
       artifact_id: "legacy-styleguide-projections",
@@ -7448,15 +7473,15 @@ function artifactValidate(root2, args = {}) {
   }
   return {
     ok: results.every((result) => result.ok !== false),
-    root: root2,
+    root,
     results,
     legacy_styleguide_path: legacyStyleguides ? "cadre/code_styleguides" : null
   };
 }
-function artifactDiff(root2, args = {}) {
-  const artifacts2 = artifactDefinitions(root2, args).filter((def) => artifactMatches(def, args));
-  const diffs = artifacts2.map((def) => {
-    const rendered = renderArtifact(root2, def, args);
+function artifactDiff(root, args = {}) {
+  const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const diffs = artifacts.map((def) => {
+    const rendered = renderArtifact(root, def);
     return {
       artifact_id: def.id,
       projection_path: def.projection,
@@ -7465,9 +7490,9 @@ function artifactDiff(root2, args = {}) {
       legacy_import_available: rendered.legacy_import_available === true
     };
   });
-  return { ok: true, root: root2, diffs, changed: diffs.filter((diff) => diff.changed).length };
+  return { ok: true, root, diffs, changed: diffs.filter((diff) => diff.changed).length };
 }
-function artifactSync(root2, args = {}) {
+function artifactSync(root, args = {}) {
   const execute = args.execute === true;
   if (args.importLegacy !== void 0 || args.import_legacy !== void 0) {
     return {
@@ -7476,16 +7501,16 @@ function artifactSync(root2, args = {}) {
       unsupported_fields: ["importLegacy", "import_legacy"].filter((field) => args[field] !== void 0)
     };
   }
-  const defs = artifactDefinitions(root2, args).filter((def) => artifactMatches(def, args));
-  const artifacts2 = [];
+  const defs = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
+  const artifacts = [];
   const written = [];
   const skipped = [];
   const warnings = [];
   const errors = [];
   const pendingWrites = [];
   for (const def of defs) {
-    const rendered = renderArtifact(root2, def, args);
-    artifacts2.push({
+    const rendered = renderArtifact(root, def);
+    artifacts.push({
       artifact_id: def.id,
       canonical_path: def.canonical,
       projection_path: def.projection || null,
@@ -7498,7 +7523,7 @@ function artifactSync(root2, args = {}) {
       else if (rendered.ok === false && def.projection) errors.push(`${def.id}: ${asOptionalString(rendered.error) || "projection render failed"}`);
       continue;
     }
-    const projectionFile = import_node_path31.default.join(root2, def.projection);
+    const projectionFile = import_node_path31.default.join(root, def.projection);
     const existing = fileExists(projectionFile) ? import_node_fs17.default.readFileSync(projectionFile, "utf8") : "";
     if (existing && !hasGeneratedMarker(existing)) {
       skipped.push(def.projection);
@@ -7508,17 +7533,17 @@ function artifactSync(root2, args = {}) {
     if (rendered.changed === true) pendingWrites.push({ path: def.projection, content: rendered.content });
     else skipped.push(def.projection);
   }
-  if (fileExists(import_node_path31.default.join(root2, "cadre", "code_styleguides"))) {
+  if (fileExists(import_node_path31.default.join(root, "cadre", "code_styleguides"))) {
     warnings.push("Deprecated styleguide projection directory exists: cadre/code_styleguides. Regenerate into cadre/styleguides and remove the legacy directory manually.");
   }
-  const traceBefore = execute ? beginTrace(root2) : null;
+  const traceBefore = execute ? beginTrace(root) : null;
   let mutation = null;
   if (execute && errors.length === 0 && pendingWrites.length > 0) {
-    mutation = writeArtifactFilesAtomic(root2, pendingWrites);
+    mutation = writeArtifactFilesAtomic(root, pendingWrites);
     if (mutation.ok === false) errors.push(asOptionalString(mutation.error) || "Projection write failed");
     else written.push(...pendingWrites.map((file) => file.path));
   }
-  const controlCommit = execute ? commitTrace(root2, args, {
+  const controlCommit = execute ? commitTrace(root, args, {
     kind: "control",
     workflow: "artifacts",
     subject: "sync projections",
@@ -7536,7 +7561,7 @@ function artifactSync(root2, args = {}) {
     ok: errors.length === 0 && (!controlCommit || controlCommit.ok !== false),
     dry_run: !execute,
     phase_state: execute ? controlCommit && controlCommit.ok === false ? "recovery_required" : "executed" : "dry_run",
-    artifacts: artifacts2,
+    artifacts,
     approval: { required: false },
     written,
     skipped,
@@ -7547,61 +7572,242 @@ function artifactSync(root2, args = {}) {
     ...errors.length ? { error: errors[0] } : {}
   };
 }
-function artifactImport(root2, args = {}) {
+function artifactImport(args = {}) {
   return {
     ok: false,
     error: "Legacy Markdown import is not supported. Create canonical JSON/JSONL artifacts and rerun artifact sync.",
     action: asOptionalString(args.action) || "import"
   };
 }
-function artifactPacket(root2, args = {}) {
+function artifactPacket(root, args = {}) {
   const markdownError = markdownPayloadError(args);
   if (markdownError) return markdownError;
   const action = asOptionalString(args.action) || "catalog";
-  if (action === "catalog") return artifactCatalog(root2, args);
+  if (action === "catalog") return artifactCatalog(root, args);
   if (action === "schema") return artifactSchema(args.artifact || args.id || args.scope);
-  if (action === "validate") return artifactValidate(root2, args);
-  if (action === "render") return artifactRender(root2, args);
-  if (action === "diff") return artifactDiff(root2, args);
-  if (action === "sync") return artifactSync(root2, args);
-  if (action === "import") return artifactImport(root2, args);
+  if (action === "validate") return artifactValidate(root, args);
+  if (action === "render") return artifactRender(root, args);
+  if (action === "diff") return artifactDiff(root, args);
+  if (action === "sync") return artifactSync(root, args);
+  if (action === "import") return artifactImport(args);
   return { ok: false, error: `Unknown artifact action: ${action}` };
 }
 
 // src/dap/config.ts
+var import_node_child_process6 = require("node:child_process");
+
+// src/infrastructure/project-control-file.ts
 var import_node_fs18 = __toESM(require("node:fs"));
 var import_node_path32 = __toESM(require("node:path"));
-var import_node_child_process6 = require("node:child_process");
+var import_node_crypto4 = require("node:crypto");
+function errorMessage2(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function isContained(root, candidate) {
+  const relative = import_node_path32.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith(`..${import_node_path32.default.sep}`) && relative !== ".." && !import_node_path32.default.isAbsolute(relative);
+}
+function canonicalProjectRoot(root) {
+  try {
+    const canonical = import_node_fs18.default.realpathSync(import_node_path32.default.resolve(root));
+    return import_node_fs18.default.statSync(canonical).isDirectory() ? canonical : null;
+  } catch {
+    return null;
+  }
+}
+function requestedSegments(requested) {
+  if (!requested || requested.includes("\0") || import_node_path32.default.posix.isAbsolute(requested) || import_node_path32.default.win32.isAbsolute(requested)) {
+    return null;
+  }
+  const segments = requested.replace(/\\/g, "/").split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === "..")) return null;
+  return segments;
+}
+function lstatIfPresent(file) {
+  try {
+    return import_node_fs18.default.lstatSync(file);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+function safeExistingControlPlane(controlDir) {
+  try {
+    const stat = lstatIfPresent(controlDir);
+    if (!stat) return null;
+    if (stat.isSymbolicLink()) return { ok: false, error: "Cadre config directory must not be a symbolic link" };
+    if (!stat.isDirectory()) return { ok: false, error: "Cadre config directory is not a directory" };
+    return null;
+  } catch (error) {
+    return { ok: false, error: `Cannot inspect Cadre config directory: ${errorMessage2(error)}` };
+  }
+}
+function safeExistingConfigFile(file) {
+  try {
+    const stat = lstatIfPresent(file);
+    if (!stat) return null;
+    if (stat.isSymbolicLink()) return { ok: false, error: "Cadre config file must not be a symbolic link" };
+    if (!stat.isFile()) return { ok: false, error: "Cadre config path is not a regular file" };
+    return null;
+  } catch (error) {
+    return { ok: false, error: `Cannot inspect Cadre config file: ${errorMessage2(error)}` };
+  }
+}
+function resolveProjectControlJsonPath(root, requested, defaultRelative) {
+  const canonicalRoot = canonicalProjectRoot(root);
+  if (!canonicalRoot) return { ok: false, error: "Project root does not exist or is not a directory" };
+  const relativeInput = requested || defaultRelative;
+  const segments = requestedSegments(relativeInput);
+  const defaultSegments = requestedSegments(defaultRelative);
+  const defaultName = defaultSegments?.length === 2 && defaultSegments[0] === "cadre" ? defaultSegments[1] : "";
+  const defaultStem = import_node_path32.default.basename(defaultName, ".json");
+  const requestedName = segments?.[1] || "";
+  const namespaceMatch = requestedName === defaultName || requestedName.startsWith(`${defaultStem}-`) && requestedName.length > `${defaultStem}-.json`.length;
+  if (!segments || segments.length !== 2 || segments[0] !== "cadre" || import_node_path32.default.extname(requestedName).toLowerCase() !== ".json" || !namespaceMatch) {
+    return {
+      ok: false,
+      error: `Cadre config must be ${defaultRelative} or a relative cadre/${defaultStem}-*.json path without traversal`
+    };
+  }
+  const controlDir = import_node_path32.default.join(canonicalRoot, "cadre");
+  const file = import_node_path32.default.join(controlDir, segments[1]);
+  const controlError = safeExistingControlPlane(controlDir);
+  if (controlError) return controlError;
+  const fileError = safeExistingConfigFile(file);
+  if (fileError) return fileError;
+  return {
+    ok: true,
+    root: canonicalRoot,
+    file,
+    relative: `cadre/${segments[1]}`,
+    controlDir
+  };
+}
+function readProjectControlJson(resolved) {
+  let descriptor = null;
+  try {
+    const pathStat = import_node_fs18.default.lstatSync(resolved.file);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      return { ok: false, error: "Cadre config path is not a regular non-symlink file" };
+    }
+    const noFollow = import_node_fs18.default.constants.O_NOFOLLOW || 0;
+    descriptor = import_node_fs18.default.openSync(resolved.file, import_node_fs18.default.constants.O_RDONLY | noFollow);
+    const openStat = import_node_fs18.default.fstatSync(descriptor);
+    if (!openStat.isFile() || openStat.dev !== pathStat.dev || openStat.ino !== pathStat.ino) {
+      return { ok: false, error: "Cadre config file changed during secure open" };
+    }
+    const value = JSON.parse(import_node_fs18.default.readFileSync(descriptor, "utf8"));
+    return { ok: true, value };
+  } catch (error) {
+    return { ok: false, error: `Cannot read Cadre config: ${errorMessage2(error)}` };
+  } finally {
+    if (descriptor !== null) {
+      try {
+        import_node_fs18.default.closeSync(descriptor);
+      } catch {
+      }
+    }
+  }
+}
+function writeProjectControlJson(root, requested, defaultRelative, value) {
+  const initial = resolveProjectControlJsonPath(root, requested, defaultRelative);
+  if (!initial.ok) return initial;
+  try {
+    if (!import_node_fs18.default.existsSync(initial.controlDir)) import_node_fs18.default.mkdirSync(initial.controlDir, { mode: 448 });
+  } catch (error) {
+    return { ok: false, error: `Cannot create Cadre config directory: ${errorMessage2(error)}` };
+  }
+  const resolved = resolveProjectControlJsonPath(root, requested, defaultRelative);
+  if (!resolved.ok) return resolved;
+  const temporary = import_node_path32.default.join(resolved.controlDir, `.${import_node_path32.default.basename(resolved.file)}.${(0, import_node_crypto4.randomUUID)()}.tmp`);
+  let descriptor = null;
+  try {
+    const noFollow = import_node_fs18.default.constants.O_NOFOLLOW || 0;
+    descriptor = import_node_fs18.default.openSync(
+      temporary,
+      import_node_fs18.default.constants.O_CREAT | import_node_fs18.default.constants.O_EXCL | import_node_fs18.default.constants.O_WRONLY | noFollow,
+      384
+    );
+    import_node_fs18.default.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}
+`, "utf8");
+    import_node_fs18.default.fsyncSync(descriptor);
+    import_node_fs18.default.closeSync(descriptor);
+    descriptor = null;
+    const finalCheck = resolveProjectControlJsonPath(root, requested, defaultRelative);
+    if (!finalCheck.ok) return finalCheck;
+    import_node_fs18.default.renameSync(temporary, finalCheck.file);
+    return finalCheck;
+  } catch (error) {
+    return { ok: false, error: `Cannot write Cadre config: ${errorMessage2(error)}` };
+  } finally {
+    if (descriptor !== null) {
+      try {
+        import_node_fs18.default.closeSync(descriptor);
+      } catch {
+      }
+    }
+    try {
+      import_node_fs18.default.rmSync(temporary, { force: true });
+    } catch {
+    }
+  }
+}
+function resolveContainedProjectPath(root, requested) {
+  const canonicalRoot = canonicalProjectRoot(root);
+  if (!canonicalRoot) return { ok: false, error: "Project root does not exist or is not a directory" };
+  if (!requested || requested.includes("\0")) return { ok: false, error: "Project file path is required" };
+  const lexicalRoot = import_node_path32.default.resolve(root);
+  const lexicalCandidate = import_node_path32.default.isAbsolute(requested) ? import_node_path32.default.resolve(requested) : import_node_path32.default.resolve(lexicalRoot, requested);
+  if (!isContained(lexicalRoot, lexicalCandidate)) {
+    return { ok: false, error: "Project file path must stay inside the project root" };
+  }
+  const lexicalRelative = import_node_path32.default.relative(lexicalRoot, lexicalCandidate);
+  const candidate = import_node_path32.default.resolve(canonicalRoot, lexicalRelative);
+  if (!isContained(canonicalRoot, candidate)) {
+    return { ok: false, error: "Project file path must stay inside the project root" };
+  }
+  try {
+    let existing = candidate;
+    while (!lstatIfPresent(existing) && existing !== canonicalRoot) existing = import_node_path32.default.dirname(existing);
+    const canonicalExisting = import_node_fs18.default.realpathSync(existing);
+    if (!isContained(canonicalRoot, canonicalExisting)) {
+      return { ok: false, error: "Project file path resolves outside the project root" };
+    }
+    const canonicalCandidate = lstatIfPresent(candidate) ? import_node_fs18.default.realpathSync(candidate) : candidate;
+    if (!isContained(canonicalRoot, canonicalCandidate)) {
+      return { ok: false, error: "Project file path resolves outside the project root" };
+    }
+    return {
+      ok: true,
+      root: canonicalRoot,
+      file: canonicalCandidate,
+      relative: import_node_path32.default.relative(canonicalRoot, canonicalCandidate).split(import_node_path32.default.sep).join("/")
+    };
+  } catch (error) {
+    return { ok: false, error: `Cannot inspect project file path: ${errorMessage2(error)}` };
+  }
+}
+
+// src/dap/config.ts
+var DEFAULT_DAP_CONFIG = "cadre/dap.json";
 function commandExists2(command, cwd) {
   const result = (0, import_node_child_process6.spawnSync)("sh", ["-lc", `command -v '${command.replace(/'/g, "'\\''")}'`], { cwd, encoding: "utf8" });
   return result.status === 0;
 }
-function pythonCommand(root2) {
-  return ["python3", "python"].find((command) => commandExists2(command, root2)) || null;
+function pythonCommand(root) {
+  return ["python3", "python"].find((command) => commandExists2(command, root)) || null;
 }
-function pythonDebugpyAvailable(root2, command) {
-  const result = (0, import_node_child_process6.spawnSync)(command, ["-c", "import debugpy.adapter"], { cwd: root2, encoding: "utf8" });
+function pythonDebugpyAvailable(root, command) {
+  const result = (0, import_node_child_process6.spawnSync)(command, ["-c", "import debugpy.adapter"], { cwd: root, encoding: "utf8" });
   return result.status === 0;
 }
-function configPath(root2, config) {
-  const rel = config || "cadre/dap.json";
-  return import_node_path32.default.isAbsolute(rel) ? rel : import_node_path32.default.join(root2, rel);
+function readConfig(configPath) {
+  const read = readProjectControlJson(configPath);
+  return read.ok ? asJsonObject(read.value) : {};
 }
-function readConfig(file) {
-  try {
-    return asJsonObject(JSON.parse(import_node_fs18.default.readFileSync(file, "utf8")));
-  } catch {
-    return {};
-  }
-}
-function writeConfig(file, value) {
-  import_node_fs18.default.mkdirSync(import_node_path32.default.dirname(file), { recursive: true });
-  import_node_fs18.default.writeFileSync(file, `${JSON.stringify(value, null, 2)}
-`);
-}
-function scanLanguages(root2) {
+function scanLanguages(root) {
   const counts = /* @__PURE__ */ new Map();
-  for (const file of listWorkspaceFiles(root2)) {
+  for (const file of listWorkspaceFiles(root)) {
     const language = languageForFile(file);
     if (!language) continue;
     const entry = counts.get(language) || { files: 0, samples: [] };
@@ -7611,11 +7817,11 @@ function scanLanguages(root2) {
   }
   return Array.from(counts.entries()).map(([language, entry]) => ({ language, files: entry.files, samples: entry.samples })).sort((left, right) => String(left.language).localeCompare(String(right.language)));
 }
-function dapRecommendations(root2) {
-  const detected = scanLanguages(root2);
+function dapRecommendations(root) {
+  const detected = scanLanguages(root);
   const languageSet = new Set(detected.map((entry) => String(entry.language)));
   const recommended = [];
-  const py = pythonCommand(root2);
+  const py = pythonCommand(root);
   if (languageSet.has("python") && py) {
     recommended.push({
       id: "python-debugpy",
@@ -7624,7 +7830,7 @@ function dapRecommendations(root2) {
       args: ["-m", "debugpy.adapter"],
       languages: ["python"],
       install: "python3 -m pip install debugpy",
-      available: pythonDebugpyAvailable(root2, py)
+      available: pythonDebugpyAvailable(root, py)
     });
   }
   if (languageSet.has("go")) {
@@ -7635,7 +7841,7 @@ function dapRecommendations(root2) {
       args: ["dap"],
       languages: ["go"],
       install: "go install github.com/go-delve/delve/cmd/dlv@latest",
-      available: commandExists2("dlv", root2)
+      available: commandExists2("dlv", root)
     });
   }
   const covered = new Set(recommended.flatMap((entry) => asStringArray(entry.languages)));
@@ -7649,28 +7855,30 @@ function dapRecommendations(root2) {
 function adapterKey(adapter) {
   return asOptionalString(adapter.id) || asOptionalString(adapter.command) || "";
 }
-function dapSetup(root2, args = {}) {
-  const file = configPath(root2, args.config);
-  const existing = readConfig(file);
+function dapSetup(root, args = {}) {
+  const configPath = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG);
+  if (!configPath.ok) return { ok: false, error: configPath.error };
+  const existing = readConfig(configPath);
   const adapters = Array.isArray(existing.adapters) ? existing.adapters.map(asJsonObject) : [];
   const configurations = Array.isArray(existing.configurations) ? existing.configurations.map(asJsonObject) : [];
-  const { recommended, manual, detected } = dapRecommendations(root2);
+  const { recommended, manual, detected } = dapRecommendations(root);
   const existingKeys = new Set(adapters.map(adapterKey).filter(Boolean));
   const missingFromConfig = recommended.filter((adapter) => !existingKeys.has(adapterKey(adapter)));
   const added = args.execute === true ? missingFromConfig : [];
   if (args.execute === true) {
-    writeConfig(file, {
+    const written = writeProjectControlJson(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG, {
       version: 1,
       schema: "cadre.dap.v1",
       ...existing,
       adapters: [...adapters, ...added],
       configurations
     });
+    if (!written.ok) return { ok: false, error: written.error };
   }
   return {
     ok: true,
-    root: root2,
-    config: import_node_path32.default.relative(root2, file),
+    root,
+    config: configPath.relative,
     execute: args.execute === true,
     dry_run: args.execute !== true,
     recommended,
@@ -7681,12 +7889,13 @@ function dapSetup(root2, args = {}) {
     added: added.map((entry) => adapterKey(entry))
   };
 }
-function dapStatus(root2, args = {}) {
-  const file = configPath(root2, args.config);
-  const config = readConfig(file);
+function dapStatus(root, args = {}) {
+  const configPath = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG);
+  if (!configPath.ok) return { ok: false, error: configPath.error };
+  const config = readConfig(configPath);
   const adapters = Array.isArray(config.adapters) ? config.adapters.map(asJsonObject) : [];
   const configurations = Array.isArray(config.configurations) ? config.configurations.map(asJsonObject) : [];
-  const { recommended, manual, detected } = dapRecommendations(root2);
+  const { recommended, manual, detected } = dapRecommendations(root);
   const summarizedAdapters = adapters.map((adapter) => {
     const command = asOptionalString(adapter.command);
     return {
@@ -7694,13 +7903,13 @@ function dapStatus(root2, args = {}) {
       label: asOptionalString(adapter.label) || null,
       command: command || null,
       languages: asStringArray(adapter.languages),
-      available: command ? commandExists2(command, root2) : false
+      available: command ? commandExists2(command, root) : false
     };
   });
   return {
     ok: true,
     configured: Object.keys(config).length > 0,
-    path: import_node_path32.default.relative(root2, file),
+    path: configPath.relative,
     adapters: summarizedAdapters,
     configurations: configurations.map((entry) => ({
       id: asOptionalString(entry.id) || "unknown",
@@ -7712,8 +7921,8 @@ function dapStatus(root2, args = {}) {
     detected,
     recommended,
     manual,
-    setup_packet: "cadre_action action intel.dap_setup",
-    snapshot_packet: "cadre_action action intel.dap_snapshot"
+    setup_call: { tool: "cadre_action", arguments: { root, action: "intel.dap_setup", input: {}, execute: false } },
+    snapshot_call: { tool: "cadre_action", arguments: { root, action: "intel.dap_snapshot", input: {}, execute: true } }
   };
 }
 function substitute(value, tokens) {
@@ -7724,48 +7933,66 @@ function substitute(value, tokens) {
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substitute(entry, tokens)]));
 }
-function normalizeBreakpoints(root2, raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw.map(asJsonObject).flatMap((entry) => {
+function normalizeBreakpoints(root, raw) {
+  if (!Array.isArray(raw)) return { ok: true, breakpoints: [] };
+  const breakpoints = [];
+  for (const entry of raw.map(asJsonObject)) {
     const file = asOptionalString(entry.file) || asOptionalString(entry.path);
     const line = asNumber(entry.line);
-    if (!file || line < 1) return [];
-    const abs = import_node_path32.default.isAbsolute(file) ? file : import_node_path32.default.join(root2, file);
-    return [{
+    if (!file || line < 1) continue;
+    const resolved = resolveContainedProjectPath(root, file);
+    if (!resolved.ok) return { ok: false, error: `Invalid DAP breakpoint path ${file}: ${resolved.error}` };
+    breakpoints.push({
       ...entry,
-      file: import_node_path32.default.relative(root2, abs).split(import_node_path32.default.sep).join("/"),
+      file: resolved.relative,
       line
-    }];
-  });
+    });
+  }
+  return { ok: true, breakpoints };
 }
-function normalizeDapSession(root2, args = {}) {
-  const file = configPath(root2, args.config);
-  const loaded = readConfig(file);
-  const inlineConfiguration = asJsonObject(args.configuration);
+function normalizeDapSession(root, args = {}) {
+  const configPath = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG);
+  if (!configPath.ok) return configPath;
+  const loaded = readConfig(configPath);
+  if (args.configuration !== void 0) {
+    return { ok: false, error: "Inline DAP configurations are not allowed; configure cadre/dap.json and pass configurationId" };
+  }
   const configurationId = asOptionalString(args.configurationId || args.configuration_id || args.id);
   const configurations = Array.isArray(loaded.configurations) ? loaded.configurations.map(asJsonObject) : [];
-  const configuration = Object.keys(inlineConfiguration).length > 0 ? inlineConfiguration : configurations.find((entry) => asOptionalString(entry.id) === configurationId) || configurations[0] || {};
+  const configuration = configurationId ? configurations.find((entry) => asOptionalString(entry.id) === configurationId) || {} : configurations[0] || {};
+  if (configurationId && Object.keys(configuration).length === 0) {
+    return { ok: false, error: `DAP configuration not found: ${configurationId}` };
+  }
   if (Object.keys(configuration).length === 0) return { ok: false, error: "DAP configuration is required" };
+  if (Object.keys(asJsonObject(configuration.adapter)).length > 0) {
+    return { ok: false, error: "Inline DAP adapters are not allowed; reference a configured adapterId" };
+  }
   const adapters = Array.isArray(loaded.adapters) ? loaded.adapters.map(asJsonObject) : [];
   const adapterId = asOptionalString(configuration.adapterId) || asOptionalString(configuration.adapter_id);
-  const inlineAdapter = asJsonObject(configuration.adapter);
-  const adapter = Object.keys(inlineAdapter).length > 0 ? inlineAdapter : adapters.find((entry) => asOptionalString(entry.id) === adapterId) || {};
+  if (!adapterId) return { ok: false, error: "DAP configuration adapterId is required" };
+  const adapter = adapters.find((entry) => asOptionalString(entry.id) === adapterId) || {};
+  if (Object.keys(adapter).length === 0) return { ok: false, error: `DAP adapter not found: ${adapterId}` };
   const command = asOptionalString(adapter.command);
   if (!command) return { ok: false, error: "DAP adapter command is required" };
   const request = asOptionalString(configuration.request);
   if (request !== "launch" && request !== "attach") return { ok: false, error: "DAP configuration request must be launch or attach" };
-  const tokens = {
-    "${workspaceFolder}": root2,
-    "${root}": root2,
-    "${cwd}": root2,
+  const adapterTokens = {
+    "${workspaceFolder}": root,
+    "${root}": root,
+    "${cwd}": root
+  };
+  const configurationTokens = {
+    ...adapterTokens,
     "${testCommand}": asOptionalString(args.testCommand || args.test_command) || ""
   };
+  const breakpoints = normalizeBreakpoints(root, args.breakpoints || configuration.breakpoints);
+  if (!breakpoints.ok) return breakpoints;
   return {
-    adapter: substitute(adapter, tokens),
-    configuration: substitute(configuration, tokens),
+    adapter: substitute(adapter, adapterTokens),
+    configuration: substitute(configuration, configurationTokens),
     request,
-    arguments: substitute(configuration.arguments || configuration.args || {}, tokens),
-    breakpoints: normalizeBreakpoints(root2, args.breakpoints || configuration.breakpoints),
+    arguments: substitute(configuration.arguments || configuration.args || {}, configurationTokens),
+    breakpoints: breakpoints.breakpoints,
     timeoutMs: Math.max(1e3, Math.min(10 * 60 * 1e3, asNumber(args.timeoutMs, 12e4)))
   };
 }
@@ -8021,7 +8248,7 @@ async function collectStoppedSnapshot(client, event, args) {
     threads
   };
 }
-async function setBreakpoints(client, root2, breakpoints) {
+async function setBreakpoints(client, root, breakpoints) {
   const groups = /* @__PURE__ */ new Map();
   for (const breakpoint of breakpoints) {
     const file = asOptionalString(breakpoint.file);
@@ -8032,7 +8259,7 @@ async function setBreakpoints(client, root2, breakpoints) {
   }
   const results = [];
   for (const [file, entries] of groups.entries()) {
-    const abs = import_node_path33.default.isAbsolute(file) ? file : import_node_path33.default.join(root2, file);
+    const abs = import_node_path33.default.isAbsolute(file) ? file : import_node_path33.default.join(root, file);
     const response = await requestOptional(client, "setBreakpoints", {
       source: { path: abs },
       breakpoints: entries.map((entry) => ({
@@ -8049,8 +8276,8 @@ async function setBreakpoints(client, root2, breakpoints) {
   }
   return results;
 }
-async function dapSnapshot(root2, args = {}) {
-  const normalized = normalizeDapSession(root2, args);
+async function dapSnapshot(root, args = {}) {
+  const normalized = normalizeDapSession(root, args);
   if ("ok" in normalized && normalized.ok === false) return normalized;
   const session = normalized;
   const command = asOptionalString(session.adapter.command) || "";
@@ -8058,7 +8285,7 @@ async function dapSnapshot(root2, args = {}) {
   const client = new DapClient({
     command,
     args: adapterArgs,
-    cwd: root2,
+    cwd: root,
     requestTimeoutMs: asNumber(session.adapter.requestTimeoutMs, 1e4),
     outputLimit: 8e3
   });
@@ -8084,7 +8311,7 @@ async function dapSnapshot(root2, args = {}) {
       launchError = errorMessage(error);
     });
     await initialized;
-    const breakpointResults = await setBreakpoints(client, root2, session.breakpoints);
+    const breakpointResults = await setBreakpoints(client, root, session.breakpoints);
     await requestOptional(client, "configurationDone", {}, 3e3);
     await Promise.race([launch, delay(250)]);
     if (launchError) throw new Error(launchError);
@@ -8095,7 +8322,7 @@ async function dapSnapshot(root2, args = {}) {
     };
     return {
       ok: finalEvent !== null,
-      root: root2,
+      root,
       started_at: startedAt,
       finished_at: (/* @__PURE__ */ new Date()).toISOString(),
       adapter: {
@@ -8116,7 +8343,7 @@ async function dapSnapshot(root2, args = {}) {
   } catch (error) {
     return {
       ok: false,
-      root: root2,
+      root,
       started_at: startedAt,
       finished_at: (/* @__PURE__ */ new Date()).toISOString(),
       adapter: { command, args: adapterArgs },
@@ -8133,20 +8360,20 @@ async function dapSnapshot(root2, args = {}) {
 // src/core/application/runtime/setup-infrastructure.ts
 var import_node_fs19 = __toESM(require("node:fs"));
 var import_node_path34 = __toESM(require("node:path"));
-function configuredCiProvider(root2, args = {}) {
-  const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root2).config.provider_mode);
+function configuredCiProvider(root, args = {}) {
+  const raw = asOptionalString(args.ciProvider || args.ci_provider) || asOptionalString(args.providerMode || args.provider_mode || args.provider) || asOptionalString(loadTopology(root).config.provider_mode);
   const provider = normalizeProviderMode(raw);
   return provider === "github" || provider === "gitlab" ? provider : null;
 }
-function setupGitattributes(root2) {
-  const file = import_node_path34.default.join(root2, ".gitattributes");
-  const required2 = [
+function setupGitattributes(root) {
+  const file = import_node_path34.default.join(root, ".gitattributes");
+  const required = [
     "cadre/tracks/**/parallel_state.json merge=ours"
   ];
   const existing = fileExists(file) ? import_node_fs19.default.readFileSync(file, "utf8") : "";
   const lines = existing.split(/\r?\n/).filter(Boolean);
   let changed = false;
-  for (const line of required2) {
+  for (const line of required) {
     if (!lines.includes(line)) {
       lines.push(line);
       changed = true;
@@ -8156,15 +8383,15 @@ function setupGitattributes(root2) {
     import_node_fs19.default.writeFileSync(file, `${lines.join("\n")}
 `);
   }
-  const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root2 });
+  const mergeDriver = runCommand("git", ["config", "merge.ours.driver", "true"], { cwd: root });
   return {
     ok: mergeDriver.ok,
-    path: import_node_path34.default.relative(root2, file),
+    path: import_node_path34.default.relative(root, file),
     changed,
     merge_driver: mergeDriver
   };
 }
-function setupCiTemplates(root2, provider, args = {}) {
+function setupCiTemplates(root, provider, args = {}) {
   if (!provider) return { ok: true, skipped: true, reason: "No hosted provider selected" };
   if (args.writeCi === false || args.write_ci === false) {
     return { ok: true, skipped: true, reason: "writeCi=false" };
@@ -8175,15 +8402,15 @@ function setupCiTemplates(root2, provider, args = {}) {
   const sourceText = templateText(template, "");
   const source = templateSourceLabel(template) || template;
   if (!sourceText) return { ok: false, error: `Missing CI template ${template}` };
-  const target2 = provider === "github" ? import_node_path34.default.join(root2, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path34.default.join(root2, ".gitlab-ci.yml");
+  const target2 = provider === "github" ? import_node_path34.default.join(root, ".github", "workflows", polyrepo ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml") : import_node_path34.default.join(root, ".gitlab-ci.yml");
   if (fileExists(target2) && args.force !== true) {
-    return { ok: true, skipped: true, provider, source, path: import_node_path34.default.relative(root2, target2) };
+    return { ok: true, skipped: true, provider, source, path: import_node_path34.default.relative(root, target2) };
   }
   import_node_fs19.default.mkdirSync(import_node_path34.default.dirname(target2), { recursive: true });
   import_node_fs19.default.writeFileSync(target2, sourceText);
-  return { ok: true, provider, source, path: import_node_path34.default.relative(root2, target2), written: true };
+  return { ok: true, provider, source, path: import_node_path34.default.relative(root, target2), written: true };
 }
-function setupSubmodulePlan(root2, repos, args = {}) {
+function setupSubmodulePlan(root, repos, args = {}) {
   const entries = Array.isArray(repos.repos) ? repos.repos.map(asJsonObject) : [];
   const commands = [];
   for (const repo of entries) {
@@ -8191,12 +8418,12 @@ function setupSubmodulePlan(root2, repos, args = {}) {
     const url = asOptionalString(repo.url);
     const submodulePath = asOptionalString(repo.submodule_path);
     if (!name || !url || !submodulePath || repo.enabled === false) continue;
-    if (fileExists(import_node_path34.default.join(root2, submodulePath))) continue;
+    if (fileExists(import_node_path34.default.join(root, submodulePath))) continue;
     commands.push(plannedGitAction(
       `submodule-${safeName(name)}`,
       "submodule_add",
       name,
-      root2,
+      root,
       ["submodule", "add", url, submodulePath],
       `Register ${name} as a product submodule`
     ));
@@ -8211,8 +8438,8 @@ function setupSubmodulePlan(root2, repos, args = {}) {
     results
   };
 }
-function lspSetupHelperCandidates(root2) {
-  return mcpServerPathCandidates(root2);
+function lspSetupHelperCandidates() {
+  return mcpServerPathCandidates();
 }
 function redactRuntimeHelperPaths(text2) {
   return text2.replace(/[^\s"'`]*cadre-lsp-(?:setup|review|daemon)\.js/g, "<cadre-lsp-helper>").replace(/[^\s"'`]*cadre-server\.js/g, "<cadre-mcp-server>");
@@ -8228,20 +8455,21 @@ function summarizeRuntimeCommandResult(result) {
     error: result.error ? redactRuntimeHelperPaths(result.error) : void 0
   };
 }
-function lspSetup(root2, args = {}) {
-  const helper = lspSetupHelperCandidates(root2).find(fileExists);
+function lspSetup(root, args = {}) {
+  const helperCandidates = lspSetupHelperCandidates();
+  const helper = helperCandidates.find(fileExists);
   if (!helper) {
     return {
       ok: false,
       available: false,
       reason: "Cadre MCP runtime was not found for LSP setup",
-      checked_count: lspSetupHelperCandidates(root2).length
+      checked_count: helperCandidates.length
     };
   }
   const config = asOptionalString(args.config) || "cadre/lsp.json";
-  const commandArgs = [helper, "--cadre-lsp-setup", "--root", root2, "--config", config, "--json"];
+  const commandArgs = [helper, "--cadre-lsp-setup", "--root", root, "--config", config, "--json"];
   if (args.execute === true) commandArgs.push("--write");
-  const result = runCommand("node", commandArgs, { cwd: root2, maxBuffer: 20 * 1024 * 1024 });
+  const result = runCommand("node", commandArgs, { cwd: root, maxBuffer: 20 * 1024 * 1024 });
   if (!result.ok) {
     return { ok: false, available: true, result: summarizeRuntimeCommandResult(result), reason: "LSP setup helper failed" };
   }
@@ -8260,16 +8488,16 @@ function lspSetup(root2, args = {}) {
 
 // src/core/application/runtime/workspace-health.ts
 var import_node_path35 = __toESM(require("node:path"));
-function workspaceHealth(root2, args = {}) {
+function workspaceHealth(root, args = {}) {
   const mode = workflowResponseMode(args);
-  const topology = loadTopology(root2);
-  const techStack = techStackSummary(root2, args);
-  const workspace = workspaceDiagnostics(root2, { execute: false });
-  const dependencyGraphResult = dependencyGraph(root2);
-  const lspCoverage = summarizeLspCoverage(root2, args);
-  const dapCoverage = summarizeDapCoverage(root2, args);
-  const availableWorkResult = availableWork(root2);
-  const integrations = integrationInventory(root2, { ...args, responseMode: mode });
+  const topology = loadTopology(root);
+  const techStack = techStackSummary(root, args);
+  const workspace = workspaceDiagnostics(root, { execute: false });
+  const dependencyGraphResult = dependencyGraph(root);
+  const lspCoverage = summarizeLspCoverage(root, args);
+  const dapCoverage = summarizeDapCoverage(root, args);
+  const availableWorkResult = availableWork(root);
+  const integrations = integrationInventory(root, { ...args, responseMode: mode });
   const compactIntegrations = {
     ok: integrations.ok !== false,
     provider: asJsonObject(integrations.provider),
@@ -8281,11 +8509,11 @@ function workspaceHealth(root2, args = {}) {
     optional_mcps: Array.isArray(integrations.optional_mcps) ? integrations.optional_mcps : [],
     summary: asJsonObject(integrations.summary)
   };
-  const detailResources = workspaceHealthDetailResources(root2);
+  const detailResources = workspaceHealthDetailResources(root);
   if (mode === "detail") {
     return {
       ok: true,
-      root: root2,
+      root,
       response_mode: mode,
       detail_available: true,
       topology: {
@@ -8304,13 +8532,13 @@ function workspaceHealth(root2, args = {}) {
       },
       lsp: {
         coverage: lspCoverage,
-        status: lspConfigStatus(root2),
-        setup: lspSetup(root2, { ...args, execute: false })
+        status: lspConfigStatus(root),
+        setup: lspSetup(root, { ...args, execute: false })
       },
       dap: {
         coverage: dapCoverage,
-        status: dapStatus(root2, args),
-        setup: dapSetup(root2, { ...args, execute: false })
+        status: dapStatus(root, args),
+        setup: dapSetup(root, { ...args, execute: false })
       },
       integrations,
       detail_resources: detailResources
@@ -8318,7 +8546,7 @@ function workspaceHealth(root2, args = {}) {
   }
   return {
     ok: true,
-    root: root2,
+    root,
     response_mode: mode,
     detail_available: true,
     topology: {
@@ -8352,18 +8580,18 @@ function workspaceHealth(root2, args = {}) {
     detail_resources: detailResources
   };
 }
-function lspConfigStatus(root2) {
-  const configPath2 = import_node_path35.default.join(root2, "cadre", "lsp.json");
-  const config = readJson(configPath2, null);
+function lspConfigStatus(root) {
+  const configPath = import_node_path35.default.join(root, "cadre", "lsp.json");
+  const config = readJson(configPath, null);
   if (!config) {
     return {
       configured: false,
-      path: import_node_path35.default.relative(root2, configPath2),
+      path: import_node_path35.default.relative(root, configPath),
       servers: [],
       missing: [],
       daemon: {
-        status_packet: "cadre_action action intel.lsp_daemon_status",
-        shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
+        status_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_status", input: {}, execute: false } },
+        shutdown_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_shutdown", input: {}, execute: true } },
         max_clients_default: 8,
         idle_eviction_ms_default: 6e5
       }
@@ -8373,36 +8601,36 @@ function lspConfigStatus(root2) {
   const servers = Array.isArray(configObject.servers) ? configObject.servers.map((server) => asJsonObject(server)) : [];
   return {
     configured: true,
-    path: import_node_path35.default.relative(root2, configPath2),
+    path: import_node_path35.default.relative(root, configPath),
     servers: servers.map((server) => {
       const command = asOptionalString(server.command);
       return {
         id: asOptionalString(server.id) || command || "unknown",
         command: command || null,
-        available: command ? commandExists(command, root2) : false
+        available: command ? commandExists(command, root) : false
       };
     }),
     missing: servers.filter((server) => {
       const command = asOptionalString(server.command);
-      return !command || !commandExists(command, root2);
+      return !command || !commandExists(command, root);
     }).map((server) => asOptionalString(server.id) || asOptionalString(server.command) || "unknown"),
     daemon: {
-      status_packet: "cadre_action action intel.lsp_daemon_status",
-      shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
+      status_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_status", input: {}, execute: false } },
+      shutdown_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_shutdown", input: {}, execute: true } },
       max_clients_default: 8,
       idle_eviction_ms_default: 6e5
     }
   };
 }
-function mergeDriverStatus(root2) {
-  const result = runCommand("git", ["config", "merge.ours.driver"], { cwd: root2 });
+function mergeDriverStatus(root) {
+  const result = runCommand("git", ["config", "merge.ours.driver"], { cwd: root });
   return {
     configured: result.ok && result.stdout.trim() !== "",
     value: result.stdout.trim() || null
   };
 }
-function doctor(root2, options = {}) {
-  const candidateRoot = import_node_path35.default.resolve(root2 || process.cwd());
+function doctor(root, options = {}) {
+  const candidateRoot = import_node_path35.default.resolve(root || process.cwd());
   const generatedCheck = import_node_path35.default.join(candidateRoot, "scripts", "generate-skills.sh");
   const lspStatus = lspConfigStatus(candidateRoot);
   const lspMissing = asStringArray(lspStatus.missing);
@@ -8410,7 +8638,7 @@ function doctor(root2, options = {}) {
   const dapMissing = asStringArray(dapConfig.missing);
   const checks = {
     mcp_runtime: { ok: true, server: "cadre" },
-    cadre_project: {
+    project_state: {
       ok: Boolean(options.hasCadreProject || isCadreProjectRoot(candidateRoot)),
       root: candidateRoot,
       markers: [
@@ -8435,7 +8663,7 @@ function doctor(root2, options = {}) {
     }
   };
   const warnings = [];
-  if (!checks.cadre_project.ok) {
+  if (!checks.project_state.ok) {
     warnings.push("No Cadre project markers found. This is fine for the Cadre harness/source repo, but project-scoped Cadre workflows need setup first.");
   }
   if (checks.lsp.configured && lspMissing.length > 0) {
@@ -8456,8 +8684,8 @@ function doctor(root2, options = {}) {
 function countRecords(records) {
   return Array.isArray(records) ? records.length : 0;
 }
-function workspaceHealthDetailResources(root2) {
-  const encodedRoot = encodeURIComponent(root2);
+function workspaceHealthDetailResources(root) {
+  const encodedRoot = encodeURIComponent(root);
   return [
     `cadre://workspace-health?root=${encodedRoot}&responseMode=detail`,
     `cadre://workspace-diagnostics?root=${encodedRoot}`,
@@ -8499,9 +8727,9 @@ function summarizeLspSetupResult(result) {
     missing_commands_count: countRecords(result.missingCommands)
   };
 }
-function summarizeLspCoverage(root2, args = {}) {
-  const status = asJsonObject(lspConfigStatus(root2));
-  const setup = asJsonObject(lspSetup(root2, { ...args, execute: false }));
+function summarizeLspCoverage(root, args = {}) {
+  const status = asJsonObject(lspConfigStatus(root));
+  const setup = asJsonObject(lspSetup(root, { ...args, execute: false }));
   const configured2 = Array.isArray(status.servers) ? status.servers.map((server) => asJsonObject(server).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
   const recommended = Array.isArray(setup.recommended) ? setup.recommended.map((entry) => asJsonObject(entry).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
   const missing = recommended.filter((id) => !configured2.includes(id));
@@ -8519,9 +8747,9 @@ function summarizeLspCoverage(root2, args = {}) {
     missing: missing.slice(0, 10)
   };
 }
-function summarizeDapCoverage(root2, args = {}) {
-  const status = asJsonObject(dapStatus(root2, args));
-  const setup = asJsonObject(dapSetup(root2, { ...args, execute: false }));
+function summarizeDapCoverage(root, args = {}) {
+  const status = asJsonObject(dapStatus(root, args));
+  const setup = asJsonObject(dapSetup(root, { ...args, execute: false }));
   const configured2 = Array.isArray(status.adapters) ? status.adapters.map((adapter) => asJsonObject(adapter).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
   const recommended = Array.isArray(setup.recommended) ? setup.recommended.map((entry) => asJsonObject(entry).id || null).filter((id) => typeof id === "string" && id.length > 0) : [];
   const missing = recommended.filter((id) => !configured2.includes(id));
@@ -8588,8 +8816,8 @@ function pickIntegrationCandidate(scopes, keys) {
   }
   return null;
 }
-function integrationStatus(root2, args, kind, label, keys, mode) {
-  const topology = loadTopology(root2);
+function integrationStatus(root, args, kind, label, keys, mode) {
+  const topology = loadTopology(root);
   const config = asJsonObject(topology.config || {});
   const configIntegrations = isRecord(config.integrations) ? asJsonObject(config.integrations) : {};
   const candidate = pickIntegrationCandidate([
@@ -8617,23 +8845,23 @@ function integrationStatus(root2, args, kind, label, keys, mode) {
   }
   return status;
 }
-function integrationInventory(root2, args = {}) {
+function integrationInventory(root, args = {}) {
   const mode = workflowResponseMode(args);
-  const provider = providerMcpAvailability(root2, args);
-  const readiness = mcpReadiness(root2, args);
-  const lsp = summarizeLspCoverage(root2, args);
-  const dap = summarizeDapCoverage(root2, args);
+  const provider = providerMcpAvailability(root, args);
+  const readiness = mcpReadiness(root, args);
+  const lsp = summarizeLspCoverage(root, args);
+  const dap = summarizeDapCoverage(root, args);
   const optionalMcps = [
-    integrationStatus(root2, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
-    integrationStatus(root2, args, "issue_tracker", "Issue tracker", ["issue_tracker", "issueTracker", "jira", "jira_mcp", "jiraMcp", "linear", "linear_mcp", "linearMcp"], mode),
-    integrationStatus(root2, args, "ci", "CI", ["ci", "ci_provider", "ciProvider", "ci_mcp", "ciMcp", "ci_mcp_available", "ciMcpAvailable"], mode),
-    integrationStatus(root2, args, "logging", "Logging", ["logging", "observability", "telemetry", "sentry", "sentry_mcp", "datadog", "datadog_mcp", "honeycomb", "honeycomb_mcp"], mode),
-    integrationStatus(root2, args, "knowledge_base", "Knowledge base", ["knowledge_base", "knowledgeBase", "kb", "docs", "confluence", "notion", "knowledge_base_mcp", "knowledgeBaseMcp"], mode)
+    integrationStatus(root, args, "code_search", "Code search", ["code_search", "codeSearch", "sourcegraph", "sourcegraph_mcp", "sourcegraphMcp", "search"], mode),
+    integrationStatus(root, args, "issue_tracker", "Issue tracker", ["issue_tracker", "issueTracker", "jira", "jira_mcp", "jiraMcp", "linear", "linear_mcp", "linearMcp"], mode),
+    integrationStatus(root, args, "ci", "CI", ["ci", "ci_provider", "ciProvider", "ci_mcp", "ciMcp", "ci_mcp_available", "ciMcpAvailable"], mode),
+    integrationStatus(root, args, "logging", "Logging", ["logging", "observability", "telemetry", "sentry", "sentry_mcp", "datadog", "datadog_mcp", "honeycomb", "honeycomb_mcp"], mode),
+    integrationStatus(root, args, "knowledge_base", "Knowledge base", ["knowledge_base", "knowledgeBase", "kb", "docs", "confluence", "notion", "knowledge_base_mcp", "knowledgeBaseMcp"], mode)
   ];
   const configuredOptionalCount = optionalMcps.filter((entry) => entry.configured === true).length;
   const availableOptionalCount = optionalMcps.filter((entry) => entry.available === true).length;
   const unavailableOptionalCount = optionalMcps.filter((entry) => entry.configured === true && entry.available === false).length;
-  const detailResources = workspaceHealthDetailResources(root2);
+  const detailResources = workspaceHealthDetailResources(root);
   const summary = {
     provider_mode: asOptionalString(provider.provider_mode) || "local",
     provider_available: provider.available ?? null,
@@ -8654,7 +8882,7 @@ function integrationInventory(root2, args = {}) {
   if (mode === "detail") {
     return {
       ok: true,
-      root: root2,
+      root,
       response_mode: mode,
       detail_available: true,
       provider,
@@ -8662,13 +8890,13 @@ function integrationInventory(root2, args = {}) {
       optional_mcps: optionalMcps,
       lsp: {
         coverage: lsp,
-        status: lspConfigStatus(root2),
-        setup: lspSetup(root2, { ...args, execute: false })
+        status: lspConfigStatus(root),
+        setup: lspSetup(root, { ...args, execute: false })
       },
       dap: {
         coverage: dap,
-        status: dapStatus(root2, args),
-        setup: dapSetup(root2, { ...args, execute: false })
+        status: dapStatus(root, args),
+        setup: dapSetup(root, { ...args, execute: false })
       },
       summary,
       detail_resources: detailResources
@@ -8676,7 +8904,7 @@ function integrationInventory(root2, args = {}) {
   }
   return {
     ok: true,
-    root: root2,
+    root,
     response_mode: mode,
     detail_available: true,
     provider: {
@@ -8715,6 +8943,242 @@ var import_node_path40 = __toESM(require("node:path"));
 // src/core/application/runtime/workflow-new-track.ts
 var import_node_fs22 = __toESM(require("node:fs"));
 var import_node_path39 = __toESM(require("node:path"));
+
+// src/core/application/runtime/approval-session-store.ts
+var import_node_fs20 = __toESM(require("node:fs"));
+var import_node_path36 = __toESM(require("node:path"));
+function sessionDirectory(root) {
+  return import_node_path36.default.join(root, "cadre", "local", "approval-sessions");
+}
+function sessionFile(root, sessionId) {
+  return import_node_path36.default.join(sessionDirectory(root), `${sessionId}.json`);
+}
+function readApprovalSession(root, sessionId) {
+  try {
+    return JSON.parse(import_node_fs20.default.readFileSync(sessionFile(root, sessionId), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeApprovalSession(root, session) {
+  ensureNativeState(root);
+  import_node_fs20.default.mkdirSync(sessionDirectory(root), { recursive: true });
+  const target2 = sessionFile(root, session.session_id);
+  const temporary = `${target2}.${process.pid}.tmp`;
+  import_node_fs20.default.writeFileSync(temporary, `${JSON.stringify(session, null, 2)}
+`);
+  import_node_fs20.default.renameSync(temporary, target2);
+}
+function removeApprovalSession(root, sessionId) {
+  import_node_fs20.default.rmSync(sessionFile(root, sessionId), { force: true });
+}
+function captureApprovalBeforeFiles(root, files) {
+  return files.map((file) => {
+    const target2 = import_node_path36.default.join(root, file.path);
+    const existed = fileExists(target2);
+    return { path: file.path, existed, content: existed ? import_node_fs20.default.readFileSync(target2, "utf8") : null };
+  });
+}
+function frozenReviewFiles(root, sessionId, fallback) {
+  const session = readApprovalSession(root, sessionId);
+  return session?.snapshot_files?.length ? session.snapshot_files : fallback;
+}
+function recordApprovalPreview(root, sessionId, workflow, payloadHash, bundle) {
+  if (!bundle || bundle.ok === false) return;
+  const session = readApprovalSession(root, sessionId);
+  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) return;
+  const previewFiles = Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
+  writeApprovalSession(root, {
+    ...session,
+    preview_files: previewFiles,
+    intent_to_add_paths: Array.from(/* @__PURE__ */ new Set([
+      ...session.intent_to_add_paths,
+      ...asStringArray(bundle.intent_to_add_paths)
+    ])),
+    updated_at: utcNow()
+  });
+}
+function cancelApprovalSession(root, sessionId) {
+  const session = readApprovalSession(root, sessionId);
+  if (!session) return { ok: false, cancelled: false, error: "Approval session was not found" };
+  const outputMode = asOptionalString(session.payload.reviewOutputMode || session.payload.review_output_mode);
+  const explicitBundleDirectory = asOptionalString(session.payload.reviewBundleDir || session.payload.review_bundle_dir || session.payload.reviewDir || session.payload.review_dir);
+  if (explicitBundleDirectory || outputMode === "bundle" || outputMode === "temp" || outputMode === "temporary") {
+    const intentRemoved2 = removeReviewIntentToAdd(root, session.intent_to_add_paths);
+    removeApprovalSession(root, sessionId);
+    return { ok: true, cancelled: true, session_id: sessionId, restored: [], removed: [], preserved: [], intent_to_add_removed: intentRemoved2 };
+  }
+  const snapshots = new Map(session.snapshot_files.map((file) => [file.path, file.content]));
+  const placeholders = new Set(session.snapshot_files.filter((file) => file.missing === true).map((file) => file.path));
+  const restored = [];
+  const removed = [];
+  const preserved = [];
+  for (const before of session.before_files) {
+    if (placeholders.has(before.path)) continue;
+    const target2 = import_node_path36.default.join(root, before.path);
+    const current = fileExists(target2) ? import_node_fs20.default.readFileSync(target2, "utf8") : null;
+    if (current !== (snapshots.get(before.path) ?? null)) {
+      preserved.push(before.path);
+      continue;
+    }
+    if (before.existed && before.content !== null) {
+      const temporary = `${target2}.${process.pid}.cancel-tmp`;
+      import_node_fs20.default.writeFileSync(temporary, before.content);
+      import_node_fs20.default.renameSync(temporary, target2);
+      restored.push(before.path);
+    } else {
+      import_node_fs20.default.rmSync(target2, { force: true });
+      removed.push(before.path);
+    }
+  }
+  const intentRemoved = removeReviewIntentToAdd(root, session.intent_to_add_paths);
+  removeApprovalSession(root, sessionId);
+  return {
+    ok: preserved.length === 0,
+    cancelled: true,
+    session_id: sessionId,
+    restored,
+    removed,
+    preserved,
+    intent_to_add_removed: intentRemoved,
+    ...preserved.length ? { warning: "Files edited after preview were preserved" } : {}
+  };
+}
+function recordApprovalCompletion(root, sessionId) {
+  const session = readApprovalSession(root, sessionId);
+  if (!session) return { ok: false, error: "Approval session was not found for completion audit" };
+  return appendCadreEvent(root, {
+    kind: "approval.completed",
+    workflow: session.workflow,
+    approval_session_id: sessionId,
+    approved_documents: session.approved_stages,
+    documents: session.snapshot_files.filter((file) => file.reviewRole === "human").map((file) => ({
+      document_id: file.documentId || null,
+      projection_path: file.projectionPath || file.path,
+      sha256: textHash(file.content)
+    }))
+  });
+}
+function closeApprovalSession(root, sessionId) {
+  const session = readApprovalSession(root, sessionId);
+  if (!session) return { ok: true, skipped: true, reason: "approval session already closed" };
+  const intentRemoved = removeReviewIntentToAdd(root, session.intent_to_add_paths);
+  removeApprovalSession(root, sessionId);
+  return { ok: true, session_id: sessionId, intent_to_add_removed: intentRemoved };
+}
+function sessionIdFromArgs(args) {
+  return asOptionalString(args.approvalSessionId || args.approval_session_id) || null;
+}
+function recordApprovalCompletionFromArgs(root, args) {
+  const sessionId = sessionIdFromArgs(args);
+  return sessionId ? recordApprovalCompletion(root, sessionId) : { ok: true, skipped: true, reason: "no staged approval session" };
+}
+function closeApprovalSessionFromArgs(root, args) {
+  const sessionId = sessionIdFromArgs(args);
+  return sessionId ? closeApprovalSession(root, sessionId) : { ok: true, skipped: true, reason: "no staged approval session" };
+}
+function previewFileRecords(session) {
+  return session?.preview_files?.map(asJsonObject).filter((file) => file.missing !== true) || [];
+}
+
+// src/core/application/runtime/generation-quality.ts
+function text(value) {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return value.map(text).filter(Boolean).join(" ");
+  if (isRecord(value)) return Object.values(value).map(text).filter(Boolean).join(" ");
+  return "";
+}
+function hasAny(record, names) {
+  return names.some((name) => text(record[name]).length > 0);
+}
+function hasArray(record, names, min = 1) {
+  return names.some((name) => Array.isArray(record[name]) && record[name].length >= min);
+}
+function isGeneric(value) {
+  const normalized = text(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return true;
+  return [
+    "works",
+    "implement core",
+    "add tests",
+    "verify",
+    "done",
+    "deliver behavior",
+    "the work is complete",
+    "tests pass",
+    "use readme"
+  ].includes(normalized);
+}
+function sectionWarning(kind, section, expected) {
+  return `${kind} context is thin: ${section} should include ${expected}.`;
+}
+function setupGenerationWarnings(args) {
+  const product = isRecord(args.product) ? asJsonObject(args.product) : {};
+  const guidelines = isRecord(args.productGuidelines || args.product_guidelines) ? asJsonObject(args.productGuidelines || args.product_guidelines) : {};
+  const workflow = isRecord(args.workflowPolicy || args.workflow_policy) ? asJsonObject(args.workflowPolicy || args.workflow_policy) : {};
+  const techStack = isRecord(args.techStack || args.tech_stack) ? asJsonObject(args.techStack || args.tech_stack) : {};
+  const warnings = [];
+  if (!hasAny(product, ["name", "title"]) || !hasAny(product, ["summary", "description"])) {
+    warnings.push(sectionWarning("product", "summary", "name and a concrete product summary"));
+  }
+  if (!hasArray(product, ["users", "personas", "audience"])) {
+    warnings.push(sectionWarning("product", "users/personas", "primary users, operators, or integrators"));
+  }
+  if (!hasArray(product, ["coreWorkflows", "core_workflows", "workflows", "goals"], 2)) {
+    warnings.push(sectionWarning("product", "core workflows", "at least two repo-grounded workflows"));
+  }
+  if (!hasAny(product, ["domainModel", "domain_model", "entities", "stateMachines", "state_machines"])) {
+    warnings.push(sectionWarning("product", "domain model", "entities, relationships, or lifecycle states"));
+  }
+  if (!hasArray(product, ["invariants", "productInvariants", "product_invariants"])) {
+    warnings.push(sectionWarning("product", "invariants", "behaviors that must remain stable"));
+  }
+  if (!hasAny(product, ["dataStores", "data_stores", "schemaFiles", "schema_files", "integrations"])) {
+    warnings.push(sectionWarning("product", "data and integrations", "data stores, schemas, or external services"));
+  }
+  if (!hasArray(guidelines, ["principles", "userPromises", "user_promises", "promises"])) {
+    warnings.push(sectionWarning("product guidelines", "principles/promises", "product rules derived from observed behavior"));
+  }
+  if (!hasAny(guidelines, ["domainRules", "domain_rules", "workflowRules", "workflow_rules", "rules", "decisionRules", "decision_rules"])) {
+    warnings.push(sectionWarning("product guidelines", "domain and decision rules", "workflow, lifecycle, or tradeoff rules"));
+  }
+  if (!hasAny(techStack, ["languages", "language", "frameworks", "runtime", "database", "keyDependencies", "key_dependencies"])) {
+    warnings.push(sectionWarning("tech stack", "detected stack", "languages, frameworks, runtime, database, or dependencies"));
+  }
+  if (!hasAny(workflow, ["testCommand", "test_command", "defaultTestCommand", "default_test_command", "commands"])) {
+    warnings.push(sectionWarning("workflow", "commands", "test/build/format commands when discoverable"));
+  }
+  if (!hasArray(workflow, ["reviewFocus", "review_focus", "qualityBar", "quality_bar"])) {
+    warnings.push(sectionWarning("workflow", "quality gates", "review focus or quality bar"));
+  }
+  return warnings;
+}
+function trackGenerationWarnings(spec, plan) {
+  const warnings = [];
+  const functional = Array.isArray(spec.functional_requirements) ? spec.functional_requirements.map(asJsonObject) : [];
+  const acceptance = Array.isArray(spec.acceptance_criteria) ? spec.acceptance_criteria.map(asJsonObject) : [];
+  const outOfScope = Array.isArray(spec.out_of_scope) ? spec.out_of_scope.map(asJsonObject) : [];
+  if (isGeneric(spec.description) || functional.length === 0) {
+    warnings.push("spec context is thin: include concrete functional requirements grounded in the user request.");
+  }
+  if (acceptance.length === 0 || acceptance.some((entry) => isGeneric(entry.heading) && isGeneric(entry.body))) {
+    warnings.push("spec context is thin: acceptance criteria should be concrete and verifiable.");
+  }
+  if (outOfScope.length === 0) {
+    warnings.push("spec context is thin: out_of_scope should record meaningful boundaries.");
+  }
+  const phases = Array.isArray(plan.phases) ? plan.phases.map(asJsonObject) : [];
+  const tasks = phases.flatMap((phase) => Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : []);
+  if (tasks.length === 0) warnings.push("plan context is thin: add phase tasks under plan.phases[].tasks.");
+  if (tasks.some((task) => isGeneric(task.title))) warnings.push("plan context is thin: task titles should describe specific implementation work.");
+  const implementationTasks = tasks.filter((task) => asOptionalString(task.task_type) !== "user_manual_verification");
+  if (implementationTasks.some((task) => asStringArray(task.files).length === 0)) {
+    warnings.push("plan context is thin: implementation tasks should claim expected files where practical.");
+  }
+  const hasManualVerification = tasks.some((task) => asOptionalString(task.task_type) === "user_manual_verification" || isRecord(task.manual_verification));
+  if (!hasManualVerification) warnings.push("plan context is thin: include manual verification for user-facing or integration behavior.");
+  return warnings;
+}
 
 // src/core/application/runtime/native-prompts.ts
 function choice(id, label, description, recommended = false) {
@@ -9293,145 +9757,8 @@ function refreshIntentPrompts(args = {}) {
 }
 
 // src/core/application/runtime/staged-approval.ts
+var import_node_crypto5 = __toESM(require("node:crypto"));
 var import_node_path38 = __toESM(require("node:path"));
-var import_node_crypto4 = __toESM(require("node:crypto"));
-
-// src/core/application/runtime/approval-session-store.ts
-var import_node_fs20 = __toESM(require("node:fs"));
-var import_node_path36 = __toESM(require("node:path"));
-function sessionDirectory(root2) {
-  return import_node_path36.default.join(root2, "cadre", "local", "approval-sessions");
-}
-function sessionFile(root2, sessionId) {
-  return import_node_path36.default.join(sessionDirectory(root2), `${sessionId}.json`);
-}
-function readApprovalSession(root2, sessionId) {
-  try {
-    return JSON.parse(import_node_fs20.default.readFileSync(sessionFile(root2, sessionId), "utf8"));
-  } catch {
-    return null;
-  }
-}
-function writeApprovalSession(root2, session) {
-  ensureNativeState(root2);
-  import_node_fs20.default.mkdirSync(sessionDirectory(root2), { recursive: true });
-  const target2 = sessionFile(root2, session.session_id);
-  const temporary = `${target2}.${process.pid}.tmp`;
-  import_node_fs20.default.writeFileSync(temporary, `${JSON.stringify(session, null, 2)}
-`);
-  import_node_fs20.default.renameSync(temporary, target2);
-}
-function removeApprovalSession(root2, sessionId) {
-  import_node_fs20.default.rmSync(sessionFile(root2, sessionId), { force: true });
-}
-function captureApprovalBeforeFiles(root2, files) {
-  return files.map((file) => {
-    const target2 = import_node_path36.default.join(root2, file.path);
-    const existed = fileExists(target2);
-    return { path: file.path, existed, content: existed ? import_node_fs20.default.readFileSync(target2, "utf8") : null };
-  });
-}
-function frozenReviewFiles(root2, sessionId, fallback) {
-  const session = readApprovalSession(root2, sessionId);
-  return session?.snapshot_files?.length ? session.snapshot_files : fallback;
-}
-function recordApprovalPreview(root2, sessionId, workflow, payloadHash, bundle) {
-  if (!bundle || bundle.ok === false) return;
-  const session = readApprovalSession(root2, sessionId);
-  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) return;
-  const previewFiles = Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
-  writeApprovalSession(root2, {
-    ...session,
-    preview_files: previewFiles,
-    intent_to_add_paths: Array.from(/* @__PURE__ */ new Set([
-      ...session.intent_to_add_paths,
-      ...asStringArray(bundle.intent_to_add_paths)
-    ])),
-    updated_at: utcNow()
-  });
-}
-function cancelApprovalSession(root2, sessionId) {
-  const session = readApprovalSession(root2, sessionId);
-  if (!session) return { ok: false, cancelled: false, error: "Approval session was not found" };
-  const outputMode = asOptionalString(session.payload.reviewOutputMode || session.payload.review_output_mode);
-  const explicitBundleDirectory = asOptionalString(session.payload.reviewBundleDir || session.payload.review_bundle_dir || session.payload.reviewDir || session.payload.review_dir);
-  if (explicitBundleDirectory || outputMode === "bundle" || outputMode === "temp" || outputMode === "temporary") {
-    const intentRemoved2 = removeReviewIntentToAdd(root2, session.intent_to_add_paths);
-    removeApprovalSession(root2, sessionId);
-    return { ok: true, cancelled: true, session_id: sessionId, restored: [], removed: [], preserved: [], intent_to_add_removed: intentRemoved2 };
-  }
-  const snapshots = new Map(session.snapshot_files.map((file) => [file.path, file.content]));
-  const placeholders = new Set(session.snapshot_files.filter((file) => file.missing === true).map((file) => file.path));
-  const restored = [];
-  const removed = [];
-  const preserved = [];
-  for (const before of session.before_files) {
-    if (placeholders.has(before.path)) continue;
-    const target2 = import_node_path36.default.join(root2, before.path);
-    const current = fileExists(target2) ? import_node_fs20.default.readFileSync(target2, "utf8") : null;
-    if (current !== (snapshots.get(before.path) ?? null)) {
-      preserved.push(before.path);
-      continue;
-    }
-    if (before.existed && before.content !== null) {
-      const temporary = `${target2}.${process.pid}.cancel-tmp`;
-      import_node_fs20.default.writeFileSync(temporary, before.content);
-      import_node_fs20.default.renameSync(temporary, target2);
-      restored.push(before.path);
-    } else {
-      import_node_fs20.default.rmSync(target2, { force: true });
-      removed.push(before.path);
-    }
-  }
-  const intentRemoved = removeReviewIntentToAdd(root2, session.intent_to_add_paths);
-  removeApprovalSession(root2, sessionId);
-  return {
-    ok: preserved.length === 0,
-    cancelled: true,
-    session_id: sessionId,
-    restored,
-    removed,
-    preserved,
-    intent_to_add_removed: intentRemoved,
-    ...preserved.length ? { warning: "Files edited after preview were preserved" } : {}
-  };
-}
-function recordApprovalCompletion(root2, sessionId) {
-  const session = readApprovalSession(root2, sessionId);
-  if (!session) return { ok: false, error: "Approval session was not found for completion audit" };
-  return appendCadreEvent(root2, {
-    kind: "approval.completed",
-    workflow: session.workflow,
-    approval_session_id: sessionId,
-    approved_documents: session.approved_stages,
-    documents: session.snapshot_files.filter((file) => file.reviewRole === "human").map((file) => ({
-      document_id: file.documentId || null,
-      projection_path: file.projectionPath || file.path,
-      sha256: textHash(file.content)
-    }))
-  });
-}
-function closeApprovalSession(root2, sessionId) {
-  const session = readApprovalSession(root2, sessionId);
-  if (!session) return { ok: true, skipped: true, reason: "approval session already closed" };
-  const intentRemoved = removeReviewIntentToAdd(root2, session.intent_to_add_paths);
-  removeApprovalSession(root2, sessionId);
-  return { ok: true, session_id: sessionId, intent_to_add_removed: intentRemoved };
-}
-function sessionIdFromArgs(args) {
-  return asOptionalString(args.approvalSessionId || args.approval_session_id) || null;
-}
-function recordApprovalCompletionFromArgs(root2, args) {
-  const sessionId = sessionIdFromArgs(args);
-  return sessionId ? recordApprovalCompletion(root2, sessionId) : { ok: true, skipped: true, reason: "no staged approval session" };
-}
-function closeApprovalSessionFromArgs(root2, args) {
-  const sessionId = sessionIdFromArgs(args);
-  return sessionId ? closeApprovalSession(root2, sessionId) : { ok: true, skipped: true, reason: "no staged approval session" };
-}
-function previewFileRecords(session) {
-  return session?.preview_files?.map(asJsonObject).filter((file) => file.missing !== true) || [];
-}
 
 // src/core/application/runtime/approval-review-validation.ts
 var import_node_fs21 = __toESM(require("node:fs"));
@@ -9444,15 +9771,15 @@ function requestedSessionId(args) {
   const raw = args;
   return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
 }
-function validateApprovedTargetReviewFiles(root2, args = {}) {
+function validateApprovedTargetReviewFiles(root, args = {}) {
   if (!approvalComplete(args)) return { ok: true, skipped: true, reason: "approval is not complete" };
   const sessionId = requestedSessionId(args);
   if (!sessionId) return { ok: false, stage: "staged_review_drift", error: "approvalSessionId is required to validate target review files" };
-  const session = readApprovalSession(root2, sessionId);
+  const session = readApprovalSession(root, sessionId);
   if (!session) return { ok: false, stage: "staged_review_drift", error: "Approval session was not found for target review validation" };
   if (reviewOutputMode(args) !== "target") {
     const driftedBefore = session.before_files.filter((before) => {
-      const target2 = import_node_path37.default.join(root2, before.path);
+      const target2 = import_node_path37.default.join(root, before.path);
       const current = import_node_fs21.default.existsSync(target2) ? import_node_fs21.default.readFileSync(target2, "utf8") : null;
       return current !== (before.existed ? before.content : null);
     }).map((before) => before.path);
@@ -9465,7 +9792,7 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
       };
     }
     const materializedFiles = session.snapshot_files.filter((file) => file.missing !== true);
-    const mutation = writeArtifactFilesAtomic(root2, materializedFiles.map((file) => ({ path: file.path, content: file.content })));
+    const mutation = writeArtifactFilesAtomic(root, materializedFiles.map((file) => ({ path: file.path, content: file.content })));
     return {
       ok: mutation.ok !== false,
       stage: mutation.ok === false ? "staged_review_materialize" : void 0,
@@ -9482,7 +9809,7 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
     const relativePath = asOptionalString(file.path);
     const expectedHash = asOptionalString(file.sha256);
     if (!relativePath || !expectedHash) continue;
-    const target2 = import_node_path37.default.resolve(root2, relativePath);
+    const target2 = import_node_path37.default.resolve(root, relativePath);
     try {
       const stats = reviewStats2(import_node_fs21.default.readFileSync(target2, "utf8"));
       if (stats.sha256 !== expectedHash) errors.push(`Approved target review file changed after review: ${relativePath}`);
@@ -9642,7 +9969,7 @@ function stableJson(value) {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
 }
 function sha(value) {
-  return import_node_crypto4.default.createHash("sha256").update(value).digest("hex");
+  return import_node_crypto5.default.createHash("sha256").update(value).digest("hex");
 }
 function hasApprovalIntent(args) {
   const raw = rawArgs2(args);
@@ -9682,11 +10009,11 @@ function approvalControlPayload(args) {
   }
   return controls;
 }
-function applyStagedApprovalSessionPayload(root2, args = {}, workflow) {
+function applyStagedApprovalSessionPayload(root, args = {}, workflow) {
   if (!hasApprovalIntent(args)) return args;
   const sessionId = requestedApprovalSessionId(args);
   if (!sessionId) return args;
-  const session = readApprovalSession(root2, sessionId);
+  const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow) return args;
   const controls = approvalControlPayload(args);
   if (approvalComplete2(args) && !controls.approvedStages && !controls.approved_stages) {
@@ -9748,9 +10075,9 @@ function approvalPayloadHash(workflow, stages, args, extras) {
     extras
   }));
 }
-function approvalSessionId(workflow, root2, payloadHash) {
+function approvalSessionId(workflow, root, payloadHash) {
   return sha(`${workflow}
-${import_node_path38.default.resolve(root2)}
+${import_node_path38.default.resolve(root)}
 ${payloadHash}`).slice(0, 24);
 }
 function approvalOrderError(stageIds, approved) {
@@ -9762,8 +10089,7 @@ function approvalOrderError(stageIds, approved) {
   }
   return null;
 }
-function approvalTransitionError(root2, args, workflow, sessionId, payloadHash, stageIds, approved, snapshotFiles) {
-  const raw = rawArgs2(args);
+function approvalTransitionError(root, args, workflow, sessionId, payloadHash, stageIds, approved, snapshotFiles) {
   if (stageIds.length === 0) return null;
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return orderError;
@@ -9771,16 +10097,16 @@ function approvalTransitionError(root2, args, workflow, sessionId, payloadHash, 
   const payload = approvalPayload(args);
   const approvalIntent = hasApprovalIntent(args);
   if (!approvalIntent) {
-    const existing = readApprovalSession(root2, sessionId);
+    const existing = readApprovalSession(root, sessionId);
     if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash) return null;
-    writeApprovalSession(root2, {
+    writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
       payload_hash: payloadHash,
       payload,
       approved_stages: [],
       snapshot_files: snapshotFiles,
-      before_files: captureApprovalBeforeFiles(root2, snapshotFiles),
+      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
       preview_files: [],
       intent_to_add_paths: [],
       updated_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -9789,22 +10115,22 @@ function approvalTransitionError(root2, args, workflow, sessionId, payloadHash, 
   }
   if (!requestedSession) return "approvalSessionId is required when approving staged workflow output.";
   if (approvalComplete2(args)) {
-    const requested = readApprovalSession(root2, requestedSession);
+    const requested = readApprovalSession(root, requestedSession);
     if (requested && requested.workflow === workflow && approved.length === stageIds.length && requested.approved_stages.length === stageIds.length && requested.approved_stages.every((stage, index) => stage === stageIds[index] && approved[index] === stage)) {
       return null;
     }
   }
   if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
-  const session = readApprovalSession(root2, sessionId);
+  const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
-    writeApprovalSession(root2, {
+    writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
       payload_hash: payloadHash,
       payload,
       approved_stages: [],
       snapshot_files: snapshotFiles,
-      before_files: captureApprovalBeforeFiles(root2, snapshotFiles),
+      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
       preview_files: [],
       intent_to_add_paths: [],
       updated_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -9828,14 +10154,14 @@ function approvalTransitionError(root2, args, workflow, sessionId, payloadHash, 
   if (delta[0] !== nextExpected) return `Next approval stage must be ${nextExpected}.`;
   const requestedStage = requestedApprovalStage(args);
   if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
-  writeApprovalSession(root2, {
+  writeApprovalSession(root, {
     session_id: sessionId,
     workflow,
     payload_hash: payloadHash,
     payload: session.payload || payload,
     approved_stages: approved,
     snapshot_files: session.snapshot_files || snapshotFiles,
-    before_files: session.before_files || captureApprovalBeforeFiles(root2, snapshotFiles),
+    before_files: session.before_files || captureApprovalBeforeFiles(root, snapshotFiles),
     preview_files: session.preview_files || [],
     intent_to_add_paths: session.intent_to_add_paths || [],
     updated_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -9845,11 +10171,11 @@ function approvalTransitionError(root2, args, workflow, sessionId, payloadHash, 
 function approvedPreviewFiles(session, _approvedIds) {
   return previewFileRecords(session);
 }
-function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras = {}) {
+function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras = {}) {
   const stageIds = stages.map((stage) => stage.id);
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
-  const sessionId = approvalSessionId(workflow, root2, payloadHash);
+  const sessionId = approvalSessionId(workflow, root, payloadHash);
   const requestedSessionId2 = requestedApprovalSessionId(args);
   if (approvalCancelRequested(args)) {
     if (!requestedSessionId2) {
@@ -9863,7 +10189,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
         approval_error: "approvalSessionId is required to cancel staged review"
       };
     }
-    const cancellation = cancelApprovalSession(root2, requestedSessionId2);
+    const cancellation = cancelApprovalSession(root, requestedSessionId2);
     return {
       version: 1,
       kind: "cadre.staged_approval.v1",
@@ -9881,24 +10207,24 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
       current_review_bundle: null
     };
   }
-  const frozenFiles = requestedSessionId2 ? frozenReviewFiles(root2, requestedSessionId2, reviewFiles2) : reviewFiles2;
-  let approvalError = approvalTransitionError(root2, args, workflow, sessionId, payloadHash, stageIds, approvedIds, frozenFiles);
-  const effectiveFiles = frozenReviewFiles(root2, sessionId, frozenFiles);
+  const frozenFiles = requestedSessionId2 ? frozenReviewFiles(root, requestedSessionId2, reviewFiles2) : reviewFiles2;
+  let approvalError = approvalTransitionError(root, args, workflow, sessionId, payloadHash, stageIds, approvedIds, frozenFiles);
+  const effectiveFiles = frozenReviewFiles(root, sessionId, frozenFiles);
   const approved = new Set(approvedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));
   const requested = requestedApprovalStage(args);
   const active = stages.find((stage) => stage.id === requested && !approved.has(stage.id)) || pending[0] || null;
   const activeFiles = active ? filesForStage(effectiveFiles, active) : [];
-  const stageBundle = active ? workflowReviewBundle(root2, workflow, args, effectiveFiles, {
+  const stageBundle = active ? workflowReviewBundle(root, workflow, args, effectiveFiles, {
     ...extras,
     approval_stage: active.id,
     approved_stages: Array.from(approved),
     pending_stages: pending.map((stage) => stage.id)
   }) : null;
-  if (active) recordApprovalPreview(root2, sessionId, workflow, payloadHash, asJsonObject(stageBundle));
+  if (active) recordApprovalPreview(root, sessionId, workflow, payloadHash, asJsonObject(stageBundle));
   const bundleError = asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
-  const session = readApprovalSession(root2, sessionId);
+  const session = readApprovalSession(root, sessionId);
   const approvedFiles = approvedPreviewFiles(session, approvedIds);
   const approvedPaths = Array.from(new Set(approvedFiles.map((file) => asOptionalString(file.path)).filter((file) => Boolean(file)))).sort();
   const complete = approvalComplete2(args);
@@ -9979,105 +10305,6 @@ function stagedApprovalError(approval) {
   return asOptionalString(asJsonObject(approval).approval_error) || null;
 }
 
-// src/core/application/runtime/generation-quality.ts
-function text(value) {
-  if (typeof value === "string") return value.trim();
-  if (Array.isArray(value)) return value.map(text).filter(Boolean).join(" ");
-  if (isRecord(value)) return Object.values(value).map(text).filter(Boolean).join(" ");
-  return "";
-}
-function hasAny(record, names) {
-  return names.some((name) => text(record[name]).length > 0);
-}
-function hasArray(record, names, min = 1) {
-  return names.some((name) => Array.isArray(record[name]) && record[name].length >= min);
-}
-function isGeneric(value) {
-  const normalized = text(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (!normalized) return true;
-  return [
-    "works",
-    "implement core",
-    "add tests",
-    "verify",
-    "done",
-    "deliver behavior",
-    "the work is complete",
-    "tests pass",
-    "use readme"
-  ].includes(normalized);
-}
-function sectionWarning(kind, section, expected) {
-  return `${kind} context is thin: ${section} should include ${expected}.`;
-}
-function setupGenerationWarnings(args) {
-  const product = isRecord(args.product) ? asJsonObject(args.product) : {};
-  const guidelines = isRecord(args.productGuidelines || args.product_guidelines) ? asJsonObject(args.productGuidelines || args.product_guidelines) : {};
-  const workflow = isRecord(args.workflowPolicy || args.workflow_policy) ? asJsonObject(args.workflowPolicy || args.workflow_policy) : {};
-  const techStack = isRecord(args.techStack || args.tech_stack) ? asJsonObject(args.techStack || args.tech_stack) : {};
-  const warnings = [];
-  if (!hasAny(product, ["name", "title"]) || !hasAny(product, ["summary", "description"])) {
-    warnings.push(sectionWarning("product", "summary", "name and a concrete product summary"));
-  }
-  if (!hasArray(product, ["users", "personas", "audience"])) {
-    warnings.push(sectionWarning("product", "users/personas", "primary users, operators, or integrators"));
-  }
-  if (!hasArray(product, ["coreWorkflows", "core_workflows", "workflows", "goals"], 2)) {
-    warnings.push(sectionWarning("product", "core workflows", "at least two repo-grounded workflows"));
-  }
-  if (!hasAny(product, ["domainModel", "domain_model", "entities", "stateMachines", "state_machines"])) {
-    warnings.push(sectionWarning("product", "domain model", "entities, relationships, or lifecycle states"));
-  }
-  if (!hasArray(product, ["invariants", "productInvariants", "product_invariants"])) {
-    warnings.push(sectionWarning("product", "invariants", "behaviors that must remain stable"));
-  }
-  if (!hasAny(product, ["dataStores", "data_stores", "schemaFiles", "schema_files", "integrations"])) {
-    warnings.push(sectionWarning("product", "data and integrations", "data stores, schemas, or external services"));
-  }
-  if (!hasArray(guidelines, ["principles", "userPromises", "user_promises", "promises"])) {
-    warnings.push(sectionWarning("product guidelines", "principles/promises", "product rules derived from observed behavior"));
-  }
-  if (!hasAny(guidelines, ["domainRules", "domain_rules", "workflowRules", "workflow_rules", "rules", "decisionRules", "decision_rules"])) {
-    warnings.push(sectionWarning("product guidelines", "domain and decision rules", "workflow, lifecycle, or tradeoff rules"));
-  }
-  if (!hasAny(techStack, ["languages", "language", "frameworks", "runtime", "database", "keyDependencies", "key_dependencies"])) {
-    warnings.push(sectionWarning("tech stack", "detected stack", "languages, frameworks, runtime, database, or dependencies"));
-  }
-  if (!hasAny(workflow, ["testCommand", "test_command", "defaultTestCommand", "default_test_command", "commands"])) {
-    warnings.push(sectionWarning("workflow", "commands", "test/build/format commands when discoverable"));
-  }
-  if (!hasArray(workflow, ["reviewFocus", "review_focus", "qualityBar", "quality_bar"])) {
-    warnings.push(sectionWarning("workflow", "quality gates", "review focus or quality bar"));
-  }
-  return warnings;
-}
-function trackGenerationWarnings(spec, plan) {
-  const warnings = [];
-  const functional = Array.isArray(spec.functional_requirements) ? spec.functional_requirements.map(asJsonObject) : [];
-  const acceptance = Array.isArray(spec.acceptance_criteria) ? spec.acceptance_criteria.map(asJsonObject) : [];
-  const outOfScope = Array.isArray(spec.out_of_scope) ? spec.out_of_scope.map(asJsonObject) : [];
-  if (isGeneric(spec.description) || functional.length === 0) {
-    warnings.push("spec context is thin: include concrete functional requirements grounded in the user request.");
-  }
-  if (acceptance.length === 0 || acceptance.some((entry) => isGeneric(entry.heading) && isGeneric(entry.body))) {
-    warnings.push("spec context is thin: acceptance criteria should be concrete and verifiable.");
-  }
-  if (outOfScope.length === 0) {
-    warnings.push("spec context is thin: out_of_scope should record meaningful boundaries.");
-  }
-  const phases = Array.isArray(plan.phases) ? plan.phases.map(asJsonObject) : [];
-  const tasks = phases.flatMap((phase) => Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : []);
-  if (tasks.length === 0) warnings.push("plan context is thin: add phase tasks under plan.phases[].tasks.");
-  if (tasks.some((task) => isGeneric(task.title))) warnings.push("plan context is thin: task titles should describe specific implementation work.");
-  const implementationTasks = tasks.filter((task) => asOptionalString(task.task_type) !== "user_manual_verification");
-  if (implementationTasks.some((task) => asStringArray(task.files).length === 0)) {
-    warnings.push("plan context is thin: implementation tasks should claim expected files where practical.");
-  }
-  const hasManualVerification = tasks.some((task) => asOptionalString(task.task_type) === "user_manual_verification" || isRecord(task.manual_verification));
-  if (!hasManualVerification) warnings.push("plan context is thin: include manual verification for user-facing or integration behavior.");
-  return warnings;
-}
-
 // src/core/application/runtime/workflow-new-track.ts
 function newTrackReviewFiles(trackId, spec, plan, metadata) {
   const safeTrack = safeName(trackId);
@@ -10155,15 +10382,15 @@ function newTrackReviewFiles(trackId, spec, plan, metadata) {
     )
   ];
 }
-function workflowNewTrack(root2, args = {}) {
-  args = applyStagedApprovalSessionPayload(root2, args, "newtrack");
+function workflowNewTrack(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "newtrack");
   const approvalArgs = JSON.parse(JSON.stringify(args));
-  const summary = workflowSummary(root2, "newtrack", args);
+  const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
   const schemaIssues = newTrackSchemaIssues(args);
   if (schemaIssues.length > 0) {
-    const encodedRoot = encodeURIComponent(root2);
+    const encodedRoot = encodeURIComponent(root);
     return {
       ...summary,
       ok: false,
@@ -10211,7 +10438,7 @@ function workflowNewTrack(root2, args = {}) {
     priority: "medium",
     depends_on: [],
     description: asOptionalString(args.description) || trackId,
-    owner: gitIdentity(root2) || null,
+    owner: gitIdentity(root) || null,
     reviewer: null,
     git_branch: `track/${trackId}`,
     worktree_path: `.worktrees/cadre/tracks/${safeName(trackId)}/integrate/root`,
@@ -10219,7 +10446,7 @@ function workflowNewTrack(root2, args = {}) {
   };
   const reviewFiles2 = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
-  const approval = stagedApprovalState(root2, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles2, { track_id: String(trackId), final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
+  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles2, { track_id: String(trackId), final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
   const approvalError = stagedApprovalError(approval);
@@ -10229,7 +10456,7 @@ function workflowNewTrack(root2, args = {}) {
     ...approvalError ? [approvalError] : []
   ];
   const dryRun = args.execute !== true;
-  const assist = planAssist(root2, { ...args, plan: planJson, trackId });
+  const assist = planAssist(root, { ...args, plan: planJson, trackId });
   if (dryRun) {
     return {
       ...summary,
@@ -10272,7 +10499,7 @@ function workflowNewTrack(root2, args = {}) {
       error: approvalError || "Staged approval is required before creating track artifacts"
     };
   }
-  const reviewValidation = validateApprovedTargetReviewFiles(root2, args);
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
       ...summary,
@@ -10291,13 +10518,13 @@ function workflowNewTrack(root2, args = {}) {
       error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval"
     };
   }
-  const existingTrack = findTrack(root2, trackId);
+  const existingTrack = findTrack(root, trackId);
   if (existingTrack && asStringArray(reviewValidation.files).length === 0) {
     return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
-  const traceBefore = beginTrace(root2);
-  const dir = import_node_path39.default.join(root2, "cadre", "tracks", safeName(trackId));
+  const traceBefore = beginTrace(root);
+  const dir = import_node_path39.default.join(root, "cadre", "tracks", safeName(trackId));
   const learningsEntry = {
     ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
     id: "initial",
@@ -10308,11 +10535,11 @@ function workflowNewTrack(root2, args = {}) {
   };
   const writeReviewedJson = (relativePath, value) => {
     if (reusedReviewFiles.has(relativePath)) return;
-    writeJson(import_node_path39.default.join(root2, relativePath), value);
+    writeJson(import_node_path39.default.join(root, relativePath), value);
   };
   const writeReviewedText = (relativePath, text2) => {
     if (reusedReviewFiles.has(relativePath)) return;
-    import_node_fs22.default.writeFileSync(import_node_path39.default.join(root2, relativePath), text2);
+    import_node_fs22.default.writeFileSync(import_node_path39.default.join(root, relativePath), text2);
   };
   import_node_fs22.default.mkdirSync(dir, { recursive: true });
   writeReviewedJson(`cadre/tracks/${safeName(trackId)}/metadata.json`, metadata);
@@ -10323,16 +10550,16 @@ function workflowNewTrack(root2, args = {}) {
   writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, `${JSON.stringify(learningsEntry)}
 `);
   writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
-  const regen = regenIndex(root2);
-  const event = appendCadreEvent(root2, {
+  const regen = regenIndex(root);
+  const event = appendCadreEvent(root, {
     kind: "track_created",
     workflow: "newtrack",
     track_id: String(trackId),
     status: metadata.status,
     tags: metadata.tags || []
   });
-  const approvalAudit = recordApprovalCompletionFromArgs(root2, args);
-  const controlCommit = commitTrace(root2, args, {
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "newtrack",
     subject: `create ${trackId}`,
@@ -10346,13 +10573,13 @@ function workflowNewTrack(root2, args = {}) {
       wisp_id: asOptionalString(args.wispId || args.wisp_id) || null
     }
   });
-  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root2, args) : null;
+  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...summary,
     ok: regen.ok !== false && controlCommit.ok !== false,
     dry_run: false,
     track_id: trackId,
-    metadata_path: import_node_path39.default.relative(root2, import_node_path39.default.join(dir, "metadata.json")),
+    metadata_path: import_node_path39.default.relative(root, import_node_path39.default.join(dir, "metadata.json")),
     regen,
     event,
     approval_audit: approvalAudit,
@@ -10362,7 +10589,7 @@ function workflowNewTrack(root2, args = {}) {
     reused_review_files: asStringArray(reviewValidation.files),
     phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
     approval,
-    worktree_plan: worktreePlan(root2, { trackId })
+    worktree_plan: worktreePlan(root, { trackId })
   };
 }
 
@@ -10390,11 +10617,11 @@ function formulaAction(args) {
     "pour"
   ].includes(normalized) ? normalized : "list";
 }
-function formulaDir(root2) {
-  return import_node_path40.default.join(root2, "cadre", "formulas");
+function formulaDir(root) {
+  return import_node_path40.default.join(root, "cadre", "formulas");
 }
-function wispDir(root2) {
-  return import_node_path40.default.join(root2, "cadre", "local", "wisps");
+function wispDir(root) {
+  return import_node_path40.default.join(root, "cadre", "local", "wisps");
 }
 function formulaId(args) {
   const rawArgs3 = args;
@@ -10404,18 +10631,18 @@ function wispId(args) {
   const rawArgs3 = args;
   return asOptionalString(args.id) || asOptionalString(rawArgs3.wispId || rawArgs3.wisp_id) || null;
 }
-function formulaPath(root2, id) {
-  return import_node_path40.default.join(formulaDir(root2), `${safeName(id).replace(/\.json$/i, "")}.json`);
+function formulaPath(root, id) {
+  return import_node_path40.default.join(formulaDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
 }
-function wispPath(root2, id) {
-  return import_node_path40.default.join(wispDir(root2), `${safeName(id).replace(/\.json$/i, "")}.json`);
+function wispPath(root, id) {
+  return import_node_path40.default.join(wispDir(root), `${safeName(id).replace(/\.json$/i, "")}.json`);
 }
-function loadFormula(root2, id) {
+function loadFormula(root, id) {
   if (!id) return { ok: false, error: "formula id is required" };
-  const file = formulaPath(root2, id);
+  const file = formulaPath(root, id);
   const formula = readJson(file, null);
-  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path40.default.relative(root2, file) };
-  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path40.default.relative(root2, file), formula };
+  if (!formula) return { ok: false, id, error: `Formula not found: ${id}`, path: import_node_path40.default.relative(root, file) };
+  return { ok: true, id: asOptionalString(formula.id) || id, path: import_node_path40.default.relative(root, file), formula };
 }
 function variablesFromArgs(formula, args) {
   const rawArgs3 = args;
@@ -10443,7 +10670,7 @@ function renderTemplateValue(value, variables) {
 function stepsFromFormula(formula) {
   return Array.isArray(formula.steps) ? formula.steps.map(asJsonObject) : [];
 }
-function cookedPlan(trackId, formula, rendered) {
+function cookedPlan(trackId, rendered) {
   if (isRecord(rendered.plan)) return asJsonObject(rendered.plan);
   const steps = stepsFromFormula(rendered);
   const phaseTitle = asOptionalString(rendered.phase_title) || asOptionalString(rendered.recommended_phase) || "Formula";
@@ -10490,8 +10717,8 @@ function cookedSpec(trackId, formula, rendered) {
     out_of_scope: [{ heading: "Formula boundaries", body: "Changes outside the generated formula plan remain out of scope until explicitly revised." }]
   };
 }
-function cookFormula(root2, args) {
-  const loaded = loadFormula(root2, formulaId(args));
+function cookFormula(root, args) {
+  const loaded = loadFormula(root, formulaId(args));
   if (loaded.ok === false) return loaded;
   const formula = asJsonObject(loaded.formula);
   const variables = variablesFromArgs(formula, args);
@@ -10505,12 +10732,12 @@ function cookFormula(root2, args) {
     recommended_phase: asOptionalString(formula.recommended_phase) || null,
     dependencies: asStringArray(formula.dependencies),
     spec: cookedSpec(trackId, formula, rendered),
-    plan: cookedPlan(trackId, formula, rendered)
+    plan: cookedPlan(trackId, rendered)
   };
 }
-function listFormulas(root2) {
-  ensureNativeState(root2);
-  const dir = formulaDir(root2);
+function listFormulas(root) {
+  ensureNativeState(root);
+  const dir = formulaDir(root);
   const items = fileExists(dir) ? import_node_fs23.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
     const file = import_node_path40.default.join(dir, name);
     const formula = readJson(file, {});
@@ -10518,7 +10745,7 @@ function listFormulas(root2) {
       id: asOptionalString(formula.id) || name.replace(/\.json$/i, ""),
       title: asOptionalString(formula.title) || asOptionalString(formula.id) || name,
       recommended_phase: asOptionalString(formula.recommended_phase) || null,
-      path: import_node_path40.default.relative(root2, file)
+      path: import_node_path40.default.relative(root, file)
     };
   }) : [];
   return { ok: true, formulas: items, count: items.length };
@@ -10539,8 +10766,8 @@ function wispSteps(cooked) {
     }));
   });
 }
-function createWisp(root2, args) {
-  const cooked = cookFormula(root2, args);
+function createWisp(root, args) {
+  const cooked = cookFormula(root, args);
   if (cooked.ok === false) return cooked;
   const formula_id = asOptionalString(cooked.formula_id) || "formula";
   const now = utcNow();
@@ -10561,14 +10788,14 @@ function createWisp(root2, args) {
     steps: wispSteps(asJsonObject(cooked)),
     evidence: []
   };
-  const file = wispPath(root2, id);
+  const file = wispPath(root, id);
   writeJsonEnsured(file, wisp);
-  const event = appendCadreEvent(root2, { kind: "wisp_created", workflow: "formula", formula_id, wisp_id: id });
-  return { ok: true, wisp_id: id, path: import_node_path40.default.relative(root2, file), wisp, event };
+  const event = appendCadreEvent(root, { kind: "wisp_created", workflow: "formula", formula_id, wisp_id: id });
+  return { ok: true, wisp_id: id, path: import_node_path40.default.relative(root, file), wisp, event };
 }
-function listWisps(root2) {
-  ensureNativeState(root2);
-  const dir = wispDir(root2);
+function listWisps(root) {
+  ensureNativeState(root);
+  const dir = wispDir(root);
   const wisps = fileExists(dir) ? import_node_fs23.default.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
     const file = import_node_path40.default.join(dir, name);
     const wisp = readJson(file, {});
@@ -10578,17 +10805,17 @@ function listWisps(root2) {
       status: asOptionalString(wisp.status) || null,
       owner: asOptionalString(wisp.owner) || null,
       updated_at: asOptionalString(wisp.updated_at) || null,
-      path: import_node_path40.default.relative(root2, file)
+      path: import_node_path40.default.relative(root, file)
     };
   }) : [];
   return { ok: true, wisps, count: wisps.length };
 }
-function updateWispStep(root2, args) {
+function updateWispStep(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
-  const file = wispPath(root2, id);
+  const file = wispPath(root, id);
   const wisp = readJson(file, null);
-  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path40.default.relative(root2, file) };
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path40.default.relative(root, file) };
   const rawArgs3 = args;
   const stepId = asOptionalString(rawArgs3.stepId || rawArgs3.step_id || rawArgs3.taskKey || rawArgs3.task_key);
   const stepIndex = Number(rawArgs3.stepIndex || rawArgs3.step_index || args.taskIndex || 0);
@@ -10609,16 +10836,16 @@ function updateWispStep(root2, args) {
   };
   const next = { ...wisp, steps, status: asOptionalString(wisp.status) || "active", updated_at: now };
   writeJsonEnsured(file, next);
-  const event = appendCadreEvent(root2, { kind: "wisp_step_updated", workflow: "formula", wisp_id: id, step_id: asOptionalString(steps[index].step_id) || null, status });
-  return { ok: true, wisp_id: id, path: import_node_path40.default.relative(root2, file), step: steps[index], wisp: next, event };
+  const event = appendCadreEvent(root, { kind: "wisp_step_updated", workflow: "formula", wisp_id: id, step_id: asOptionalString(steps[index].step_id) || null, status });
+  return { ok: true, wisp_id: id, path: import_node_path40.default.relative(root, file), step: steps[index], wisp: next, event };
 }
-function squashWisp(root2, args) {
+function squashWisp(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
-  const file = wispPath(root2, id);
+  const file = wispPath(root, id);
   const wisp = readJson(file, null);
-  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path40.default.relative(root2, file) };
-  const traceBefore = beginTrace(root2);
+  if (!wisp) return { ok: false, error: `Wisp not found: ${id}`, path: import_node_path40.default.relative(root, file) };
+  const traceBefore = beginTrace(root);
   const digest = {
     version: 1,
     schema: "cadre.wisp_digest.v1",
@@ -10631,17 +10858,17 @@ function squashWisp(root2, args) {
     steps: Array.isArray(wisp.steps) ? wisp.steps.map(asJsonObject) : [],
     evidence: Array.isArray(wisp.evidence) ? wisp.evidence.map(asJsonObject) : []
   };
-  const digestPath = import_node_path40.default.join(root2, "cadre", "operations", "wisp-digests.jsonl");
+  const digestPath = import_node_path40.default.join(root, "cadre", "operations", "wisp-digests.jsonl");
   appendJsonl(digestPath, digest);
-  const event = appendCadreEvent(root2, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
-  const controlCommit = commitTrace(root2, args, {
+  const event = appendCadreEvent(root, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "wisp",
     action: "wisp_squash",
     subject: `squash ${id}`,
     before: traceBefore,
     files: [
-      import_node_path40.default.relative(root2, digestPath)
+      import_node_path40.default.relative(root, digestPath)
     ],
     note: {
       event_id: asOptionalString(asJsonObject(event.event).id) || null,
@@ -10650,21 +10877,21 @@ function squashWisp(root2, args) {
       formula_id: digest.formula_id
     }
   });
-  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: import_node_path40.default.relative(root2, digestPath), event, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, wisp_id: id, digest, path: import_node_path40.default.relative(root, digestPath), event, control_commit: controlCommit };
 }
-function burnWisp(root2, args) {
+function burnWisp(root, args) {
   const id = wispId(args);
   if (!id) return { ok: false, error: "wisp id is required" };
-  const file = wispPath(root2, id);
+  const file = wispPath(root, id);
   const existed = fileExists(file);
   if (existed) import_node_fs23.default.rmSync(file, { force: true });
-  const event = appendCadreEvent(root2, { kind: "wisp_burned", workflow: "formula", wisp_id: id, existed });
-  return { ok: true, wisp_id: id, existed, path: import_node_path40.default.relative(root2, file), event };
+  const event = appendCadreEvent(root, { kind: "wisp_burned", workflow: "formula", wisp_id: id, existed });
+  return { ok: true, wisp_id: id, existed, path: import_node_path40.default.relative(root, file), event };
 }
-function pourFormula(root2, args) {
+function pourFormula(root, args) {
   const id = wispId(args);
-  const wisp = id ? readJson(wispPath(root2, id), null) : null;
-  const cooked = wisp ? { ok: true, formula_id: asOptionalString(wisp.formula_id), spec: asJsonObject(wisp.spec), plan: asJsonObject(wisp.plan), variables: asJsonObject(wisp.variables) } : cookFormula(root2, args);
+  const wisp = id ? readJson(wispPath(root, id), null) : null;
+  const cooked = wisp ? { ok: true, formula_id: asOptionalString(wisp.formula_id), spec: asJsonObject(wisp.spec), plan: asJsonObject(wisp.plan), variables: asJsonObject(wisp.variables) } : cookFormula(root, args);
   if (cooked.ok === false) return cooked;
   const formula_id = asOptionalString(cooked.formula_id) || formulaId(args) || "formula";
   const trackId = asOptionalString(args.trackId || args.track_id) || asOptionalString(args.outputTrackId || args.output_track_id) || `${safeName(formula_id)}-${textHash(JSON.stringify(cooked.variables || {})).slice(0, 8)}`;
@@ -10672,7 +10899,7 @@ function pourFormula(root2, args) {
     `formula:${formula_id}`,
     ...asStringArray(asJsonObject(args.metadata).tags)
   ]));
-  const result = workflowNewTrack(root2, {
+  const result = workflowNewTrack(root, {
     ...args,
     workflow: "newtrack",
     action: "newtrack",
@@ -10687,19 +10914,19 @@ function pourFormula(root2, args) {
       tags
     }
   });
-  const pourTraceBefore = result.ok === false ? null : beginTrace(root2);
-  const event = result.ok === false ? null : appendCadreEvent(root2, { kind: "formula_poured", workflow: "formula", formula_id, wisp_id: id || null, track_id: trackId });
+  const pourTraceBefore = result.ok === false ? null : beginTrace(root);
+  const event = result.ok === false ? null : appendCadreEvent(root, { kind: "formula_poured", workflow: "formula", formula_id, wisp_id: id || null, track_id: trackId });
   const controlCommit = result.ok === false || !event ? null : { ok: true, skipped: true, reason: "formula pour is traced by the newtrack commit", trace_before: pourTraceBefore };
   return { ...result, ok: result.ok !== false && (!controlCommit || controlCommit.ok !== false), formula_id, wisp_id: id || null, pour_event: event, pour_commit: controlCommit };
 }
-function workflowFormula(root2, args = {}) {
+function workflowFormula(root, args = {}) {
   const action = formulaAction(args);
-  const summary = workflowSummary(root2, "formula", args);
-  ensureNativeState(root2);
-  if (action === "list") return { ...summary, action, ...listFormulas(root2) };
-  if (action === "show") return { ...summary, action, ...loadFormula(root2, formulaId(args)) };
-  if (action === "cook") return { ...summary, action, ...cookFormula(root2, args) };
-  if (action === "wisp_list") return { ...summary, action, ...listWisps(root2) };
+  const summary = workflowSummary(root, "formula", args);
+  ensureNativeState(root);
+  if (action === "list") return { ...summary, action, ...listFormulas(root) };
+  if (action === "show") return { ...summary, action, ...loadFormula(root, formulaId(args)) };
+  if (action === "cook") return { ...summary, action, ...cookFormula(root, args) };
+  if (action === "wisp_list") return { ...summary, action, ...listWisps(root) };
   if (args.execute !== true && !READ_ACTIONS.has(action)) {
     return {
       ...summary,
@@ -10710,11 +10937,11 @@ function workflowFormula(root2, args = {}) {
       error: `Formula action ${action} requires execute:true`
     };
   }
-  if (action === "wisp_create") return { ...summary, action, ...createWisp(root2, args) };
-  if (action === "wisp_update_step") return { ...summary, action, ...updateWispStep(root2, args) };
-  if (action === "wisp_squash") return { ...summary, action, ...squashWisp(root2, args) };
-  if (action === "wisp_burn") return { ...summary, action, ...burnWisp(root2, args) };
-  if (action === "pour") return { ...summary, action, ...pourFormula(root2, args) };
+  if (action === "wisp_create") return { ...summary, action, ...createWisp(root, args) };
+  if (action === "wisp_update_step") return { ...summary, action, ...updateWispStep(root, args) };
+  if (action === "wisp_squash") return { ...summary, action, ...squashWisp(root, args) };
+  if (action === "wisp_burn") return { ...summary, action, ...burnWisp(root, args) };
+  if (action === "pour") return { ...summary, action, ...pourFormula(root, args) };
   return { ...summary, ok: false, action, error: `Unknown formula action: ${action}` };
 }
 
@@ -10795,7 +11022,7 @@ function commandResultEvidence(result) {
     stderr_tail: result.stderr.slice(-4e3)
   };
 }
-function prepareManualVerificationCompletion(root2, track, task, args, workingRoot) {
+function prepareManualVerificationCompletion(root, track, task, args, workingRoot) {
   const mode = asOptionalString(args.manualVerificationMode || args.manual_verification_mode) || (manualVerificationCommand(args) ? "autorun" : "offline");
   const command = manualVerificationCommand(args);
   const suggestedChecks = asArray(asJsonObject(task.manual_verification).suggested_checks).map(asJsonObject);
@@ -10884,7 +11111,7 @@ function prepareManualVerificationCompletion(root2, track, task, args, workingRo
     mode,
     approved: true,
     approved_at: utcNow(),
-    approved_by: gitIdentity(root2) || null,
+    approved_by: gitIdentity(root) || null,
     task_key: task.task_key,
     scope: manualVerificationScope(task),
     summary: summary.trim(),
@@ -10898,11 +11125,11 @@ function prepareManualVerificationCompletion(root2, track, task, args, workingRo
 }
 
 // src/core/application/runtime/task-completion.ts
-function completeTask(root2, args = {}) {
-  return withSharedControlPlaneSync(root2, args, "complete_task", () => completeTaskInner(root2, { ...args, skipSync: true }));
+function completeTask(root, args = {}) {
+  return withSharedControlPlaneSync(root, args, "complete_task", () => completeTaskInner(root, { ...args, skipSync: true }));
 }
-function completeTaskInner(root2, args = {}) {
-  const track = findTrack(root2, args.trackId);
+function completeTaskInner(root, args = {}) {
+  const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
   const phaseIndex = Number(args.phaseIndex);
   const taskIndex = Number(args.taskIndex);
@@ -10910,7 +11137,7 @@ function completeTaskInner(root2, args = {}) {
   const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
-  const workingRoot = resolveTaskWorkingRoot(root2, track, task, args);
+  const workingRoot = resolveTaskWorkingRoot(root, track, task, args);
   if (isWorkingRootError(workingRoot)) {
     return {
       ok: false,
@@ -10929,11 +11156,11 @@ function completeTaskInner(root2, args = {}) {
       working_root: workingRoot,
       branch_set: branchSet,
       reason: branchSet.exists ? `Integration worktree for ${branchSet.repo} is ${branchSet.health}; complete_task requires the expected track branch or an explicit worker root` : `Integration worktree for ${branchSet.repo} is missing; run worktree_plan with execute before complete_task or pass an explicit worker root`,
-      worktree_plan: worktreePlan(root2, { trackId: track.track_id, repo: branchSet.repo })
+      worktree_plan: worktreePlan(root, { trackId: track.track_id, repo: branchSet.repo })
     };
   }
   const manualVerificationTask = isManualVerificationTaskObject(task);
-  const manualVerificationCompletion = manualVerificationTask ? prepareManualVerificationCompletion(root2, track, task, args, workingRoot) : null;
+  const manualVerificationCompletion = manualVerificationTask ? prepareManualVerificationCompletion(root, track, task, args, workingRoot) : null;
   if (manualVerificationCompletion && manualVerificationCompletion.ok === false) return manualVerificationCompletion;
   const manualVerificationEvidence = manualVerificationCompletion && isRecord(manualVerificationCompletion.evidence) ? asJsonObject(manualVerificationCompletion.evidence) : null;
   const coverage = manualVerificationTask ? {
@@ -10942,8 +11169,8 @@ function completeTaskInner(root2, args = {}) {
     command: null,
     coverage: null,
     reason: "Manual verification task uses structured human-approved evidence instead of coverage."
-  } : runCoverage(root2, args, workingRoot.path);
-  const threshold = Number(args.coverageThreshold ?? coverageThreshold(root2));
+  } : runCoverage(root, args, workingRoot.path);
+  const threshold = Number(args.coverageThreshold ?? coverageThreshold(root));
   const allowMissingCoverage = args.allowMissingCoverage === true;
   const allowLowCoverage = args.allowLowCoverage === true;
   if (!manualVerificationTask && !coverage.available && !allowMissingCoverage) {
@@ -10980,7 +11207,7 @@ function completeTaskInner(root2, args = {}) {
   let productCommit = null;
   if (!resolvedCommitSha && args.allowNoCommit !== true) {
     const productBefore = beginTrace(workingRoot.path);
-    productCommit = commitTrace(root2, args, {
+    productCommit = commitTrace(root, args, {
       kind: "product",
       workflow: "complete_task",
       subject: task.title.replace(/^Task\s+\d+:\s*/i, ""),
@@ -11016,7 +11243,7 @@ function completeTaskInner(root2, args = {}) {
   const sha2 = resolvedCommitSha ? resolvedCommitSha.slice(0, 12) : "unknown";
   const dedupKey = `key: ${track.track_id}:p${phaseIndex}:t${taskIndex}:${sha2.slice(0, 7)}`;
   const journalKey = `${phaseIndex}:${taskIndex}:${sha2}`;
-  const controlBefore = beginTrace(root2);
+  const controlBefore = beginTrace(root);
   const recordState = () => {
     const entry = patchCompletionJournal(track, journalKey, (current) => ({
       ...current,
@@ -11029,7 +11256,7 @@ function completeTaskInner(root2, args = {}) {
       dedup_key: dedupKey,
       started_at: current.started_at || utcNow()
     }));
-    const taskResult = recordTaskResultUnlocked(root2, {
+    const taskResult = recordTaskResultUnlocked(root, {
       trackId: args.trackId,
       phaseIndex,
       taskIndex,
@@ -11037,7 +11264,7 @@ function completeTaskInner(root2, args = {}) {
       commitSha: resolvedCommitSha || args.commitSha,
       coverage: coverage.coverage,
       repo: workingRoot.repo,
-      workingRoot: import_node_path42.default.relative(root2, workingRoot.path) || ".",
+      workingRoot: import_node_path42.default.relative(root, workingRoot.path) || ".",
       ...lastTestRun ? { lastTestRun } : {},
       ...manualVerificationEvidence ? { manualVerificationEvidence } : {}
     });
@@ -11062,7 +11289,7 @@ function completeTaskInner(root2, args = {}) {
     }));
     return { ok: true, task_result: taskResult, journal: recordedEntry };
   };
-  const stateResult = args.lock === false ? recordState() : withTrackLock(root2, track.track_id, recordState);
+  const stateResult = args.lock === false ? recordState() : withTrackLock(root, track.track_id, recordState);
   if (!stateResult.ok) return { ...stateResult, threshold, working_root: workingRoot, coverage };
   const stateTaskResult = asJsonObject(stateResult.task_result);
   const markComplete = () => patchCompletionJournal(track, journalKey, (current) => ({
@@ -11070,8 +11297,8 @@ function completeTaskInner(root2, args = {}) {
     stage: "completed",
     completed_at: current.completed_at || utcNow()
   }));
-  const completedJournal = args.lock === false ? markComplete() : withTrackLock(root2, track.track_id, markComplete);
-  const event = appendCadreEvent(root2, {
+  const completedJournal = args.lock === false ? markComplete() : withTrackLock(root, track.track_id, markComplete);
+  const event = appendCadreEvent(root, {
     kind: "task_completed",
     workflow: "complete_task",
     track_id: track.track_id,
@@ -11084,18 +11311,18 @@ function completeTaskInner(root2, args = {}) {
     summary: args.summary || null,
     journal_key: journalKey
   });
-  const controlCommit = commitTrace(root2, args, {
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "complete",
     subject: `record ${track.track_id} phase ${phaseIndex} task ${taskIndex}`,
     before: controlBefore,
     files: [
-      import_node_path42.default.relative(root2, track.metadata_path),
-      import_node_path42.default.relative(root2, track.plan_path),
-      import_node_path42.default.relative(root2, trackPlanJsonPath(track)),
-      import_node_path42.default.relative(root2, completionJournalPath(track)),
-      import_node_path42.default.relative(root2, `${completionJournalPath(track)}l`),
-      import_node_path42.default.relative(root2, import_node_path42.default.join(track.dir, "implement_state.json")),
+      import_node_path42.default.relative(root, track.metadata_path),
+      import_node_path42.default.relative(root, track.plan_path),
+      import_node_path42.default.relative(root, trackPlanJsonPath(track)),
+      import_node_path42.default.relative(root, completionJournalPath(track)),
+      import_node_path42.default.relative(root, `${completionJournalPath(track)}l`),
+      import_node_path42.default.relative(root, import_node_path42.default.join(track.dir, "implement_state.json")),
       "cadre/events.jsonl"
     ],
     allowDirty: true,
@@ -11126,20 +11353,74 @@ function completeTaskInner(root2, args = {}) {
 }
 
 // src/core/application/runtime/parallel-state.ts
-function recordParallelWorker(root2, args = {}) {
-  return withSharedControlPlaneSync(root2, args, "record_parallel_worker", () => recordParallelWorkerInner(root2, args));
+function recordParallelWorker(root, args = {}) {
+  return withSharedControlPlaneSync(root, args, "record_parallel_worker", () => recordParallelWorkerInner(root, args));
 }
-function recordParallelWorkerInner(root2, args = {}) {
-  const track = findTrack(root2, args.trackId);
+function recordParallelCleanup(root, record) {
+  const track = findTrack(root, record.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${record.trackId}` };
+  return withTrackLock(root, track.track_id, () => {
+    const traceBefore = beginTrace(root);
+    const state = readParallelState(track);
+    const index = state.workers.findIndex((worker2) => worker2.worker_id === record.workerId);
+    if (index < 0) return { ok: false, error: `Parallel worker not found: ${record.workerId}` };
+    const worker = state.workers[index];
+    const now = utcNow();
+    const nextWorker = {
+      ...worker,
+      ...record.worktreeCleaned ? {
+        worktree: null,
+        cleaned_worktree: worker.worktree || worker.cleaned_worktree || null,
+        cleaned_at: now
+      } : {},
+      ...record.workerRefCleaned ? {
+        worker_ref: null,
+        cleaned_worker_ref: worker.worker_ref || worker.cleaned_worker_ref || null,
+        worker_ref_cleaned_at: now
+      } : {},
+      updated_at: now
+    };
+    state.workers[index] = nextWorker;
+    state.updated_at = now;
+    const statePath = parallelStatePath(track);
+    writeJson(statePath, state);
+    const controlCommit = commitTrace(root, { trackId: track.track_id }, {
+      kind: "control",
+      workflow: "parallel",
+      action: "cleanup",
+      subject: `cleanup ${record.workerId}`,
+      before: traceBefore,
+      files: [import_node_path43.default.relative(root, statePath)],
+      trackId: track.track_id,
+      repo: nextWorker.repo || null,
+      note: {
+        worker_id: record.workerId,
+        worktree_cleaned: record.worktreeCleaned,
+        worker_ref_cleaned: record.workerRefCleaned,
+        cleaned_worktree: nextWorker.cleaned_worktree || null,
+        cleaned_worker_ref: nextWorker.cleaned_worker_ref || null
+      }
+    });
+    return {
+      ok: controlCommit.ok !== false,
+      track_id: track.track_id,
+      state_path: import_node_path43.default.relative(root, statePath),
+      worker: nextWorker,
+      control_commit: controlCommit
+    };
+  });
+}
+function recordParallelWorkerInner(root, args = {}) {
+  const track = findTrack(root, args.trackId);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId}` };
-  return withTrackLock(root2, track.track_id, () => recordParallelWorkerUnlocked(root2, track, args));
+  return withTrackLock(root, track.track_id, () => recordParallelWorkerUnlocked(root, track, args));
 }
-function recordParallelWorkerUnlocked(root2, track, args = {}) {
-  const traceBefore = beginTrace(root2);
+function recordParallelWorkerUnlocked(root, track, args = {}) {
+  const traceBefore = beginTrace(root);
   const workerId = args.workerId || args.worker_id;
   if (!workerId) return { ok: false, error: "workerId is required" };
   const status = args.status || "awaiting_merge";
-  const valid = /* @__PURE__ */ new Set(["in_progress", "awaiting_merge", "merged", "conflict", "failed"]);
+  const valid = /* @__PURE__ */ new Set(["in_progress", "awaiting_merge", "merged", "blocked", "conflict", "failed"]);
   if (!valid.has(status)) return { ok: false, error: `Invalid parallel worker status: ${status}` };
   if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
     return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };
@@ -11193,7 +11474,7 @@ function recordParallelWorkerUnlocked(root2, track, args = {}) {
   state.updated_at = now;
   let completion = null;
   if (args.completeTask === true) {
-    completion = completeTask(root2, {
+    completion = completeTask(root, {
       trackId: track.track_id,
       phaseIndex: args.phaseIndex,
       taskIndex: args.taskIndex,
@@ -11214,14 +11495,14 @@ function recordParallelWorkerUnlocked(root2, track, args = {}) {
   }
   writeJson(statePath, state);
   const shouldTrace = status !== "in_progress";
-  const controlCommit = shouldTrace ? commitTrace(root2, args, {
+  const controlCommit = shouldTrace ? commitTrace(root, args, {
     kind: "control",
     workflow: "parallel",
     action: status,
     subject: `record ${workerId}`,
     before: traceBefore,
     files: [
-      import_node_path43.default.relative(root2, statePath)
+      import_node_path43.default.relative(root, statePath)
     ],
     trackId: track.track_id,
     repo: nextWorker.repo || null,
@@ -11237,7 +11518,7 @@ function recordParallelWorkerUnlocked(root2, track, args = {}) {
   return {
     ok: controlCommit.ok !== false,
     track_id: track.track_id,
-    state_path: import_node_path43.default.relative(root2, statePath),
+    state_path: import_node_path43.default.relative(root, statePath),
     worker: nextWorker,
     completion,
     control_commit: controlCommit,
@@ -11270,7 +11551,7 @@ function readParallelState(track) {
 }
 
 // src/core/application/runtime/parallel-workflow.ts
-var import_node_path44 = __toESM(require("node:path"));
+var import_node_path45 = __toESM(require("node:path"));
 
 // src/core/application/runtime/dispatch-adapters.ts
 var AGENT_IDENTIFIERS = ["claude", "codex", "copilot", "antigravity"];
@@ -11303,8 +11584,107 @@ function dispatchAdapterFor(agentIdentifier) {
   return DISPATCH_ADAPTERS[agentIdentifier];
 }
 
+// src/core/application/runtime/parallel-cleanup.ts
+var import_node_fs24 = __toESM(require("node:fs"));
+var import_node_path44 = __toESM(require("node:path"));
+function cleanupRepoRoot(root, track, worker, args) {
+  const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
+  const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+  return asString(branchEntry?.integration_worktree || branchEntry?.source_root || root);
+}
+function plannedCommand(args, cwd) {
+  return { command: "git", args, cwd };
+}
+function run(command) {
+  return runCommand("git", Array.isArray(command.args) ? command.args.map(String) : [], { cwd: asString(command.cwd) });
+}
+function resolvedWorktree(root, worker) {
+  const worktree = asString(worker.worktree);
+  return import_node_path44.default.isAbsolute(worktree) ? worktree : import_node_path44.default.resolve(root, worktree);
+}
+function worktreeResult(root, entry) {
+  if (import_node_fs24.default.existsSync(resolvedWorktree(root, entry.worker))) return run(entry.command);
+  return {
+    ok: true,
+    status: 0,
+    stdout: "",
+    stderr: "",
+    command: "git worktree remove",
+    args: Array.isArray(entry.command.args) ? entry.command.args.map(String) : [],
+    cwd: asString(entry.command.cwd),
+    skipped: true,
+    reason: "worker worktree is already absent"
+  };
+}
+function parallelCleanup(root, track, args = {}) {
+  const state = readParallelState(track);
+  const force = args.force === true;
+  const eligible = state.workers.filter((worker) => force || worker.status === "merged");
+  const worktreeCommands = eligible.flatMap((worker) => worker.worktree ? [{
+    worker,
+    command: plannedCommand(
+      ["worktree", "remove", asString(worker.worktree)],
+      cleanupRepoRoot(root, track, worker, args)
+    )
+  }] : []);
+  const refCommands = eligible.flatMap((worker) => {
+    if (!worker.worker_ref) return [];
+    const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
+    const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+    return [{
+      worker,
+      command: plannedCommand(
+        ["update-ref", "-d", asString(worker.worker_ref)],
+        asString(branchEntry?.source_root || root)
+      )
+    }];
+  });
+  const workers = Array.from(new Set([...worktreeCommands, ...refCommands].map((entry) => entry.worker)));
+  const skipped = state.workers.filter((worker) => (worker.worktree || worker.worker_ref) && !eligible.includes(worker)).map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not merged" }));
+  const alreadyCleaned = state.workers.filter((worker) => !worker.worktree && !worker.worker_ref && (worker.cleaned_at || worker.worker_ref_cleaned_at)).map((worker) => ({
+    worker_id: worker.worker_id,
+    status: worker.status,
+    cleaned_at: worker.cleaned_at || null,
+    worker_ref_cleaned_at: worker.worker_ref_cleaned_at || null
+  }));
+  const execute = args.execute === true;
+  const worktreeResults = execute ? worktreeCommands.map((entry) => worktreeResult(root, entry)) : [];
+  const refResults = execute ? refCommands.map((entry) => run(entry.command)) : [];
+  const stateRecords = [];
+  if (execute) {
+    for (const worker of workers) {
+      const worktreeIndex = worktreeCommands.findIndex((entry) => entry.worker === worker);
+      const refIndex = refCommands.findIndex((entry) => entry.worker === worker);
+      const worktreeCleaned = worktreeIndex >= 0 && worktreeResults[worktreeIndex]?.ok === true;
+      const workerRefCleaned = refIndex >= 0 && refResults[refIndex]?.ok === true;
+      if (!worktreeCleaned && !workerRefCleaned) continue;
+      stateRecords.push(recordParallelCleanup(root, {
+        trackId: track.track_id,
+        workerId: worker.worker_id,
+        worktreeCleaned,
+        workerRefCleaned
+      }));
+    }
+  }
+  const results = [...worktreeResults, ...refResults];
+  return {
+    ok: results.every((result) => result.ok) && stateRecords.every((record) => record.ok !== false),
+    track_id: track.track_id,
+    action: "cleanup",
+    execute,
+    dry_run: !execute,
+    workers,
+    skipped,
+    already_cleaned: alreadyCleaned,
+    commands: worktreeCommands.map((entry) => entry.command),
+    ref_commands: refCommands.map((entry) => entry.command),
+    results,
+    state_records: stateRecords
+  };
+}
+
 // src/core/application/runtime/parallel-dispatch.ts
-function workerDispatchPayload(root2, track, worker, worktree, sourceRoot, agentIdentifier) {
+function workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentIdentifier) {
   const workerId = asString(worker.worker_id);
   const taskKey = asString(worker.task_key);
   const repo = asString(worker.repo, ".");
@@ -11325,7 +11705,7 @@ function workerDispatchPayload(root2, track, worker, worktree, sourceRoot, agent
   const recordFinishInput = {
     trackId: track.track_id,
     workerId,
-    status: "awaiting_merge",
+    status: "<awaiting_merge-or-blocked>",
     phaseIndex: worker.phase_index,
     taskIndex: worker.task_index,
     repo,
@@ -11335,7 +11715,8 @@ function workerDispatchPayload(root2, track, worker, worktree, sourceRoot, agent
     filesChanged: ["<changed-file>"],
     tests: [{ command: "<test-command>", cwd: worktree, ok: true, status: 0 }],
     summary: "<worker-summary>",
-    blockers: []
+    blockers: [],
+    agentIdentifier
   };
   return {
     prompt,
@@ -11365,13 +11746,14 @@ function workerDispatchPayload(root2, track, worker, worktree, sourceRoot, agent
       }
     },
     evidence_requirements: {
+      status: "Copy the worker result status exactly: awaiting_merge or blocked.",
       commit: "Required unless blocked before code changes; record the commit SHA in record_finish.",
       tests: "Include every command run, cwd, exit status, and relevant stdout/stderr tail.",
       coverage: "Include parsed coverage when available or a reason coverage was not produced."
     },
     record_finish_packet: {
       tool: "cadre_action",
-      arguments: { root: root2, action: "parallel.record_finish", input: recordFinishInput, execute: true }
+      arguments: { root, action: "parallel.record_finish", input: recordFinishInput, execute: true }
     },
     finish_evidence_fields: Object.keys(recordFinishInput)
   };
@@ -11390,7 +11772,7 @@ function changedFilesFromArgs(args) {
   return asStringArray(args.filesChanged || args.files_changed || args.files);
 }
 function isManifestChange(file) {
-  const base = import_node_path44.default.basename(file).toLowerCase();
+  const base = import_node_path45.default.basename(file).toLowerCase();
   return [
     "package.json",
     "package-lock.json",
@@ -11411,7 +11793,7 @@ function isManifestChange(file) {
   ].includes(base);
 }
 function fileStem(file) {
-  return import_node_path44.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
+  return import_node_path45.default.basename(file).replace(/\.(test|spec|_test)\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
 }
 function isNarrowTestChange(file, ownedFiles) {
   const normalized = normalizeClaimPath(file);
@@ -11436,7 +11818,7 @@ function planTaskForWorker(track, args) {
   }
   return null;
 }
-function validateWorkerFinishEvidence(root2, track, args = {}) {
+function validateWorkerFinishEvidence(root, track, args = {}) {
   const changed = changedFilesFromArgs(args).map(normalizeClaimPath).filter(Boolean);
   if (changed.length === 0) {
     return {
@@ -11447,7 +11829,7 @@ function validateWorkerFinishEvidence(root2, track, args = {}) {
   }
   const task = planTaskForWorker(track, args);
   const ownedFiles = asStringArray(task?.files).map(normalizeClaimPath).filter(Boolean);
-  const likelyTests = Array.from(new Set(ownedFiles.flatMap((file) => likelyTestCandidatesForFile(root2, file)).map(normalizeClaimPath)));
+  const likelyTests = Array.from(new Set(ownedFiles.flatMap((file) => likelyTestCandidatesForFile(root, file)).map(normalizeClaimPath)));
   const allowed = changed.filter(
     (file) => ownedFiles.some((owned) => claimsOverlap(file, owned)) || likelyTests.includes(file) || isNarrowTestChange(file, ownedFiles) || isManifestChange(file)
   );
@@ -11467,8 +11849,8 @@ function validateWorkerFinishEvidence(root2, track, args = {}) {
     reason: violations.length === 0 ? "All changed files are owned, likely related tests, or narrow manifest changes" : forceAccepted ? "Unowned changed files accepted because force and approvalComplete were supplied" : "Changed files include paths outside the worker ownership claim"
   };
 }
-function parallelWorkersForWave(root2, track, args = {}) {
-  const schedule = phaseSchedule(root2, { ...args, trackId: track.track_id });
+function parallelWorkersForWave(root, track, args = {}) {
+  const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
   if (schedule.ok === false) return schedule;
   const readyGroups = Array.isArray(schedule.ready_groups) ? schedule.ready_groups : [];
   const groupIndex = Number(args.groupIndex || 0);
@@ -11508,7 +11890,7 @@ function parallelWorkersForWave(root2, track, args = {}) {
     const dependencies = (task.depends || []).map((dep) => normalizeTaskDependency(phase, dep));
     if (dependencies.some((dep) => !completeTaskKeys.has(dep))) return false;
     const taskClaims = (task.files || []).map((file) => ({
-      repo: task.repo || loadTopology(root2).defaultRepo || ".",
+      repo: task.repo || loadTopology(root).defaultRepo || ".",
       file: normalizeClaimPath(file)
     }));
     return taskClaims.every(
@@ -11530,10 +11912,10 @@ function parallelWorkersForWave(root2, track, args = {}) {
     task_key: asString(task.task_key),
     title: asString(task.title),
     marker: asString(task.marker),
-    repo: asString(task.repo, loadTopology(root2).defaultRepo || "."),
+    repo: asString(task.repo, loadTopology(root).defaultRepo || "."),
     files: asStringArray(task.files),
     branch: `${track.metadata.git_branch || `track/${track.track_id}`}-${safeName(task.task_key)}`,
-    worker_ref: workerRef(track.track_id, asString(task.repo, loadTopology(root2).defaultRepo || "."), asString(task.task_key))
+    worker_ref: workerRef(track.track_id, asString(task.repo, loadTopology(root).defaultRepo || "."), asString(task.task_key))
   }))).filter((worker) => !["x", "-"].includes(worker.marker));
   const workers = candidateWorkers.slice(0, availableSlots);
   return {
@@ -11551,34 +11933,34 @@ function parallelWorkersForWave(root2, track, args = {}) {
     workers
   };
 }
-function plannedCommand(command, args, cwd) {
+function plannedCommand2(command, args, cwd) {
   return { command, args, cwd };
 }
 function runPlannedCommands(commands) {
   return commands.map((entry) => runCommand(asString(entry.command), asStringArray(entry.args), { cwd: asString(entry.cwd) }));
 }
-function parallelSetupWorkers(root2, track, args = {}) {
+function parallelSetupWorkers(root, track, args = {}) {
   const agentIdentifier = asOptionalString(args.agentIdentifier);
-  if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_parallel setup_workers requires agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
-  const wave = parallelWorkersForWave(root2, track, args);
+  if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_action parallel.setup_workers requires input.agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
+  const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
-  const topology = loadTopology(root2);
-  const entries = new Map(repoEntriesForTrack(root2, track, args).map((entry) => [entry.repo, entry]));
+  const topology = loadTopology(root);
+  const entries = new Map(repoEntriesForTrack(root, track, args).map((entry) => [entry.repo, entry]));
   const commands = [];
   const workers = asArray(wave.workers).map((rawWorker) => {
     const worker = asJsonObject(rawWorker);
     const repo = asString(worker.repo, ".");
-    const branchEntry = branchSetEntryForRepo(root2, track, repo, args);
-    const entry = entries.get(repo) || { root: root2, base: args.base || "main" };
-    const worktree = workerWorktreePath(root2, track.track_id, repo, asString(worker.task_key));
-    const sourceRoot = asString(branchEntry?.source_root || entry.root || root2);
+    const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+    const entry = entries.get(repo) || { root, base: args.base || "main" };
+    const worktree = workerWorktreePath(root, track.track_id, repo, asString(worker.task_key));
+    const sourceRoot = asString(branchEntry?.source_root || entry.root || root);
     const trackBranch = asString(branchEntry?.track_branch || asOptionalString(asJsonObject(entry).head) || track.metadata.git_branch || `track/${track.track_id}`);
     const ref = asOptionalString(worker.worker_ref) || workerRef(track.track_id, repo, asString(worker.task_key));
     const integration = args.execute === true && branchEntry ? ensureIntegrationWorktree(branchEntry) : null;
     const integrationCommand = branchEntry?.commands?.[0] || null;
     const integrationOk = !integration || integration.ok !== false;
     const commandCwd = branchEntry?.source_root || sourceRoot;
-    commands.push(plannedCommand(
+    commands.push(plannedCommand2(
       "git",
       ["worktree", "add", "--detach", worktree, trackBranch],
       commandCwd
@@ -11593,18 +11975,21 @@ function parallelSetupWorkers(root2, track, args = {}) {
       integration_setup: integrationCommand,
       integration_setup_result: integration ? asJsonObject(integration) : null,
       integration_ready: integrationOk,
-      dispatch: workerDispatchPayload(root2, track, worker, worktree, sourceRoot, agentIdentifier)
+      dispatch: workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentIdentifier)
     };
   });
   const execute = args.execute === true;
-  const runnableCommands = workers.map((worker, index) => worker.integration_ready !== false ? commands[index] : null).filter((command) => Boolean(command));
-  const results = execute ? runPlannedCommands(runnableCommands.filter((command) => Boolean(command))) : [];
+  const runnableWorkers = workers.flatMap((worker, index) => {
+    const command = commands[index];
+    return worker.integration_ready !== false && command ? [{ worker, command }] : [];
+  });
+  const results = execute ? runPlannedCommands(runnableWorkers.map((entry) => entry.command)) : [];
   const stateRecords = [];
   if (execute) {
-    workers.forEach((worker, index) => {
+    runnableWorkers.forEach(({ worker }, index) => {
       const commandResult = results[index];
       if (commandResult && commandResult.ok) {
-        stateRecords.push(recordParallelWorker(root2, {
+        stateRecords.push(recordParallelWorker(root, {
           ...args,
           skipSync: true,
           trackId: track.track_id,
@@ -11633,21 +12018,30 @@ function parallelSetupWorkers(root2, track, args = {}) {
     state_records: stateRecords
   };
 }
-function workerRepoRoot(root2, track, worker, args = {}) {
+function workerRepoRoot(root, track, worker, args = {}) {
   const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
-  const branchEntry = branchSetEntryForRepo(root2, track, repo, args);
-  return asString(branchEntry?.integration_worktree || branchEntry?.source_root || root2);
+  const branchEntry = branchSetEntryForRepo(root, track, repo, args);
+  return asString(branchEntry?.integration_worktree || branchEntry?.source_root || root);
 }
-function parallelMergeBack(root2, track, args = {}) {
+function parallelMergeBack(root, track, args = {}) {
   const state = readParallelState(track);
   const force = args.force === true;
-  const workers = state.workers.filter((worker) => !args.workerId || worker.worker_id === args.workerId).filter((worker) => force || worker.status === "awaiting_merge");
-  const skipped = state.workers.filter((worker) => !args.workerId || worker.worker_id === args.workerId).filter((worker) => !workers.includes(worker)).map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not awaiting_merge" }));
-  const commands = workers.filter((worker) => worker.branch || worker.commit_sha).map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.worker_ref || worker.branch)], workerRepoRoot(root2, track, worker, args)));
+  const selectedWorkers = state.workers.filter((worker) => !args.workerId || worker.worker_id === args.workerId).filter((worker) => force || worker.status === "awaiting_merge");
+  const workers = selectedWorkers.filter((worker) => worker.branch || worker.commit_sha || worker.worker_ref);
+  const skipped = state.workers.filter((worker) => !args.workerId || worker.worker_id === args.workerId).filter((worker) => !workers.includes(worker)).map((worker) => ({
+    worker_id: worker.worker_id,
+    status: worker.status,
+    reason: selectedWorkers.includes(worker) ? "worker has no merge ref" : "worker is not awaiting_merge"
+  }));
+  const commands = workers.map((worker) => plannedCommand2(
+    "git",
+    ["merge", "--no-ff", asString(worker.commit_sha || worker.worker_ref || worker.branch)],
+    workerRepoRoot(root, track, worker, args)
+  ));
   const execute = args.execute === true;
   const branchChecks = workers.map((worker) => {
     const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
-    const branchEntry = branchSetEntryForRepo(root2, track, repo, args);
+    const branchEntry = branchSetEntryForRepo(root, track, repo, args);
     if (!branchEntry) return { ok: false, worker_id: worker.worker_id, repo, error: "No branch-set entry for worker repo" };
     if (!branchEntry.exists) return { ok: false, worker_id: worker.worker_id, repo, error: "Integration worktree is missing", branch_set: branchEntry };
     if (branchEntry.health !== "ready") return { ok: false, worker_id: worker.worker_id, repo, error: `Integration worktree is ${branchEntry.health}`, branch_set: branchEntry };
@@ -11679,7 +12073,10 @@ function parallelMergeBack(root2, track, args = {}) {
           skipSync: true,
           trackId: track.track_id,
           workerId: worker.worker_id,
-          status: "merged"
+          status: "merged",
+          completeTask: true,
+          workingRoot: workerRepoRoot(root, track, worker, args),
+          summary: asOptionalString(worker.summary) || `Merged parallel worker ${worker.worker_id}`
         };
         if (worker.phase_index != null) recordArgs.phaseIndex = worker.phase_index;
         if (worker.task_index != null) recordArgs.taskIndex = worker.task_index;
@@ -11688,7 +12085,7 @@ function parallelMergeBack(root2, track, args = {}) {
         if (worker.branch) recordArgs.branch = worker.branch;
         if (worker.worker_ref) recordArgs.workerRef = worker.worker_ref;
         if (worker.commit_sha) recordArgs.commitSha = worker.commit_sha;
-        stateRecords.push(recordParallelWorker(root2, recordArgs));
+        stateRecords.push(recordParallelWorker(root, recordArgs));
       }
     });
   }
@@ -11706,55 +12103,29 @@ function parallelMergeBack(root2, track, args = {}) {
     state_records: stateRecords
   };
 }
-function parallelCleanup(root2, track, args = {}) {
-  const state = readParallelState(track);
-  const force = args.force === true;
-  const workers = state.workers.filter((worker) => worker.worktree && (force || worker.status === "merged"));
-  const skipped = state.workers.filter((worker) => worker.worktree && !workers.includes(worker)).map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not merged" }));
-  const commands = workers.map((worker) => plannedCommand("git", ["worktree", "remove", asString(worker.worktree)], workerRepoRoot(root2, track, worker, args)));
-  const refCommands = workers.filter((worker) => worker.worker_ref).map((worker) => {
-    const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
-    const branchEntry = branchSetEntryForRepo(root2, track, repo, args);
-    return plannedCommand("git", ["update-ref", "-d", asString(worker.worker_ref)], asString(branchEntry?.source_root || root2));
-  });
-  const execute = args.execute === true;
-  const results = execute ? runPlannedCommands([...commands, ...refCommands]) : [];
-  return {
-    ok: results.every((result) => result.ok),
-    track_id: track.track_id,
-    action: "cleanup",
-    execute,
-    dry_run: !execute,
-    workers,
-    skipped,
-    commands,
-    ref_commands: refCommands,
-    results
-  };
-}
-function parallelWorkflow(root2, args = {}) {
+function parallelWorkflow(root, args = {}) {
   const action = args.action || "plan";
   const mutating = ["setup_workers", "record_finish", "merge_back", "cleanup"].includes(action);
   if (mutating && args.execute === true && args.skipSync !== true) {
     return withSharedControlPlaneSync(
-      root2,
+      root,
       args,
       `parallel:${action}`,
-      () => parallelWorkflow(root2, { ...args, skipSync: true })
+      () => parallelWorkflow(root, { ...args, skipSync: true })
     );
   }
-  const track = findTrack(root2, args.trackId || args.track_id);
+  const track = findTrack(root, args.trackId || args.track_id);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
-  const repoError = repoEntriesError(root2, track, args);
+  const repoError = repoEntriesError(root, track, args);
   if (repoError) return repoError;
   if (action === "plan") {
-    const schedule = phaseSchedule(root2, { ...args, trackId: track.track_id });
+    const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
     return { ok: schedule.ok !== false, track_id: track.track_id, schedule, state: readParallelState(track) };
   }
-  if (action === "next_wave") return parallelWorkersForWave(root2, track, args);
-  if (action === "setup_workers") return parallelSetupWorkers(root2, track, args);
+  if (action === "next_wave") return parallelWorkersForWave(root, track, args);
+  if (action === "setup_workers") return parallelSetupWorkers(root, track, args);
   if (action === "record_finish") {
-    const evidenceValidation = validateWorkerFinishEvidence(root2, track, args);
+    const evidenceValidation = validateWorkerFinishEvidence(root, track, args);
     if (args.execute !== true) {
       return {
         ok: true,
@@ -11777,20 +12148,20 @@ function parallelWorkflow(root2, args = {}) {
     }
     if (evidenceValidation.ok === false) return evidenceValidation;
     const task = planTaskForWorker(track, args);
-    const repo = asOptionalString(args.repo) || task?.repo || loadTopology(root2).defaultRepo || ".";
+    const repo = asOptionalString(args.repo) || task?.repo || loadTopology(root).defaultRepo || ".";
     const ref = asOptionalString(args.workerRef || args.worker_ref) || (task ? workerRef(track.track_id, repo, task.task_key) : null);
-    const branchEntry = ref ? branchSetEntryForRepo(root2, track, repo, args) : null;
+    const branchEntry = ref ? branchSetEntryForRepo(root, track, repo, args) : null;
     let refRecord = null;
     const commitSha2 = asOptionalString(args.commitSha || args.commit);
     if (ref && branchEntry && commitSha2) {
       const exists = runCommand("git", ["cat-file", "-e", `${commitSha2}^{commit}`], { cwd: branchEntry.source_root });
       refRecord = exists.ok ? { ok: runCommand("git", ["update-ref", ref, commitSha2], { cwd: branchEntry.source_root }).ok, ref, commit_sha: commitSha2, source_root: branchEntry.source_root } : { ok: true, skipped: true, ref, commit_sha: commitSha2, reason: "commit is not available in local repo; worker ref not created" };
     }
-    const recorded = recordParallelWorker(root2, { ...args, trackId: track.track_id, status: args.status || "awaiting_merge", workerRef: ref || void 0 });
+    const recorded = recordParallelWorker(root, { ...args, trackId: track.track_id, status: args.status || "awaiting_merge", workerRef: ref || void 0 });
     return { ...recorded, worker_ref_record: refRecord };
   }
-  if (action === "merge_back") return parallelMergeBack(root2, track, args);
-  if (action === "cleanup") return parallelCleanup(root2, track, args);
+  if (action === "merge_back") return parallelMergeBack(root, track, args);
+  if (action === "cleanup") return parallelCleanup(root, track, args);
   return { ok: false, error: `Unknown parallel action: ${action}` };
 }
 
@@ -11829,11 +12200,11 @@ function canonicalWorkflow(value) {
 }
 
 // src/core/infrastructure/runtime/project-skills-store.ts
-var import_node_fs24 = __toESM(require("node:fs"));
-var import_node_path45 = __toESM(require("node:path"));
+var import_node_fs25 = __toESM(require("node:fs"));
+var import_node_path46 = __toESM(require("node:path"));
 function isInside(parent, candidate) {
-  const relative = import_node_path45.default.relative(parent, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path45.default.isAbsolute(relative);
+  const relative = import_node_path46.default.relative(parent, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path46.default.isAbsolute(relative);
 }
 function strings(value) {
   return Array.from(new Set(asStringArray(value).map((entry) => entry.trim()).filter(Boolean)));
@@ -11852,44 +12223,44 @@ function referenceRecord(skillDir, value) {
   const rawPath = asOptionalString(raw.path)?.trim() || "";
   const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
   if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) return { error: `invalid reference id: ${id || "(missing)"}` };
-  if (!normalized || import_node_path45.default.isAbsolute(rawPath) || normalized.split("/").includes("..")) return { error: `reference must stay inside the skill directory: ${rawPath}` };
-  if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path45.default.extname(normalized).toLowerCase())) return { error: `unsupported reference type: ${rawPath}` };
-  const absolutePath2 = import_node_path45.default.resolve(skillDir, normalized);
+  if (!normalized || import_node_path46.default.isAbsolute(rawPath) || normalized.split("/").includes("..")) return { error: `reference must stay inside the skill directory: ${rawPath}` };
+  if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path46.default.extname(normalized).toLowerCase())) return { error: `unsupported reference type: ${rawPath}` };
+  const absolutePath2 = import_node_path46.default.resolve(skillDir, normalized);
   try {
-    const realSkillDir = import_node_fs24.default.realpathSync(skillDir);
-    const realReference = import_node_fs24.default.realpathSync(absolutePath2);
+    const realSkillDir = import_node_fs25.default.realpathSync(skillDir);
+    const realReference = import_node_fs25.default.realpathSync(absolutePath2);
     if (!isInside(realSkillDir, realReference)) return { error: `reference escapes the skill directory: ${rawPath}` };
-    const stat = import_node_fs24.default.statSync(realReference);
+    const stat = import_node_fs25.default.statSync(realReference);
     if (!stat.isFile() || stat.size > PROJECT_SKILL_MAX_FILE_BYTES) return { error: `invalid or oversized reference: ${rawPath}` };
-    if (import_node_fs24.default.readFileSync(realReference).subarray(0, 8192).includes(0)) return { error: `binary reference is not supported: ${rawPath}` };
+    if (import_node_fs25.default.readFileSync(realReference).subarray(0, 8192).includes(0)) return { error: `binary reference is not supported: ${rawPath}` };
     return { reference: { id, path: normalized, absolutePath: realReference, bytes: stat.size, ...selectors(raw.when) } };
   } catch (error) {
     return { error: `reference cannot be resolved (${rawPath}): ${errorMessage(error)}` };
   }
 }
-function projectSkillIds(root2) {
-  const dir = import_node_path45.default.join(root2, "cadre", "skills");
+function projectSkillIds(root) {
+  const dir = import_node_path46.default.join(root, "cadre", "skills");
   try {
-    return import_node_fs24.default.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && import_node_fs24.default.existsSync(import_node_path45.default.join(dir, entry.name, "skill.json"))).map((entry) => entry.name).sort();
+    return import_node_fs25.default.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && import_node_fs25.default.existsSync(import_node_path46.default.join(dir, entry.name, "skill.json"))).map((entry) => entry.name).sort();
   } catch {
     return [];
   }
 }
-function loadProjectSkill(root2, id, knownRepos2) {
+function loadProjectSkill(root, id, knownRepos2) {
   const errors = [];
   if (!PROJECT_SKILL_ID_PATTERN.test(id)) return { id, ok: false, errors: [`invalid skill id: ${id}`] };
-  const skillDir = import_node_path45.default.join(root2, "cadre", "skills", id);
-  const file = import_node_path45.default.join(skillDir, "skill.json");
-  if (!import_node_fs24.default.existsSync(file)) return { id, ok: false, errors: [`skill manifest not found: ${id}/skill.json`] };
+  const skillDir = import_node_path46.default.join(root, "cadre", "skills", id);
+  const file = import_node_path46.default.join(skillDir, "skill.json");
+  if (!import_node_fs25.default.existsSync(file)) return { id, ok: false, errors: [`skill manifest not found: ${id}/skill.json`] };
   let raw;
   let stat;
   try {
-    const realCatalog = import_node_fs24.default.realpathSync(import_node_path45.default.join(root2, "cadre", "skills"));
-    const realDir = import_node_fs24.default.realpathSync(skillDir);
-    const realFile = import_node_fs24.default.realpathSync(file);
+    const realCatalog = import_node_fs25.default.realpathSync(import_node_path46.default.join(root, "cadre", "skills"));
+    const realDir = import_node_fs25.default.realpathSync(skillDir);
+    const realFile = import_node_fs25.default.realpathSync(file);
     if (!isInside(realCatalog, realDir) || !isInside(realDir, realFile)) return { id, ok: false, errors: [`skill manifest escapes cadre/skills: ${id}`] };
-    stat = import_node_fs24.default.statSync(realFile);
-    raw = asJsonObject(JSON.parse(import_node_fs24.default.readFileSync(realFile, "utf8")));
+    stat = import_node_fs25.default.statSync(realFile);
+    raw = asJsonObject(JSON.parse(import_node_fs25.default.readFileSync(realFile, "utf8")));
   } catch (error) {
     return { id, ok: false, errors: [`skill manifest cannot be read: ${errorMessage(error)}`] };
   }
@@ -11931,7 +12302,7 @@ function loadProjectSkill(root2, id, knownRepos2) {
   const referenceIds = new Set(references.map((reference) => reference.id));
   for (const rule of rules) for (const reference of rule.references) if (!referenceIds.has(reference)) errors.push(`rule ${rule.id} references unknown id: ${reference}`);
   if (errors.length > 0) return { id, ok: false, errors };
-  const projection = import_node_path45.default.join(skillDir, "SKILL.md");
+  const projection = import_node_path46.default.join(skillDir, "SKILL.md");
   return {
     id,
     ok: true,
@@ -11943,14 +12314,14 @@ function loadProjectSkill(root2, id, knownRepos2) {
       ...baseSelectors,
       rules: rules.sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id)),
       references,
-      path: import_node_path45.default.relative(root2, file).split(import_node_path45.default.sep).join("/"),
-      projectionPath: import_node_fs24.default.existsSync(projection) ? import_node_path45.default.relative(root2, projection).split(import_node_path45.default.sep).join("/") : null,
+      path: import_node_path46.default.relative(root, file).split(import_node_path46.default.sep).join("/"),
+      projectionPath: import_node_fs25.default.existsSync(projection) ? import_node_path46.default.relative(root, projection).split(import_node_path46.default.sep).join("/") : null,
       bytes: stat.size
     }
   };
 }
 function projectSkillReferenceContent(reference) {
-  const content = import_node_fs24.default.readFileSync(reference.absolutePath, "utf8");
+  const content = import_node_fs25.default.readFileSync(reference.absolutePath, "utf8");
   return { id: reference.id, path: reference.path, bytes: reference.bytes, content };
 }
 
@@ -11959,8 +12330,8 @@ function requestedSkillIds(value) {
   const values = typeof value === "string" ? value.split(/[,\s]+/) : asStringArray(value);
   return Array.from(new Set(values.map((entry) => entry.trim()).filter(Boolean))).sort();
 }
-function inlineRuleBudget(root2, args) {
-  const config = asJsonObject(loadTopology(root2).config.project_skills);
+function inlineRuleBudget(root, args) {
+  const config = asJsonObject(loadTopology(root).config.project_skills);
   const argumentValue = args.skillRuleBudget ?? args.skill_rule_budget;
   const configuredValue = config.inline_rule_budget;
   const source = argumentValue !== void 0 ? "argument" : configuredValue !== void 0 ? "config" : "default";
@@ -11983,8 +12354,8 @@ function inlineRuleBudget(root2, args) {
     warnings: value === requested ? [] : [`Project skill inline rule budget from ${source} was clamped to ${value}`]
   };
 }
-function knownRepoNames(root2) {
-  const topology = loadTopology(root2);
+function knownRepoNames(root) {
+  const topology = loadTopology(root);
   const known = /* @__PURE__ */ new Set([".", "root"]);
   for (const raw of Array.isArray(topology.repos.repos) ? topology.repos.repos : []) {
     const name = asOptionalString(asJsonObject(raw).name);
@@ -11998,21 +12369,21 @@ function reposFromPlan(value) {
 function filesFromPlan(value) {
   return (Array.isArray(asJsonObject(value).phases) ? asJsonObject(value).phases : []).flatMap((phase) => Array.isArray(asJsonObject(phase).tasks) ? asJsonObject(phase).tasks : []).flatMap((task) => asStringArray(asJsonObject(task).files));
 }
-function projectSkillTargetRepos(root2, args = {}) {
-  const topology = loadTopology(root2);
+function projectSkillTargetRepos(root, args = {}) {
+  const topology = loadTopology(root);
   const explicit = [asOptionalString(args.repo), ...asStringArray(args.repos), ...reposFromPlan(args.plan)].filter((repo) => Boolean(repo));
   if (explicit.length > 0) return Array.from(new Set(explicit)).sort();
-  const track = findTrack(root2, asOptionalString(args.trackId || args.track_id));
+  const track = findTrack(root, asOptionalString(args.trackId || args.track_id));
   if (track) {
     const repos = parsePlanFile(track.plan_path).tasks.map((task) => task.repo || (topology.polyrepo ? topology.defaultRepo : ".")).filter(Boolean);
     if (repos.length > 0) return Array.from(new Set(repos)).sort();
   }
   return topology.polyrepo ? [] : ["."];
 }
-function targetFiles(root2, args) {
+function targetFiles(root, args) {
   const explicit = [...asStringArray(args.files), ...asStringArray(args.filesChanged || args.files_changed), ...filesFromPlan(args.plan)];
   if (explicit.length > 0) return Array.from(new Set(explicit)).sort();
-  const track = findTrack(root2, asOptionalString(args.trackId || args.track_id));
+  const track = findTrack(root, asOptionalString(args.trackId || args.track_id));
   return track ? Array.from(new Set(parsePlanFile(track.plan_path).tasks.flatMap((task) => task.files))).sort() : [];
 }
 function globMatch(pattern, file) {
@@ -12025,7 +12396,7 @@ function selectorMatch(workflows, repos, patterns, workflow, targets, files) {
   const filesOk = patterns.length === 0 || files.some((file) => patterns.some((pattern) => globMatch(pattern, file)));
   return workflowOk && repoOk && filesOk;
 }
-function selectedRule(skill, rule, root2, workflow, repos, files) {
+function selectedRule(skill, rule, root, workflow, repos, files) {
   return {
     id: rule.id,
     text: rule.text,
@@ -12034,26 +12405,26 @@ function selectedRule(skill, rule, root2, workflow, repos, files) {
     references: rule.references.flatMap((id) => {
       const reference = skill.references.find((entry) => entry.id === id);
       if (!reference || !selectorMatch(reference.workflows, reference.repos, reference.filePatterns, workflow, repos, files)) return [];
-      return [{ id, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root2)}&id=${encodeURIComponent(skill.id)}&reference=${encodeURIComponent(id)}` }];
+      return [{ id, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}&reference=${encodeURIComponent(id)}` }];
     })
   };
 }
-function projectSkillSelection(root2, workflowValue, args = {}) {
+function projectSkillSelection(root, workflowValue, args = {}) {
   const workflow = canonicalWorkflow(workflowValue);
   const requested = requestedSkillIds(args.skillIds);
   const requestedSet = new Set(requested);
-  const repos = projectSkillTargetRepos(root2, args);
-  const files = targetFiles(root2, args);
-  const budget = inlineRuleBudget(root2, args);
-  const knownRepos2 = knownRepoNames(root2);
-  const installed = projectSkillIds(root2);
+  const repos = projectSkillTargetRepos(root, args);
+  const files = targetFiles(root, args);
+  const budget = inlineRuleBudget(root, args);
+  const knownRepos2 = knownRepoNames(root);
+  const installed = projectSkillIds(root);
   const errors = [];
   const warnings = [...budget.warnings];
   const selected = [];
   let inlineChars = 0;
   for (const id of requested) if (!PROJECT_SKILL_ID_PATTERN.test(id) || !installed.includes(id)) errors.push(`Explicit project skill is missing or invalid: ${id}`);
   for (const id of installed) {
-    const loaded = loadProjectSkill(root2, id, knownRepos2);
+    const loaded = loadProjectSkill(root, id, knownRepos2);
     if (!loaded.ok || !loaded.skill) {
       const messages = loaded.errors.map((error) => `${id}: ${error}`);
       if (requestedSet.has(id)) errors.push(...messages);
@@ -12074,7 +12445,7 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
         continue;
       }
       inlineChars += cost;
-      rules.push(selectedRule(skill, rule, root2, workflow, repos, files));
+      rules.push(selectedRule(skill, rule, root, workflow, repos, files));
     }
     selected.push({
       id: skill.id,
@@ -12084,7 +12455,7 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
       projection_path: skill.projectionPath,
       reasons: [explicit ? "explicit" : "selector"],
       rules,
-      resource_uri: `cadre://project-skill?root=${encodeURIComponent(root2)}&id=${encodeURIComponent(skill.id)}`
+      resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(skill.id)}`
     });
   }
   return {
@@ -12107,8 +12478,8 @@ function projectSkillSelection(root2, workflowValue, args = {}) {
     errors
   };
 }
-function projectSkillDetail(root2, id) {
-  const loaded = loadProjectSkill(root2, id, knownRepoNames(root2));
+function projectSkillDetail(root, id) {
+  const loaded = loadProjectSkill(root, id, knownRepoNames(root));
   if (!loaded.ok || !loaded.skill) return { ok: false, id, source: "cadre/skills", errors: loaded.errors };
   const skill = loaded.skill;
   return {
@@ -12125,8 +12496,8 @@ function projectSkillDetail(root2, id) {
     }
   };
 }
-function projectSkillDiagnostics(root2) {
-  const loaded = projectSkillIds(root2).map((id) => loadProjectSkill(root2, id, knownRepoNames(root2)));
+function projectSkillDiagnostics(root) {
+  const loaded = projectSkillIds(root).map((id) => loadProjectSkill(root, id, knownRepoNames(root)));
   return {
     ok: loaded.every((skill) => skill.ok),
     source: "cadre/skills",
@@ -12137,39 +12508,39 @@ function projectSkillDiagnostics(root2) {
 }
 
 // src/core/application/runtime/workflow-basic.ts
-var import_node_fs25 = __toESM(require("node:fs"));
-var import_node_path46 = __toESM(require("node:path"));
-function workflowImplement(root2, args = {}) {
-  const prep = implementationPrep(root2, {
+var import_node_fs26 = __toESM(require("node:fs"));
+var import_node_path47 = __toESM(require("node:path"));
+function workflowImplement(root, args = {}) {
+  const prep = implementationPrep(root, {
     ...args,
     claim: args.claim === true || args.execute === true
   });
   const trackId = asOptionalString(prep.selected_track) || args.trackId || args.track_id || null;
   return {
-    ...workflowSummary(root2, "implement", args),
+    ...workflowSummary(root, "implement", args),
     ok: prep.ok !== false,
     prepare_implementation: prep,
-    phase_schedule: trackId ? phaseSchedule(root2, { ...args, trackId }) : null
+    phase_schedule: trackId ? phaseSchedule(root, { ...args, trackId }) : null
   };
 }
-function workflowStatus(root2, args = {}) {
+function workflowStatus(root, args = {}) {
   const mode = args.mode || args.view || args.status || "live";
-  const summary = workflowSummary(root2, "status", args);
-  if (mode === "team" || args.mine === true) return { ...summary, ok: true, status: teamBoard(root2, { ...args, mine: args.mine === true }) };
-  if (mode === "fleet" || mode === "repos") return { ...summary, ok: true, status: fleetStatus(root2, args) };
-  if (mode === "available") return { ...summary, ok: true, status: availableWork(root2) };
-  if (mode === "collisions") return { ...summary, ok: true, status: collisionScan(root2) };
-  if (mode === "doctor") return { ...summary, ok: true, status: doctor(root2, { hasCadreProject: true }) };
-  return { ...summary, ok: true, status: liveStatus(root2) };
+  const summary = workflowSummary(root, "status", args);
+  if (mode === "team" || args.mine === true) return { ...summary, ok: true, status: teamBoard(root, { ...args, mine: args.mine === true }) };
+  if (mode === "fleet" || mode === "repos") return { ...summary, ok: true, status: fleetStatus(root, args) };
+  if (mode === "available") return { ...summary, ok: true, status: availableWork(root) };
+  if (mode === "collisions") return { ...summary, ok: true, status: collisionScan(root) };
+  if (mode === "doctor") return { ...summary, ok: true, status: doctor(root, { hasCadreProject: true }) };
+  return { ...summary, ok: true, status: liveStatus(root) };
 }
-function workflowReview(root2, args = {}) {
-  const trackId = selectedTrackId(root2, args);
-  const summary = workflowSummary(root2, "review", args);
+function workflowReview(root, args = {}) {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "review", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  const context = trackContext(root2, trackId);
-  const review = reviewAssist(root2, { ...args, trackId });
-  const gate = reviewGate(root2, trackId, args);
-  const provider = args.includeProvider === false ? null : prCiStatus(root2, { ...args, trackId });
+  const context = trackContext(root, trackId);
+  const review = reviewAssist(root, { ...args, trackId });
+  const gate = reviewGate(root, trackId, args);
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
   const pendingProvider = Boolean(provider && provider.ok === false);
   return {
     ...summary,
@@ -12185,30 +12556,30 @@ function workflowReview(root2, args = {}) {
     next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : []
   };
 }
-function workflowValidate(root2, args = {}) {
-  const summary = workflowSummary(root2, "validate", args);
-  const branchSets = listTracks(root2).map((track) => ({
+function workflowValidate(root, args = {}) {
+  const summary = workflowSummary(root, "validate", args);
+  const branchSets = listTracks(root).map((track) => ({
     track_id: track.track_id,
-    branch_set: branchSetForTrack(root2, track)
+    branch_set: branchSetForTrack(root, track)
   }));
-  const projections = artifactValidate(root2, { ...args, includeArchive: true });
+  const projections = artifactValidate(root, { ...args, includeArchive: true });
   return {
     ...summary,
     ok: projections.ok !== false,
-    doctor: doctor(root2, { hasCadreProject: true }),
-    team: teamStatus(root2),
-    integrity: planIntegrity(root2, args.trackId || args.track_id || null),
-    collisions: collisionScan(root2),
-    fleet: fleetStatus(root2, { includeCollisions: false }),
+    doctor: doctor(root, { hasCadreProject: true }),
+    team: teamStatus(root),
+    integrity: planIntegrity(root, args.trackId || args.track_id || null),
+    collisions: collisionScan(root),
+    fleet: fleetStatus(root, { includeCollisions: false }),
     branch_sets: branchSets,
-    native_state: nativeStateSummary(root2),
-    project_skill_diagnostics: projectSkillDiagnostics(root2),
+    native_state: nativeStateSummary(root),
+    project_skill_diagnostics: projectSkillDiagnostics(root),
     projection_validation: projections
   };
 }
-function workflowArchive(root2, args = {}) {
-  const summary = workflowSummary(root2, "archive", args);
-  const tracks = listTracks(root2).filter(
+function workflowArchive(root, args = {}) {
+  const summary = workflowSummary(root, "archive", args);
+  const tracks = listTracks(root).filter(
     (track) => args.trackId || args.track_id ? track.track_id === (args.trackId || args.track_id) : (track.metadata.status || "new") === "completed"
   );
   if (tracks.length === 0) return { ...summary, ok: false, error: "No completed or selected track found" };
@@ -12229,41 +12600,41 @@ function workflowArchive(root2, args = {}) {
       review_artifacts: reviewArtifacts
     };
   }
-  const syncPre = syncControlPlane(root2, { mode: "pre" });
+  const syncPre = syncControlPlane(root, { mode: "pre" });
   if (syncPre.ok === false) return { ...summary, ok: false, phase_state: "blocked", stage: "sync_pre", sync_pre: syncPre };
-  const traceBefore = beginTrace(root2);
+  const traceBefore = beginTrace(root);
   const archived = [];
-  const archiveRoot = import_node_path46.default.join(root2, "cadre", "archive");
-  import_node_fs25.default.mkdirSync(archiveRoot, { recursive: true });
+  const archiveRoot = import_node_path47.default.join(root, "cadre", "archive");
+  import_node_fs26.default.mkdirSync(archiveRoot, { recursive: true });
   for (const track of tracks) {
-    const target2 = import_node_path46.default.join(archiveRoot, track.track_id);
+    const target2 = import_node_path47.default.join(archiveRoot, track.track_id);
     if (fileExists(target2)) {
       archived.push({ track_id: track.track_id, ok: false, error: "Archive target already exists" });
       continue;
     }
-    import_node_fs25.default.renameSync(track.dir, target2);
-    const archiveDefs = artifactDefinitions(root2, { includeArchive: true }).filter((definition) => definition.id.startsWith(`archive:${track.track_id}:`) && definition.projection);
+    import_node_fs26.default.renameSync(track.dir, target2);
+    const archiveDefs = artifactDefinitions(root, { includeArchive: true }).filter((definition) => definition.id.startsWith(`archive:${track.track_id}:`) && definition.projection);
     const projectionErrors = [];
     const projectionWrites = archiveDefs.flatMap((definition) => {
-      if (!fileExists(import_node_path46.default.join(root2, definition.canonical))) return [];
-      const existingProjection = definition.projection ? import_node_path46.default.join(root2, definition.projection) : null;
-      if (existingProjection && fileExists(existingProjection) && !hasGeneratedMarker(import_node_fs25.default.readFileSync(existingProjection, "utf8"))) {
+      if (!fileExists(import_node_path47.default.join(root, definition.canonical))) return [];
+      const existingProjection = definition.projection ? import_node_path47.default.join(root, definition.projection) : null;
+      if (existingProjection && fileExists(existingProjection) && !hasGeneratedMarker(import_node_fs26.default.readFileSync(existingProjection, "utf8"))) {
         projectionErrors.push(`Refusing to rewrite user-owned archived projection ${definition.projection}`);
         return [];
       }
-      const rendered = renderArtifact(root2, definition);
+      const rendered = renderArtifact(root, definition);
       if (rendered.ok !== true || !rendered.content || !definition.projection) {
         projectionErrors.push(`Unable to render archived projection for ${definition.canonical}`);
         return [];
       }
       return rendered.ok === true && rendered.content && definition.projection ? [{ path: definition.projection, content: rendered.content }] : [];
     });
-    const projectionMutation = projectionErrors.length > 0 ? { ok: false, error: projectionErrors[0], errors: projectionErrors } : projectionWrites.length > 0 ? writeArtifactFilesAtomic(root2, projectionWrites) : { ok: true, skipped: true };
+    const projectionMutation = projectionErrors.length > 0 ? { ok: false, error: projectionErrors[0], errors: projectionErrors } : projectionWrites.length > 0 ? writeArtifactFilesAtomic(root, projectionWrites) : { ok: true, skipped: true };
     let moveRollback = null;
     if (projectionMutation.ok === false) {
       try {
-        import_node_fs25.default.renameSync(target2, track.dir);
-        moveRollback = { ok: true, restored: import_node_path46.default.relative(root2, track.dir) };
+        import_node_fs26.default.renameSync(target2, track.dir);
+        moveRollback = { ok: true, restored: import_node_path47.default.relative(root, track.dir) };
       } catch (error) {
         moveRollback = { ok: false, error: errorMessage(error) };
       }
@@ -12271,13 +12642,13 @@ function workflowArchive(root2, args = {}) {
     archived.push({
       track_id: track.track_id,
       ok: projectionMutation.ok !== false,
-      path: import_node_path46.default.relative(root2, target2),
+      path: import_node_path47.default.relative(root, target2),
       projection_mutation: projectionMutation,
       move_rollback: moveRollback
     });
   }
-  const regen = regenIndex(root2);
-  const controlCommit = commitTrace(root2, args, {
+  const regen = regenIndex(root);
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "archive",
     subject: tracks.length === 1 ? `archive ${tracks[0]?.track_id || "track"}` : `archive ${tracks.length} tracks`,
@@ -12288,7 +12659,7 @@ function workflowArchive(root2, args = {}) {
       archived: archived.map(asJsonObject)
     }
   });
-  const syncPost = syncControlPlane(root2, { mode: "post" });
+  const syncPost = syncControlPlane(root, { mode: "post" });
   return {
     ...summary,
     ok: archived.every((item) => item.ok !== false) && regen.ok !== false && controlCommit.ok !== false && syncPost.ok !== false,
@@ -12301,14 +12672,14 @@ function workflowArchive(root2, args = {}) {
     sync_post: syncPost
   };
 }
-function workflowHandoff(root2, args = {}) {
-  args = applyStagedApprovalSessionPayload(root2, args, "handoff");
-  const trackId = selectedTrackId(root2, args);
-  const summary = workflowSummary(root2, "handoff", args);
+function workflowHandoff(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "handoff");
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "handoff", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  const context = trackContext(root2, trackId);
+  const context = trackContext(root, trackId);
   if (context.ok === false) return { ...summary, ok: false, track_context: context };
-  const track = findTrack(root2, trackId);
+  const track = findTrack(root, trackId);
   if (!track) return { ...summary, ok: false, track_context: context, error: `Track not found: ${trackId}` };
   const text2 = asOptionalString(args.handoffText) || [
     `# Handoff: ${trackId}`,
@@ -12317,24 +12688,24 @@ function workflowHandoff(root2, args = {}) {
     "",
     "Resume from the packet context returned by Cadre MCP."
   ].join("\n");
-  const handoffPath = import_node_path46.default.join(track.dir, "HANDOFF.md");
+  const handoffPath = import_node_path47.default.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
   const handoffJson = markdownDocJson("handoff", text2, { track_id: trackId });
   const handoffCanonicalContent = `${JSON.stringify(handoffJson, null, 2)}
 `;
   const reviewFiles2 = documentReviewPair(
     "handoff",
-    jsonReviewFile(import_node_path46.default.relative(root2, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
+    jsonReviewFile(import_node_path47.default.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
     textReviewFile(
-      import_node_path46.default.relative(root2, handoffPath),
+      import_node_path47.default.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(import_node_path46.default.relative(root2, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path46.default.relative(root2, handoffJsonPath)), { canonicalContent: handoffCanonicalContent, projection: import_node_path46.default.relative(root2, handoffPath) })
+      withGeneratedMarker(import_node_path47.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path47.default.relative(root, handoffJsonPath)), { canonicalContent: handoffCanonicalContent, projection: import_node_path47.default.relative(root, handoffPath) })
     )
   );
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
-  const reviewBundle = workflowReviewBundle(root2, "handoff", args, reviewFiles2, { track_id: trackId });
-  const approval = stagedApprovalState(root2, "handoff", args, handoffApprovalStages(), reviewFiles2, { track_id: trackId, final_only_files: ["cadre/events.jsonl"] });
+  const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles2, { track_id: trackId });
+  const approval = stagedApprovalState(root, "handoff", args, handoffApprovalStages(), reviewFiles2, { track_id: trackId, final_only_files: ["cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
@@ -12347,7 +12718,7 @@ function workflowHandoff(root2, args = {}) {
     ...summary,
     track_id: trackId,
     track_context: context,
-    handoff_path: import_node_path46.default.relative(root2, handoffPath),
+    handoff_path: import_node_path47.default.relative(root, handoffPath),
     approval,
     human_review: humanReview,
     review_artifacts: stageReviewArtifacts,
@@ -12373,7 +12744,7 @@ function workflowHandoff(root2, args = {}) {
       error: approvalError || "Staged approval is required before writing handoff artifacts"
     };
   }
-  const reviewValidation = validateApprovedTargetReviewFiles(root2, args);
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
       ...base,
@@ -12386,35 +12757,35 @@ function workflowHandoff(root2, args = {}) {
     };
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
-  const traceBefore = beginTrace(root2);
+  const traceBefore = beginTrace(root);
   if (args.execute === true) {
-    if (!reusedReviewFiles.has(import_node_path46.default.relative(root2, handoffJsonPath))) writeJsonEnsured(handoffJsonPath, handoffJson);
-    if (!reusedReviewFiles.has(import_node_path46.default.relative(root2, handoffPath))) {
-      import_node_fs25.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path46.default.relative(root2, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path46.default.relative(root2, handoffJsonPath))));
+    if (!reusedReviewFiles.has(import_node_path47.default.relative(root, handoffJsonPath))) writeJsonEnsured(handoffJsonPath, handoffJson);
+    if (!reusedReviewFiles.has(import_node_path47.default.relative(root, handoffPath))) {
+      import_node_fs26.default.writeFileSync(handoffPath, withGeneratedMarker(import_node_path47.default.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, import_node_path47.default.relative(root, handoffJsonPath))));
     }
   }
   const recipient = asOptionalString(args.to || args.assignee || track.metadata.reviewer) || null;
   const subject = asOptionalString(args.subject) || `Handoff: ${trackId}`;
-  const message = appendCadreMessage(root2, "outbox", {
+  const message = appendCadreMessage(root, "outbox", {
     kind: "handoff",
     workflow: "handoff",
     track_id: trackId,
     to: recipient,
     subject,
     body: asOptionalString(args.body) || text2,
-    handoff_path: import_node_path46.default.relative(root2, handoffPath),
-    handoff_json_path: import_node_path46.default.relative(root2, handoffJsonPath)
+    handoff_path: import_node_path47.default.relative(root, handoffPath),
+    handoff_json_path: import_node_path47.default.relative(root, handoffJsonPath)
   });
-  const event = appendCadreEvent(root2, {
+  const event = appendCadreEvent(root, {
     kind: "handoff_created",
     workflow: "handoff",
     track_id: trackId,
     to: recipient,
     subject,
-    handoff_path: import_node_path46.default.relative(root2, handoffPath)
+    handoff_path: import_node_path47.default.relative(root, handoffPath)
   });
-  const approvalAudit = recordApprovalCompletionFromArgs(root2, args);
-  const controlCommit = commitTrace(root2, args, {
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "handoff",
     subject: `record ${trackId} handoff`,
@@ -12428,7 +12799,7 @@ function workflowHandoff(root2, args = {}) {
       to: recipient
     }
   });
-  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root2, args) : null;
+  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...base,
     ok: controlCommit.ok !== false,
@@ -12445,16 +12816,16 @@ function workflowHandoff(root2, args = {}) {
 }
 
 // src/core/application/runtime/workflow-refresh-revert.ts
-var import_node_fs26 = __toESM(require("node:fs"));
-var import_node_path47 = __toESM(require("node:path"));
+var import_node_fs27 = __toESM(require("node:fs"));
+var import_node_path48 = __toESM(require("node:path"));
 function refreshedPatternsText(text2, now = utcNow()) {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
   const next = /Last refreshed:\s*.*/.test(text2) ? text2.replace(/Last refreshed:\s*.*/, stamp) : `${text2.replace(/\n*$/, "\n\n")}${stamp}
 `;
   return { text: next, stamp };
 }
-function refreshedPatternsArtifacts(root2) {
-  const jsonlPath = import_node_path47.default.join(root2, "cadre", "patterns.jsonl");
+function refreshedPatternsArtifacts(root) {
+  const jsonlPath = import_node_path48.default.join(root, "cadre", "patterns.jsonl");
   if (!fileExists(jsonlPath)) return null;
   const entries = readJsonl(jsonlPath);
   const seed = entries[0] || templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
@@ -12463,12 +12834,12 @@ function refreshedPatternsArtifacts(root2) {
   const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
   const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
   const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries), { canonicalContent: jsonl, projection: "cadre/patterns.md" });
-  const projectionPath = import_node_path47.default.join(root2, "cadre", "patterns.md");
+  const projectionPath = import_node_path48.default.join(root, "cadre", "patterns.md");
   return {
     files: documentReviewPair(
       "patterns",
-      plainReviewFile(import_node_path47.default.relative(root2, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
-      textReviewFile(import_node_path47.default.relative(root2, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
+      plainReviewFile(import_node_path48.default.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
+      textReviewFile(import_node_path48.default.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection)
     ),
     jsonlPath,
     projectionPath,
@@ -12477,13 +12848,13 @@ function refreshedPatternsArtifacts(root2) {
     stamp: next.stamp
   };
 }
-function refreshReviewFiles(root2) {
-  return refreshedPatternsArtifacts(root2)?.files || [];
+function refreshReviewFiles(root) {
+  return refreshedPatternsArtifacts(root)?.files || [];
 }
-function revertGitActions(root2, track, args = {}) {
+function revertGitActions(root, track, args = {}) {
   const plan = parsePlanFile(track.plan_path);
   const requestedCommit = asOptionalString(args.commitSha || args.commit);
-  const topology = loadTopology(root2);
+  const topology = loadTopology(root);
   const commitEntries = requestedCommit ? [{ commit: requestedCommit, repo: asOptionalString(args.repo) || (topology.polyrepo ? topology.defaultRepo : "root") }] : plan.tasks.flatMap((task) => {
     const taskCommits = asStringArray(task.commit_shas || []).concat(task.commit ? [task.commit] : []);
     const repo = asOptionalString(args.repo) || task.repo || (topology.polyrepo ? topology.defaultRepo : "root");
@@ -12492,27 +12863,27 @@ function revertGitActions(root2, track, args = {}) {
   return commitEntries.reverse().map((entryInfo, index) => {
     const commit = entryInfo.commit;
     const repo = asOptionalString(entryInfo.repo) || (topology.polyrepo ? topology.defaultRepo : "root");
-    const entry = repoEntriesForTrack(root2, track, { ...args, repo }).find((item) => item.repo === repo);
+    const entry = repoEntriesForTrack(root, track, { ...args, repo }).find((item) => item.repo === repo);
     return plannedGitAction(
       `revert-${index + 1}`,
       "revert_commit",
       repo,
-      entry ? asString(entry.root, root2) : root2,
+      entry ? asString(entry.root, root) : root,
       ["revert", "--no-edit", commit],
       `Revert ${commit} in ${repo}`
     );
   });
 }
-function workflowRevert(root2, args = {}) {
-  const trackId = selectedTrackId(root2, args);
-  const summary = workflowSummary(root2, "revert", args);
+function workflowRevert(root, args = {}) {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "revert", args);
   if (!trackId) return { ...summary, ok: false, phase_state: "blocked", error: "trackId is required" };
-  const track = findTrack(root2, trackId);
+  const track = findTrack(root, trackId);
   if (!track) return { ...summary, ok: false, phase_state: "blocked", error: `Track not found: ${trackId}` };
-  const repoError = repoEntriesError(root2, track, args);
+  const repoError = repoEntriesError(root, track, args);
   if (repoError) return { ...summary, ok: false, phase_state: "blocked", stage: "polyrepo_repo_resolution", repo_error: repoError };
-  const affectedRepos = repoEntriesForTrack(root2, track, args).map((entry) => entry.repo);
-  if ((args.commitSha || args.commit) && loadTopology(root2).polyrepo && !args.repo && affectedRepos.length > 1) {
+  const affectedRepos = repoEntriesForTrack(root, track, args).map((entry) => entry.repo);
+  if ((args.commitSha || args.commit) && loadTopology(root).polyrepo && !args.repo && affectedRepos.length > 1) {
     return {
       ...summary,
       ok: false,
@@ -12522,13 +12893,13 @@ function workflowRevert(root2, args = {}) {
       affected_repos: affectedRepos
     };
   }
-  const gitActions = revertGitActions(root2, track, args);
+  const gitActions = revertGitActions(root, track, args);
   if (gitActions.length === 0) {
     return {
       ...summary,
       ok: false,
       phase_state: "blocked",
-      track_context: trackContext(root2, trackId),
+      track_context: trackContext(root, trackId),
       reason: "No commit evidence found to revert; pass commitSha or record task commits first",
       git_actions: gitActions
     };
@@ -12543,10 +12914,10 @@ function workflowRevert(root2, args = {}) {
   const humanReview = { required: false, execution_required: true, workflow: "revert", artifacts: reviewArtifacts };
   const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
   const gitOk = actionResultsOk(gitResults);
-  const traceBefore = args.execute === true && gitOk ? beginTrace(root2) : null;
-  const projectionRepair = args.execute === true && gitOk ? artifactSync(root2, { execute: true, commitMode: "off" }) : null;
+  const traceBefore = args.execute === true && gitOk ? beginTrace(root) : null;
+  const projectionRepair = args.execute === true && gitOk ? artifactSync(root, { execute: true, commitMode: "off" }) : null;
   const mutationOk = gitOk && (!projectionRepair || projectionRepair.ok !== false);
-  const statusResult = args.execute === true && mutationOk ? metadataPatch(root2, {
+  const statusResult = args.execute === true && mutationOk ? metadataPatch(root, {
     trackId,
     patch: {
       status: "in_progress",
@@ -12557,7 +12928,7 @@ function workflowRevert(root2, args = {}) {
       }
     }
   }) : null;
-  const controlCommit = args.execute === true && mutationOk && statusResult && statusResult.ok !== false ? commitTrace(root2, args, {
+  const controlCommit = args.execute === true && mutationOk && statusResult && statusResult.ok !== false ? commitTrace(root, args, {
     kind: "control",
     workflow: "revert",
     subject: `record ${trackId} revert`,
@@ -12573,7 +12944,7 @@ function workflowRevert(root2, args = {}) {
     ok: args.execute === true ? mutationOk && (!statusResult || statusResult.ok !== false) && (!controlCommit || controlCommit.ok !== false) : true,
     phase_state: args.execute !== true ? "dry_run" : mutationOk && (!controlCommit || controlCommit.ok !== false) ? "executed" : "recovery_required",
     dry_run: args.execute !== true,
-    track_context: trackContext(root2, trackId),
+    track_context: trackContext(root, trackId),
     git_actions: gitActions,
     git_results: gitResults,
     projection_repair: projectionRepair,
@@ -12583,9 +12954,9 @@ function workflowRevert(root2, args = {}) {
     review_artifacts: reviewArtifacts
   };
 }
-function workflowRefresh(root2, args = {}) {
-  args = applyStagedApprovalSessionPayload(root2, args, "refresh");
-  const summary = workflowSummary(root2, "refresh", args);
+function workflowRefresh(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "refresh");
+  const summary = workflowSummary(root, "refresh", args);
   const intentPrompts = refreshIntentPrompts(args);
   if (intentPrompts.length > 0) {
     return {
@@ -12607,11 +12978,11 @@ function workflowRefresh(root2, args = {}) {
   const lspScopeRequested = scopeIds.some((scope) => ["all", "lsp"].includes(scope));
   const lspWriteRequested = lspScopeRequested && setupLspWriteRequested(args);
   const mutatingRefresh = refreshPatterns || lspWriteRequested;
-  const reviewFiles2 = refreshPatterns ? refreshReviewFiles(root2) : [];
+  const reviewFiles2 = refreshPatterns ? refreshReviewFiles(root) : [];
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
   if (lspWriteRequested) reviewArtifacts.push(...setupLspReviewArtifacts(args));
-  const reviewBundle = workflowReviewBundle(root2, "refresh", args, reviewFiles2);
-  const approval = reviewFiles2.length > 0 ? stagedApprovalState(root2, "refresh", args, refreshApprovalStages(refreshPatterns, lspWriteRequested), reviewFiles2, { final_only_files: ["cadre/tracks.json", "cadre/events.jsonl", ...lspWriteRequested ? ["cadre/lsp.json"] : []] }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
+  const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles2);
+  const approval = reviewFiles2.length > 0 ? stagedApprovalState(root, "refresh", args, refreshApprovalStages(refreshPatterns, lspWriteRequested), reviewFiles2, { final_only_files: ["cadre/tracks.json", "cadre/events.jsonl", ...lspWriteRequested ? ["cadre/lsp.json"] : []] }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles2.length > 0 ? humanReviewState("refresh", args, reviewArtifactsFromFiles(reviewFiles2), reviewBundle) : null;
@@ -12622,8 +12993,8 @@ function workflowRefresh(root2, args = {}) {
   ];
   const awaitingDocumentReview = args.execute === true && reviewFiles2.length > 0 && !stagedApprovalReady(approval);
   const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
-  const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root2) : null;
-  const lsp = lspRequested ? lspSetup(root2, { ...args, execute: true }) : lspSetup(root2, { ...args, execute: false });
+  const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
+  const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
   if (awaitingDocumentReview) {
     return {
       ...summary,
@@ -12631,10 +13002,10 @@ function workflowRefresh(root2, args = {}) {
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      doctor: doctor(root2, { hasCadreProject: true }),
-      workspace: workspaceDiagnostics(root2, { execute: false }),
-      dependency_graph: dependencyGraph(root2),
-      lsp: lspConfigStatus(root2),
+      doctor: doctor(root, { hasCadreProject: true }),
+      workspace: workspaceDiagnostics(root, { execute: false }),
+      dependency_graph: dependencyGraph(root),
+      lsp: lspConfigStatus(root),
       lsp_setup: lsp,
       scope: scopeIds,
       approval,
@@ -12645,7 +13016,7 @@ function workflowRefresh(root2, args = {}) {
       error: approvalError || "Staged approval is required before refreshing Cadre context documents"
     };
   }
-  const reviewValidation = args.execute === true && reviewFiles2.length > 0 ? validateApprovedTargetReviewFiles(root2, args) : { ok: true, skipped: true };
+  const reviewValidation = args.execute === true && reviewFiles2.length > 0 ? validateApprovedTargetReviewFiles(root, args) : { ok: true, skipped: true };
   if (args.execute === true && reviewValidation.ok === false) {
     return {
       ...summary,
@@ -12653,10 +13024,10 @@ function workflowRefresh(root2, args = {}) {
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_review_drift",
-      doctor: doctor(root2, { hasCadreProject: true }),
-      workspace: workspaceDiagnostics(root2, { execute: false }),
-      dependency_graph: dependencyGraph(root2),
-      lsp: lspConfigStatus(root2),
+      doctor: doctor(root, { hasCadreProject: true }),
+      workspace: workspaceDiagnostics(root, { execute: false }),
+      dependency_graph: dependencyGraph(root),
+      lsp: lspConfigStatus(root),
       lsp_setup: lsp,
       scope: scopeIds,
       approval,
@@ -12669,23 +13040,23 @@ function workflowRefresh(root2, args = {}) {
     };
   }
   const reusedReviewFiles = new Set(asStringArray(asJsonObject(reviewValidation).files));
-  const regen = args.execute === true && mutatingRefresh ? regenIndex(root2) : null;
+  const regen = args.execute === true && mutatingRefresh ? regenIndex(root) : null;
   let patterns = null;
   if (args.execute === true && refreshPatterns) {
-    const refreshed = refreshedPatternsArtifacts(root2);
+    const refreshed = refreshedPatternsArtifacts(root);
     if (refreshed) {
-      if (!reusedReviewFiles.has(import_node_path47.default.relative(root2, refreshed.jsonlPath))) import_node_fs26.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
-      if (!reusedReviewFiles.has(import_node_path47.default.relative(root2, refreshed.projectionPath))) import_node_fs26.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
+      if (!reusedReviewFiles.has(import_node_path48.default.relative(root, refreshed.jsonlPath))) import_node_fs27.default.writeFileSync(refreshed.jsonlPath, refreshed.jsonl);
+      if (!reusedReviewFiles.has(import_node_path48.default.relative(root, refreshed.projectionPath))) import_node_fs27.default.writeFileSync(refreshed.projectionPath, refreshed.projection);
       patterns = {
         ok: true,
-        path: import_node_path47.default.relative(root2, refreshed.jsonlPath),
-        projection: import_node_path47.default.relative(root2, refreshed.projectionPath),
+        path: import_node_path48.default.relative(root, refreshed.jsonlPath),
+        projection: import_node_path48.default.relative(root, refreshed.projectionPath),
         refreshed_at: refreshed.stamp
       };
     }
   }
-  const approvalAudit = args.execute === true && reviewFiles2.length > 0 ? recordApprovalCompletionFromArgs(root2, args) : null;
-  const controlCommit = args.execute === true && mutatingRefresh ? commitTrace(root2, args, {
+  const approvalAudit = args.execute === true && reviewFiles2.length > 0 ? recordApprovalCompletionFromArgs(root, args) : null;
+  const controlCommit = args.execute === true && mutatingRefresh ? commitTrace(root, args, {
     kind: "control",
     workflow: "refresh",
     subject: "refresh project context",
@@ -12697,17 +13068,17 @@ function workflowRefresh(root2, args = {}) {
       lsp_setup: asJsonObject(lsp)
     }
   }) : null;
-  const approvalSessionClose = args.execute === true && reviewFiles2.length > 0 && (!controlCommit || controlCommit.ok !== false) ? closeApprovalSessionFromArgs(root2, args) : null;
+  const approvalSessionClose = args.execute === true && reviewFiles2.length > 0 && (!controlCommit || controlCommit.ok !== false) ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...summary,
     ok: (!approvalError || args.execute === true) && (!regen || regen.ok !== false) && lsp.ok !== false && (!controlCommit || controlCommit.ok !== false),
     phase_state: args.execute === true ? controlCommit && controlCommit.ok === false ? "recovery_required" : "executed" : "dry_run",
     ...approvalError && args.execute !== true ? { stage: "staged_approval", error: approvalError } : {},
     scope: scopeIds,
-    doctor: doctor(root2, { hasCadreProject: true }),
-    workspace: workspaceDiagnostics(root2, { execute: false }),
-    dependency_graph: dependencyGraph(root2),
-    lsp: lspConfigStatus(root2),
+    doctor: doctor(root, { hasCadreProject: true }),
+    workspace: workspaceDiagnostics(root, { execute: false }),
+    dependency_graph: dependencyGraph(root),
+    lsp: lspConfigStatus(root),
     lsp_setup: lsp,
     regen,
     patterns,
@@ -12725,17 +13096,17 @@ function workflowRefresh(root2, args = {}) {
 }
 
 // src/core/application/runtime/workflow-release-revise.ts
-var import_node_fs27 = __toESM(require("node:fs"));
-var import_node_path48 = __toESM(require("node:path"));
-function releaseArtifactPlan(root2, args = {}) {
-  const completed = listTracks(root2).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
+var import_node_fs28 = __toESM(require("node:fs"));
+var import_node_path49 = __toESM(require("node:path"));
+function releaseArtifactPlan(root, args = {}) {
+  const completed = listTracks(root).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
   const rawArgs3 = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
   const generatedAt = asOptionalString(rawArgs3.generatedAt || rawArgs3.generated_at) || utcNow();
-  const releaseDir = import_node_path48.default.join(root2, "cadre", "releases");
+  const releaseDir = import_node_path49.default.join(root, "cadre", "releases");
   const releaseSlug = safeName(version);
-  const releaseMd = import_node_path48.default.join(releaseDir, `${releaseSlug}.md`);
-  const releaseJson = import_node_path48.default.join(releaseDir, `${releaseSlug}.json`);
+  const releaseMd = import_node_path49.default.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = import_node_path49.default.join(releaseDir, `${releaseSlug}.json`);
   const notesBody = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release - ${version}`,
     "",
@@ -12763,29 +13134,29 @@ function releaseArtifactPlan(root2, args = {}) {
 `
   };
   const notes = withGeneratedMarker(
-    import_node_path48.default.relative(root2, releaseJson),
+    import_node_path49.default.relative(root, releaseJson),
     "cadre.release.v1",
     notesBody,
     {
       canonicalContent: `${JSON.stringify(metadata, null, 2)}
 `,
-      projection: import_node_path48.default.relative(root2, releaseMd)
+      projection: import_node_path49.default.relative(root, releaseMd)
     }
   );
-  const gitActions = rawArgs3.createTag === true || rawArgs3.create_tag === true || rawArgs3.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root2, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
+  const gitActions = rawArgs3.createTag === true || rawArgs3.create_tag === true || rawArgs3.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
   return { version, generatedAt, completed, releaseDir, releaseMd, releaseJson, notes, metadata, gitActions };
 }
-function releaseReviewFiles(root2, plan) {
+function releaseReviewFiles(root, plan) {
   return documentReviewPair(
     "release_notes",
     jsonReviewFile(
-      import_node_path48.default.relative(root2, plan.releaseJson),
+      import_node_path49.default.relative(root, plan.releaseJson),
       "Release metadata",
       "releaseMetadata",
       plan.metadata
     ),
     textReviewFile(
-      import_node_path48.default.relative(root2, plan.releaseMd),
+      import_node_path49.default.relative(root, plan.releaseMd),
       "Release notes",
       "releaseNotes",
       plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
@@ -12793,19 +13164,19 @@ function releaseReviewFiles(root2, plan) {
     )
   );
 }
-function workflowRelease(root2, args = {}) {
-  args = applyStagedApprovalSessionPayload(root2, args, "release");
-  const summary = workflowSummary(root2, "release", args);
-  const plan = releaseArtifactPlan(root2, args);
-  const reviewFiles2 = releaseReviewFiles(root2, plan);
+function workflowRelease(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "release");
+  const summary = workflowSummary(root, "release", args);
+  const plan = releaseArtifactPlan(root, args);
+  const reviewFiles2 = releaseReviewFiles(root, plan);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
   if (plan.gitActions.length > 0) {
     reviewArtifacts.push(packetReviewArtifact("Release git actions", "workflow:release", {
       git_actions: plan.gitActions
     }));
   }
-  const reviewBundle = workflowReviewBundle(root2, "release", args, reviewFiles2, { release_version: plan.version });
-  const approval = stagedApprovalState(root2, "release", args, releaseApprovalStages(plan.gitActions.length > 0), reviewFiles2, { release_version: plan.version, final_only_files: ["cadre/setup_state.json", "cadre/events.jsonl"] });
+  const reviewBundle = workflowReviewBundle(root, "release", args, reviewFiles2, { release_version: plan.version });
+  const approval = stagedApprovalState(root, "release", args, releaseApprovalStages(plan.gitActions.length > 0), reviewFiles2, { release_version: plan.version, final_only_files: ["cadre/setup_state.json", "cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
@@ -12818,7 +13189,7 @@ function workflowRelease(root2, args = {}) {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
-    release_artifacts: [import_node_path48.default.relative(root2, plan.releaseMd), import_node_path48.default.relative(root2, plan.releaseJson)],
+    release_artifacts: [import_node_path49.default.relative(root, plan.releaseMd), import_node_path49.default.relative(root, plan.releaseJson)],
     git_actions: plan.gitActions,
     approval,
     human_review: humanReview,
@@ -12845,7 +13216,7 @@ function workflowRelease(root2, args = {}) {
       error: approvalError || "Staged approval is required before writing release artifacts"
     };
   }
-  const reviewValidation = validateApprovedTargetReviewFiles(root2, args);
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
       ...base,
@@ -12858,26 +13229,26 @@ function workflowRelease(root2, args = {}) {
     };
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
-  const traceBefore = beginTrace(root2);
-  import_node_fs27.default.mkdirSync(plan.releaseDir, { recursive: true });
-  if (!reusedReviewFiles.has(import_node_path48.default.relative(root2, plan.releaseMd))) {
-    import_node_fs27.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+  const traceBefore = beginTrace(root);
+  import_node_fs28.default.mkdirSync(plan.releaseDir, { recursive: true });
+  if (!reusedReviewFiles.has(import_node_path49.default.relative(root, plan.releaseMd))) {
+    import_node_fs28.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `);
   }
-  if (!reusedReviewFiles.has(import_node_path48.default.relative(root2, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
-  const indexPatch = patchJsonFile(import_node_path48.default.join(root2, "cadre", "setup_state.json"), (current) => {
+  if (!reusedReviewFiles.has(import_node_path49.default.relative(root, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
+  const indexPatch = patchJsonFile(import_node_path49.default.join(root, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: plan.version,
-      path: import_node_path48.default.relative(root2, plan.releaseMd),
-      metadata: import_node_path48.default.relative(root2, plan.releaseJson),
+      path: import_node_path49.default.relative(root, plan.releaseMd),
+      metadata: import_node_path49.default.relative(root, plan.releaseJson),
       completed_tracks: plan.completed.length,
       released_at: plan.generatedAt
     };
     current.updated_at = utcNow();
     return current;
   }, { lock: false });
-  const approvalAudit = recordApprovalCompletionFromArgs(root2, args);
-  const controlCommit = commitTrace(root2, args, {
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "release",
     subject: `prepare ${plan.version}`,
@@ -12891,7 +13262,7 @@ function workflowRelease(root2, args = {}) {
   });
   const gitResults = runPlannedGitActions(plan.gitActions);
   const gitOk = actionResultsOk(gitResults);
-  const approvalSessionClose = indexPatch.ok !== false && controlCommit.ok !== false && gitOk ? closeApprovalSessionFromArgs(root2, args) : null;
+  const approvalSessionClose = indexPatch.ok !== false && controlCommit.ok !== false && gitOk ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...base,
     ok: indexPatch.ok !== false && controlCommit.ok !== false && gitOk,
@@ -12907,11 +13278,11 @@ function workflowRelease(root2, args = {}) {
     reused_review_files: asStringArray(reviewValidation.files)
   };
 }
-function workflowRevise(root2, args = {}) {
-  args = applyStagedApprovalSessionPayload(root2, args, "revise");
+function workflowRevise(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "revise");
   const approvalArgs = JSON.parse(JSON.stringify(args));
-  const trackId = selectedTrackId(root2, args);
-  const summary = workflowSummary(root2, "revise", args);
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "revise", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
   const hasStructuredRevision = isRecord(args.spec) || isRecord(args.plan);
@@ -12923,7 +13294,7 @@ function workflowRevise(root2, args = {}) {
       dry_run: true,
       phase_state: "awaiting_clarification",
       stage: "intent_clarification",
-      ...trackId ? { track_id: trackId, track_context: trackContext(root2, trackId) } : {},
+      ...trackId ? { track_id: trackId, track_context: trackContext(root, trackId) } : {},
       intent_prompts: initialPrompts,
       next_actions: [
         "Answer revise intent_prompts before producing revised artifacts.",
@@ -12933,9 +13304,9 @@ function workflowRevise(root2, args = {}) {
     };
   }
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  const track = findTrack(root2, trackId);
-  const context = trackContext(root2, trackId);
-  const impact = lspImpact(root2, args);
+  const track = findTrack(root, trackId);
+  const context = trackContext(root, trackId);
+  const impact = lspImpact(root, args);
   const reviewFiles2 = [];
   const existingSpec = track ? readJson(trackSpecJsonPath(track), null) : null;
   const revisedSpec = isRecord(args.spec) ? normalizeSpecJson(trackId, args.spec) : null;
@@ -12953,32 +13324,32 @@ function workflowRevise(root2, args = {}) {
   if (track && revisedSpec) {
     reviewFiles2.push(...documentReviewPair(
       "spec",
-      jsonReviewFile(import_node_path48.default.relative(root2, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec),
+      jsonReviewFile(import_node_path49.default.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec),
       textReviewFile(
-        import_node_path48.default.relative(root2, track.spec_path),
+        import_node_path49.default.relative(root, track.spec_path),
         "Revised track spec",
         "spec.json",
-        withGeneratedMarker(import_node_path48.default.relative(root2, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path48.default.relative(root2, trackSpecJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedSpec, null, 2)}
-`, projection: import_node_path48.default.relative(root2, track.spec_path) })
+        withGeneratedMarker(import_node_path49.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path49.default.relative(root, trackSpecJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedSpec, null, 2)}
+`, projection: import_node_path49.default.relative(root, track.spec_path) })
       )
     ));
   }
   if (track && revisedPlan) {
     reviewFiles2.push(...documentReviewPair(
       "plan",
-      jsonReviewFile(import_node_path48.default.relative(root2, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan),
+      jsonReviewFile(import_node_path49.default.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan),
       textReviewFile(
-        import_node_path48.default.relative(root2, track.plan_path),
+        import_node_path49.default.relative(root, track.plan_path),
         "Revised track plan",
         "plan.json",
-        withGeneratedMarker(import_node_path48.default.relative(root2, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path48.default.relative(root2, trackPlanJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedPlan, null, 2)}
-`, projection: import_node_path48.default.relative(root2, track.plan_path) })
+        withGeneratedMarker(import_node_path49.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path49.default.relative(root, trackPlanJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedPlan, null, 2)}
+`, projection: import_node_path49.default.relative(root, track.plan_path) })
       )
     ));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
-  const reviewBundle = workflowReviewBundle(root2, "revise", args, reviewFiles2, { track_id: trackId });
-  const approval = stagedApprovalState(root2, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles2, { track_id: trackId, final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
+  const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles2, { track_id: trackId });
+  const approval = stagedApprovalState(root, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles2, { track_id: trackId, final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles2.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
@@ -13036,7 +13407,7 @@ function workflowRevise(root2, args = {}) {
       error: approvalError || "Staged approval is required before revising track artifacts"
     };
   }
-  const reviewValidation = validateApprovedTargetReviewFiles(root2, args);
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
       ...base,
@@ -13049,30 +13420,30 @@ function workflowRevise(root2, args = {}) {
     };
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
-  const traceBefore = beginTrace(root2);
-  const writeResult = withTrackLock(root2, track.track_id, () => {
+  const traceBefore = beginTrace(root);
+  const writeResult = withTrackLock(root, track.track_id, () => {
     const written = [];
     if (revisedSpec) {
-      if (!reusedReviewFiles.has(import_node_path48.default.relative(root2, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      if (!reusedReviewFiles.has(import_node_path48.default.relative(root2, track.spec_path))) {
-        import_node_fs27.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path48.default.relative(root2, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path48.default.relative(root2, trackSpecJsonPath(track)))));
+      if (!reusedReviewFiles.has(import_node_path49.default.relative(root, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
+      if (!reusedReviewFiles.has(import_node_path49.default.relative(root, track.spec_path))) {
+        import_node_fs28.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path49.default.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path49.default.relative(root, trackSpecJsonPath(track)))));
       }
-      written.push(import_node_path48.default.relative(root2, trackSpecJsonPath(track)));
-      written.push(import_node_path48.default.relative(root2, track.spec_path));
+      written.push(import_node_path49.default.relative(root, trackSpecJsonPath(track)));
+      written.push(import_node_path49.default.relative(root, track.spec_path));
     }
     if (revisedPlan) {
-      if (!reusedReviewFiles.has(import_node_path48.default.relative(root2, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      if (!reusedReviewFiles.has(import_node_path48.default.relative(root2, track.plan_path))) {
-        import_node_fs27.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path48.default.relative(root2, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path48.default.relative(root2, trackPlanJsonPath(track)))));
+      if (!reusedReviewFiles.has(import_node_path49.default.relative(root, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
+      if (!reusedReviewFiles.has(import_node_path49.default.relative(root, track.plan_path))) {
+        import_node_fs28.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path49.default.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path49.default.relative(root, trackPlanJsonPath(track)))));
       }
-      written.push(import_node_path48.default.relative(root2, trackPlanJsonPath(track)));
-      written.push(import_node_path48.default.relative(root2, track.plan_path));
+      written.push(import_node_path49.default.relative(root, trackPlanJsonPath(track)));
+      written.push(import_node_path49.default.relative(root, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
   });
-  const regen = writeResult.ok !== false ? regenIndex(root2) : null;
-  const approvalAudit = writeResult.ok !== false && (!regen || regen.ok !== false) ? recordApprovalCompletionFromArgs(root2, args) : null;
-  const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false) ? commitTrace(root2, args, {
+  const regen = writeResult.ok !== false ? regenIndex(root) : null;
+  const approvalAudit = writeResult.ok !== false && (!regen || regen.ok !== false) ? recordApprovalCompletionFromArgs(root, args) : null;
+  const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false) ? commitTrace(root, args, {
     kind: "control",
     workflow: "revise",
     subject: `update ${trackId}`,
@@ -13085,7 +13456,7 @@ function workflowRevise(root2, args = {}) {
       revised_plan: Boolean(revisedPlan)
     }
   }) : null;
-  const approvalSessionClose = writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false) ? closeApprovalSessionFromArgs(root2, args) : null;
+  const approvalSessionClose = writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false) ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...base,
     ok: writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false),
@@ -13102,22 +13473,22 @@ function workflowRevise(root2, args = {}) {
 }
 
 // src/core/application/runtime/workflow-setup.ts
-var import_node_fs28 = __toESM(require("node:fs"));
-var import_node_path50 = __toESM(require("node:path"));
+var import_node_fs29 = __toESM(require("node:fs"));
+var import_node_path51 = __toESM(require("node:path"));
 
 // src/core/application/runtime/setup-review-plan.ts
-var import_node_path49 = __toESM(require("node:path"));
+var import_node_path50 = __toESM(require("node:path"));
 function machineReviewFile(relativePath, title, source, content) {
   return { ...plainReviewFile(relativePath, title, source, content), reviewRole: "machine" };
 }
-function appendRequiredLine(existing, required2) {
+function appendRequiredLine(existing, required) {
   const lines = existing.split(/\r?\n/).filter(Boolean);
-  if (!lines.includes(required2)) lines.push(required2);
+  if (!lines.includes(required)) lines.push(required);
   return `${lines.join("\n")}
 `;
 }
-function lspPreviewPayload(root2, recommendations) {
-  const existing = readJson(import_node_path49.default.join(root2, "cadre", "lsp.json"), {});
+function lspPreviewPayload(root, recommendations) {
+  const existing = readJson(import_node_path50.default.join(root, "cadre", "lsp.json"), {});
   const servers = Array.isArray(existing.servers) ? [...existing.servers] : [];
   const known = new Set(servers.map((server) => asOptionalString(asJsonObject(server).id || asJsonObject(server).command)).filter(Boolean));
   for (const value of Array.isArray(recommendations.recommended) ? recommendations.recommended : []) {
@@ -13143,19 +13514,19 @@ function lspPreviewPayload(root2, recommendations) {
 }
 
 // src/core/application/runtime/workflow-setup.ts
-function workflowSetup(root2, args = {}) {
-  args = applyStagedApprovalSessionPayload(root2, args, "setup");
-  const summary = workflowSummary(root2, "setup", args);
+function workflowSetup(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "setup");
+  const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
   const rawArgs3 = args;
   const requestedTopology = asOptionalString(rawArgs3.topology)?.toLowerCase();
   const reposPayload = isRecord(rawArgs3.repos) ? asJsonObject(rawArgs3.repos) : null;
   const polyrepoRequested = Boolean(reposPayload && reposPayload.mode === "polyrepo") || requestedTopology === "polyrepo" || rawArgs3.polyrepo === true;
-  const styleGuides = setupStyleGuides(root2, args);
-  const provider = configuredProvider(root2, args);
+  const styleGuides = setupStyleGuides(root, args);
+  const provider = configuredProvider(root, args);
   const providerMode = asOptionalString(provider.provider_mode);
-  const lspRecommendations = lspSetup(root2, { ...args, execute: false });
+  const lspRecommendations = lspSetup(root, { ...args, execute: false });
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
   const hasPreviewLspAdded = Object.prototype.hasOwnProperty.call(rawArgs3, "setupPreviewLspAdded") || Object.prototype.hasOwnProperty.call(rawArgs3, "setup_preview_lsp_added");
   const previewLspAdded = hasPreviewLspAdded ? asStringArray(rawArgs3.setupPreviewLspAdded || rawArgs3.setup_preview_lsp_added) : asStringArray(lspRecommendations.missingFromConfig);
@@ -13166,7 +13537,7 @@ function workflowSetup(root2, args = {}) {
   };
   const approvalArgs = { ...args, setupPreviewLspAdded: previewLspAdded, setupPreviewStyleGuides: previewStyleGuides };
   const detailMode = workflowResponseMode(args) === "detail";
-  const workspaceHealthResult = workspaceHealth(root2, { ...args, responseMode: detailMode ? "detail" : "compact" });
+  const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const configOverrides = asJsonObject(rawArgs3.config);
   const requestedSyncMode = asOptionalString(rawArgs3.syncMode || rawArgs3.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs3.teamSize || rawArgs3.team_size || 0);
@@ -13189,9 +13560,9 @@ function workflowSetup(root2, args = {}) {
     initialized_at: generatedAt,
     updated_at: generatedAt
   };
-  const trackIndex = trackIndexPayload(root2, []);
+  const trackIndex = trackIndexPayload(root, []);
   const machineFiles = [
-    machineReviewFile("cadre/.gitignore", "Cadre local-state ignore", "setup:native-state", appendRequiredLine(fileExists(import_node_path50.default.join(root2, "cadre", ".gitignore")) ? import_node_fs28.default.readFileSync(import_node_path50.default.join(root2, "cadre", ".gitignore"), "utf8") : "", "/local/")),
+    machineReviewFile("cadre/.gitignore", "Cadre local-state ignore", "setup:native-state", appendRequiredLine(fileExists(import_node_path51.default.join(root, "cadre", ".gitignore")) ? import_node_fs29.default.readFileSync(import_node_path51.default.join(root, "cadre", ".gitignore"), "utf8") : "", "/local/")),
     machineReviewFile("cadre/config.json", "Cadre configuration", "setup:config", `${JSON.stringify(configPayload, null, 2)}
 `),
     machineReviewFile("cadre/setup_state.json", "Cadre setup state", "setup:state", `${JSON.stringify(setupStatePayload, null, 2)}
@@ -13200,26 +13571,26 @@ function workflowSetup(root2, args = {}) {
 `)
   ];
   if (lspWriteRequested) {
-    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root2, lspRecommendations), null, 2)}
+    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations), null, 2)}
 `));
   }
   const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs3.writeGitattributes === true || rawArgs3.write_gitattributes === true;
   if (gitattributesNeeded) {
-    const attributesPath = import_node_path50.default.join(root2, ".gitattributes");
-    machineFiles.push(machineReviewFile(".gitattributes", "Cadre merge attributes", "setup:gitattributes", appendRequiredLine(fileExists(attributesPath) ? import_node_fs28.default.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours")));
+    const attributesPath = import_node_path51.default.join(root, ".gitattributes");
+    machineFiles.push(machineReviewFile(".gitattributes", "Cadre merge attributes", "setup:gitattributes", appendRequiredLine(fileExists(attributesPath) ? import_node_fs29.default.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours")));
   }
-  const ciProvider = configuredCiProvider(root2, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
+  const ciProvider = configuredCiProvider(root, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
   if (ciProvider && rawArgs3.writeCi !== false && rawArgs3.write_ci !== false) {
     const ciTemplate = polyrepoRequested ? ciProvider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml" : ciProvider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml";
     const ciPath = ciProvider === "github" ? `.github/workflows/${polyrepoRequested ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml"}` : ".gitlab-ci.yml";
-    if (!fileExists(import_node_path50.default.join(root2, ciPath)) || rawArgs3.force === true) {
+    if (!fileExists(import_node_path51.default.join(root, ciPath)) || rawArgs3.force === true) {
       machineFiles.push(machineReviewFile(ciPath, "Cadre CI workflow", `template:${ciTemplate}`, templateText(ciTemplate, "")));
     }
   }
   const providerNeedsConfirmation = provider.requires_confirmation === true && !asOptionalString(rawArgs3.providerMode || rawArgs3.provider_mode || rawArgs3.provider);
-  const reviewFiles2 = providerNeedsConfirmation ? [] : setupReviewFiles(root2, args, styleGuides, polyrepoRequested, machineFiles);
+  const reviewFiles2 = providerNeedsConfirmation ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
   const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles2, styleGuides), args, lspWriteRequested);
-  const approval = providerNeedsConfirmation ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [] } : stagedApprovalState(root2, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles2, {
+  const approval = providerNeedsConfirmation ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [] } : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles2, {
     styleGuides: previewStyleGuides,
     final_only_files: ["cadre/events.jsonl"]
   });
@@ -13246,7 +13617,7 @@ function workflowSetup(root2, args = {}) {
     ok: true,
     phase_state: args.execute !== true && intentPrompts.length > 0 ? "awaiting_clarification" : summary.phase_state,
     ...args.execute !== true && intentPrompts.length > 0 ? { stage: "intent_clarification" } : {},
-    doctor: doctor(root2, { hasCadreProject: isCadreProjectRoot(root2) }),
+    doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace_health: workspaceHealthResult,
     workspace: workspaceHealthResult.workspace,
     dependency_graph: workspaceHealthResult.dependency_graph,
@@ -13259,7 +13630,7 @@ function workflowSetup(root2, args = {}) {
     sync_recommendation: teamSize >= 2 && syncModeRecommendation !== "shared" ? "Team setup detected; use syncMode/shared sync for 10-20 person coordination." : null,
     styleGuides,
     templates: templateManifest(),
-    techStackSummary: techStackSummary(root2, args),
+    techStackSummary: techStackSummary(root, args),
     ...intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {},
     ...nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {},
     approval,
@@ -13289,7 +13660,7 @@ function workflowSetup(root2, args = {}) {
     };
   }
   if (args.execute !== true) return result;
-  const cadreDir = import_node_path50.default.join(root2, "cadre");
+  const cadreDir = import_node_path51.default.join(root, "cadre");
   const force = asBoolean(rawArgs3.force, false);
   const missingPayload = [
     ...!isRecord(rawArgs3.product) ? ["product"] : [],
@@ -13314,7 +13685,7 @@ function workflowSetup(root2, args = {}) {
       error: approvalError || "Staged approval is required before writing setup artifacts"
     };
   }
-  const reviewValidation = validateApprovedTargetReviewFiles(root2, args);
+  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
       ...result,
@@ -13327,7 +13698,7 @@ function workflowSetup(root2, args = {}) {
     };
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
-  const traceBefore = beginTrace(root2);
+  const traceBefore = beginTrace(root);
   const written = [];
   const skipped = [];
   const writeText = (relativePath, text2) => {
@@ -13336,14 +13707,14 @@ function workflowSetup(root2, args = {}) {
       written.push(reviewPath);
       return;
     }
-    const file = import_node_path50.default.join(cadreDir, relativePath);
+    const file = import_node_path51.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path50.default.relative(root2, file));
+      skipped.push(import_node_path51.default.relative(root, file));
       return;
     }
-    import_node_fs28.default.mkdirSync(import_node_path50.default.dirname(file), { recursive: true });
-    import_node_fs28.default.writeFileSync(file, text2);
-    written.push(import_node_path50.default.relative(root2, file));
+    import_node_fs29.default.mkdirSync(import_node_path51.default.dirname(file), { recursive: true });
+    import_node_fs29.default.writeFileSync(file, text2);
+    written.push(import_node_path51.default.relative(root, file));
   };
   const writeSetupJson = (relativePath, value) => {
     const reviewPath = `cadre/${relativePath}`;
@@ -13351,14 +13722,14 @@ function workflowSetup(root2, args = {}) {
       written.push(reviewPath);
       return;
     }
-    const file = import_node_path50.default.join(cadreDir, relativePath);
+    const file = import_node_path51.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path50.default.relative(root2, file));
+      skipped.push(import_node_path51.default.relative(root, file));
       return;
     }
-    import_node_fs28.default.mkdirSync(import_node_path50.default.dirname(file), { recursive: true });
+    import_node_fs29.default.mkdirSync(import_node_path51.default.dirname(file), { recursive: true });
     writeJson(file, value);
-    written.push(import_node_path50.default.relative(root2, file));
+    written.push(import_node_path51.default.relative(root, file));
   };
   const writeSetupJsonlEntry = (relativePath, value) => {
     const reviewPath = `cadre/${relativePath}`;
@@ -13366,22 +13737,22 @@ function workflowSetup(root2, args = {}) {
       written.push(reviewPath);
       return;
     }
-    const file = import_node_path50.default.join(cadreDir, relativePath);
+    const file = import_node_path51.default.join(cadreDir, relativePath);
     if (fileExists(file) && !force) {
-      skipped.push(import_node_path50.default.relative(root2, file));
+      skipped.push(import_node_path51.default.relative(root, file));
       return;
     }
     appendJsonl(file, value);
-    written.push(import_node_path50.default.relative(root2, file));
+    written.push(import_node_path51.default.relative(root, file));
   };
   const writeProjectDoc = (relativePath, kind, value, title) => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
     writeSetupJson(jsonPath, value);
     writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title, `cadre/${jsonPath}`)));
   };
-  import_node_fs28.default.mkdirSync(import_node_path50.default.join(cadreDir, "tracks"), { recursive: true });
-  import_node_fs28.default.mkdirSync(import_node_path50.default.join(cadreDir, "archive"), { recursive: true });
-  const nativeState = ensureNativeState(root2);
+  import_node_fs29.default.mkdirSync(import_node_path51.default.join(cadreDir, "tracks"), { recursive: true });
+  import_node_fs29.default.mkdirSync(import_node_path51.default.join(cadreDir, "archive"), { recursive: true });
+  const nativeState = ensureNativeState(root);
   const nativeIgnorePath = asOptionalString(nativeState.ignore_path);
   if (nativeIgnorePath) written.push(nativeIgnorePath);
   writeProjectDoc(
@@ -13479,7 +13850,7 @@ function workflowSetup(root2, args = {}) {
       })
     );
   }
-  const lspSetupExecution = lspWriteRequested ? lspSetup(root2, { ...args, execute: true }) : lspRecommendations;
+  const lspSetupExecution = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
   const lspSetupResult = lspWriteRequested ? {
     ...lspSetupExecution,
     written: lspSetupExecution.ok !== false,
@@ -13489,18 +13860,18 @@ function workflowSetup(root2, args = {}) {
     ])),
     preview_materialized: true
   } : lspSetupExecution;
-  const gitattributes = gitattributesNeeded ? setupGitattributes(root2) : null;
+  const gitattributes = gitattributesNeeded ? setupGitattributes(root) : null;
   const ciSetup = setupCiTemplates(
-    root2,
+    root,
     ciProvider,
     { ...args, topology: polyrepoRequested ? "polyrepo" : "monorepo" }
   );
   const polyrepoSetup = polyrepoRequested && repos ? {
     gitattributes,
     ci: ciSetup,
-    submodules: setupSubmodulePlan(root2, repos, args)
+    submodules: setupSubmodulePlan(root, repos, args)
   } : null;
-  const setupEvent = appendCadreEvent(root2, {
+  const setupEvent = appendCadreEvent(root, {
     kind: "setup_completed",
     workflow: "setup",
     topology: polyrepoRequested ? "polyrepo" : "monorepo",
@@ -13509,8 +13880,8 @@ function workflowSetup(root2, args = {}) {
     written_count: written.length,
     skipped_count: skipped.length
   });
-  const approvalAudit = recordApprovalCompletionFromArgs(root2, args);
-  const controlCommit = commitTrace(root2, args, {
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "setup",
     subject: "initialize control plane",
@@ -13525,7 +13896,7 @@ function workflowSetup(root2, args = {}) {
       provider_mode: providerMode || "local"
     }
   });
-  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root2, args) : null;
+  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...result,
     ok: controlCommit.ok !== false,
@@ -13551,20 +13922,20 @@ function workflowSetup(root2, args = {}) {
     ci_setup: ciSetup,
     polyrepo_setup: polyrepoSetup,
     force,
-    doctor_after: doctor(root2, { hasCadreProject: true })
+    doctor_after: doctor(root, { hasCadreProject: true })
   };
 }
 
 // src/core/application/runtime/workflow-ship-land.ts
-var import_node_path51 = __toESM(require("node:path"));
+var import_node_path52 = __toESM(require("node:path"));
 function providerActionKind(workflow, provider) {
   if (provider === "gitlab") return workflow === "land" ? "open_merge_request_group" : "open_merge_request";
   return workflow === "land" ? "open_pull_request_group" : "open_pull_request";
 }
-function providerActionsForTrack(root2, workflow, track, args = {}) {
-  const provider = providerFromConfig(root2, args);
+function providerActionsForTrack(root, workflow, track, args = {}) {
+  const provider = providerFromConfig(root, args);
   if (provider === "local") return [];
-  const entries = workflow === "land" ? repoEntriesForTrack(root2, track, args) : repoEntriesForTrack(root2, track, { ...args, repo: args.repo || "root" }).filter((entry) => entry.repo === "root" || entry.repo === "." || !loadTopology(root2).polyrepo);
+  const entries = workflow === "land" ? repoEntriesForTrack(root, track, args) : repoEntriesForTrack(root, track, { ...args, repo: args.repo || "root" }).filter((entry) => entry.repo === "root" || entry.repo === "." || !loadTopology(root).polyrepo);
   const label = `cadre-track:${track.track_id}`;
   return entries.map((entry) => {
     const repo = asString(entry.repo, ".");
@@ -13585,33 +13956,33 @@ function providerActionsForTrack(root2, workflow, track, args = {}) {
       ].join("\n"),
       labels: [label],
       evidence_key: `${provider}:${workflow}:${track.track_id}:${repo}`,
-      required_evidence: asJsonObject(providerEvidenceRequirement(root2, { ...args, trackId: track.track_id }))
+      required_evidence: asJsonObject(providerEvidenceRequirement(root, { ...args, trackId: track.track_id }))
     };
   });
 }
-function shipGitActions(root2, track, args = {}) {
+function shipGitActions(root, track, args = {}) {
   const remote = args.remote || "origin";
   const base = args.base || "main";
-  const entry = repoEntriesForTrack(root2, track, { ...args, repo: "root" })[0];
+  const entry = repoEntriesForTrack(root, track, { ...args, repo: "root" })[0];
   const branch = args.branch || entry?.head || track.metadata.git_branch || `track/${track.track_id}`;
-  const cwd = asString(entry?.root, root2);
+  const cwd = asString(entry?.root, root);
   return [
     plannedGitAction("ship-fetch", "fetch_base", "root", cwd, ["fetch", String(remote), String(base)], `Fetch ${remote}/${base}`),
     plannedGitAction("ship-rebase", "rebase_base", "root", cwd, ["rebase", `${remote}/${base}`], `Rebase ${branch} onto ${remote}/${base}`),
     plannedGitAction("ship-push", "push_branch", "root", cwd, ["push", "-u", String(remote), String(branch)], `Push ${branch}`)
   ];
 }
-function landGitActions(root2, track, args = {}) {
+function landGitActions(root, track, args = {}) {
   const remote = args.remote || "origin";
   const actions = [];
-  for (const entry of repoEntriesForTrack(root2, track, args)) {
+  for (const entry of repoEntriesForTrack(root, track, args)) {
     const repo = asString(entry.repo, ".");
     const branch = asString(entry.head || track.metadata.git_branch || `track/${track.track_id}`);
     actions.push(plannedGitAction(
       `land-push-${safeName(repo)}`,
       "push_repo_branch",
       repo,
-      asString(entry.root, root2),
+      asString(entry.root, root),
       ["push", "-u", String(remote), branch],
       `Push ${repo} branch ${branch}`
     ));
@@ -13620,14 +13991,14 @@ function landGitActions(root2, track, args = {}) {
     "land-push-control",
     "push_control_branch",
     ".",
-    root2,
+    root,
     ["push", String(remote), args.branch || "HEAD"],
     "Push control-plane branch"
   ));
   return actions;
 }
-function publicationLedger(root2, workflow, track, args, data) {
-  const before = beginTrace(root2);
+function publicationLedger(root, workflow, track, args, data) {
+  const before = beginTrace(root);
   const entry = {
     version: 1,
     schema: "cadre.publication.v1",
@@ -13637,22 +14008,22 @@ function publicationLedger(root2, workflow, track, args, data) {
     continuation_token: asOptionalString(data.continuation_token) || null,
     ...data
   };
-  const file = import_node_path51.default.join(root2, "cadre", "operations", "publication.jsonl");
+  const file = import_node_path52.default.join(root, "cadre", "operations", "publication.jsonl");
   appendJsonl(file, entry);
-  const controlCommit = commitTrace(root2, args, {
+  const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow,
     subject: `publish ${track.track_id}`,
     before,
     files: [
-      import_node_path51.default.relative(root2, file)
+      import_node_path52.default.relative(root, file)
     ],
     trackId: track.track_id,
     note: entry
   });
-  return { ok: controlCommit.ok !== false, path: import_node_path51.default.relative(root2, file), entry, control_commit: controlCommit };
+  return { ok: controlCommit.ok !== false, path: import_node_path52.default.relative(root, file), entry, control_commit: controlCommit };
 }
-function runPublicationGit(root2, workflow, track, args, gitActions, providerActions) {
+function runPublicationGit(root, workflow, track, args, gitActions, providerActions) {
   const remote = asOptionalString(args.remote) || "origin";
   const pushKinds = /* @__PURE__ */ new Set(["push_branch", "push_repo_branch", "push_control_branch"]);
   const beforePush = gitActions.filter((action) => !pushKinds.has(action.kind));
@@ -13662,7 +14033,7 @@ function runPublicationGit(root2, workflow, track, args, gitActions, providerAct
     return { ok: false, stage: "git_before_push", git_results: beforePushResults };
   }
   const token = continuationToken(workflow, track.track_id, [...providerActions, ...gitActions]);
-  const publication = publicationLedger(root2, workflow, track, args, {
+  const publication = publicationLedger(root, workflow, track, args, {
     git_actions: gitActions,
     provider_actions: providerActions,
     continuation_token: token
@@ -13670,9 +14041,9 @@ function runPublicationGit(root2, workflow, track, args, gitActions, providerAct
   if (publication.ok === false) {
     return { ok: false, stage: "publication_ledger", git_results: beforePushResults, publication };
   }
-  const noteActions = notesPushEnabled(root2) ? Array.from(new Map([
+  const noteActions = notesPushEnabled(root) ? Array.from(new Map([
     ...pushActions,
-    ...repoEntriesForTrack(root2, track, args).map((entry) => notesPushAction(root2, asString(entry.repo, "."), asString(entry.root, root2), remote))
+    ...repoEntriesForTrack(root, track, args).map((entry) => notesPushAction(root, asString(entry.repo, "."), asString(entry.root, root), remote))
   ].map((action) => [`${action.cwd}:${action.kind}:${action.repo}`, action])).values()) : pushActions;
   const pushResults = runPlannedGitActions(noteActions);
   return {
@@ -13682,38 +14053,39 @@ function runPublicationGit(root2, workflow, track, args, gitActions, providerAct
     push_actions: noteActions
   };
 }
-function persistProviderEvidenceIfSupplied(root2, track, args = {}) {
+function persistProviderEvidenceIfSupplied(root, track, args = {}) {
   const evidence = args.evidence || args.providerEvidence || args.provider_evidence;
   if (!evidence || args.execute !== true) return null;
-  return providerEvidence(root2, {
+  return providerEvidence(root, {
     ...args,
     trackId: track.track_id,
     evidence
   });
 }
-function workflowShip(root2, args = {}) {
-  const trackId = selectedTrackId(root2, args);
-  const summary = workflowSummary(root2, "ship", args);
+function workflowShip(root, args = {}) {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "ship", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  const track = findTrack(root2, trackId);
+  const track = findTrack(root, trackId);
   if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
-  const gate = reviewGate(root2, trackId, args);
-  const provider = args.includeProvider === false ? null : prCiStatus(root2, { ...args, trackId });
-  const providerActions = providerActionsForTrack(root2, "ship", track, args);
-  const gitActions = shipGitActions(root2, track, args);
+  const gate = reviewGate(root, trackId, args);
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  const providerActions = providerActionsForTrack(root, "ship", track, args);
+  const gitActions = shipGitActions(root, track, args);
   const evidenceSupplied = hasProviderEvidence(args);
   const pendingProvider = Boolean(provider && provider.ok === false && providerActions.length > 0 && !evidenceSupplied);
   const blocked = gate.ok === false;
-  const evidenceWrite = persistProviderEvidenceIfSupplied(root2, track, args);
+  const evidenceWrite = persistProviderEvidenceIfSupplied(root, track, args);
   const canExecuteGit = args.execute === true && !blocked && !evidenceSupplied && (!evidenceWrite || evidenceWrite.ok !== false);
-  const execution = canExecuteGit ? runPublicationGit(root2, "ship", track, args, gitActions, providerActions) : null;
+  const execution = canExecuteGit ? runPublicationGit(root, "ship", track, args, gitActions, providerActions) : null;
   const gitResults = asArray(asJsonObject(execution).git_results);
-  const publication = args.execute === true && evidenceWrite && evidenceWrite.ok !== false ? publicationLedger(root2, "ship", track, args, { provider_evidence_write: asJsonObject(evidenceWrite), provider_actions: providerActions }) : asJsonObject(execution).publication || null;
+  const publication = args.execute === true && evidenceWrite && evidenceWrite.ok !== false ? publicationLedger(root, "ship", track, args, { provider_evidence_write: asJsonObject(evidenceWrite), provider_actions: providerActions }) : asJsonObject(execution).publication || null;
   const executionFailed = canExecuteGit && (!execution || execution.ok === false);
   const phaseState = executionFailed ? "recovery_required" : workflowPhaseState(args, blocked || Boolean(evidenceWrite && evidenceWrite.ok === false), pendingProvider);
   return {
     ...summary,
     ok: gate.ok !== false && (!evidenceWrite || evidenceWrite.ok !== false) && (!publication || asJsonObject(publication).ok !== false) && !executionFailed,
+    track_id: trackId,
     phase_state: phaseState,
     gate,
     provider,
@@ -13731,31 +14103,32 @@ function workflowShip(root2, args = {}) {
     next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : []
   };
 }
-function workflowLand(root2, args = {}) {
-  const trackId = selectedTrackId(root2, args);
-  const summary = workflowSummary(root2, "land", args);
+function workflowLand(root, args = {}) {
+  const trackId = selectedTrackId(root, args);
+  const summary = workflowSummary(root, "land", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  const track = findTrack(root2, trackId);
+  const track = findTrack(root, trackId);
   if (!track) return { ...summary, ok: false, error: `Track not found: ${trackId}` };
-  const topology = loadTopology(root2);
-  const preflight = polyrepoPreflight(root2);
-  const gate = reviewGate(root2, trackId, args);
-  const provider = args.includeProvider === false ? null : prCiStatus(root2, { ...args, trackId });
-  const providerActions = topology.polyrepo && preflight.ok !== false ? providerActionsForTrack(root2, "land", track, args) : [];
-  const gitActions = topology.polyrepo && preflight.ok !== false ? landGitActions(root2, track, args) : [];
+  const topology = loadTopology(root);
+  const preflight = polyrepoPreflight(root);
+  const gate = reviewGate(root, trackId, args);
+  const provider = args.includeProvider === false ? null : prCiStatus(root, { ...args, trackId });
+  const providerActions = topology.polyrepo && preflight.ok !== false ? providerActionsForTrack(root, "land", track, args) : [];
+  const gitActions = topology.polyrepo && preflight.ok !== false ? landGitActions(root, track, args) : [];
   const evidenceSupplied = hasProviderEvidence(args);
   const pendingProvider = Boolean(provider && provider.ok === false && providerActions.length > 0 && !evidenceSupplied);
   const blocked = !topology.polyrepo || preflight.ok === false || gate.ok === false;
-  const evidenceWrite = persistProviderEvidenceIfSupplied(root2, track, args);
+  const evidenceWrite = persistProviderEvidenceIfSupplied(root, track, args);
   const canExecuteGit = args.execute === true && !blocked && !evidenceSupplied && (!evidenceWrite || evidenceWrite.ok !== false);
-  const execution = canExecuteGit ? runPublicationGit(root2, "land", track, args, gitActions, providerActions) : null;
+  const execution = canExecuteGit ? runPublicationGit(root, "land", track, args, gitActions, providerActions) : null;
   const gitResults = asArray(asJsonObject(execution).git_results);
-  const publication = args.execute === true && evidenceWrite && evidenceWrite.ok !== false ? publicationLedger(root2, "land", track, args, { provider_evidence_write: asJsonObject(evidenceWrite), provider_actions: providerActions }) : asJsonObject(execution).publication || null;
+  const publication = args.execute === true && evidenceWrite && evidenceWrite.ok !== false ? publicationLedger(root, "land", track, args, { provider_evidence_write: asJsonObject(evidenceWrite), provider_actions: providerActions }) : asJsonObject(execution).publication || null;
   const executionFailed = canExecuteGit && (!execution || execution.ok === false);
   const phaseState = executionFailed ? "recovery_required" : workflowPhaseState(args, blocked || Boolean(evidenceWrite && evidenceWrite.ok === false), pendingProvider);
   return {
     ...summary,
     ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false && (!evidenceWrite || evidenceWrite.ok !== false) && (!publication || asJsonObject(publication).ok !== false) && !executionFailed,
+    track_id: trackId,
     phase_state: phaseState,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     preflight,
@@ -13772,14 +14145,14 @@ function workflowLand(root2, args = {}) {
     required_evidence: provider && provider.ok === false ? provider.required_evidence || null : null,
     unsupported_reason: provider && provider.ok === false ? provider.unsupported_reason || provider.reason || null : null,
     next_actions: provider && Array.isArray(provider.next_actions) ? provider.next_actions : [],
-    fleet: fleetStatus(root2, { includeCollisions: false })
+    fleet: fleetStatus(root, { includeCollisions: false })
   };
 }
 
 // src/core/application/runtime/workflow-skill.ts
-var import_node_crypto5 = __toESM(require("node:crypto"));
-var import_node_fs30 = __toESM(require("node:fs"));
-var import_node_path53 = __toESM(require("node:path"));
+var import_node_crypto6 = __toESM(require("node:crypto"));
+var import_node_fs32 = __toESM(require("node:fs"));
+var import_node_path55 = __toESM(require("node:path"));
 
 // src/core/domain/project-skill-management.ts
 function absolutePath(value) {
@@ -13900,14 +14273,14 @@ function validateManagedManifest(manifest, knownRepos2) {
 }
 
 // src/core/infrastructure/runtime/project-skill-mutations.ts
-var import_node_fs29 = __toESM(require("node:fs"));
+var import_node_fs30 = __toESM(require("node:fs"));
 var import_node_os3 = __toESM(require("node:os"));
-var import_node_path52 = __toESM(require("node:path"));
+var import_node_path53 = __toESM(require("node:path"));
 function normalizeReferenceContent(file, content) {
   let normalized = content.replace(/\r\n?/g, "\n");
   if (Buffer.byteLength(normalized, "utf8") > PROJECT_SKILL_MAX_FILE_BYTES) throw new Error(`reference exceeds ${PROJECT_SKILL_MAX_FILE_BYTES} bytes: ${file}`);
   if (Buffer.from(normalized).subarray(0, 8192).includes(0)) throw new Error(`binary reference is not supported: ${file}`);
-  if (import_node_path52.default.extname(file).toLowerCase() === ".json") {
+  if (import_node_path53.default.extname(file).toLowerCase() === ".json") {
     try {
       normalized = JSON.stringify(JSON.parse(normalized), null, 2);
     } catch {
@@ -13918,98 +14291,152 @@ function normalizeReferenceContent(file, content) {
 `;
 }
 function copyIfExists(source, target2) {
-  if (import_node_fs29.default.existsSync(source)) import_node_fs29.default.cpSync(source, target2, { recursive: true });
+  if (import_node_fs30.default.existsSync(source)) import_node_fs30.default.cpSync(source, target2, { recursive: true });
 }
-function atomicSkillMutation(root2, sourceId, targetId, files) {
-  const catalog2 = import_node_path52.default.join(root2, "cadre", "skills");
-  const source = import_node_path52.default.join(catalog2, sourceId);
-  const target2 = targetId ? import_node_path52.default.join(catalog2, targetId) : null;
-  const backup = import_node_fs29.default.mkdtempSync(import_node_path52.default.join(import_node_os3.default.tmpdir(), "cadre-skill-backup-"));
-  copyIfExists(source, import_node_path52.default.join(backup, "source"));
-  if (target2 && target2 !== source) copyIfExists(target2, import_node_path52.default.join(backup, "target"));
+function atomicSkillMutation(root, sourceId, targetId, files) {
+  const catalog2 = import_node_path53.default.join(root, "cadre", "skills");
+  const source = import_node_path53.default.join(catalog2, sourceId);
+  const target2 = targetId ? import_node_path53.default.join(catalog2, targetId) : null;
+  const backup = import_node_fs30.default.mkdtempSync(import_node_path53.default.join(import_node_os3.default.tmpdir(), "cadre-skill-backup-"));
+  copyIfExists(source, import_node_path53.default.join(backup, "source"));
+  if (target2 && target2 !== source) copyIfExists(target2, import_node_path53.default.join(backup, "target"));
   const rollback = () => {
-    import_node_fs29.default.rmSync(source, { recursive: true, force: true });
-    if (target2 && target2 !== source) import_node_fs29.default.rmSync(target2, { recursive: true, force: true });
-    copyIfExists(import_node_path52.default.join(backup, "source"), source);
-    if (target2 && target2 !== source) copyIfExists(import_node_path52.default.join(backup, "target"), target2);
+    import_node_fs30.default.rmSync(source, { recursive: true, force: true });
+    if (target2 && target2 !== source) import_node_fs30.default.rmSync(target2, { recursive: true, force: true });
+    copyIfExists(import_node_path53.default.join(backup, "source"), source);
+    if (target2 && target2 !== source) copyIfExists(import_node_path53.default.join(backup, "target"), target2);
   };
   try {
-    import_node_fs29.default.mkdirSync(catalog2, { recursive: true });
-    if (!target2) import_node_fs29.default.rmSync(source, { recursive: true, force: true });
+    import_node_fs30.default.mkdirSync(catalog2, { recursive: true });
+    if (!target2) import_node_fs30.default.rmSync(source, { recursive: true, force: true });
     else {
-      if (source !== target2 && import_node_fs29.default.existsSync(source)) import_node_fs29.default.renameSync(source, target2);
-      import_node_fs29.default.mkdirSync(target2, { recursive: true });
+      if (source !== target2 && import_node_fs30.default.existsSync(source)) import_node_fs30.default.renameSync(source, target2);
+      import_node_fs30.default.mkdirSync(target2, { recursive: true });
       const desired = new Set(files.keys());
       for (const [relative, content] of files) {
-        const destination = import_node_path52.default.join(target2, relative);
-        import_node_fs29.default.mkdirSync(import_node_path52.default.dirname(destination), { recursive: true });
+        const destination = import_node_path53.default.join(target2, relative);
+        import_node_fs30.default.mkdirSync(import_node_path53.default.dirname(destination), { recursive: true });
         const temporary = `${destination}.tmp-${process.pid}`;
-        import_node_fs29.default.writeFileSync(temporary, content);
-        import_node_fs29.default.renameSync(temporary, destination);
+        import_node_fs30.default.writeFileSync(temporary, content);
+        import_node_fs30.default.renameSync(temporary, destination);
       }
       for (const existing of walkFiles(target2)) {
-        const relative = import_node_path52.default.relative(target2, existing).split(import_node_path52.default.sep).join("/");
-        if (!desired.has(relative)) import_node_fs29.default.rmSync(existing, { force: true });
+        const relative = import_node_path53.default.relative(target2, existing).split(import_node_path53.default.sep).join("/");
+        if (!desired.has(relative)) import_node_fs30.default.rmSync(existing, { force: true });
       }
     }
   } catch (error) {
     rollback();
-    import_node_fs29.default.rmSync(backup, { recursive: true, force: true });
+    import_node_fs30.default.rmSync(backup, { recursive: true, force: true });
     throw error;
   }
   return {
     written: target2 ? Array.from(files.keys()).map((file) => `cadre/skills/${targetId}/${file}`).sort() : [],
     removed: !target2 ? [`cadre/skills/${sourceId}`] : sourceId !== targetId ? [`cadre/skills/${sourceId}`] : [],
     rollback,
-    finish: () => import_node_fs29.default.rmSync(backup, { recursive: true, force: true })
+    finish: () => import_node_fs30.default.rmSync(backup, { recursive: true, force: true })
   };
 }
 function walkFiles(directory) {
-  if (!import_node_fs29.default.existsSync(directory)) return [];
-  return import_node_fs29.default.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = import_node_path52.default.join(directory, entry.name);
+  if (!import_node_fs30.default.existsSync(directory)) return [];
+  return import_node_fs30.default.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = import_node_path53.default.join(directory, entry.name);
     return entry.isDirectory() ? walkFiles(file) : [file];
   });
 }
 
+// src/core/infrastructure/runtime/project-source-files.ts
+var import_node_fs31 = __toESM(require("node:fs"));
+var import_node_path54 = __toESM(require("node:path"));
+function inside(root, candidate) {
+  const relative = import_node_path54.default.relative(root, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${import_node_path54.default.sep}`) && !import_node_path54.default.isAbsolute(relative);
+}
+function noSymlinkComponents(root, relativePath) {
+  let current = root;
+  const components = relativePath.split(import_node_path54.default.sep).filter(Boolean);
+  for (let index = 0; index < components.length; index += 1) {
+    current = import_node_path54.default.join(current, components[index]);
+    const stat = import_node_fs31.default.lstatSync(current);
+    if (stat.isSymbolicLink()) return false;
+    if (index < components.length - 1 && !stat.isDirectory()) return false;
+  }
+  return true;
+}
+function readProjectSourceFile(root, requestedPath) {
+  if (!requestedPath || import_node_path54.default.isAbsolute(requestedPath) || !PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path54.default.extname(requestedPath).toLowerCase())) return { ok: false, kind: "path" };
+  let descriptor = null;
+  try {
+    const canonicalRoot = import_node_fs31.default.realpathSync(import_node_path54.default.resolve(root));
+    const candidate = import_node_path54.default.resolve(canonicalRoot, requestedPath);
+    if (!inside(canonicalRoot, candidate)) return { ok: false, kind: "path" };
+    const relativePath = import_node_path54.default.relative(canonicalRoot, candidate);
+    if (!noSymlinkComponents(canonicalRoot, relativePath)) return { ok: false, kind: "path" };
+    const canonicalPath = import_node_fs31.default.realpathSync(candidate);
+    if (canonicalPath !== candidate || !inside(canonicalRoot, canonicalPath)) {
+      return { ok: false, kind: "path" };
+    }
+    const noFollow = typeof import_node_fs31.default.constants.O_NOFOLLOW === "number" ? import_node_fs31.default.constants.O_NOFOLLOW : 0;
+    descriptor = import_node_fs31.default.openSync(canonicalPath, import_node_fs31.default.constants.O_RDONLY | noFollow);
+    const stat = import_node_fs31.default.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > PROJECT_SKILL_MAX_FILE_BYTES) {
+      return { ok: false, kind: "source" };
+    }
+    const bytes = import_node_fs31.default.readFileSync(descriptor);
+    if (bytes.length > PROJECT_SKILL_MAX_FILE_BYTES || bytes.subarray(0, 8192).includes(0)) {
+      return { ok: false, kind: "source" };
+    }
+    return { ok: true, canonicalRoot, canonicalPath, relativePath, bytes };
+  } catch {
+    return { ok: false, kind: "path" };
+  } finally {
+    if (descriptor !== null) {
+      try {
+        import_node_fs31.default.closeSync(descriptor);
+      } catch {
+      }
+    }
+  }
+}
+
 // src/core/application/runtime/workflow-skill.ts
-function knownRepos(root2) {
+function knownRepos(root) {
   const known = /* @__PURE__ */ new Set([".", "root"]);
-  for (const value of Array.isArray(loadTopology(root2).repos.repos) ? loadTopology(root2).repos.repos : []) {
+  for (const value of Array.isArray(loadTopology(root).repos.repos) ? loadTopology(root).repos.repos : []) {
     const name = asOptionalString(asJsonObject(value).name);
     if (name) known.add(name);
   }
   return known;
 }
-function readManifest(root2, id) {
-  const file = import_node_path53.default.join(root2, "cadre", "skills", id, "skill.json");
+function readManifest(root, id) {
+  const file = import_node_path55.default.join(root, "cadre", "skills", id, "skill.json");
   try {
-    const raw = asJsonObject(JSON.parse(import_node_fs30.default.readFileSync(file, "utf8")));
+    const raw = asJsonObject(JSON.parse(import_node_fs32.default.readFileSync(file, "utf8")));
     return { manifest: raw };
   } catch (error) {
     return { error: `skill manifest cannot be read: ${errorMessage(error)}` };
   }
 }
 function hashDirectory(directory) {
-  const hash = import_node_crypto5.default.createHash("sha256");
+  const hash = import_node_crypto6.default.createHash("sha256");
   const visit = (current) => {
-    if (!import_node_fs30.default.existsSync(current)) {
+    if (!import_node_fs32.default.existsSync(current)) {
       hash.update("missing");
       return;
     }
-    for (const entry of import_node_fs30.default.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const file = import_node_path53.default.join(current, entry.name);
-      hash.update(import_node_path53.default.relative(directory, file));
+    for (const entry of import_node_fs32.default.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const file = import_node_path55.default.join(current, entry.name);
+      hash.update(import_node_path55.default.relative(directory, file));
       if (entry.isDirectory()) visit(file);
-      else hash.update(import_node_fs30.default.readFileSync(file));
+      else hash.update(import_node_fs32.default.readFileSync(file));
     }
   };
   visit(directory);
   return hash.digest("hex");
 }
-function catalog(root2) {
-  const repos = knownRepos(root2);
-  const loaded = projectSkillIds(root2).map((id) => loadProjectSkill(root2, id, repos));
+function catalog(root) {
+  const repos = knownRepos(root);
+  const loaded = projectSkillIds(root).map((id) => loadProjectSkill(root, id, repos));
   return {
     ok: true,
     operation: "list",
@@ -14017,9 +14444,9 @@ function catalog(root2) {
     invalid: loaded.filter((entry) => !entry.ok).map((entry) => ({ id: entry.id, diagnostics: entry.errors }))
   };
 }
-function show(root2, id) {
-  const loaded = loadProjectSkill(root2, id, knownRepos(root2));
-  const raw = readManifest(root2, id);
+function show(root, id) {
+  const loaded = loadProjectSkill(root, id, knownRepos(root));
+  const raw = readManifest(root, id);
   if (!raw.manifest) return { ok: false, operation: "show", skill_id: id, diagnostics: [raw.error], projection_path: `cadre/skills/${id}/SKILL.md`, references: [] };
   return {
     ok: loaded.ok,
@@ -14031,36 +14458,35 @@ function show(root2, id) {
     references: (Array.isArray(raw.manifest.references) ? raw.manifest.references : []).map((value) => {
       const reference = asJsonObject(value);
       const relative = asOptionalString(reference.path) || "";
-      const file = import_node_path53.default.join(root2, "cadre", "skills", id, relative);
-      return { id: reference.id, path: relative, bytes: import_node_fs30.default.existsSync(file) ? import_node_fs30.default.statSync(file).size : null, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root2)}&id=${encodeURIComponent(id)}&reference=${encodeURIComponent(String(reference.id || ""))}` };
+      const file = import_node_path55.default.join(root, "cadre", "skills", id, relative);
+      return { id: reference.id, path: relative, bytes: import_node_fs32.default.existsSync(file) ? import_node_fs32.default.statSync(file).size : null, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root)}&id=${encodeURIComponent(id)}&reference=${encodeURIComponent(String(reference.id || ""))}` };
     })
   };
 }
-function validateCatalog(root2, id) {
+function validateCatalog(root, id) {
   if (id) {
-    const loaded = loadProjectSkill(root2, id, knownRepos(root2));
+    const loaded = loadProjectSkill(root, id, knownRepos(root));
     return { ok: loaded.ok, operation: "validate", skill_id: id, diagnostics: loaded.errors };
   }
-  const result = catalog(root2);
+  const result = catalog(root);
   const invalid = Array.isArray(result.invalid) ? result.invalid : [];
   return { ...result, operation: "validate", ok: invalid.length === 0 };
 }
-function inside(parent, candidate) {
-  const relative = import_node_path53.default.relative(parent, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path53.default.isAbsolute(relative);
-}
-function sourcePause(root2, skillId, requests) {
+function sourcePause(root, skillId, requests) {
   const resources = [];
   const errors = [];
   for (const request of requests) {
     const source = asOptionalString(request.source_path) || "";
-    const absolute = import_node_path53.default.resolve(root2, source);
-    const relative = import_node_path53.default.relative(root2, absolute);
-    if (!source || relative.startsWith("..") || import_node_path53.default.isAbsolute(relative)) errors.push(`source_path must stay inside the project: ${source}`);
-    else if (!import_node_fs30.default.existsSync(absolute) || !import_node_fs30.default.statSync(absolute).isFile()) errors.push(`source_path is not a file: ${source}`);
-    else if (!inside(import_node_fs30.default.realpathSync(root2), import_node_fs30.default.realpathSync(absolute))) errors.push(`source_path escapes the project through a link: ${source}`);
-    else if (import_node_path53.default.resolve(root2, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === absolute) errors.push(`source_path collides with its managed target: ${source}`);
-    else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root2)}&path=${encodeURIComponent(source)}`);
+    const lexicalRoot = import_node_path55.default.resolve(root);
+    const lexicalPath = import_node_path55.default.resolve(lexicalRoot, source);
+    const relative = import_node_path55.default.relative(lexicalRoot, lexicalPath);
+    const validated = readProjectSourceFile(root, source);
+    if (!source || relative.startsWith("..") || import_node_path55.default.isAbsolute(relative)) errors.push(`source_path must stay inside the project: ${source}`);
+    else if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path55.default.extname(source).toLowerCase())) errors.push(`source_path has an unsupported extension: ${source}`);
+    else if (!validated.ok && validated.kind === "path") errors.push(`source_path must identify an existing, link-free project file: ${source}`);
+    else if (!validated.ok) errors.push(`source_path must be a text file no larger than 128 KiB: ${source}`);
+    else if (import_node_path55.default.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
+    else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root)}&path=${encodeURIComponent(source)}`);
   }
   return errors.length ? { ok: false, phase_state: "blocked", errors, error: errors[0] } : {
     ok: true,
@@ -14070,7 +14496,7 @@ function sourcePause(root2, skillId, requests) {
     source_requests: requests
   };
 }
-function desiredFiles(root2, sourceId, manifest, contents) {
+function desiredFiles(root, sourceId, manifest, contents) {
   const files = /* @__PURE__ */ new Map();
   const errors = [];
   files.set("skill.json", `${JSON.stringify(manifest, null, 2)}
@@ -14082,8 +14508,8 @@ function desiredFiles(root2, sourceId, manifest, contents) {
     const relative = asOptionalString(reference.path) || "";
     let content = contents.get(id);
     if (content === void 0) {
-      const existing = import_node_path53.default.join(root2, "cadre", "skills", sourceId, relative);
-      if (import_node_fs30.default.existsSync(existing)) content = import_node_fs30.default.readFileSync(existing, "utf8");
+      const existing = import_node_path55.default.join(root, "cadre", "skills", sourceId, relative);
+      if (import_node_fs32.default.existsSync(existing)) content = import_node_fs32.default.readFileSync(existing, "utf8");
       else {
         errors.push(`reference content is required: ${id}`);
         continue;
@@ -14097,7 +14523,7 @@ function desiredFiles(root2, sourceId, manifest, contents) {
   }
   return { files, errors };
 }
-function reviewFilesFor(operation, sourceId, targetId, files, removedReferencePaths) {
+function reviewFilesFor(sourceId, targetId, files, removedReferencePaths) {
   if (!targetId) return [
     { path: `cadre/skills/${sourceId}/.delete`, title: `Remove project skill ${sourceId}`, kind: "text", source: "skill.remove", content: `Delete cadre/skills/${sourceId}/
 `, missing: true },
@@ -14141,31 +14567,31 @@ function approvalStages(operation, referenceReviewPaths) {
     ...["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"] }] : []
   ];
 }
-function workflowSkill(root2, args) {
-  args = applyStagedApprovalSessionPayload(root2, args, "skill");
+function workflowSkill(root, args) {
+  args = applyStagedApprovalSessionPayload(root, args, "skill");
   const operation = asOptionalString(args.operation) || "list";
   const id = asOptionalString(args.skillId || args.skill_id || args.id)?.trim() || "";
-  if (operation === "list") return catalog(root2);
-  if (operation === "show") return id ? show(root2, id) : { ok: false, error: "skillId is required" };
-  if (operation === "validate") return validateCatalog(root2, id || null);
+  if (operation === "list") return catalog(root);
+  if (operation === "show") return id ? show(root, id) : { ok: false, error: "skillId is required" };
+  if (operation === "validate") return validateCatalog(root, id || null);
   if (!["create", "update", "rename", "remove"].includes(operation)) return { ok: false, error: `unknown skill operation: ${operation}` };
   if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) return { ok: false, error: `invalid skillId: ${id || "(missing)"}` };
-  const existing = readManifest(root2, id);
+  const existing = readManifest(root, id);
   const continuingApproval = Boolean(args.approvalSessionId || args.approval_session_id);
-  if (operation === "create" && import_node_fs30.default.existsSync(import_node_path53.default.join(root2, "cadre", "skills", id)) && !continuingApproval) return { ok: false, error: `skill already exists: ${id}` };
+  if (operation === "create" && import_node_fs32.default.existsSync(import_node_path55.default.join(root, "cadre", "skills", id)) && !continuingApproval) return { ok: false, error: `skill already exists: ${id}` };
   if (operation !== "create" && !existing.manifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
-  if (operation === "remove" && !import_node_fs30.default.existsSync(import_node_path53.default.join(root2, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
+  if (operation === "remove" && !import_node_fs32.default.existsSync(import_node_path55.default.join(root, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
   const newId = operation === "rename" ? asOptionalString(args.newSkillId || args.new_skill_id)?.trim() || "" : id;
-  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || import_node_fs30.default.existsSync(import_node_path53.default.join(root2, "cadre", "skills", newId)))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || import_node_fs32.default.existsSync(import_node_path55.default.join(root, "cadre", "skills", newId)))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
   const sessionSource = args.source_manifest;
   const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource) ? asJsonObject(sessionSource) : existing.manifest;
   const base = operation === "create" ? emptyManagedManifest(id) : sourceManifest || emptyManagedManifest(id);
   const changed = applySkillChanges(base, args.changes);
-  if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root2, id, changed.sourceRequests) };
+  if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root, id, changed.sourceRequests) };
   const manifest = changed.manifest;
   manifest.id = newId;
-  const errors = [...changed.errors, ...operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root2))];
-  const desired = operation === "remove" ? { files: /* @__PURE__ */ new Map(), errors: [] } : desiredFiles(root2, id, manifest, changed.referenceContent);
+  const errors = [...changed.errors, ...operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root))];
+  const desired = operation === "remove" ? { files: /* @__PURE__ */ new Map(), errors: [] } : desiredFiles(root, id, manifest, changed.referenceContent);
   errors.push(...desired.errors);
   if (errors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: errors[0], errors };
   const existingReferences = (Array.isArray(sourceManifest?.references) ? sourceManifest.references : []).map(asJsonObject);
@@ -14176,19 +14602,19 @@ function workflowSkill(root2, args) {
   const removedPaths = existingReferences.filter((reference) => changed.removedReferences.has(asOptionalString(reference.id) || "")).map((reference) => asOptionalString(reference.path) || "");
   const changedReferencePaths = Array.from(new Set(operation === "rename" || operation === "remove" ? [...existingReferencePaths, ...targetReferencePaths] : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
   const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
-  const reviews = reviewFilesFor(operation, id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const reviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
   const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
     const base2 = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
     return deletedReferencePaths.includes(relative) ? [`${base2}.delete`] : [base2];
   });
   const stages = approvalStages(operation, referenceReviewPaths);
-  const snapshot = asOptionalString(args.source_snapshot) || hashDirectory(import_node_path53.default.join(root2, "cadre", "skills", id));
+  const snapshot = asOptionalString(args.source_snapshot) || hashDirectory(import_node_path55.default.join(root, "cadre", "skills", id));
   const reviewArgs = {
     ...args,
     source_snapshot: snapshot,
     source_manifest: sourceManifest || emptyManagedManifest(id)
   };
-  const approval = stages.length > 0 ? stagedApprovalState(root2, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
+  const approval = stages.length > 0 ? stagedApprovalState(root, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const approvalError = stages.length > 0 ? stagedApprovalError(approval) : null;
   if (args.execute !== true || stages.length > 0 && !stagedApprovalReady(approval)) return {
     ok: !approvalError,
@@ -14202,13 +14628,13 @@ function workflowSkill(root2, args) {
     mutation_plan: stages.length === 0 ? { operation, source: id, target: operation === "remove" ? null : newId } : null,
     ...approvalError ? { error: approvalError } : {}
   };
-  const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root2, reviewArgs) : { ok: true, skipped: true };
+  const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root, reviewArgs) : { ok: true, skipped: true };
   if (reviewValidation.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, error: asOptionalString(reviewValidation.error) || "Approved review files changed" };
-  const traceBefore = beginTrace(root2);
+  const traceBefore = beginTrace(root);
   try {
-    const mutation = atomicSkillMutation(root2, id, operation === "remove" ? null : newId, desired.files);
+    const mutation = atomicSkillMutation(root, id, operation === "remove" ? null : newId, desired.files);
     if (operation !== "remove") {
-      const final = loadProjectSkill(root2, newId, knownRepos(root2));
+      const final = loadProjectSkill(root, newId, knownRepos(root));
       if (!final.ok) {
         mutation.rollback();
         mutation.finish();
@@ -14217,12 +14643,12 @@ function workflowSkill(root2, args) {
     }
     mutation.finish();
     const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
-    const event = appendCadreEvent(root2, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null });
-    const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root2, reviewArgs) : null;
+    const event = appendCadreEvent(root, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null });
+    const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root, reviewArgs) : null;
     const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
-    const controlCommit = commitTrace(root2, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
+    const controlCommit = commitTrace(root, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
     if (controlCommit.ok === false) return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit };
-    const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root2, reviewArgs) : null;
+    const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root, reviewArgs) : null;
     return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
   } catch (error) {
     return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "filesystem", error: errorMessage(error) };
@@ -14230,21 +14656,21 @@ function workflowSkill(root2, args) {
 }
 
 // src/core/application/runtime/workflow-packet.ts
-function workflowPacket(root2, args = {}) {
+function workflowPacket(root, args = {}) {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
   const markdownError = markdownPayloadError(args);
-  if (markdownError) return shapeWorkflowResponse(root2, workflow, args, { ...workflowSummary(root2, workflow, args), ...markdownError });
+  if (markdownError) return shapeWorkflowResponse(root, workflow, args, { ...workflowSummary(root, workflow, args), ...markdownError });
   if (workflow === "skill") {
     if (args.execute === true && args.skipSync !== true) {
-      const result2 = withSharedControlPlaneSync(root2, args, "workflow:skill", () => workflowSkill(root2, { ...args, skipSync: true }));
-      return shapeWorkflowResponse(root2, workflow, args, result2);
+      const result2 = withSharedControlPlaneSync(root, args, "workflow:skill", () => workflowSkill(root, { ...args, skipSync: true }));
+      return shapeWorkflowResponse(root, workflow, args, result2);
     }
-    return shapeWorkflowResponse(root2, workflow, args, workflowSkill(root2, args));
+    return shapeWorkflowResponse(root, workflow, args, workflowSkill(root, args));
   }
-  const projectSkills = projectSkillSelection(root2, workflow, args);
+  const projectSkills = projectSkillSelection(root, workflow, args);
   if (projectSkills.ok === false) {
-    return shapeWorkflowResponse(root2, workflow, args, {
-      ...workflowSummary(root2, workflow, args),
+    return shapeWorkflowResponse(root, workflow, args, {
+      ...workflowSummary(root, workflow, args),
       ok: false,
       phase_state: "blocked",
       stage: "project_skills",
@@ -14269,86 +14695,86 @@ function workflowPacket(root2, args = {}) {
   ].includes(workflow);
   if (mutating && args.skipSync !== true) {
     const result2 = withSharedControlPlaneSync(
-      root2,
+      root,
       args,
       `workflow:${workflow}`,
-      () => workflowPacket(root2, { ...args, skipSync: true })
+      () => workflowPacket(root, { ...args, skipSync: true })
     );
-    return shapeWorkflowResponse(root2, workflow, args, result2);
+    return shapeWorkflowResponse(root, workflow, args, result2);
   }
   const result = (() => {
     switch (workflow) {
       case "setup":
       case "setup_assist":
       case "setup_scaffold":
-        return workflowSetup(root2, args);
+        return workflowSetup(root, args);
       case "newtrack":
       case "new_track":
-        return workflowNewTrack(root2, args);
+        return workflowNewTrack(root, args);
       case "implement":
-        return workflowImplement(root2, args);
+        return workflowImplement(root, args);
       case "status":
-        return workflowStatus(root2, args);
+        return workflowStatus(root, args);
       case "review":
-        return workflowReview(root2, args);
+        return workflowReview(root, args);
       case "validate":
-        return workflowValidate(root2, args);
+        return workflowValidate(root, args);
       case "debug": {
-        const summary = workflowSummary(root2, "debug", args);
+        const summary = workflowSummary(root, "debug", args);
         return {
           ...summary,
           ok: true,
           dry_run: true,
           phase_state: args.execute === true ? "ready_for_snapshot" : "ready",
-          dap_status: dapStatus(root2, args),
-          dap_setup: dapSetup(root2, { ...args, execute: false }),
+          dap_status: dapStatus(root, args),
+          dap_setup: dapSetup(root, { ...args, execute: false }),
           snapshot_packet: {
             tool: "cadre_action",
             arguments: {
-              root: root2,
+              root,
               action: "intel.dap_snapshot",
               input: {
                 trackId: args.trackId || args.track_id,
                 config: args.config,
                 configurationId: args.configurationId || args.configuration_id || args.id,
-                async: args.async === true,
-                execute: args.execute === true
-              }
+                async: args.async === true
+              },
+              execute: args.execute === true
             }
           }
         };
       }
       case "archive":
-        return workflowArchive(root2, args);
+        return workflowArchive(root, args);
       case "handoff":
-        return workflowHandoff(root2, args);
+        return workflowHandoff(root, args);
       case "ship":
-        return workflowShip(root2, args);
+        return workflowShip(root, args);
       case "land":
-        return workflowLand(root2, args);
+        return workflowLand(root, args);
       case "release":
-        return workflowRelease(root2, args);
+        return workflowRelease(root, args);
       case "revise":
-        return workflowRevise(root2, args);
+        return workflowRevise(root, args);
       case "refresh":
-        return workflowRefresh(root2, args);
+        return workflowRefresh(root, args);
       case "artifacts":
       case "artifact_sync": {
         const artifactAction = asOptionalString(args.artifactAction || args.artifact_action) || asOptionalString(args.mode) || "sync";
         return {
-          ...workflowSummary(root2, workflow, args),
+          ...workflowSummary(root, workflow, args),
           artifact_action: artifactAction,
           artifact_scope: asOptionalString(args.scope || args.view) || "all",
-          ...artifactPacket(root2, { ...args, action: artifactAction })
+          ...artifactPacket(root, { ...args, action: artifactAction })
         };
       }
       case "flag": {
-        const trackId = selectedTrackId(root2, args);
-        const summary = workflowSummary(root2, "flag", args);
+        const trackId = selectedTrackId(root, args);
+        const summary = workflowSummary(root, "flag", args);
         if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
         const status = asOptionalString(args.status) || "blocked";
         const reason = asOptionalString(args.reason) || asOptionalString(args.note) || null;
-        const context = trackContext(root2, trackId);
+        const context = trackContext(root, trackId);
         const reviewArtifacts = [
           packetReviewArtifact("Flag status change", "workflow:flag", {
             track_id: trackId,
@@ -14369,24 +14795,24 @@ function workflowPacket(root2, args = {}) {
             review_artifacts: reviewArtifacts
           };
         }
-        const traceBefore = beginTrace(root2);
-        const statusResult = setTrackStatus(root2, trackId, status, { ...args, commitMode: "off" });
+        const traceBefore = beginTrace(root);
+        const statusResult = setTrackStatus(root, trackId, status, { ...args, commitMode: "off" });
         if (statusResult.ok === false) return { ...summary, ok: false, track_context: context, status_result: statusResult };
-        const patch = metadataPatch(root2, {
+        const patch = metadataPatch(root, {
           trackId,
           patch: {
             last_status_reason: reason,
             last_status_at: utcNow()
           }
         });
-        const event = appendCadreEvent(root2, {
+        const event = appendCadreEvent(root, {
           kind: "status_changed",
           workflow: "flag",
           track_id: trackId,
           status,
           reason
         });
-        const controlCommit = commitTrace(root2, args, {
+        const controlCommit = commitTrace(root, args, {
           kind: "control",
           workflow: "flag",
           subject: `mark ${trackId} ${status}`,
@@ -14417,18 +14843,18 @@ function workflowPacket(root2, args = {}) {
         };
       }
       case "revert":
-        return workflowRevert(root2, args);
+        return workflowRevert(root, args);
       case "formula":
-        return workflowFormula(root2, args);
+        return workflowFormula(root, args);
       default:
         return {
-          ...workflowSummary(root2, workflow, args),
+          ...workflowSummary(root, workflow, args),
           ok: false,
           error: `Unknown Cadre workflow packet: ${workflow}`
         };
     }
   })();
-  return shapeWorkflowResponse(root2, workflow, args, {
+  return shapeWorkflowResponse(root, workflow, args, {
     ...result,
     project_skills: projectSkills,
     warnings: Array.from(/* @__PURE__ */ new Set([
@@ -14438,81 +14864,51 @@ function workflowPacket(root2, args = {}) {
   });
 }
 
-// src/mcp/domain/tool-catalog.ts
-var SERVER_INSTRUCTIONS = [
-  "Cadre is a packet-led runtime. Call cadre_workflow first for workflows, cadre_action for a packet named by a workflow response, and cadre_read only for a relevant resource URI.",
-  "Pass a root candidate to project-scoped calls. Cadre resolves it internally; setup accepts an uninitialized directory.",
-  "Cadre owns control-plane, provider, worker, approval, merge, and generated projection state."
-].join(" ");
-var root = {
-  type: "string",
-  description: "Project root candidate or a path inside the project."
-};
-var TOOLS = [
-  {
-    name: "cadre_workflow",
-    description: "Start or continue a Cadre workflow. The response contains the current decision and at most one deterministic next call.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root,
-        workflow: { type: "string" },
-        input: { type: "object", description: "Workflow-specific structured input." },
-        execute: { type: "boolean" },
-        approval: { type: "object", description: "Explicit document approval supplied only after user confirmation, or cancel:true to abandon a review session." }
-      },
-      required: ["root", "workflow"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "cadre_action",
-    description: "Run the namespaced action returned by a Cadre workflow, such as task.complete, intel.repo_map, or job.result.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        root,
-        action: { type: "string" },
-        input: { type: "object", description: "Action-specific structured input." },
-        execute: { type: "boolean" }
-      },
-      required: ["action"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "cadre_read",
-    description: "Read one targeted Cadre resource URI returned by a packet.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        uri: { type: "string" }
-      },
-      required: ["uri"],
-      additionalProperties: false
-    }
+// src/core/application/runtime/workflow-packet-v1.ts
+var ROOTLESS_RESOURCES = /* @__PURE__ */ new Set(["cadre://template-inventory"]);
+var MAX_DATA_ARRAY_ITEMS = 30;
+var MAX_DATA_DEPTH = 6;
+var MAX_DATA_OBJECT_KEYS = 50;
+var MAX_DATA_STRING_CHARS = 4e3;
+var APPROVAL_INPUT_KEYS = /* @__PURE__ */ new Set([
+  "root",
+  "workflow",
+  "execute",
+  "approval",
+  "approvalStage",
+  "approval_stage",
+  "approvalSessionId",
+  "approval_session_id",
+  "approvedStages",
+  "approved_stages",
+  "approvalComplete",
+  "approval_complete",
+  "approvalCancel",
+  "approval_cancel"
+]);
+function jsonValue(value) {
+  return isJsonValue(value) ? value : void 0;
+}
+function boundedJsonValue(value, depth = 0) {
+  if (typeof value === "string") {
+    return value.length > MAX_DATA_STRING_CHARS ? `${value.slice(0, MAX_DATA_STRING_CHARS)}
+...[truncated]` : value;
   }
-];
-
-// src/mcp/application/workflow-envelope.ts
-var FORBIDDEN_BODY_KEYS = /* @__PURE__ */ new Set(["content", "instructions", "stdout", "stderr", "notes", "diff", "plan"]);
-function bounded(value, depth = 0) {
-  if (value === void 0) return null;
-  if (value === null) return null;
-  if (typeof value === "string") return value.length > 600 ? `${value.slice(0, 600)}\u2026` : value;
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value !== "object") return String(value);
-  if (depth >= 4) return "[resource-required]";
-  if (Array.isArray(value)) return value.slice(0, 12).map((entry) => bounded(entry, depth + 1));
-  const output = {};
-  for (const [key, entry] of Object.entries(asJsonObject(value))) {
-    if (FORBIDDEN_BODY_KEYS.has(key)) {
-      output[`${key}_available`] = entry != null;
-      continue;
-    }
-    output[key] = bounded(entry, depth + 1);
+  if (value == null || typeof value === "number" || typeof value === "boolean") return jsonValue(value);
+  if (depth >= MAX_DATA_DEPTH) return "[depth-limit]";
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_DATA_ARRAY_ITEMS).map((entry) => boundedJsonValue(entry, depth + 1)).filter((entry) => entry !== void 0);
   }
-  return output;
+  const result = {};
+  for (const [key, entry] of Object.entries(asJsonObject(value)).slice(0, MAX_DATA_OBJECT_KEYS)) {
+    const bounded = boundedJsonValue(entry, depth + 1);
+    if (bounded !== void 0) result[key] = bounded;
+  }
+  return result;
+}
+function boundedJsonObject(value) {
+  const bounded = boundedJsonValue(value);
+  return bounded && typeof bounded === "object" && !Array.isArray(bounded) ? bounded : {};
 }
 function approvalDecision(result) {
   const approval = asJsonObject(result.approval);
@@ -14521,13 +14917,18 @@ function approvalDecision(result) {
   if (!currentStage) {
     const human = asJsonObject(result.human_review);
     if (human.required === true && human.confirmed !== true) {
-      return { kind: "approval", stage: "human_review", session_id: null, prompt: human.approval_instruction || "Review the proposed change and ask for explicit user approval." };
+      return {
+        kind: "approval",
+        stage: "human_review",
+        session_id: null,
+        prompt: jsonValue(human.approval_instruction) || "Review the proposed change and ask for explicit user approval."
+      };
     }
     return null;
   }
   return {
     kind: "approval",
-    stage: currentStage || asOptionalString(result.stage) || "human_review",
+    stage: currentStage,
     title: asOptionalString(approval.current_stage_title) || null,
     session_id: asOptionalString(approval.session_id) || null,
     approved_stages: asStringArray(approval.approved_stages),
@@ -14535,122 +14936,218 @@ function approvalDecision(result) {
     prompt: asOptionalString(approval.manual_approval_prompt) || "Review the current stage and ask for explicit user approval."
   };
 }
-function decision(result) {
-  if (result.decision) return asJsonObject(result.decision);
+function workflowDecision(result) {
+  const explicit = asJsonObject(result.decision);
+  if (Object.keys(explicit).length > 0) return explicit;
   const skills = asJsonObject(result.project_skills);
-  if (skills.decision) return asJsonObject(skills.decision);
-  const prompts = Array.isArray(result.intent_prompts) ? result.intent_prompts : Array.isArray(result.native_prompts) ? result.native_prompts : [];
-  if (prompts.length > 0) return { kind: "clarification", prompts: bounded(prompts) };
+  const skillDecision = asJsonObject(skills.decision);
+  if (Object.keys(skillDecision).length > 0) return skillDecision;
+  const prompts = Array.isArray(result.intent_prompts) ? asJsonArray(result.intent_prompts) : asJsonArray(result.native_prompts);
+  if (prompts.length > 0) return { kind: "clarification", prompts };
   const approval = approvalDecision(result);
   if (approval) return approval;
-  if (result.phase_state === "pending_provider") return { kind: "provider_evidence", required: result.required_evidence || null };
-  if (result.ok === false) return { kind: "blocked", reason: result.error || result.stage || "Cadre workflow failed" };
-  return { kind: result.execute === true && result.dry_run !== true ? "complete" : "ready" };
+  if (result.phase_state === "pending_provider") {
+    return { kind: "provider_evidence", required: jsonValue(result.required_evidence) || null };
+  }
+  if (result.ok === false) {
+    return { kind: "blocked", reason: asOptionalString(result.error || result.reason || result.stage) || "Cadre workflow failed" };
+  }
+  const completed = ["executed", "complete", "completed"].includes(String(result.phase_state || ""));
+  return { kind: completed ? "complete" : "ready" };
 }
-function required(result) {
+function implementationTarget(result) {
+  const prep = asJsonObject(result.prepare_implementation);
+  const trackId = asOptionalString(prep.selected_track) || asOptionalString(result.track_id);
+  if (!trackId || prep.ok === false) return null;
+  const schedule = asJsonObject(result.phase_schedule);
+  const readyPhaseIds = new Set(asStringArray(schedule.ready_phases));
+  const phase = asJsonArray(schedule.phases).map((entry) => asJsonObject(entry)).find((entry) => readyPhaseIds.has(String(entry.phase_id || "")));
+  return phase ? { trackId, phase, readyGroups: asJsonArray(schedule.ready_groups).map((entry) => asStringArray(entry)) } : null;
+}
+function parallelImplementation(target2) {
+  return target2.phase.execution === "parallel" || (target2.readyGroups[0]?.length || 0) > 1;
+}
+function requiredInputs(result, workflow, args) {
+  const target2 = workflow === "implement" ? implementationTarget(result) : null;
   return Array.from(/* @__PURE__ */ new Set([
     ...asStringArray(result.missing_payload),
     ...result.ok === false ? asStringArray(result.required_payload) : [],
-    ...result.required_provider_mcp ? [String(result.required_provider_mcp)] : []
+    ...result.required_provider_mcp ? ["providerEvidence"] : [],
+    ...target2 && parallelImplementation(target2) && !args.agentIdentifier ? ["agentIdentifier"] : [],
+    ...workflow === "debug" && args.execute !== true ? ["execute"] : []
   ]));
 }
 function reviewFiles(value) {
   const bundle = asJsonObject(value);
-  return (Array.isArray(bundle.files) ? bundle.files : []).slice(0, 30).map((entry) => {
+  return asJsonArray(bundle.files).slice(0, 30).map((entry) => {
     const file = asJsonObject(entry);
     return {
-      path: file.path || null,
-      review_path: file.review_path || null,
-      target_path: file.target_path || null,
-      kind: file.kind || null
+      path: jsonValue(file.path) || null,
+      review_path: jsonValue(file.review_path) || null,
+      target_path: jsonValue(file.target_path) || null,
+      title: jsonValue(file.title) || null,
+      kind: jsonValue(file.kind) || null
     };
   });
 }
-function artifacts(result) {
-  const files = reviewFiles(result.review_bundle);
-  for (const path54 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) files.push({ path: path54, kind: "changed" });
-  return files;
-}
-function relevantResources(workflow, result) {
-  const candidates = [
-    ...asStringArray(result.schema_resources),
-    ...asStringArray(result.detail_resources),
-    ...asStringArray(result.resource_uris)
+function workflowArtifacts(result) {
+  const files = [
+    ...asJsonArray(result.review_artifacts).map((entry) => boundedJsonObject(entry)),
+    ...reviewFiles(result.review_bundle)
   ];
-  const keep = {
-    setup: ["template-inventory", "workspace-diagnostics", "dependency-graph"],
-    newtrack: ["artifact-schema"],
-    implement: ["track-context", "parallel-state", "project-skill"],
-    review: ["quality-gate", "review-evidence"],
-    ship: ["provider-actions", "quality-gate"],
-    land: ["provider-actions", "quality-gate"],
-    release: ["release-plan"],
-    artifacts: ["artifact-"],
-    skill: ["project-skill-source", "project-skill"]
-  };
-  const needles = keep[workflow] || [];
-  return Array.from(new Set(candidates.filter((uri) => needles.some((needle) => uri.includes(needle))))).slice(0, 6);
+  for (const path56 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) {
+    files.push({ path: path56, kind: "changed" });
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return files.filter((file) => {
+    const located = asOptionalString(file.path) || asOptionalString(file.review_path) || asOptionalString(file.target_path);
+    const semantic = [file.kind, file.title, file.source].map((entry) => String(entry || "")).join(":");
+    const key = located || (semantic === "::" ? JSON.stringify(file) || "{}" : semantic);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 30);
 }
-function nextCall(root2, workflow, result, resources, args) {
-  if (workflow === "skill" && result.phase_state === "awaiting_formatting" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
+function resourceWithRoot(root, uri) {
+  const base = uri.split("?")[0] || uri;
+  if (!uri.startsWith("cadre://") || ROOTLESS_RESOURCES.has(base) || /[?&]root=/.test(uri)) return uri;
+  return `${uri}${uri.includes("?") ? "&" : "?"}root=${encodeURIComponent(root)}`;
+}
+function workflowResources(root, result) {
+  const candidates = [
+    ...asStringArray(result.resource_uris),
+    ...asStringArray(result.schema_resources),
+    ...asStringArray(result.detail_resources)
+  ];
+  return Array.from(new Set(candidates.map((uri) => resourceWithRoot(root, uri)))).slice(0, 8);
+}
+function publicCall(value) {
+  const packet = asJsonObject(value);
+  const tool = asOptionalString(packet.tool);
+  if (!tool || !["cadre_workflow", "cadre_action", "cadre_read"].includes(tool)) return null;
+  return { tool, arguments: asJsonObject(packet.arguments) };
+}
+function actionCall(root, action, input = {}, execute = false) {
+  return {
+    tool: "cadre_action",
+    arguments: { root, action, input, ...execute ? { execute: true } : {} }
+  };
+}
+function implementNext(root, result, args) {
+  const target2 = implementationTarget(result);
+  if (!target2) return null;
+  const task = asJsonArray(target2.phase.tasks).map((entry) => asJsonObject(entry)).find((entry) => !["x", "-", "!"].includes(String(entry.marker || "")));
+  if (!task) return null;
+  if (parallelImplementation(target2)) {
+    if (!args.agentIdentifier) return null;
+    const input = { trackId: target2.trackId, groupIndex: 0 };
+    if (args.maxWorkers != null) input.maxWorkers = args.maxWorkers;
+    input.agentIdentifier = args.agentIdentifier;
+    return actionCall(root, "parallel.next_wave", input);
+  }
+  const phaseIndex = Number(target2.phase.phase_index || 0);
+  const taskIndex = Number(task.task_index || 0);
+  return phaseIndex > 0 && taskIndex > 0 ? actionCall(root, "task.complete", { trackId: target2.trackId, phaseIndex, taskIndex }, true) : null;
+}
+function nextCall(root, workflow, result, resources, args) {
+  const explicit = publicCall(result.next) || publicCall(result.next_intent);
+  if (explicit) return explicit;
+  if (workflow === "skill" && result.phase_state === "awaiting_formatting" && resources[0]) {
+    return { tool: "cadre_read", arguments: { uri: resources[0] } };
+  }
   if (workflow === "skill") {
     const approval = asJsonObject(result.approval);
     if (approval.cancelled !== true && asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
-      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !["root", "workflow", "execute", "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id", "approvedStages", "approved_stages", "approvalComplete", "approval_complete", "approvalCancel", "approval_cancel"].includes(key)));
-      return { tool: "cadre_workflow", arguments: { root: root2, workflow, input, execute: true, approval: { session_id: approval.session_id, approved_stages: approval.approved_stages, complete: true } } };
+      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !APPROVAL_INPUT_KEYS.has(key)));
+      return {
+        tool: "cadre_workflow",
+        arguments: {
+          root,
+          workflow,
+          input,
+          execute: true,
+          approval: {
+            session_id: approval.session_id,
+            approved_stages: jsonValue(approval.approved_stages) || [],
+            complete: true
+          }
+        }
+      };
     }
   }
-  if (result.phase_state === "pending_provider" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
-  const snapshot = asJsonObject(result.snapshot_packet);
-  if (snapshot.tool) {
-    const argumentsObject = asJsonObject(snapshot.arguments);
-    return { tool: "cadre_action", arguments: { root: root2, action: "intel.dap_snapshot", input: argumentsObject.input || argumentsObject } };
+  if (result.phase_state === "pending_provider") {
+    const providerActions = resources.find((uri) => uri.startsWith("cadre://provider-actions"));
+    return providerActions ? { tool: "cadre_read", arguments: { uri: providerActions } } : null;
   }
+  const snapshot = args.execute === true ? publicCall(result.snapshot_packet) : null;
+  if (snapshot) return snapshot;
   const job = asJsonObject(result.job);
-  if (job.id) return { tool: "cadre_action", arguments: { root: root2, action: "job.result", input: { jobId: job.id } } };
-  if (workflow === "implement") {
-    const prep = asJsonObject(result.prepare_implementation);
-    const trackId = asOptionalString(prep.selected_track);
-    const phase = Number(prep.next_phase_index || 0);
-    const task = Number(prep.next_task_index || 0);
-    if (trackId && phase > 0 && task > 0) return { tool: "cadre_action", arguments: { root: root2, action: "task.complete", input: { trackId, phaseIndex: phase, taskIndex: task } } };
-  }
+  if (job.id) return actionCall(root, "job.result", { jobId: String(job.id) });
+  if (workflow === "implement") return implementNext(root, result, args);
   return null;
 }
+var WORKFLOW_ALIASES = {
+  setup_assist: "setup",
+  setup_scaffold: "setup",
+  new_track: "newtrack",
+  artifact_sync: "artifacts"
+};
+var COMMON_DATA_FIELDS = ["dry_run", "operation", "stage", "sync_pre", "sync_post", "control_commit"];
+var WORKFLOW_DATA_FIELDS = {
+  setup: ["topology", "provider", "sync_mode", "workspace_health", "workspace", "dependency_graph", "lsp", "lsp_setup", "integrations", "styleguide_ids", "project_skills", "scaffolded", "written", "skipped", "gitattributes", "ci_setup", "polyrepo_setup", "force"],
+  newtrack: ["track_id", "track_context", "plan_assist", "generation_quality", "project_skills", "write", "regen"],
+  implement: ["prepare_implementation", "phase_schedule", "project_skills"],
+  status: ["status", "project_skills"],
+  review: ["track_context", "review_assist", "gate", "provider", "required_provider_mcp", "required_evidence", "unsupported_reason", "project_skills"],
+  validate: ["doctor", "team", "integrity", "collisions", "fleet", "branch_sets", "native_state", "project_skill_diagnostics", "projection_validation"],
+  debug: ["dap_status", "dap_setup", "snapshot", "breakpoints", "configuration", "adapter", "output", "job"],
+  archive: ["tracks", "archived", "regen"],
+  handoff: ["track_id", "track_context", "handoff_path", "message", "event", "review_validation", "reused_review_files"],
+  ship: ["track_id", "gate", "provider", "provider_actions", "git_actions", "git_results", "publication", "git_action_state", "provider_evidence_write", "continuation_token", "required_provider_mcp", "required_evidence", "unsupported_reason"],
+  land: ["track_id", "topology", "preflight", "gate", "provider", "provider_actions", "git_actions", "git_results", "publication", "git_action_state", "provider_evidence_write", "continuation_token", "required_provider_mcp", "required_evidence", "unsupported_reason", "fleet"],
+  release: ["release_version", "completed_tracks", "release_artifacts", "git_actions", "git_results", "bump", "setup_state", "review_validation", "reused_review_files"],
+  revise: ["track_id", "track_context", "impact", "write", "regen", "review_validation", "reused_review_files"],
+  refresh: ["scope", "doctor", "workspace", "dependency_graph", "lsp", "lsp_setup", "regen", "patterns", "review_validation", "reused_review_files"],
+  artifacts: ["artifact_action", "artifact_scope", "artifacts", "written", "skipped", "mutation"],
+  flag: ["track_id", "track_context", "proposed_status", "reason", "status_result", "metadata_patch", "event"],
+  revert: ["track_id", "track_context", "affected_repos", "repo_error", "git_actions", "git_results", "metadata_patch", "projection_repair", "regen", "event"],
+  formula: ["action", "id", "formula_id", "wisp_id", "path", "formula", "formulas", "count", "title", "variables", "recommended_phase", "dependencies", "spec", "plan", "wisp", "wisps", "step", "digest", "event", "existed", "pour_event", "pour_commit", "track_id"],
+  skill: ["operation", "skill_id", "new_skill_id", "valid", "invalid", "manifest", "diagnostics", "projection_path", "references", "source_requests", "written", "removed"]
+};
 function workflowData(workflow, result) {
-  const fields = {
-    setup: ["topology", "provider", "sync_mode", "workspace_health", "styleguide_ids", "project_skills", "scaffolded"],
-    newtrack: ["track_id", "plan_assist", "project_skills"],
-    implement: ["prepare_implementation", "phase_schedule", "project_skills"],
-    debug: ["dap_status", "dap_setup"],
-    status: ["status", "project_skills"],
-    review: ["track_context", "review_assist", "gate", "provider", "project_skills"],
-    validate: ["doctor", "team", "integrity", "collisions", "fleet", "project_skill_diagnostics"],
-    skill: ["operation", "skill_id", "new_skill_id", "valid", "invalid", "manifest", "diagnostics", "projection_path", "references", "source_requests", "control_commit"],
-    ship: ["track_id", "gate", "provider", "provider_actions", "git_actions"],
-    land: ["track_id", "gate", "provider", "provider_actions", "git_actions"]
-  };
-  const selected = fields[workflow] || ["track_id", "status", "reason", "scope", "project_skills"];
-  return Object.fromEntries(selected.filter((key) => result[key] !== void 0).map((key) => [key, bounded(result[key])]));
+  const canonical = WORKFLOW_ALIASES[workflow] || workflow;
+  const selected = [...COMMON_DATA_FIELDS, ...WORKFLOW_DATA_FIELDS[canonical] || ["track_id", "status", "reason", "scope", "project_skills"]];
+  const data = {};
+  for (const key of new Set(selected)) {
+    const value = boundedJsonValue(result[key]);
+    if (value !== void 0) data[key] = value;
+  }
+  return data;
 }
-function workflowEnvelope(root2, args, value) {
+function workflowPacketV1(root, args = {}) {
+  const raw = workflowPacket(root, args);
+  return workflowPacketEnvelopeV1(root, args, raw);
+}
+function workflowPacketEnvelopeV1(root, args, value) {
   const result = asJsonObject(value);
   const workflow = asOptionalString(result.workflow || args.workflow) || "status";
   const ok = result.ok !== false;
-  const resources = relevantResources(workflow, result);
+  const resources = workflowResources(root, result);
   const reason = asOptionalString(result.error || result.reason || result.stage);
+  const rawErrors = asStringArray(result.errors);
+  const errors = ok ? rawErrors : Array.from(/* @__PURE__ */ new Set([reason || rawErrors[0] || "Cadre workflow failed", ...rawErrors]));
   return {
     ok,
     workflow,
     phase: asOptionalString(result.phase_state) || (ok ? "ready" : "blocked"),
-    decision: decision(result),
-    required: required(result),
-    next: nextCall(root2, workflow, result, resources, args),
-    artifacts: artifacts(result),
+    decision: workflowDecision(result),
+    required: requiredInputs(result, workflow, args),
+    next: nextCall(root, workflow, result, resources, args),
+    artifacts: workflowArtifacts(result),
     resources,
     data: workflowData(workflow, result),
     warnings: asStringArray(result.warnings),
-    errors: ok ? [] : [reason || "Cadre workflow failed"]
+    errors
   };
 }
 // Annotate the CommonJS export names for ESM import in node:
@@ -14685,7 +15182,6 @@ function workflowEnvelope(root2, args, value) {
   lspReview,
   lspSetup,
   mcpReadiness,
-  mcpTools,
   metadataPatch,
   nativeStateSummary,
   parallelWorkflow,
@@ -14722,9 +15218,10 @@ function workflowEnvelope(root2, args, value) {
   testCoverage,
   testImpact,
   trackContext,
-  workflowEnvelope,
   workflowFormula,
   workflowPacket,
+  workflowPacketEnvelopeV1,
+  workflowPacketV1,
   workspaceDiagnostics,
   workspaceHealth,
   worktreePlan,

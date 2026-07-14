@@ -1,12 +1,7 @@
-import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
-import type { JsonObject } from "../../types";
-import { asJsonObject, asNumber, asOptionalString, asStringArray, errorMessage, isRecord } from "../../guards";
-import { isIgnoredFile, normalizeRel, shouldIgnore } from "../ignore-policy";
+import { asJsonObject, asOptionalString } from "../../guards";
 
-import { LspServerConfig } from "./types";
+import type { LspServerConfig } from "./types";
 
 export const DEFAULT_LANGUAGE_IDS: Record<string, string> = {
   ".bash": "shellscript",

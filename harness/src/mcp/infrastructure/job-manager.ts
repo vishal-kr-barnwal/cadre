@@ -13,6 +13,29 @@ interface ManagedJobRecord extends JobRecord {
   proc: ChildProcessWithoutNullStreams | null;
 }
 
+const JOB_ID_PATTERN = /^job_[a-z0-9-]{1,96}$/i;
+const MAX_JOB_ARTIFACT_BYTES = 2 * 1024 * 1024;
+
+function isJobId(value: string | null | undefined): value is string {
+  return typeof value === "string" && JOB_ID_PATTERN.test(value);
+}
+
+function inside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== ""
+    && relative !== ".."
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function sameRoot(left: string, right: string): boolean {
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return path.resolve(left) === path.resolve(right);
+  }
+}
+
 export class JobManager {
   jobs: Map<string, ManagedJobRecord>;
   ttlMs: number;
@@ -22,15 +45,38 @@ export class JobManager {
     this.ttlMs = 60 * 60 * 1000;
   }
 
-  jobDir(root: string): string {
-    return path.join(root, "cadre", "jobs");
+  private safeJobDirectory(root: string, create: boolean): string {
+    const canonicalRoot = fs.realpathSync(root);
+    const cadreDirectory = path.join(canonicalRoot, "cadre");
+    if (create && !fs.existsSync(cadreDirectory)) fs.mkdirSync(cadreDirectory);
+    const cadreStat = fs.lstatSync(cadreDirectory);
+    if (!cadreStat.isDirectory() || cadreStat.isSymbolicLink()) throw new Error("Unsafe Cadre job directory");
+    const canonicalCadre = fs.realpathSync(cadreDirectory);
+    if (!inside(canonicalRoot, canonicalCadre)) throw new Error("Unsafe Cadre job directory");
+
+    const directory = path.join(canonicalCadre, "jobs");
+    if (create && !fs.existsSync(directory)) fs.mkdirSync(directory);
+    const directoryStat = fs.lstatSync(directory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Unsafe Cadre job directory");
+    const canonicalDirectory = fs.realpathSync(directory);
+    if (!inside(canonicalRoot, canonicalDirectory)) throw new Error("Unsafe Cadre job directory");
+    return canonicalDirectory;
   }
 
-  jobPath(root: string, id: string): string {
-    return path.join(this.jobDir(root), `${id}.json`);
+  private jobPath(root: string, id: string, createDirectory = false): string {
+    if (!isJobId(id)) throw new Error("Invalid Cadre job id");
+    const directory = this.safeJobDirectory(root, createDirectory);
+    const candidate = path.resolve(directory, `${id}.json`);
+    if (path.dirname(candidate) !== directory) throw new Error("Invalid Cadre job path");
+    return candidate;
   }
 
-  serialize(job: JobRecord): JsonObject {
+  private artifactPath(id: string): string {
+    if (!isJobId(id)) throw new Error("Invalid Cadre job id");
+    return path.join("cadre", "jobs", `${id}.json`);
+  }
+
+  serialize(job: JobRecord, artifactPath: string | null = job.artifact_path || null): JsonObject {
     return {
       id: job.id,
       type: job.type,
@@ -44,26 +90,57 @@ export class JobManager {
       result: asJsonObject(job.result),
       exit_code: job.exit_code,
       signal: job.signal,
-      artifact_path: job.artifact_path || path.relative(job.root, this.jobPath(job.root, job.id)),
+      artifact_path: artifactPath,
     };
   }
 
   persist(job: JobRecord): void {
+    let temporaryPath: string | null = null;
+    let descriptor: number | null = null;
+    delete job.artifact_path;
     try {
-      fs.mkdirSync(this.jobDir(job.root), { recursive: true });
-      const artifactPath = this.jobPath(job.root, job.id);
-      job.artifact_path = path.relative(job.root, artifactPath);
-      fs.writeFileSync(artifactPath, `${JSON.stringify(this.serialize(job), null, 2)}\n`);
+      const artifactPath = this.jobPath(job.root, job.id, true);
+      if (fs.existsSync(artifactPath)) {
+        const stat = fs.lstatSync(artifactPath);
+        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Unsafe Cadre job artifact");
+      }
+      const relativeArtifactPath = this.artifactPath(job.id);
+      temporaryPath = `${artifactPath}.${crypto.randomUUID()}.tmp`;
+      const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+      descriptor = fs.openSync(
+        temporaryPath,
+        fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow,
+        0o600,
+      );
+      fs.writeFileSync(descriptor, `${JSON.stringify(this.serialize(job, relativeArtifactPath), null, 2)}\n`);
+      fs.fsyncSync(descriptor);
+      fs.closeSync(descriptor);
+      descriptor = null;
+      fs.renameSync(temporaryPath, artifactPath);
+      temporaryPath = null;
+      job.artifact_path = relativeArtifactPath;
     } catch {
       // Job persistence must not crash the MCP server.
+    } finally {
+      if (descriptor !== null) {
+        try { fs.closeSync(descriptor); } catch { /* best-effort cleanup */ }
+      }
+      if (temporaryPath) {
+        try { fs.rmSync(temporaryPath, { force: true }); } catch { /* best-effort cleanup */ }
+      }
     }
   }
 
   loadPersisted(root: string, id: string | null | undefined): JsonObject | null {
-    if (!id) return null;
-    const file = this.jobPath(root, id);
+    if (!isJobId(id)) return null;
     try {
-      const parsed = asJsonObject(JSON.parse(fs.readFileSync(file, "utf8")));
+      const file = this.jobPath(root, id);
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_JOB_ARTIFACT_BYTES) return null;
+      const canonicalFile = fs.realpathSync(file);
+      if (canonicalFile !== file || path.dirname(canonicalFile) !== path.dirname(file)) return null;
+      const parsed = asJsonObject(JSON.parse(fs.readFileSync(canonicalFile, "utf8")));
+      if (typeof parsed.root !== "string" || !sameRoot(parsed.root, root)) return null;
       return {
         ...parsed,
         persisted: true,
@@ -106,9 +183,7 @@ export class JobManager {
       signal: typeof job.signal === "string" ? job.signal : null,
       stdout_tail: stdout.slice(-4000),
       stderr_tail: stderr.slice(-4000),
-      artifact_path: typeof job.artifact_path === "string"
-        ? job.artifact_path
-        : (root && id ? path.relative(root, this.jobPath(root, id)) : null),
+      artifact_path: typeof job.artifact_path === "string" ? job.artifact_path : null,
       persisted,
       stale: persisted && typeof job.status === "string" && job.status === "running",
     };
@@ -116,22 +191,25 @@ export class JobManager {
 
   private persistedJobIds(root: string): string[] {
     try {
-      return fs.readdirSync(this.jobDir(root))
+      return fs.readdirSync(this.safeJobDirectory(root, false))
         .filter((name) => name.endsWith(".json"))
-        .map((name) => name.slice(0, -5));
+        .map((name) => name.slice(0, -5))
+        .filter(isJobId);
     } catch {
       return [];
     }
   }
 
-  private getManaged(id: string | null | undefined): ManagedJobRecord | null {
+  private getManaged(root: string, id: string | null | undefined): ManagedJobRecord | null {
     this.cleanup();
-    if (!id) return null;
-    return this.jobs.get(id) || null;
+    if (!isJobId(id)) return null;
+    const job = this.jobs.get(id) || null;
+    return job && sameRoot(job.root, root) ? job : null;
   }
 
   start(type: string, root: string, args: RuntimeArgs = {}) {
     this.cleanup();
+    root = fs.realpathSync(root);
     const id = `job_${crypto.randomUUID()}`;
     const runner = currentMcpServerPath();
     if (!runner) throw new Error("Cadre MCP runtime not found for async job runner");
@@ -184,12 +262,12 @@ export class JobManager {
     return this.summaryFromState(asJsonObject(job), false);
   }
 
-  get(id: string | null | undefined): JobRecord | null {
-    return this.getManaged(id);
+  get(root: string, id: string | null | undefined): JobRecord | null {
+    return this.getManaged(root, id);
   }
 
-  cancel(id: string | null | undefined): JsonObject {
-    const job = this.getManaged(id);
+  cancel(root: string, id: string | null | undefined): JsonObject {
+    const job = this.getManaged(root, id);
     if (!job) return { ok: false, error: `Job not found: ${id}` };
     if (job.proc && job.status === "running") {
       job.status = "cancelled";
@@ -200,22 +278,27 @@ export class JobManager {
     return { ok: true, job: this.summary(job) };
   }
 
-  result(id: string | null | undefined): JsonObject {
-    const job = this.getManaged(id);
+  result(root: string, id: string | null | undefined): JsonObject {
+    const job = this.getManaged(root, id);
     if (!job) return { ok: false, error: `Job not found: ${id}` };
-    return { ok: job.status === "succeeded", job: this.summary(job), result: asJsonObject(job.result) };
+    return {
+      ok: job.status === "running" || job.status === "succeeded",
+      job: this.summary(job),
+      result: asJsonObject(job.result),
+    };
   }
 
-  list(root: string | null = null): JsonObject {
+  list(root: string): JsonObject {
     this.cleanup();
-    const live = Array.from(this.jobs.values()).map((job) => this.summaryFromState(asJsonObject(job), false));
-    const persisted = root
-      ? this.persistedJobIds(root)
-        .filter((id) => !this.jobs.has(id))
-        .map((id) => this.loadPersisted(root, id))
-        .filter((job): job is JsonObject => job !== null)
-        .map((job) => this.summaryFromState(job, true))
-      : [];
+    const live = Array.from(this.jobs.values())
+      .filter((job) => sameRoot(job.root, root))
+      .map((job) => this.summaryFromState(asJsonObject(job), false));
+    const liveIds = new Set(live.map((job) => String(job.id)));
+    const persisted = this.persistedJobIds(root)
+      .filter((id) => !liveIds.has(id))
+      .map((id) => this.loadPersisted(root, id))
+      .filter((job): job is JsonObject => job !== null)
+      .map((job) => this.summaryFromState(job, true));
     const jobs = [...live, ...persisted].sort((a, b) => {
       const left = Date.parse(String(a.started_at || a.finished_at || 0));
       const right = Date.parse(String(b.started_at || b.finished_at || 0));

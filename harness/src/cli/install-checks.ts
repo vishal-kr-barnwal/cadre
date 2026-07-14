@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { asJsonObject, asOptionalString } from "../guards";
+import { PROTOCOL_VERSION } from "../mcp/domain/tool-catalog";
 import { CommandPlan, RuntimePaths, Target, TargetPaths } from "./install-targets";
 
 interface MpcServerConfig {
@@ -18,25 +20,52 @@ export function runCommand(plan: CommandPlan): { ok: boolean; status: number | n
 
 export function pingMcp(runtime: RuntimePaths): { ok: boolean; reason?: string } {
   if (!fs.existsSync(runtime.mcpServer)) return { ok: false, reason: `missing MCP server: ${runtime.mcpServer}` };
-  const request = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    params: { name: "cadre_action", arguments: { action: "project.ping" } },
-  };
+  const messages = [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "cadre-installer", version: "1" },
+      },
+    },
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "cadre_action", arguments: { action: "project.ping" } },
+    },
+  ];
   const result = spawnSync(runtime.nodePath, [runtime.mcpServer], {
     cwd: runtime.runtimeRoot,
-    input: `${JSON.stringify(request)}\n`,
+    input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`,
     encoding: "utf8",
     timeout: 3000,
   });
   if (result.status !== 0 && !result.stdout.trim()) return { ok: false, reason: result.stderr || `MCP exited with ${result.status}` };
-  const line = result.stdout.split(/\r?\n/).find((entry) => entry.trim());
-  if (!line) return { ok: false, reason: "MCP returned no JSON-RPC response" };
   try {
-    const parsed = JSON.parse(line) as { result?: { content?: Array<{ text?: string }> }; error?: { message?: string } };
-    if (parsed.error) return { ok: false, reason: parsed.error.message || "MCP returned an error" };
-    const text = parsed.result?.content?.[0]?.text;
+    const responses = result.stdout
+      .split(/\r?\n/)
+      .filter((entry) => entry.trim())
+      .map((entry) => asJsonObject(JSON.parse(entry)));
+    const initialize = responses.find((response) => response.id === 1);
+    const ping = responses.find((response) => response.id === 2);
+    if (!initialize) return { ok: false, reason: "MCP returned no initialize response" };
+    const initializeError = asJsonObject(initialize.error);
+    if (Object.keys(initializeError).length > 0) return { ok: false, reason: asOptionalString(initializeError.message) || "MCP initialize returned an error" };
+    const initializeResult = asJsonObject(initialize.result);
+    if (initializeResult.protocolVersion !== PROTOCOL_VERSION) {
+      return { ok: false, reason: `MCP negotiated ${initializeResult.protocolVersion || "no protocol version"}; expected ${PROTOCOL_VERSION}` };
+    }
+    if (!ping) return { ok: false, reason: "MCP returned no ping response after initialization" };
+    const pingError = asJsonObject(ping.error);
+    if (Object.keys(pingError).length > 0) return { ok: false, reason: asOptionalString(pingError.message) || "MCP ping returned an error" };
+    const pingResult = asJsonObject(ping.result);
+    const content = Array.isArray(pingResult.content) ? pingResult.content : [];
+    const text = asOptionalString(asJsonObject(content[0]).text);
     const body = text ? JSON.parse(text) as { data?: { ok?: boolean } } : null;
     return body?.data?.ok === true ? { ok: true } : { ok: false, reason: "MCP ping did not return ok:true" };
   } catch (error) {

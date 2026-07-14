@@ -198,7 +198,7 @@ export function providerReadiness(root: string, args: RuntimeArgs = {}): JsonObj
       detected_agent_capability_evidence: null,
       missing_evidence_fields: [],
       required_provider_mcp: null,
-      exact_write_back_packet: null,
+      write_back: null,
       reason: "provider_mode is local; provider MCP evidence is not required",
     };
   }
@@ -225,10 +225,15 @@ export function providerReadiness(root: string, args: RuntimeArgs = {}): JsonObj
       server: mode,
       purpose: "Fetch PR/MR metadata, reviews, CI/check status, and discussion evidence.",
     },
-    exact_write_back_packet: {
-      tool: "cadre_review",
-      action: "provider_evidence",
-      required_fields: ["root", "trackId", "providerEvidence"],
+    write_back: {
+      tool: "cadre_action",
+      arguments: {
+        root,
+        action: "review.provider_evidence",
+        input: { trackId: "<track-id>", providerEvidence: `<${mode}-mcp-evidence>` },
+        execute: true,
+      },
+      required_fields: ["root", "input.trackId", "input.providerEvidence"],
     },
     reason: available == null
       ? `${mode} provider mode requires packet-owned evidence that the agent can access the ${mode} MCP`

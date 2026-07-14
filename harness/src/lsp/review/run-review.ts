@@ -1,41 +1,52 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
 import type { JsonObject } from "../../types";
-import { asJsonObject, asNumber, asOptionalString, asStringArray, errorMessage, isRecord } from "../../guards";
-import { isIgnoredFile, normalizeRel, shouldIgnore } from "../ignore-policy";
+import { asJsonObject, asNumber, asOptionalString, asStringArray, errorMessage } from "../../guards";
+import { readProjectControlJson, resolveOwnedProjectControlJsonPath } from "../../infrastructure/project-control-file";
+import { isIgnoredFile } from "../ignore-policy";
 
 import { LspClient } from "./client";
 import { commandAvailability } from "./command-availability";
 import { DEFAULT_REQUEST_TIMEOUT_MS, DEFAULT_STARTUP_TIMEOUT_MS } from "./constants";
 import { changedEntries, changedSymbolCandidates } from "./git-diff";
 import { diagnosticFinding, externalReferenceFinding, flattenSymbols, lspRefToLocation, nearbyFileHints, optionalLocations, scanTextReferences, serverFileMatch, skipFinding } from "./scanners";
-import { LspServerConfig, RelativeLocation, RunReviewOptions, ServerReport, SymbolCandidate } from "./types";
+import type { LspServerConfig, RelativeLocation, RunReviewOptions, ServerReport, SymbolCandidate } from "./types";
 import { positiveInt, withTimeout } from "./utils";
+
+const DEFAULT_LSP_CONFIG = "cadre/lsp.json";
+
+function unavailable(reason: string) {
+  return {
+    available: false,
+    reason,
+    changedFiles: [],
+    changedEntries: [],
+    servers: [],
+    findings: [],
+  };
+}
 
 export async function runReview(options: RunReviewOptions = {}) {
   const args = {
     base: options.base || "main",
     head: options.head || "HEAD",
-    config: options.config || "cadre/lsp.json",
+    config: options.config || DEFAULT_LSP_CONFIG,
   };
   const root = options.root || process.cwd();
   const clientPool = options.clientPool || null;
-  const configPath = path.resolve(root, args.config);
-  if (!fs.existsSync(configPath)) {
-    return {
-      available: false,
-      reason: `No LSP config found at ${args.config}`,
-      changedFiles: [],
-      changedEntries: [],
-      servers: [],
-      findings: [],
-    };
-  }
+  const configPath = resolveOwnedProjectControlJsonPath(
+    root,
+    options.configOwnerRoot || root,
+    args.config,
+    DEFAULT_LSP_CONFIG,
+  );
+  if (!configPath.ok) return unavailable(configPath.error);
+  if (!fs.existsSync(configPath.file)) return unavailable(`No LSP config found at ${configPath.relative}`);
   const entries = changedEntries(root, args.base, args.head);
   const files = entries.map((entry) => entry.path);
-  const config = asJsonObject(JSON.parse(fs.readFileSync(configPath, "utf8")));
+  const configRead = readProjectControlJson(configPath);
+  if (!configRead.ok) return unavailable(`Cannot read LSP config ${configPath.relative}: ${configRead.error}`);
+  const config = asJsonObject(configRead.value);
   const servers: LspServerConfig[] = Array.isArray(config.servers)
     ? config.servers
       .map((server) => asJsonObject(server))
@@ -224,6 +235,7 @@ export async function runReview(options: RunReviewOptions = {}) {
 
   return {
     available: true,
+    reason: undefined,
     base: args.base,
     head: args.head,
     config: args.config,

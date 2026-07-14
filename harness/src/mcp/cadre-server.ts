@@ -4,8 +4,8 @@ import { runLspDaemon } from "../cadre-lsp-daemon";
 import { runCli as runLspReviewCli } from "../cadre-lsp-review";
 import { runCli as runLspSetupCli } from "../cadre-lsp-setup";
 import { errorMessage } from "../guards";
-import { handle } from "./server-runtime";
-import { startStdioTransport } from "./stdio-transport";
+import { handle } from "./presentation/server-runtime";
+import { startStdioTransport } from "./presentation/stdio-transport";
 
 async function withHiddenModeStripped(fn: () => void | Promise<void>): Promise<void> {
   const originalArgv = process.argv;

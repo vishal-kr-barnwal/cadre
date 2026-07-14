@@ -1,7 +1,7 @@
 import type { JsonObject, RuntimeArgs } from "../../../types";
 import type { RuntimeEnvelope } from "../../domain/protocol-types";
-import { envelope } from "../envelope";
-import { jobEnvelope, jobTypeForPacket } from "../job-support";
+import { envelope, executionGuard } from "../envelope";
+import { jobEnvelope, jobTypeForAction } from "../job-support";
 import { warmLspReview } from "../review-support";
 import type { RuntimeDependencies } from "../ports";
 
@@ -39,12 +39,20 @@ export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs):
   const root = usesCandidateRoot
     ? (rootInfo ? rootInfo.root : process.cwd())
     : deps.rootResolver.requireCadreRoot(args);
-  if (args.async === true) return jobEnvelope(jobTypeForPacket("cadre_intel", args), root, args, deps);
+  if (args.async === true) {
+    const jobType = jobTypeForAction(`intel.${action}`);
+    if (!jobType) return envelope({ ok: false, error: `cadre_action intel.${action} does not support input.async:true` });
+    const guard = executionGuard(`intel.${action}`, args);
+    return guard || jobEnvelope(jobType, root, args, deps);
+  }
   if (action === "repo_map") return envelope(deps.core.repoMap(root, args));
   if (action === "lsp_setup") return envelope(deps.core.lspSetup(root, args));
   if (action === "dap_setup") return envelope(deps.core.dapSetup(root, args));
   if (action === "dap_status") return envelope(deps.core.dapStatus(root, args));
-  if (action === "dap_snapshot") return envelope(await deps.core.dapSnapshot(root, args));
+  if (action === "dap_snapshot") {
+    const guard = executionGuard("intel.dap_snapshot", args);
+    return guard || envelope(await deps.core.dapSnapshot(root, args));
+  }
   if (action === "workspace_diagnostics") return envelope(deps.core.workspaceDiagnostics(root));
   if (action === "test_impact") return envelope(deps.core.testImpact(root, args));
   if (action === "dependency_graph") return envelope(deps.core.dependencyGraph(root));
@@ -63,6 +71,9 @@ export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs):
     return envelope(await warmLspReview(deps, root, args));
   }
   if (action === "lsp_daemon_status") return envelope(await deps.lspDaemon.request("status", {}, 5000));
-  if (action === "lsp_daemon_shutdown") return envelope(await deps.lspDaemon.shutdown());
-  return envelope({ ok: false, error: `Unknown cadre_intel action: ${action}` });
+  if (action === "lsp_daemon_shutdown") {
+    const guard = executionGuard("intel.lsp_daemon_shutdown", args);
+    return guard || envelope(await deps.lspDaemon.shutdown());
+  }
+  return envelope({ ok: false, error: `Unknown cadre_action action: intel.${action}` });
 }

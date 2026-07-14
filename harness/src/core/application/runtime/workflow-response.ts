@@ -1,25 +1,16 @@
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { CoreResult } from "./contracts";
 import { utcNow } from "../../infrastructure/runtime/json-store";
-import { normalizePlanManualVerification } from "./plan-docs";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
+import { gitIdentity } from "../../infrastructure/runtime/system";
+import type { CoreResult } from "./contracts";
+import { packagedTemplateJson, packagedTemplatePath, packagedTemplatePaths, packagedTemplateSource, packagedTemplateText } from "./packaged-assets";
+import { normalizePlanManualVerification } from "./plan-docs";
+import { compactWorkflowResponse } from "./response-compaction";
 import { syncControlPlane } from "./review-records";
 import { normalizedSpecFromRaw } from "./spec-docs";
 import { asArray } from "./status";
-import { gitIdentity } from "../../infrastructure/runtime/system";
-import { packagedTemplateJson, packagedTemplatePath, packagedTemplatePaths, packagedTemplateSource, packagedTemplateText } from "./packaged-assets";
-import { compactWorkflowResponse } from "./response-compaction";
 
 export function workflowResponseMode(args: RuntimeArgs = {}): "compact" | "detail" {
   const raw = asOptionalString(args.responseMode || args.response_mode
@@ -127,28 +118,46 @@ export function workflowResourceUris(root: string, workflow: string, result: Cor
   const trackId = asOptionalString(result.track_id)
     || asOptionalString(asJsonObject(result.track || {}).track_id)
     || asOptionalString(asJsonObject(asJsonObject(result.track_context).track).track_id);
-  const uris = [
-    `cadre://workspace-health?root=${encodedRoot}`,
-    `cadre://mcp-readiness?root=${encodedRoot}`,
-    `cadre://team-board?root=${encodedRoot}`,
-    `cadre://quality-gate?root=${encodedRoot}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
-    `cadre://project-skills?root=${encodedRoot}&workflow=${encodeURIComponent(workflow)}${trackId ? `&trackId=${encodeURIComponent(trackId)}` : ""}`,
-  ];
-  if (trackId) {
-    uris.push(`cadre://track-context?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
-    uris.push(`cadre://parallel-state?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
+  const encodedTrackId = trackId ? encodeURIComponent(trackId) : null;
+  const rooted = (resource: string): string => `cadre://${resource}?root=${encodedRoot}`;
+  const tracked = (resource: string): string | null => encodedTrackId
+    ? `${rooted(resource)}&trackId=${encodedTrackId}`
+    : null;
+  const uris: string[] = [];
+  const add = (...values: Array<string | null>): void => {
+    for (const value of values) if (value) uris.push(value);
+  };
+
+  if (["setup", "setup_assist", "setup_scaffold"].includes(workflow)) {
+    add("cadre://template-inventory", rooted("workspace-diagnostics"), rooted("dependency-graph"), rooted("mcp-readiness"));
+  } else if (workflow === "status") {
+    add(rooted("team-board"), rooted("workspace-health"), rooted("my-next-actions"));
+  } else if (workflow === "implement") {
+    add(tracked("track-context"), tracked("parallel-state"), `${rooted("project-skills")}&workflow=implement${encodedTrackId ? `&trackId=${encodedTrackId}` : ""}`);
+  } else if (workflow === "review") {
+    add(tracked("quality-gate"), tracked("review-evidence"), `${rooted("project-skills")}&workflow=review${encodedTrackId ? `&trackId=${encodedTrackId}` : ""}`);
+  } else if (["ship", "land"].includes(workflow)) {
+    add(
+      encodedTrackId ? `${rooted("provider-actions")}&trackId=${encodedTrackId}&workflow=${workflow}` : null,
+      tracked("quality-gate"),
+      tracked(`${workflow}-plan`),
+    );
+  } else if (workflow === "validate") {
+    add(rooted("workspace-health"), rooted("workspace-diagnostics"), rooted("dependency-graph"), rooted("collisions"));
+  } else if (workflow === "debug") {
+    add(rooted("dap-status"), rooted("workspace-diagnostics"));
+  } else if (workflow === "newtrack") {
+    add(`${rooted("artifact-schema")}&artifact=spec`, `${rooted("artifact-schema")}&artifact=plan`);
   }
-  if (workflow === "ship" && trackId) uris.push(`cadre://ship-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
-  if (workflow === "land" && trackId) uris.push(`cadre://land-plan?root=${encodedRoot}&trackId=${encodeURIComponent(trackId)}`);
-  if (workflow === "release") uris.push(`cadre://release-plan?root=${encodedRoot}`);
   if (workflow === "artifacts" || workflow === "artifact_sync") {
     const scope = asOptionalString(result.scope || result.artifact_scope) || "all";
-    uris.push(`cadre://artifact-catalog?root=${encodedRoot}`);
-    uris.push(`cadre://artifact-sync-plan?root=${encodedRoot}&scope=${encodeURIComponent(scope)}`);
+    add(rooted("artifact-catalog"), `${rooted("artifact-sync-plan")}&scope=${encodeURIComponent(scope)}`);
     if (scope.startsWith("track:")) {
       const scopedTrackId = scope.slice("track:".length);
-      uris.push(`cadre://track-spec?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
-      uris.push(`cadre://track-plan?root=${encodedRoot}&trackId=${encodeURIComponent(scopedTrackId)}`);
+      add(
+        `${rooted("track-spec")}&trackId=${encodeURIComponent(scopedTrackId)}`,
+        `${rooted("track-plan")}&trackId=${encodeURIComponent(scopedTrackId)}`,
+      );
     }
   }
   return Array.from(new Set(uris));

@@ -2,20 +2,21 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { asJsonObject, asOptionalString, errorMessage } from "../../../guards";
 import type { JsonObject, RuntimeArgs } from "../../../types";
-import { asJsonObject, asOptionalString, asStringArray, errorMessage } from "../../../guards";
 import { applySkillChanges, emptyManagedManifest, validateManagedManifest, type ManagedManifest, type SkillOperation } from "../../domain/project-skill-management";
-import { PROJECT_SKILL_ID_PATTERN } from "../../domain/project-skill-policy";
-import { atomicSkillMutation, normalizeReferenceContent } from "../../infrastructure/runtime/project-skill-mutations";
+import { PROJECT_SKILL_ID_PATTERN, PROJECT_SKILL_REFERENCE_EXTENSIONS } from "../../domain/project-skill-policy";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
+import { atomicSkillMutation, normalizeReferenceContent } from "../../infrastructure/runtime/project-skill-mutations";
 import { loadProjectSkill, projectSkillIds } from "../../infrastructure/runtime/project-skills-store";
-import type { CoreResult, ReviewFile } from "./contracts";
+import { readProjectSourceFile } from "../../infrastructure/runtime/project-source-files";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
+import type { CoreResult, ReviewFile } from "./contracts";
 import { appendCadreEvent } from "./native-state";
 import { renderProjectSkillProjection } from "./project-skill-projection";
 import { applyStagedApprovalSessionPayload, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import type { ApprovalStage } from "./staged-approval-stages";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 function knownRepos(root: string): Set<string> {
   const known = new Set([".", "root"]);
@@ -89,22 +90,20 @@ function validateCatalog(root: string, id: string | null): CoreResult {
   return { ...result, operation: "validate", ok: invalid.length === 0 };
 }
 
-function inside(parent: string, candidate: string): boolean {
-  const relative = path.relative(parent, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
 function sourcePause(root: string, skillId: string, requests: JsonObject[]): CoreResult {
   const resources: string[] = [];
   const errors: string[] = [];
   for (const request of requests) {
     const source = asOptionalString(request.source_path) || "";
-    const absolute = path.resolve(root, source);
-    const relative = path.relative(root, absolute);
+    const lexicalRoot = path.resolve(root);
+    const lexicalPath = path.resolve(lexicalRoot, source);
+    const relative = path.relative(lexicalRoot, lexicalPath);
+    const validated = readProjectSourceFile(root, source);
     if (!source || relative.startsWith("..") || path.isAbsolute(relative)) errors.push(`source_path must stay inside the project: ${source}`);
-    else if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) errors.push(`source_path is not a file: ${source}`);
-    else if (!inside(fs.realpathSync(root), fs.realpathSync(absolute))) errors.push(`source_path escapes the project through a link: ${source}`);
-    else if (path.resolve(root, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === absolute) errors.push(`source_path collides with its managed target: ${source}`);
+    else if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(path.extname(source).toLowerCase())) errors.push(`source_path has an unsupported extension: ${source}`);
+    else if (!validated.ok && validated.kind === "path") errors.push(`source_path must identify an existing, link-free project file: ${source}`);
+    else if (!validated.ok) errors.push(`source_path must be a text file no larger than 128 KiB: ${source}`);
+    else if (path.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
     else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root)}&path=${encodeURIComponent(source)}`);
   }
   return errors.length ? { ok: false, phase_state: "blocked", errors, error: errors[0] } : {
@@ -133,7 +132,7 @@ function desiredFiles(root: string, sourceId: string, manifest: ManagedManifest,
   return { files, errors };
 }
 
-function reviewFilesFor(operation: SkillOperation, sourceId: string, targetId: string | null, files: Map<string, string>, removedReferencePaths: string[]): ReviewFile[] {
+function reviewFilesFor(sourceId: string, targetId: string | null, files: Map<string, string>, removedReferencePaths: string[]): ReviewFile[] {
   if (!targetId) return [
     { path: `cadre/skills/${sourceId}/.delete`, title: `Remove project skill ${sourceId}`, kind: "text", source: "skill.remove", content: `Delete cadre/skills/${sourceId}/\n`, missing: true },
     ...removedReferencePaths.map((relative): ReviewFile => ({ path: `cadre/skills/${sourceId}/${relative}.delete`, title: `Remove reference ${relative}`, kind: "text", source: "skill.reference.remove", content: `Delete cadre/skills/${sourceId}/${relative}\n`, missing: true })),
@@ -221,7 +220,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     ? [...existingReferencePaths, ...targetReferencePaths]
     : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
   const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
-  const reviews = reviewFilesFor(operation, id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const reviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
   const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
     const base = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
     return deletedReferencePaths.includes(relative) ? [`${base}.delete`] : [base];

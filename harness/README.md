@@ -23,8 +23,8 @@ Public docs: [https://cadre-docs.pages.dev/](https://cadre-docs.pages.dev/)
   workspace diagnostics, LSP setup, warm LSP review, and async job artifacts.
 - **Four agent surfaces:** Claude Code, OpenAI Codex, GitHub Copilot, and
   Google Antigravity plugins are thin MCP entrypoints. The global `cadre-mcp`
-  runtime owns the skill contract, protocols, references, templates, and packet
-  tools.
+  runtime owns three public packet tools, the validated resource registry, and
+  the setup templates needed at runtime.
 
 ## Install
 

@@ -8,7 +8,7 @@ order: 140
 # Architecture
 
 This repository is the Cadre harness/package repository. It builds the runtime,
-skill shim, MCP-served contracts, references, templates, tests, and install-time
+skill shim, source workflow metadata, setup templates, tests, and install-time
 thin plugin bundles that users install into Claude Code, OpenAI Codex, GitHub
 Copilot, and Google Antigravity.
 
@@ -29,7 +29,7 @@ resources; they are not installed or resolved globally.
 │   └── public/                   # Static assets such as the Cadre logo
 ├── harness/
 │   ├── skills/cadre/             # Master skill and workflow protocols
-│   ├── scripts/agent-refs/       # Master references embedded into cadre-mcp
+│   ├── scripts/agent-refs/       # Maintainer reference sources
 │   ├── templates/                # Target-project templates and CI templates
 │   ├── src/                      # TypeScript runtime, MCP, and LSP sources
 │   └── scripts/                  # Built JS runtime, generator, tests, helper scripts
@@ -49,9 +49,9 @@ need to be materialized.
 | Source | Owns |
 |--------|------|
 | `harness/skills/cadre/SKILL.md` | Self-contained packet-led Cadre activation shim. |
-| `harness/skills/cadre/skill.json` | Optional master `cadre.skill.v1` reference contract embedded into `cadre-mcp`. |
-| `harness/skills/cadre/protocols/` | Master workflow protocol bodies embedded into `cadre-mcp` and served by MCP resources. |
-| `harness/scripts/agent-refs/` | Reference material embedded into `cadre-mcp` and served by MCP reference resources. |
+| `harness/skills/cadre/skill.json` | Maintainer-facing `cadre.skill.v1` source contract used by source validation. |
+| `harness/skills/cadre/protocols/` | Compact maintainer-facing workflow protocol definitions used by source validation and documentation. |
+| `harness/scripts/agent-refs/` | Maintainer reference sources for workflow and source-contract validation. |
 | `harness/templates/` | Target-project templates embedded into `cadre-mcp` and written by `cadre-setup`. |
 | `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
 | `docs/` | Public Next.js/shadcn documentation website. |
@@ -87,8 +87,9 @@ The generator:
 - Copies the master `SKILL.md` shim into each platform bundle.
 - Writes platform MCP configs that point at the global `cadre-mcp` runtime.
 - Keeps plugins thin: no copied assets, scripts, or platform worker agents.
-- Embeds the skill contract, workflow protocols, references, and templates into
-  `scripts/mcp/cadre-server.js`.
+- Embeds only runtime setup templates into `scripts/mcp/cadre-server.js`; skill
+  contracts, workflow protocols, and maintainer references stay out of the
+  published MCP bundle.
 - Uses MCP-provided worker prompts for parallel dispatch; Claude uses `Task`,
   Codex uses multi-agent tool discovery, Copilot uses its custom-agent flow, and
   Antigravity uses subagent dispatch from the parallel execution reference.
@@ -142,8 +143,8 @@ framework.
 
 When public documentation describes plugin internals, keep it aligned with the
 master sources under `harness/`. When plugin instruction references are needed,
-place them under `harness/scripts/agent-refs/` so `cadre-mcp` can serve them as
-resources independent from public docs.
+place maintainer-only validation inputs under `harness/scripts/agent-refs/`.
+They are source fixtures and are not served by `cadre-mcp` as resources.
 
 ## Versioning
 

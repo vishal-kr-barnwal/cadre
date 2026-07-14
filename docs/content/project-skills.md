@@ -528,10 +528,15 @@ unsupported extensions, path escapes, and files over 128 KiB:
 ```
 
 For an unformatted project-local source, send `source_path` without `content`.
-Cadre returns `phase: "awaiting_formatting"` and exactly the targeted
-`cadre://project-skill-source` read. The agent reads it, formats the material,
-and resubmits the same `reference.upsert` with inline `content`; no review files
-or target files are created during the formatting pause.
+Cadre returns `phase: "awaiting_formatting"` and exactly the targeted,
+short-lived `cadre://project-skill-source` read. The opaque token is bound to
+that canonical root and unchanged file content, so use the URI exactly as
+returned. Source files and their parent path must be regular, link-free project
+entries; Cadre rejects symlinked sources even when their target remains inside
+the project. The agent
+reads it, formats the material, and resubmits the same `reference.upsert` with
+inline `content`; no review files or target files are created during the
+formatting pause.
 
 Rename with `operation: "rename"`, `skillId`, and `newSkillId`. Remove with
 `operation: "remove"` and `skillId`. Rename collisions are rejected. A malformed

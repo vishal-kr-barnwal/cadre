@@ -1,9 +1,7 @@
-#!/usr/bin/env node
-import path from "node:path";
 import readline from "node:readline";
 import { LspClient, runReview } from "./cadre-lsp-review";
 import type { JsonObject, RuntimeArgs } from "./types";
-import { asJsonObject, asOptionalString, errorMessage } from "./guards";
+import { asJsonObject, errorMessage } from "./guards";
 
 interface DaemonServer extends JsonObject {
   id?: string;
@@ -178,8 +176,4 @@ export function runLspDaemon(): void {
   process.on("SIGTERM", () => {
     pool.shutdownAll().finally(() => process.exit(0));
   });
-}
-
-if (["cadre-lsp-daemon.js", "cadre-lsp-daemon.ts"].includes(path.basename(process.argv[1] || ""))) {
-  runLspDaemon();
 }

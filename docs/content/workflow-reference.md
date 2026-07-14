@@ -19,7 +19,7 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 | Preview | `execute:false` returns the current decision and materializes the complete deterministic artifact diff for document workflows. |
 | Approval | Only explicit approval of a human-facing document belongs in the `approval` field; its canonical/projection pair is one unit. |
 | Execution | `execute:true` is valid only after prerequisites and current approvals are satisfied. |
-| Next action | A response contains at most one deterministic next tool call. |
+| Continuation | `next` is the sole immediate single-agent Cadre continuation. The only callbacks outside it are provider `decision.required.write_back` after external evidence collection, each parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact completion or recovery callbacks reissued under `data.worker_callbacks[].record_finish_packet`. |
 | Skills | Applicable repository skills are selected by workflow, repo target, and optional explicit IDs. |
 | Evidence | Large context is exposed through targeted `cadre://` resources. |
 
@@ -44,8 +44,8 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 - Inputs: desired outcome, constraints, optional ID/skill selectors, spec, and
   plan payloads.
 - Approval: clarification when intent is weak, then spec and plan stages.
-- Output: canonical track spec/plan, task graph, projections, events, and next
-  implementation action.
+- Output: canonical track spec/plan, task graph, projections, events, and an
+  exact `next` call when implementation can proceed.
 - Common failures: untestable acceptance criteria, missing task dependencies,
   invalid schema, ambiguous repo targets, or preview drift.
 
@@ -56,8 +56,8 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 - Inputs: optional track/task targeting, repo context, and explicit skill IDs.
 - Approval: implementation itself is not a staged document approval; returned
   task completion or parallel actions remain packet-owned.
-- Output: next task context, phase schedule, applicable rules, test impact,
-  completion requirements, or a parallel dispatch action.
+- Output: task context, phase schedule, applicable rules, test impact,
+  completion requirements, or an exact parallel-dispatch `next` call.
 - Common failures: no ready task, blockers, ownership collision, unresolved repo,
   invalid skill, or unfinished prerequisite.
 
@@ -69,8 +69,8 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
   optional track/repository target.
 - Approval: none for diagnostics; requested configuration writes require
   `execute:true`.
-- Output: bounded diagnosis context, test/diagnostic evidence, and a next debug
-  action or track update.
+- Output: bounded diagnosis context, test/diagnostic evidence, and an exact
+  `next` call when a debug operation or track update is safe.
 - Common failures: no reproduction evidence, ambiguous root, unrelated active
   work, or a request that is actually a scope change.
 
@@ -122,11 +122,11 @@ integrations, and generated state.
 **Purpose:** Evaluate implementation against accepted intent and delivery policy.
 
 - Inputs: track target plus test, diagnostics, manual verification, reviewer,
-  and provider evidence supplied through returned actions.
+  and provider evidence supplied through `decision.required.write_back`.
 - Approval: records review through packet-owned actions; verdict must reference
   the reviewed commit identity.
-- Output: findings, review evidence, quality gate, provider summary, and next
-  fix/ship action.
+- Output: findings, review evidence, quality gate, provider summary, and an
+  exact `next` call when another immediate operation is safe.
 - Common failures: stale SHA, missing tests/manual checks, self-review under a
   second-reviewer policy, provider unavailability, or blocking findings.
 
@@ -186,7 +186,7 @@ history.
 - Inputs: optional bump and `releaseVersion`.
 - Approval: one release-notes review. Release JSON is the atomic canonical pair;
   optional local tagging runs under final `execute:true` without another approval.
-- Output: release Markdown/JSON, setup-state release metadata, and release plan.
+- Output: release Markdown/JSON and setup-state release metadata.
 - Common failures: invalid version, incomplete tracks, missing review evidence,
   target drift, or an existing conflicting tag.
 
@@ -250,7 +250,7 @@ their projections.
 - Approval: create/update reviews `SKILL.md` and one collective changed-reference
   set. Rename/remove require `execute:true` without a content approval.
 - Output: catalog/selection diagnostics, validated manifest, projection,
-  enablement state, or exact next action.
+  enablement state, or an exact `next` call.
 - Common failures: schema/version mismatch, unsafe path, duplicate ID, invalid
   selector, unresolved repo, unsupported reference, or required-rule overflow.
 

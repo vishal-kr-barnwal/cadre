@@ -1,4 +1,3 @@
-import type { JsonObject } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { ManagedManifest } from "../../domain/project-skill-management";
 import { withGeneratedMarker } from "./markdown-docs";

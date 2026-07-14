@@ -1,7 +1,7 @@
-import * as core from "../../cadre-core";
-import type { TextJsonResult } from "../../types";
-import { asJsonObject } from "../../guards";
+import type { RuntimeArgs, TextJsonResult } from "../../types";
+import { asJsonObject, asStringArray } from "../../guards";
 import type { RuntimeEnvelope } from "../domain/protocol-types";
+import type { RuntimeDependencies } from "./ports";
 
 export function asTextJson(value: unknown): TextJsonResult {
   return {
@@ -14,14 +14,30 @@ export function envelope(value: unknown): RuntimeEnvelope {
   const ok = Object.prototype.hasOwnProperty.call(object, "ok") ? Boolean(object.ok) : true;
   const warnings = Array.isArray(object.warnings) ? object.warnings : [];
   const reason = object.error || object.reason || object.stage;
-  const errors = ok ? [] : [typeof reason === "string" ? reason : "Cadre operation failed"];
+  const structuredErrors = asStringArray(object.errors);
+  const primary = typeof reason === "string" ? reason : null;
+  const errors = ok
+    ? structuredErrors
+    : Array.from(new Set([primary || structuredErrors[0] || "Cadre operation failed", ...structuredErrors]));
   const out: RuntimeEnvelope = { ok, data: value || null, warnings, errors };
   if (Object.prototype.hasOwnProperty.call(object, "commands")) out.commands = object.commands;
   if (Object.prototype.hasOwnProperty.call(object, "job")) out.job = object.job;
   return out;
 }
 
-export function syncedEnvelope(root: string, operation: string, fn: () => unknown): RuntimeEnvelope {
+export function executionGuard(action: string, args: RuntimeArgs): RuntimeEnvelope | null {
+  if (args.execute === true) return null;
+  const response = envelope({ ok: false, error: `cadre_action ${action} requires execute:true` });
+  response.required = ["execute"];
+  return response;
+}
+
+export function syncedEnvelope(
+  core: Pick<RuntimeDependencies["core"], "syncControlPlane">,
+  root: string,
+  operation: string,
+  fn: () => unknown,
+): RuntimeEnvelope {
   const syncPre = core.syncControlPlane(root, { mode: "pre" });
   if (syncPre.ok === false) {
     return envelope({

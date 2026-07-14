@@ -1,21 +1,14 @@
-import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
+import { asJsonObject, asOptionalString, asString, asStringArray, isRecord } from "../../../guards";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import type { CadreTrack, JsonObject, PlanTask, RuntimeArgs, Topology } from "../../../types";
 
-import { normalizeClaimPath } from "./collision";
-import { CoreResult } from "./contracts";
-import { fileExists, safeName } from "../../infrastructure/runtime/json-store";
+import { fileExists } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
-import { repoEntriesError, repoEntriesForTrack, unresolvedPlanRepos } from "./repo-resolution";
 import { branchSetForTrack, ensureIntegrationWorktree } from "./branch-set";
+import { normalizeClaimPath } from "./collision";
+import type { CoreResult } from "./contracts";
+import { repoEntriesError, unresolvedPlanRepos } from "./repo-resolution";
 import { findTrack } from "./track-context";
 import { listTracks, parsePlanFile, parsePlanJson, phaseSchedule } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson } from "./workflow-response";

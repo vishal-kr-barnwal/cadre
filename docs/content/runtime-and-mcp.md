@@ -27,8 +27,9 @@ flowchart LR
 ```
 
 The installed shim activates Cadre and states invariants. It does not embed the
-workflow engine. `cadre-mcp` serves the skill contract, workflow protocols,
-references, templates, resources, and three public tools.
+workflow engine. `cadre-mcp` serves three public tools, the resource registry,
+and the packaged setup templates needed at runtime. Source skill metadata,
+workflow protocols, and maintainer references are not exposed as MCP resources.
 
 ## Public Tool Boundary
 
@@ -38,8 +39,19 @@ references, templates, resources, and three public tools.
 - `cadre_read` reads one targeted resource URI returned by a packet.
 
 This boundary replaced a larger direct-tool surface with token-efficient v1
-contracts. Add new behavior behind an action, workflow, or resource before
-considering another public tool.
+contracts. Retired flat packet names are not routing aliases. Public requests
+remain nested as `{root, workflow, input, execute, approval}` or
+`{root, action, input, execute}`. Add new behavior behind an action, workflow,
+or resource before considering another public tool.
+
+A workflow response has at most one immediate single-agent continuation. If
+`next` is non-null, clients invoke exactly `next.tool` with `next.arguments`
+once for that packet. The only typed callbacks outside `next` are
+`decision.required.write_back` after external provider evidence is collected,
+each `data.workers[].dispatch.record_finish_packet` in a parallel fan-out, and
+exact completion or recovery callbacks reissued under
+`data.worker_callbacks[].record_finish_packet`.
+Clients do not recover any other action from prose or internal fields.
 
 ## MCP Layers
 
@@ -55,6 +67,11 @@ The MCP implementation follows four layers:
 Normalize untrusted MCP input at the boundary. Application and domain code
 should receive explicit types rather than broad JSON bags.
 
+The stdio lifecycle supports MCP `2025-11-25` and `2025-06-18`. Normal requests
+follow `initialize`, the negotiated-version response, and
+`notifications/initialized`. Malformed JSON and invalid JSON-RPC requests are
+reported with the standard parse and invalid-request errors.
+
 ## Root Resolution
 
 Every project-scoped call carries a root candidate. The runtime resolves it to
@@ -67,14 +84,15 @@ repository selection when a resolved root is available.
 
 ## Workflow Envelopes
 
-`workflow-envelope.ts` compacts rich internal results into a stable response:
+The core v1 workflow packet adapter compacts rich internal results once into a
+stable response:
 
-- workflow, phase, stage, and decision;
-- approval state when review is required;
-- one next tool call when deterministic progress is possible;
-- bounded workflow-specific summaries;
-- project-skill selection diagnostics;
-- resource URIs for larger evidence.
+- `ok`, `workflow`, `phase`, and `decision`;
+- required input or evidence names;
+- one immediate single-agent `next` tool call when deterministic progress is possible;
+- bounded `artifacts` and relevant resource URIs;
+- workflow-specific summaries under `data`;
+- `warnings` and structured `errors`.
 
 Do not re-expand large internal payloads into every response. Prefer a compact
 summary and a targeted resource.
@@ -82,8 +100,12 @@ summary and a targeted resource.
 ## Resources
 
 Resources separate discoverable evidence from the hot workflow response.
-Definitions live in the resource catalog; the application resource service
-validates query parameters and delegates to typed runtime capabilities.
+One typed registry owns definitions and query contracts. `resources/list`
+contains fixed resources; `resources/templates/list` contains parameterized
+templates. The application resource service validates every URI against that
+registry and delegates to typed runtime capabilities. Packaged skill contracts,
+workflow protocols, and agent references are deliberately absent from the
+runtime resource surface.
 
 When adding a resource:
 

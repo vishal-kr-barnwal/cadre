@@ -25,7 +25,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
   const recordFinishInput = {
     trackId: track.track_id,
     workerId,
-    status: "awaiting_merge",
+    status: "<awaiting_merge-or-blocked>",
     phaseIndex: worker.phase_index,
     taskIndex: worker.task_index,
     repo,
@@ -36,6 +36,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
     tests: [{ command: "<test-command>", cwd: worktree, ok: true, status: 0 }],
     summary: "<worker-summary>",
     blockers: [],
+    agentIdentifier,
   };
   return {
     prompt,
@@ -65,6 +66,7 @@ export function workerDispatchPayload(root: string, track: CadreTrack, worker: J
       },
     },
     evidence_requirements: {
+      status: "Copy the worker result status exactly: awaiting_merge or blocked.",
       commit: "Required unless blocked before code changes; record the commit SHA in record_finish.",
       tests: "Include every command run, cwd, exit status, and relevant stdout/stderr tail.",
       coverage: "Include parsed coverage when available or a reason coverage was not produced.",

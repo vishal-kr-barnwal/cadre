@@ -30,8 +30,10 @@ The installed plugins contain only platform wiring:
   `mcp_config.json` for Antigravity.
 
 The plugin does not copy Cadre assets, worker agents, or MCP runtime scripts.
-The global `cadre-mcp` binary embeds the skill contract, protocols, references,
-target-project templates, resources, packet tools, jobs, and LSP helper modes.
+The global `cadre-mcp` binary contains the three-tool runtime, resource
+registry, jobs, code-intelligence helpers, and the target-project templates
+needed by setup. Maintainer skill contracts, protocol sources, and agent
+references are not embedded or exposed as MCP resources.
 `cadre install` also bootstraps narrow client approval rules for Cadre's own MCP
 tools so `cadre-setup` and later packet workflows do not prompt on every Cadre
 tool call. It does not bypass approval for shell commands, file edits, other

@@ -3,7 +3,10 @@ import path from "node:path";
 
 import type { JsonObject, RuntimeArgs } from "../../types";
 import { asJsonObject, asOptionalString, errorMessage } from "../../guards";
+import { resolveProjectControlJsonPath } from "../../infrastructure/project-control-file";
 import type { RuntimeDependencies } from "./ports";
+
+const DEFAULT_LSP_CONFIG = "cadre/lsp.json";
 
 function selectedRepos(args: RuntimeArgs): Set<string> | null {
   const values = [
@@ -89,12 +92,21 @@ async function warmLspReview(deps: Pick<RuntimeDependencies, "core" | "lspDaemon
   const targets = repoReviewTargets(deps, root, args);
   const timeoutMs = Number(args.timeoutMs || 120000);
   const maxWorkers = Math.max(1, Math.min(12, Number(args.maxWorkers || args.limit || 4)));
-  const rawConfig = asOptionalString(args.config) || path.join(root, "cadre", "lsp.json");
-  const config = path.isAbsolute(rawConfig) ? rawConfig : path.resolve(root, rawConfig);
+  const config = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_LSP_CONFIG);
+  if (!config.ok) {
+    return { ok: false, available: false, reason: config.error, findings: [] };
+  }
   if (targets.length <= 1 && targets[0]?.repo === ".") {
     return asJsonObject(await deps.lspDaemon.request(
       "review",
-      { ...args, root, base: args.base || "main", head: args.head || "HEAD", config },
+      {
+        ...args,
+        root,
+        base: args.base || "main",
+        head: args.head || "HEAD",
+        config: config.relative,
+        configOwnerRoot: config.root,
+      },
       timeoutMs
     ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
   }
@@ -116,7 +128,8 @@ async function warmLspReview(deps: Pick<RuntimeDependencies, "core" | "lspDaemon
         root: cwd,
         base: asOptionalString(target.base) || args.base || "main",
         head: asOptionalString(target.head) || args.head || "HEAD",
-        config,
+        config: config.relative,
+        configOwnerRoot: config.root,
       },
       timeoutMs
     ).catch((error) => ({ available: false, reason: errorMessage(error), findings: [] })));
@@ -135,7 +148,7 @@ async function warmLspReview(deps: Pick<RuntimeDependencies, "core" | "lspDaemon
     max_workers: maxWorkers,
     target_count: targets.length,
     bounded_concurrency: true,
-    config,
+    config: config.relative,
     repos,
     findings,
   };

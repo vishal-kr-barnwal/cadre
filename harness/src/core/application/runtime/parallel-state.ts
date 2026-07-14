@@ -1,26 +1,79 @@
-import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import type { CadreTrack, JsonObject, RuntimeArgs } from "../../../types";
 
-import { CoreResult, ParallelState, ParallelWorker } from "./contracts";
-import { coverageThreshold } from "../../infrastructure/runtime/coverage";
 import { readJson, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
-import { completeTask } from "./task-completion";
 import { beginTrace, commitTrace } from "./commit-trace";
+import type { CoreResult, ParallelState, ParallelWorker } from "./contracts";
+import { completeTask } from "./task-completion";
 import { findTrack } from "./track-context";
 import { withSharedControlPlaneSync } from "./workflow-response";
 
 export function recordParallelWorker(root: string, args: RuntimeArgs = {}): CoreResult {
   return withSharedControlPlaneSync(root, args, "record_parallel_worker", () => recordParallelWorkerInner(root, args));
+}
+
+interface ParallelCleanupRecord {
+  trackId: string;
+  workerId: string;
+  worktreeCleaned: boolean;
+  workerRefCleaned: boolean;
+}
+
+export function recordParallelCleanup(root: string, record: ParallelCleanupRecord): CoreResult {
+  const track = findTrack(root, record.trackId);
+  if (!track) return { ok: false, error: `Track not found: ${record.trackId}` };
+  return withTrackLock(root, track.track_id, () => {
+    const traceBefore = beginTrace(root);
+    const state = readParallelState(track);
+    const index = state.workers.findIndex((worker) => worker.worker_id === record.workerId);
+    if (index < 0) return { ok: false, error: `Parallel worker not found: ${record.workerId}` };
+    const worker = state.workers[index] as ParallelWorker;
+    const now = utcNow();
+    const nextWorker: ParallelWorker = {
+      ...worker,
+      ...(record.worktreeCleaned ? {
+        worktree: null,
+        cleaned_worktree: worker.worktree || worker.cleaned_worktree || null,
+        cleaned_at: now,
+      } : {}),
+      ...(record.workerRefCleaned ? {
+        worker_ref: null,
+        cleaned_worker_ref: worker.worker_ref || worker.cleaned_worker_ref || null,
+        worker_ref_cleaned_at: now,
+      } : {}),
+      updated_at: now,
+    };
+    state.workers[index] = nextWorker;
+    state.updated_at = now;
+    const statePath = parallelStatePath(track);
+    writeJson(statePath, state as JsonObject);
+    const controlCommit = commitTrace(root, { trackId: track.track_id }, {
+      kind: "control",
+      workflow: "parallel",
+      action: "cleanup",
+      subject: `cleanup ${record.workerId}`,
+      before: traceBefore,
+      files: [path.relative(root, statePath)],
+      trackId: track.track_id,
+      repo: nextWorker.repo || null,
+      note: {
+        worker_id: record.workerId,
+        worktree_cleaned: record.worktreeCleaned,
+        worker_ref_cleaned: record.workerRefCleaned,
+        cleaned_worktree: nextWorker.cleaned_worktree || null,
+        cleaned_worker_ref: nextWorker.cleaned_worker_ref || null,
+      },
+    });
+    return {
+      ok: controlCommit.ok !== false,
+      track_id: track.track_id,
+      state_path: path.relative(root, statePath),
+      worker: nextWorker,
+      control_commit: controlCommit,
+    };
+  });
 }
 
 export function recordParallelWorkerInner(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -34,7 +87,7 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
   const workerId = args.workerId || args.worker_id;
   if (!workerId) return { ok: false, error: "workerId is required" };
   const status = args.status || "awaiting_merge";
-  const valid = new Set(["in_progress", "awaiting_merge", "merged", "conflict", "failed"]);
+  const valid = new Set(["in_progress", "awaiting_merge", "merged", "blocked", "conflict", "failed"]);
   if (!valid.has(status)) return { ok: false, error: `Invalid parallel worker status: ${status}` };
   if (status === "awaiting_merge" && !args.commitSha && !args.commit && args.allowNoCommit !== true) {
     return { ok: false, error: "commitSha is required before a parallel worker can move to awaiting_merge" };

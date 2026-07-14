@@ -18,6 +18,14 @@ function walk(dir) {
   });
 }
 
+function walkFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return walkFiles(full);
+    return entry.isFile() ? [full] : [];
+  });
+}
+
 function importsFor(file) {
   const text = fs.readFileSync(file, "utf8");
   const imports = [];
@@ -76,6 +84,69 @@ test("source architecture keeps domain pure and MCP layered", () => {
   assertLayerImports(files, mcpDomainRoot, [mcpApplicationRoot, mcpInfrastructureRoot, mcpPresentationRoot], { forbidNode: true });
   assertLayerImports(files, mcpApplicationRoot, [mcpInfrastructureRoot, mcpPresentationRoot]);
   assertLayerImports(files, mcpInfrastructureRoot, [mcpApplicationRoot, mcpPresentationRoot]);
+});
+
+test("MCP entrypoint imports layered modules without flat forwarding shims", () => {
+  const flatShims = [
+    "envelope.ts",
+    "job-manager.ts",
+    "lsp-daemon-client.ts",
+    "protocol-types.ts",
+    "resources.ts",
+    "root-resolution.ts",
+    "server-runtime.ts",
+    "stdio-transport.ts",
+    "tool-catalog.ts",
+  ];
+  for (const file of flatShims) {
+    assert.equal(fs.existsSync(path.join(srcRoot, "mcp", file)), false, `obsolete MCP shim remains: ${file}`);
+  }
+
+  const entrypoint = fs.readFileSync(path.join(srcRoot, "mcp", "cadre-server.ts"), "utf8");
+  assert.match(entrypoint, /\.\/presentation\/server-runtime/);
+  assert.match(entrypoint, /\.\/presentation\/stdio-transport/);
+});
+
+test("retired source barrels and package-layout fallbacks stay removed", () => {
+  const retiredFiles = [
+    "src/core/application/cadre-runtime.ts",
+    "src/core/application/runtime/internal.ts",
+    "src/core/domain/plan-parser.ts",
+    "src/core/infrastructure/runtime/index.ts",
+    "src/core/infrastructure/system-command-runner.ts",
+    "src/core/ports/index.ts",
+    "scripts/check-agent-context.sh",
+    "scripts/migrate-to-cadre.sh",
+    "scripts/agent-refs/cadre-sync.json",
+    "scripts/agent-refs/mcp-contract.json",
+  ];
+  for (const file of retiredFiles) {
+    assert.equal(fs.existsSync(path.join(root, file)), false, `retired source remains: ${file}`);
+  }
+
+  const packagedAssets = fs.readFileSync(path.join(srcRoot, "core", "application", "runtime", "packaged-assets.ts"), "utf8");
+  assert.doesNotMatch(packagedAssets, /packaged(?:SkillContract|WorkflowProtocols?|AgentReferences?)/);
+  assert.doesNotMatch(packagedAssets, /["'](?:assets|skills)["'],\s*["']cadre["'],\s*["']templates["']/);
+
+  const runtimePaths = fs.readFileSync(path.join(srcRoot, "runtime-paths.ts"), "utf8");
+  assert.doesNotMatch(runtimePaths, /["']cadre["'],\s*["']scripts["'],\s*["']mcp["']/);
+});
+
+test("production sources do not revive retired MCP tool names", () => {
+  const repoRoot = path.resolve(root, "..");
+  const files = [
+    ...walkFiles(path.join(root, "src")),
+    ...walkFiles(path.join(root, "skills")),
+    ...walkFiles(path.join(root, "templates")),
+    ...walkFiles(path.join(repoRoot, "docs", "content")),
+    path.join(root, "README.md"),
+  ];
+  const retired = /\bcadre_(?:resource|project|status|track|mutate|parallel|review|intel|job|artifact|task)\b/g;
+  const failures = files.flatMap((file) => {
+    const text = fs.readFileSync(file, "utf8");
+    return Array.from(text.matchAll(retired), (match) => `${path.relative(repoRoot, file)}:${text.slice(0, match.index).split("\n").length}:${match[0]}`);
+  });
+  assert.deepEqual(failures, []);
 });
 
 test("generated cadre-core bundle preserves the public runtime API", () => {

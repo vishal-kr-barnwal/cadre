@@ -1,20 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString } from "../../../guards";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { artifactDefinitions, artifactMatches, artifactSchema } from "./artifact-catalog";
-import { ArtifactDefinition, ArtifactRenderResult, CoreResult, ReviewFile } from "./contracts";
+import type { ManagedManifest } from "../../domain/project-skill-management";
 import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { artifactDefinitions, artifactMatches, artifactSchema } from "./artifact-catalog";
+import { writeArtifactFilesAtomic } from "./artifact-pairs";
+import { beginTrace, commitTrace } from "./commit-trace";
+import type { ArtifactDefinition, ArtifactRenderResult, CoreResult } from "./contracts";
 import { appendCanonicalJsonReference, hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown } from "./plan-docs";
+import { renderProjectSkillProjection } from "./project-skill-projection";
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
-import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
-import { renderProjectSkillProjection } from "./project-skill-projection";
-import type { ManagedManifest } from "../../domain/project-skill-management";
-import { writeArtifactFilesAtomic } from "./artifact-pairs";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args)
@@ -61,7 +61,7 @@ export function renderJsonlMarkdown(title: string, entries: JsonObject[]): strin
   return normalizedText(parts.join("\n"));
 }
 
-export function renderArtifact(root: string, def: ArtifactDefinition, args: RuntimeArgs = {}): ArtifactRenderResult {
+export function renderArtifact(root: string, def: ArtifactDefinition): ArtifactRenderResult {
   const canonicalPath = path.join(root, def.canonical);
   const projectionPath = def.projection ? path.join(root, def.projection) : undefined;
   let raw: JsonObject | null = null;
@@ -132,7 +132,7 @@ export function artifactRender(root: string, args: RuntimeArgs = {}): CoreResult
   if (!artifact) return { ok: false, error: "artifact is required" };
   const def = artifactDefinitions(root, args).find((item) => item.id === artifact || item.id.endsWith(`:${artifact}`));
   if (!def) return { ok: false, error: `Unknown artifact: ${artifact}` };
-  return renderArtifact(root, def, args);
+  return renderArtifact(root, def);
 }
 
 export function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -146,7 +146,7 @@ export function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResu
         ? fs.readFileSync(file, "utf8").trim().length > 0
         : Boolean(readJson<JsonObject | null>(file, null));
     if (!canonicalOk || !def.projection) return { artifact_id: def.id, ok: canonicalOk, canonical_path: def.canonical };
-    const rendered = renderArtifact(root, def, args);
+    const rendered = renderArtifact(root, def);
     const projectionFile = path.join(root, def.projection);
     const projectionExists = fileExists(projectionFile);
     const existing = projectionExists ? fs.readFileSync(projectionFile, "utf8") : "";
@@ -183,7 +183,7 @@ export function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResu
 export function artifactDiff(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
   const diffs = artifacts.map((def) => {
-    const rendered = renderArtifact(root, def, args);
+    const rendered = renderArtifact(root, def);
     return {
       artifact_id: def.id,
       projection_path: def.projection,
@@ -212,7 +212,7 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
   const errors: string[] = [];
   const pendingWrites: Array<{ path: string; content: string }> = [];
   for (const def of defs) {
-    const rendered = renderArtifact(root, def, args);
+    const rendered = renderArtifact(root, def);
     artifacts.push({
       artifact_id: def.id,
       canonical_path: def.canonical,
@@ -278,7 +278,7 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
   };
 }
 
-export function artifactImport(root: string, args: RuntimeArgs = {}): CoreResult {
+export function artifactImport(args: RuntimeArgs = {}): CoreResult {
   return {
     ok: false,
     error: "Legacy Markdown import is not supported. Create canonical JSON/JSONL artifacts and rerun artifact sync.",
@@ -296,6 +296,6 @@ export function artifactPacket(root: string, args: RuntimeArgs = {}): CoreResult
   if (action === "render") return artifactRender(root, args);
   if (action === "diff") return artifactDiff(root, args);
   if (action === "sync") return artifactSync(root, args);
-  if (action === "import") return artifactImport(root, args);
+  if (action === "import") return artifactImport(args);
   return { ok: false, error: `Unknown artifact action: ${action}` };
 }

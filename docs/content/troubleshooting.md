@@ -153,6 +153,9 @@ cadre-refresh --lsp
 Install any recommended language-server commands, then allow Cadre to write or
 append `cadre/lsp.json`.
 
+Alternate configs must use a relative `cadre/lsp-*.json` name. Cadre rejects
+paths outside the project control plane and symlink-selected configs.
+
 LSP is optional unless your team's review policy explicitly requires it.
 
 ## DAP Debugging Is Skipped
@@ -166,11 +169,14 @@ Symptoms:
 Fix:
 
 ```text
-cadre_action { action: "intel.dap_setup", input: {...} }
+cadre_workflow {"root":"/path/to/project","workflow":"debug","input":{},"execute":false}
 ```
 
-Review the recommended adapter entries, install missing adapter commands, then
-allow Cadre to write or append `cadre/dap.json` when appropriate.
+Review the reported adapter state, install missing adapter commands, and invoke
+only the returned `next` call if Cadre offers a configuration step. Allow Cadre
+to write or append `cadre/dap.json` only through that packet-owned path.
+Alternate configs must use a relative `cadre/dap-*.json` name; adapter commands
+come from that file rather than inline workflow input.
 
 DAP is adapter-driven. Cadre can run a bounded snapshot for any configured
 adapter, but it does not install debugger adapters automatically and v1 does not
@@ -220,7 +226,7 @@ Symptoms:
 
 Fix:
 
-- Follow the packet's sync pre/post next actions.
+- Follow only the packet's typed `next` call; do not reconstruct sync steps from prose.
 - Ensure the `ours` merge driver is registered.
 - Resolve intentional conflicts in human-authored files such as specs and
   plans.

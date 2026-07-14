@@ -10,6 +10,9 @@
   },
   "invariants": [
     "Cadre packets own control-plane, provider, worker, approval, merge, and generated projection state",
+    "next is the sole immediate single-agent Cadre continuation",
+    "Only decision.required.write_back, data.workers[].dispatch.record_finish_packet, and reissued data.worker_callbacks[].record_finish_packet are typed deferred or fan-out callbacks",
+    "Merge, cleanup, and all other continuations must come from a later packet next call",
     "Markdown projections are never canonical input",
     "Only explicit user approval may be mapped into approval fields",
     "Required project-skill rules are never truncated"
@@ -38,8 +41,8 @@
   "references": [
     { "id": "native-prompts", "when": "decision.kind == 'clarification'" },
     { "id": "approval-and-generation", "when": "decision.kind == 'approval'" },
-    { "id": "provider-evidence", "when": "phase == 'pending_provider'" },
-    { "id": "parallel-execution", "when": "next.action startsWith 'parallel.'" },
+    { "id": "provider-evidence", "when": "decision.required.write_back exists" },
+    { "id": "parallel-execution", "when": "next.arguments.action startsWith 'parallel.' or data.workers[].dispatch.record_finish_packet exists or data.worker_callbacks[].record_finish_packet exists" },
     { "id": "ownership-guard", "when": "decision.kind == 'ownership_conflict'" },
     { "id": "polyrepo-git", "when": "workflow == 'land'" },
     { "id": "template-locator", "when": "workflow in ['setup','artifacts'] and a template resource is returned" }

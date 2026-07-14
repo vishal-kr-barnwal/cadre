@@ -1,16 +1,17 @@
 import type { JsonObject, RuntimeArgs } from "../../types";
 import type { JobRecord } from "../domain/protocol-types";
+import type { ProjectSourceReaderPort } from "../domain/resource-types";
 
 export type CoreApi = typeof import("../../core/application/api");
 
 export interface JobManagerPort {
   start(type: string, root: string, args?: RuntimeArgs): JsonObject;
-  get(id: string | null | undefined): JobRecord | null;
+  get(root: string, id: string | null | undefined): JobRecord | null;
   summary(job: JobRecord): JsonObject;
   loadPersisted(root: string, id: string | null | undefined): JsonObject | null;
-  result(id: string | null | undefined): JsonObject;
-  cancel(id: string | null | undefined): JsonObject;
-  list(root?: string | null): JsonObject;
+  result(root: string, id: string | null | undefined): JsonObject;
+  cancel(root: string, id: string | null | undefined): JsonObject;
+  list(root: string): JsonObject;
 }
 
 export interface LspDaemonPort {
@@ -28,4 +29,5 @@ export interface RuntimeDependencies {
   jobs: JobManagerPort;
   lspDaemon: LspDaemonPort;
   rootResolver: RootResolverPort;
+  projectSourceReader: ProjectSourceReaderPort;
 }

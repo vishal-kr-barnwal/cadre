@@ -2,12 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { JsonObject } from "../../../types";
-import { asJsonObject, asOptionalString } from "../../../guards";
+import { asJsonObject } from "../../../guards";
 
 export interface PackagedAssets {
-  skill?: JsonObject;
-  protocols?: Record<string, JsonObject>;
-  references?: Record<string, JsonObject>;
   templates?: Record<string, string>;
 }
 
@@ -23,10 +20,6 @@ function normalizeRelativePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
 }
 
-function unique(values: string[]): string[] {
-  return Array.from(new Set(values));
-}
-
 function isFile(file: string): boolean {
   try {
     return fs.statSync(file).isFile();
@@ -35,48 +28,20 @@ function isFile(file: string): boolean {
   }
 }
 
-function isDir(dir: string): boolean {
-  try {
-    return fs.statSync(dir).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function readJsonFile(file: string): JsonObject | null {
-  try {
-    return asJsonObject(JSON.parse(fs.readFileSync(file, "utf8")));
-  } catch {
-    return null;
-  }
-}
-
-function walkingCandidates(factory: (dir: string) => string[]): string[] {
+function templateCandidates(relativePath: string): string[] {
   const candidates: string[] = [];
   let dir = __dirname;
   for (let depth = 0; depth < SEARCH_DEPTH; depth += 1) {
-    candidates.push(...factory(dir));
+    candidates.push(path.join(dir, "templates", relativePath));
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return unique(candidates);
+  return candidates;
 }
 
 function findFile(candidates: string[]): string | null {
   return candidates.find(isFile) || null;
-}
-
-function jsonFiles(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir)
-      .filter((file) => file.endsWith(".json"))
-      .map((file) => path.join(dir, file))
-      .filter(isFile)
-      .sort();
-  } catch {
-    return [];
-  }
 }
 
 function walkTemplateFiles(dir: string, base = dir): string[] {
@@ -92,98 +57,9 @@ function walkTemplateFiles(dir: string, base = dir): string[] {
   return files;
 }
 
-function referenceDirs(): string[] {
-  return walkingCandidates((dir) => [
-    path.join(dir, "assets", "cadre", "references"),
-    path.join(dir, "references"),
-    path.join(dir, "scripts", "agent-refs"),
-    path.join(dir, "skills", "cadre", "references"),
-  ]).filter(isDir);
-}
-
-function protocolDirs(): string[] {
-  return walkingCandidates((dir) => [
-    path.join(dir, "assets", "cadre", "protocols"),
-    path.join(dir, "skills", "cadre", "protocols"),
-    path.join(dir, "protocols"),
-  ]).filter(isDir);
-}
-
-export function packagedSkillContract(): JsonObject | null {
-  const embedded = embeddedAssets()?.skill;
-  if (embedded) return embedded;
-  const file = findFile(walkingCandidates((dir) => [
-    path.join(dir, "assets", "cadre", "skill.json"),
-    path.join(dir, "skills", "cadre", "skill.json"),
-    path.join(dir, "skill.json"),
-  ]));
-  return file ? readJsonFile(file) : null;
-}
-
-export function packagedWorkflowProtocols(): JsonObject[] {
-  const embedded = embeddedAssets()?.protocols;
-  if (embedded) {
-    return Object.values(embedded)
-      .map(asJsonObject)
-      .sort((left, right) => String(left.workflow || left.id || "").localeCompare(String(right.workflow || right.id || "")));
-  }
-  const protocols = protocolDirs()
-    .flatMap(jsonFiles)
-    .map(readJsonFile)
-    .filter((protocol): protocol is JsonObject => protocol !== null);
-  return protocols.sort((left, right) => String(left.workflow || left.id || "").localeCompare(String(right.workflow || right.id || "")));
-}
-
-export function packagedWorkflowProtocol(workflow: string | null | undefined): JsonObject | null {
-  const wanted = asOptionalString(workflow)?.trim();
-  if (!wanted) return null;
-  return packagedWorkflowProtocols().find((protocol) => {
-    const id = asOptionalString(protocol.id) || "";
-    const protocolWorkflow = asOptionalString(protocol.workflow) || "";
-    return protocolWorkflow === wanted || id === wanted || id === `cadre-${wanted}`;
-  }) || null;
-}
-
-export function packagedAgentReferences(): JsonObject[] {
-  const embedded = embeddedAssets()?.references;
-  if (embedded) {
-    return Object.values(embedded)
-      .map(asJsonObject)
-      .sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")));
-  }
-  const seen = new Set<string>();
-  const references: JsonObject[] = [];
-  for (const file of referenceDirs().flatMap(jsonFiles)) {
-    const reference = readJsonFile(file);
-    const id = asOptionalString(reference?.id) || path.basename(file, ".json");
-    if (!reference || seen.has(id)) continue;
-    seen.add(id);
-    references.push(reference);
-  }
-  return references.sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")));
-}
-
-export function packagedAgentReference(id: string | null | undefined): JsonObject | null {
-  const wanted = asOptionalString(id)?.trim();
-  if (!wanted) return null;
-  const embedded = embeddedAssets()?.references?.[wanted];
-  if (embedded) return embedded;
-  const file = findFile(walkingCandidates((dir) => [
-    path.join(dir, "assets", "cadre", "references", `${wanted}.json`),
-    path.join(dir, "references", `${wanted}.json`),
-    path.join(dir, "scripts", "agent-refs", `${wanted}.json`),
-    path.join(dir, "skills", "cadre", "references", `${wanted}.json`),
-  ]));
-  return file ? readJsonFile(file) : null;
-}
-
 export function packagedTemplatePath(relativePath: string): string | null {
   const normalized = normalizeRelativePath(relativePath);
-  return findFile(walkingCandidates((dir) => [
-    path.join(dir, "assets", "cadre", "templates", normalized),
-    path.join(dir, "templates", normalized),
-    path.join(dir, "skills", "cadre", "templates", normalized),
-  ]));
+  return findFile(templateCandidates(normalized));
 }
 
 export function packagedTemplateText(relativePath: string): string | null {

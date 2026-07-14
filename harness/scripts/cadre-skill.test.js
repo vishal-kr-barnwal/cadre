@@ -150,6 +150,26 @@ test("skill workflow pauses source discovery for model formatting without writin
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("skill workflow rejects symlinked formatting sources even when the link stays in-project", () => {
+  const root = project();
+  try {
+    write(path.join(root, ".env"), "SECRET=do-not-format\n");
+    fs.mkdirSync(path.join(root, "notes"), { recursive: true });
+    fs.symlinkSync(path.join(root, ".env"), path.join(root, "notes", "raw.md"));
+    const result = core.workflowPacket(root, {
+      workflow: "skill", operation: "create", skillId: "docs", changes: [
+        { type: "metadata.set", name: "Docs", description: "Documentation rules" },
+        { type: "selectors.set", workflows: ["review"] },
+        { type: "rule.upsert", id: "docs", text: "Keep docs current.", references: ["raw"] },
+        { type: "reference.upsert", id: "raw", path: "references/raw.md", source_path: "notes/raw.md" },
+      ],
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join(" "), /link-free project file/);
+    assert.deepEqual(result.detail_resources || [], []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill workflow rejects dangling references, invalid selectors, path escapes, and invalid JSON", () => {
   const root = project();
   try {

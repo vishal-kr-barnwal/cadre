@@ -5,6 +5,8 @@ export interface RuntimeEnvelope extends UnknownRecord {
   data: unknown;
   warnings: unknown[];
   errors: string[];
+  required?: string[];
+  next?: JsonObject | null;
   commands?: unknown;
   job?: unknown;
 }
@@ -31,33 +33,20 @@ export interface JobRecord {
   artifact_path?: string;
 }
 
-export interface McpMessage extends JsonObject {
-  id?: string | number | null;
-  method?: string;
+export type McpRequestId = string | number;
+
+interface McpIncomingMessage extends JsonObject {
+  jsonrpc: "2.0";
+  method: string;
   params?: JsonObject;
 }
 
-export interface ResourceQuery extends JsonObject {
-  base: string;
-  root: string | null;
-  trackId: string | null;
-  symbol: string | null;
-  workflow: string | null;
-  name: string | null;
-  id: string | null;
-  reference: string | null;
-  path: string | null;
-  skillRuleBudget: number | null;
-  artifact: string | null;
-  scope: string | null;
-  jobId: string | null;
-  baseRef: string | null;
-  headRef: string | null;
-  files: string[];
-  repos: string[];
-  responseMode: string | null;
-  response_mode: string | null;
-  detail: boolean | null;
-  compact: boolean | null;
-  includeArchive: boolean | null;
+export interface McpRequest extends McpIncomingMessage {
+  id: McpRequestId;
 }
+
+export interface McpNotification extends McpIncomingMessage {
+  id?: never;
+}
+
+export type McpMessage = McpRequest | McpNotification;

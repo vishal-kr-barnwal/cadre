@@ -39,7 +39,7 @@ __export(cadre_lsp_review_exports, {
   runReview: () => runReview
 });
 module.exports = __toCommonJS(cadre_lsp_review_exports);
-var import_node_path7 = __toESM(require("node:path"));
+var import_node_path8 = __toESM(require("node:path"));
 
 // src/guards.ts
 function isRecord(value) {
@@ -412,11 +412,127 @@ function commandAvailability(command) {
 }
 
 // src/lsp/review/run-review.ts
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path6 = __toESM(require("node:path"));
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path7 = __toESM(require("node:path"));
+
+// src/infrastructure/project-control-file.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path3 = __toESM(require("node:path"));
+function errorMessage2(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function canonicalProjectRoot(root) {
+  try {
+    const canonical = import_node_fs2.default.realpathSync(import_node_path3.default.resolve(root));
+    return import_node_fs2.default.statSync(canonical).isDirectory() ? canonical : null;
+  } catch {
+    return null;
+  }
+}
+function requestedSegments(requested) {
+  if (!requested || requested.includes("\0") || import_node_path3.default.posix.isAbsolute(requested) || import_node_path3.default.win32.isAbsolute(requested)) {
+    return null;
+  }
+  const segments = requested.replace(/\\/g, "/").split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === "..")) return null;
+  return segments;
+}
+function lstatIfPresent(file) {
+  try {
+    return import_node_fs2.default.lstatSync(file);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+function safeExistingControlPlane(controlDir) {
+  try {
+    const stat = lstatIfPresent(controlDir);
+    if (!stat) return null;
+    if (stat.isSymbolicLink()) return { ok: false, error: "Cadre config directory must not be a symbolic link" };
+    if (!stat.isDirectory()) return { ok: false, error: "Cadre config directory is not a directory" };
+    return null;
+  } catch (error) {
+    return { ok: false, error: `Cannot inspect Cadre config directory: ${errorMessage2(error)}` };
+  }
+}
+function safeExistingConfigFile(file) {
+  try {
+    const stat = lstatIfPresent(file);
+    if (!stat) return null;
+    if (stat.isSymbolicLink()) return { ok: false, error: "Cadre config file must not be a symbolic link" };
+    if (!stat.isFile()) return { ok: false, error: "Cadre config path is not a regular file" };
+    return null;
+  } catch (error) {
+    return { ok: false, error: `Cannot inspect Cadre config file: ${errorMessage2(error)}` };
+  }
+}
+function resolveProjectControlJsonPath(root, requested, defaultRelative) {
+  const canonicalRoot = canonicalProjectRoot(root);
+  if (!canonicalRoot) return { ok: false, error: "Project root does not exist or is not a directory" };
+  const relativeInput = requested || defaultRelative;
+  const segments = requestedSegments(relativeInput);
+  const defaultSegments = requestedSegments(defaultRelative);
+  const defaultName = defaultSegments?.length === 2 && defaultSegments[0] === "cadre" ? defaultSegments[1] : "";
+  const defaultStem = import_node_path3.default.basename(defaultName, ".json");
+  const requestedName = segments?.[1] || "";
+  const namespaceMatch = requestedName === defaultName || requestedName.startsWith(`${defaultStem}-`) && requestedName.length > `${defaultStem}-.json`.length;
+  if (!segments || segments.length !== 2 || segments[0] !== "cadre" || import_node_path3.default.extname(requestedName).toLowerCase() !== ".json" || !namespaceMatch) {
+    return {
+      ok: false,
+      error: `Cadre config must be ${defaultRelative} or a relative cadre/${defaultStem}-*.json path without traversal`
+    };
+  }
+  const controlDir = import_node_path3.default.join(canonicalRoot, "cadre");
+  const file = import_node_path3.default.join(controlDir, segments[1]);
+  const controlError = safeExistingControlPlane(controlDir);
+  if (controlError) return controlError;
+  const fileError = safeExistingConfigFile(file);
+  if (fileError) return fileError;
+  return {
+    ok: true,
+    root: canonicalRoot,
+    file,
+    relative: `cadre/${segments[1]}`,
+    controlDir
+  };
+}
+function resolveOwnedProjectControlJsonPath(workspaceRoot, ownerRoot, requested, defaultRelative) {
+  const canonicalWorkspace = canonicalProjectRoot(workspaceRoot);
+  if (!canonicalWorkspace) return { ok: false, error: "Review workspace root does not exist or is not a directory" };
+  const owned = resolveProjectControlJsonPath(ownerRoot, requested, defaultRelative);
+  if (!owned.ok) return owned;
+  return { ...owned, workspaceRoot: canonicalWorkspace };
+}
+function readProjectControlJson(resolved) {
+  let descriptor = null;
+  try {
+    const pathStat = import_node_fs2.default.lstatSync(resolved.file);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      return { ok: false, error: "Cadre config path is not a regular non-symlink file" };
+    }
+    const noFollow = import_node_fs2.default.constants.O_NOFOLLOW || 0;
+    descriptor = import_node_fs2.default.openSync(resolved.file, import_node_fs2.default.constants.O_RDONLY | noFollow);
+    const openStat = import_node_fs2.default.fstatSync(descriptor);
+    if (!openStat.isFile() || openStat.dev !== pathStat.dev || openStat.ino !== pathStat.ino) {
+      return { ok: false, error: "Cadre config file changed during secure open" };
+    }
+    const value = JSON.parse(import_node_fs2.default.readFileSync(descriptor, "utf8"));
+    return { ok: true, value };
+  } catch (error) {
+    return { ok: false, error: `Cannot read Cadre config: ${errorMessage2(error)}` };
+  } finally {
+    if (descriptor !== null) {
+      try {
+        import_node_fs2.default.closeSync(descriptor);
+      } catch {
+      }
+    }
+  }
+}
 
 // src/lsp/ignore-policy.ts
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path4 = __toESM(require("node:path"));
 var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
   ".hg",
@@ -468,16 +584,16 @@ var DEFAULT_IGNORE_PATHS = [
   "plugins/cadre-antigravity"
 ];
 function normalizeRel(file) {
-  return file.split(import_node_path3.default.sep).join("/");
+  return file.split(import_node_path4.default.sep).join("/");
 }
 function shouldIgnore(root, fullPath, name) {
   if (DEFAULT_IGNORES.has(name)) return true;
-  const rel = normalizeRel(import_node_path3.default.relative(root, fullPath));
+  const rel = normalizeRel(import_node_path4.default.relative(root, fullPath));
   return DEFAULT_IGNORE_PATHS.some(
     (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
   );
 }
-function isIgnoredFile(root, file) {
+function isIgnoredFile(_root, file) {
   const rel = normalizeRel(file);
   if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
   return DEFAULT_IGNORE_PATHS.some(
@@ -486,8 +602,8 @@ function isIgnoredFile(root, file) {
 }
 
 // src/lsp/review/git-diff.ts
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
 var import_node_child_process3 = require("node:child_process");
 function runGit(root, args) {
   const result = (0, import_node_child_process3.spawnSync)("git", args, { cwd: root, encoding: "utf8" });
@@ -518,7 +634,7 @@ function changedEntries(root, base, head) {
       kind,
       path: file || "",
       oldPath,
-      exists: file ? import_node_fs2.default.existsSync(import_node_path4.default.join(root, file)) : false
+      exists: file ? import_node_fs3.default.existsSync(import_node_path5.default.join(root, file)) : false
     };
   }).filter((entry) => Boolean(entry.path) && !isIgnoredFile(root, entry.path));
 }
@@ -585,8 +701,8 @@ function changedSymbolCandidates(root, base, head, entry) {
 }
 
 // src/lsp/review/scanners.ts
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path6 = __toESM(require("node:path"));
 var import_node_url2 = require("node:url");
 function flattenSymbols(symbols, out = []) {
   if (!Array.isArray(symbols)) return out;
@@ -603,8 +719,8 @@ function escapeRegExp(value) {
 function serverFileMatch(file, server) {
   const extensionSet = new Set(server.extensions || []);
   const filenameSet = new Set((server.filenames || []).map((name) => name.toLowerCase()));
-  const ext = import_node_path5.default.extname(file);
-  const basename = import_node_path5.default.basename(file).toLowerCase();
+  const ext = import_node_path6.default.extname(file);
+  const basename = import_node_path6.default.basename(file).toLowerCase();
   return extensionSet.has(ext) || filenameSet.has(basename);
 }
 function scanTextReferences(root, symbol, changedPathSet, server) {
@@ -615,12 +731,12 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
   function visit(dir) {
     let entries;
     try {
-      entries = import_node_fs3.default.readdirSync(dir, { withFileTypes: true });
+      entries = import_node_fs4.default.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
-      const full = import_node_path5.default.join(dir, entry.name);
+      const full = import_node_path6.default.join(dir, entry.name);
       if (shouldIgnore(root, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
@@ -629,17 +745,17 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
       }
       if (!entry.isFile()) continue;
       if (!serverFileMatch(full, server)) continue;
-      if (changedPathSet.has(import_node_path5.default.resolve(full))) continue;
+      if (changedPathSet.has(import_node_path6.default.resolve(full))) continue;
       let stat;
       try {
-        stat = import_node_fs3.default.statSync(full);
+        stat = import_node_fs4.default.statSync(full);
       } catch {
         continue;
       }
       if (stat.size > MAX_SCAN_FILE_BYTES) continue;
       let text;
       try {
-        text = import_node_fs3.default.readFileSync(full, "utf8");
+        text = import_node_fs4.default.readFileSync(full, "utf8");
       } catch {
         continue;
       }
@@ -649,7 +765,7 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
         if (!pattern.test(line)) continue;
         results.push({
           file: full,
-          relativeFile: normalizeRel(import_node_path5.default.relative(root, full)),
+          relativeFile: normalizeRel(import_node_path6.default.relative(root, full)),
           line: i + 1,
           snippet: line.trim().slice(0, 160)
         });
@@ -699,7 +815,7 @@ function lspRefToLocation(root, ref) {
     const range = location.range || location.targetSelectionRange || location.targetRange;
     return {
       file,
-      relativeFile: normalizeRel(import_node_path5.default.relative(root, file)),
+      relativeFile: normalizeRel(import_node_path6.default.relative(root, file)),
       line: (range?.start ? range.start.line : 0) + 1
     };
   } catch {
@@ -749,25 +865,25 @@ function nearbyFileHints(root, files) {
     "build.gradle.kts"
   ]);
   for (const file of files || []) {
-    let dir = import_node_path5.default.dirname(import_node_path5.default.join(root, file));
+    let dir = import_node_path6.default.dirname(import_node_path6.default.join(root, file));
     while (dir.startsWith(root)) {
       for (const name of manifestNames) {
-        const candidate = import_node_path5.default.join(dir, name);
-        if (import_node_fs3.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path5.default.relative(root, candidate)));
+        const candidate = import_node_path6.default.join(dir, name);
+        if (import_node_fs4.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path6.default.relative(root, candidate)));
       }
       if (dir === root) break;
-      dir = import_node_path5.default.dirname(dir);
+      dir = import_node_path6.default.dirname(dir);
     }
-    const parsed = import_node_path5.default.parse(file);
+    const parsed = import_node_path6.default.parse(file);
     const candidates = [
-      import_node_path5.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-      import_node_path5.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-      import_node_path5.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-      import_node_path5.default.join("test", file),
-      import_node_path5.default.join("tests", file)
+      import_node_path6.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+      import_node_path6.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+      import_node_path6.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+      import_node_path6.default.join("test", file),
+      import_node_path6.default.join("tests", file)
     ];
     for (const candidate of candidates) {
-      if (import_node_fs3.default.existsSync(import_node_path5.default.join(root, candidate))) tests.add(normalizeRel(candidate));
+      if (import_node_fs4.default.existsSync(import_node_path6.default.join(root, candidate))) tests.add(normalizeRel(candidate));
     }
   }
   return {
@@ -777,28 +893,38 @@ function nearbyFileHints(root, files) {
 }
 
 // src/lsp/review/run-review.ts
+var DEFAULT_LSP_CONFIG = "cadre/lsp.json";
+function unavailable(reason) {
+  return {
+    available: false,
+    reason,
+    changedFiles: [],
+    changedEntries: [],
+    servers: [],
+    findings: []
+  };
+}
 async function runReview(options = {}) {
   const args = {
     base: options.base || "main",
     head: options.head || "HEAD",
-    config: options.config || "cadre/lsp.json"
+    config: options.config || DEFAULT_LSP_CONFIG
   };
   const root = options.root || process.cwd();
   const clientPool = options.clientPool || null;
-  const configPath = import_node_path6.default.resolve(root, args.config);
-  if (!import_node_fs4.default.existsSync(configPath)) {
-    return {
-      available: false,
-      reason: `No LSP config found at ${args.config}`,
-      changedFiles: [],
-      changedEntries: [],
-      servers: [],
-      findings: []
-    };
-  }
+  const configPath = resolveOwnedProjectControlJsonPath(
+    root,
+    options.configOwnerRoot || root,
+    args.config,
+    DEFAULT_LSP_CONFIG
+  );
+  if (!configPath.ok) return unavailable(configPath.error);
+  if (!import_node_fs5.default.existsSync(configPath.file)) return unavailable(`No LSP config found at ${configPath.relative}`);
   const entries = changedEntries(root, args.base, args.head);
   const files = entries.map((entry) => entry.path);
-  const config = asJsonObject(JSON.parse(import_node_fs4.default.readFileSync(configPath, "utf8")));
+  const configRead = readProjectControlJson(configPath);
+  if (!configRead.ok) return unavailable(`Cannot read LSP config ${configPath.relative}: ${configRead.error}`);
+  const config = asJsonObject(configRead.value);
   const servers = Array.isArray(config.servers) ? config.servers.map((server) => asJsonObject(server)).map((server) => ({
     ...server,
     id: asOptionalString(server.id),
@@ -815,8 +941,8 @@ async function runReview(options = {}) {
   const serverReports = [];
   const changedSet = /* @__PURE__ */ new Set();
   for (const entry of entries) {
-    if (entry.path) changedSet.add(import_node_path6.default.resolve(root, entry.path));
-    if (entry.oldPath) changedSet.add(import_node_path6.default.resolve(root, entry.oldPath));
+    if (entry.path) changedSet.add(import_node_path7.default.resolve(root, entry.path));
+    if (entry.oldPath) changedSet.add(import_node_path7.default.resolve(root, entry.oldPath));
   }
   for (const server of servers) {
     const serverEntries = entries.filter((entry) => {
@@ -938,7 +1064,7 @@ async function runReview(options = {}) {
             typeDefinitions,
             implementations
           });
-          const externalRefs = refs.map((ref) => lspRefToLocation(root, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path6.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root, ref.relativeFile));
+          const externalRefs = refs.map((ref) => lspRefToLocation(root, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path7.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root, ref.relativeFile));
           if (externalRefs.length > 0) {
             findings.push(externalReferenceFinding(server, candidate, externalRefs, "lsp"));
           }
@@ -946,7 +1072,7 @@ async function runReview(options = {}) {
       }
       for (const candidate of allCandidates.values()) {
         if (candidate.changeType !== "removed") continue;
-        if (candidate.changedFile && import_node_fs4.default.existsSync(import_node_path6.default.join(root, candidate.changedFile))) continue;
+        if (candidate.changedFile && import_node_fs5.default.existsSync(import_node_path7.default.join(root, candidate.changedFile))) continue;
         const refs = scanTextReferences(root, candidate.name, changedSet, server);
         if (refs.length > 0) {
           findings.push(externalReferenceFinding(server, candidate, refs, "text"));
@@ -971,6 +1097,7 @@ async function runReview(options = {}) {
   }
   return {
     available: true,
+    reason: void 0,
     base: args.base,
     head: args.head,
     config: args.config,
@@ -1052,7 +1179,7 @@ async function runCli() {
 }
 
 // src/cadre-lsp-review.ts
-if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path7.default.basename(process.argv[1] || ""))) {
+if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path8.default.basename(process.argv[1] || ""))) {
   runCli().catch((error) => {
     console.error(errorMessage(error));
     process.exit(1);

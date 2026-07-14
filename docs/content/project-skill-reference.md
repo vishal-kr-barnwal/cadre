@@ -76,7 +76,10 @@ cadre://project-skill?root=/path&id=<skill-id>&reference=<reference-id>
 ```
 
 only when a packet exposes the reference as relevant. Source formatting helpers
-use the dedicated project-skill-source resource and the same containment rules.
+use the dedicated project-skill-source resource. Its returned URI contains a
+short-lived opaque capability bound to one canonical root and file; a bare path,
+an invented token, a token retargeted to another file, changed content, or a
+symlinked source path is rejected.
 
 ## Polyrepo Targeting
 
@@ -99,7 +102,7 @@ do not mutate management state through ad hoc JSON edits.
 |---|---|
 | `cadre://project-skills` | Selection and diagnostics for a root and workflow. |
 | `cadre://project-skill` | One manifest or one exposed reference. |
-| `cadre://project-skill-source` | A validated local text source requested for formatting. |
+| `cadre://project-skill-source` | A capability-bound local text source requested for formatting. |
 
 ## Validation Failures
 

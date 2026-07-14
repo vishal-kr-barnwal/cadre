@@ -1,24 +1,16 @@
-import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import type { RuntimeArgs } from "../../../types";
 
-import { CoreResult } from "./contracts";
+import { dapSetup, dapStatus } from "../../../dap/config";
+import { fileExists, readJson } from "../../infrastructure/runtime/json-store";
+import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
+import { commandExists, gitIdentity, isCadreProjectRoot, runCommand } from "../../infrastructure/runtime/system";
+import type { CoreResult } from "./contracts";
 import { countRecords, summarizeDapCoverage, summarizeDependencyGraphResult, summarizeLspCoverage, summarizeWorkspaceDiagnosticsResult, workspaceHealthDetailResources } from "./health-summaries";
 import { integrationInventory } from "./integrations";
-import { fileExists, readJson } from "../../infrastructure/runtime/json-store";
-import { dapSetup, dapStatus } from "../../../dap/config";
-import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
 import { lspSetup } from "./setup-infrastructure";
 import { availableWork } from "./status";
-import { commandExists, gitIdentity, isCadreProjectRoot, runCommand } from "../../infrastructure/runtime/system";
 import { techStackSummary } from "./tech-stack";
 import { workflowResponseMode } from "./workflow-response";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
@@ -136,8 +128,8 @@ export function lspConfigStatus(root: string): CoreResult {
       servers: [],
       missing: [],
       daemon: {
-        status_packet: "cadre_action action intel.lsp_daemon_status",
-        shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
+        status_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_status", input: {}, execute: false } },
+        shutdown_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_shutdown", input: {}, execute: true } },
         max_clients_default: 8,
         idle_eviction_ms_default: 600000,
       },
@@ -163,8 +155,8 @@ export function lspConfigStatus(root: string): CoreResult {
       })
       .map((server) => asOptionalString(server.id) || asOptionalString(server.command) || "unknown"),
     daemon: {
-      status_packet: "cadre_action action intel.lsp_daemon_status",
-      shutdown_packet: "cadre_action action intel.lsp_daemon_shutdown",
+      status_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_status", input: {}, execute: false } },
+      shutdown_call: { tool: "cadre_action", arguments: { root, action: "intel.lsp_daemon_shutdown", input: {}, execute: true } },
       max_clients_default: 8,
       idle_eviction_ms_default: 600000,
     },
@@ -188,7 +180,7 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
   const dapMissing = asStringArray(dapConfig.missing);
   const checks = {
     mcp_runtime: { ok: true, server: "cadre" },
-    cadre_project: {
+    project_state: {
       ok: Boolean(options.hasCadreProject || isCadreProjectRoot(candidateRoot)),
       root: candidateRoot,
       markers: [
@@ -213,7 +205,7 @@ export function doctor(root: string, options: RuntimeArgs = {}): CoreResult {
     },
   };
   const warnings: string[] = [];
-  if (!checks.cadre_project.ok) {
+  if (!checks.project_state.ok) {
     warnings.push("No Cadre project markers found. This is fine for the Cadre harness/source repo, but project-scoped Cadre workflows need setup first.");
   }
   if (checks.lsp.configured && lspMissing.length > 0) {

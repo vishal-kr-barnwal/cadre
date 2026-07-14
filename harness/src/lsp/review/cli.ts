@@ -1,13 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
-import type { JsonObject } from "../../types";
-import { asJsonObject, asNumber, asOptionalString, asStringArray, errorMessage, isRecord } from "../../guards";
-import { isIgnoredFile, normalizeRel, shouldIgnore } from "../ignore-policy";
+import { asOptionalString } from "../../guards";
 
 import { runReview } from "./run-review";
-import { CliArgs } from "./types";
+import type { CliArgs } from "./types";
 
 export function usage(): void {
   console.log(`Usage: node <cadre-lsp-review.js> [--base main] [--head HEAD] [--config cadre/lsp.json] [--json]

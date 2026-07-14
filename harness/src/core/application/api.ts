@@ -28,5 +28,7 @@ export { trackContext } from "./runtime/track-context";
 export { claimTrack, heartbeatTrack, metadataPatch, recordTaskResult, reviewGate, setTrackStatus } from "./runtime/track-mutations";
 export { parsePlanFile, parsePlanJson, phaseSchedule } from "./runtime/track-schedule";
 export { workflowPacket } from "./runtime/workflow-packet";
+export { workflowPacketEnvelopeV1, workflowPacketV1 } from "./runtime/workflow-packet-v1";
+export type { CadrePublicTool, WorkflowNextCall, WorkflowPacketV1 } from "./runtime/workflow-packet-v1";
 export { doctor, lspConfigStatus, workspaceHealth } from "./runtime/workspace-health";
 export { dependencyGraph, lspImpact, testImpact, workspaceDiagnostics } from "./runtime/workspace-intel";

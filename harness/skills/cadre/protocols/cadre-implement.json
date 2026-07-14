@@ -18,7 +18,7 @@
   "references": [
     {
       "id": "parallel-execution",
-      "when": "next:parallel.*"
+      "when": "next.arguments.action startsWith 'parallel.' or data.workers[].dispatch.record_finish_packet exists or data.worker_callbacks[].record_finish_packet exists"
     },
     {
       "id": "ownership-guard",

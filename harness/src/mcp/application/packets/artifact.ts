@@ -7,7 +7,7 @@ export function artifactPacket(deps: RuntimeDependencies, args: RuntimeArgs): Ru
   const action = args.action || "catalog";
   const root = deps.rootResolver.requireCadreRoot(args);
   if (["import", "sync"].includes(String(action)) && args.execute === true) {
-    return syncedEnvelope(root, `artifact:${action}`, () => deps.core.artifactPacket(root, args));
+    return syncedEnvelope(deps.core, root, `artifact:${action}`, () => deps.core.artifactPacket(root, args));
   }
   return envelope(deps.core.artifactPacket(root, args));
 }

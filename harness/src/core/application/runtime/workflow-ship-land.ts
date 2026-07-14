@@ -1,25 +1,17 @@
-import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asString } from "../../../guards";
+import type { CadreTrack, JsonObject, RuntimeArgs } from "../../../types";
 
-import { CoreResult, PlannedGitAction, PlannedProviderAction, WorkflowPhaseState } from "./contracts";
 import { appendJsonl, safeName, utcNow } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
+import { actionResultsOk, continuationToken, hasProviderEvidence, plannedGitAction, runPlannedGitActions, workflowPhaseState } from "../../infrastructure/runtime/system";
+import { beginTrace, commitTrace, notesPushAction, notesPushEnabled } from "./commit-trace";
+import type { CoreResult, PlannedGitAction, PlannedProviderAction, WorkflowPhaseState } from "./contracts";
 import { polyrepoPreflight } from "./project-maintenance";
 import { prCiStatus, providerEvidenceRequirement, providerFromConfig } from "./quality-gates";
 import { repoEntriesForTrack } from "./repo-resolution";
 import { providerEvidence } from "./review-records";
 import { asArray, fleetStatus, selectedTrackId } from "./status";
-import { actionResultsOk, continuationToken, hasProviderEvidence, plannedGitAction, runPlannedGitActions, workflowPhaseState } from "../../infrastructure/runtime/system";
-import { beginTrace, commitTrace, notesPushAction, notesPushEnabled } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { reviewGate } from "./track-mutations";
 import { workflowSummary } from "./workflow-response";
@@ -196,6 +188,7 @@ export function workflowShip(root: string, args: RuntimeArgs = {}): CoreResult {
   return {
     ...summary,
     ok: gate.ok !== false && (!evidenceWrite || evidenceWrite.ok !== false) && (!publication || asJsonObject(publication).ok !== false) && !executionFailed,
+    track_id: trackId,
     phase_state: phaseState,
     gate,
     provider,
@@ -243,6 +236,7 @@ export function workflowLand(root: string, args: RuntimeArgs = {}): CoreResult {
   return {
     ...summary,
     ok: topology.polyrepo && preflight.ok !== false && gate.ok !== false && (!evidenceWrite || evidenceWrite.ok !== false) && (!publication || asJsonObject(publication).ok !== false) && !executionFailed,
+    track_id: trackId,
     phase_state: phaseState,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
     preflight,

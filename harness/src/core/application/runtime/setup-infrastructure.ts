@@ -1,21 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString } from "../../../guards";
+import type { CommandResult, JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { CoreResult, PlannedGitAction } from "./contracts";
+import { mcpServerPathCandidates } from "../../../runtime-paths";
 import { fileExists, safeName } from "../../infrastructure/runtime/json-store";
 import { loadTopology, normalizeProviderMode } from "../../infrastructure/runtime/project-config";
-import { actionResultsOk, commandExists, plannedGitAction, runCommand, runPlannedGitActions } from "../../infrastructure/runtime/system";
+import { actionResultsOk, plannedGitAction, runCommand, runPlannedGitActions } from "../../infrastructure/runtime/system";
+import type { CoreResult, PlannedGitAction } from "./contracts";
 import { templateSourceLabel, templateText } from "./workflow-response";
-import { mcpServerPathCandidates } from "../../../runtime-paths";
 
 export function configuredCiProvider(root: string, args: RuntimeArgs = {}): "github" | "gitlab" | null {
   const raw = asOptionalString(args.ciProvider || args.ci_provider)
@@ -104,8 +97,8 @@ export function setupSubmodulePlan(root: string, repos: JsonObject, args: Runtim
   };
 }
 
-export function lspSetupHelperCandidates(root: string): string[] {
-  return mcpServerPathCandidates(root);
+export function lspSetupHelperCandidates(): string[] {
+  return mcpServerPathCandidates();
 }
 
 export function redactRuntimeHelperPaths(text: string): string {
@@ -127,13 +120,14 @@ export function summarizeRuntimeCommandResult(result: CommandResult): JsonObject
 }
 
 export function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
-  const helper = lspSetupHelperCandidates(root).find(fileExists);
+  const helperCandidates = lspSetupHelperCandidates();
+  const helper = helperCandidates.find(fileExists);
   if (!helper) {
     return {
       ok: false,
       available: false,
       reason: "Cadre MCP runtime was not found for LSP setup",
-      checked_count: lspSetupHelperCandidates(root).length,
+      checked_count: helperCandidates.length,
     };
   }
   const config = asOptionalString(args.config) || "cadre/lsp.json";

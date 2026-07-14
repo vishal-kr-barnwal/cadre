@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { RuntimeArgs } from "../../../types";
 import type { RuntimeEnvelope } from "../../domain/protocol-types";
-import { envelope } from "../envelope";
+import { envelope, executionGuard } from "../envelope";
 import { PROTOCOL_VERSION } from "../../domain/tool-catalog";
 import type { RuntimeDependencies } from "../ports";
 
@@ -50,7 +50,10 @@ export async function projectPacket(deps: RuntimeDependencies, args: RuntimeArgs
   if (action === "topology") return envelope({ ok: true, root, topology: deps.core.loadTopology(root) });
   if (action === "tech_stack_summary") return envelope(deps.core.techStackSummary(root, args));
   if (action === "integrations") return envelope(deps.core.integrationInventory(root, args));
-  if (action === "sync_control_plane") return envelope(deps.core.syncControlPlane(root, args));
+  if (action === "sync_control_plane") {
+    const guard = executionGuard("project.sync_control_plane", args);
+    return guard || envelope(deps.core.syncControlPlane(root, args));
+  }
   if (action === "polyrepo_preflight") return envelope(deps.core.polyrepoPreflight(root));
-  return envelope({ ok: false, error: `Unknown cadre_project action: ${action}` });
+  return envelope({ ok: false, error: `Unknown cadre_action action: project.${action}` });
 }

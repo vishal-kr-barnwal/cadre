@@ -1,6 +1,9 @@
 import type { JsonObject } from "../../types";
 
-export const PROTOCOL_VERSION = "2026-07-10";
+/** Published MCP revisions this server can serve over its newline-delimited stdio transport. */
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18"] as const;
+export type SupportedProtocolVersion = typeof SUPPORTED_PROTOCOL_VERSIONS[number];
+export const PROTOCOL_VERSION: SupportedProtocolVersion = SUPPORTED_PROTOCOL_VERSIONS[0];
 
 export const SERVER_INSTRUCTIONS = [
   "Cadre is a packet-led runtime. Call cadre_workflow first for workflows, cadre_action for a packet named by a workflow response, and cadre_read only for a relevant resource URI.",
@@ -23,7 +26,7 @@ export const TOOLS: JsonObject[] = [
         root,
         workflow: { type: "string" },
         input: { type: "object", description: "Workflow-specific structured input." },
-        execute: { type: "boolean" },
+        execute: { type: "boolean", description: "Apply the workflow after its required approval steps; omit or false for preview." },
         approval: { type: "object", description: "Explicit document approval supplied only after user confirmation, or cancel:true to abandon a review session." },
       },
       required: ["root", "workflow"],
@@ -39,7 +42,7 @@ export const TOOLS: JsonObject[] = [
         root,
         action: { type: "string" },
         input: { type: "object", description: "Action-specific structured input." },
-        execute: { type: "boolean" },
+        execute: { type: "boolean", description: "Required for mutating actions; omit or false for read-only actions and supported dry runs." },
       },
       required: ["action"],
       additionalProperties: false,

@@ -1,10 +1,17 @@
-import fs from "node:fs";
-import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { JsonObject, RuntimeArgs } from "../types";
 import { asJsonObject, asNumber, asOptionalString, asStringArray, isRecord } from "../guards";
+import {
+  resolveContainedProjectPath,
+  resolveProjectControlJsonPath,
+  readProjectControlJson,
+  writeProjectControlJson,
+  type ProjectControlJsonPath,
+} from "../infrastructure/project-control-file";
 import { languageForFile, listWorkspaceFiles } from "../lsp/language-registry";
+
+const DEFAULT_DAP_CONFIG = "cadre/dap.json";
 
 export interface DapSession {
   adapter: JsonObject;
@@ -29,22 +36,9 @@ function pythonDebugpyAvailable(root: string, command: string): boolean {
   return result.status === 0;
 }
 
-function configPath(root: string, config?: string): string {
-  const rel = config || "cadre/dap.json";
-  return path.isAbsolute(rel) ? rel : path.join(root, rel);
-}
-
-function readConfig(file: string): JsonObject {
-  try {
-    return asJsonObject(JSON.parse(fs.readFileSync(file, "utf8")));
-  } catch {
-    return {};
-  }
-}
-
-function writeConfig(file: string, value: JsonObject): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+function readConfig(configPath: ProjectControlJsonPath): JsonObject {
+  const read = readProjectControlJson(configPath);
+  return read.ok ? asJsonObject(read.value) : {};
 }
 
 function scanLanguages(root: string): JsonObject[] {
@@ -105,8 +99,9 @@ function adapterKey(adapter: JsonObject): string {
 }
 
 export function dapSetup(root: string, args: RuntimeArgs = {}): JsonObject {
-  const file = configPath(root, args.config);
-  const existing = readConfig(file);
+  const configPath = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG);
+  if (!configPath.ok) return { ok: false, error: configPath.error };
+  const existing = readConfig(configPath);
   const adapters = Array.isArray(existing.adapters) ? existing.adapters.map(asJsonObject) : [];
   const configurations = Array.isArray(existing.configurations) ? existing.configurations.map(asJsonObject) : [];
   const { recommended, manual, detected } = dapRecommendations(root);
@@ -114,18 +109,19 @@ export function dapSetup(root: string, args: RuntimeArgs = {}): JsonObject {
   const missingFromConfig = recommended.filter((adapter) => !existingKeys.has(adapterKey(adapter)));
   const added = args.execute === true ? missingFromConfig : [];
   if (args.execute === true) {
-    writeConfig(file, {
+    const written = writeProjectControlJson(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG, {
       version: 1,
       schema: "cadre.dap.v1",
       ...existing,
       adapters: [...adapters, ...added],
       configurations,
     });
+    if (!written.ok) return { ok: false, error: written.error };
   }
   return {
     ok: true,
     root,
-    config: path.relative(root, file),
+    config: configPath.relative,
     execute: args.execute === true,
     dry_run: args.execute !== true,
     recommended,
@@ -138,8 +134,9 @@ export function dapSetup(root: string, args: RuntimeArgs = {}): JsonObject {
 }
 
 export function dapStatus(root: string, args: RuntimeArgs = {}): JsonObject {
-  const file = configPath(root, args.config);
-  const config = readConfig(file);
+  const configPath = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG);
+  if (!configPath.ok) return { ok: false, error: configPath.error };
+  const config = readConfig(configPath);
   const adapters = Array.isArray(config.adapters) ? config.adapters.map(asJsonObject) : [];
   const configurations = Array.isArray(config.configurations) ? config.configurations.map(asJsonObject) : [];
   const { recommended, manual, detected } = dapRecommendations(root);
@@ -156,7 +153,7 @@ export function dapStatus(root: string, args: RuntimeArgs = {}): JsonObject {
   return {
     ok: true,
     configured: Object.keys(config).length > 0,
-    path: path.relative(root, file),
+    path: configPath.relative,
     adapters: summarizedAdapters,
     configurations: configurations.map((entry) => ({
       id: asOptionalString(entry.id) || "unknown",
@@ -168,8 +165,8 @@ export function dapStatus(root: string, args: RuntimeArgs = {}): JsonObject {
     detected,
     recommended,
     manual,
-    setup_packet: "cadre_action action intel.dap_setup",
-    snapshot_packet: "cadre_action action intel.dap_snapshot",
+    setup_call: { tool: "cadre_action", arguments: { root, action: "intel.dap_setup", input: {}, execute: false } },
+    snapshot_call: { tool: "cadre_action", arguments: { root, action: "intel.dap_snapshot", input: {}, execute: true } },
   };
 }
 
@@ -182,53 +179,69 @@ function substitute(value: unknown, tokens: Record<string, string>): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substitute(entry, tokens)]));
 }
 
-function normalizeBreakpoints(root: string, raw: unknown): JsonObject[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map(asJsonObject).flatMap((entry) => {
+function normalizeBreakpoints(root: string, raw: unknown): { ok: true; breakpoints: JsonObject[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw)) return { ok: true, breakpoints: [] };
+  const breakpoints: JsonObject[] = [];
+  for (const entry of raw.map(asJsonObject)) {
     const file = asOptionalString(entry.file) || asOptionalString(entry.path);
     const line = asNumber(entry.line);
-    if (!file || line < 1) return [];
-    const abs = path.isAbsolute(file) ? file : path.join(root, file);
-    return [{
+    if (!file || line < 1) continue;
+    const resolved = resolveContainedProjectPath(root, file);
+    if (!resolved.ok) return { ok: false, error: `Invalid DAP breakpoint path ${file}: ${resolved.error}` };
+    breakpoints.push({
       ...entry,
-      file: path.relative(root, abs).split(path.sep).join("/"),
+      file: resolved.relative,
       line,
-    }];
-  });
+    });
+  }
+  return { ok: true, breakpoints };
 }
 
 export function normalizeDapSession(root: string, args: RuntimeArgs = {}): DapSession | { ok: false; error: string } {
-  const file = configPath(root, args.config);
-  const loaded = readConfig(file);
-  const inlineConfiguration = asJsonObject(args.configuration);
+  const configPath = resolveProjectControlJsonPath(root, asOptionalString(args.config), DEFAULT_DAP_CONFIG);
+  if (!configPath.ok) return configPath;
+  const loaded = readConfig(configPath);
+  if (args.configuration !== undefined) {
+    return { ok: false, error: "Inline DAP configurations are not allowed; configure cadre/dap.json and pass configurationId" };
+  }
   const configurationId = asOptionalString(args.configurationId || args.configuration_id || args.id);
   const configurations = Array.isArray(loaded.configurations) ? loaded.configurations.map(asJsonObject) : [];
-  const configuration = Object.keys(inlineConfiguration).length > 0
-    ? inlineConfiguration
-    : configurations.find((entry) => asOptionalString(entry.id) === configurationId) || configurations[0] || {};
+  const configuration = configurationId
+    ? configurations.find((entry) => asOptionalString(entry.id) === configurationId) || {}
+    : configurations[0] || {};
+  if (configurationId && Object.keys(configuration).length === 0) {
+    return { ok: false, error: `DAP configuration not found: ${configurationId}` };
+  }
   if (Object.keys(configuration).length === 0) return { ok: false, error: "DAP configuration is required" };
+  if (Object.keys(asJsonObject(configuration.adapter)).length > 0) {
+    return { ok: false, error: "Inline DAP adapters are not allowed; reference a configured adapterId" };
+  }
   const adapters = Array.isArray(loaded.adapters) ? loaded.adapters.map(asJsonObject) : [];
   const adapterId = asOptionalString(configuration.adapterId) || asOptionalString(configuration.adapter_id);
-  const inlineAdapter = asJsonObject(configuration.adapter);
-  const adapter = Object.keys(inlineAdapter).length > 0
-    ? inlineAdapter
-    : adapters.find((entry) => asOptionalString(entry.id) === adapterId) || {};
+  if (!adapterId) return { ok: false, error: "DAP configuration adapterId is required" };
+  const adapter = adapters.find((entry) => asOptionalString(entry.id) === adapterId) || {};
+  if (Object.keys(adapter).length === 0) return { ok: false, error: `DAP adapter not found: ${adapterId}` };
   const command = asOptionalString(adapter.command);
   if (!command) return { ok: false, error: "DAP adapter command is required" };
   const request = asOptionalString(configuration.request);
   if (request !== "launch" && request !== "attach") return { ok: false, error: "DAP configuration request must be launch or attach" };
-  const tokens = {
+  const adapterTokens = {
     "${workspaceFolder}": root,
     "${root}": root,
     "${cwd}": root,
+  };
+  const configurationTokens = {
+    ...adapterTokens,
     "${testCommand}": asOptionalString(args.testCommand || args.test_command) || "",
   };
+  const breakpoints = normalizeBreakpoints(root, args.breakpoints || configuration.breakpoints);
+  if (!breakpoints.ok) return breakpoints;
   return {
-    adapter: substitute(adapter, tokens) as JsonObject,
-    configuration: substitute(configuration, tokens) as JsonObject,
+    adapter: substitute(adapter, adapterTokens) as JsonObject,
+    configuration: substitute(configuration, configurationTokens) as JsonObject,
     request,
-    arguments: substitute(configuration.arguments || configuration.args || {}, tokens) as JsonObject,
-    breakpoints: normalizeBreakpoints(root, args.breakpoints || configuration.breakpoints),
+    arguments: substitute(configuration.arguments || configuration.args || {}, configurationTokens) as JsonObject,
+    breakpoints: breakpoints.breakpoints,
     timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, asNumber(args.timeoutMs, 120000))),
   };
 }

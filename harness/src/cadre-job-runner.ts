@@ -1,9 +1,6 @@
-#!/usr/bin/env node
-import path from "node:path";
-
 import * as core from "./cadre-core";
 import type { RuntimeArgs } from "./types";
-import { asJsonObject, asOptionalString, errorMessage } from "./guards";
+import { asJsonObject, asOptionalString } from "./guards";
 
 export function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -45,11 +42,4 @@ export async function runJobRunner(): Promise<void> {
   const payload = asJsonObject(JSON.parse(input || "{}")) as RuntimeArgs;
   const result = await runJob(payload);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-}
-
-if (["cadre-job-runner.js", "cadre-job-runner.ts"].includes(path.basename(process.argv[1] || ""))) {
-  runJobRunner().catch((error) => {
-    process.stdout.write(`${JSON.stringify({ ok: false, error: errorMessage(error), stack: error instanceof Error ? error.stack : undefined }, null, 2)}\n`);
-    process.exit(1);
-  });
 }

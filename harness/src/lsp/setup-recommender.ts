@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { asJsonObject, asStringArray, isRecord } from "../guards";
+import { asJsonObject, isRecord } from "../guards";
+import { resolveProjectControlJsonPath, writeProjectControlJson } from "../infrastructure/project-control-file";
 import type { JsonObject } from "../types";
 import { LANGUAGE_RULES, scanWorkspaceFiles, type LanguageRule, type WorkspaceScanResult } from "./language-registry";
+
+const DEFAULT_LSP_CONFIG = "cadre/lsp.json";
 
 interface LspSetupArgs {
   root: string;
@@ -65,7 +68,9 @@ function parseArgs(argv: string[]): LspSetupArgs {
     }
   }
   const root = path.resolve(args.root);
-  return { ...args, root, configPath: path.resolve(root, args.config) };
+  const configPath = resolveProjectControlJsonPath(root, args.config, DEFAULT_LSP_CONFIG);
+  if (!configPath.ok) throw new Error(configPath.error);
+  return { ...args, root, config: configPath.relative, configPath: configPath.file };
 }
 
 function shellQuote(value: string): string {
@@ -112,9 +117,9 @@ function loadConfig(configPath: string): LspConfig {
   }
 }
 
-function saveConfig(configPath: string, config: LspConfig): void {
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+function saveConfig(root: string, requested: string, config: LspConfig): void {
+  const written = writeProjectControlJson(root, requested, DEFAULT_LSP_CONFIG, config);
+  if (!written.ok) throw new Error(written.error);
 }
 
 function recommend(root: string): Recommendation[] {
@@ -208,14 +213,14 @@ function runCli(): void {
 
   if (args.write) {
     const merged = mergeConfig(config, recommendations, args.root);
-    saveConfig(args.configPath, merged.config);
+    saveConfig(args.root, args.config, merged.config);
     written = true;
     added = merged.added;
   }
 
   const result = {
     root: args.root,
-    config: path.relative(args.root, args.configPath),
+    config: args.config,
     recommended: recommendations,
     missingFromConfig: missingFromConfig.map((rec) => rec.id),
     missingCommands: missingCommands.map((rec) => ({
@@ -248,7 +253,7 @@ function runCli(): void {
     if (!rec.available) console.log(`  install: ${rec.install}`);
   }
   if (written) {
-    console.log(`Updated ${path.relative(args.root, args.configPath)}; added: ${added.join(", ") || "none"}.`);
+    console.log(`Updated ${args.config}; added: ${added.join(", ") || "none"}.`);
   } else if (missingFromConfig.length > 0) {
     console.log("Run with --write to append missing server entries to cadre/lsp.json.");
   }

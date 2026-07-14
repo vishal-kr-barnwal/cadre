@@ -64,7 +64,7 @@ export function shouldIgnore(root: string, fullPath: string, name: string): bool
   );
 }
 
-export function isIgnoredFile(root: string, file: string): boolean {
+export function isIgnoredFile(_root: string, file: string): boolean {
   const rel = normalizeRel(file);
   if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
   return DEFAULT_IGNORE_PATHS.some(

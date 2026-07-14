@@ -43,7 +43,7 @@ cadre-monorepo-check:
           tracks: (sort_by(.track_id))
         }' "$entries" > "$expected"
         if ! diff -u "$expected" "$actual"; then
-          echo "ERROR: cadre/tracks.json is stale. Run cadre_mutate action regen_index through Cadre MCP and commit the result."
+          echo "ERROR: cadre/tracks.json is stale. Call cadre_action with action mutate.regen_index through Cadre MCP and commit the result."
           exit 1
         fi
         echo "cadre/tracks.json matches track metadata."

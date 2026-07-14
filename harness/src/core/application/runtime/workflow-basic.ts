@@ -1,41 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asStringArray, errorMessage } from "../../../guards";
+import type { RuntimeArgs } from "../../../types";
 
-import { collisionScan } from "./collision";
-import { CoreResult } from "./contracts";
 import { fileExists, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { artifactValidate, renderArtifact } from "./artifact-actions";
+import { artifactDefinitions } from "./artifact-catalog";
+import { writeArtifactFilesAtomic } from "./artifact-pairs";
+import { branchSetForTrack } from "./branch-set";
+import { collisionScan } from "./collision";
+import { beginTrace, commitTrace } from "./commit-trace";
+import type { CoreResult } from "./contracts";
 import { hasGeneratedMarker, markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent, appendCadreMessage, nativeStateSummary } from "./native-state";
 import { trackHandoffJsonPath } from "./plan-docs";
 import { planIntegrity } from "./planning";
-import { projectSkillDiagnostics } from "./project-skills";
 import { regenIndex } from "./project-maintenance";
+import { projectSkillDiagnostics } from "./project-skills";
 import { prCiStatus, reviewAssist } from "./quality-gates";
 import { implementationPrep } from "./repo-resolution";
 import { documentReviewPair, humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { syncControlPlane } from "./review-records";
+import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
-import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
-import { branchSetForTrack } from "./branch-set";
 import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
-import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { artifactValidate, renderArtifact } from "./artifact-actions";
-import { artifactDefinitions } from "./artifact-catalog";
-import { writeArtifactFilesAtomic } from "./artifact-pairs";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const prep = implementationPrep(root, {

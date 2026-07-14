@@ -121,7 +121,7 @@ function stepsFromFormula(formula: JsonObject): JsonObject[] {
   return Array.isArray(formula.steps) ? formula.steps.map(asJsonObject) : [];
 }
 
-function cookedPlan(trackId: string, formula: JsonObject, rendered: JsonObject): JsonObject {
+function cookedPlan(trackId: string, rendered: JsonObject): JsonObject {
   if (isRecord(rendered.plan)) return asJsonObject(rendered.plan);
   const steps = stepsFromFormula(rendered);
   const phaseTitle = asOptionalString(rendered.phase_title)
@@ -191,7 +191,7 @@ function cookFormula(root: string, args: RuntimeArgs): CoreResult {
     recommended_phase: asOptionalString(formula.recommended_phase) || null,
     dependencies: asStringArray(formula.dependencies),
     spec: cookedSpec(trackId, formula, rendered),
-    plan: cookedPlan(trackId, formula, rendered),
+    plan: cookedPlan(trackId, rendered),
   };
 }
 

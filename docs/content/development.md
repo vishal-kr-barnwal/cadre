@@ -43,7 +43,7 @@ Edit these master sources:
 
 - `harness/src/` for runtime, MCP, LSP, DAP, and CLI TypeScript;
 - `harness/skills/cadre/` for the skill contract and protocols;
-- `harness/scripts/agent-refs/` for MCP-served references;
+- `harness/scripts/agent-refs/` for maintainer reference sources;
 - `harness/templates/` for target-project and CI templates;
 - `docs/` for the public site and Markdown content.
 

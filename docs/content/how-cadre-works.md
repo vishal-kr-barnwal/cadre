@@ -20,11 +20,12 @@ prep, review evidence, provider actions, parallel merge-back, or archive.
 The operating rule is simple:
 
 1. The agent activates the Cadre skill.
-2. The workflow protocol tells the agent which packet to call.
+2. The agent calls `cadre_workflow` with a nested request.
 3. The agent passes a per-call `root`.
 4. Cadre MCP reads the needed state, performs the operation, and returns
    structured output.
-5. The agent summarizes the packet result and follows returned next actions.
+5. The agent summarizes the packet result and invokes only the exact typed
+   `next` call when one is returned.
 
 Agents should not mutate `metadata.json`, `plan.json`, `tracks.json`, generated
 projections, event/message logs, local wisps, parallel state, review verdicts,
@@ -59,22 +60,30 @@ The `cadre-ai` npm package installs a dependency-free stdio MCP server:
 cadre-mcp
 ```
 
-The installed plugins are thin client entrypoints. They point Claude Code and
-OpenAI Codex at the global `cadre-mcp` runtime, which embeds Cadre contracts,
-workflow protocols, references, and target-project templates.
+The installed plugins are thin client entrypoints. They point supported clients
+at the global `cadre-mcp` runtime, which embeds only the target-project
+templates it needs at runtime. Skill contracts, workflow protocols, and agent
+references remain source validation inputs rather than MCP resources.
 
 The server exposes three packet-led tools:
 
 | Surface | What it owns |
 |---------|--------------|
-| `cadre_workflow` | High-level setup, newtrack, implement, debug, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, and artifact-sync aliases. |
+| `cadre_workflow` | High-level setup, newtrack, implement, debug, status, review, ship, land, archive, release, handoff, refresh, revise, revert, flag, validate, formula, artifacts, and skill workflows. |
 | `cadre_action` | Namespaced actions returned by workflows, including task completion, parallel coordination, review, intelligence, jobs, and artifact operations. |
 | `cadre_read` | One targeted resource URI returned by a packet. |
 
 Workflow packets use a compact common envelope with `phase`, `decision`,
 `required`, at most one deterministic `next` call, artifact descriptors, and
-relevant resource URIs. Detailed evidence is fetched explicitly rather than
-embedded in every response.
+relevant resource URIs. `next` is the sole immediate single-agent Cadre
+continuation, and a client invokes exactly `next.tool` with `next.arguments`
+once for that packet. The only deferred or fan-out callbacks are provider
+`decision.required.write_back` after external evidence collection, each
+parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact
+completion or recovery callbacks reissued under
+`data.worker_callbacks[].record_finish_packet`. There is no
+fallback direct-tool alias. Detailed evidence is fetched explicitly rather
+than embedded in every response.
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
 `cadre://review-queue`, `cadre://handoff-inbox`, `cadre://quality-gate`,
@@ -184,7 +193,8 @@ matching provider MCP and be written back through Cadre packets.
 
 There is no workflow fallback to raw provider shell commands. If the required
 provider MCP is unavailable, provider-dependent packets fail closed with
-required evidence and next actions.
+required evidence. After collecting that evidence, invoke only the returned
+`decision.required.write_back` callback, then follow any new `next` call.
 
 Local mode skips hosted provider evidence and keeps delivery local.
 
@@ -210,9 +220,17 @@ Cadre uses code intelligence to reduce blind spots:
 LSP is optional. If `cadre/lsp.json` is absent, Cadre records that code
 intelligence was skipped instead of blocking ordinary work.
 
+Custom config names stay in the project control plane: Cadre accepts only
+`cadre/lsp.json` or `cadre/lsp-*.json` for LSP and `cadre/dap.json` or
+`cadre/dap-*.json` for DAP. Absolute, traversing, cross-purpose, and symlinked
+config paths are rejected before a language server or debug adapter can start.
+
 DAP is also optional and adapter-driven. Cadre can speak DAP to any configured
 adapter, but language support depends on the adapter command installed for the
-project. V1 snapshots are bounded diagnostics, not a full interactive debugger.
+project. A snapshot selects an adapter and configuration already stored in the
+project config; callers cannot provide an inline adapter command, and breakpoint
+paths must remain inside the project. V1 snapshots are bounded diagnostics, not
+a full interactive debugger.
 
 ## Failure Model
 
@@ -222,4 +240,4 @@ ownership conflicts, dependency gates, provider gates, failed review gates, and
 invalid plan annotations.
 
 Agents should retry only when a packet marks the operation retryable or
-idempotent. Otherwise they report the packet error and next actions.
+idempotent. Otherwise they report the packet's structured decision and errors.

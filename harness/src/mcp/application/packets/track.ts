@@ -23,5 +23,5 @@ export function trackPacket(deps: RuntimeDependencies, args: RuntimeArgs): Runti
   if (action === "prepare_implementation") return envelope(deps.core.implementationPrep(root, args));
   if (action === "plan_assist") return envelope(deps.core.planAssist(root, args));
   if (action === "worktree_plan") return envelope(deps.core.worktreePlan(root, args));
-  return envelope({ ok: false, error: `Unknown cadre_track action: ${action}` });
+  return envelope({ ok: false, error: `Unknown cadre_action action: track.${action}` });
 }

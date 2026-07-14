@@ -13,7 +13,7 @@ function fileExists(file: string): boolean {
   }
 }
 
-export function mcpServerPathCandidates(root?: string): string[] {
+export function mcpServerPathCandidates(): string[] {
   const candidates: string[] = [];
   let dir = __dirname;
   for (let depth = 0; depth < 8; depth += 1) {
@@ -24,12 +24,11 @@ export function mcpServerPathCandidates(root?: string): string[] {
     if (parent === dir) break;
     dir = parent;
   }
-  if (root) candidates.push(path.join(root, "cadre", "scripts", "mcp", "cadre-server.js"));
   return unique(candidates);
 }
 
-export function currentMcpServerPath(root?: string): string | null {
-  return mcpServerPathCandidates(root).find(fileExists) || null;
+export function currentMcpServerPath(): string | null {
+  return mcpServerPathCandidates().find(fileExists) || null;
 }
 
 export function mcpRuntimeRoot(serverPath: string): string {

@@ -131,11 +131,28 @@ function startServer(options = {}) {
     });
   }
 
-  return { server, request };
+  function notify(method, params = {}) {
+    server.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+  }
+
+  async function initialize(params = {}) {
+    const result = await request("initialize", params);
+    notify("notifications/initialized");
+    return result;
+  }
+
+  return { server, request, notify, initialize };
 }
 
 function parseTextJson(result) {
   return JSON.parse(result.content[0].text);
+}
+
+function callAction(request, action, root, input = {}, execute = false) {
+  const arguments_ = { action, input };
+  if (root) arguments_.root = root;
+  if (execute) arguments_.execute = true;
+  return request("tools/call", { name: "cadre_action", arguments: arguments_ });
 }
 
 async function callApprovedWorkflow(request, args) {
@@ -204,12 +221,9 @@ function requestDaemon(daemon, method, params = {}) {
 requestDaemon.nextId = 1;
 requestDaemon.listeners = new Map();
 
-async function waitForJob(request, jobId) {
+async function waitForJob(request, root, jobId) {
   for (let i = 0; i < 20; i += 1) {
-    const result = await request("tools/call", {
-      name: "cadre_job",
-      arguments: { action: "result", jobId },
-    });
+    const result = await callAction(request, "job.result", root, { jobId });
     const parsed = parseTextJson(result);
     if (parsed.data.job.status !== "running") return parsed;
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -274,6 +288,10 @@ process.stdin.on("data", (chunk) => {
 
 test("LSP setup JSON and daemon status/shutdown smoke", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-smoke-"));
+  const outsideConfig = `${root}-outside.json`;
+  const symlinkTarget = `${root}-symlink-target.json`;
+  const symlinkRoot = `${root}-symlink-root`;
+  const symlinkControlDir = `${root}-symlink-control`;
   const serverPath = path.join(__dirname, "cadre-server.js");
   const daemon = spawn(process.execPath, [serverPath, "--cadre-lsp-daemon"], {
     cwd: path.resolve(__dirname, "..", ".."),
@@ -319,6 +337,77 @@ test("LSP setup JSON and daemon status/shutdown smoke", async () => {
     assert.deepEqual(docker.filenames, ["Dockerfile", "Containerfile"]);
     assert.equal(docker.languageIds.Dockerfile, "dockerfile");
 
+    const productConfig = path.join(root, "cadre", "product.json");
+    write(productConfig, "{\"sentinel\":\"product\"}\n");
+    const crossPurpose = spawnSync(process.execPath, [
+      serverPath,
+      "--cadre-lsp-setup",
+      "--root",
+      root,
+      "--config",
+      "cadre/product.json",
+      "--write",
+      "--json",
+    ], { encoding: "utf8" });
+    assert.notEqual(crossPurpose.status, 0);
+    assert.equal(fs.readFileSync(productConfig, "utf8"), "{\"sentinel\":\"product\"}\n");
+
+    write(outsideConfig, "{\"sentinel\":\"outside\"}\n");
+    const traversal = spawnSync(process.execPath, [
+      serverPath,
+      "--cadre-lsp-setup",
+      "--root",
+      root,
+      "--config",
+      `../${path.basename(outsideConfig)}`,
+      "--write",
+      "--json",
+    ], { encoding: "utf8" });
+    assert.notEqual(traversal.status, 0);
+    assert.equal(fs.readFileSync(outsideConfig, "utf8"), "{\"sentinel\":\"outside\"}\n");
+
+    const absolute = spawnSync(process.execPath, [
+      serverPath,
+      "--cadre-lsp-setup",
+      "--root",
+      root,
+      "--config",
+      outsideConfig,
+      "--write",
+      "--json",
+    ], { encoding: "utf8" });
+    assert.notEqual(absolute.status, 0);
+    assert.equal(fs.readFileSync(outsideConfig, "utf8"), "{\"sentinel\":\"outside\"}\n");
+
+    write(symlinkTarget, "{\"sentinel\":\"symlink\"}\n");
+    fs.rmSync(path.join(root, "cadre", "lsp.json"));
+    fs.symlinkSync(symlinkTarget, path.join(root, "cadre", "lsp.json"));
+    const symlinkFile = spawnSync(process.execPath, [
+      serverPath,
+      "--cadre-lsp-setup",
+      "--root",
+      root,
+      "--write",
+      "--json",
+    ], { encoding: "utf8" });
+    assert.notEqual(symlinkFile.status, 0);
+    assert.equal(fs.readFileSync(symlinkTarget, "utf8"), "{\"sentinel\":\"symlink\"}\n");
+
+    fs.mkdirSync(symlinkRoot);
+    fs.mkdirSync(symlinkControlDir);
+    fs.symlinkSync(symlinkControlDir, path.join(symlinkRoot, "cadre"));
+    write(path.join(symlinkRoot, "src", "index.ts"), "export const guarded = true;\n");
+    const symlinkDirectory = spawnSync(process.execPath, [
+      serverPath,
+      "--cadre-lsp-setup",
+      "--root",
+      symlinkRoot,
+      "--write",
+      "--json",
+    ], { encoding: "utf8" });
+    assert.notEqual(symlinkDirectory.status, 0);
+    assert.deepEqual(fs.readdirSync(symlinkControlDir), []);
+
     const status = await requestDaemon(daemon, "status");
     assert.equal(status.ok, true);
     assert.deepEqual(status.servers, []);
@@ -327,6 +416,10 @@ test("LSP setup JSON and daemon status/shutdown smoke", async () => {
   } finally {
     daemon.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outsideConfig, { force: true });
+    fs.rmSync(symlinkTarget, { force: true });
+    fs.rmSync(symlinkRoot, { recursive: true, force: true });
+    fs.rmSync(symlinkControlDir, { recursive: true, force: true });
   }
 });
 
@@ -340,7 +433,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
   assert.equal(fs.existsSync(path.join(pluginRoot, "assets")), false);
   assert.equal(fs.existsSync(path.join(pluginRoot, "agents")), false);
   assert.equal(fs.existsSync(path.join(pluginRoot, "scripts")), false);
-  const { server, request } = startServer({
+  const { server, request, initialize } = startServer({
     serverPath,
     cwd: path.resolve(__dirname, "..", ".."),
   });
@@ -348,7 +441,7 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
     git(root, ["init"]);
     git(root, ["config", "user.email", "reviewer@example.com"]);
     git(root, ["config", "user.name", "Reviewer"]);
-    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
 
     const setup = await callApprovedWorkflow(request, {
         root,
@@ -403,9 +496,9 @@ test("Global embedded MCP runtime writes setup and newtrack artifacts while plug
 
 test("MCP root resolution rejects harness skill directories without project state", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-test-"));
-  const { server, request } = startServer();
+  const { server, request, initialize } = startServer();
   try {
-    const initialized = await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
+    const initialized = await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
     assert.match(initialized.instructions, /root/);
     assert.match(initialized.instructions, /packet-led/);
     const tools = await request("tools/list", {});
@@ -418,122 +511,103 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(fieldsFor("cadre_read"), ["uri"]);
     assert.ok(Math.ceil(JSON.stringify(tools.tools).length / 4) <= 1700);
     assert.ok(tools.tools.every((tool) => tool.inputSchema.additionalProperties === false));
-    const ping = parseTextJson(await request("tools/call", { name: "cadre_action", arguments: { action: "project.ping" } }));
+    for (const legacyName of [
+      "cadre_resource",
+      "cadre_project",
+      "cadre_status",
+      "cadre_track",
+      "cadre_parallel",
+      "cadre_mutate",
+      "cadre_complete_task",
+      "cadre_job",
+      "cadre_review",
+      "cadre_intel",
+      "cadre_artifact",
+    ]) {
+      await assert.rejects(
+        request("tools/call", { name: legacyName, arguments: {} }),
+        new RegExp(`Unknown tool: ${legacyName}`),
+      );
+    }
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_workflow",
+        arguments: { root, workflow: "status", mode: "fleet" },
+      }),
+      /unsupported fields: mode/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_action",
+        arguments: { action: "project.ping", trackId: "flat-input" },
+      }),
+      /unsupported fields: trackId/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_read",
+        arguments: { uri: "cadre://template-inventory", root },
+      }),
+      /unsupported fields: root/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_workflow",
+        arguments: { root, workflow: "status", input: { approvalComplete: true } },
+      }),
+      /reserved control fields: approvalComplete/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_workflow",
+        arguments: { root, workflow: "skill", input: { source_snapshot: "injected" } },
+      }),
+      /reserved control fields: source_snapshot/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_action",
+        arguments: { root, action: "project.ping", input: { skipSync: true } },
+      }),
+      /reserved control fields: skipSync/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_action",
+        arguments: { root, action: "parallel.record_finish", input: { force: true, approvalComplete: true }, execute: true },
+      }),
+      /reserved control fields: approvalComplete/,
+    );
+    const ping = parseTextJson(await callAction(request, "project.ping", null));
     assert.equal(ping.data.ok, true);
     const resources = await request("resources/list", {});
     const uris = resources.resources.map((resource) => resource.uri);
-    assert.ok(uris.includes("cadre://skill-contract"));
-    assert.ok(uris.includes("cadre://workflow-protocols"));
-    assert.ok(uris.includes("cadre://workflow-protocol"));
-    assert.ok(uris.includes("cadre://agent-references"));
-    assert.ok(uris.includes("cadre://agent-reference"));
-    assert.ok(uris.includes("cadre://template-inventory"));
-    assert.ok(uris.includes("cadre://fleet-board"));
-    assert.ok(uris.includes("cadre://workspace-health"));
-    assert.ok(uris.includes("cadre://integrations"));
-    assert.ok(uris.includes("cadre://mcp-readiness"));
-    assert.ok(uris.includes("cadre://review-evidence"));
-    assert.ok(uris.includes("cadre://workspace-diagnostics"));
-    assert.ok(uris.includes("cadre://lsp-status"));
-    assert.ok(uris.includes("cadre://dap-status"));
-    assert.ok(uris.includes("cadre://repo-topology"));
-    assert.ok(uris.includes("cadre://provider-actions"));
-    assert.ok(uris.includes("cadre://ship-plan"));
-    assert.ok(uris.includes("cadre://land-plan"));
-    assert.ok(uris.includes("cadre://release-plan"));
-    assert.ok(uris.includes("cadre://my-next-actions"));
-    assert.ok(uris.includes("cadre://review-queue"));
-    assert.ok(uris.includes("cadre://parallel-state"));
-    assert.ok(uris.includes("cadre://quality-gate"));
-    assert.ok(uris.includes("cadre://artifact-catalog"));
-    assert.ok(uris.includes("cadre://artifact-schema"));
-    assert.ok(uris.includes("cadre://artifact-preview"));
-    assert.ok(uris.includes("cadre://artifact-sync-plan"));
-    assert.ok(uris.includes("cadre://track-spec"));
-    assert.ok(uris.includes("cadre://styleguide-selection"));
-    assert.ok(uris.includes("cadre://project-skills"));
-    assert.ok(uris.includes("cadre://project-skill"));
+    assert.deepEqual(uris, ["cadre://template-inventory"]);
     const templates = await request("resources/templates/list", {});
     const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
-    assert.ok(templateUris.includes("cadre://skill-contract"));
-    assert.ok(templateUris.includes("cadre://workflow-protocols"));
-    assert.ok(templateUris.includes("cadre://agent-references"));
-    assert.ok(templateUris.includes("cadre://template-inventory"));
     assert.ok(templateUris.some((uri) => uri.startsWith("cadre://track-context")));
-    const templateByUri = new Map(templates.resourceTemplates.map((template) => [template.uriTemplate.split("{")[0], template]));
-    assert.deepEqual(templateByUri.get("cadre://skill-contract").required, []);
-    assert.deepEqual(templateByUri.get("cadre://workflow-protocols").required, []);
-    assert.deepEqual(templateByUri.get("cadre://workflow-protocol").required, ["workflow"]);
-    assert.deepEqual(templateByUri.get("cadre://agent-references").required, []);
-    assert.deepEqual(templateByUri.get("cadre://agent-reference").required, ["name"]);
-    assert.deepEqual(templateByUri.get("cadre://template-inventory").required, []);
-    assert.deepEqual(templateByUri.get("cadre://provider-actions").required, ["root", "trackId", "workflow"]);
-    assert.deepEqual(templateByUri.get("cadre://workspace-health").optional, ["responseMode", "detail", "compact"]);
-    assert.deepEqual(templateByUri.get("cadre://integrations").optional, ["responseMode", "detail", "compact"]);
-    assert.deepEqual(templateByUri.get("cadre://mcp-readiness").required, ["root"]);
-    assert.ok(templateByUri.get("cadre://workspace-health").uriTemplate.includes("responseMode"));
-    assert.ok(templateByUri.get("cadre://repo-map").optional.includes("symbol"));
-    assert.deepEqual(templateByUri.get("cadre://ship-plan").required, ["root", "trackId"]);
-    assert.deepEqual(templateByUri.get("cadre://land-plan").required, ["root", "trackId"]);
-    assert.deepEqual(templateByUri.get("cadre://job-result").required, ["root", "jobId"]);
-    assert.deepEqual(templateByUri.get("cadre://test-impact").required, ["root"]);
-    assert.deepEqual(templateByUri.get("cadre://test-impact").requiredAny, [["files"], ["base", "head"]]);
-    assert.deepEqual(templateByUri.get("cadre://dap-status").required, ["root"]);
-    assert.deepEqual(templateByUri.get("cadre://artifact-preview").required, ["root", "artifact"]);
-    assert.deepEqual(templateByUri.get("cadre://artifact-sync-plan").optional, ["scope", "artifact", "includeArchive"]);
-    assert.deepEqual(templateByUri.get("cadre://track-spec").required, ["root", "trackId"]);
-    assert.deepEqual(templateByUri.get("cadre://project-skills").required, ["root", "workflow"]);
-    assert.deepEqual(templateByUri.get("cadre://project-skills").optional, ["trackId", "repos", "files", "skillRuleBudget"]);
-    assert.deepEqual(templateByUri.get("cadre://project-skill").required, ["root", "id"]);
+    assert.ok(templateUris.some((uri) => uri.startsWith("cadre://dependency-graph{?root")));
+    assert.ok(templateUris.some((uri) => uri.startsWith("cadre://provider-actions{?root,trackId,workflow")));
+    assert.ok(templateUris.some((uri) => uri.startsWith("cadre://workspace-health{?root,responseMode,detail,compact")));
+    assert.ok(templateUris.some((uri) => uri.startsWith("cadre://project-skills{?root,workflow,trackId,repos,files,skillRuleBudget")));
+    assert.ok(templateUris.some((uri) => uri.startsWith("cadre://project-skill-source{?root,path,token")));
+    assert.equal(templateUris.some((uri) => uri.startsWith("cadre://release-plan")), false);
+    for (const retired of ["skill-contract", "workflow-protocol", "workflow-protocols", "agent-reference", "agent-references"]) {
+      assert.equal(templateUris.some((uri) => uri.startsWith(`cadre://${retired}`)), false);
+    }
 
-    const skillContract = await request("resources/read", { uri: "cadre://skill-contract" });
-    const skillContractTool = parseTextJson(await request("tools/call", {
+    const templateInventory = await request("resources/read", { uri: "cadre://template-inventory" });
+    const templateInventoryTool = parseTextJson(await request("tools/call", {
       name: "cadre_read",
-      arguments: { uri: "cadre://skill-contract" },
+      arguments: { uri: "cadre://template-inventory" },
     }));
-    assert.equal(skillContractTool.contents[0].text, skillContract.contents[0].text);
-
-    const parsedSkillContract = JSON.parse(skillContract.contents[0].text);
-    assert.equal(parsedSkillContract.ok, true);
-    assert.equal(parsedSkillContract.data.skill.schema, "cadre.skill.v1");
-    assert.equal(parsedSkillContract.data.skill.activation.protocol_reads_required, false);
-
-    const workflowProtocols = await request("resources/read", { uri: "cadre://workflow-protocols" });
-    const parsedWorkflowProtocols = JSON.parse(workflowProtocols.contents[0].text);
-    assert.equal(parsedWorkflowProtocols.ok, true);
-    assert.ok(parsedWorkflowProtocols.data.workflows.some((workflow) => workflow.workflow === "setup" && workflow.uri === "cadre://workflow-protocol?workflow=setup"));
-
-    const setupProtocol = await request("resources/read", { uri: "cadre://workflow-protocol?workflow=setup" });
-    const parsedSetupProtocol = JSON.parse(setupProtocol.contents[0].text);
-    assert.equal(parsedSetupProtocol.ok, true);
-    assert.equal(parsedSetupProtocol.data.protocol.schema, "cadre.protocol.v1");
-    assert.equal(parsedSetupProtocol.data.protocol.workflow, "setup");
-
-    const agentReferences = await request("resources/read", { uri: "cadre://agent-references" });
-    const parsedAgentReferences = JSON.parse(agentReferences.contents[0].text);
-    assert.equal(parsedAgentReferences.ok, true);
-    assert.ok(parsedAgentReferences.data.references.some((reference) => reference.id === "mcp-contract"));
-    assert.ok(parsedAgentReferences.data.references.some((reference) => reference.id === "native-prompts"));
-
-    const mcpContract = await request("resources/read", { uri: "cadre://agent-reference?name=mcp-contract" });
-    const parsedMcpContract = JSON.parse(mcpContract.contents[0].text);
-    assert.equal(parsedMcpContract.ok, true);
-    assert.equal(parsedMcpContract.data.reference.id, "mcp-contract");
-    assert.equal(parsedMcpContract.data.reference.schema, "cadre.reference.v1");
-
-    const nativePrompts = await request("resources/read", { uri: "cadre://agent-reference?name=native-prompts" });
-    const parsedNativePrompts = JSON.parse(nativePrompts.contents[0].text);
-    assert.equal(parsedNativePrompts.ok, true);
-    assert.equal(parsedNativePrompts.data.reference.id, "native-prompts");
-    assert.equal(parsedNativePrompts.data.reference.platforms.codex.adapter, "request_user_input");
+    assert.deepEqual(templateInventoryTool, JSON.parse(templateInventory.contents[0].text));
+    assert.equal(templateInventoryTool.data.ok, true);
 
     const freshRoot = path.join(root, "fresh");
     write(path.join(freshRoot, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
     write(path.join(freshRoot, "src", "index.ts"), "export const fresh = true;\n");
-    const freshProjectRoot = parseTextJson(await request("tools/call", {
-      name: "cadre_project",
-      arguments: { action: "root", root: freshRoot },
-    })).data;
+    const freshProjectRoot = parseTextJson(await callAction(request, "project.root", freshRoot)).data;
     assert.equal(freshProjectRoot.root, freshRoot);
     assert.equal(freshProjectRoot.has_cadre, false);
     assert.equal(freshProjectRoot.setup_candidate, true);
@@ -549,62 +623,52 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(setupSkills.data.inline_rule_budget, 5000);
     assert.equal(setupSkills.data.inline_rule_budget_source, "argument");
 
-    const freshTechStack = parseTextJson(await request("tools/call", {
-      name: "cadre_project",
-      arguments: { action: "tech_stack_summary", root: freshRoot, techStack: { languages: ["TypeScript"] } },
-    })).data;
+    const freshTechStack = parseTextJson(await callAction(
+      request,
+      "project.tech_stack_summary",
+      freshRoot,
+      { techStack: { languages: ["TypeScript"] } },
+    )).data;
     assert.equal(freshTechStack.ok, true);
     assert.equal(freshTechStack.root, freshRoot);
 
-    const freshIntegrations = parseTextJson(await request("tools/call", {
-      name: "cadre_project",
-      arguments: { action: "integrations", root: freshRoot },
-    })).data;
+    const freshIntegrations = parseTextJson(await callAction(request, "project.integrations", freshRoot)).data;
     assert.equal(freshIntegrations.ok, true);
     assert.equal(freshIntegrations.root, freshRoot);
 
-    const freshRepoMap = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { action: "repo_map", root: freshRoot, limit: 20 },
-    })).data;
+    const freshRepoMap = parseTextJson(await callAction(request, "intel.repo_map", freshRoot, { limit: 20 })).data;
     assert.equal(freshRepoMap.ok, true);
     assert.equal(freshRepoMap.root, freshRoot);
 
-    const freshDiagnostics = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { action: "workspace_diagnostics", root: freshRoot },
-    })).data;
+    const freshDiagnostics = parseTextJson(await callAction(request, "intel.workspace_diagnostics", freshRoot)).data;
     assert.equal(freshDiagnostics.ok, true);
     assert.equal(freshDiagnostics.root, freshRoot);
 
-    await assert.rejects(
-      request("tools/call", {
-        name: "cadre_status",
-        arguments: { action: "live", root: freshRoot },
-      }),
-      /requires \{ root \}/
-    );
-
-    const templateInventory = await request("resources/read", { uri: "cadre://template-inventory" });
-    const parsedTemplateInventory = JSON.parse(templateInventory.contents[0].text);
-    assert.equal(parsedTemplateInventory.ok, true);
-    assert.ok(parsedTemplateInventory.data.templates.templates.some((template) => template.id === "product"));
+    await assert.rejects(callAction(request, "status.live", freshRoot), /requires \{ root \}/);
+    assert.ok(templateInventoryTool.data.templates.templates.some((template) => template.id === "product"));
 
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
-      request("tools/call", {
-        name: "cadre_project",
-        arguments: { action: "root", root: path.join(root, "harness", "skills", "cadre") },
-      }),
+      callAction(request, "project.root", path.join(root, "harness", "skills", "cadre")),
       /requires \{ root \}/
     );
 
     write(path.join(root, "project", "cadre", "setup_state.json"), "{}\n");
-    const valid = await request("tools/call", {
-      name: "cadre_project",
-      arguments: { action: "root", root: path.join(root, "project", "cadre") },
-    });
+    const valid = await callAction(request, "project.root", path.join(root, "project", "cadre"));
     assert.equal(parseTextJson(valid).data.root, path.join(root, "project"));
+    const injectedJob = parseTextJson(await callAction(
+      request,
+      "review.anything",
+      path.join(root, "project"),
+      { async: true, type: "complete_task" },
+      true,
+    ));
+    assert.equal(injectedJob.ok, false);
+    assert.match(injectedJob.errors.join(" "), /does not support input\.async/i);
+    assert.equal(fs.existsSync(path.join(root, "project", "cadre", "jobs")), false);
+    const guardedMutation = parseTextJson(await callAction(request, "mutate.regen_index", path.join(root, "project")));
+    assert.equal(guardedMutation.ok, false);
+    assert.deepEqual(guardedMutation.required, ["execute"]);
     write(path.join(root, "project", "cadre", "skills", "project-rules", "skill.json"), JSON.stringify({
       version: 1, schema: "cadre.project-skill.v1", id: "project-rules", name: "project-rules", description: "Project rules",
       selectors: { workflows: ["implement"] },
@@ -624,21 +688,81 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.equal(projectSkill.data.ok, true);
     assert.equal(projectSkill.data.skill.references[0].content, "Keep changes scoped.\n");
 
-    const integrations = await request("tools/call", {
-      name: "cadre_project",
-      arguments: { action: "integrations", root: path.join(root, "project") },
-    });
+    write(path.join(root, "project", "notes", "raw.md"), "Workflow-authorized source.\n");
+    write(path.join(root, "project", ".env"), "SECRET=not-authorized\n");
+    const sourcePacket = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root: path.join(root, "project"),
+        workflow: "skill",
+        input: {
+          operation: "create",
+          skillId: "source-rules",
+          changes: [
+            { type: "metadata.set", name: "Source rules", description: "Rules formatted from a project source." },
+            { type: "selectors.set", workflows: ["review"] },
+            { type: "rule.upsert", id: "source", text: "Use the formatted source.", references: ["raw"] },
+            { type: "reference.upsert", id: "raw", path: "references/raw.md", source_path: "notes/raw.md" },
+          ],
+        },
+      },
+    }));
+    assert.equal(sourcePacket.ok, true);
+    assert.equal(sourcePacket.phase, "awaiting_formatting");
+    assert.equal(sourcePacket.resources.length, 1);
+    const sourceUri = sourcePacket.resources[0];
+    const sourceUrl = new URL(sourceUri);
+    assert.match(sourceUrl.searchParams.get("token"), /^[A-Za-z0-9_-]{40,}$/);
+    assert.equal(sourcePacket.next.tool, "cadre_read");
+    assert.equal(sourcePacket.next.arguments.uri, sourceUri);
+    const authorizedSource = JSON.parse((await request("resources/read", { uri: sourceUri })).contents[0].text);
+    assert.equal(authorizedSource.ok, true);
+    assert.equal(authorizedSource.data.content, "Workflow-authorized source.\n");
+
+    await assert.rejects(
+      request("resources/read", {
+        uri: `cadre://project-skill-source?root=${encodeURIComponent(path.join(root, "project"))}&path=notes%2Fraw.md`,
+      }),
+      /requires query parameter 'token'/,
+    );
+    const inventedUrl = new URL(sourceUri);
+    inventedUrl.searchParams.set("token", "invented-token");
+    const invented = JSON.parse((await request("resources/read", { uri: inventedUrl.toString() })).contents[0].text);
+    assert.equal(invented.ok, false);
+    const retargetedUrl = new URL(sourceUri);
+    retargetedUrl.searchParams.set("path", ".env");
+    const retargeted = JSON.parse((await request("resources/read", { uri: retargetedUrl.toString() })).contents[0].text);
+    assert.equal(retargeted.ok, false);
+    const secretSource = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root: path.join(root, "project"),
+        workflow: "skill",
+        input: {
+          operation: "create",
+          skillId: "secret-source",
+          changes: [
+            { type: "metadata.set", name: "Secret source", description: "Must not expose hidden environment files." },
+            { type: "selectors.set", workflows: ["review"] },
+            { type: "rule.upsert", id: "secret", text: "Use a source.", references: ["secret"] },
+            { type: "reference.upsert", id: "secret", path: "references/secret.md", source_path: ".env" },
+          ],
+        },
+      },
+    }));
+    assert.equal(secretSource.ok, false);
+    assert.match(secretSource.errors.join(" "), /unsupported extension/);
+    assert.deepEqual(secretSource.resources, []);
+
+    const integrations = await callAction(request, "project.integrations", path.join(root, "project"));
     assert.equal(parseTextJson(integrations).data.ok, true);
 
-    const doctor = await request("tools/call", {
-      name: "cadre_project",
-      arguments: { action: "doctor", root: path.join(root, "harness", "skills", "cadre") },
-    });
-    assert.equal(parseTextJson(doctor).data.checks.cadre_project.ok, false);
+    const doctor = await callAction(request, "project.doctor", path.join(root, "harness", "skills", "cadre"));
+    assert.equal(parseTextJson(doctor).data.checks.project_state.ok, false);
 
     const setupAssist = await request("tools/call", {
       name: "cadre_workflow",
-      arguments: { workflow: "setup", root: path.join(root, "uninitialized") },
+      arguments: { workflow: "setup", root: path.join(root, "uninitialized"), input: {} },
     });
     const parsedSetupAssist = parseTextJson(setupAssist);
     assert.equal(parsedSetupAssist.ok, true);
@@ -647,17 +771,18 @@ test("MCP root resolution rejects harness skill directories without project stat
       assert.equal(Object.prototype.hasOwnProperty.call(parsedSetupAssist, key), true, `missing workflow envelope key ${key}`);
     }
 
-    const job = await request("tools/call", {
-      name: "cadre_job",
-      arguments: {
-        action: "start",
+    const job = await callAction(
+      request,
+      "job.start",
+      path.join(root, "project"),
+      {
         type: "coverage",
-        root: path.join(root, "project"),
         args: { command: "printf 'Statements : 91%%\\n'", coverageThreshold: 80 },
       },
-    });
+      true,
+    );
     const jobId = parseTextJson(job).job.id;
-    const completed = await waitForJob(request, jobId);
+    const completed = await waitForJob(request, path.join(root, "project"), jobId);
     assert.equal(completed.ok, true);
     assert.equal(completed.data.result.coverage, 91);
     assert.equal(fs.existsSync(path.join(root, "project", "cadre", "jobs", `${jobId}.json`)), true);
@@ -665,6 +790,14 @@ test("MCP root resolution rejects harness skill directories without project stat
       uri: `cadre://job-result?root=${encodeURIComponent(path.join(root, "project"))}&jobId=${jobId}`,
     });
     assert.equal(JSON.parse(jobResource.contents[0].text).data.status, "succeeded");
+    const traversal = parseTextJson(await callAction(
+      request,
+      "job.result",
+      path.join(root, "project"),
+      { jobId: "../../outside" },
+    ));
+    assert.equal(traversal.ok, false);
+    assert.match(traversal.errors.join(" "), /invalid|not found/i);
   } finally {
     server.kill();
     fs.rmSync(root, { recursive: true, force: true });
@@ -684,19 +817,20 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
     }, null, 2));
     write(path.join(projectRoot, "src", "index.ts"), "export const value = 1;\n");
 
-    await first.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
-    const started = parseTextJson(await first.request("tools/call", {
-      name: "cadre_job",
-      arguments: {
-        action: "start",
+    await first.initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    const started = parseTextJson(await callAction(
+      first.request,
+      "job.start",
+      projectRoot,
+      {
         type: "coverage",
-        root: projectRoot,
         args: { command: "printf 'Statements : 91%%\\n'", coverageThreshold: 80 },
       },
-    }));
+      true,
+    ));
     const jobId = started.job.id;
     assert.match(jobId, /^job_[0-9a-f-]{36}$/i);
-    const completed = await waitForJob(first.request, jobId);
+    const completed = await waitForJob(first.request, projectRoot, jobId);
     assert.equal(completed.data.result.coverage, 91);
 
     const health = JSON.parse((await first.request("resources/read", {
@@ -716,34 +850,40 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
 
     const second = startServer();
     try {
-      await second.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
-      const listed = parseTextJson(await second.request("tools/call", {
-        name: "cadre_job",
-        arguments: { action: "list", root: projectRoot },
-      }));
+      await second.initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+      const listed = parseTextJson(await callAction(second.request, "job.list", projectRoot));
       const persisted = listed.data.jobs.find((job) => job.id === jobId);
       assert.equal(Boolean(persisted), true);
       assert.equal(persisted.persisted, true);
       assert.equal(persisted.stale, false);
 
-      const result = parseTextJson(await second.request("tools/call", {
-        name: "cadre_job",
-        arguments: { action: "result", root: projectRoot, jobId },
-      }));
+      const result = parseTextJson(await callAction(second.request, "job.result", projectRoot, { jobId }));
       assert.equal(result.data.job.id, jobId);
       assert.equal(result.data.result.coverage, 91);
 
-      const restarted = parseTextJson(await second.request("tools/call", {
-        name: "cadre_job",
-        arguments: {
-          action: "start",
+      const otherRoot = path.join(root, "other-project");
+      write(path.join(otherRoot, "cadre", "setup_state.json"), "{}\n");
+      const crossProject = parseTextJson(await callAction(second.request, "job.result", otherRoot, { jobId }));
+      assert.equal(crossProject.ok, false);
+      assert.match(crossProject.errors.join(" "), /not found/i);
+      const crossList = parseTextJson(await callAction(second.request, "job.list", otherRoot));
+      assert.equal(crossList.data.jobs.some((job) => job.id === jobId), false);
+      const crossCancel = parseTextJson(await callAction(second.request, "job.cancel", otherRoot, { jobId }, true));
+      assert.equal(crossCancel.ok, false);
+      assert.match(crossCancel.errors.join(" "), /not found/i);
+
+      const restarted = parseTextJson(await callAction(
+        second.request,
+        "job.start",
+        projectRoot,
+        {
           type: "coverage",
-          root: projectRoot,
           args: { command: "printf 'Statements : 88%%\\n'", coverageThreshold: 80 },
         },
-      }));
+        true,
+      ));
       assert.notEqual(restarted.job.id, jobId);
-      await waitForJob(second.request, restarted.job.id);
+      await waitForJob(second.request, projectRoot, restarted.job.id);
     } finally {
       await new Promise((resolve) => {
         second.server.once("exit", resolve);
@@ -756,10 +896,112 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
   }
 });
 
+test("MCP job persistence rejects symlinked project storage", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-job-symlink-test-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-job-symlink-outside-"));
+  const { server, request, initialize } = startServer();
+  try {
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    fs.symlinkSync(outside, path.join(root, "cadre", "jobs"));
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "job-symlink-test" } });
+    const started = parseTextJson(await callAction(
+      request,
+      "job.start",
+      root,
+      { type: "coverage", args: { command: "printf 'Statements : 91%%\\n'", coverageThreshold: 80 } },
+      true,
+    ));
+    assert.equal(started.ok, true);
+    assert.equal(started.job.artifact_path, null);
+    const completed = await waitForJob(request, root, started.job.id);
+    assert.equal(completed.ok, true);
+    assert.equal(completed.job.artifact_path, null);
+    assert.deepEqual(fs.readdirSync(outside), []);
+    const resourceUri = `cadre://job-result?root=${encodeURIComponent(root)}&jobId=${started.job.id}`;
+    const persisted = JSON.parse((await request("resources/read", { uri: resourceUri })).contents[0].text);
+    assert.equal(persisted.data.ok, false);
+  } finally {
+    server.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("MCP LSP reviews reject unowned configs without spawning commands", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-config-guard-"));
+  const outsideConfig = `${root}-outside.json`;
+  const marker = `${root}-spawned`;
+  const { server, request, initialize } = startServer();
+  try {
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "reviewer@example.com"]);
+    git(root, ["config", "user.name", "Reviewer"]);
+    write(path.join(root, "src", "index.ts"), "export function guarded() { return true; }\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "initial"]);
+    git(root, ["branch", "-M", "main"]);
+    git(root, ["checkout", "-b", "track/lsp-config-guard"]);
+    write(path.join(root, "src", "index.ts"), "export function guarded() { return false; }\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "change guarded source"]);
+
+    const markerCommand = `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`;
+    const hostileConfig = JSON.stringify({
+      servers: [{
+        id: "hostile",
+        command: process.execPath,
+        args: ["-e", markerCommand],
+        extensions: [".ts"],
+      }],
+    }, null, 2);
+    write(outsideConfig, hostileConfig);
+    write(path.join(root, "cadre", "product.json"), hostileConfig);
+    fs.symlinkSync(outsideConfig, path.join(root, "cadre", "lsp-linked.json"));
+
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "lsp-config-guard" } });
+    await assert.rejects(
+      callAction(
+        request,
+        "intel.lsp_warm_review",
+        root,
+        { base: "main", head: "HEAD", configOwnerRoot: path.dirname(outsideConfig) },
+      ),
+      /reserved control fields: configOwnerRoot/i,
+    );
+
+    for (const action of ["intel.lsp_review", "intel.lsp_warm_review"]) {
+      for (const config of [
+        outsideConfig,
+        `../${path.basename(outsideConfig)}`,
+        "cadre/product.json",
+        "cadre/lsp-linked.json",
+      ]) {
+        const review = parseTextJson(await callAction(
+          request,
+          action,
+          root,
+          { base: "main", head: "HEAD", config, timeoutMs: 5000 },
+        ));
+        assert.equal(review.data.available, false, `${action} should reject ${config}`);
+        assert.match(String(review.data.reason), /Cadre config|symbolic link/i);
+        assert.equal(fs.existsSync(marker), false, `${action} spawned the rejected config ${config}`);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
+    server.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outsideConfig, { force: true });
+    fs.rmSync(marker, { force: true });
+  }
+});
+
 test("MCP warm LSP review qualifies polyrepo findings with repo context", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-lsp-test-"));
   const appRoot = path.join(root, "products", "app");
-  const { server, request } = startServer();
+  const { server, request, initialize } = startServer();
   try {
     write(path.join(root, "cadre", "setup_state.json"), "{}\n");
     write(path.join(root, "cadre", "repos.json"), JSON.stringify({
@@ -813,16 +1055,16 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
     git(appRoot, ["add", "."]);
     git(appRoot, ["commit", "-m", "change app"]);
 
-    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
-    const review = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: {
-        root,
-        action: "lsp_warm_review",
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
+    const review = parseTextJson(await callAction(
+      request,
+      "intel.lsp_warm_review",
+      root,
+      {
         trackId: "poly_lsp",
         timeoutMs: 10000,
       },
-    }));
+    ));
     assert.equal(review.data.polyrepo, true);
     const appResult = review.data.repos.find((repo) => repo.repo === "app");
     assert.equal(appResult.path, "products/app");
@@ -834,10 +1076,7 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
       assert.equal(finding.cwd, appRoot);
     }
 
-    await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { action: "lsp_daemon_shutdown" },
-    });
+    await callAction(request, "intel.lsp_daemon_shutdown", null, {}, true);
   } finally {
     server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
@@ -846,7 +1085,11 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
 
 test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-dap-test-"));
-  const { server, request } = startServer();
+  const outsideConfig = `${root}-outside.json`;
+  const outsideSource = `${root}-outside.py`;
+  const inlineMarker = `${root}-inline-marker`;
+  const breakpointMarker = `${root}-breakpoint-marker`;
+  const { server, request, initialize } = startServer();
   try {
     write(path.join(root, "cadre", "setup_state.json"), "{}\n");
     write(path.join(root, "src", "app.py"), "def main():\n    return 42\n");
@@ -871,41 +1114,34 @@ test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async
       }],
     }, null, 2));
 
-    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
 
-    const setup = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { root, action: "dap_setup" },
-    }));
+    const setup = parseTextJson(await callAction(request, "intel.dap_setup", root));
     assert.equal(setup.data.ok, true);
     assert.equal(setup.data.dry_run, true);
     assert.ok(setup.data.recommended.some((entry) => entry.id === "python-debugpy"));
 
-    const status = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { root, action: "dap_status" },
-    }));
+    const status = parseTextJson(await callAction(request, "intel.dap_status", root));
     assert.equal(status.data.configured, true);
     assert.equal(status.data.adapters[0].available, true);
 
     const dryRun = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
-      arguments: { root, workflow: "debug", configurationId: "fake-launch" },
+      arguments: { root, workflow: "debug", input: { configurationId: "fake-launch" } },
     }));
     assert.equal(dryRun.ok, true);
-    assert.equal(dryRun.next.arguments.action, "intel.dap_snapshot");
+    assert.equal(dryRun.next, null);
+    assert.deepEqual(dryRun.required, ["execute"]);
 
-    const snapshotArgs = {
-      root,
-      action: "dap_snapshot",
+    const snapshotInput = {
       configurationId: "fake-launch",
       breakpoints: [{ file: "src/app.py", line: 2 }],
       timeoutMs: 5000,
     };
-    const snapshot = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: snapshotArgs,
-    }));
+    const guardedSnapshot = parseTextJson(await callAction(request, "intel.dap_snapshot", root, snapshotInput));
+    assert.equal(guardedSnapshot.ok, false);
+    assert.deepEqual(guardedSnapshot.required, ["execute"]);
+    const snapshot = parseTextJson(await callAction(request, "intel.dap_snapshot", root, snapshotInput, true));
     assert.equal(snapshot.data.ok, true);
     assert.equal(snapshot.data.snapshot.event, "stopped");
     assert.equal(snapshot.data.breakpoints[0].breakpoints[0].verified, true);
@@ -914,17 +1150,17 @@ test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async
 
     const workflowSnapshot = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
-      arguments: { ...snapshotArgs, workflow: "debug", action: undefined, execute: true },
+      arguments: { root, workflow: "debug", input: snapshotInput, execute: true },
     }));
     assert.equal(workflowSnapshot.ok, true);
     assert.equal(workflowSnapshot.phase, "ready");
 
     const asyncStart = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
-      arguments: { ...snapshotArgs, workflow: "debug", action: undefined, execute: true, async: true },
+      arguments: { root, workflow: "debug", input: { ...snapshotInput, async: true }, execute: true },
     }));
     const jobId = asyncStart.next.arguments.input.jobId;
-    const completed = await waitForJob(request, jobId);
+    const completed = await waitForJob(request, root, jobId);
     assert.equal(completed.ok, true);
     assert.equal(completed.data.result.snapshot.event, "stopped");
 
@@ -933,6 +1169,265 @@ test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async
     });
     const parsedResource = JSON.parse(resource.contents[0].text);
     assert.equal(parsedResource.data.status.configured, true);
+
+    const productConfig = path.join(root, "cadre", "product.json");
+    write(productConfig, "{\"sentinel\":\"product\"}\n");
+    const crossPurpose = parseTextJson(await callAction(
+      request,
+      "intel.dap_setup",
+      root,
+      { config: "cadre/product.json" },
+      true,
+    ));
+    assert.equal(crossPurpose.ok, false);
+    assert.match(crossPurpose.errors.join(" "), /cadre\/dap/i);
+    assert.equal(fs.readFileSync(productConfig, "utf8"), "{\"sentinel\":\"product\"}\n");
+
+    write(outsideConfig, "{\"sentinel\":\"outside\"}\n");
+    const traversal = parseTextJson(await callAction(
+      request,
+      "intel.dap_setup",
+      root,
+      { config: `../${path.basename(outsideConfig)}` },
+      true,
+    ));
+    assert.equal(traversal.ok, false);
+    assert.equal(fs.readFileSync(outsideConfig, "utf8"), "{\"sentinel\":\"outside\"}\n");
+
+    fs.symlinkSync(outsideConfig, path.join(root, "cadre", "dap-linked.json"));
+    const linkedConfig = parseTextJson(await callAction(
+      request,
+      "intel.dap_setup",
+      root,
+      { config: "cadre/dap-linked.json" },
+      true,
+    ));
+    assert.equal(linkedConfig.ok, false);
+    assert.match(linkedConfig.errors.join(" "), /symbolic link/i);
+    assert.equal(fs.readFileSync(outsideConfig, "utf8"), "{\"sentinel\":\"outside\"}\n");
+
+    const inlineCommand = `require("node:fs").writeFileSync(${JSON.stringify(inlineMarker)}, "spawned")`;
+    const inlineSnapshot = parseTextJson(await callAction(
+      request,
+      "intel.dap_snapshot",
+      root,
+      {
+        configuration: {
+          request: "launch",
+          adapter: { command: process.execPath, args: ["-e", inlineCommand] },
+          arguments: {},
+        },
+      },
+      true,
+    ));
+    assert.equal(inlineSnapshot.ok, false);
+    assert.match(inlineSnapshot.errors.join(" "), /inline DAP configuration/i);
+    assert.equal(fs.existsSync(inlineMarker), false);
+
+    const markerCommand = `require("node:fs").writeFileSync(${JSON.stringify(breakpointMarker)}, "spawned")`;
+    write(path.join(root, "cadre", "dap.json"), JSON.stringify({
+      version: 1,
+      schema: "cadre.dap.v1",
+      adapters: [{ id: "marker", command: process.execPath, args: ["-e", markerCommand] }],
+      configurations: [{ id: "marker-launch", adapterId: "marker", request: "launch", arguments: {} }],
+    }, null, 2));
+    write(outsideSource, "print('outside')\n");
+    const outsideBreakpoint = parseTextJson(await callAction(
+      request,
+      "intel.dap_snapshot",
+      root,
+      { configurationId: "marker-launch", breakpoints: [{ file: outsideSource, line: 1 }] },
+      true,
+    ));
+    assert.equal(outsideBreakpoint.ok, false);
+    assert.match(outsideBreakpoint.errors.join(" "), /breakpoint path.*inside the project root/i);
+    assert.equal(fs.existsSync(breakpointMarker), false);
+
+    fs.symlinkSync(outsideSource, path.join(root, "src", "linked.py"));
+    const linkedBreakpoint = parseTextJson(await callAction(
+      request,
+      "intel.dap_snapshot",
+      root,
+      { configurationId: "marker-launch", breakpoints: [{ file: "src/linked.py", line: 1 }] },
+      true,
+    ));
+    assert.equal(linkedBreakpoint.ok, false);
+    assert.match(linkedBreakpoint.errors.join(" "), /breakpoint path.*outside the project root/i);
+    assert.equal(fs.existsSync(breakpointMarker), false);
+  } finally {
+    server.kill("SIGTERM");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outsideConfig, { force: true });
+    fs.rmSync(outsideSource, { force: true });
+    fs.rmSync(inlineMarker, { force: true });
+    fs.rmSync(breakpointMarker, { force: true });
+  }
+});
+
+test("MCP typed continuations and execution guards compose end to end", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-continuation-test-"));
+  const { server, request, notify, initialize } = startServer();
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), JSON.stringify({ provider_mode: "github" }, null, 2));
+    write(path.join(root, "src", "sequential.ts"), "export const sequential = true;\n");
+    write(path.join(root, "src", "api.ts"), "export const api = true;\n");
+    write(path.join(root, "src", "ui.ts"), "export const ui = true;\n");
+    writeTrack(root, "sequential_next", {
+      version: 1,
+      schema: "cadre.plan.v1",
+      track_id: "sequential_next",
+      phases: [{
+        phase_index: 1,
+        title: "Sequential",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [planTask(1, 1, "Sequential task", ["src/sequential.ts"])],
+      }],
+    }, {
+      review: { verdict: "approved", blocking_count: 0, reviewed_sha: "reviewed-sequential" },
+    });
+    writeTrack(root, "parallel_next", {
+      version: 1,
+      schema: "cadre.plan.v1",
+      track_id: "parallel_next",
+      phases: [{
+        phase_index: 1,
+        title: "Parallel",
+        execution_mode: "parallel",
+        depends_on: [],
+        tasks: [
+          planTask(1, 1, "API task", ["src/api.ts"]),
+          planTask(1, 2, "UI task", ["src/ui.ts"]),
+        ],
+      }],
+    });
+
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "continuation-test" } });
+
+    const tracksBeforeNotification = fs.readFileSync(path.join(root, "cadre", "tracks.json"), "utf8");
+    notify("tools/call", {
+      name: "cadre_action",
+      arguments: { root, action: "mutate.regen_index", input: {}, execute: true },
+    });
+    await request("ping");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tracks.json"), "utf8"), tracksBeforeNotification);
+
+    const sequential = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { root, workflow: "implement", input: { trackId: "sequential_next" } },
+    }));
+    assert.deepEqual(sequential.next, {
+      tool: "cadre_action",
+      arguments: {
+        root,
+        action: "task.complete",
+        input: { trackId: "sequential_next", phaseIndex: 1, taskIndex: 1 },
+        execute: true,
+      },
+    });
+
+    const parallelBlocked = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { root, workflow: "implement", input: { trackId: "parallel_next" } },
+    }));
+    assert.equal(parallelBlocked.next, null);
+    assert.deepEqual(parallelBlocked.required, ["agentIdentifier"]);
+
+    const parallel = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "implement",
+        input: { trackId: "parallel_next", agentIdentifier: "codex", maxWorkers: 2 },
+      },
+    }));
+    assert.equal(parallel.next.tool, "cadre_action");
+    assert.equal(parallel.next.arguments.action, "parallel.next_wave");
+    const wave = parseTextJson(await request("tools/call", {
+      name: parallel.next.tool,
+      arguments: parallel.next.arguments,
+    }));
+    assert.equal(wave.next.tool, "cadre_action");
+    assert.equal(wave.next.arguments.action, "parallel.setup_workers");
+    assert.equal(wave.next.arguments.root, root);
+    assert.equal(wave.next.arguments.input.agentIdentifier, "codex");
+    assert.equal(wave.next.arguments.execute, true);
+
+    const provider = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { root, workflow: "ship", input: { trackId: "sequential_next", providerMode: "github" } },
+    }));
+    assert.equal(provider.phase, "pending_provider");
+    assert.equal(provider.next.tool, "cadre_read");
+    assert.match(provider.next.arguments.uri, /^cadre:\/\/provider-actions\?/);
+    assert.match(provider.next.arguments.uri, /workflow=ship/);
+
+    const statusBeforeReads = git(root, ["status", "--porcelain=v1", "--untracked-files=all"]).stdout;
+    for (const uri of [
+      provider.next.arguments.uri,
+      `cadre://ship-plan?root=${encodeURIComponent(root)}&trackId=sequential_next`,
+      `cadre://land-plan?root=${encodeURIComponent(root)}&trackId=sequential_next`,
+    ]) {
+      await request("resources/read", { uri });
+    }
+    assert.equal(
+      git(root, ["status", "--porcelain=v1", "--untracked-files=all"]).stdout,
+      statusBeforeReads,
+      "MCP resource reads must not write files or alter the Git index",
+    );
+
+    const guardedTask = parseTextJson(await callAction(
+      request,
+      "task.complete",
+      root,
+      { trackId: "sequential_next", phaseIndex: 1, taskIndex: 1 },
+    ));
+    assert.equal(guardedTask.ok, false);
+    assert.deepEqual(guardedTask.required, ["execute"]);
+
+    const guardedJob = parseTextJson(await callAction(
+      request,
+      "job.start",
+      root,
+      { type: "coverage", args: { command: "printf 'Statements : 91%%\\n'" } },
+    ));
+    assert.equal(guardedJob.ok, false);
+    assert.deepEqual(guardedJob.required, ["execute"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "jobs")), false);
+
+    const guardedCancel = parseTextJson(await callAction(
+      request,
+      "job.cancel",
+      root,
+      { jobId: "job_00000000-0000-0000-0000-000000000000" },
+    ));
+    assert.equal(guardedCancel.ok, false);
+    assert.deepEqual(guardedCancel.required, ["execute"]);
+
+    const evidencePath = path.join(root, "cadre", "tracks", "sequential_next", "review-evidence.jsonl");
+    const guardedEvidence = parseTextJson(await callAction(
+      request,
+      "review.provider_evidence",
+      root,
+      { trackId: "sequential_next", provider: "github", evidence: { pr: 1 } },
+    ));
+    assert.equal(guardedEvidence.ok, false);
+    assert.deepEqual(guardedEvidence.required, ["execute"]);
+    assert.equal(fs.existsSync(evidencePath), false);
+
+    const started = parseTextJson(await callAction(
+      request,
+      "job.start",
+      root,
+      { type: "coverage", args: { command: "printf 'Statements : 91%%\\n'", coverageThreshold: 80 } },
+      true,
+    ));
+    assert.deepEqual(started.next, {
+      tool: "cadre_action",
+      arguments: { root, action: "job.result", input: { jobId: started.job.id } },
+    });
+    await waitForJob(request, root, started.job.id);
   } finally {
     server.kill("SIGTERM");
     fs.rmSync(root, { recursive: true, force: true });
@@ -941,7 +1436,7 @@ test("MCP DAP setup, snapshot, workflow, async job, and resource compose", async
 
 test("MCP team-scale workflow packets compose on one track", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-server-packets-test-"));
-  const { server, request } = startServer();
+  const { server, request, initialize } = startServer();
   try {
     spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
     spawnSync("git", ["config", "user.email", "reviewer@example.com"], { cwd: root, encoding: "utf8" });
@@ -966,92 +1461,94 @@ test("MCP team-scale workflow packets compose on one track", async () => {
       }],
     });
 
-    await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test" } });
+    await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
 
-    const planAssist = parseTextJson(await request("tools/call", {
-      name: "cadre_track",
-      arguments: { root, action: "plan_assist", trackId: "packets_20260618" },
-    }));
+    const planAssist = parseTextJson(await callAction(
+      request,
+      "track.plan_assist",
+      root,
+      { trackId: "packets_20260618" },
+    ));
     assert.equal(planAssist.data.ok, true);
     assert.ok(planAssist.data.likely_tests.includes("src/app.test.ts"));
 
-    const wave = parseTextJson(await request("tools/call", {
-      name: "cadre_parallel",
-      arguments: { root, action: "next_wave", trackId: "packets_20260618" },
-    }));
+    const wave = parseTextJson(await callAction(
+      request,
+      "parallel.next_wave",
+      root,
+      { trackId: "packets_20260618" },
+    ));
     assert.equal(wave.data.ok, true);
     assert.equal(wave.data.workers.length, 2);
 
-    const readiness = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { root, action: "mcp_readiness", providerMode: "github", mcpCapabilities: { github: { available: true } } },
-    }));
+    const readiness = parseTextJson(await callAction(
+      request,
+      "intel.mcp_readiness",
+      root,
+      { providerMode: "github", mcpCapabilities: { github: { available: true } } },
+    ));
     assert.equal(readiness.data.provider.available, true);
     assert.equal(readiness.data.summary.packet_owned_evidence_only, true);
 
-    const fleet = parseTextJson(await request("tools/call", {
-      name: "cadre_status",
-      arguments: { root, action: "fleet", includeCollisions: false },
-    }));
+    const fleet = parseTextJson(await callAction(request, "status.fleet", root, { includeCollisions: false }));
     assert.equal(fleet.data.ok, true);
     assert.ok(fleet.data.repos.some((repo) => repo.name === "."));
 
     const workflowStatus = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
-      arguments: { root, workflow: "status", mode: "fleet", includeCollisions: false },
+      arguments: { root, workflow: "status", input: { mode: "fleet", includeCollisions: false } },
     }));
     assert.equal(workflowStatus.ok, true);
     assert.equal(workflowStatus.data.status.ok, true);
 
     const workflowValidate = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
-      arguments: { root, workflow: "validate", trackId: "packets_20260618" },
+      arguments: { root, workflow: "validate", input: { trackId: "packets_20260618" } },
     }));
     assert.equal(workflowValidate.ok, false);
     assert.equal(workflowValidate.data.integrity.ok, true);
 
-    const artifactCatalog = parseTextJson(await request("tools/call", {
-      name: "cadre_artifact",
-      arguments: { root, action: "catalog", scope: "track:packets_20260618" },
-    }));
+    const artifactCatalog = parseTextJson(await callAction(
+      request,
+      "artifact.catalog",
+      root,
+      { scope: "track:packets_20260618" },
+    ));
     assert.equal(artifactCatalog.data.ok, true);
     assert.ok(artifactCatalog.data.artifacts.some((artifact) => artifact.id === "track:packets_20260618:plan"));
 
-    const artifactSync = parseTextJson(await request("tools/call", {
-      name: "cadre_artifact",
-      arguments: { root, action: "sync", scope: "track:packets_20260618" },
-    }));
+    const artifactSync = parseTextJson(await callAction(
+      request,
+      "artifact.sync",
+      root,
+      { scope: "track:packets_20260618" },
+    ));
     assert.equal(artifactSync.data.ok, true);
     assert.equal(artifactSync.data.dry_run, true);
     assert.ok(artifactSync.data.artifacts.some((artifact) => artifact.artifact_id === "track:packets_20260618:plan"));
 
-    const diagnostics = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { root, action: "workspace_diagnostics" },
-    }));
+    const diagnostics = parseTextJson(await callAction(request, "intel.workspace_diagnostics", root));
     assert.equal(diagnostics.data.ok, true);
     assert.ok(diagnostics.data.adapters.some((adapter) => adapter.id === "node"));
 
-    const lspSetup = parseTextJson(await request("tools/call", {
-      name: "cadre_intel",
-      arguments: { root, action: "lsp_setup" },
-    }));
+    const lspSetup = parseTextJson(await callAction(request, "intel.lsp_setup", root));
     assert.equal(lspSetup.data.ok, true);
     assert.equal(lspSetup.data.dry_run, true);
     assert.ok(lspSetup.data.recommended.some((entry) => entry.id === "typescript"));
 
-    const evidence = parseTextJson(await request("tools/call", {
-      name: "cadre_review",
-      arguments: {
-        root,
-        action: "provider_evidence",
+    const evidence = parseTextJson(await callAction(
+      request,
+      "review.provider_evidence",
+      root,
+      {
         trackId: "packets_20260618",
         provider: "github",
         fetch: false,
         evidence: { pr: 7 },
         findings: [{ severity: "blocking", message: "example" }],
       },
-    }));
+      true,
+    ));
     assert.equal(evidence.data.ok, true);
     assert.equal(evidence.data.entry.blocking_count, 1);
 
@@ -1109,11 +1606,6 @@ test("MCP team-scale workflow packets compose on one track", async () => {
     const parsedIntegrations = JSON.parse(integrationsResource.contents[0].text);
     assert.equal(parsedIntegrations.data.response_mode, "detail");
     assert.ok(Array.isArray(parsedIntegrations.data.optional_mcps));
-
-    const releaseResource = await request("resources/read", {
-      uri: `cadre://release-plan?root=${encodeURIComponent(root)}`,
-    });
-    assert.equal(JSON.parse(releaseResource.contents[0].text).data.workflow, "release");
 
     const parallelResource = await request("resources/read", {
       uri: `cadre://parallel-state?root=${encodeURIComponent(root)}&trackId=packets_20260618`,

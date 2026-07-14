@@ -1,12 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
 import type { JsonObject } from "../../types";
-import { asJsonObject, asNumber, asOptionalString, asStringArray, errorMessage, isRecord } from "../../guards";
-import { isIgnoredFile, normalizeRel, shouldIgnore } from "../ignore-policy";
-
-import { LspClient } from "./client";
+import type { LspClient } from "./client";
 
 export interface CliArgs extends JsonObject {
   base: string;
@@ -105,6 +98,7 @@ export interface RunReviewOptions {
   base?: string | undefined;
   head?: string | undefined;
   config?: string | undefined;
+  configOwnerRoot?: string | undefined;
   root?: string | undefined;
   clientPool?: LspClientPool | null | undefined;
 }

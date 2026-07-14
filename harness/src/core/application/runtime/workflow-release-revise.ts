@@ -1,34 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { CoreResult, ReleaseArtifactPlan, ReviewFile } from "./contracts";
 import { patchJsonFile, readJson, safeName, utcNow, writeJson, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
 import { withTrackLock } from "../../infrastructure/runtime/locking";
+import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { beginTrace, commitTrace } from "./commit-trace";
+import type { CoreResult, ReleaseArtifactPlan, ReviewFile } from "./contracts";
+import { trackGenerationWarnings } from "./generation-quality";
+import { reviseIntentPrompts } from "./intent-prompts";
 import { withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown, trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { regenIndex } from "./project-maintenance";
 import { documentReviewPair, humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
+import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { metadataTrackSummary, selectedTrackId } from "./status";
-import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
-import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
-import { reviseIntentPrompts } from "./intent-prompts";
 import { listTracks } from "./track-schedule";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
 import { lspImpact } from "./workspace-intel";
-import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { trackGenerationWarnings } from "./generation-quality";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
   const completed = listTracks(root)

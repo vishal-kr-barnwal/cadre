@@ -286,13 +286,12 @@ The debug workflow:
 
 - Reads `cadre/dap.json` for configured debug adapters and launch/attach
   configurations.
-- Uses `cadre_action` with `action: "intel.dap_status"` to report configured adapters,
-  missing commands, and detected languages that need manual adapter setup.
-- Uses `cadre_action` with `action: "intel.dap_setup"` to recommend conservative adapter
-  entries and optionally write `cadre/dap.json`.
-- Uses `cadre_action` with `action: "intel.dap_snapshot"` or `cadre_workflow` with
-  `workflow: "debug"` and `execute:true` to launch or attach, set breakpoints,
-  capture stack frames, variables, and output, then disconnect.
+- Starts through `cadre_workflow` with `workflow:"debug"` and reports adapter
+  status, missing commands, and conservative configuration recommendations.
+- Invokes only the exact returned `next` call to configure or run a bounded
+  snapshot; callers do not enter through a hardcoded intelligence action.
+- Launches or attaches, applies requested breakpoints, captures bounded stack,
+  variable, and output evidence, then disconnects.
 
 DAP support is adapter-driven. Cadre can speak the protocol for any configured
 adapter, but language support depends on the debugger command installed in the
@@ -516,5 +515,6 @@ confirmed mutation.
 
 Handles Cadre formula or template operations.
 
-Formula workflows are packet-owned and should use MCP-served template locator
-resources instead of copying plugin files by hand.
+Formula workflows are packet-owned. Call the formula workflow and follow its
+returned decision and `next`; do not copy packaged plugin files or assume a
+template-locator MCP resource exists.

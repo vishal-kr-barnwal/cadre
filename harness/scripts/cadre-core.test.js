@@ -573,19 +573,19 @@ test("parsePlanJson captures execution, repo ownership, dependencies, and commit
   assert.equal(plan.tasks[0].repo_shas.app, "deadbeef");
 });
 
-test("build emits every required runtime bundle path", () => {
+test("build emits required runtime bundles without obsolete standalone helpers", () => {
   for (const file of [
     "scripts/cadre-cli.js",
     "scripts/cadre-core.js",
-    "scripts/cadre-job-runner.js",
     "scripts/cadre-lsp-setup.js",
     "scripts/cadre-lsp-review.js",
-    "scripts/cadre-lsp-daemon.js",
     "scripts/mcp/cadre-server.js",
   ]) {
     assert.equal(fs.existsSync(path.join(__dirname, "..", file)), true, `missing ${file}`);
   }
   for (const file of [
+    "scripts/cadre-job-runner.js",
+    "scripts/cadre-lsp-daemon.js",
     "scripts/mcp/cadre-server.external.js",
     "plugins/cadre/assets",
     "plugins/cadre/agents",
@@ -639,8 +639,12 @@ test("build emits every required runtime bundle path", () => {
     "plugins/cadre-copilot/skills/cadre/templates/scripts/cadre-lsp-setup.js",
     "plugins/cadre-antigravity/skills/cadre/templates/scripts/cadre-lsp-review.js",
   ]) {
-    assert.equal(fs.existsSync(path.join(__dirname, "..", file)), false, `duplicate helper should not be bundled: ${file}`);
+    assert.equal(fs.existsSync(path.join(__dirname, "..", file)), false, `obsolete or duplicate helper should not be bundled: ${file}`);
   }
+
+  const server = fs.readFileSync(path.join(__dirname, "mcp", "cadre-server.js"), "utf8");
+  assert.match(server, /--cadre-job-runner/, "MCP bundle should retain its hidden job-runner mode");
+  assert.match(server, /--cadre-lsp-daemon/, "MCP bundle should retain its hidden LSP-daemon mode");
 });
 
 test("implementationPrep returns bounded candidate context", () => {
@@ -821,6 +825,8 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
     assert.equal(setup.workers[0].dispatch.record_finish_packet.tool, "cadre_action");
     assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.action, "parallel.record_finish");
     assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.input.trackId, "parallel_20260617");
+    assert.equal(setup.workers[0].dispatch.record_finish_packet.arguments.input.status, "<awaiting_merge-or-blocked>");
+    assert.match(setup.workers[0].dispatch.evidence_requirements.status, /awaiting_merge or blocked/);
     assert.ok(setup.workers[0].dispatch.finish_evidence_fields.includes("filesChanged"));
 
     const claudeSetup = core.parallelWorkflow(root, { action: "setup_workers", trackId: "parallel_20260617", agentIdentifier: "claude" });
@@ -898,6 +904,96 @@ test("parallelWorkflow plans waves and keeps mutating actions dry-run by default
   }
 });
 
+test("parallel merge completes canonical tasks before cleanup", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-parallel-merge-test-"));
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "owner@example.com"]);
+    git(root, ["config", "user.name", "Owner"]);
+    write(path.join(root, "src", "core.js"), "export const value = 1;\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "base"]);
+    const trackId = "parallel_merge_20260714";
+    writeTrack(root, trackId, samplePlan(trackId));
+
+    const integration = core.worktreePlan(root, { trackId, execute: true });
+    assert.equal(integration.ok, true);
+    const setup = core.parallelWorkflow(root, {
+      action: "setup_workers",
+      trackId,
+      agentIdentifier: "codex",
+      execute: true,
+    });
+    assert.equal(setup.ok, true);
+    assert.equal(setup.workers.length, 1);
+    const worker = setup.workers[0];
+    write(path.join(worker.worktree, "src", "core.js"), "export const value = 2;\n");
+    git(worker.worktree, ["add", "src/core.js"]);
+    git(worker.worktree, ["commit", "-m", "parallel worker"]);
+    const commitSha = git(worker.worktree, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const recorded = core.parallelWorkflow(root, {
+      action: "record_finish",
+      trackId,
+      workerId: worker.worker_id,
+      phaseIndex: worker.phase_index,
+      taskIndex: worker.task_index,
+      repo: worker.repo,
+      workerRef: worker.worker_ref,
+      commitSha,
+      filesChanged: ["src/core.js"],
+      tests: [{ command: "node --test", cwd: worker.worktree, ok: true, status: 0 }],
+      summary: "Updated the parallel task",
+      execute: true,
+    });
+    assert.equal(recorded.ok, true);
+
+    const merged = core.parallelWorkflow(root, {
+      action: "merge_back",
+      trackId,
+      command: "printf 'Statements : 91%%\\n'",
+      coverageThreshold: 80,
+      execute: true,
+    });
+    assert.equal(merged.ok, true, JSON.stringify(merged));
+    const plan = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.json"), "utf8"));
+    assert.equal(plan.phases[0].tasks[0].status, "completed");
+    assert.equal(merged.state_records[0].completion.ok, true);
+
+    const cleanup = core.parallelWorkflow(root, { action: "cleanup", trackId, execute: true });
+    assert.equal(cleanup.ok, true);
+    assert.equal(fs.existsSync(worker.worktree), false);
+    const cleanedState = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "parallel_state.json"), "utf8"));
+    assert.equal(cleanedState.workers[0].status, "merged");
+    assert.equal(cleanedState.workers[0].worktree, null);
+    assert.equal(cleanedState.workers[0].worker_ref, null);
+    assert.equal(cleanedState.workers[0].cleaned_worktree, worker.worktree);
+    assert.equal(cleanedState.workers[0].cleaned_worker_ref, worker.worker_ref);
+    assert.match(cleanedState.workers[0].cleaned_at, /^\d{4}-\d{2}-\d{2}T/);
+
+    const idempotentCleanup = core.parallelWorkflow(root, { action: "cleanup", trackId, execute: true });
+    assert.equal(idempotentCleanup.ok, true);
+    assert.equal(idempotentCleanup.commands.length, 0);
+    assert.equal(idempotentCleanup.ref_commands.length, 0);
+    assert.equal(idempotentCleanup.already_cleaned[0].worker_id, worker.worker_id);
+
+    const nextWave = core.parallelWorkflow(root, { action: "next_wave", trackId });
+    assert.equal(nextWave.ok, true);
+    assert.equal(nextWave.workers[0].task_key, "phase1_task2");
+    const nextSetup = core.parallelWorkflow(root, {
+      action: "setup_workers",
+      trackId,
+      agentIdentifier: "codex",
+      execute: true,
+    });
+    assert.equal(nextSetup.ok, true, JSON.stringify(nextSetup));
+    const laterCleanupPlan = core.parallelWorkflow(root, { action: "cleanup", trackId });
+    assert.equal(laterCleanupPlan.commands.some((command) => command.args.includes(worker.worktree)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("MCP readiness records provider capability evidence without making optional MCPs mandatory", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-mcp-readiness-test-"));
   try {
@@ -924,7 +1020,9 @@ test("MCP readiness records provider capability evidence without making optional
     });
     assert.equal(ci.ok, false);
     assert.deepEqual(ci.missing_evidence_fields, []);
-    assert.equal(ci.exact_write_back_packet.tool, "cadre_review");
+    assert.equal(ci.required_evidence.write_back.tool, "cadre_action");
+    assert.equal(ci.required_evidence.write_back.arguments.action, "review.provider_evidence");
+    assert.equal(ci.required_evidence.write_back.arguments.execute, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1058,6 +1156,150 @@ test("phaseSchedule splits ready phases with file ownership conflicts", () => {
     assert.equal(schedule.conflict_splits[0].file, "src/shared.js");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflowPacketV1 emits executable sequential and parallel continuations", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-next-test-"));
+  try {
+    git(root, ["init"]);
+    const sequentialTrack = "next_sequential_20260617";
+    writeTrack(root, sequentialTrack, planFromPhases(sequentialTrack, [{
+      phase_index: 1,
+      title: "Phase 1: Sequential",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [
+        planTask(1, 1, "Continue active work", ["src/sequential.js"], { status: "in_progress" }),
+        planTask(1, 2, "Start later work", ["src/later.js"]),
+      ],
+    }]));
+
+    const sequential = core.workflowPacketV1(root, { workflow: "implement", trackId: sequentialTrack });
+    assert.equal(sequential.ok, true);
+    assert.deepEqual(sequential.next, {
+      tool: "cadre_action",
+      arguments: {
+        root,
+        action: "task.complete",
+        input: { trackId: sequentialTrack, phaseIndex: 1, taskIndex: 1 },
+        execute: true,
+      },
+    });
+
+    const parallelTrack = "next_parallel_20260617";
+    writeTrack(root, parallelTrack, planFromPhases(parallelTrack, [{
+      phase_index: 1,
+      title: "Phase 1: Parallel",
+      execution_mode: "parallel",
+      depends_on: [],
+      tasks: [
+        planTask(1, 1, "Build API", ["src/api.js"]),
+        planTask(1, 2, "Build UI", ["src/ui.js"]),
+      ],
+    }]));
+
+    const parallelWithoutIdentity = core.workflowPacketV1(root, {
+      workflow: "implement",
+      trackId: parallelTrack,
+    });
+    assert.equal(parallelWithoutIdentity.next, null);
+    assert.deepEqual(parallelWithoutIdentity.required, ["agentIdentifier"]);
+
+    const parallel = core.workflowPacketV1(root, {
+      workflow: "implement",
+      trackId: parallelTrack,
+      agentIdentifier: "codex",
+      maxWorkers: 2,
+    });
+    assert.equal(parallel.ok, true);
+    assert.deepEqual(parallel.next, {
+      tool: "cadre_action",
+      arguments: {
+        root,
+        action: "parallel.next_wave",
+        input: { trackId: parallelTrack, groupIndex: 0, maxWorkers: 2, agentIdentifier: "codex" },
+      },
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflowPacketEnvelopeV1 retains bounded workflow data, artifacts, resources, and errors", () => {
+  const root = "/tmp/cadre-workflow-envelope-v1";
+  const packet = core.workflowPacketEnvelopeV1(root, { workflow: "release" }, {
+    ok: false,
+    workflow: "release",
+    phase_state: "blocked",
+    error: "primary failure",
+    errors: ["primary failure", "secondary failure"],
+    release_version: "v".repeat(5_000),
+    completed_tracks: Array.from({ length: 80 }, (_, index) => ({ track_id: `track-${index + 1}` })),
+    review_artifacts: [
+      { path: "cadre/review.json", title: "Canonical review", kind: "json" },
+      { title: "Release approval", kind: "packet", source: "workflow:release", release_version: "v1" },
+    ],
+    review_bundle: {
+      files: [
+        { path: "cadre/review.json", review_path: ".cadre-review/review.json", kind: "json" },
+        { path: "cadre/release.md", review_path: ".cadre-review/release.md", kind: "markdown" },
+      ],
+    },
+    written: ["cadre/written.json"],
+    release_artifacts: ["cadre/release.md", "cadre/release.json"],
+    resource_uris: ["cadre://template-inventory", "cadre://workspace-diagnostics"],
+    schema_resources: ["cadre://artifact-schema?artifact=release"],
+    detail_resources: ["cadre://workspace-diagnostics"],
+  });
+
+  assert.deepEqual(packet.errors, ["primary failure", "secondary failure"]);
+  assert.equal(packet.resources[0], "cadre://template-inventory");
+  assert.equal(packet.resources[1], `cadre://workspace-diagnostics?root=${encodeURIComponent(root)}`);
+  assert.equal(packet.data.completed_tracks.length, 30);
+  assert.ok(packet.data.release_version.length < 5_000);
+  assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean), [
+    "cadre/review.json",
+    "cadre/release.md",
+    "cadre/written.json",
+    "cadre/release.json",
+  ]);
+  assert.equal(packet.artifacts.some((artifact) => artifact.title === "Release approval" && artifact.kind === "packet"), true);
+
+  const workflowFields = [
+    ["setup", "scaffolded"],
+    ["setup_assist", "scaffolded"],
+    ["setup_scaffold", "scaffolded"],
+    ["newtrack", "track_id"],
+    ["new_track", "track_id"],
+    ["implement", "prepare_implementation"],
+    ["status", "status"],
+    ["review", "gate"],
+    ["validate", "projection_validation"],
+    ["debug", "snapshot"],
+    ["archive", "archived"],
+    ["handoff", "message"],
+    ["ship", "publication"],
+    ["land", "preflight"],
+    ["release", "release_version"],
+    ["revise", "write"],
+    ["refresh", "patterns"],
+    ["artifacts", "artifacts"],
+    ["artifact_sync", "written"],
+    ["flag", "status_result"],
+    ["revert", "git_results"],
+    ["formula", "formula"],
+    ["skill", "manifest"],
+  ];
+  for (const [workflow, field] of workflowFields) {
+    const shaped = core.workflowPacketEnvelopeV1(root, { workflow }, {
+      ok: true,
+      workflow,
+      [field]: { sentinel: workflow },
+      next_actions: ["legacy prose continuation"],
+    });
+    assert.deepEqual(shaped.data[field], { sentinel: workflow }, `${workflow} should preserve ${field}`);
+    assert.equal(shaped.data.next_actions, undefined, `${workflow} should not expose legacy prose continuations`);
   }
 });
 
@@ -1557,6 +1799,7 @@ test("review-heavy workflows expose staged approval bundles", () => {
     const release = core.workflowPacket(root, { workflow: "release", releaseVersion: "v0.0.1" });
     assert.equal(release.ok, true);
     assert.equal(release.approval.current_stage, "release_notes");
+    assert.deepEqual(release.resource_uris, [], "release previews are not recomputed through read resources");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -3044,8 +3287,9 @@ test("workflowPacket compact responses trim heavy plan detail and expose resourc
       includeMachine: false,
     });
     assert.equal(compact.response_mode, "compact");
-    assert.ok(compact.resource_uris.some((uri) => uri.includes("workspace-health")));
     assert.ok(compact.resource_uris.some((uri) => uri.includes("quality-gate")));
+    assert.ok(compact.resource_uris.some((uri) => uri.includes("review-evidence")));
+    assert.equal(compact.resource_uris.some((uri) => uri.includes("workspace-health")), false);
     assert.equal(typeof compact.track_context.plan.phases, "number");
 
     const detail = core.workflowPacket(root, {
@@ -3216,6 +3460,20 @@ test("provider status is provider-MCP-only and local mode skips provider evidenc
     assert.equal(review.response_mode, "detail");
     assert.equal(review.required_provider_mcp.provider, "github");
     assert.match(review.unsupported_reason, /provider_mode github requires github MCP evidence/);
+
+    const reviewV1 = core.workflowPacketV1(root, {
+      workflow: "review",
+      trackId: "provider_20260618",
+      includeLsp: false,
+      includeMachine: false,
+      prNumber: 42,
+    });
+    assert.deepEqual(reviewV1.required, ["providerEvidence"]);
+    assert.equal(reviewV1.next, null);
+    assert.equal(reviewV1.decision.kind, "provider_evidence");
+    assert.equal(reviewV1.decision.required.write_back.tool, "cadre_action");
+    assert.equal(reviewV1.decision.required.write_back.arguments.action, "review.provider_evidence");
+    assert.equal(reviewV1.decision.required.write_back.arguments.input.providerEvidence, "<github-mcp-evidence>");
 
     const supplied = core.prCiStatus(root, {
       trackId: "provider_20260618",

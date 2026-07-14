@@ -1,17 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import type { JsonObject, RuntimeArgs, TrackMetadata } from "../../../types";
 
-import { CoreResult, ReviewFile } from "./contracts";
 import { safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
+import { gitIdentity } from "../../infrastructure/runtime/system";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { beginTrace, commitTrace } from "./commit-trace";
+import type { CoreResult, ReviewFile } from "./contracts";
+import { trackGenerationWarnings } from "./generation-quality";
+import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent } from "./native-state";
 import { renderPlanMarkdown } from "./plan-docs";
@@ -19,14 +17,9 @@ import { planAssist, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
 import { documentReviewPair, jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
-import { gitIdentity } from "../../infrastructure/runtime/system";
-import { beginTrace, commitTrace } from "./commit-trace";
-import { findTrack } from "./track-context";
-import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
-import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
 import { applyStagedApprovalSessionPayload, newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { trackGenerationWarnings } from "./generation-quality";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { findTrack } from "./track-context";
+import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);

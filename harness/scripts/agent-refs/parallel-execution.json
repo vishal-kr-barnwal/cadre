@@ -5,14 +5,14 @@
   "title": "Parallel execution",
   "markdownUse": "human_projection_only",
   "rules": [
-    "Run only parallel.* actions returned by cadre_workflow.",
-    "Dispatch exactly the returned workers.",
-    "Merge into packet-owned integration worktrees and clean up only when the packet allows it."
+    "Use next as the sole immediate coordinator continuation.",
+    "Dispatch exactly the returned workers and invoke each returned record_finish_packet once with that worker's evidence.",
+    "Do not invent merge or cleanup actions; invoke them only when a later packet returns them through next."
   ],
   "sections": [
     {
       "heading": "Loop",
-      "body": "Call `cadre_action` with `parallel.next_wave`, `parallel.setup_workers`, `parallel.record_finish`, `parallel.merge_back`, and `parallel.cleanup` in the returned order. Put action fields in `input` and set `execute:true` only for authorized mutations."
+      "body": "Invoke the returned `next` call once. When setup returns workers, fan them out through the selected dispatch adapters and invoke each worker's `data.workers[].dispatch.record_finish_packet` once. Resume only from the `next` returned after those callbacks; later merge and cleanup operations remain packet-owned."
     },
     {
       "heading": "Evidence",

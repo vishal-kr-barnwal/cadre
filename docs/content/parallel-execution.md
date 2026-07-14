@@ -69,19 +69,21 @@ the Markdown and spawn workers on its own.
 The coordinator loop is:
 
 ```text
-cadre_action { action: "parallel.next_wave", input: {...} }
-cadre_action { action: "parallel.setup_workers", input: {agentIdentifier: "codex"}, execute: true }
-dispatch exactly the returned workers
-cadre_action { action: "parallel.record_finish", input: workerEvidence, execute: true }
-cadre_action { action: "parallel.merge_back", input: {...}, execute: true }
-cadre_action { action: "parallel.cleanup", input: {...}, execute: true }
+cadre_workflow {"root":"/path/to/project","workflow":"implement","input":{"trackId":"checkout","agentIdentifier":"codex"},"execute":false}
+invoke exactly response.next.tool with response.next.arguments when next is non-null
+when a response contains data.workers, dispatch exactly those packet-owned payloads
+submit each worker result once through that worker's data.workers[].dispatch.record_finish_packet
+when Cadre returns data.worker_callbacks, use those exact reissued completion or recovery callbacks
+after every response, invoke only its newly returned next call when non-null
 ```
 
 Cadre returns ready groups only when dependencies, file claims, repo routing,
 worker state, and plan integrity are safe.
-`setup_workers` requires `agentIdentifier` and returns a single
+Worker setup requires `agentIdentifier` and returns a single
 `selected_dispatch` adapter for that caller. Valid identifiers are `codex`,
-`claude`, `copilot`, and `antigravity`.
+`claude`, `copilot`, and `antigravity`. The coordinator never derives merge or
+cleanup actions from this guide; Cadre returns each safe immediate operation in
+the preceding call's `next` field.
 
 Dispatch adapters are client-specific:
 
@@ -121,6 +123,18 @@ keep commits local, and return evidence to the coordinator:
 ```
 
 Workers do not edit Cadre state directly.
+For each returned worker, map its structured result into that worker's exact
+`dispatch.record_finish_packet` placeholders and invoke the packet once. Do not
+construct a finish action from the example result or reuse one worker's callback
+for another worker. If other workers remain incomplete or enter `blocked`,
+`failed`, or `conflict`, the latest response is self-contained: it returns exact
+completion or recovery calls under `data.worker_callbacks[].record_finish_packet`.
+Cadre returns merge and cleanup through `next` only after the resulting worker
+state proves every worker is ready for that transition.
+
+The callback's `status` placeholder must be filled from the worker result as
+either `awaiting_merge` or `blocked`. `awaiting_merge` requires a commit SHA;
+`blocked` may use a null commit and must retain the worker's blockers.
 
 ## File Claims
 
@@ -145,18 +159,22 @@ Parallel worker records move through states such as:
 - `failed`
 - `conflict`
 
+After successful cleanup, a worker remains `merged` for scheduling history, but
+its live `worktree` and `worker_ref` fields are cleared. Cadre retains
+`cleaned_worktree`, `cleaned_worker_ref`, and cleanup timestamps for auditability,
+so later waves do not retry already-completed cleanup commands.
+
 The audit file is packet-owned. Agents should inspect packet output and compact
 resources instead of editing worker state.
 
 ## Merge-Back
 
-When a worker finishes, the coordinator records evidence and asks Cadre to
-merge the worker branch back into the track worktree. After a clean merge,
-Cadre can complete the task, update plan progress, record metadata, write the
-completion journal, and append native events through the same packet-owned path.
-
-Cleanup removes merged workers. Failed or conflicted workers remain available
-for recovery unless force cleanup is explicit.
+Each worker's typed finish callback records its evidence. The callback response
+decides whether another worker is still outstanding, recovery is required, or
+a merge is now safe. The coordinator invokes only a non-null `next` returned by
+that response. A later packet may similarly return cleanup through `next` after
+a clean merge; callers never precompute either operation. Failed or conflicted
+workers remain available for packet-directed recovery.
 
 ## Failure Recovery
 

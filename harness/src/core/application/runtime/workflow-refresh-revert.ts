@@ -1,36 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalString, asString, asStringArray } from "../../../guards";
+import type { CadreTrack, RuntimeArgs } from "../../../types";
 
-import { artifactSync, readJsonl, renderJsonlMarkdown } from "./artifact-actions";
-import { CoreResult, PlannedGitAction, ReviewFile } from "./contracts";
 import { fileExists, utcNow } from "../../infrastructure/runtime/json-store";
-import { withGeneratedMarker } from "./markdown-docs";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
+import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { artifactSync, readJsonl, renderJsonlMarkdown } from "./artifact-actions";
+import { beginTrace, commitTrace } from "./commit-trace";
+import type { CoreResult, PlannedGitAction, ReviewFile } from "./contracts";
+import { refreshIntentPrompts, refreshScopeIds } from "./intent-prompts";
+import { withGeneratedMarker } from "./markdown-docs";
 import { regenIndex } from "./project-maintenance";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
 import { documentReviewPair, humanReviewState, packetReviewArtifact, plainReviewFile, reviewArtifactsFromFiles, setupLspReviewArtifacts, setupLspWriteRequested, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { lspSetup } from "./setup-infrastructure";
+import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { selectedTrackId } from "./status";
-import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
-import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
-import { refreshIntentPrompts, refreshScopeIds } from "./intent-prompts";
 import { metadataPatch } from "./track-mutations";
 import { parsePlanFile } from "./track-schedule";
 import { templateJson, workflowSummary } from "./workflow-response";
 import { doctor, lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
-import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;

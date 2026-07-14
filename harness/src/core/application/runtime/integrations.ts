@@ -1,20 +1,11 @@
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asOptionalNumber, asOptionalString, isRecord } from "../../../guards";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { CoreResult } from "./contracts";
+import { dapSetup, dapStatus } from "../../../dap/config";
+import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
+import type { CoreResult } from "./contracts";
 import { summarizeDapCoverage, summarizeLspCoverage, workspaceHealthDetailResources } from "./health-summaries";
 import { mcpReadiness } from "./mcp-readiness";
-import { loadTopology, providerMcpAvailability } from "../../infrastructure/runtime/project-config";
-import { dapSetup, dapStatus } from "../../../dap/config";
 import { lspSetup } from "./setup-infrastructure";
 import { workflowResponseMode } from "./workflow-response";
 import { lspConfigStatus } from "./workspace-health";

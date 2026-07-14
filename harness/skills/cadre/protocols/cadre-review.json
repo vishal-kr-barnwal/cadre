@@ -15,7 +15,7 @@
   "references": [
     {
       "id": "provider-evidence",
-      "when": "phase:pending_provider"
+      "when": "decision.required.write_back exists"
     }
   ]
 }

@@ -1,14 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import type { CadreLock, JsonObject, RuntimeArgs, Topology, UnknownRecord } from "../../../types";
 
 export interface LockOptions extends RuntimeArgs {
   owner?: string | null;
@@ -223,6 +213,10 @@ export interface ParallelWorker extends UnknownRecord {
   worktree?: string | null;
   branch?: string | null;
   worker_ref?: string | null;
+  cleaned_worktree?: string | null;
+  cleaned_worker_ref?: string | null;
+  cleaned_at?: string;
+  worker_ref_cleaned_at?: string;
   commit_sha?: string | null;
   coverage?: number | null;
   evidence?: JsonObject | string | null;

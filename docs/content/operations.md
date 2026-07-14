@@ -85,7 +85,7 @@ events, and Git notes. Periodically verify that:
 
 When a workflow fails, recover from the narrowest authoritative evidence:
 
-1. Read the packet's `decision`, `stage`, warnings, and next action.
+1. Read the packet's `decision`, `stage`, warnings, and typed `next` call.
 2. Load only a resource URI returned for that failure.
 3. Correct configuration, provider readiness, ownership, drift, or validation.
 4. Rerun the same workflow as a dry run.

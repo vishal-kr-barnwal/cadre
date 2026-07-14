@@ -1,7 +1,7 @@
 import type { JsonObject } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
 
-import { CoreResult } from "./contracts";
+import type { CoreResult } from "./contracts";
 import { compactProjectSkills } from "./project-skill-response";
 import { compactApproval } from "./approval-compaction";
 

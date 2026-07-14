@@ -5,12 +5,38 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
 const core = require("./cadre-core");
 const baselines = require("./fixtures/token-baselines.json");
 
 const harnessRoot = path.resolve(__dirname, "..");
+let cachedMcpTools = null;
+
+function mcpTools() {
+  if (cachedMcpTools) return cachedMcpTools;
+  const messages = [
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "token-test", version: "1" } } },
+    { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+  ];
+  const child = spawnSync(process.execPath, [path.join(harnessRoot, "scripts", "mcp", "cadre-server.js")], {
+    cwd: harnessRoot,
+    encoding: "utf8",
+    input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`,
+    timeout: 10_000,
+  });
+  assert.equal(child.status, 0, child.stderr || child.error?.message);
+  const response = child.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .find((message) => message.id === 2);
+  assert.ok(response?.result?.tools, `tools/list failed: ${child.stdout}`);
+  cachedMcpTools = response.result.tools;
+  return cachedMcpTools;
+}
 
 function write(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -70,21 +96,20 @@ function flowArgs(flow, root, trackId) {
 
 test("token-efficient v1 activation and MCP schemas stay within hard token budgets", () => {
   const shim = fs.readFileSync(path.join(harnessRoot, "skills", "cadre", "SKILL.md"), "utf8");
-  assert.ok(estimatedTokens(core.mcpTools) <= 1700);
+  assert.ok(estimatedTokens(mcpTools()) <= 1700);
   assert.ok(estimatedTokens(shim) <= 1000);
 });
 
 test("token-efficient v1 workflows reduce estimated tokens by at least 40 percent", () => {
   const shim = fs.readFileSync(path.join(harnessRoot, "skills", "cadre", "SKILL.md"), "utf8");
-  const tools = estimatedTokens(core.mcpTools);
+  const tools = estimatedTokens(mcpTools());
   for (const flow of ["setup", "implement", "status", "review"]) {
     const protocol = fs.readFileSync(path.join(harnessRoot, "skills", "cadre", "protocols", `cadre-${flow}.json`), "utf8");
     for (const skillCount of [0, 1, 3]) {
       const { root, trackId } = fixture(skillCount);
       try {
         const args = flowArgs(flow, root, trackId);
-        const raw = core.workflowPacket(root, args);
-        const packet = core.workflowEnvelope(root, args, raw);
+        const packet = core.workflowPacketV1(root, args);
         const call = { tool: "cadre_workflow", arguments: { root, workflow: flow, input: flow === "implement" || flow === "review" ? { trackId } : {} } };
         const actual = tools + estimatedTokens(shim) + estimatedTokens(protocol) + estimatedTokens(call) + estimatedTokens(packet);
         const baseline = baselines.flows[flow][String(skillCount)];

@@ -1,19 +1,29 @@
 import type { RuntimeArgs } from "../../types";
+import { asJsonObject } from "../../guards";
 import type { RuntimeEnvelope } from "../domain/protocol-types";
 import { envelope } from "./envelope";
 import type { RuntimeDependencies } from "./ports";
 
-export function jobTypeForPacket(name: string, args: RuntimeArgs): string | null {
-  if (name === "cadre_complete_task") return "complete_task";
-  if (name === "cadre_review" && args.action === "assist") return "review_assist";
-  if (name === "cadre_review" && args.action === "machine_gate") return "machine_gate";
-  if (name === "cadre_intel" && args.action === "lsp_review") return "lsp_review";
-  if (name === "cadre_intel" && args.action === "lsp_impact") return "lsp_impact";
-  if (name === "cadre_intel" && args.action === "dap_snapshot") return "dap_snapshot";
-  return args.type || null;
+const ASYNC_JOB_TYPES: Record<string, string> = {
+  "task.complete": "complete_task",
+  "review.assist": "review_assist",
+  "review.machine_gate": "machine_gate",
+  "intel.lsp_review": "lsp_review",
+  "intel.lsp_impact": "lsp_impact",
+  "intel.dap_snapshot": "dap_snapshot",
+};
+
+export function jobTypeForAction(action: string): string | null {
+  return ASYNC_JOB_TYPES[action] || null;
 }
 
 export function jobEnvelope(type: string | null, root: string, args: RuntimeArgs, deps: Pick<RuntimeDependencies, "jobs">): RuntimeEnvelope {
   if (!type) return envelope({ ok: false, error: "job type is required" });
-  return envelope({ ok: true, job: deps.jobs.start(type, root, args) });
+  const response = envelope({ ok: true, job: deps.jobs.start(type, root, args) });
+  const job = asJsonObject(response.job);
+  response.next = job.id ? {
+    tool: "cadre_action",
+    arguments: { root, action: "job.result", input: { jobId: job.id } },
+  } : null;
+  return response;
 }

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-import type { JsonObject, RuntimeArgs } from "../../types";
+import type { JsonObject } from "../../types";
 import { asJsonObject, asOptionalString } from "../../guards";
 import type { PendingRequest } from "../domain/protocol-types";
 import { currentMcpServerPath, mcpRuntimeRoot } from "../../runtime-paths";

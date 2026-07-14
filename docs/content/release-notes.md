@@ -37,6 +37,31 @@ This styleguide path change is intentionally breaking. Regenerate projections
 into `cadre/styleguides/`, review the resulting diff, and remove the legacy
 directory manually.
 
+### MCP Contract Cleanup
+
+The MCP boundary now enforces the three-tool contract end to end:
+
+- `cadre_workflow`, `cadre_action`, and `cadre_read` are the only public tool
+  names; retired flat packet names are no longer internal routing aliases;
+- workflow and action calls use nested request objects, and `next` is the sole
+  immediate single-agent continuation (`next.tool` plus `next.arguments`);
+- the only typed callbacks outside `next` are provider
+  `decision.required.write_back` after external evidence collection, each
+  parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact
+  completion or recovery callbacks reissued under
+  `data.worker_callbacks[].record_finish_packet`; later merge and cleanup
+  operations return through `next` after state checks rather than prose recipes;
+- MCP `2025-11-25` and `2025-06-18` are supported through a complete
+  initialize/initialized lifecycle, and server metadata uses the package
+  version;
+- one typed resource registry distinguishes fixed resources from parameterized
+  templates and validates their queries;
+- packaged skill contracts, workflow protocols, and agent references are no
+  longer MCP resources or embedded runtime payloads; setup templates remain
+  packaged;
+- obsolete standalone job/daemon bundles and duplicate MCP compatibility shims
+  are no longer published.
+
 ## 2.1.0 - 2026-07-12
 
 Cadre 2.1.0 makes the agent-facing runtime smaller while making repository
@@ -72,7 +97,7 @@ The workflow envelope is designed for deterministic client behavior:
 - `decision` identifies ready, clarification, approval, blocked, or complete
   state;
 - `required` lists missing evidence or payload requirements;
-- `next` contains at most one exact tool call;
+- `next` contains at most one exact immediate single-agent tool call;
 - `artifacts` identifies current review or changed files;
 - `resources` points to bounded detail that is relevant now;
 - `data` contains only workflow-specific summary fields.

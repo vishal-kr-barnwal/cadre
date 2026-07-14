@@ -20,9 +20,15 @@ function gitBranch(cwd: string): string | null {
   return result.ok ? result.stdout.trim() || null : null;
 }
 
-function gitRoot(cwd: string): string | null {
-  const result = runCommand("git", ["rev-parse", "--show-toplevel"], { cwd });
-  return result.ok ? path.resolve(result.stdout.trim() || cwd) : null;
+function gitRepository(cwd: string): string | null {
+  const result = runCommand("git", ["rev-parse", "--git-common-dir"], { cwd });
+  if (!result.ok) return null;
+  const candidate = path.resolve(cwd, result.stdout.trim() || ".git");
+  try {
+    return fs.realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
 }
 
 function branchExists(cwd: string, branch: string): boolean {
@@ -103,9 +109,9 @@ export function branchSetEntry(root: string, track: CadreTrack, repo: string, in
   const workerRoot = path.resolve(root, ".worktrees", "cadre", "tracks", safeName(track.track_id), "workers", segment);
   const exists = fileExists(integrationWorktree);
   const currentBranch = exists ? gitBranch(integrationWorktree) : null;
-  const expectedRoot = gitRoot(sourceRoot);
-  const actualRoot = exists ? gitRoot(integrationWorktree) : null;
-  const wrongRepo = Boolean(exists && expectedRoot && actualRoot && expectedRoot !== actualRoot);
+  const expectedRepository = gitRepository(sourceRoot);
+  const actualRepository = exists ? gitRepository(integrationWorktree) : null;
+  const wrongRepo = Boolean(exists && expectedRepository && actualRepository && expectedRepository !== actualRepository);
   const wrongBranch = Boolean(exists && currentBranch && currentBranch !== trackBranch);
   const health = !exists ? "missing" : wrongRepo ? "wrong_repo" : wrongBranch ? "wrong_branch" : "ready";
   return {

@@ -1,13 +1,13 @@
-import path from "node:path";
 import fs from "node:fs";
+import path from "node:path";
 
+import { asJsonObject, asOptionalString } from "../../../guards";
 import type { CommandResult, JsonObject, RuntimeArgs } from "../../../types";
-import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
-import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
+import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { plannedGitAction, runCommand } from "../../infrastructure/runtime/system";
-import type { CoreResult, PlannedGitAction } from "./contracts";
 import { artifactDefinitions } from "./artifact-catalog";
+import type { CoreResult, PlannedGitAction } from "./contracts";
 
 const DEFAULT_NOTES_REF = "refs/notes/cadre";
 

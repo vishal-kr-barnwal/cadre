@@ -19,8 +19,10 @@ worker orchestration, and mono/polyrepo delivery.
 
 Cadre is not a prompt collection that asks agents to edit state by hand. The
 installed plugins are thin MCP entrypoints with `SKILL.md` and client MCP
-configuration. The global `cadre-mcp` runtime embeds the skill contract,
-workflow protocols, references, template inventory, jobs, and LSP helper modes.
+configuration. The global `cadre-mcp` runtime contains the three-tool server,
+typed resource registry, setup template inventory, jobs, and code-intelligence
+helpers; maintainer contracts, protocols, and references stay out of the
+runtime bundle.
 Agents call Cadre packets, and those packets own Cadre state, native event and
 message logs, review records, provider evidence, and derived indexes.
 
@@ -84,8 +86,8 @@ flowchart LR
 
 Every project-scoped packet call carries a `root` argument. Cadre MCP resolves
 that root, reads the relevant bounded context, performs the requested operation,
-and returns structured next actions. Agents summarize packet results; they do
-not manually reconstruct Cadre state.
+and returns a structured decision plus at most one typed `next` call. Agents
+summarize packet results; they do not manually reconstruct Cadre state.
 
 ## Documentation Map
 

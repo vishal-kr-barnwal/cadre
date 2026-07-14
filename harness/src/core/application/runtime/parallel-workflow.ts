@@ -1,30 +1,25 @@
-import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import { asJsonObject, asNumber, asOptionalString, asString, asStringArray } from "../../../guards";
+import type { CadreTrack, CommandResult, JsonObject, PlanPhase, PlanTask, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { claimsOverlap, normalizeClaimPath } from "./collision";
-import { CoreResult, ParallelWorker } from "./contracts";
 import { safeName } from "../../infrastructure/runtime/json-store";
-import { likelyTestCandidatesForFile } from "./planning";
-import { readParallelState, recordParallelWorker } from "./parallel-state";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
-import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
-import { branchSetEntryForRepo, ensureIntegrationWorktree, workerRef, workerWorktreePath } from "./branch-set";
-import { asArray } from "./status";
 import { runCommand } from "../../infrastructure/runtime/system";
+import { branchSetEntryForRepo, ensureIntegrationWorktree, workerRef, workerWorktreePath } from "./branch-set";
+import { claimsOverlap, normalizeClaimPath } from "./collision";
+import type { CoreResult, ParallelWorker } from "./contracts";
+import { AGENT_IDENTIFIERS, isAgentIdentifier } from "./dispatch-adapters";
+import { parallelCleanup } from "./parallel-cleanup";
+import { workerDispatchPayload } from "./parallel-dispatch";
+import { readParallelState, recordParallelWorker } from "./parallel-state";
+import { likelyTestCandidatesForFile } from "./planning";
+import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
+import { asArray } from "./status";
 import { findTrack } from "./track-context";
 import { parsePlanFile, phaseSchedule } from "./track-schedule";
 import { withSharedControlPlaneSync } from "./workflow-response";
-import { AGENT_IDENTIFIERS, isAgentIdentifier } from "./dispatch-adapters";
-import { workerDispatchPayload } from "./parallel-dispatch";
+
+export { parallelCleanup } from "./parallel-cleanup";
 
 function positiveInt(value: unknown, fallback: number, max = 20): number {
   const parsed = Number(value);
@@ -233,7 +228,7 @@ export function runPlannedCommands(commands: CoreResult[]): CommandResult[] {
 
 export function parallelSetupWorkers(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const agentIdentifier = asOptionalString(args.agentIdentifier);
-  if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_parallel setup_workers requires agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
+  if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_action parallel.setup_workers requires input.agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
   const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
   const topology = loadTopology(root);
@@ -271,13 +266,14 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
     };
   });
   const execute = args.execute === true;
-  const runnableCommands = workers
-    .map((worker, index) => worker.integration_ready !== false ? commands[index] : null)
-    .filter((command): command is CoreResult => Boolean(command));
-  const results = execute ? runPlannedCommands(runnableCommands.filter((command): command is CoreResult => Boolean(command))) : [];
+  const runnableWorkers = workers.flatMap((worker, index) => {
+    const command = commands[index];
+    return worker.integration_ready !== false && command ? [{ worker, command }] : [];
+  });
+  const results = execute ? runPlannedCommands(runnableWorkers.map((entry) => entry.command)) : [];
   const stateRecords: CoreResult[] = [];
   if (execute) {
-    workers.forEach((worker, index) => {
+    runnableWorkers.forEach(({ worker }, index) => {
       const commandResult = results[index];
       if (commandResult && commandResult.ok) {
         stateRecords.push(recordParallelWorker(root, {
@@ -319,16 +315,23 @@ export function workerRepoRoot(root: string, track: CadreTrack, worker: Parallel
 export function parallelMergeBack(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const state = readParallelState(track);
   const force = args.force === true;
-  const workers = state.workers
+  const selectedWorkers = state.workers
     .filter((worker) => !args.workerId || worker.worker_id === args.workerId)
     .filter((worker) => force || worker.status === "awaiting_merge");
+  const workers = selectedWorkers.filter((worker) => worker.branch || worker.commit_sha || worker.worker_ref);
   const skipped = state.workers
     .filter((worker) => !args.workerId || worker.worker_id === args.workerId)
     .filter((worker) => !workers.includes(worker))
-    .map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not awaiting_merge" }));
-  const commands = workers
-    .filter((worker) => worker.branch || worker.commit_sha)
-    .map((worker) => plannedCommand("git", ["merge", "--no-ff", asString(worker.commit_sha || worker.worker_ref || worker.branch)], workerRepoRoot(root, track, worker, args)));
+    .map((worker) => ({
+      worker_id: worker.worker_id,
+      status: worker.status,
+      reason: selectedWorkers.includes(worker) ? "worker has no merge ref" : "worker is not awaiting_merge",
+    }));
+  const commands = workers.map((worker) => plannedCommand(
+    "git",
+    ["merge", "--no-ff", asString(worker.commit_sha || worker.worker_ref || worker.branch)],
+    workerRepoRoot(root, track, worker, args),
+  ));
   const execute = args.execute === true;
   const branchChecks = workers.map((worker) => {
     const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
@@ -365,6 +368,9 @@ export function parallelMergeBack(root: string, track: CadreTrack, args: Runtime
           trackId: track.track_id,
           workerId: worker.worker_id,
           status: "merged",
+          completeTask: true,
+          workingRoot: workerRepoRoot(root, track, worker, args),
+          summary: asOptionalString(worker.summary) || `Merged parallel worker ${worker.worker_id}`,
         };
         if (worker.phase_index != null) recordArgs.phaseIndex = worker.phase_index;
         if (worker.task_index != null) recordArgs.taskIndex = worker.task_index;
@@ -389,37 +395,6 @@ export function parallelMergeBack(root: string, track: CadreTrack, args: Runtime
     commands,
     results,
     state_records: stateRecords,
-  };
-}
-
-export function parallelCleanup(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
-  const state = readParallelState(track);
-  const force = args.force === true;
-  const workers = state.workers.filter((worker) => worker.worktree && (force || worker.status === "merged"));
-  const skipped = state.workers
-    .filter((worker) => worker.worktree && !workers.includes(worker))
-    .map((worker) => ({ worker_id: worker.worker_id, status: worker.status, reason: "worker is not merged" }));
-  const commands = workers.map((worker) => plannedCommand("git", ["worktree", "remove", asString(worker.worktree)], workerRepoRoot(root, track, worker, args)));
-  const refCommands = workers
-    .filter((worker) => worker.worker_ref)
-    .map((worker) => {
-      const repo = asOptionalString(worker.repo) || asOptionalString(args.repo) || ".";
-      const branchEntry = branchSetEntryForRepo(root, track, repo, args);
-      return plannedCommand("git", ["update-ref", "-d", asString(worker.worker_ref)], asString(branchEntry?.source_root || root));
-    });
-  const execute = args.execute === true;
-  const results = execute ? runPlannedCommands([...commands, ...refCommands]) : [];
-  return {
-    ok: results.every((result) => result.ok),
-    track_id: track.track_id,
-    action: "cleanup",
-    execute,
-    dry_run: !execute,
-    workers,
-    skipped,
-    commands,
-    ref_commands: refCommands,
-    results,
   };
 }
 

@@ -1,12 +1,11 @@
-import path from "node:path";
 import crypto from "node:crypto";
-import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
+import path from "node:path";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
 import { reviewArtifactsFromFiles, workflowReviewBundle } from "./review-bundles";
 
-import type { ApprovalStage } from "./staged-approval-stages";
 import {
   cancelApprovalSession,
   captureApprovalBeforeFiles,
@@ -17,6 +16,7 @@ import {
   writeApprovalSession,
   type ApprovalSession,
 } from "./approval-session-store";
+import type { ApprovalStage } from "./staged-approval-stages";
 export { approvedTargetReviewPaths, validateApprovedTargetReviewFiles } from "./approval-review-validation";
 export {
   artifactApprovalStages,
@@ -25,7 +25,7 @@ export {
   refreshApprovalStages,
   releaseApprovalStages,
   reviseApprovalStages,
-  setupApprovalStages,
+  setupApprovalStages
 } from "./staged-approval-stages";
 
 function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string, files: ReviewFile[]): string {
@@ -218,7 +218,6 @@ function approvalTransitionError(
   approved: string[],
   snapshotFiles: ReviewFile[]
 ): string | null {
-  const raw = rawArgs(args);
   if (stageIds.length === 0) return null;
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return orderError;

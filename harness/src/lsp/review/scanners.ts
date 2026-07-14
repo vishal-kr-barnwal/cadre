@@ -1,14 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 import type { JsonObject } from "../../types";
-import { asJsonObject, asNumber, asOptionalString, asStringArray, errorMessage, isRecord } from "../../guards";
-import { isIgnoredFile, normalizeRel, shouldIgnore } from "../ignore-policy";
+import { asJsonObject } from "../../guards";
+import { normalizeRel, shouldIgnore } from "../ignore-policy";
 
-import { LspClient } from "./client";
+import type { LspClient } from "./client";
 import { MAX_SCAN_FILE_BYTES, MAX_TEXT_REFERENCE_RESULTS } from "./constants";
-import { LspDiagnostic, LspLocation, LspPosition, LspServerConfig, LspSymbol, RelativeLocation, SymbolCandidate } from "./types";
+import type { LspDiagnostic, LspLocation, LspPosition, LspServerConfig, LspSymbol, RelativeLocation, SymbolCandidate } from "./types";
 
 export function flattenSymbols(symbols: unknown, out: LspSymbol[] = []): LspSymbol[] {
   if (!Array.isArray(symbols)) return out;
