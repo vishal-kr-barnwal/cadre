@@ -258,42 +258,39 @@ test("Workflow templates include JSON canonical and task-level commit guidance",
   assert.deepEqual(failures, []);
 });
 
-test("Artifact workflow protocols require compact staged review", () => {
+test("Protocol approval matrix distinguishes documents, execution, and read-only commands", () => {
   const required = new Map([
-    ["cadre-setup.json", "setup"],
-    ["cadre-newtrack.json", "newtrack"],
-    ["cadre-revise.json", "revise"],
-    ["cadre-refresh.json", "refresh"],
-    ["cadre-release.json", "release"],
-    ["cadre-handoff.json", "handoff"],
-    ["cadre-artifacts.json", "artifacts"],
+    ["archive", "execute"],
+    ["artifacts", "execute"],
+    ["debug", "execute"],
+    ["flag", "execute"],
+    ["formula", "execute_for_mutations"],
+    ["handoff", "document_staged"],
+    ["implement", "execute"],
+    ["land", "execute"],
+    ["newtrack", "document_staged"],
+    ["refresh", "document_staged_when_patterns_change"],
+    ["release", "document_staged"],
+    ["revert", "execute"],
+    ["review", "none"],
+    ["revise", "document_staged"],
+    ["setup", "document_staged"],
+    ["ship", "execute"],
+    ["skill", "document_staged_for_create_update_execute_for_rename_remove"],
+    ["status", "none"],
+    ["validate", "none"],
   ]);
   const failures = [];
   for (const dir of protocolDirs) {
-    for (const [fileName, workflow] of required.entries()) {
-      const file = path.join(dir, fileName);
+    for (const [workflow, approval] of required.entries()) {
+      const file = path.join(dir, `cadre-${workflow}.json`);
       const protocol = readJson(file);
-      if (protocol.approval !== "staged") failures.push(`${path.relative(root, file)}: missing staged approval for ${workflow}`);
-      if (!protocol.transitions.some((step) => /review/.test(step))) failures.push(`${path.relative(root, file)}: missing review transition for ${workflow}`);
-      if (!protocol.references.some((reference) => reference.id === "approval-and-generation" && reference.when)) failures.push(`${path.relative(root, file)}: missing conditional approval reference for ${workflow}`);
-    }
-  }
-  assert.deepEqual(failures, []);
-});
-
-test("Action workflow protocols require explicit approval", () => {
-  const required = new Map([
-    ["cadre-archive.json", "archive"],
-    ["cadre-revert.json", "revert"],
-    ["cadre-flag.json", "flag"],
-  ]);
-  const failures = [];
-  for (const dir of protocolDirs) {
-    for (const [fileName, workflow] of required.entries()) {
-      const file = path.join(dir, fileName);
-      const protocol = readJson(file);
-      if (protocol.approval !== "explicit") failures.push(`${path.relative(root, file)}: missing explicit approval for ${workflow}`);
-      if (!protocol.transitions.includes("execute")) failures.push(`${path.relative(root, file)}: missing execute transition for ${workflow}`);
+      if (protocol.approval !== approval) failures.push(`${path.relative(root, file)}: expected ${approval}, received ${protocol.approval}`);
+      if (approval.includes("document_staged")) {
+        if (!protocol.transitions.some((step) => /review/.test(step))) failures.push(`${path.relative(root, file)}: missing document review transition`);
+        if (!protocol.references.some((reference) => reference.id === "approval-and-generation" && reference.when)) failures.push(`${path.relative(root, file)}: missing document approval reference`);
+      }
+      if (approval.includes("execute") && !protocol.transitions.includes("execute")) failures.push(`${path.relative(root, file)}: missing execute transition`);
     }
   }
   assert.deepEqual(failures, []);

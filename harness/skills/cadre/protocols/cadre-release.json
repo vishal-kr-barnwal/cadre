@@ -12,7 +12,7 @@
     "review_stages",
     "execute"
   ],
-  "approval": "staged",
+  "approval": "document_staged",
   "references": [
     {
       "id": "approval-and-generation",

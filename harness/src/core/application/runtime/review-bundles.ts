@@ -63,6 +63,25 @@ export function jsonReviewFile(relativePath: string, title: string, source: stri
   };
 }
 
+export function documentReviewPair(
+  documentId: string,
+  canonical: ReviewFile,
+  projection: ReviewFile,
+  approvalGroup?: string,
+  reviewRole: "human" | "generated" = "human"
+): ReviewFile[] {
+  const pair = {
+    documentId,
+    canonicalPath: canonical.path,
+    projectionPath: projection.path,
+    ...(approvalGroup ? { approvalGroup } : {}),
+  };
+  return [
+    { ...canonical, ...pair, reviewRole: reviewRole === "human" ? "canonical" as const : "generated" as const },
+    { ...projection, ...pair, reviewRole },
+  ];
+}
+
 export function setupLspWriteRequested(args: RuntimeArgs = {}): boolean {
   const rawArgs = args as UnknownRecord;
   return rawArgs.lsp === true
@@ -87,9 +106,10 @@ export function setupShouldWriteLsp(args: RuntimeArgs, lspRecommendations: CoreR
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
 
-export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean): ReviewFile[] {
+export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean, machineFiles: ReviewFile[] = []): ReviewFile[] {
   const rawArgs = args as UnknownRecord;
   const techStack = techStackForPacket(root, args);
+  const techStackProjection = techStack || {};
   const productJson = normalizeProjectDoc("product", rawArgs.product, "product.json", "Product Context", "Project-Specific Product Notes");
   const productGuidelinesJson = normalizeProjectDoc(
     "product_guidelines",
@@ -115,18 +135,31 @@ export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: C
     selected: selectedStyleGuides,
     generated_at: utcNow(),
   };
+  const productCanonical = `${JSON.stringify(productJson, null, 2)}\n`;
+  const guidelinesCanonical = `${JSON.stringify(productGuidelinesJson, null, 2)}\n`;
+  const techCanonical = `${JSON.stringify(techStackProjection, null, 2)}\n`;
+  const workflowCanonical = `${JSON.stringify(workflowJson, null, 2)}\n`;
+  const patternsCanonical = `${JSON.stringify(patternsEntry)}\n`;
+  const styleIndexCanonical = `${JSON.stringify(styleGuideIndex, null, 2)}\n`;
   const files: ReviewFile[] = [
-    jsonReviewFile("cadre/product.json", "Product context canonical", "product", productJson),
-    textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context", "cadre/product.json"))),
-    jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelines", productGuidelinesJson),
-    textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines", "cadre/product_guidelines.json"))),
-    jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-    jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowPolicy", workflowJson),
-    textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow", "cadre/workflow.json"))),
-    plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", `${JSON.stringify(patternsEntry)}\n`),
-    textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText)),
-    jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),
-    textReviewFile("cadre/code_styleguides/README.md", "Style guide catalog", "cadre/styleguides/index.json", withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))),
+    ...documentReviewPair("product",
+      jsonReviewFile("cadre/product.json", "Product context canonical", "product", productJson),
+      textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context", "cadre/product.json"), { canonicalContent: productCanonical, projection: "cadre/product.md" }))),
+    ...documentReviewPair("product_guidelines",
+      jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelines", productGuidelinesJson),
+      textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines", "cadre/product_guidelines.json"), { canonicalContent: guidelinesCanonical, projection: "cadre/product_guidelines.md" }))),
+    ...documentReviewPair("tech_stack",
+      jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
+      textReviewFile("cadre/tech-stack.md", "Tech stack", "cadre/tech-stack.json", withGeneratedMarker("cadre/tech-stack.json", "cadre.tech_stack.v1", renderJsonCodeblock("Tech stack", techStackProjection), { canonicalContent: techCanonical, projection: "cadre/tech-stack.md" }))),
+    ...documentReviewPair("workflow",
+      jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowPolicy", workflowJson),
+      textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow", "cadre/workflow.json"), { canonicalContent: workflowCanonical, projection: "cadre/workflow.md" }))),
+    ...documentReviewPair("patterns",
+      plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", patternsCanonical),
+      textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText, { canonicalContent: patternsCanonical, projection: "cadre/patterns.md" })), undefined, "generated"),
+    ...documentReviewPair("styleguides",
+      jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),
+      textReviewFile("cadre/styleguides/README.md", "Style guide catalog", "cadre/styleguides/index.json", withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex), { canonicalContent: styleIndexCanonical, projection: "cadre/styleguides/README.md" })), "styleguides"),
     ...selectedStyleGuides.flatMap((guideId) => {
       const guideJson = templateJson(`styleguides/${guideId}.json`, {
         version: 1,
@@ -136,20 +169,32 @@ export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: C
         rules: [],
         source: "bundled_template",
       });
-      return [
-        jsonReviewFile(`cadre/styleguides/${guideId}.json`, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guideJson),
+      const canonicalPath = `cadre/styleguides/${guideId}.json`;
+      const projectionPath = `cadre/styleguides/${guideId}.md`;
+      const canonicalContent = `${JSON.stringify(guideJson, null, 2)}\n`;
+      return documentReviewPair("styleguides",
+        jsonReviewFile(canonicalPath, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guideJson),
         textReviewFile(
-          `cadre/code_styleguides/${guideId}.md`,
+          projectionPath,
           `Code style guide: ${guideId}`,
           `cadre/styleguides/${guideId}.json`,
-          withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson))
-        ),
-      ];
+          withGeneratedMarker(canonicalPath, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson), { canonicalContent, projection: projectionPath })
+        ), "styleguides");
     }),
   ];
   if (polyrepoRequested) {
-    files.push(jsonReviewFile("cadre/repos.json", "Polyrepo topology", "repos", isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null));
+    const repos = isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null;
+    if (repos) {
+      const reposValue = asJsonObject(repos);
+      const canonicalContent = `${JSON.stringify(reposValue, null, 2)}\n`;
+      files.push(...documentReviewPair("repos",
+        jsonReviewFile("cadre/repos.json", "Polyrepo topology canonical", "repos", reposValue),
+        textReviewFile("cadre/repos.md", "Repository topology", "cadre/repos.json", withGeneratedMarker("cadre/repos.json", "cadre.repos.v1", renderJsonCodeblock("Repository topology", reposValue), { canonicalContent, projection: "cadre/repos.md" }))));
+    } else {
+      files.push({ ...jsonReviewFile("cadre/repos.json", "Polyrepo topology canonical", "repos", null), documentId: "repos", reviewRole: "canonical", canonicalPath: "cadre/repos.json", projectionPath: "cadre/repos.md" });
+    }
   }
+  files.push(...machineFiles);
   return files;
 }
 
@@ -159,6 +204,11 @@ export function reviewArtifactsFromFiles(reviewFiles: ReviewFile[]): JsonObject[
       title: file.title,
       kind: file.kind,
       source: file.source,
+      document_id: file.documentId || null,
+      review_role: file.reviewRole || null,
+      canonical_path: file.canonicalPath || null,
+      projection_path: file.projectionPath || null,
+      approval_group: file.approvalGroup || null,
       missing: file.missing === true,
       ...reviewStats(file.content),
     }));

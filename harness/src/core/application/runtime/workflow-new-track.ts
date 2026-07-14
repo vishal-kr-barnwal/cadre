@@ -17,7 +17,7 @@ import { appendCadreEvent } from "./native-state";
 import { renderPlanMarkdown } from "./plan-docs";
 import { planAssist, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
-import { jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText } from "./review-bundles";
+import { documentReviewPair, jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
 import { gitIdentity } from "../../infrastructure/runtime/system";
 import { beginTrace, commitTrace } from "./commit-trace";
@@ -26,6 +26,7 @@ import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
 import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
 import { applyStagedApprovalSessionPayload, newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { trackGenerationWarnings } from "./generation-quality";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
   const safeTrack = safeName(trackId);
@@ -39,54 +40,59 @@ export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: Jso
     recorded_at: utcNow(),
     text: trackLearningsText(trackId),
   };
+  const specCanonical = `cadre/tracks/${safeTrack}/spec.json`;
+  const specProjection = `cadre/tracks/${safeTrack}/spec.md`;
+  const planCanonical = `cadre/tracks/${safeTrack}/plan.json`;
+  const planProjection = `cadre/tracks/${safeTrack}/plan.md`;
+  const learningsCanonical = `${JSON.stringify(learningsEntry)}\n`;
   return [
-    jsonReviewFile(
-      `cadre/tracks/${safeTrack}/spec.json`,
+    ...documentReviewPair("spec", jsonReviewFile(
+      specCanonical,
       "Track spec canonical",
       "spec",
       specJson
     ),
     textReviewFile(
-      `cadre/tracks/${safeTrack}/spec.md`,
+      specProjection,
       "Track spec",
       "spec.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeTrack}/spec.json`))
-    ),
-    jsonReviewFile(
-      `cadre/tracks/${safeTrack}/plan.json`,
+      withGeneratedMarker(specCanonical, "cadre.spec.v1", renderSpecMarkdown(specJson, specCanonical), { canonicalContent: `${JSON.stringify(specJson, null, 2)}\n`, projection: specProjection })
+    )),
+    ...documentReviewPair("plan", jsonReviewFile(
+      planCanonical,
       "Track plan canonical",
       "plan",
       planJson
     ),
     textReviewFile(
-      `cadre/tracks/${safeTrack}/plan.md`,
+      planProjection,
       "Track plan",
       "plan.json",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeTrack}/plan.json`))
-    ),
-    jsonReviewFile(
+      withGeneratedMarker(planCanonical, "cadre.plan.v1", renderPlanMarkdown(planJson, planCanonical), { canonicalContent: `${JSON.stringify(planJson, null, 2)}\n`, projection: planProjection })
+    )),
+    { ...jsonReviewFile(
       `cadre/tracks/${safeTrack}/metadata.json`,
       "Track metadata",
       "metadata",
       metadata
-    ),
-    plainReviewFile(
+    ), documentId: "metadata", reviewRole: "machine" },
+    ...documentReviewPair("learnings", plainReviewFile(
       `cadre/tracks/${safeTrack}/learnings.jsonl`,
       "Track learnings canonical",
       "template:learnings_seed.json",
-      `${JSON.stringify(learningsEntry)}\n`
+      learningsCanonical
     ),
     textReviewFile(
       `cadre/tracks/${safeTrack}/learnings.md`,
       "Track learnings",
       "learnings.jsonl",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId))
-    ),
+      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId), { canonicalContent: learningsCanonical, projection: `cadre/tracks/${safeTrack}/learnings.md` })
+    ), undefined, "generated"),
   ];
 }
 
 export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "newtrack");
+  args = applyStagedApprovalSessionPayload(root, args, "newtrack");
   const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
@@ -149,7 +155,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   };
   const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId) });
+  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId), final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
   const approvalError = stagedApprovalError(approval);
@@ -177,7 +183,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       error: approvalError || undefined,
       next_actions: approvalError ? asStringArray(asJsonObject(approval).next_actions) : [
         "Approve newtrack one stage at a time with approvedStages.",
-        "After spec, plan, metadata, and learnings are approved, call newtrack with execute:true and approvalComplete:true using the same structured payload.",
+        "After spec and plan are approved, call newtrack with execute:true and approvalComplete:true using the same approval session.",
       ],
     };
   }
@@ -260,6 +266,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     status: metadata.status,
     tags: metadata.tags || [],
   });
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "newtrack",
@@ -274,6 +281,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       wisp_id: asOptionalString(args.wispId || args.wisp_id) || null,
     },
   });
+  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...summary,
     ok: regen.ok !== false && controlCommit.ok !== false,
@@ -282,6 +290,8 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     metadata_path: path.relative(root, path.join(dir, "metadata.json")),
     regen,
     event,
+    approval_audit: approvalAudit,
+    approval_session_close: approvalSessionClose,
     control_commit: controlCommit,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),

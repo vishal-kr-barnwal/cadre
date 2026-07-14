@@ -11,7 +11,7 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { CoreResult } from "./contracts";
-import { fileExists, patchJsonFile, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
+import { fileExists, patchJsonFile, readJson, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { trackLockName, withTrackLock } from "../../infrastructure/runtime/locking";
 import { withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent } from "./native-state";
@@ -23,6 +23,7 @@ import { gitIdentity } from "../../infrastructure/runtime/system";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack } from "./track-context";
 import { holdInfo, listTracks, parsePlanFile } from "./track-schedule";
+import { jsonContent, writeArtifactPairAtomic } from "./artifact-pairs";
 
 export function reviewGate(root: string, trackId: string, options: RuntimeArgs = {}): CoreResult {
   const track = listTracks(root).find((item) => item.track_id === trackId);
@@ -295,8 +296,9 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
     return { ok: false, track_id: track.track_id, stage: "metadata_patch", metadata };
   }
   if (fileExists(planJsonPath)) {
-    const planPatch = patchJsonFile(planJsonPath, (current) => {
-      const phases = asArray(current.phases).map((rawPhase) => {
+    const currentPlan = readJson<JsonObject | null>(planJsonPath, null);
+    if (!currentPlan) return { ok: false, track_id: track.track_id, stage: "plan_json_read", error: `Invalid canonical plan JSON: ${planJsonPath}`, metadata };
+    const phases = asArray(currentPlan.phases).map((rawPhase) => {
         const currentPhase = asJsonObject(rawPhase);
         if (Number(currentPhase.phase_index || currentPhase.index) !== phaseIndex) return currentPhase;
         return {
@@ -325,16 +327,18 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
           }),
         };
       });
-      return { ...current, phases, updated_at: recordedAt };
-    });
-    if (!planPatch.ok) {
-      return { ok: false, track_id: track.track_id, stage: "plan_json_patch", metadata, plan_json: planPatch };
-    }
-    const nextPlan = asJsonObject(planPatch.value);
-    fs.writeFileSync(
-      track.plan_path,
-      withGeneratedMarker(path.relative(root, planJsonPath), "cadre.plan.v1", renderPlanMarkdown(nextPlan, path.relative(root, planJsonPath)))
+    const nextPlan: JsonObject = { ...currentPlan, phases, updated_at: recordedAt };
+    const canonicalPath = path.relative(root, planJsonPath);
+    const projectionPath = path.relative(root, track.plan_path);
+    const canonicalContent = jsonContent(nextPlan);
+    const projectionContent = withGeneratedMarker(
+      canonicalPath,
+      "cadre.plan.v1",
+      renderPlanMarkdown(nextPlan, canonicalPath),
+      { canonicalContent, projection: projectionPath }
     );
+    const planPatch = writeArtifactPairAtomic(root, canonicalPath, canonicalContent, projectionPath, projectionContent, { lock: false });
+    if (planPatch.ok === false) return { ok: false, track_id: track.track_id, stage: "plan_pair_write", metadata, plan_json: planPatch };
     return {
       ok: true,
       track_id: track.track_id,

@@ -24,7 +24,7 @@ export const TOOLS: JsonObject[] = [
         workflow: { type: "string" },
         input: { type: "object", description: "Workflow-specific structured input." },
         execute: { type: "boolean" },
-        approval: { type: "object", description: "Explicit staged approval supplied only after user confirmation." },
+        approval: { type: "object", description: "Explicit document approval supplied only after user confirmation, or cancel:true to abandon a review session." },
       },
       required: ["root", "workflow"],
       additionalProperties: false,

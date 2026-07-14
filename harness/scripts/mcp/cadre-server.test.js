@@ -1007,7 +1007,7 @@ test("MCP team-scale workflow packets compose on one track", async () => {
       name: "cadre_workflow",
       arguments: { root, workflow: "validate", trackId: "packets_20260618" },
     }));
-    assert.equal(workflowValidate.ok, true);
+    assert.equal(workflowValidate.ok, false);
     assert.equal(workflowValidate.data.integrity.ok, true);
 
     const artifactCatalog = parseTextJson(await request("tools/call", {

@@ -12,11 +12,6 @@
     "preview",
     "execute"
   ],
-  "approval": "explicit",
-  "references": [
-    {
-      "id": "approval-and-generation",
-      "when": "decision:approval"
-    }
-  ]
+  "approval": "execute",
+  "references": []
 }

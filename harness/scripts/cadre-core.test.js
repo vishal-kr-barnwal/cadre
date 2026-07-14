@@ -308,40 +308,6 @@ function approveWorkflow(root, args) {
   });
 }
 
-function approveArtifact(root, args) {
-  const clone = (value) => JSON.parse(JSON.stringify(value));
-  const base = { ...clone(args), execute: false };
-  delete base.approvalComplete;
-  delete base.approval_complete;
-  delete base.approvedStages;
-  delete base.approved_stages;
-  delete base.approvalStage;
-  delete base.approval_stage;
-  delete base.approvalSessionId;
-  delete base.approval_session_id;
-  let preview = core.artifactPacket(root, base);
-  assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.errors || preview.warnings || {}));
-  const approval = preview.approval;
-  const approved = [];
-  for (const stage of approval?.stages || []) {
-    approved.push(stage.id);
-    preview = core.artifactPacket(root, {
-      ...clone(base),
-      approvalSessionId: approval.session_id,
-      approvalStage: stage.id,
-      approvedStages: approved,
-    });
-    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.approval || {}));
-  }
-  return core.artifactPacket(root, {
-    ...clone(args),
-    execute: true,
-    approvalComplete: true,
-    approvalSessionId: approval?.session_id,
-    approvedStages: approved,
-  });
-}
-
 function setupTraceableProject(root) {
   git(root, ["init"]);
   git(root, ["config", "user.email", "trace@example.com"]);
@@ -1576,7 +1542,7 @@ test("review-heavy workflows expose staged approval bundles", () => {
 
     const handoff = core.workflowPacket(root, { workflow: "handoff", trackId });
     assert.equal(handoff.ok, true);
-    assert.equal(handoff.approval.current_stage, "handoff_json");
+    assert.equal(handoff.approval.current_stage, "handoff");
 
     const refresh = core.workflowPacket(root, { workflow: "refresh", refreshScope: "patterns" });
     assert.equal(refresh.ok, true);
@@ -1584,7 +1550,7 @@ test("review-heavy workflows expose staged approval bundles", () => {
 
     const artifacts = core.artifactPacket(root, { action: "sync", scope: `track:${trackId}` });
     assert.equal(artifacts.ok, true);
-    assert.equal(artifacts.approval.current_stage, "projections");
+    assert.equal(artifacts.approval.required, false);
 
     const patched = core.metadataPatch(root, { trackId, patch: { status: "completed" } });
     assert.equal(patched.ok, true);
@@ -1723,12 +1689,14 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.ok(setup.styleGuides.selected.includes("python"));
     assert.deepEqual(setup.styleGuides.missing, []);
     assert.equal(setup.approval.approval_complete, true);
-    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/general.md"));
-    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/typescript.md"));
-    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/python.md"));
+    assert.ok(setup.styleGuides.written.includes("cadre/styleguides/general.md"));
+    assert.ok(setup.styleGuides.written.includes("cadre/styleguides/typescript.md"));
+    assert.ok(setup.styleGuides.written.includes("cadre/styleguides/python.md"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "index.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "README.md")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "general.json")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "code_styleguides")), false);
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("typescript"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
@@ -1760,7 +1728,8 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.match(patterns, /Last refreshed: YYYY-MM-DD/);
     assert.doesNotMatch(patterns, /Example:/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "learnings.md")), false);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.md")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.md")), true);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tech-stack.md"), "utf8"), /cadre:generated from="cadre\/tech-stack\.json"/);
     const techStack = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"));
     assert.deepEqual(techStack.languages, ["TypeScript"]);
     assert.match(setup.techStackSummary.summary, /languages: TypeScript/);
@@ -1955,7 +1924,7 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
     });
 
     assert.equal(setup.ok, true);
-    assert.ok(setup.styleGuides.written.includes("cadre/code_styleguides/rust.md"));
+    assert.ok(setup.styleGuides.written.includes("cadre/styleguides/rust.md"));
     assert.match(fs.readFileSync(path.join(root, "cadre", "workflow.md"), "utf8"), /Guiding Principles/);
     const patterns = fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8");
     assert.match(patterns, /# Codebase Patterns/);
@@ -1965,7 +1934,7 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
     assert.match(patterns, /## Testing/);
     assert.match(patterns, /## Context/);
     assert.doesNotMatch(patterns, /Example:/);
-    assert.match(fs.readFileSync(path.join(root, "cadre", "code_styleguides", "rust.md"), "utf8"), /Effective Rust/);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "styleguides", "rust.md"), "utf8"), /Effective Rust/);
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("rust"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
@@ -2593,35 +2562,18 @@ test("artifact sync rejects legacy import and regenerates projections from canon
     assert.equal(legacyImport.ok, false);
     assert.match(legacyImport.error, /Legacy Markdown import is not supported/);
 
-    const preview = core.artifactPacket(root, {
-      action: "sync",
-      scope: "track:legacy_20260618",
-      reviewBundleDir: ".artifact-review",
-    });
+    const preview = core.artifactPacket(root, { action: "sync", scope: "track:legacy_20260618" });
     assert.equal(preview.ok, true);
     assert.equal(preview.dry_run, true);
+    assert.equal(preview.approval.required, false);
     assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:spec" && artifact.legacy_import_available === false));
     assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:plan" && artifact.legacy_import_available === false));
-    assert.equal(preview.review_bundle.content_in_response, false);
-    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "spec.md")), true);
-    assert.equal(fs.existsSync(path.join(preview.review_bundle.directory, "cadre", "tracks", "legacy_20260618", "plan.md")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
 
-    const blocked = core.artifactPacket(root, {
+    const written = core.artifactPacket(root, {
       action: "sync",
       scope: "track:legacy_20260618",
       execute: true,
-    });
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "staged_approval");
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "legacy_20260618", "plan.json")), true);
-
-    const written = approveArtifact(root, {
-      action: "sync",
-      scope: "track:legacy_20260618",
-      execute: true,
-      approvalComplete: true,
-      force: true,
     });
     assert.equal(written.ok, true);
     assert.equal(written.phase_state, "executed");
@@ -2640,6 +2592,26 @@ test("artifact sync rejects legacy import and regenerates projections from canon
     const render = core.artifactPacket(root, { action: "render", artifact: "track:legacy_20260618:plan" });
     assert.equal(render.ok, true);
     assert.equal(render.changed, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("artifact validation reports legacy styleguide projections without moving or deleting them", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-legacy-styleguide-test-"));
+  try {
+    git(root, ["init"]);
+    const legacy = path.join(root, "cadre", "code_styleguides", "general.md");
+    write(legacy, "# Legacy style guide\n");
+    const validation = core.artifactPacket(root, { action: "validate", scope: "styleguides" });
+    assert.equal(validation.ok, false);
+    assert.equal(validation.legacy_styleguide_path, "cadre/code_styleguides");
+    assert.ok(validation.results.some((result) => result.artifact_id === "legacy-styleguide-projections" && /Deprecated/.test(result.error)));
+    const sync = core.artifactPacket(root, { action: "sync", scope: "styleguides", execute: true, commitMode: "off" });
+    assert.equal(sync.ok, true);
+    assert.ok(sync.warnings.some((warning) => /remove the legacy directory manually/.test(warning)));
+    assert.equal(fs.readFileSync(legacy, "utf8"), "# Legacy style guide\n");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides")), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2682,7 +2654,7 @@ test("workflow revise reviews proposed track files before writing", () => {
     });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.stage, "staged_approval");
-    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
 
     const written = approveWorkflow(root, {
       workflow: "revise",
@@ -2746,6 +2718,136 @@ test("target staged review previews appear in git diff and reject drift", () => 
     assert.equal(execute.ok, false);
     assert.equal(execute.stage, "staged_review_drift");
     assert.match(execute.error, /changed after review/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("target setup materializes the complete diff with intent-to-add and cancel restores it", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-target-setup-cancel-test-"));
+  try {
+    git(root, ["init"]);
+    const args = {
+      workflow: "setup",
+      providerMode: "local",
+      setupLsp: false,
+      styleGuideIds: ["general"],
+      product: { title: "Diff Product", summary: "Review the complete target diff." },
+      techStack: { languages: ["TypeScript"] },
+    };
+    const preview = core.workflowPacket(root, args);
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.review_bundle.mode, "target");
+    assert.equal(preview.approval.current_document.id, "product");
+    assert.equal(preview.approval.current_document.canonical_path, "cadre/product.json");
+    assert.equal(preview.approval.current_document.projection_path, "cadre/product.md");
+    assert.deepEqual(Object.keys(preview.approval.current_document.snapshot_hashes).sort(), ["cadre/product.json", "cadre/product.md"]);
+    for (const file of [
+      "cadre/product.json",
+      "cadre/product.md",
+      "cadre/tech-stack.json",
+      "cadre/tech-stack.md",
+      "cadre/workflow.json",
+      "cadre/workflow.md",
+      "cadre/patterns.jsonl",
+      "cadre/patterns.md",
+      "cadre/styleguides/index.json",
+      "cadre/styleguides/README.md",
+      "cadre/config.json",
+      "cadre/setup_state.json",
+      "cadre/tracks.json",
+      "cadre/.gitignore",
+    ]) assert.equal(fs.existsSync(path.join(root, file)), true, file);
+    assert.ok(preview.approval.intent_to_add_paths.includes("cadre/product.json"));
+    assert.ok(preview.approval.intent_to_add_paths.includes("cadre/config.json"));
+    assert.match(git(root, ["diff", "--", "cadre/product.json"]).stdout, /Diff Product/);
+    assert.equal(git(root, ["diff", "--cached"]).stdout, "");
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`);
+    assert.equal(fs.existsSync(sessionFile), true);
+    assert.equal(git(root, ["check-ignore", "-q", "--", path.relative(root, sessionFile)]).status, 0);
+
+    const cancelled = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.approval.cancelled, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", ".gitignore")), false);
+    assert.equal(fs.existsSync(sessionFile), false);
+    assert.equal(git(root, ["diff", "--cached"]).stdout, "");
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("non-committing staged completion records a compact approval event and clears intent-to-add", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-approval-audit-test-"));
+  try {
+    git(root, ["init"]);
+    const result = approveWorkflow(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      commitMode: "off",
+      providerMode: "local",
+      setupLsp: false,
+      styleGuideIds: ["general"],
+      product: { title: "Audit Product", summary: "Record approval hashes only." },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(git(root, ["diff", "--cached"]).stdout, "");
+    const events = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8").trim().split(/\n/).map(JSON.parse);
+    const approvalEvent = events.find((event) => event.kind === "approval.completed");
+    assert.ok(approvalEvent);
+    assert.ok(approvalEvent.approved_documents.includes("product"));
+    assert.ok(approvalEvent.documents.every((document) => document.sha256 && !Object.prototype.hasOwnProperty.call(document, "content")));
+    assert.equal(fs.readdirSync(path.join(root, "cadre", "local", "approval-sessions")).length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("projection registry covers every canonical pair and atomic writes roll back both files", () => {
+  const expected = new Map([
+    ["product", ["cadre/product.json", "cadre/product.md"]],
+    ["product-guidelines", ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]],
+    ["tech-stack", ["cadre/tech-stack.json", "cadre/tech-stack.md"]],
+    ["workflow", ["cadre/workflow.json", "cadre/workflow.md"]],
+    ["repository-topology", ["cadre/repos.json", "cadre/repos.md"]],
+    ["patterns", ["cadre/patterns.jsonl", "cadre/patterns.md"]],
+    ["styleguide-catalog", ["cadre/styleguides/index.json", "cadre/styleguides/README.md"]],
+    ["styleguide", ["cadre/styleguides/{id}.json", "cadre/styleguides/{id}.md"]],
+    ["track-specification", ["cadre/tracks/{trackId}/spec.json", "cadre/tracks/{trackId}/spec.md"]],
+    ["track-plan", ["cadre/tracks/{trackId}/plan.json", "cadre/tracks/{trackId}/plan.md"]],
+    ["track-learnings", ["cadre/tracks/{trackId}/learnings.jsonl", "cadre/tracks/{trackId}/learnings.md"]],
+    ["track-handoff", ["cadre/tracks/{trackId}/handoff.json", "cadre/tracks/{trackId}/HANDOFF.md"]],
+    ["release", ["cadre/releases/{version}.json", "cadre/releases/{version}.md"]],
+    ["project-skill", ["cadre/skills/{id}/skill.json", "cadre/skills/{id}/SKILL.md"]],
+  ]);
+  assert.equal(core.PROJECTION_REGISTRY.length, expected.size);
+  for (const registration of core.PROJECTION_REGISTRY) {
+    assert.deepEqual([registration.canonical, registration.projection], expected.get(registration.intent), registration.intent);
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-atomic-pair-test-"));
+  try {
+    write(path.join(root, "pair.json"), "old canonical\n");
+    write(path.join(root, "pair.md"), "old projection\n");
+    const failed = core.writeArtifactFilesAtomic(root, [
+      { path: "pair.json", content: "new canonical\n" },
+      { path: "pair.md", content: "new projection\n" },
+    ], { simulateFailureAfter: 1 });
+    assert.equal(failed.ok, false);
+    assert.equal(failed.rolled_back, true);
+    assert.equal(fs.readFileSync(path.join(root, "pair.json"), "utf8"), "old canonical\n");
+    assert.equal(fs.readFileSync(path.join(root, "pair.md"), "utf8"), "old projection\n");
+    const temporaryFiles = fs.readdirSync(root, { recursive: true }).map(String).filter((file) => file.includes(".cadre-tmp"));
+    assert.deepEqual(temporaryFiles, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2842,35 +2944,13 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     assert.equal(handoff.phase_state, "executed");
     assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "HANDOFF.md"), "utf8"), /Continue with the next task/);
 
-    const archiveBlocked = core.workflowPacket(root, {
-      workflow: "archive",
-      trackId: "done_20260618",
-      execute: true,
-    });
-    assert.equal(archiveBlocked.ok, false);
-    assert.equal(archiveBlocked.stage, "human_review");
-    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "done_20260618")), true);
-
     const archived = core.workflowPacket(root, {
       workflow: "archive",
       trackId: "done_20260618",
       execute: true,
-      approvalComplete: true,
     });
     assert.equal(archived.ok, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "archive", "done_20260618")), true);
-
-    const flagBlocked = core.workflowPacket(root, {
-      workflow: "flag",
-      trackId: "workflow_20260618",
-      status: "blocked",
-      reason: "waiting for credentials",
-      execute: true,
-    });
-    assert.equal(flagBlocked.ok, false);
-    assert.equal(flagBlocked.stage, "human_review");
-    let metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
-    assert.equal(metadata.status, "in_progress");
 
     const flag = core.workflowPacket(root, {
       workflow: "flag",
@@ -2878,8 +2958,8 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
       status: "blocked",
       reason: "waiting for credentials",
       execute: true,
-      approvalComplete: true,
     });
+    let metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
     assert.equal(flag.ok, true);
     assert.equal(flag.dry_run, false);
     metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "workflow_20260618", "metadata.json"), "utf8"));
@@ -2889,6 +2969,31 @@ test("workflowPacket exposes packet-only routes for primary workflows", () => {
     process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(setupRoot, { recursive: true, force: true });
+  }
+});
+
+test("archive rewrites generated marker paths and rolls the move back on projection conflict", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-archive-pair-test-"));
+  try {
+    git(root, ["init"]);
+    writeTrack(root, "archive_ok_20260713", samplePlan("archive_ok_20260713"), { status: "completed" });
+    const archived = core.workflowPacket(root, { workflow: "archive", trackId: "archive_ok_20260713", execute: true, commitMode: "off" });
+    assert.equal(archived.ok, true, archived.error);
+    const archivedPlan = fs.readFileSync(path.join(root, "cadre", "archive", "archive_ok_20260713", "plan.md"), "utf8");
+    assert.match(archivedPlan, /from="cadre\/archive\/archive_ok_20260713\/plan\.json"/);
+    assert.match(archivedPlan, /projection="cadre\/archive\/archive_ok_20260713\/plan\.md"/);
+    assert.match(archivedPlan, /canonical_hash="[a-f0-9]+"/);
+
+    writeTrack(root, "archive_conflict_20260713", samplePlan("archive_conflict_20260713"), { status: "completed" });
+    write(path.join(root, "cadre", "tracks", "archive_conflict_20260713", "plan.md"), "# User-owned plan\n");
+    const conflict = core.workflowPacket(root, { workflow: "archive", trackId: "archive_conflict_20260713", execute: true, commitMode: "off" });
+    assert.equal(conflict.ok, false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "archive_conflict_20260713")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "archive", "archive_conflict_20260713")), false);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tracks", "archive_conflict_20260713", "plan.md"), "utf8"), "# User-owned plan\n");
+    assert.equal(conflict.archived[0].move_rollback.ok, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -3441,29 +3546,16 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       },
     });
 
-    const revertBlocked = core.workflowPacket(root, {
-      workflow: "revert",
-      execute: true,
-      trackId: "execute_20260618",
-      reason: "test revert",
-    });
-    assert.equal(revertBlocked.ok, false);
-    assert.equal(revertBlocked.stage, "human_review");
-    assert.equal(revertBlocked.git_results, undefined);
-    let metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
-    assert.equal(metadata.status, "completed");
-
     const revert = core.workflowPacket(root, {
       workflow: "revert",
       execute: true,
-      approvalComplete: true,
       trackId: "execute_20260618",
       reason: "test revert",
     });
     assert.equal(revert.ok, true);
     assert.equal(revert.phase_state, "executed");
     assert.equal(revert.git_results[0].ok, true);
-    metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
+    let metadata = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "execute_20260618", "metadata.json"), "utf8"));
     assert.equal(metadata.status, "in_progress");
     assert.equal(metadata.last_revert.reason, "test revert");
 
@@ -3490,12 +3582,20 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
       approvalComplete: true,
       createTag: true,
       releaseVersion: "v1.2.3",
+      releaseNotes: "# Release v1.2.3\n\n## Highlights\n\nApproved custom notes.\n",
     });
     assert.equal(release.ok, true);
     assert.equal(release.phase_state, "executed");
     assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.md")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "releases", "v1.2.3.json")), true);
     assert.equal(git(root, ["tag", "-l", "v1.2.3"]).stdout.trim(), "v1.2.3");
+    const approvedReleaseMarkdown = fs.readFileSync(path.join(root, "cadre", "releases", "v1.2.3.md"), "utf8");
+    const releaseCanonical = readJson(path.join(root, "cadre", "releases", "v1.2.3.json"));
+    assert.equal(releaseCanonical.release_notes_markdown, "# Release v1.2.3\n\n## Highlights\n\nApproved custom notes.\n");
+    fs.rmSync(path.join(root, "cadre", "releases", "v1.2.3.md"));
+    const regeneratedRelease = core.artifactPacket(root, { action: "sync", artifact: "release:v1.2.3", execute: true, commitMode: "off" });
+    assert.equal(regeneratedRelease.ok, true, regeneratedRelease.error);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "releases", "v1.2.3.md"), "utf8"), approvedReleaseMarkdown);
     const setupState = JSON.parse(fs.readFileSync(path.join(root, "cadre", "setup_state.json"), "utf8"));
     assert.equal(setupState.last_release.version, "v1.2.3");
 
@@ -3528,6 +3628,25 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     assert.equal(refresh.phase_state, "executed");
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.jsonl"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LSP-only refresh uses execution authorization without document approval", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-only-refresh-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+    write(path.join(root, "src", "index.ts"), "export const ready = true;\n");
+    const preview = core.workflowPacket(root, { workflow: "refresh", refreshScope: "lsp", lsp: true });
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.approval.required, false);
+    assert.equal(preview.review_bundle, null);
+    const executed = core.workflowPacket(root, { workflow: "refresh", refreshScope: "lsp", lsp: true, execute: true, commitMode: "off" });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(executed.phase_state, "executed");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

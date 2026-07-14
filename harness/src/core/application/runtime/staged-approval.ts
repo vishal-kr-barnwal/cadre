@@ -1,15 +1,23 @@
-import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import os from "node:os";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 
 import type { ReviewFile } from "./contracts";
-import { reviewArtifactsFromFiles, reviewStats, workflowReviewBundle } from "./review-bundles";
-import { reviewOutputMode } from "./review-output";
+import { reviewArtifactsFromFiles, workflowReviewBundle } from "./review-bundles";
 
 import type { ApprovalStage } from "./staged-approval-stages";
+import {
+  cancelApprovalSession,
+  captureApprovalBeforeFiles,
+  frozenReviewFiles,
+  previewFileRecords,
+  readApprovalSession,
+  recordApprovalPreview,
+  writeApprovalSession,
+  type ApprovalSession,
+} from "./approval-session-store";
+export { approvedTargetReviewPaths, validateApprovedTargetReviewFiles } from "./approval-review-validation";
 export {
   artifactApprovalStages,
   handoffApprovalStages,
@@ -20,19 +28,12 @@ export {
   setupApprovalStages,
 } from "./staged-approval-stages";
 
-function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string): string {
-  return `Approve Cadre ${workflow} stage "${stage.id}" (${stage.title})? Reply "approve ${stage.id}" to allow one staged approval for session ${sessionId}.`;
+function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string, files: ReviewFile[]): string {
+  const projection = files.find((file) => file.reviewRole === "human")?.projectionPath
+    || files.find((file) => file.kind === "markdown")?.path
+    || stage.title;
+  return `Approve Cadre ${workflow} document "${stage.id}" after reviewing ${projection}? Reply "approve ${stage.id}" to approve its exact canonical/projection pair for session ${sessionId}.`;
 }
-
-type ApprovalSession = {
-  session_id: string;
-  workflow: string;
-  payload_hash: string;
-  payload: JsonObject;
-  approved_stages: string[];
-  preview_files?: Record<string, JsonObject[]>;
-  updated_at: string;
-};
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
   return args as UnknownRecord;
@@ -59,8 +60,11 @@ export function requestedApprovalSessionId(args: RuntimeArgs = {}): string | nul
 }
 
 function filesForStage(files: ReviewFile[], stage: ApprovalStage): ReviewFile[] {
-  if (stage.fileMatches.includes("*")) return files;
-  return files.filter((file) => stage.fileMatches.some((needle) => file.path.includes(needle)));
+  const documentIds = new Set(stage.documentIds);
+  if (documentIds.size > 0) return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId!));
+  const matches = stage.fileMatches || [];
+  if (matches.includes("*")) return files;
+  return files.filter((file) => matches.some((needle) => file.path.includes(needle)));
 }
 
 function stableJson(value: unknown): string {
@@ -74,33 +78,19 @@ function sha(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-function approvalSessionDir(): string {
-  return path.join(os.tmpdir(), "cadre-approval-sessions");
-}
-
-function approvalSessionFile(sessionId: string): string {
-  return path.join(approvalSessionDir(), `${sessionId}.json`);
-}
-
-function readApprovalSession(sessionId: string): ApprovalSession | null {
-  try {
-    return JSON.parse(fs.readFileSync(approvalSessionFile(sessionId), "utf8")) as ApprovalSession;
-  } catch {
-    return null;
-  }
-}
-
-function writeApprovalSession(session: ApprovalSession): void {
-  fs.mkdirSync(approvalSessionDir(), { recursive: true });
-  fs.writeFileSync(approvalSessionFile(session.session_id), `${JSON.stringify(session, null, 2)}\n`);
-}
-
 function hasApprovalIntent(args: RuntimeArgs): boolean {
   const raw = rawArgs(args);
   return approvedStageIds(args).length > 0
     || approvalComplete(args)
     || raw.approvalStage !== undefined
-    || raw.approval_stage !== undefined;
+    || raw.approval_stage !== undefined
+    || raw.approvalCancel === true
+    || raw.approval_cancel === true;
+}
+
+function approvalCancelRequested(args: RuntimeArgs): boolean {
+  const raw = rawArgs(args);
+  return raw.approvalCancel === true || raw.approval_cancel === true;
 }
 
 function approvalControlPayload(args: RuntimeArgs): JsonObject {
@@ -110,6 +100,8 @@ function approvalControlPayload(args: RuntimeArgs): JsonObject {
     "execute",
     "approvalComplete",
     "approval_complete",
+    "approvalCancel",
+    "approval_cancel",
     "approvalStage",
     "approval_stage",
     "approvedStages",
@@ -132,11 +124,11 @@ function approvalControlPayload(args: RuntimeArgs): JsonObject {
   return controls;
 }
 
-export function applyStagedApprovalSessionPayload(args: RuntimeArgs = {}, workflow: string): RuntimeArgs {
+export function applyStagedApprovalSessionPayload(root: string, args: RuntimeArgs = {}, workflow: string): RuntimeArgs {
   if (!hasApprovalIntent(args)) return args;
   const sessionId = requestedApprovalSessionId(args);
   if (!sessionId) return args;
-  const session = readApprovalSession(sessionId);
+  const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow) return args;
   const controls = approvalControlPayload(args);
   if (approvalComplete(args) && !controls.approvedStages && !controls.approved_stages) {
@@ -169,18 +161,14 @@ function approvalPayload(args: RuntimeArgs): JsonObject {
     "execute",
     "approvalComplete",
     "approval_complete",
+    "approvalCancel",
+    "approval_cancel",
     "approvalStage",
     "approval_stage",
     "approvedStages",
     "approved_stages",
     "approvalSessionId",
     "approval_session_id",
-    "reviewBundleDir",
-    "review_bundle_dir",
-    "reviewDir",
-    "review_dir",
-    "reviewOutputMode",
-    "review_output_mode",
     "responseMode",
     "response_mode",
     "detail",
@@ -221,12 +209,14 @@ function approvalOrderError(stageIds: string[], approved: string[]): string | nu
 }
 
 function approvalTransitionError(
+  root: string,
   args: RuntimeArgs,
   workflow: string,
   sessionId: string,
   payloadHash: string,
   stageIds: string[],
-  approved: string[]
+  approved: string[],
+  snapshotFiles: ReviewFile[]
 ): string | null {
   const raw = rawArgs(args);
   if (stageIds.length === 0) return null;
@@ -236,12 +226,25 @@ function approvalTransitionError(
   const payload = approvalPayload(args);
   const approvalIntent = hasApprovalIntent(args);
   if (!approvalIntent) {
-    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, payload, approved_stages: [], preview_files: {}, updated_at: new Date().toISOString() });
+    const existing = readApprovalSession(root, sessionId);
+    if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash) return null;
+    writeApprovalSession(root, {
+      session_id: sessionId,
+      workflow,
+      payload_hash: payloadHash,
+      payload,
+      approved_stages: [],
+      snapshot_files: snapshotFiles,
+      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
+      preview_files: [],
+      intent_to_add_paths: [],
+      updated_at: new Date().toISOString(),
+    });
     return null;
   }
   if (!requestedSession) return "approvalSessionId is required when approving staged workflow output.";
   if (approvalComplete(args)) {
-    const requested = readApprovalSession(requestedSession);
+    const requested = readApprovalSession(root, requestedSession);
     if (
       requested
       && requested.workflow === workflow
@@ -253,9 +256,20 @@ function approvalTransitionError(
     }
   }
   if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
-  const session = readApprovalSession(sessionId);
+  const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
-    writeApprovalSession({ session_id: sessionId, workflow, payload_hash: payloadHash, payload, approved_stages: [], preview_files: {}, updated_at: new Date().toISOString() });
+    writeApprovalSession(root, {
+      session_id: sessionId,
+      workflow,
+      payload_hash: payloadHash,
+      payload,
+      approved_stages: [],
+      snapshot_files: snapshotFiles,
+      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
+      preview_files: [],
+      intent_to_add_paths: [],
+      updated_at: new Date().toISOString(),
+    });
     return "Approval session was not found for this payload; review the current stage before approving.";
   }
   const previous = session.approved_stages || [];
@@ -275,77 +289,23 @@ function approvalTransitionError(
   if (delta[0] !== nextExpected) return `Next approval stage must be ${nextExpected}.`;
   const requestedStage = requestedApprovalStage(args);
   if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
-  writeApprovalSession({
+  writeApprovalSession(root, {
     session_id: sessionId,
     workflow,
     payload_hash: payloadHash,
     payload: session.payload || payload,
     approved_stages: approved,
-    preview_files: session.preview_files || {},
+    snapshot_files: session.snapshot_files || snapshotFiles,
+    before_files: session.before_files || captureApprovalBeforeFiles(root, snapshotFiles),
+    preview_files: session.preview_files || [],
+    intent_to_add_paths: session.intent_to_add_paths || [],
     updated_at: new Date().toISOString(),
   });
   return null;
 }
 
-function recordApprovalSessionPreview(sessionId: string, workflow: string, payloadHash: string, stageId: string, bundle: JsonObject | null): void {
-  if (!bundle || bundle.ok === false) return;
-  const session = readApprovalSession(sessionId);
-  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) return;
-  const files = Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
-  const previewFiles = { ...(session.preview_files || {}) };
-  previewFiles[stageId] = files.map((file) => ({
-    path: asOptionalString(file.path) || null,
-    review_path: asOptionalString(file.review_path) || null,
-    target_path: asOptionalString(file.target_path) || asOptionalString(file.review_path) || null,
-    sha256: asOptionalString(file.sha256) || null,
-    bytes: file.bytes,
-    lines: file.lines,
-  }));
-  writeApprovalSession({ ...session, preview_files: previewFiles, updated_at: new Date().toISOString() });
-}
-
-function approvedPreviewFiles(session: ApprovalSession | null, approvedIds: string[]): JsonObject[] {
-  if (!session?.preview_files) return [];
-  return approvedIds.flatMap((stageId) => (session.preview_files?.[stageId] || []).map(asJsonObject));
-}
-
-export function approvedTargetReviewPaths(approval: unknown): string[] {
-  return asStringArray(asJsonObject(approval).approved_review_paths);
-}
-
-export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArgs = {}): JsonObject {
-  if (reviewOutputMode(args) !== "target") return { ok: true, skipped: true, reason: "review output mode is bundle" };
-  if (!approvalComplete(args)) return { ok: true, skipped: true, reason: "approval is not complete" };
-  const sessionId = requestedApprovalSessionId(args);
-  if (!sessionId) return { ok: false, stage: "staged_review_drift", error: "approvalSessionId is required to validate target review files" };
-  const session = readApprovalSession(sessionId);
-  if (!session) return { ok: false, stage: "staged_review_drift", error: "Approval session was not found for target review validation" };
-  const approvedIds = approvedStageIds(args);
-  const files = approvedPreviewFiles(session, approvedIds);
-  const errors: string[] = [];
-  const paths: string[] = [];
-  for (const file of files) {
-    const relativePath = asOptionalString(file.path);
-    const expectedHash = asOptionalString(file.sha256);
-    if (!relativePath || !expectedHash) continue;
-    const target = path.resolve(root, relativePath);
-    try {
-      const content = fs.readFileSync(target, "utf8");
-      const stats = reviewStats(content);
-      if (stats.sha256 !== expectedHash) errors.push(`Approved target review file changed after review: ${relativePath}`);
-      paths.push(relativePath);
-    } catch {
-      errors.push(`Approved target review file is missing: ${relativePath}`);
-    }
-  }
-  const uniquePaths = Array.from(new Set(paths)).sort();
-  return {
-    ok: errors.length === 0,
-    stage: errors.length > 0 ? "staged_review_drift" : undefined,
-    error: errors[0],
-    errors,
-    files: uniquePaths,
-  };
+function approvedPreviewFiles(session: ApprovalSession | null, _approvedIds: string[]): JsonObject[] {
+  return previewFileRecords(session);
 }
 
 export function stagedApprovalState(
@@ -360,32 +320,67 @@ export function stagedApprovalState(
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
   const sessionId = approvalSessionId(workflow, root, payloadHash);
-  let approvalError = approvalTransitionError(args, workflow, sessionId, payloadHash, stageIds, approvedIds);
+  const requestedSessionId = requestedApprovalSessionId(args);
+  if (approvalCancelRequested(args)) {
+    if (!requestedSessionId) {
+      return {
+        version: 1,
+        kind: "cadre.staged_approval.v1",
+        workflow,
+        required: true,
+        cancelled: false,
+        valid_for_execute: false,
+        approval_error: "approvalSessionId is required to cancel staged review",
+      };
+    }
+    const cancellation = cancelApprovalSession(root, requestedSessionId);
+    return {
+      version: 1,
+      kind: "cadre.staged_approval.v1",
+      workflow,
+      required: true,
+      session_id: requestedSessionId,
+      cancelled: cancellation.cancelled === true,
+      valid_for_execute: false,
+      approval_error: cancellation.ok === false && cancellation.cancelled !== true ? cancellation.error : null,
+      cancellation: asJsonObject(cancellation),
+      current_stage: null,
+      approved_stages: [],
+      pending_stages: [],
+      current_review_artifacts: [],
+      current_review_bundle: null,
+    };
+  }
+  const frozenFiles = requestedSessionId
+    ? frozenReviewFiles(root, requestedSessionId, reviewFiles)
+    : reviewFiles;
+  let approvalError = approvalTransitionError(root, args, workflow, sessionId, payloadHash, stageIds, approvedIds, frozenFiles);
+  const effectiveFiles = frozenReviewFiles(root, sessionId, frozenFiles);
   const approved = new Set(approvedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));
   const requested = requestedApprovalStage(args);
   const active = stages.find((stage) => stage.id === requested && !approved.has(stage.id))
     || pending[0]
     || null;
-  const activeFiles = active ? filesForStage(reviewFiles, active) : [];
+  const activeFiles = active ? filesForStage(effectiveFiles, active) : [];
   const stageBundle = active
-    ? workflowReviewBundle(root, `${workflow}-${active.id}`, args, activeFiles, {
+    ? workflowReviewBundle(root, workflow, args, effectiveFiles, {
       ...extras,
       approval_stage: active.id,
       approved_stages: Array.from(approved),
       pending_stages: pending.map((stage) => stage.id),
     })
     : null;
-  if (active) recordApprovalSessionPreview(sessionId, workflow, payloadHash, active.id, asJsonObject(stageBundle));
+  if (active) recordApprovalPreview(root, sessionId, workflow, payloadHash, asJsonObject(stageBundle));
   const bundleError = asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
-  const session = readApprovalSession(sessionId);
+  const session = readApprovalSession(root, sessionId);
   const approvedFiles = approvedPreviewFiles(session, approvedIds);
   const approvedPaths = Array.from(new Set(approvedFiles.map((file) => asOptionalString(file.path)).filter((file): file is string => Boolean(file)))).sort();
   const complete = approvalComplete(args);
-  const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, reviewFiles, extras)]));
+  const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, effectiveFiles, extras)]));
   const validForExecute = !approvalError && complete && approvedIds.length === stages.length;
-  const manualPrompt = active ? stageApprovalPrompt(workflow, active, sessionId) : null;
+  const manualPrompt = active ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
   return {
     version: 1,
     kind: "cadre.staged_approval.v1",
@@ -417,17 +412,34 @@ export function stagedApprovalState(
     approved_stages: Array.from(approved),
     pending_stages: pending.map((stage) => stage.id),
     stages: stages.map((stage) => {
-      const stageFiles = filesForStage(reviewFiles, stage);
+      const stageFiles = filesForStage(effectiveFiles, stage);
       return {
         id: stage.id,
         title: stage.title,
         description: stage.description,
         approved: approved.has(stage.id),
         file_count: stageFiles.length,
+        canonical_paths: Array.from(new Set(stageFiles.map((file) => file.canonicalPath).filter((value): value is string => Boolean(value)))),
+        projection_paths: Array.from(new Set(stageFiles.map((file) => file.projectionPath).filter((value): value is string => Boolean(value)))),
       };
     }),
+    review_documents: stages.map((stage) => ({
+      id: stage.id,
+      title: stage.title,
+      approved: approved.has(stage.id),
+      files: reviewArtifactsFromFiles(filesForStage(effectiveFiles, stage)),
+    })),
+    review_files: reviewArtifactsFromFiles(effectiveFiles),
+    final_only_files: asStringArray(extras.final_only_files),
+    current_document: active ? {
+      id: active.id,
+      title: active.title,
+      files: reviewArtifactsFromFiles(activeFiles),
+    } : null,
     current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
     current_review_bundle: stageBundle,
+    review_bundle: stageBundle,
+    intent_to_add_paths: session?.intent_to_add_paths || [],
     approved_review_files: approvedFiles,
     approved_review_paths: approvedPaths,
     next_actions: complete

@@ -15,6 +15,7 @@ import { fileExists } from "../../infrastructure/runtime/json-store";
 import { trackHandoffJsonPath, trackLearningsJsonlPath, trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { TRACKS_INDEX_SCHEMA } from "./status";
 import { listTracks } from "./track-schedule";
+import { projectionDefinition } from "./projection-registry";
 
 export function safeReadDir(dir: string): string[] {
   try {
@@ -149,6 +150,7 @@ export function artifactSchema(artifact: unknown): JsonObject {
       generated_at: { type: "string" },
       completed_tracks: { type: "array" },
       notes: { type: "array" },
+      release_notes_markdown: { type: "string" },
     }),
     journal: objectSchema(["track_id", "events"], {
       track_id: { type: "string" },
@@ -214,58 +216,48 @@ export function artifactSchema(artifact: unknown): JsonObject {
 
 export function artifactDefinitions(root: string, args: RuntimeArgs = {}): ArtifactDefinition[] {
   const defs: ArtifactDefinition[] = [
-    { id: "product", title: "Product context", canonical: "cadre/product.json", projection: "cadre/product.md", schema: "cadre.product.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
-    { id: "product-guidelines", title: "Product guidelines", canonical: "cadre/product_guidelines.json", projection: "cadre/product_guidelines.md", schema: "cadre.product_guidelines.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
-    { id: "workflow", title: "Workflow policy", canonical: "cadre/workflow.json", projection: "cadre/workflow.md", schema: "cadre.workflow.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" },
-    { id: "patterns", title: "Project patterns", canonical: "cadre/patterns.jsonl", projection: "cadre/patterns.md", schema: "cadre.patterns.v1", scope: "project", sourceFormat: "jsonl", projectionFormat: "markdown" },
+    projectionDefinition("product", "product"),
+    projectionDefinition("product-guidelines", "product-guidelines"),
+    projectionDefinition("workflow", "workflow"),
+    projectionDefinition("patterns", "patterns"),
     { id: "tracks-index", title: "Track index", canonical: "cadre/tracks.json", schema: TRACKS_INDEX_SCHEMA, scope: "project", sourceFormat: "json", projectionFormat: "none" },
-    { id: "tech-stack", title: "Tech stack", canonical: "cadre/tech-stack.json", schema: "cadre.tech_stack.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
+    projectionDefinition("tech-stack", "tech-stack"),
     { id: "config", title: "Cadre config", canonical: "cadre/config.json", schema: "cadre.config.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
     { id: "setup-state", title: "Setup state", canonical: "cadre/setup_state.json", schema: "cadre.setup_state.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" },
   ];
   if (fileExists(path.join(root, "cadre", "repos.json")) || fileExists(path.join(root, "cadre", "repos.md"))) {
-    defs.push({ id: "repos", title: "Repository topology", canonical: "cadre/repos.json", projection: "cadre/repos.md", schema: "cadre.repos.v1", scope: "project", sourceFormat: "json", projectionFormat: "markdown" });
+    defs.push(projectionDefinition("repository-topology", "repos"));
   }
   if (fileExists(path.join(root, "cadre", "lsp.json"))) {
     defs.push({ id: "lsp-config", title: "LSP config", canonical: "cadre/lsp.json", schema: "cadre.lsp.v1", scope: "project", sourceFormat: "json", projectionFormat: "none" });
   }
   const styleJsonDir = path.join(root, "cadre", "styleguides");
-  const styleMdDir = path.join(root, "cadre", "code_styleguides");
   const styleIds = new Set<string>();
   for (const file of safeReadDir(styleJsonDir)) {
     if (file.endsWith(".json") && file !== "index.json") styleIds.add(path.basename(file, ".json"));
   }
-  for (const file of safeReadDir(styleMdDir)) {
+  for (const file of safeReadDir(styleJsonDir)) {
     if (file.endsWith(".md") && file !== "README.md") styleIds.add(path.basename(file, ".md"));
   }
-  if (styleIds.size > 0) {
-    defs.push({ id: "styleguides-index", title: "Style guide catalog", canonical: "cadre/styleguides/index.json", projection: "cadre/code_styleguides/README.md", schema: "cadre.styleguide_index.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
+  if (styleIds.size > 0 || fileExists(path.join(styleJsonDir, "index.json")) || fileExists(path.join(styleJsonDir, "README.md"))) {
+    defs.push(projectionDefinition("styleguide-catalog", "styleguides-index"));
   }
   for (const id of Array.from(styleIds).sort()) {
-    defs.push({ id: `styleguide:${id}`, title: `Style guide: ${id}`, canonical: `cadre/styleguides/${id}.json`, projection: `cadre/code_styleguides/${id}.md`, schema: "cadre.styleguide.v1", scope: "styleguide", sourceFormat: "json", projectionFormat: "markdown" });
+    defs.push(projectionDefinition("styleguide", `styleguide:${id}`, { id }, `Style guide: ${id}`));
   }
   const skillsDir = path.join(root, "cadre", "skills");
   for (const id of safeReadDir(skillsDir)) {
     const skillPath = path.join(skillsDir, id, "skill.json");
     if (!fileExists(skillPath)) continue;
-    defs.push({
-      id: `skill:${id}`,
-      title: `Project skill: ${id}`,
-      canonical: path.relative(root, skillPath).split(path.sep).join("/"),
-      ...(fileExists(path.join(skillsDir, id, "SKILL.md")) ? { projection: `cadre/skills/${id}/SKILL.md` } : {}),
-      schema: "cadre.project-skill.v1",
-      scope: "skill",
-      sourceFormat: "json",
-      projectionFormat: fileExists(path.join(skillsDir, id, "SKILL.md")) ? "markdown" : "none",
-    });
+    defs.push(projectionDefinition("project-skill", `skill:${id}`, { id }, `Project skill: ${id}`));
   }
   for (const track of listTracks(root)) {
     defs.push(
       { id: `track:${track.track_id}:metadata`, title: `Metadata: ${track.track_id}`, canonical: path.relative(root, track.metadata_path), schema: "cadre.metadata.v1", scope: "track", sourceFormat: "json", projectionFormat: "none" },
-      { id: `track:${track.track_id}:spec`, title: `Spec: ${track.track_id}`, canonical: path.relative(root, trackSpecJsonPath(track)), projection: path.relative(root, track.spec_path), schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
-      { id: `track:${track.track_id}:plan`, title: `Plan: ${track.track_id}`, canonical: path.relative(root, trackPlanJsonPath(track)), projection: path.relative(root, track.plan_path), schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
-      { id: `track:${track.track_id}:learnings`, title: `Learnings: ${track.track_id}`, canonical: path.relative(root, trackLearningsJsonlPath(track)), projection: path.relative(root, track.learnings_path || path.join(track.dir, "learnings.md")), schema: "cadre.learnings.v1", scope: "track", sourceFormat: "jsonl", projectionFormat: "markdown" },
-      { id: `track:${track.track_id}:handoff`, title: `Handoff: ${track.track_id}`, canonical: path.relative(root, trackHandoffJsonPath(track)), projection: path.relative(root, path.join(track.dir, "HANDOFF.md")), schema: "cadre.handoff.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+      projectionDefinition("track-specification", `track:${track.track_id}:spec`, { trackId: track.track_id }, `Spec: ${track.track_id}`),
+      projectionDefinition("track-plan", `track:${track.track_id}:plan`, { trackId: track.track_id }, `Plan: ${track.track_id}`),
+      projectionDefinition("track-learnings", `track:${track.track_id}:learnings`, { trackId: track.track_id }, `Learnings: ${track.track_id}`),
+      projectionDefinition("track-handoff", `track:${track.track_id}:handoff`, { trackId: track.track_id }, `Handoff: ${track.track_id}`)
     );
     const reviewEvidenceJsonl = path.join(track.dir, "review-evidence.jsonl");
     const reviewEvidenceJson = path.join(track.dir, "review-evidence.json");
@@ -292,7 +284,7 @@ export function artifactDefinitions(root: string, args: RuntimeArgs = {}): Artif
   for (const file of safeReadDir(releasesDir)) {
     if (!file.endsWith(".json")) continue;
     const version = path.basename(file, ".json");
-    defs.push({ id: `release:${version}`, title: `Release - ${version}`, canonical: `cadre/releases/${file}`, projection: `cadre/releases/${version}.md`, schema: "cadre.release.v1", scope: "release", sourceFormat: "json", projectionFormat: "markdown" });
+    defs.push(projectionDefinition("release", `release:${version}`, { version }, `Release - ${version}`));
   }
   const jobsDir = path.join(root, "cadre", "jobs");
   for (const file of safeReadDir(jobsDir)) {
@@ -306,8 +298,10 @@ export function artifactDefinitions(root: string, args: RuntimeArgs = {}): Artif
       const dir = path.join(archiveDir, trackId);
       if (!fileExists(path.join(dir, "metadata.json"))) continue;
       defs.push(
-        { id: `archive:${trackId}:spec`, title: `Archived spec: ${trackId}`, canonical: `cadre/archive/${trackId}/spec.json`, projection: `cadre/archive/${trackId}/spec.md`, schema: "cadre.spec.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" },
-        { id: `archive:${trackId}:plan`, title: `Archived plan: ${trackId}`, canonical: `cadre/archive/${trackId}/plan.json`, projection: `cadre/archive/${trackId}/plan.md`, schema: "cadre.plan.v1", scope: "track", sourceFormat: "json", projectionFormat: "markdown" }
+        projectionDefinition("track-specification", `archive:${trackId}:spec`, { trackId, archived: true }, `Archived spec: ${trackId}`),
+        projectionDefinition("track-plan", `archive:${trackId}:plan`, { trackId, archived: true }, `Archived plan: ${trackId}`),
+        projectionDefinition("track-learnings", `archive:${trackId}:learnings`, { trackId, archived: true }, `Archived learnings: ${trackId}`),
+        projectionDefinition("track-handoff", `archive:${trackId}:handoff`, { trackId, archived: true }, `Archived handoff: ${trackId}`)
       );
     }
   }

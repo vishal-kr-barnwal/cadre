@@ -10,18 +10,17 @@ import { PROVIDER_MODES } from "../../domain/provider-policy";
 import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
-import { readJsonl, renderJsonlMarkdown } from "./artifact-actions";
+import { artifactSync, readJsonl, renderJsonlMarkdown } from "./artifact-actions";
 import { CoreResult, PlannedGitAction, ReviewFile } from "./contracts";
 import { fileExists, utcNow } from "../../infrastructure/runtime/json-store";
 import { withGeneratedMarker } from "./markdown-docs";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { regenIndex } from "./project-maintenance";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
-import { humanReviewState, packetReviewArtifact, plainReviewFile, reviewArtifactsFromFiles, setupLspReviewArtifacts, setupLspWriteRequested, textReviewFile, workflowReviewBundle } from "./review-bundles";
+import { documentReviewPair, humanReviewState, packetReviewArtifact, plainReviewFile, reviewArtifactsFromFiles, setupLspReviewArtifacts, setupLspWriteRequested, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { lspSetup } from "./setup-infrastructure";
 import { selectedTrackId } from "./status";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
-import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
 import { refreshIntentPrompts, refreshScopeIds } from "./intent-prompts";
@@ -31,6 +30,7 @@ import { templateJson, workflowSummary } from "./workflow-response";
 import { doctor, lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
 import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function refreshedPatternsText(text: string, now = utcNow()): { text: string; stamp: string } {
   const stamp = `Last refreshed: ${now.slice(0, 10)}`;
@@ -49,13 +49,13 @@ export function refreshedPatternsArtifacts(root: string): { files: ReviewFile[];
   const next = refreshedPatternsText(currentText);
   const nextEntries = [{ ...seed, text: next.text, refreshed_at: utcNow() }, ...entries.slice(1)];
   const jsonl = nextEntries.map((entry) => JSON.stringify(entry)).join("\n").replace(/\n*$/, "\n");
-  const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries));
+  const projection = withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", renderJsonlMarkdown("Project patterns", nextEntries), { canonicalContent: jsonl, projection: "cadre/patterns.md" });
   const projectionPath = path.join(root, "cadre", "patterns.md");
   return {
-    files: [
+    files: documentReviewPair("patterns",
       plainReviewFile(path.relative(root, jsonlPath), "Refreshed project patterns canonical", "refresh:patterns", jsonl),
       textReviewFile(path.relative(root, projectionPath), "Refreshed project patterns projection", "cadre/patterns.jsonl", projection),
-    ],
+    ),
     jsonlPath,
     projectionPath,
     jsonl,
@@ -131,25 +131,15 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
       reason: args.reason || null,
     }),
   ];
-  const humanReview = humanReviewState("revert", args, reviewArtifacts);
-  if (args.execute === true && !humanReviewConfirmed(args)) {
-    return {
-      ...summary,
-      ok: false,
-      phase_state: "awaiting_staged_approval",
-      stage: "human_review",
-      dry_run: true,
-      track_context: trackContext(root, trackId),
-      git_actions: gitActions,
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      error: "Staged approval is required before reverting tracked commits",
-    };
-  }
+  const humanReview = { required: false, execution_required: true, workflow: "revert", artifacts: reviewArtifacts };
   const gitResults = args.execute === true ? runPlannedGitActions(gitActions) : [];
   const gitOk = actionResultsOk(gitResults);
   const traceBefore = args.execute === true && gitOk ? beginTrace(root) : null;
-  const statusResult = args.execute === true && gitOk
+  const projectionRepair = args.execute === true && gitOk
+    ? artifactSync(root, { execute: true, commitMode: "off" })
+    : null;
+  const mutationOk = gitOk && (!projectionRepair || projectionRepair.ok !== false);
+  const statusResult = args.execute === true && mutationOk
     ? metadataPatch(root, {
       trackId,
       patch: {
@@ -162,7 +152,7 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
       },
     })
     : null;
-  const controlCommit = args.execute === true && gitOk && statusResult && statusResult.ok !== false
+  const controlCommit = args.execute === true && mutationOk && statusResult && statusResult.ok !== false
     ? commitTrace(root, args, {
       kind: "control",
       workflow: "revert",
@@ -177,12 +167,13 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
     : null;
   return {
     ...summary,
-    ok: args.execute === true ? gitOk && (!statusResult || statusResult.ok !== false) && (!controlCommit || controlCommit.ok !== false) : true,
-    phase_state: args.execute !== true ? "dry_run" : (gitOk && (!controlCommit || controlCommit.ok !== false) ? "executed" : "recovery_required"),
+    ok: args.execute === true ? mutationOk && (!statusResult || statusResult.ok !== false) && (!controlCommit || controlCommit.ok !== false) : true,
+    phase_state: args.execute !== true ? "dry_run" : (mutationOk && (!controlCommit || controlCommit.ok !== false) ? "executed" : "recovery_required"),
     dry_run: args.execute !== true,
     track_context: trackContext(root, trackId),
     git_actions: gitActions,
     git_results: gitResults,
+    projection_repair: projectionRepair,
     metadata_patch: statusResult,
     control_commit: controlCommit,
     human_review: humanReview,
@@ -191,7 +182,7 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
 }
 
 export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "refresh");
+  args = applyStagedApprovalSessionPayload(root, args, "refresh");
   const summary = workflowSummary(root, "refresh", args);
   const intentPrompts = refreshIntentPrompts(args);
   if (intentPrompts.length > 0) {
@@ -218,16 +209,18 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   if (lspWriteRequested) reviewArtifacts.push(...setupLspReviewArtifacts(args));
   const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
-  const approval = stagedApprovalState(root, "refresh", args, refreshApprovalStages(refreshPatterns, lspWriteRequested), reviewFiles);
+  const approval = reviewFiles.length > 0
+    ? stagedApprovalState(root, "refresh", args, refreshApprovalStages(refreshPatterns, lspWriteRequested), reviewFiles, { final_only_files: ["cadre/tracks.json", "cadre/events.jsonl", ...(lspWriteRequested ? ["cadre/lsp.json"] : [])] })
+    : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
-  const humanReview = reviewArtifacts.length > 0 ? humanReviewState("refresh", args, reviewArtifacts, reviewBundle) : null;
-  const approvalError = stagedApprovalError(approval);
+  const humanReview = reviewFiles.length > 0 ? humanReviewState("refresh", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle) : null;
+  const approvalError = reviewFiles.length > 0 ? stagedApprovalError(approval) : null;
   const warnings = [
     ...asStringArray(asJsonObject(stageReviewBundle).warnings),
     ...(approvalError ? [approvalError] : []),
   ];
-  const awaitingDocumentReview = args.execute === true && reviewArtifacts.length > 0 && !stagedApprovalReady(approval);
+  const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !stagedApprovalReady(approval);
   const lspRequested = args.execute === true && !awaitingDocumentReview && lspWriteRequested;
   const traceBefore = args.execute === true && !awaitingDocumentReview && mutatingRefresh ? beginTrace(root) : null;
   const lsp = lspRequested ? lspSetup(root, { ...args, execute: true }) : lspSetup(root, { ...args, execute: false });
@@ -252,7 +245,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       error: approvalError || "Staged approval is required before refreshing Cadre context documents",
     };
   }
-  const reviewValidation = args.execute === true && reviewArtifacts.length > 0
+  const reviewValidation = args.execute === true && reviewFiles.length > 0
     ? validateApprovedTargetReviewFiles(root, args)
     : { ok: true, skipped: true };
   if (args.execute === true && reviewValidation.ok === false) {
@@ -293,6 +286,9 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       };
     }
   }
+  const approvalAudit = args.execute === true && reviewFiles.length > 0
+    ? recordApprovalCompletionFromArgs(root, args)
+    : null;
   const controlCommit = args.execute === true && mutatingRefresh
     ? commitTrace(root, args, {
       kind: "control",
@@ -306,6 +302,9 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
         lsp_setup: asJsonObject(lsp),
       },
     })
+    : null;
+  const approvalSessionClose = args.execute === true && reviewFiles.length > 0 && (!controlCommit || controlCommit.ok !== false)
+    ? closeApprovalSessionFromArgs(root, args)
     : null;
   return {
     ...summary,
@@ -321,6 +320,8 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     regen,
     patterns,
     control_commit: controlCommit,
+    approval_audit: approvalAudit,
+    approval_session_close: approvalSessionClose,
     approval,
     human_review: humanReview,
     review_artifacts: stageReviewArtifacts,

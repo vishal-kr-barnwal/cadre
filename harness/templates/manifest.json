@@ -58,7 +58,7 @@
       "id": "style-guides",
       "source": "styleguides/*.json",
       "target": "cadre/styleguides/*.json",
-      "projection": "cadre/code_styleguides/*.md",
+      "projection": "cadre/styleguides/*.md",
       "purpose": "Language-specific implementation guidance selected by setup packets.",
       "scope": "target-project"
     },

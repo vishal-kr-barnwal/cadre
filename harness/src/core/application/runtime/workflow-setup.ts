@@ -11,7 +11,7 @@ import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 
 import { renderJsonCodeblock } from "./artifact-actions";
-import { CoreResult } from "./contracts";
+import { CoreResult, ReviewFile } from "./contracts";
 import { summarizeLspSetupResult } from "./health-summaries";
 import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
@@ -26,13 +26,15 @@ import { trackIndexPayload } from "./status";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
 import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
-import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
+import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, templateText, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
 import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { setupGenerationWarnings } from "./generation-quality";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { appendRequiredLine, lspPreviewPayload, machineReviewFile } from "./setup-review-plan";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "setup");
+  args = applyStagedApprovalSessionPayload(root, args, "setup");
   const summary = workflowSummary(root, "setup", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
@@ -47,24 +49,85 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const providerMode = asOptionalString(provider.provider_mode);
   const lspRecommendations = lspSetup(root, { ...args, execute: false });
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
+  const hasPreviewLspAdded = Object.prototype.hasOwnProperty.call(rawArgs, "setupPreviewLspAdded")
+    || Object.prototype.hasOwnProperty.call(rawArgs, "setup_preview_lsp_added");
+  const previewLspAdded = hasPreviewLspAdded
+    ? asStringArray(rawArgs.setupPreviewLspAdded || rawArgs.setup_preview_lsp_added)
+    : asStringArray(lspRecommendations.missingFromConfig);
+  const previewStyleGuides = isRecord(rawArgs.setupPreviewStyleGuides || rawArgs.setup_preview_style_guides)
+    ? asJsonObject(rawArgs.setupPreviewStyleGuides || rawArgs.setup_preview_style_guides)
+    : {
+      selected: asStringArray(styleGuides.selected),
+      missing: asStringArray(styleGuides.missing),
+      warnings: asStringArray(styleGuides.warnings),
+    };
+  const approvalArgs = { ...args, setupPreviewLspAdded: previewLspAdded, setupPreviewStyleGuides: previewStyleGuides } as RuntimeArgs;
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const configOverrides = asJsonObject(rawArgs.config);
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
-  const reviewFiles = setupReviewFiles(root, args, styleGuides, polyrepoRequested);
+  const generatedAt = utcNow();
+  const configPayload: JsonObject = {
+    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
+    packet_only: true,
+    sync_mode: syncModeRecommendation,
+    provider_mode: providerMode || "local",
+    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
+    ...(asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {}),
+    ...(isRecord(rawArgs.integrations) ? { integrations: asJsonObject(rawArgs.integrations) } : {}),
+    ...configOverrides,
+  };
+  const setupStatePayload: JsonObject = {
+    version: 1,
+    packet_only: true,
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
+    initialized_at: generatedAt,
+    updated_at: generatedAt,
+  };
+  const trackIndex = trackIndexPayload(root, []);
+  const machineFiles: ReviewFile[] = [
+    machineReviewFile("cadre/.gitignore", "Cadre local-state ignore", "setup:native-state", appendRequiredLine(fileExists(path.join(root, "cadre", ".gitignore")) ? fs.readFileSync(path.join(root, "cadre", ".gitignore"), "utf8") : "", "/local/")),
+    machineReviewFile("cadre/config.json", "Cadre configuration", "setup:config", `${JSON.stringify(configPayload, null, 2)}\n`),
+    machineReviewFile("cadre/setup_state.json", "Cadre setup state", "setup:state", `${JSON.stringify(setupStatePayload, null, 2)}\n`),
+    machineReviewFile("cadre/tracks.json", "Initial track index", "setup:track-index", `${JSON.stringify(trackIndex, null, 2)}\n`),
+  ];
+  if (lspWriteRequested) {
+    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations), null, 2)}\n`));
+  }
+  const gitattributesNeeded = polyrepoRequested
+    || configPayload.sync_mode === "shared"
+    || rawArgs.writeGitattributes === true
+    || rawArgs.write_gitattributes === true;
+  if (gitattributesNeeded) {
+    const attributesPath = path.join(root, ".gitattributes");
+    machineFiles.push(machineReviewFile(".gitattributes", "Cadre merge attributes", "setup:gitattributes", appendRequiredLine(fileExists(attributesPath) ? fs.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours")));
+  }
+  const ciProvider = configuredCiProvider(root, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
+  if (ciProvider && rawArgs.writeCi !== false && rawArgs.write_ci !== false) {
+    const ciTemplate = polyrepoRequested
+      ? (ciProvider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml")
+      : (ciProvider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml");
+    const ciPath = ciProvider === "github"
+      ? `.github/workflows/${polyrepoRequested ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml"}`
+      : ".gitlab-ci.yml";
+    if (!fileExists(path.join(root, ciPath)) || rawArgs.force === true) {
+      machineFiles.push(machineReviewFile(ciPath, "Cadre CI workflow", `template:${ciTemplate}`, templateText(ciTemplate, "")));
+    }
+  }
+  const providerNeedsConfirmation = provider.requires_confirmation === true && !asOptionalString(rawArgs.providerMode || rawArgs.provider_mode || rawArgs.provider);
+  const reviewFiles = providerNeedsConfirmation ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
   const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
-  const approval = stagedApprovalState(root, "setup", args, setupApprovalStages(polyrepoRequested), reviewFiles, {
-    styleGuides: {
-      selected: asStringArray(styleGuides.selected),
-      missing: asStringArray(styleGuides.missing),
-      warnings: asStringArray(styleGuides.warnings),
-    },
-  });
+  const approval = providerNeedsConfirmation
+    ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [] }
+    : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles, {
+      styleGuides: previewStyleGuides,
+      final_only_files: ["cadre/events.jsonl"],
+    });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const approvalError = stagedApprovalError(approval);
+  const approvalError = providerNeedsConfirmation ? null : stagedApprovalError(approval);
   const qualityWarnings = setupGenerationWarnings(args as JsonObject);
   const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
   const nativePrompts = args.execute === true ? [] : setupNativePrompts({
@@ -254,13 +317,20 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     "Product Guidelines"
   );
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
+  writeText(
+    "tech-stack.md",
+    withGeneratedMarker("cadre/tech-stack.json", "cadre.tech_stack.v1", renderJsonCodeblock("Tech stack", techStackFromArgs(args) || {}), {
+      canonicalContent: `${JSON.stringify(techStackFromArgs(args) || {}, null, 2)}\n`,
+      projection: "cadre/tech-stack.md",
+    })
+  );
   writeProjectDoc(
     "workflow.md",
     "workflow",
     normalizeProjectDoc("workflow", rawArgs.workflowPolicy || rawArgs.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes"),
     "Project Workflow"
   );
-  writeSetupJson("tracks.json", trackIndexPayload(root, []));
+  writeSetupJson("tracks.json", trackIndex);
   const patternsSeed = templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
   const patternsText = asOptionalString(patternsSeed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
   writeSetupJsonlEntry("patterns.jsonl", {
@@ -284,8 +354,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     });
     writeSetupJson(`styleguides/${guideId}.json`, guideJson);
     writeText(
-      `code_styleguides/${guideId}.md`,
-      withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson))
+      `styleguides/${guideId}.md`,
+      withGeneratedMarker(`cadre/styleguides/${guideId}.json`, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson), {
+        canonicalContent: `${JSON.stringify(guideJson, null, 2)}\n`,
+        projection: `cadre/styleguides/${guideId}.md`,
+      })
     );
   }
   const styleGuideIndex: JsonObject = {
@@ -296,41 +369,42 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   };
   writeSetupJson("styleguides/index.json", styleGuideIndex);
   writeText(
-    "code_styleguides/README.md",
-    withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex))
+    "styleguides/README.md",
+    withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex), {
+      canonicalContent: `${JSON.stringify(styleGuideIndex, null, 2)}\n`,
+      projection: "cadre/styleguides/README.md",
+    })
   );
-  writeSetupJson("setup_state.json", {
-    version: 1,
-    packet_only: true,
-    topology: polyrepoRequested ? "polyrepo" : "monorepo",
-    initialized_at: utcNow(),
-    updated_at: utcNow(),
-  });
-  const configPayload = {
-    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
-    packet_only: true,
-    sync_mode: syncModeRecommendation,
-    provider_mode: providerMode || "local",
-    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
-    ...(asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {}),
-    ...(isRecord(rawArgs.integrations) ? { integrations: asJsonObject(rawArgs.integrations) } : {}),
-    ...configOverrides,
-  };
+  writeSetupJson("setup_state.json", setupStatePayload);
   writeSetupJson("config.json", configPayload);
   let repos: JsonObject | null = null;
   if (reposPayload) {
     repos = reposPayload;
     writeSetupJson("repos.json", reposPayload);
+    writeText(
+      "repos.md",
+      withGeneratedMarker("cadre/repos.json", "cadre.repos.v1", renderJsonCodeblock("Repository topology", reposPayload), {
+        canonicalContent: `${JSON.stringify(reposPayload, null, 2)}\n`,
+        projection: "cadre/repos.md",
+      })
+    );
   }
-  const lspSetupResult = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
-  const gitattributesNeeded = polyrepoRequested
-    || configPayload.sync_mode === "shared"
-    || rawArgs.writeGitattributes === true
-    || rawArgs.write_gitattributes === true;
+  const lspSetupExecution = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
+  const lspSetupResult = lspWriteRequested
+    ? {
+      ...lspSetupExecution,
+      written: lspSetupExecution.ok !== false,
+      added: Array.from(new Set([
+        ...previewLspAdded,
+        ...asStringArray(lspSetupExecution.added),
+      ])),
+      preview_materialized: true,
+    }
+    : lspSetupExecution;
   const gitattributes = gitattributesNeeded ? setupGitattributes(root) : null;
   const ciSetup = setupCiTemplates(
     root,
-    configuredCiProvider(root, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null),
+    ciProvider,
     { ...args, topology: polyrepoRequested ? "polyrepo" : "monorepo" }
   );
   const polyrepoSetup = polyrepoRequested && repos
@@ -349,6 +423,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     written_count: written.length,
     skipped_count: skipped.length,
   });
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "setup",
@@ -356,7 +431,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     before: traceBefore,
     forceEnabled: true,
     allowDirty: true,
-    includeDirtyFiles: asStringArray(reviewValidation.files),
+    includeDirtyFiles: [...asStringArray(reviewValidation.files), "cadre/.gitignore"],
     note: {
       event_id: asOptionalString(asJsonObject(setupEvent.event).id) || null,
       topology: polyrepoRequested ? "polyrepo" : "monorepo",
@@ -364,6 +439,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       provider_mode: providerMode || "local",
     },
   });
+  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...result,
     ok: controlCommit.ok !== false,
@@ -380,6 +456,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     lsp_setup: lspSetupResult,
     native_state: nativeState,
     event: setupEvent,
+    approval_audit: approvalAudit,
+    approval_session_close: approvalSessionClose,
     control_commit: controlCommit,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),

@@ -104,6 +104,32 @@ test("skill workflow creates, projects, updates, renames, and removes through st
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("skill review defaults to target mode while explicit bundle mode stays non-mutating", () => {
+  const root = project();
+  try {
+    const input = createInput();
+    const bundle = core.workflowPacket(root, { workflow: "skill", ...input, reviewOutputMode: "bundle" });
+    assert.equal(bundle.ok, true, bundle.error);
+    assert.equal(bundle.review_bundle.mode, "bundle");
+    assert.equal(bundle.review_bundle.mutates_worktree, false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), false);
+    const bundleCancel = core.workflowPacket(root, { workflow: "skill", approvalSessionId: bundle.approval.session_id, approvalCancel: true });
+    assert.equal(bundleCancel.approval.cancelled, true);
+
+    const target = core.workflowPacket(root, { workflow: "skill", ...input });
+    assert.equal(target.ok, true, target.error);
+    assert.equal(target.review_bundle.mode, "target");
+    assert.equal(target.approval.current_document.id, "skill");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "skill.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "SKILL.md")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md")), true);
+    const targetCancel = core.workflowPacket(root, { workflow: "skill", approvalSessionId: target.approval.session_id, approvalCancel: true });
+    assert.equal(targetCancel.approval.cancelled, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "skill.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "SKILL.md")), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill workflow pauses source discovery for model formatting without writing review artifacts", () => {
   const root = project();
   try {

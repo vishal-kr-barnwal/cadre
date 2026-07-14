@@ -14,7 +14,7 @@
     "review_revision",
     "execute"
   ],
-  "approval": "staged",
+  "approval": "document_staged",
   "references": [
     {
       "id": "native-prompts",

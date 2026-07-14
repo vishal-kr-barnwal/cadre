@@ -13,8 +13,9 @@ import type { CoreResult, ReviewFile } from "./contracts";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { appendCadreEvent } from "./native-state";
 import { renderProjectSkillProjection } from "./project-skill-projection";
-import { stagedApprovalError, stagedApprovalReady, stagedApprovalState } from "./staged-approval";
+import { applyStagedApprovalSessionPayload, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import type { ApprovalStage } from "./staged-approval-stages";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 function knownRepos(root: string): Set<string> {
   const known = new Set([".", "root"]);
@@ -138,21 +139,45 @@ function reviewFilesFor(operation: SkillOperation, sourceId: string, targetId: s
     ...removedReferencePaths.map((relative): ReviewFile => ({ path: `cadre/skills/${sourceId}/${relative}.delete`, title: `Remove reference ${relative}`, kind: "text", source: "skill.reference.remove", content: `Delete cadre/skills/${sourceId}/${relative}\n`, missing: true })),
   ];
   const output: ReviewFile[] = [];
-  if (operation === "create" || operation === "rename") output.push({ path: `cadre/skills/${targetId}/.identity`, title: `${operation} project skill`, kind: "text", source: `skill.${operation}`, content: `${sourceId} -> ${targetId}\n` });
-  for (const [relative, content] of files) output.push({ path: `cadre/skills/${targetId}/${relative}`, title: relative, kind: relative.endsWith(".json") ? "json" : relative.endsWith(".md") ? "markdown" : "text", source: "skill.desired_state", content });
-  for (const relative of removedReferencePaths) output.push({ path: `cadre/skills/${targetId}/${relative}.delete`, title: `Remove reference ${relative}`, kind: "text", source: "skill.reference.remove", content: `Delete cadre/skills/${targetId}/${relative}\n`, missing: true });
+  for (const [relative, content] of files) {
+    const mainDocument = relative === "skill.json" || relative === "SKILL.md";
+    output.push({
+      path: `cadre/skills/${targetId}/${relative}`,
+      title: relative,
+      kind: relative.endsWith(".json") ? "json" : relative.endsWith(".md") ? "markdown" : "text",
+      source: "skill.desired_state",
+      content,
+      documentId: mainDocument ? "skill" : "references",
+      reviewRole: relative === "skill.json" ? "canonical" : "human",
+      ...(mainDocument ? { canonicalPath: `cadre/skills/${targetId}/skill.json` } : {}),
+      projectionPath: mainDocument ? `cadre/skills/${targetId}/SKILL.md` : `cadre/skills/${targetId}/${relative}`,
+      ...(!mainDocument ? { approvalGroup: "references" } : {}),
+    });
+  }
+  for (const relative of removedReferencePaths) output.push({
+    path: `cadre/skills/${targetId}/${relative}.delete`,
+    title: `Remove reference ${relative}`,
+    kind: "text",
+    source: "skill.reference.remove",
+    content: `Delete cadre/skills/${targetId}/${relative}\n`,
+    missing: true,
+    documentId: "references",
+    reviewRole: "human",
+    projectionPath: `cadre/skills/${targetId}/${relative}`,
+    approvalGroup: "references",
+  });
   return output;
 }
 
 function approvalStages(operation: SkillOperation, referenceReviewPaths: string[]): ApprovalStage[] {
   return [
-    ...(["create", "rename", "remove"].includes(operation) ? [{ id: "identity", title: "Skill Identity", description: "Skill directory creation, move, or deletion.", fileMatches: [".identity", ".delete"] }] : []),
-    ...(operation !== "remove" ? [{ id: "manifest", title: "Manifest And Projection", description: "Canonical skill.json and generated SKILL.md.", fileMatches: ["skill.json", "SKILL.md"] }] : []),
-    ...(referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", fileMatches: referenceReviewPaths }] : []),
+    ...(["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"] }] : []),
+    ...(["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"] }] : []),
   ];
 }
 
 export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
+  args = applyStagedApprovalSessionPayload(root, args, "skill");
   const operation = (asOptionalString(args.operation) || "list") as SkillOperation;
   const id = asOptionalString(args.skillId || args.skill_id || args.id)?.trim() || "";
   if (operation === "list") return catalog(root);
@@ -161,12 +186,17 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   if (!["create", "update", "rename", "remove"].includes(operation)) return { ok: false, error: `unknown skill operation: ${operation}` };
   if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) return { ok: false, error: `invalid skillId: ${id || "(missing)"}` };
   const existing = readManifest(root, id);
-  if (operation === "create" && fs.existsSync(path.join(root, "cadre", "skills", id))) return { ok: false, error: `skill already exists: ${id}` };
+  const continuingApproval = Boolean(args.approvalSessionId || args.approval_session_id);
+  if (operation === "create" && fs.existsSync(path.join(root, "cadre", "skills", id)) && !continuingApproval) return { ok: false, error: `skill already exists: ${id}` };
   if (operation !== "create" && !existing.manifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
   if (operation === "remove" && !fs.existsSync(path.join(root, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
   const newId = operation === "rename" ? asOptionalString(args.newSkillId || args.new_skill_id)?.trim() || "" : id;
   if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || fs.existsSync(path.join(root, "cadre", "skills", newId)))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
-  const base = operation === "create" ? emptyManagedManifest(id) : existing.manifest || emptyManagedManifest(id);
+  const sessionSource = (args as JsonObject).source_manifest;
+  const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource)
+    ? asJsonObject(sessionSource) as unknown as ManagedManifest
+    : existing.manifest;
+  const base = operation === "create" ? emptyManagedManifest(id) : sourceManifest || emptyManagedManifest(id);
   const changed = applySkillChanges(base, args.changes);
   if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root, id, changed.sourceRequests) };
   const manifest = changed.manifest;
@@ -175,7 +205,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   const desired = operation === "remove" ? { files: new Map<string, string>(), errors: [] } : desiredFiles(root, id, manifest, changed.referenceContent);
   errors.push(...desired.errors);
   if (errors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: errors[0], errors };
-  const existingReferences = (Array.isArray(existing.manifest?.references) ? existing.manifest!.references : []).map(asJsonObject);
+  const existingReferences = (Array.isArray(sourceManifest?.references) ? sourceManifest!.references : []).map(asJsonObject);
   const existingReferencePaths = existingReferences.map((value) => asOptionalString(value.path)).filter((value): value is string => Boolean(value));
   const targetReferencePaths = manifest.references.map((value) => asOptionalString(asJsonObject(value).path)).filter((value): value is string => Boolean(value));
   const upsertedPaths = Array.from(changed.referenceContent.keys()).flatMap((referenceId) => manifest.references
@@ -197,15 +227,30 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     return deletedReferencePaths.includes(relative) ? [`${base}.delete`] : [base];
   });
   const stages = approvalStages(operation, referenceReviewPaths);
-  const snapshot = hashDirectory(path.join(root, "cadre", "skills", id));
-  const reviewArgs = { ...args, reviewOutputMode: "bundle" };
-  const approval = stagedApprovalState(root, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot });
-  const approvalError = stagedApprovalError(approval);
-  if (args.execute !== true || !stagedApprovalReady(approval)) return {
-    ok: !approvalError, operation, skill_id: id, new_skill_id: newId, dry_run: true,
-    phase_state: "awaiting_staged_approval", approval, review_bundle: asJsonObject(approval).current_review_bundle,
+  const snapshot = asOptionalString((args as JsonObject).source_snapshot) || hashDirectory(path.join(root, "cadre", "skills", id));
+  const reviewArgs = {
+    ...args,
+    source_snapshot: snapshot,
+    source_manifest: (sourceManifest || emptyManagedManifest(id)) as unknown as JsonObject,
+  } as RuntimeArgs;
+  const approval = stages.length > 0
+    ? stagedApprovalState(root, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] })
+    : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
+  const approvalError = stages.length > 0 ? stagedApprovalError(approval) : null;
+  if (args.execute !== true || (stages.length > 0 && !stagedApprovalReady(approval))) return {
+    ok: !approvalError,
+    operation,
+    skill_id: id,
+    new_skill_id: newId,
+    dry_run: true,
+    phase_state: stages.length > 0 ? "awaiting_staged_approval" : "ready",
+    approval,
+    review_bundle: asJsonObject(approval).current_review_bundle,
+    mutation_plan: stages.length === 0 ? { operation, source: id, target: operation === "remove" ? null : newId } : null,
     ...(approvalError ? { error: approvalError } : {}),
   };
+  const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root, reviewArgs) : { ok: true, skipped: true };
+  if (reviewValidation.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, error: asOptionalString(reviewValidation.error) || "Approved review files changed" };
   const traceBefore = beginTrace(root);
   try {
     const mutation = atomicSkillMutation(root, id, operation === "remove" ? null : newId, desired.files);
@@ -216,9 +261,11 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     mutation.finish();
     const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
     const event = appendCadreEvent(root, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null });
+    const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root, reviewArgs) : null;
     const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
-    const controlCommit = commitTrace(root, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
+    const controlCommit = commitTrace(root, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
     if (controlCommit.ok === false) return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit };
-    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval };
+    const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root, reviewArgs) : null;
+    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
   } catch (error) { return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "filesystem", error: errorMessage(error) }; }
 }

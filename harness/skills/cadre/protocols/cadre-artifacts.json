@@ -9,18 +9,13 @@
   ],
   "transitions": [
     "preview",
-    "review_projection",
     "execute"
   ],
-  "approval": "staged",
+  "approval": "execute",
   "references": [
     {
       "id": "template-locator",
       "when": "resources:template"
-    },
-    {
-      "id": "approval-and-generation",
-      "when": "decision:approval"
     }
   ]
 }

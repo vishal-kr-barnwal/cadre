@@ -16,7 +16,7 @@ import { withTrackLock } from "../../infrastructure/runtime/locking";
 import { withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown, trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { regenIndex } from "./project-maintenance";
-import { humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
+import { documentReviewPair, humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
 import { metadataTrackSummary, selectedTrackId } from "./status";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
@@ -28,6 +28,7 @@ import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSum
 import { lspImpact } from "./workspace-intel";
 import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { trackGenerationWarnings } from "./generation-quality";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
   const completed = listTracks(root)
@@ -40,7 +41,7 @@ export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): Relea
   const releaseSlug = safeName(version);
   const releaseMd = path.join(releaseDir, `${releaseSlug}.md`);
   const releaseJson = path.join(releaseDir, `${releaseSlug}.json`);
-  const notes = asOptionalString(args.releaseNotes || args.release_notes)
+  const notesBody = asOptionalString(args.releaseNotes || args.release_notes)
     || [
       `# Release - ${version}`,
       "",
@@ -64,7 +65,17 @@ export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): Relea
       tags: track.tags || [],
       review: track.review,
     })),
+    release_notes_markdown: notesBody.endsWith("\n") ? notesBody : `${notesBody}\n`,
   };
+  const notes = withGeneratedMarker(
+    path.relative(root, releaseJson),
+    "cadre.release.v1",
+    notesBody,
+    {
+      canonicalContent: `${JSON.stringify(metadata, null, 2)}\n`,
+      projection: path.relative(root, releaseMd),
+    }
+  );
   const gitActions = rawArgs.createTag === true || rawArgs.create_tag === true || rawArgs.tag === true
     ? [plannedGitAction("release-tag", "tag_release", ".", root, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)]
     : [];
@@ -72,24 +83,23 @@ export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): Relea
 }
 
 export function releaseReviewFiles(root: string, plan: ReleaseArtifactPlan): ReviewFile[] {
-  return [
-    textReviewFile(
-      path.relative(root, plan.releaseMd),
-      "Release notes",
-      "releaseNotes",
-      plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}\n`
-    ),
+  return documentReviewPair("release_notes",
     jsonReviewFile(
       path.relative(root, plan.releaseJson),
       "Release metadata",
       "releaseMetadata",
       plan.metadata
     ),
-  ];
+    textReviewFile(
+      path.relative(root, plan.releaseMd),
+      "Release notes",
+      "releaseNotes",
+      plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}\n`
+    ));
 }
 
 export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "release");
+  args = applyStagedApprovalSessionPayload(root, args, "release");
   const summary = workflowSummary(root, "release", args);
   const plan = releaseArtifactPlan(root, args);
   const reviewFiles = releaseReviewFiles(root, plan);
@@ -100,7 +110,7 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     }));
   }
   const reviewBundle = workflowReviewBundle(root, "release", args, reviewFiles, { release_version: plan.version });
-  const approval = stagedApprovalState(root, "release", args, releaseApprovalStages(plan.gitActions.length > 0), reviewFiles, { release_version: plan.version });
+  const approval = stagedApprovalState(root, "release", args, releaseApprovalStages(plan.gitActions.length > 0), reviewFiles, { release_version: plan.version, final_only_files: ["cadre/setup_state.json", "cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("release", args, reviewArtifacts, reviewBundle);
@@ -170,6 +180,7 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     current.updated_at = utcNow();
     return current;
   }, { lock: false });
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "release",
@@ -184,6 +195,9 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
   });
   const gitResults = runPlannedGitActions(plan.gitActions);
   const gitOk = actionResultsOk(gitResults);
+  const approvalSessionClose = indexPatch.ok !== false && controlCommit.ok !== false && gitOk
+    ? closeApprovalSessionFromArgs(root, args)
+    : null;
   return {
     ...base,
     ok: indexPatch.ok !== false && controlCommit.ok !== false && gitOk,
@@ -193,13 +207,15 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     setup_state: indexPatch,
     control_commit: controlCommit,
     git_results: gitResults,
+    approval_audit: approvalAudit,
+    approval_session_close: approvalSessionClose,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),
   };
 }
 
 export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "revise");
+  args = applyStagedApprovalSessionPayload(root, args, "revise");
   const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "revise", args);
@@ -242,26 +258,28 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     };
   }
   if (track && revisedSpec) {
-    reviewFiles.push(jsonReviewFile(path.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec));
-    reviewFiles.push(textReviewFile(
+    reviewFiles.push(...documentReviewPair("spec",
+      jsonReviewFile(path.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec),
+      textReviewFile(
       path.relative(root, track.spec_path),
       "Revised track spec",
       "spec.json",
-      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track))))
-    ));
+      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedSpec, null, 2)}\n`, projection: path.relative(root, track.spec_path) })
+    )));
   }
   if (track && revisedPlan) {
-    reviewFiles.push(jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan));
-    reviewFiles.push(textReviewFile(
+    reviewFiles.push(...documentReviewPair("plan",
+      jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan),
+      textReviewFile(
       path.relative(root, track.plan_path),
       "Revised track plan",
       "plan.json",
-      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track))))
-    ));
+      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedPlan, null, 2)}\n`, projection: path.relative(root, track.plan_path) })
+    )));
   }
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
-  const approval = stagedApprovalState(root, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId, final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
@@ -358,6 +376,9 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     return { ok: true, written, revised_at: utcNow() };
   });
   const regen = writeResult.ok !== false ? regenIndex(root) : null;
+  const approvalAudit = writeResult.ok !== false && (!regen || regen.ok !== false)
+    ? recordApprovalCompletionFromArgs(root, args)
+    : null;
   const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false)
     ? commitTrace(root, args, {
       kind: "control",
@@ -373,6 +394,9 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       },
     })
     : null;
+  const approvalSessionClose = writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false)
+    ? closeApprovalSessionFromArgs(root, args)
+    : null;
   return {
     ...base,
     ok: writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false),
@@ -381,6 +405,8 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
     write: writeResult,
     regen,
     control_commit: controlCommit,
+    approval_audit: approvalAudit,
+    approval_session_close: approvalSessionClose,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),
   };

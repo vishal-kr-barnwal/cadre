@@ -1,5 +1,6 @@
 export * from "./artifact-actions";
 export * from "./artifact-catalog";
+export * from "./artifact-pairs";
 export * from "./collision";
 export * from "./contracts";
 export * from "./formula-workflow";
@@ -17,6 +18,7 @@ export * from "./plan-docs";
 export * from "./planning";
 export * from "../../infrastructure/runtime/project-config";
 export * from "./project-maintenance";
+export * from "./projection-registry";
 export * from "./quality-gates";
 export * from "./repo-map";
 export * from "./repo-resolution";

@@ -241,6 +241,8 @@ export interface RuntimeArgs extends JsonObject {
   approved_stages?: string[] | string;
   approvalComplete?: boolean;
   approval_complete?: boolean;
+  approvalCancel?: boolean;
+  approval_cancel?: boolean;
   manualVerificationMode?: string;
   manual_verification_mode?: string;
   manualVerificationSummary?: string;

@@ -13,7 +13,7 @@ import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-regis
 import { collisionScan } from "./collision";
 import { CoreResult } from "./contracts";
 import { fileExists, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
-import { markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { hasGeneratedMarker, markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent, appendCadreMessage, nativeStateSummary } from "./native-state";
 import { trackHandoffJsonPath } from "./plan-docs";
 import { planIntegrity } from "./planning";
@@ -21,10 +21,9 @@ import { projectSkillDiagnostics } from "./project-skills";
 import { regenIndex } from "./project-maintenance";
 import { prCiStatus, reviewAssist } from "./quality-gates";
 import { implementationPrep } from "./repo-resolution";
-import { humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
+import { documentReviewPair, humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { syncControlPlane } from "./review-records";
 import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
-import { humanReviewConfirmed } from "./tech-stack";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { findTrack, trackContext } from "./track-context";
 import { branchSetForTrack } from "./branch-set";
@@ -33,6 +32,10 @@ import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
 import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
+import { artifactValidate, renderArtifact } from "./artifact-actions";
+import { artifactDefinitions } from "./artifact-catalog";
+import { writeArtifactFilesAtomic } from "./artifact-pairs";
+import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const prep = implementationPrep(root, {
@@ -89,9 +92,10 @@ export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResu
     track_id: track.track_id,
     branch_set: branchSetForTrack(root, track),
   }));
+  const projections = artifactValidate(root, { ...args, includeArchive: true });
   return {
     ...summary,
-    ok: true,
+    ok: projections.ok !== false,
     doctor: doctor(root, { hasCadreProject: true }),
     team: teamStatus(root),
     integrity: planIntegrity(root, args.trackId || args.track_id || null),
@@ -100,6 +104,7 @@ export function workflowValidate(root: string, args: RuntimeArgs = {}): CoreResu
     branch_sets: branchSets,
     native_state: nativeStateSummary(root),
     project_skill_diagnostics: projectSkillDiagnostics(root),
+    projection_validation: projections,
   };
 }
 
@@ -117,7 +122,7 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
       tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
     }),
   ];
-  const humanReview = humanReviewState("archive", args, reviewArtifacts);
+  const humanReview = { required: false, execution_required: true, workflow: "archive", artifacts: reviewArtifacts };
   if (args.execute !== true) {
     return {
       ...summary,
@@ -126,19 +131,6 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
       tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
       human_review: humanReview,
       review_artifacts: reviewArtifacts,
-    };
-  }
-  if (!humanReviewConfirmed(args)) {
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_staged_approval",
-      stage: "human_review",
-      tracks: tracks.map((track) => asJsonObject(metadataTrackSummary(track))),
-      human_review: humanReview,
-      review_artifacts: reviewArtifacts,
-      error: "Staged approval is required before archiving tracks",
     };
   }
   const syncPre = syncControlPlane(root, { mode: "pre" });
@@ -154,7 +146,46 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
       continue;
     }
     fs.renameSync(track.dir, target);
-    archived.push({ track_id: track.track_id, ok: true, path: path.relative(root, target) });
+    const archiveDefs = artifactDefinitions(root, { includeArchive: true })
+      .filter((definition) => definition.id.startsWith(`archive:${track.track_id}:`) && definition.projection);
+    const projectionErrors: string[] = [];
+    const projectionWrites = archiveDefs.flatMap((definition) => {
+      if (!fileExists(path.join(root, definition.canonical))) return [];
+      const existingProjection = definition.projection ? path.join(root, definition.projection) : null;
+      if (existingProjection && fileExists(existingProjection) && !hasGeneratedMarker(fs.readFileSync(existingProjection, "utf8"))) {
+        projectionErrors.push(`Refusing to rewrite user-owned archived projection ${definition.projection}`);
+        return [];
+      }
+      const rendered = renderArtifact(root, definition);
+      if (rendered.ok !== true || !rendered.content || !definition.projection) {
+        projectionErrors.push(`Unable to render archived projection for ${definition.canonical}`);
+        return [];
+      }
+      return rendered.ok === true && rendered.content && definition.projection
+        ? [{ path: definition.projection, content: rendered.content }]
+        : [];
+    });
+    const projectionMutation = projectionErrors.length > 0
+      ? { ok: false, error: projectionErrors[0], errors: projectionErrors }
+      : projectionWrites.length > 0
+        ? writeArtifactFilesAtomic(root, projectionWrites)
+        : { ok: true, skipped: true };
+    let moveRollback: CoreResult | null = null;
+    if (projectionMutation.ok === false) {
+      try {
+        fs.renameSync(target, track.dir);
+        moveRollback = { ok: true, restored: path.relative(root, track.dir) };
+      } catch (error) {
+        moveRollback = { ok: false, error: errorMessage(error) };
+      }
+    }
+    archived.push({
+      track_id: track.track_id,
+      ok: projectionMutation.ok !== false,
+      path: path.relative(root, target),
+      projection_mutation: projectionMutation,
+      move_rollback: moveRollback,
+    });
   }
   const regen = regenIndex(root);
   const controlCommit = commitTrace(root, args, {
@@ -183,7 +214,7 @@ export function workflowArchive(root: string, args: RuntimeArgs = {}): CoreResul
 }
 
 export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "handoff");
+  args = applyStagedApprovalSessionPayload(root, args, "handoff");
   const trackId = selectedTrackId(root, args);
   const summary = workflowSummary(root, "handoff", args);
   if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
@@ -202,18 +233,18 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
   const handoffPath = path.join(track.dir, "HANDOFF.md");
   const handoffJsonPath = trackHandoffJsonPath(track);
   const handoffJson = markdownDocJson("handoff", text, { track_id: trackId });
-  const reviewFiles = [
+  const handoffCanonicalContent = `${JSON.stringify(handoffJson, null, 2)}\n`;
+  const reviewFiles = documentReviewPair("handoff",
     jsonReviewFile(path.relative(root, handoffJsonPath), "Track handoff canonical", "handoffText", handoffJson),
     textReviewFile(
       path.relative(root, handoffPath),
       "Track handoff",
       "handoff.json",
-      withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, path.relative(root, handoffJsonPath)))
-    ),
-  ];
+      withGeneratedMarker(path.relative(root, handoffJsonPath), "cadre.handoff.v1", renderMarkdownDoc(handoffJson, `Handoff: ${trackId}`, path.relative(root, handoffJsonPath)), { canonicalContent: handoffCanonicalContent, projection: path.relative(root, handoffPath) })
+    ));
   const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
   const reviewBundle = workflowReviewBundle(root, "handoff", args, reviewFiles, { track_id: trackId });
-  const approval = stagedApprovalState(root, "handoff", args, handoffApprovalStages(), reviewFiles, { track_id: trackId });
+  const approval = stagedApprovalState(root, "handoff", args, handoffApprovalStages(), reviewFiles, { track_id: trackId, final_only_files: ["cadre/events.jsonl"] });
   const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
   const humanReview = humanReviewState("handoff", args, reviewArtifacts, reviewBundle);
@@ -292,6 +323,7 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     subject,
     handoff_path: path.relative(root, handoffPath),
   });
+  const approvalAudit = recordApprovalCompletionFromArgs(root, args);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "handoff",
@@ -306,6 +338,7 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
       to: recipient,
     },
   });
+  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
     ...base,
     ok: controlCommit.ok !== false,
@@ -313,6 +346,8 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
     message,
     event,
+    approval_audit: approvalAudit,
+    approval_session_close: approvalSessionClose,
     control_commit: controlCommit,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),

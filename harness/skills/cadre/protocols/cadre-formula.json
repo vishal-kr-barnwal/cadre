@@ -11,8 +11,9 @@
   "transitions": [
     "run_operation",
     "review_pour_if_needed",
+    "execute",
     "summarize"
   ],
-  "approval": "operation_dependent",
+  "approval": "execute_for_mutations",
   "references": []
 }

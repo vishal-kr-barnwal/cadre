@@ -1,5 +1,7 @@
 export { artifactCatalog, artifactPacket, artifactRender, artifactSync } from "./runtime/artifact-actions";
 export { artifactSchema } from "./runtime/artifact-catalog";
+export { writeArtifactFilesAtomic, writeArtifactPairAtomic } from "./runtime/artifact-pairs";
+export { PROJECTION_REGISTRY, projectionDefinition, projectionRegistration } from "./runtime/projection-registry";
 export { collisionScan } from "./runtime/collision";
 export { dapSetup, dapStatus } from "../../dap/config";
 export { dapSnapshot } from "../../dap/snapshot";

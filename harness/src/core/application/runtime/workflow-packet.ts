@@ -18,7 +18,6 @@ import { appendCadreEvent } from "./native-state";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { humanReviewState, packetReviewArtifact } from "./review-bundles";
 import { selectedTrackId } from "./status";
-import { humanReviewConfirmed } from "./tech-stack";
 import { trackContext } from "./track-context";
 import { metadataPatch, setTrackStatus } from "./track-mutations";
 import { projectSkillSelection } from "./project-skills";
@@ -158,7 +157,7 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
             reason,
           }),
         ];
-        const humanReview = humanReviewState("flag", args, reviewArtifacts);
+        const humanReview = { required: false, execution_required: true, workflow: "flag", artifacts: reviewArtifacts };
         if (args.execute !== true) {
           return {
             ...summary,
@@ -169,21 +168,6 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
             reason,
             human_review: humanReview,
             review_artifacts: reviewArtifacts,
-          };
-        }
-        if (!humanReviewConfirmed(args)) {
-          return {
-            ...summary,
-            ok: false,
-            dry_run: true,
-            phase_state: "awaiting_staged_approval",
-            stage: "human_review",
-            track_context: context,
-            proposed_status: status,
-            reason,
-            human_review: humanReview,
-            review_artifacts: reviewArtifacts,
-            error: "Staged approval is required before flagging track status",
           };
         }
         const traceBefore = beginTrace(root);

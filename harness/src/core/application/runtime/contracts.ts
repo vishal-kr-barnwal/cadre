@@ -32,7 +32,28 @@ export interface ReviewFile {
   source: string;
   content: string;
   missing?: boolean;
+  documentId?: string;
+  reviewRole?: "human" | "canonical" | "generated" | "machine";
+  canonicalPath?: string;
+  projectionPath?: string;
+  approvalGroup?: string;
 }
+
+export type ProjectionIntent =
+  | "product"
+  | "product-guidelines"
+  | "tech-stack"
+  | "workflow"
+  | "repository-topology"
+  | "patterns"
+  | "styleguide-catalog"
+  | "styleguide"
+  | "track-specification"
+  | "track-plan"
+  | "track-learnings"
+  | "track-handoff"
+  | "release"
+  | "project-skill";
 
 export interface ArtifactDefinition {
   id: string;
@@ -43,6 +64,8 @@ export interface ArtifactDefinition {
   scope: "project" | "track" | "styleguide" | "skill" | "release" | "external";
   sourceFormat: "json" | "jsonl" | "markdown";
   projectionFormat?: "markdown" | "yaml" | "none";
+  reviewRole?: "document" | "generated" | "none";
+  projectionIntent?: ProjectionIntent;
 }
 
 export interface ArtifactRenderResult extends JsonObject {

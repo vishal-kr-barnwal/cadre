@@ -25,7 +25,6 @@ export function normalizeStyleGuideId(value: string): string {
   return value
     .trim()
     .replace(/\\/g, "/")
-    .replace(/^.*code_styleguides\//, "")
     .replace(/^.*styleguides\//, "")
     .replace(/\.(md|json)$/i, "")
     .toLowerCase();

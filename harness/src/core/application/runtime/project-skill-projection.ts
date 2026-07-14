@@ -1,13 +1,13 @@
 import type { JsonObject } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { ManagedManifest } from "../../domain/project-skill-management";
+import { withGeneratedMarker } from "./markdown-docs";
 
 function list(values: string[]): string { return values.length ? values.map((value) => `\`${value}\``).join(", ") : "Any"; }
 
 export function renderProjectSkillProjection(manifest: ManagedManifest): string {
   const selectors = asJsonObject(manifest.selectors);
   const lines = [
-    `<!-- cadre:generated from="cadre/skills/${manifest.id}/skill.json" schema="cadre.project-skill.v1" -->`,
     `# ${manifest.name}`, "", manifest.description, "", "## Selectors", "",
     `- Workflows: ${list(asStringArray(selectors.workflows))}`,
     `- Repositories: ${list(asStringArray(selectors.repos))}`,
@@ -26,5 +26,12 @@ export function renderProjectSkillProjection(manifest: ManagedManifest): string 
     const reference = asJsonObject(value);
     lines.push(`- \`${asOptionalString(reference.id) || "reference"}\`: \`${asOptionalString(reference.path) || ""}\``);
   }
-  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+  const body = `${lines.join("\n").replace(/\n+$/, "")}\n`;
+  const canonical = `${JSON.stringify(manifest, null, 2)}\n`;
+  return withGeneratedMarker(
+    `cadre/skills/${manifest.id}/skill.json`,
+    "cadre.project-skill.v1",
+    body,
+    { canonicalContent: canonical, projection: `cadre/skills/${manifest.id}/SKILL.md` }
+  );
 }

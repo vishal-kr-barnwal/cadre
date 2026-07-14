@@ -4,8 +4,8 @@
   "id": "cadre-skill",
   "workflow": "skill",
   "inputs": ["operation", "skillId?", "newSkillId?", "changes?"],
-  "transitions": ["inspect", "format_references", "review_identity", "review_manifest", "review_references", "execute", "commit"],
-  "approval": "staged_for_mutations",
+  "transitions": ["inspect", "format_references", "review_skill", "review_references", "execute", "commit"],
+  "approval": "document_staged_for_create_update_execute_for_rename_remove",
   "references": [
     { "id": "approval-and-generation", "when": "decision:approval" }
   ]

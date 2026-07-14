@@ -25,6 +25,7 @@ function bounded(value: unknown, depth = 0): JsonValue {
 
 function approvalDecision(result: JsonObject): JsonObject | null {
   const approval = asJsonObject(result.approval);
+  if (approval.cancelled === true) return null;
   const currentStage = asOptionalString(approval.current_stage);
   if (!currentStage) {
     const human = asJsonObject(result.human_review);
@@ -109,8 +110,8 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
   if (workflow === "skill" && result.phase_state === "awaiting_formatting" && resources[0]) return { tool: "cadre_read", arguments: { uri: resources[0] } };
   if (workflow === "skill") {
     const approval = asJsonObject(result.approval);
-    if (asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
-      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !["root", "workflow", "execute", "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id", "approvedStages", "approved_stages", "approvalComplete", "approval_complete"].includes(key)));
+    if (approval.cancelled !== true && asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
+      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !["root", "workflow", "execute", "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id", "approvedStages", "approved_stages", "approvalComplete", "approval_complete", "approvalCancel", "approval_cancel"].includes(key)));
       return { tool: "cadre_workflow", arguments: { root, workflow, input, execute: true, approval: { session_id: approval.session_id, approved_stages: approval.approved_stages, complete: true } } };
     }
   }

@@ -36,6 +36,7 @@ function workflowArgs(args: RuntimeArgs): RuntimeArgs {
       approvalSessionId: approval.session_id,
       approvedStages: approval.approved_stages,
       approvalComplete: approval.complete === true,
+      approvalCancel: approval.cancel === true,
     } : {}),
   } as RuntimeArgs;
 }

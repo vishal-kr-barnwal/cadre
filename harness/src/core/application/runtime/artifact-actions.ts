@@ -1,26 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
-import type { CadreLock, CadreTrack, CommandResult, JsonObject, LockInfo, ParsedPlan, PlanPhase, PlanTask, RuntimeArgs, Topology, TrackMetadata, UnknownRecord } from "../../../types";
-import { asBoolean, asJsonObject, asNumber, asOptionalNumber, asOptionalString, asString, asStringArray, errorCode, errorMessage, getBoolean, getNumber, getOptionalString, getString, isRecord } from "../../../guards";
-import { LOCK_STALE_MS, STALE_LEASE_MS } from "../../domain/lease-policy";
-import { PROVIDER_MODES } from "../../domain/provider-policy";
-import { STATUS_MARKERS, VALID_STATUSES } from "../../domain/track-status";
-import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
+import { asJsonObject, asOptionalString } from "../../../guards";
 
 import { artifactDefinitions, artifactMatches, artifactSchema } from "./artifact-catalog";
 import { ArtifactDefinition, ArtifactRenderResult, CoreResult, ReviewFile } from "./contracts";
-import { ensureParent, fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
 import { appendCanonicalJsonReference, hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown } from "./plan-docs";
-import { humanReviewState, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { beginTrace, commitTrace } from "./commit-trace";
 import { markdownPayloadError } from "./workflow-response";
-import { applyStagedApprovalSessionPayload, artifactApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
+import { renderProjectSkillProjection } from "./project-skill-projection";
+import type { ManagedManifest } from "../../domain/project-skill-management";
+import { writeArtifactFilesAtomic } from "./artifact-pairs";
 
 export function artifactCatalog(root: string, args: RuntimeArgs = {}): CoreResult {
   const artifacts = artifactDefinitions(root, args)
@@ -71,17 +65,21 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
   const canonicalPath = path.join(root, def.canonical);
   const projectionPath = def.projection ? path.join(root, def.projection) : undefined;
   let raw: JsonObject | null = null;
+  let canonicalContent = "";
   let body = "";
   let missingCanonical = false;
   if (def.sourceFormat === "markdown") {
     if (!fileExists(canonicalPath)) missingCanonical = true;
-    else body = fs.readFileSync(canonicalPath, "utf8");
+    else body = canonicalContent = fs.readFileSync(canonicalPath, "utf8");
   } else if (def.sourceFormat === "jsonl") {
-    const entries = readJsonl(canonicalPath);
-    if (entries.length === 0) missingCanonical = true;
-    const title = def.title;
-    body = renderJsonlMarkdown(title, entries);
+    if (!fileExists(canonicalPath)) {
+      missingCanonical = true;
+    } else {
+      canonicalContent = fs.readFileSync(canonicalPath, "utf8");
+      body = renderJsonlMarkdown(def.title, readJsonl(canonicalPath));
+    }
   } else if (fileExists(canonicalPath)) {
+    canonicalContent = fs.readFileSync(canonicalPath, "utf8");
     raw = readJson<JsonObject | null>(canonicalPath, null);
     if (!raw) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, error: "Invalid canonical JSON" };
     if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw, def.canonical);
@@ -89,13 +87,19 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
     else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
     else if (def.schema === "cadre.styleguide_index.v1") body = renderJsonCodeblock(def.title, raw);
     else if (def.schema === "cadre.release.v1") body = releaseMarkdownFromMetadata(raw);
+    else if (def.schema === "cadre.project-skill.v1") body = renderProjectSkillProjection(raw as unknown as ManagedManifest);
     else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title, def.canonical);
     else body = renderJsonCodeblock(def.title, raw);
   } else {
     missingCanonical = true;
   }
   if (!body) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, missing_canonical: missingCanonical };
-  const content = def.sourceFormat === "markdown" ? body : withGeneratedMarker(def.canonical, def.schema, body);
+  const content = def.sourceFormat === "markdown" || hasGeneratedMarker(body)
+    ? body
+    : withGeneratedMarker(def.canonical, def.schema, body, {
+      canonicalContent,
+      ...(def.projection ? { projection: def.projection } : {}),
+    });
   const existing = projectionPath && fileExists(projectionPath) ? fs.readFileSync(projectionPath, "utf8") : "";
   return {
     ok: true,
@@ -110,6 +114,8 @@ export function renderArtifact(root: string, def: ArtifactDefinition, args: Runt
 }
 
 export function releaseMarkdownFromMetadata(metadata: JsonObject): string {
+  const approved = asOptionalString(metadata.release_notes_markdown);
+  if (approved) return normalizedText(approved);
   const version = asOptionalString(metadata.version) || "release";
   const parts = [`# Release - ${version}`, "", `Generated: ${asOptionalString(metadata.generated_at) || utcNow()}`, "", "## Completed Tracks", ""];
   for (const rawTrack of asArray(metadata.completed_tracks)) {
@@ -134,12 +140,44 @@ export function artifactValidate(root: string, args: RuntimeArgs = {}): CoreResu
   const results = artifacts.map((def) => {
     const file = path.join(root, def.canonical);
     if (!fileExists(file)) return { artifact_id: def.id, ok: false, missing: true, canonical_path: def.canonical };
-    if (def.sourceFormat === "jsonl") return { artifact_id: def.id, ok: readJsonl(file).length >= 0, canonical_path: def.canonical };
-    if (def.sourceFormat === "markdown") return { artifact_id: def.id, ok: fs.readFileSync(file, "utf8").trim().length > 0, canonical_path: def.canonical };
-    const value = readJson<JsonObject | null>(file, null);
-    return { artifact_id: def.id, ok: Boolean(value), canonical_path: def.canonical };
+    const canonicalOk = def.sourceFormat === "jsonl"
+      ? readJsonl(file).length >= 0
+      : def.sourceFormat === "markdown"
+        ? fs.readFileSync(file, "utf8").trim().length > 0
+        : Boolean(readJson<JsonObject | null>(file, null));
+    if (!canonicalOk || !def.projection) return { artifact_id: def.id, ok: canonicalOk, canonical_path: def.canonical };
+    const rendered = renderArtifact(root, def, args);
+    const projectionFile = path.join(root, def.projection);
+    const projectionExists = fileExists(projectionFile);
+    const existing = projectionExists ? fs.readFileSync(projectionFile, "utf8") : "";
+    const generated = projectionExists && hasGeneratedMarker(existing);
+    const drifted = rendered.ok === true && rendered.changed === true;
+    return {
+      artifact_id: def.id,
+      ok: rendered.ok === true && projectionExists && generated && !drifted,
+      canonical_path: def.canonical,
+      projection_path: def.projection,
+      projection_missing: !projectionExists,
+      projection_generated: generated,
+      projection_drift: drifted,
+      ...(projectionExists && !generated ? { error: "Projection is user-owned or missing its Cadre generated marker" } : {}),
+    };
   });
-  return { ok: results.every((result) => result.ok !== false), root, results };
+  const legacyStyleguides = fileExists(path.join(root, "cadre", "code_styleguides"));
+  if (legacyStyleguides) {
+    results.push({
+      artifact_id: "legacy-styleguide-projections",
+      ok: false,
+      canonical_path: "cadre/styleguides",
+      error: "Deprecated cadre/code_styleguides exists; projections now belong beside canonical JSON in cadre/styleguides",
+    });
+  }
+  return {
+    ok: results.every((result) => result.ok !== false),
+    root,
+    results,
+    legacy_styleguide_path: legacyStyleguides ? "cadre/code_styleguides" : null,
+  };
 }
 
 export function artifactDiff(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -158,9 +196,7 @@ export function artifactDiff(root: string, args: RuntimeArgs = {}): CoreResult {
 }
 
 export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(args, "artifacts");
   const execute = args.execute === true;
-  const force = args.force === true;
   if ((args as UnknownRecord).importLegacy !== undefined || (args as UnknownRecord).import_legacy !== undefined) {
     return {
       ok: false,
@@ -169,12 +205,12 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   }
   const defs = artifactDefinitions(root, args).filter((def) => artifactMatches(def, args));
-  const reviewFiles: ReviewFile[] = [];
   const artifacts: JsonObject[] = [];
   const written: string[] = [];
   const skipped: string[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
+  const pendingWrites: Array<{ path: string; content: string }> = [];
   for (const def of defs) {
     const rendered = renderArtifact(root, def, args);
     artifacts.push({
@@ -187,74 +223,28 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     });
     if (rendered.ok === false || !rendered.content || !def.projection) {
       if (rendered.missing_canonical) warnings.push(`Missing canonical for ${def.id}`);
+      else if (rendered.ok === false && def.projection) errors.push(`${def.id}: ${asOptionalString(rendered.error) || "projection render failed"}`);
       continue;
     }
-    reviewFiles.push(textReviewFile(def.projection, def.title, def.canonical, rendered.content));
-  }
-  const reviewBundle = workflowReviewBundle(root, "artifacts", args, reviewFiles, {
-    scope: args.scope || "all",
-    artifact: args.artifact || null,
-  });
-  const approval = stagedApprovalState(root, "artifacts", args, artifactApprovalStages(), reviewFiles, {
-    scope: args.scope || "all",
-    artifact: args.artifact || null,
-  });
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifactsFromFiles(reviewFiles);
-  const humanReview = humanReviewState("artifacts", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle);
-  const approvalError = stagedApprovalError(approval);
-  if (approvalError) warnings.push(approvalError);
-  if (execute && !stagedApprovalReady(approval)) {
-    return {
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_staged_approval",
-      stage: "staged_approval",
-      artifacts,
-      approval,
-      human_review: humanReview,
-      review_artifacts: stageReviewArtifacts,
-      review_bundle: stageReviewBundle,
-      warnings,
-      errors: ["Staged approval is required before syncing artifacts"],
-      error: approvalError || "Staged approval is required before syncing artifacts",
-    };
-  }
-  const reviewValidation = execute ? validateApprovedTargetReviewFiles(root, args) : { ok: true, skipped: true };
-  if (execute && reviewValidation.ok === false) {
-    return {
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_staged_approval",
-      stage: "staged_review_drift",
-      artifacts,
-      approval,
-      human_review: humanReview,
-      review_artifacts: stageReviewArtifacts,
-      review_bundle: stageReviewBundle,
-      review_validation: reviewValidation,
-      warnings,
-      errors: asStringArray(asJsonObject(reviewValidation).errors),
-      error: asOptionalString(asJsonObject(reviewValidation).error) || "Approved review files changed after staged approval",
-    };
-  }
-  const reusedReviewFiles = new Set(asStringArray(asJsonObject(reviewValidation).files));
-  const traceBefore = execute ? beginTrace(root) : null;
-  if (execute) {
-    for (const def of defs) {
-      const rendered = renderArtifact(root, def, args);
-      if (rendered.ok === false || !rendered.content || !def.projection) continue;
-      const projectionFile = path.join(root, def.projection);
-      const existing = fileExists(projectionFile) ? fs.readFileSync(projectionFile, "utf8") : "";
-      if (existing && !hasGeneratedMarker(existing) && !force) {
-        skipped.push(def.projection);
-        warnings.push(`Skipped unmarked projection ${def.projection}; pass force:true or import first.`);
-        continue;
-      }
-      ensureParent(projectionFile);
-      if (!reusedReviewFiles.has(def.projection)) fs.writeFileSync(projectionFile, rendered.content);
-      written.push(def.projection);
+    const projectionFile = path.join(root, def.projection);
+    const existing = fileExists(projectionFile) ? fs.readFileSync(projectionFile, "utf8") : "";
+    if (existing && !hasGeneratedMarker(existing)) {
+      skipped.push(def.projection);
+      errors.push(`Refusing to overwrite user-owned projection ${def.projection}`);
+      continue;
     }
+    if (rendered.changed === true) pendingWrites.push({ path: def.projection, content: rendered.content });
+    else skipped.push(def.projection);
+  }
+  if (fileExists(path.join(root, "cadre", "code_styleguides"))) {
+    warnings.push("Deprecated styleguide projection directory exists: cadre/code_styleguides. Regenerate into cadre/styleguides and remove the legacy directory manually.");
+  }
+  const traceBefore = execute ? beginTrace(root) : null;
+  let mutation: CoreResult | null = null;
+  if (execute && errors.length === 0 && pendingWrites.length > 0) {
+    mutation = writeArtifactFilesAtomic(root, pendingWrites);
+    if (mutation.ok === false) errors.push(asOptionalString(mutation.error) || "Projection write failed");
+    else written.push(...pendingWrites.map((file) => file.path));
   }
   const controlCommit = execute
     ? commitTrace(root, args, {
@@ -264,7 +254,6 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
       before: traceBefore,
       files: written,
       allowDirty: true,
-      includeDirtyFiles: asStringArray(asJsonObject(reviewValidation).files),
       note: {
         scope: args.scope || "all",
         artifact: args.artifact || null,
@@ -274,22 +263,18 @@ export function artifactSync(root: string, args: RuntimeArgs = {}): CoreResult {
     })
     : null;
   return {
-    ok: errors.length === 0 && !approvalError && (!controlCommit || controlCommit.ok !== false),
+    ok: errors.length === 0 && (!controlCommit || controlCommit.ok !== false),
     dry_run: !execute,
     phase_state: execute ? (controlCommit && controlCommit.ok === false ? "recovery_required" : "executed") : "dry_run",
-    ...(approvalError && !execute ? { stage: "staged_approval", error: approvalError } : {}),
     artifacts,
-    approval,
-    review_artifacts: stageReviewArtifacts,
-    review_bundle: stageReviewBundle,
-    human_review: humanReview,
+    approval: { required: false },
     written,
     skipped,
+    mutation,
     control_commit: controlCommit,
-    review_validation: reviewValidation,
-    reused_review_files: asStringArray(asJsonObject(reviewValidation).files),
     warnings,
     errors,
+    ...(errors.length ? { error: errors[0] } : {}),
   };
 }
 

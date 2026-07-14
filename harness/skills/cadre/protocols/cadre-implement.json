@@ -11,9 +11,10 @@
   "transitions": [
     "select_ready_task",
     "apply_project_rules",
+    "execute",
     "complete_task"
   ],
-  "approval": "task_completion",
+  "approval": "execute",
   "references": [
     {
       "id": "parallel-execution",

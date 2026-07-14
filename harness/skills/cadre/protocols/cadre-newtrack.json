@@ -13,7 +13,7 @@
     "review_spec_plan",
     "execute"
   ],
-  "approval": "staged",
+  "approval": "document_staged",
   "references": [
     {
       "id": "native-prompts",

@@ -17,13 +17,29 @@ export function normalizedText(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\n*$/, "\n");
 }
 
-export function generatedMarker(source: string, schema: string, body: string): string {
-  return `<!-- cadre:generated from="${source}" schema="${schema}" hash="${textHash(body).slice(0, 16)}" -->`;
+export interface GeneratedMarkerOptions {
+  canonicalContent?: string;
+  projection?: string;
+  rendererVersion?: string;
 }
 
-export function withGeneratedMarker(source: string, schema: string, body: string): string {
+export function generatedMarker(source: string, schema: string, body: string, options: GeneratedMarkerOptions = {}): string {
+  const attributes = [
+    `from="${source}"`,
+    `schema="${schema}"`,
+    `hash="${textHash(body).slice(0, 16)}"`,
+    `renderer="${options.rendererVersion || "1"}"`,
+  ];
+  if (options.canonicalContent !== undefined) {
+    attributes.push(`canonical_hash="${textHash(options.canonicalContent).slice(0, 16)}"`);
+  }
+  if (options.projection) attributes.push(`projection="${options.projection}"`);
+  return `<!-- cadre:generated ${attributes.join(" ")} -->`;
+}
+
+export function withGeneratedMarker(source: string, schema: string, body: string, options: GeneratedMarkerOptions = {}): string {
   const normalized = normalizedText(body);
-  return `${generatedMarker(source, schema, normalized)}\n${normalized}`;
+  return `${generatedMarker(source, schema, normalized, options)}\n${normalized}`;
 }
 
 export function appendCanonicalJsonReference(parts: string[], source?: string, heading = "Canonical Source"): void {

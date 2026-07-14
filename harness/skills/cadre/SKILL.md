@@ -15,6 +15,9 @@ Use `cadre_action` only for a namespaced action returned by a packet and
 provider, worker, merge, and generated-projection state. Never recreate that
 state with shell commands or treat Markdown projections as canonical.
 
-Send `approval` only after explicit user approval of the current stage. If a
-packet is blocked, report its error or requested narrowing; do not truncate or
-invent required project-skill rules.
+Send `approval` only after explicit user approval of the current human-facing
+document. Its canonical JSON/JSONL and generated projection are one immutable
+review pair and never receive separate approvals. `execute:true` authorizes a
+mutation or side effect; it is not document approval. If a packet is blocked,
+report its error or requested narrowing; do not truncate or invent required
+project-skill rules.

@@ -11,8 +11,9 @@
   "transitions": [
     "inspect_adapter",
     "snapshot",
+    "execute",
     "summarize"
   ],
-  "approval": "before_config_write",
+  "approval": "execute",
   "references": []
 }

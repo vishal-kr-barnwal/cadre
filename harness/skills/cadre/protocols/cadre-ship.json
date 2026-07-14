@@ -12,7 +12,7 @@
     "prepare_provider",
     "execute"
   ],
-  "approval": "explicit",
+  "approval": "execute",
   "references": [
     {
       "id": "provider-evidence",
