@@ -185,6 +185,7 @@ export function approvalPayloadHash(workflow: string, stages: ApprovalStage[], a
       description: stage.description,
       documentIds: stage.documentIds,
       inputKeys: stage.inputKeys || [],
+      fileMatches: stage.fileMatches || [],
     })),
     payload: approvalPayload(args),
     extras,

@@ -97,7 +97,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     machineReviewFile("cadre/tracks.json", "Initial track index", "setup:track-index", `${JSON.stringify(trackIndex, null, 2)}\n`),
   ];
   if (lspWriteRequested) {
-    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations), null, 2)}\n`));
+    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations, reposPayload), null, 2)}\n`));
   }
   const gitattributesNeeded = polyrepoRequested
     || configPayload.sync_mode === "shared"
@@ -379,7 +379,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     version: 1,
     schema: "cadre.styleguide_index.v1",
     selected: asStringArray(styleGuides.selected),
-    generated_at: utcNow(),
   };
   writeSetupJson("styleguides/index.json", styleGuideIndex);
   writeText(

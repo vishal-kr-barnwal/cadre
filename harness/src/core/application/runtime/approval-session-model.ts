@@ -69,12 +69,12 @@ function uniquePreviewFiles(values: JsonObject[]): JsonObject[] {
 
 export function filesForApprovalStage(files: ReviewFile[], stage: ApprovalStage): ReviewFile[] {
   const documentIds = new Set(stage.documentIds);
-  if (documentIds.size > 0) {
-    return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId!));
-  }
   const matches = stage.fileMatches || [];
   if (matches.includes("*")) return files;
-  return files.filter((file) => matches.some((needle) => file.path.includes(needle)));
+  return files.filter((file) => (
+    (Boolean(file.documentId) && documentIds.has(file.documentId!))
+    || matches.some((needle) => file.path.includes(needle))
+  ));
 }
 
 function beforeFilesForSnapshots(beforeFiles: ApprovalBeforeFile[], snapshots: ReviewFile[]): ApprovalBeforeFile[] {

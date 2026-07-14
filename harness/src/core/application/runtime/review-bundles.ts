@@ -136,7 +136,6 @@ export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: C
     version: 1,
     schema: "cadre.styleguide_index.v1",
     selected: selectedStyleGuides,
-    generated_at: utcNow(),
   };
   const productCanonical = `${JSON.stringify(productJson, null, 2)}\n`;
   const guidelinesCanonical = `${JSON.stringify(productGuidelinesJson, null, 2)}\n`;

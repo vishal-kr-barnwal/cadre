@@ -5791,8 +5791,7 @@ function setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFil
   const styleGuideIndex = {
     version: 1,
     schema: "cadre.styleguide_index.v1",
-    selected: selectedStyleGuides,
-    generated_at: utcNow()
+    selected: selectedStyleGuides
   };
   const productCanonical = `${JSON.stringify(productJson, null, 2)}
 `;
@@ -9157,12 +9156,9 @@ function uniquePreviewFiles(values) {
 }
 function filesForApprovalStage(files, stage) {
   const documentIds = new Set(stage.documentIds);
-  if (documentIds.size > 0) {
-    return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId));
-  }
   const matches = stage.fileMatches || [];
   if (matches.includes("*")) return files;
-  return files.filter((file) => matches.some((needle) => file.path.includes(needle)));
+  return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId) || matches.some((needle) => file.path.includes(needle)));
 }
 function beforeFilesForSnapshots(beforeFiles, snapshots) {
   const paths = new Set(snapshots.map((file) => file.path));
@@ -11037,7 +11033,8 @@ function approvalPayloadHash(workflow, stages, args, extras) {
       title: stage.title,
       description: stage.description,
       documentIds: stage.documentIds,
-      inputKeys: stage.inputKeys || []
+      inputKeys: stage.inputKeys || [],
+      fileMatches: stage.fileMatches || []
     })),
     payload: approvalPayload(args),
     extras
@@ -11310,11 +11307,53 @@ function setupApprovalStages(polyrepoRequested) {
       inputKeys: ["productGuidelines", "product_guidelines"]
     },
     {
-      id: "tech_stack",
-      title: "Tech Stack",
-      description: "Structured languages, frameworks, package managers, platforms, and project commands.",
-      documentIds: ["tech_stack"],
-      inputKeys: ["techStack", "tech_stack"]
+      id: "technical",
+      title: "Technical Context",
+      description: "Tech stack, style guides, repository topology, language servers, and setup infrastructure choices.",
+      documentIds: ["tech_stack", "styleguides", ...polyrepoRequested ? ["repos"] : []],
+      fileMatches: ["cadre/lsp.json"],
+      inputKeys: [
+        "techStack",
+        "tech_stack",
+        "styleGuideIds",
+        "style_guide_ids",
+        "styleGuides",
+        "style_guides",
+        "setupPreviewStyleGuides",
+        "setup_preview_style_guides",
+        "writeLsp",
+        "write_lsp",
+        "setupLsp",
+        "setup_lsp",
+        "lsp",
+        "setupPreviewLspAdded",
+        "setup_preview_lsp_added",
+        "lspSetupOther",
+        "providerMode",
+        "provider_mode",
+        "provider",
+        "providerModeOther",
+        "syncMode",
+        "sync_mode",
+        "syncModeOther",
+        "teamSize",
+        "team_size",
+        "integrations",
+        "config",
+        "topology",
+        "polyrepo",
+        "repos",
+        "ciProvider",
+        "ci_provider",
+        "writeCi",
+        "write_ci",
+        "writeGitattributes",
+        "write_gitattributes",
+        "addSubmodules",
+        "add_submodules",
+        "executeSubmodules",
+        "execute_submodules"
+      ]
     },
     {
       id: "workflow",
@@ -11322,20 +11361,6 @@ function setupApprovalStages(polyrepoRequested) {
       description: "Development, verification, review, commit, and coordination expectations.",
       documentIds: ["workflow"],
       inputKeys: ["workflowPolicy", "workflow_policy"]
-    },
-    ...polyrepoRequested ? [{
-      id: "repos",
-      title: "Repository Topology",
-      description: "Human-readable repository topology and its canonical JSON.",
-      documentIds: ["repos"],
-      inputKeys: ["repos", "topology"]
-    }] : [],
-    {
-      id: "styleguides",
-      title: "Style Guides",
-      description: "Generated style-guide selection and projections derived from the tech stack.",
-      documentIds: ["styleguides"],
-      inputKeys: ["styleGuideIds", "style_guide_ids", "styleGuides", "style_guides"]
     }
   ];
 }
@@ -15474,7 +15499,18 @@ function appendRequiredLine(existing, required) {
   return `${lines.join("\n")}
 `;
 }
-function lspPreviewPayload(root, recommendations) {
+function requestedWorkspaceFolders(repos) {
+  if (!repos || repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return null;
+  return [
+    { name: ".", path: "." },
+    ...repos.repos.map(asJsonObject).flatMap((repo) => {
+      const name = asOptionalString(repo.name);
+      const submodulePath = asOptionalString(repo.submodule_path);
+      return repo.enabled !== false && name && submodulePath ? [{ name, path: submodulePath }] : [];
+    })
+  ];
+}
+function lspPreviewPayload(root, recommendations, repos = null) {
   const existing = readJson(import_node_path51.default.join(root, "cadre", "lsp.json"), {});
   const servers = Array.isArray(existing.servers) ? [...existing.servers] : [];
   const known = new Set(servers.map((server) => asOptionalString(asJsonObject(server).id || asJsonObject(server).command)).filter(Boolean));
@@ -15496,7 +15532,7 @@ function lspPreviewPayload(root, recommendations) {
   return {
     ...existing,
     servers,
-    workspaceFolders: Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : []
+    workspaceFolders: requestedWorkspaceFolders(repos) || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : [])
   };
 }
 
@@ -15563,7 +15599,7 @@ function workflowSetup(root, args = {}) {
 `)
   ];
   if (lspWriteRequested) {
-    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations), null, 2)}
+    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations, reposPayload), null, 2)}
 `));
   }
   const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs6.writeGitattributes === true || rawArgs6.write_gitattributes === true;
@@ -15820,8 +15856,7 @@ function workflowSetup(root, args = {}) {
   const styleGuideIndex = {
     version: 1,
     schema: "cadre.styleguide_index.v1",
-    selected: asStringArray(styleGuides.selected),
-    generated_at: utcNow()
+    selected: asStringArray(styleGuides.selected)
   };
   writeSetupJson("styleguides/index.json", styleGuideIndex);
   writeText(

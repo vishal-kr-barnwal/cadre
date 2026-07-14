@@ -1809,8 +1809,14 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     const resolved = resolveSetupPrompts(root, {
       workflow: "setup",
       providerMode: "local",
+      syncMode: "local",
+      setupLsp: true,
+      styleGuideIds: ["general"],
+      integrations: {},
       product: { title: "Product", summary: "Test product" },
+      productGuidelines: { title: "Product Guidelines", summary: "Keep setup review evidence explicit." },
       techStack: { languages: ["TypeScript"] },
+      workflowPolicy: { title: "Workflow", summary: "Review each setup stage before execution." },
       reviewBundleDir: ".cadre-review",
     });
     const args = resolved.args;
@@ -1858,7 +1864,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.deepEqual(guidelinesManifest.files.map((file) => file.path).sort(), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
     const persistedSession = readJson(path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`));
     assert.equal(persistedSession.schema_version, 2);
-    assert.deepEqual(persistedSession.stage_order, ["product", "product_guidelines", "tech_stack", "workflow", "styleguides"]);
+    assert.deepEqual(persistedSession.stage_order, ["product", "product_guidelines", "technical", "workflow"]);
     assert.equal(persistedSession.stage_records.product.status, "approved");
     assert.equal(persistedSession.stage_records.product_guidelines.status, "previewed");
     assert.ok(persistedSession.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
@@ -1874,6 +1880,27 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.equal(approvedWithAccidentalPayload.ok, false);
     assert.match(approvedWithAccidentalPayload.error, /cannot amend staged input/i);
     assert.equal(approvedWithAccidentalPayload.approval.current_stage, "product_guidelines");
+
+    const guidelinesApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "product_guidelines",
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(guidelinesApproved.ok, true, guidelinesApproved.error);
+    assert.equal(guidelinesApproved.approval.current_stage, "technical");
+    const technicalManifest = readJson(guidelinesApproved.review_bundle.manifest_path);
+    assert.deepEqual(technicalManifest.files.map((file) => file.path).sort(), [
+      "cadre/lsp.json",
+      "cadre/styleguides/README.md",
+      "cadre/styleguides/general.json",
+      "cadre/styleguides/general.md",
+      "cadre/styleguides/index.json",
+      "cadre/styleguides/typescript.json",
+      "cadre/styleguides/typescript.md",
+      "cadre/tech-stack.json",
+      "cadre/tech-stack.md",
+    ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2874,6 +2901,10 @@ test("workflow setup scaffolds polyrepo control-plane assets and LSP config", ()
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("typescript"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
+    assert.deepEqual(readJson(path.join(root, "cadre", "lsp.json")).workspaceFolders, [
+      { name: ".", path: "." },
+      { name: "app", path: "repos/app" },
+    ]);
   } finally {
     process.env.PATH = oldPath;
     fs.rmSync(root, { recursive: true, force: true });
@@ -3568,7 +3599,7 @@ test("target setup materializes only the active stage and cancel restores all ma
       workflow: "setup",
       providerMode: "local",
       syncMode: "local",
-      setupLsp: false,
+      setupLsp: true,
       styleGuideIds: ["general"],
       integrations: {},
       product: { title: "Diff Product", summary: "Review the complete target diff." },
@@ -3589,6 +3620,7 @@ test("target setup materializes only the active stage and cancel restores all ma
       "cadre/product_guidelines.md",
       "cadre/tech-stack.json",
       "cadre/tech-stack.md",
+      "cadre/lsp.json",
       "cadre/workflow.json",
       "cadre/workflow.md",
       "cadre/patterns.jsonl",
@@ -3607,7 +3639,7 @@ test("target setup materializes only the active stage and cancel restores all ma
     assert.equal(fs.existsSync(sessionFile), true);
     const session = readJson(sessionFile);
     assert.equal(session.schema_version, 2);
-    assert.deepEqual(session.stage_order, ["product", "product_guidelines", "tech_stack", "workflow", "styleguides"]);
+    assert.deepEqual(session.stage_order, ["product", "product_guidelines", "technical", "workflow"]);
     assert.deepEqual(session.stage_records.product.snapshot_files.map((file) => file.path), ["cadre/product.json", "cadre/product.md"]);
     assert.deepEqual(session.stage_records.product_guidelines.snapshot_files.map((file) => file.path), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
     assert.ok(session.final_snapshot_files.some((file) => file.path === "cadre/config.json"));

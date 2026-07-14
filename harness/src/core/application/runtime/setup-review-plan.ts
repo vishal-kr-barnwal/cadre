@@ -16,7 +16,19 @@ export function appendRequiredLine(existing: string, required: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function lspPreviewPayload(root: string, recommendations: CoreResult): JsonObject {
+function requestedWorkspaceFolders(repos: JsonObject | null): JsonObject[] | null {
+  if (!repos || repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return null;
+  return [
+    { name: ".", path: "." },
+    ...repos.repos.map(asJsonObject).flatMap((repo) => {
+      const name = asOptionalString(repo.name);
+      const submodulePath = asOptionalString(repo.submodule_path);
+      return repo.enabled !== false && name && submodulePath ? [{ name, path: submodulePath }] : [];
+    }),
+  ];
+}
+
+export function lspPreviewPayload(root: string, recommendations: CoreResult, repos: JsonObject | null = null): JsonObject {
   const existing = readJson<JsonObject>(path.join(root, "cadre", "lsp.json"), {});
   const servers = Array.isArray(existing.servers) ? [...existing.servers] : [];
   const known = new Set(servers.map((server) => asOptionalString(asJsonObject(server).id || asJsonObject(server).command)).filter(Boolean));
@@ -38,6 +50,7 @@ export function lspPreviewPayload(root: string, recommendations: CoreResult): Js
   return {
     ...existing,
     servers,
-    workspaceFolders: Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : [],
+    workspaceFolders: requestedWorkspaceFolders(repos)
+      || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : []),
   };
 }
