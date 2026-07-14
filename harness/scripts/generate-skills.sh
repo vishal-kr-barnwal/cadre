@@ -494,7 +494,6 @@ if (rootClaudeMarketplace.plugins?.[0]?.source !== "./harness/plugins/cadre-clau
 }
 
 for (const rel of [
-  "plugins/cadre-claude/skills/cadre/SKILL.md",
   "plugins/cadre-copilot/skills/cadre/SKILL.md",
   "plugins/cadre-antigravity/skills/cadre/SKILL.md",
 ]) {
@@ -506,24 +505,34 @@ const pluginSkillRoots = {
   copilot: path.join(root, "plugins/cadre-copilot/skills"),
   antigravity: path.join(root, "plugins/cadre-antigravity/skills"),
 };
-if (fs.existsSync(path.join(pluginSkillRoots.codex, "cadre"))) {
-  throw new Error("Codex plugin must not expose a redundant cadre:cadre skill");
+for (const platform of ["codex", "claude"]) {
+  if (fs.existsSync(path.join(pluginSkillRoots[platform], "cadre"))) {
+    throw new Error(`${platform} plugin must not expose a redundant cadre:cadre skill`);
+  }
 }
 for (const command of workflowCommands) {
-  const commandRoot = path.join(pluginSkillRoots.codex, command);
-  const skillFile = path.join(commandRoot, "SKILL.md");
-  const metadataFile = path.join(commandRoot, "agents/openai.yaml");
-  if (!fs.existsSync(skillFile)) throw new Error(`missing Codex command skill: ${command}`);
+  const codexCommandRoot = path.join(pluginSkillRoots.codex, command);
+  const claudeCommandRoot = path.join(pluginSkillRoots.claude, command);
+  const codexSkillFile = path.join(codexCommandRoot, "SKILL.md");
+  const claudeSkillFile = path.join(claudeCommandRoot, "SKILL.md");
+  const metadataFile = path.join(codexCommandRoot, "agents/openai.yaml");
+  if (!fs.existsSync(codexSkillFile)) throw new Error(`missing Codex command skill: ${command}`);
+  if (!fs.existsSync(claudeSkillFile)) throw new Error(`missing Claude command skill: ${command}`);
   if (!fs.existsSync(metadataFile)) throw new Error(`missing Codex command metadata: ${command}`);
-  const skill = fs.readFileSync(skillFile, "utf8");
-  if (!skill.includes(`name: "${command}"`)) throw new Error(`wrong command frontmatter: ${command}`);
-  const workflow = command;
-  if (!skill.includes(`workflow:\"${workflow}\"`)) throw new Error(`wrong workflow binding: ${command}`);
+  if (fs.existsSync(path.join(claudeCommandRoot, "agents"))) throw new Error(`Claude command has Codex metadata: ${command}`);
+  const codexSkill = fs.readFileSync(codexSkillFile, "utf8");
+  const claudeSkill = fs.readFileSync(claudeSkillFile, "utf8");
+  for (const [platform, skill] of [["Codex", codexSkill], ["Claude", claudeSkill]]) {
+    if (!skill.includes(`name: "${command}"`)) throw new Error(`wrong ${platform} command frontmatter: ${command}`);
+    if (!skill.includes(`workflow:\"${command}\"`)) throw new Error(`wrong ${platform} workflow binding: ${command}`);
+  }
+  if (codexSkill.includes("disable-model-invocation")) throw new Error(`Codex command has Claude-only frontmatter: ${command}`);
+  if (!claudeSkill.includes("disable-model-invocation: true")) throw new Error(`Claude command must be explicit-only: ${command}`);
   const metadata = fs.readFileSync(metadataFile, "utf8");
   if (!metadata.includes('interface:\n  display_name: "Cadre ')) throw new Error(`missing command interface metadata: ${command}`);
-  if (!metadata.includes("allow_implicit_invocation: false")) throw new Error(`command must be explicit-only: ${command}`);
-  for (const [platform, skillsRoot] of Object.entries(pluginSkillRoots)) {
-    if (platform !== "codex" && fs.existsSync(path.join(skillsRoot, command))) {
+  if (!metadata.includes("allow_implicit_invocation: false")) throw new Error(`Codex command must be explicit-only: ${command}`);
+  for (const platform of ["copilot", "antigravity"]) {
+    if (fs.existsSync(path.join(pluginSkillRoots[platform], command))) {
       throw new Error(`unexpected ${platform} workflow command skill: ${command}`);
     }
   }
@@ -606,8 +615,8 @@ generate_plugins() {
 
   generate_plugin_bundle() {
     local skill_dir="$1" plugin_dir="$2" platform="$3"
-    if [[ "$platform" == "codex" ]]; then
-      node "$REPO_ROOT/scripts/workflow-command-skills.mjs" --write "$(out_path "$plugin_dir/skills")"
+    if [[ "$platform" == "codex" || "$platform" == "claude" ]]; then
+      node "$REPO_ROOT/scripts/workflow-command-skills.mjs" --write "$(out_path "$plugin_dir/skills")" --platform "$platform"
     else
       copy_skill_tree "$skill_dir" "$plugin_dir/skills/cadre"
     fi
@@ -649,11 +658,11 @@ main() {
 
   if [[ "$MODE" == "--check" ]]; then
     echo "✓ Generated plugin bundles can be produced from source."
-    echo "  Checked thin plugin manifests, MCP configs, Codex workflow commands, and marketplaces."
+    echo "  Checked thin plugin manifests, MCP configs, Codex and Claude workflow commands, and marketplaces."
   else
     echo "✓ Generated Cadre skill and plugin fixtures."
     echo "  .claude/skills/cadre/ .agents/skills/cadre/ contain SKILL.md only"
-    echo "  plugins/cadre adds explicit workflow commands; all platform plugins remain thin global cadre-mcp entrypoints"
+    echo "  Codex and Claude plugins add explicit workflow commands; all platform plugins remain thin global cadre-mcp entrypoints"
   fi
 }
 

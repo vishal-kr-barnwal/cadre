@@ -33,7 +33,6 @@ process.once("exit", () => {
 const generatedSkillDirs = [
   path.join(generatedRoot, ".agents", "skills", "cadre"),
   path.join(generatedRoot, ".claude", "skills", "cadre"),
-  path.join(generatedRoot, "plugins", "cadre-claude", "skills", "cadre"),
   path.join(generatedRoot, "plugins", "cadre-copilot", "skills", "cadre"),
   path.join(generatedRoot, "plugins", "cadre-antigravity", "skills", "cadre"),
 ];
@@ -142,31 +141,41 @@ test("Master skill JSON is a conditional v1 reference contract", () => {
   assert.ok(skill.references.every((reference) => reference.id && reference.when));
 });
 
-test("Generated Codex plugin exposes explicit workflow command skills", () => {
+test("Generated Codex and Claude plugins expose explicit workflow command skills", () => {
   const contract = readJson(path.join(masterSkillDir, "skill.json"));
   const expectedCommands = [...contract.workflows].sort();
   const codexSkills = path.join(generatedRoot, "plugins", "cadre", "skills");
-  const actualCommands = fs.readdirSync(codexSkills, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  assert.deepEqual(actualCommands, expectedCommands);
+  const claudeSkills = path.join(generatedRoot, "plugins", "cadre-claude", "skills");
+  for (const [platform, skills] of [["Codex", codexSkills], ["Claude", claudeSkills]]) {
+    const actualCommands = fs.readdirSync(skills, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual(actualCommands, expectedCommands, `${platform} workflow command set`);
+  }
   assert.equal(fs.existsSync(path.join(codexSkills, "cadre")), false);
+  assert.equal(fs.existsSync(path.join(claudeSkills, "cadre")), false);
 
   for (const command of expectedCommands) {
     const workflow = command;
-    const skill = fs.readFileSync(path.join(codexSkills, command, "SKILL.md"), "utf8");
+    const codexSkill = fs.readFileSync(path.join(codexSkills, command, "SKILL.md"), "utf8");
+    const claudeSkill = fs.readFileSync(path.join(claudeSkills, command, "SKILL.md"), "utf8");
     const metadata = fs.readFileSync(path.join(codexSkills, command, "agents", "openai.yaml"), "utf8");
-    assert.match(skill, new RegExp(`^---\\nname: "${command}"`, "m"));
-    assert.ok(skill.includes(`workflow:"${workflow}"`), `${command} has the wrong workflow binding`);
-    assert.match(skill, /Call `cadre_workflow`/);
-    assert.match(skill, /exactly\s+`next\.tool` with `next\.arguments`/);
-    assert.ok(Math.ceil(skill.length / 4) <= 450, `${command} exceeds the command-skill budget`);
+    for (const [platform, skill] of [["Codex", codexSkill], ["Claude", claudeSkill]]) {
+      assert.match(skill, new RegExp(`^---\\nname: "${command}"`, "m"));
+      assert.ok(skill.includes(`workflow:"${workflow}"`), `${platform} ${command} has the wrong workflow binding`);
+      assert.match(skill, /Call `cadre_workflow`/);
+      assert.match(skill, /exactly\s+`next\.tool` with `next\.arguments`/);
+      assert.ok(Math.ceil(skill.length / 4) <= 450, `${platform} ${command} exceeds the command-skill budget`);
+    }
+    assert.doesNotMatch(codexSkill, /disable-model-invocation/);
+    assert.match(claudeSkill, /disable-model-invocation: true/);
+    assert.equal(fs.existsSync(path.join(claudeSkills, command, "agents")), false);
     assert.match(metadata, /interface:\n  display_name: "Cadre [^"]+"\n  short_description: "[^"]+"/);
     assert.match(metadata, /policy:\n  allow_implicit_invocation: false\n$/);
   }
 
-  for (const plugin of ["cadre-claude", "cadre-copilot", "cadre-antigravity"]) {
+  for (const plugin of ["cadre-copilot", "cadre-antigravity"]) {
     const skills = path.join(generatedRoot, "plugins", plugin, "skills");
     assert.deepEqual(fs.readdirSync(skills).sort(), ["cadre"], `${plugin} should retain only its generic skill`);
   }
@@ -191,9 +200,11 @@ test("Generated skill and plugin bundles collapse Cadre-owned files", () => {
   for (const file of [
     ".claude-plugin/plugin.json",
     "mcp-config.json",
-    "skills/cadre/SKILL.md",
   ]) {
     assert.ok(claudeFiles.includes(file), `missing Claude plugin file ${file}`);
+  }
+  for (const command of readJson(path.join(masterSkillDir, "skill.json")).workflows) {
+    assert.ok(claudeFiles.includes(`skills/${command}/SKILL.md`), `missing Claude plugin command ${command}`);
   }
   for (const file of [
     "plugin.json",
@@ -384,11 +395,28 @@ test("Generated Codex and Claude plugin bundles only differ in intentional overl
 
   for (const rel of allFiles) {
     const [rootDir, skillName] = rel.split("/");
-    if (
-      intentionalDifferences.has(rel)
-      || rel === "skills/cadre/SKILL.md"
-      || (rootDir === "skills" && workflowSkills.has(skillName))
-    ) continue;
+    if (intentionalDifferences.has(rel)) continue;
+    if (rootDir === "skills" && workflowSkills.has(skillName)) {
+      if (rel === `skills/${skillName}/agents/openai.yaml`) {
+        if (!codexFiles.has(rel)) failures.push(`missing Codex command metadata: ${rel}`);
+        if (claudeFiles.has(rel)) failures.push(`unexpected Claude command metadata: ${rel}`);
+        continue;
+      }
+      if (rel === `skills/${skillName}/SKILL.md`) {
+        if (!codexFiles.has(rel)) failures.push(`missing from Codex bundle: ${rel}`);
+        if (!claudeFiles.has(rel)) failures.push(`missing from Claude bundle: ${rel}`);
+        if (codexFiles.has(rel) && claudeFiles.has(rel)) {
+          const codexText = fs.readFileSync(path.join(codexPlugin, rel), "utf8");
+          const claudeText = fs.readFileSync(path.join(claudePlugin, rel), "utf8");
+          if (claudeText.replace("disable-model-invocation: true\n", "") !== codexText) {
+            failures.push(`unexpected command skill diff: ${rel}`);
+          }
+        }
+        continue;
+      }
+      failures.push(`unexpected workflow skill file: ${rel}`);
+      continue;
+    }
     if (!codexFiles.has(rel)) {
       failures.push(`missing from Codex bundle: ${rel}`);
       continue;
@@ -442,7 +470,15 @@ test("Generated plugin manifests and marketplace shims point at expected paths",
   assert.equal(Object.prototype.hasOwnProperty.call(claudeManifest, "agents"), false);
   assert.equal(claudeManifest.mcpServers, "./mcp-config.json");
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-claude", "mcp-config.json")), true);
-  assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-claude", "skills", "cadre", "SKILL.md")), true);
+  const claudeSkills = path.join(generatedRoot, "plugins", "cadre-claude", "skills");
+  const workflowCommands = [...readJson(path.join(masterSkillDir, "skill.json")).workflows].sort();
+  assert.deepEqual(fs.readdirSync(claudeSkills).sort(), workflowCommands);
+  assert.equal(fs.existsSync(path.join(claudeSkills, "cadre")), false);
+  for (const command of workflowCommands) {
+    const skill = fs.readFileSync(path.join(claudeSkills, command, "SKILL.md"), "utf8");
+    assert.match(skill, /disable-model-invocation: true/);
+    assert.equal(fs.existsSync(path.join(claudeSkills, command, "agents")), false);
+  }
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-claude", "skills", "cadre", "skill.json")), false);
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-claude", "skills", "cadre", "protocols")), false);
   assert.equal(fs.existsSync(path.join(generatedRoot, "plugins", "cadre-claude", "references")), false);

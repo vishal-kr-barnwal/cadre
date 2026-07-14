@@ -12,11 +12,14 @@ skill shim, source workflow metadata, setup templates, tests, and install-time
 thin plugin bundles that users install into Claude Code, OpenAI Codex, GitHub
 Copilot, and Google Antigravity.
 
-The installed Cadre `SKILL.md` is a self-contained activation shim for the MCP
-runtime. A target repository may separately own `cadre/skills/<id>/skill.json`
-manifests with optional `SKILL.md` human projections. Those project skills are discovered from the active control repo,
-selected by workflow and repo context, and returned through MCP packets and
-resources; they are not installed or resolved globally.
+The installed activation surface is target-specific. Codex and Claude Code
+receive short-named, self-contained workflow shims, producing `$cadre:<workflow>`
+and `/cadre:<workflow>` picker entries without a generic umbrella command.
+Copilot and Antigravity retain the generic Cadre activation shim. A target
+repository may separately own `cadre/skills/<id>/skill.json` manifests with
+optional `SKILL.md` human projections. Those project skills are discovered from
+the active control repo, selected by workflow and repo context, and returned
+through MCP packets and resources; they are not installed or resolved globally.
 
 ## Repository Shape
 
@@ -49,6 +52,7 @@ need to be materialized.
 | Source | Owns |
 |--------|------|
 | `harness/skills/cadre/SKILL.md` | Self-contained packet-led Cadre activation shim. |
+| `harness/skills/cadre/workflow-command-template.md` | Thin workflow-bound command shim shared by Codex and Claude Code generation. |
 | `harness/skills/cadre/skill.json` | Maintainer-facing `cadre.skill.v1` source contract used by source validation. |
 | `harness/skills/cadre/protocols/` | Compact maintainer-facing workflow protocol definitions used by source validation and documentation. |
 | `harness/scripts/agent-refs/` | Maintainer reference sources for workflow and source-contract validation. |
@@ -84,7 +88,11 @@ the same thin plugin shape through `cadre install`.
 
 The generator:
 
-- Copies the master `SKILL.md` shim into each platform bundle.
+- Generates the same 19 short-named workflow skills for Codex and Claude Code;
+  Codex adds explicit-only OpenAI metadata, while Claude Code exposes each
+  skill through `/cadre:<workflow>`.
+- Copies the generic master `SKILL.md` shim into the Copilot and Antigravity
+  bundles.
 - Writes platform MCP configs that point at the global `cadre-mcp` runtime.
 - Keeps plugins thin: no copied assets, scripts, or platform worker agents.
 - Embeds only runtime setup templates into `scripts/mcp/cadre-server.js`; skill

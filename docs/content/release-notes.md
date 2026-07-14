@@ -13,8 +13,8 @@ Cadre 2.2.0 makes canonical state and its human-facing projection one atomic
 review unit, then completes the token-efficient MCP v1 migration with strict
 protocol, resource, continuation, job, parallel, and process-execution
 boundaries. The result is a more deterministic review loop, a smaller published
-package, first-class Codex workflow discovery, and substantially stronger
-failure behavior at every untrusted input boundary.
+package, first-class Codex and Claude Code workflow discovery, and substantially
+stronger failure behavior at every untrusted input boundary.
 
 ### Compared With 2.1.0
 
@@ -25,12 +25,12 @@ failure behavior at every untrusted input boundary.
 | Approval state | Ignored, resumable approval sessions bind every stage to reviewed hashes, support cancellation, and emit compact completion evidence. |
 | Styleguides | Human projections move from `cadre/code_styleguides/` to `cadre/styleguides/`, beside their canonical files. |
 | MCP boundary | The three public v1 tools are now enforced internally; retired aliases, flat inputs, reserved control injection, and undocumented continuations are rejected. |
-| Codex discovery | Every registered workflow appears as an explicit-only `$cadre:*` picker entry; the redundant `$cadre:cadre` entry is no longer installed. |
+| Command discovery | The same 19 registered workflows appear as explicit `$cadre:*` entries in Codex and `/cadre:*` entries in Claude Code; neither redundant umbrella entry is installed. |
 | Protocol lifecycle | MCP `2025-11-25` and `2025-06-18` negotiate through initialize/initialized, with standard JSON-RPC error and notification behavior. |
 | Resources | One typed registry separates the only fixed resource from parameterized templates and validates every URI/query contract. |
 | Parallel and jobs | Workers receive exact completion or recovery callbacks; merge, cleanup, restart, persistence, and job continuation all fail closed from observed state. |
 | LSP and DAP | Project-owned config namespaces, secure reads/writes, contained breakpoints, and configured adapter selection prevent path and command injection. |
-| Package | The npm publish set drops from 10 to 8 files, removes duplicate worker/daemon executables, and reduces the uncompressed payload by 22,484 bytes. |
+| Package | The npm publish set drops from 10 to 8 files, removes duplicate worker/daemon executables, and reduces the uncompressed payload by 20,456 bytes. |
 | Verification | Test declarations increase from 114 to 148, with new lifecycle, resource, packet, approval, command-picker, source-capability, job, parallel, and config-security coverage. |
 
 ### Atomic Canonical And Projection Review
@@ -97,13 +97,19 @@ single-agent continuation. The only typed callbacks outside `next` are provider
 evidence write-back after external collection and exact parallel worker finish
 callbacks returned by Cadre.
 
-Codex now installs a thin, explicit-only skill shim for each registered
-workflow. Typing `$cadre:` exposes entries such as `$cadre:setup`,
-`$cadre:status`, `$cadre:implement`, and `$cadre:review`.
-Each shim fixes one workflow name and enters through `cadre_workflow`; none of
-them expands the three-tool MCP catalog, aliases retired tools, or activates
-implicitly. Claude Code, Copilot, and Antigravity retain the single generic
-Cadre skill.
+Codex and Claude Code now install a thin, explicit skill shim for each
+registered workflow. Typing `$cadre:` in Codex exposes entries such as
+`$cadre:setup`, `$cadre:status`, `$cadre:implement`, and `$cadre:review`;
+typing `/cadre:` in Claude Code exposes `/cadre:setup`, `/cadre:status`,
+`/cadre:implement`, and `/cadre:review`.
+
+Both clients use the same 19 workflow names: `setup`, `newtrack`, `implement`,
+`debug`, `status`, `validate`, `flag`, `revise`, `review`, `ship`, `land`,
+`handoff`, `archive`, `release`, `refresh`, `revert`, `formula`, `artifacts`,
+and `skill`. Neither installs a redundant `$cadre:cadre` or `/cadre:cadre`
+umbrella. Each shim fixes one workflow name and enters through
+`cadre_workflow`; none expands the three-tool MCP catalog or aliases retired
+tools. Copilot and Antigravity retain the single generic Cadre skill.
 
 ### Protocol And Resource Correctness
 
@@ -163,8 +169,8 @@ The runtime build now emits five bundles instead of seven. Private job-runner
 and LSP-daemon modes remain embedded in `cadre-mcp`, while the duplicate
 standalone executables are removed from the package. The npm publish set drops
 from 10 files to 8 and its tracked uncompressed payload decreases from
-1,936,959 to 1,914,475 bytes despite the additional validation and generated
-Codex workflow discovery.
+1,936,959 to 1,916,503 bytes despite the additional validation and generated
+Codex and Claude Code workflow discovery.
 
 Flat MCP forwarding shims, obsolete source barrels and adapters, dead package
 fallbacks, retired migration/context scripts, and unused agent references have
@@ -187,7 +193,8 @@ Restart clients that cache plugin or MCP configuration. Verify that
 `cadre@cadre` is installed and enabled at 2.2.0 and that its MCP command points
 to the current installed `cadre-mcp` runtime. In a new Codex task, type
 `$cadre:` and confirm the explicit workflow entries are listed without a
-generic `cadre` entry.
+generic `cadre` entry. In Claude Code, run `/reload-plugins` or restart, type
+`/cadre:`, and confirm the same 19 entries are listed without `/cadre:cadre`.
 
 Regenerate styleguide projections into `cadre/styleguides/`, review the
 resulting diff, and remove `cadre/code_styleguides/` manually. Cadre reports the

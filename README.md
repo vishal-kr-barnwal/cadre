@@ -22,8 +22,9 @@ hand.
 
 - **Structured delivery:** setup, track planning, implementation, review,
   ship/land, archive, release, handoff, refresh, and recovery workflows.
-- **Codex command discovery:** explicit picker entries expose every workflow as
-  `$cadre:*` without expanding Cadre's three-tool MCP surface.
+- **Codex and Claude command discovery:** explicit picker entries expose every
+  workflow as `$cadre:*` in Codex and `/cadre:*` in Claude Code without
+  expanding Cadre's three-tool MCP surface.
 - **Durable context:** canonical product, workflow, pattern, technology, track,
   event, message, review, and trace state with generated human projections.
 - **Repository-owned guidance:** workflow- and repository-targeted project
@@ -55,10 +56,10 @@ flat compatibility shims, embedded maintainer-only contracts, and dead scripts
 have been removed while regression coverage now exercises lifecycle, packet,
 resource, approval, parallel, job, and path-security boundaries.
 
-Codex installs also expose explicit workflow entries in the command picker.
-Type `$cadre:` to choose setup, status, implementation, review, release, or any
-other Cadre workflow directly; these entries are thin activation shims, not
-additional MCP tools.
+Codex and Claude Code installs also expose explicit workflow entries in their
+command pickers. Type `$cadre:` in Codex or `/cadre:` in Claude Code to choose
+setup, status, implementation, review, release, or any other Cadre workflow
+directly; these entries are thin activation shims, not additional MCP tools.
 
 See the [detailed 2.2.0 release notes](docs/content/release-notes.md) and
 [changelog](harness/CHANGELOG.md).
@@ -71,8 +72,9 @@ cadre install
 cadre install --check
 ```
 
-Restart clients that cache plugin or MCP configuration. Confirm that
-`cadre@cadre` is installed and enabled at 2.2.0.
+Restart clients that cache plugin or MCP configuration. In Claude Code,
+`/reload-plugins` refreshes the installed commands without restarting. Confirm
+that `cadre@cadre` is installed and enabled at 2.2.0.
 
 To remove generated client wiring:
 
@@ -82,20 +84,33 @@ cadre uninstall --target codex
 
 ## Use Cadre
 
-In Codex, type `$cadre:` and choose a workflow entry directly:
+In Codex, type `$cadre:`; in Claude Code, type `/cadre:`. Both clients expose
+the same workflow entries:
 
 ```text
+# Codex
 $cadre:setup
 $cadre:newtrack Add OAuth login
 $cadre:implement
 $cadre:review
 $cadre:ship
 $cadre:archive
+
+# Claude Code
+/cadre:setup
+/cadre:newtrack Add OAuth login
+/cadre:implement
+/cadre:review
+/cadre:ship
+/cadre:archive
 ```
 
-Codex exposes only the workflow entries, avoiding a redundant
-`$cadre:cadre` option. In Claude Code, Copilot, and Antigravity, activate the
-single Cadre skill and ask for the same workflow by its `cadre-*` name.
+The complete 19-workflow set is `setup`, `newtrack`, `implement`, `debug`,
+`status`, `validate`, `flag`, `revise`, `review`, `ship`, `land`, `handoff`,
+`archive`, `release`, `refresh`, `revert`, `formula`, `artifacts`, and `skill`.
+Neither picker exposes a redundant `$cadre:cadre` or `/cadre:cadre` umbrella.
+In Copilot and Antigravity, activate the Cadre skill and ask for the workflow by
+its `cadre-*` name.
 
 Use `cadre-land` instead of `cadre-ship` for a polyrepo control repository.
 Cadre packets own the control plane, approvals, provider evidence, worker state,

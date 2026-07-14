@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { asJsonObject, asOptionalString } from "../guards";
 import { PROTOCOL_VERSION } from "../mcp/domain/tool-catalog";
 import { CommandPlan, RuntimePaths, Target, TargetPaths } from "./install-targets";
+import { WorkflowCommandPlatform, WorkflowCommandSkills, WorkflowCommandSkillSets } from "./workflow-command-skills";
 
 interface MpcServerConfig {
   command?: string;
@@ -107,11 +108,12 @@ function checkMcpConfig(target: Target, file: string, runtime: RuntimePaths): st
 }
 
 function checkCommandSkills(
+  platform: WorkflowCommandPlatform,
   pluginRoot: string,
-  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  commandSkills: WorkflowCommandSkills,
 ): string[] {
   const errors: string[] = [];
-  if (Object.keys(commandSkills).length === 0) return ["Cadre Codex workflow commands are missing"];
+  if (Object.keys(commandSkills).length === 0) return [`Cadre ${platform} workflow commands are missing`];
   for (const [command, files] of Object.entries(commandSkills)) {
     const commandRoot = path.join(pluginRoot, "skills", command);
     if (fs.existsSync(commandRoot) && !fs.lstatSync(commandRoot).isDirectory()) {
@@ -171,7 +173,7 @@ export function checkTarget(
   target: Target,
   paths: TargetPaths,
   runtime: RuntimePaths,
-  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  commandSkillSets: WorkflowCommandSkillSets,
 ): string[] {
   const errors: string[] = [];
   for (const skillRoot of paths.skillRoots) {
@@ -179,7 +181,7 @@ export function checkTarget(
     if (!fs.existsSync(skill)) errors.push(`missing ${skill}`);
   }
   for (const pluginRoot of paths.pluginRoots) {
-    if (target !== "codex") {
+    if (target !== "codex" && target !== "claude") {
       const skill = path.join(pluginRoot, "skills", "cadre", "SKILL.md");
       if (!fs.existsSync(skill)) errors.push(`missing ${skill}`);
     }
@@ -188,7 +190,9 @@ export function checkTarget(
     if (!fs.existsSync(files.mcp)) errors.push(`missing ${files.mcp}`);
     errors.push(...forbiddenThinPayload(pluginRoot).map((entry) => `thin plugin contains forbidden payload ${entry}`));
     if (fs.existsSync(files.mcp)) errors.push(...checkMcpConfig(target, files.mcp, runtime));
-    if (target === "codex") errors.push(...checkCommandSkills(pluginRoot, commandSkills));
+    if (target === "codex" || target === "claude") {
+      errors.push(...checkCommandSkills(target, pluginRoot, commandSkillSets[target]));
+    }
   }
   if (paths.marketplaceFile && !fs.existsSync(paths.marketplaceFile)) errors.push(`missing ${paths.marketplaceFile}`);
   return errors;

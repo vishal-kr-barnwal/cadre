@@ -25,11 +25,12 @@ cadre doctor
 
 The installed plugins contain only platform wiring:
 
-- On Claude Code, Copilot, and Antigravity, `skills/cadre/SKILL.md` as the
-  agent-facing entrypoint.
-- On Codex, generated `skills/<workflow>/SKILL.md` entries plus explicit-only
-  `agents/openai.yaml` metadata for workflow discovery in the `$cadre:` picker;
-  no redundant umbrella entry is installed.
+- On Codex and Claude Code, generated `skills/<workflow>/SKILL.md` entries for
+  the same 19 workflow commands. Codex adds explicit-only `agents/openai.yaml`
+  metadata for the `$cadre:` picker; Claude Code exposes the short skill names
+  through its `/cadre:` plugin namespace.
+- On Copilot and Antigravity, `skills/cadre/SKILL.md` as the agent-facing
+  entrypoint.
 - `.mcp.json` for Codex and Copilot, `mcp-config.json` for Claude, or
   `mcp_config.json` for Antigravity.
 
@@ -70,35 +71,50 @@ For source development, keep using the npm-first install path. Harness
 contributors can run `pnpm --filter cadre-ai generate` to create ignored local
 plugin fixtures for validation, but those generated files are not checked in.
 
-### Codex Workflow Picker
+### Codex And Claude Workflow Pickers
 
-After installing or upgrading, restart Codex or open a new task, type
-`$cadre:`, and choose a workflow directly. For example:
+After installing or upgrading, restart Codex or open a new task, then type
+`$cadre:`. In Claude Code, run `/reload-plugins` or restart, then type
+`/cadre:`. Both clients expose the same workflow set:
 
 ```text
+# Codex
 $cadre:setup
 $cadre:status
 $cadre:newtrack Add OAuth login
 $cadre:implement
 $cadre:review
 $cadre:ship
+
+# Claude Code
+/cadre:setup
+/cadre:status
+/cadre:newtrack Add OAuth login
+/cadre:implement
+/cadre:review
+/cadre:ship
 ```
 
-Cadre generates one explicit-only picker entry for every registered workflow
-and deliberately omits a redundant `$cadre:cadre` entry. The picker entries
-all route through `cadre_workflow` and do not add tools or aliases to the MCP
-contract.
+The 19 workflow names are `setup`, `newtrack`, `implement`, `debug`, `status`,
+`validate`, `flag`, `revise`, `review`, `ship`, `land`, `handoff`, `archive`,
+`release`, `refresh`, `revert`, `formula`, `artifacts`, and `skill`. Cadre
+deliberately omits redundant `$cadre:cadre` and `/cadre:cadre` entries. Every
+picker entry routes through `cadre_workflow` and adds no tools or aliases to the
+MCP contract.
 
 ## First Project Setup
 
-In Codex, select the setup workflow from the picker:
+Select the setup workflow from the client picker:
 
 ```text
+# Codex
 $cadre:setup
+
+# Claude Code
+/cadre:setup
 ```
 
-In Claude Code, Copilot, or Antigravity, activate the Cadre skill and ask for
-`cadre-setup`.
+In Copilot or Antigravity, activate the Cadre skill and ask for `cadre-setup`.
 
 Setup asks for product context, tech stack, topology, sync mode, provider mode,
 quality gate, optional CI templates, and LSP setup. Setup dry-runs can return

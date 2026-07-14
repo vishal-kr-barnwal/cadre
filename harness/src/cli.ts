@@ -16,7 +16,10 @@ const workflowCommands = typeof __CADRE_WORKFLOW_COMMANDS__ !== "undefined"
 
 runCli(process.argv.slice(2), {
   skillShim: typeof __CADRE_SKILL_SHIM__ === "string" ? __CADRE_SKILL_SHIM__ : "",
-  commandSkills: renderWorkflowCommandSkills(commandSkillTemplate, workflowCommands),
+  commandSkills: {
+    codex: renderWorkflowCommandSkills(commandSkillTemplate, workflowCommands, { platform: "codex" }),
+    claude: renderWorkflowCommandSkills(commandSkillTemplate, workflowCommands, { platform: "claude" }),
+  },
 }).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n`);

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PACKAGE_DISPLAY_NAME, PACKAGE_PLUGIN_NAME, RuntimePaths, Target, TargetPaths } from "./install-targets";
+import { WorkflowCommandSkills, WorkflowCommandSkillSets } from "./workflow-command-skills";
 
 const MARKETPLACE_PLUGIN_SOURCE = "./plugins/cadre";
 
@@ -122,7 +123,7 @@ function writeText(file: string, text: string): void {
 
 function writeCommandSkills(
   pluginRoot: string,
-  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  commandSkills: WorkflowCommandSkills,
 ): void {
   for (const [command, files] of Object.entries(commandSkills)) {
     if (command === "cadre" || !/^[a-z][a-z0-9-]*$/.test(command)) {
@@ -143,13 +144,16 @@ function writePluginRoot(
   pluginRoot: string,
   runtime: RuntimePaths,
   skillShim: string,
-  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  commandSkillSets: WorkflowCommandSkillSets,
 ): void {
-  if (target === "codex" && Object.keys(commandSkills).length === 0) {
-    throw new Error("Cadre Codex workflow commands are missing");
+  const commandSkills = target === "codex" || target === "claude"
+    ? commandSkillSets[target]
+    : null;
+  if (commandSkills && Object.keys(commandSkills).length === 0) {
+    throw new Error(`Cadre ${target} workflow commands are missing`);
   }
   fs.rmSync(pluginRoot, { recursive: true, force: true });
-  if (target === "codex") {
+  if (commandSkills) {
     writeCommandSkills(pluginRoot, commandSkills);
   } else {
     writeText(path.join(pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
@@ -174,9 +178,9 @@ export function writeTarget(
   paths: TargetPaths,
   runtime: RuntimePaths,
   skillShim: string,
-  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  commandSkillSets: WorkflowCommandSkillSets,
 ): void {
-  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkills);
+  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkillSets);
   for (const skillRoot of paths.skillRoots) {
     fs.rmSync(skillRoot, { recursive: true, force: true });
     writeText(path.join(skillRoot, "SKILL.md"), skillShim);

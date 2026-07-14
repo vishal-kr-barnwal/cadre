@@ -111,7 +111,9 @@ test("cadre install writes thin plugins and invokes native installers", () => {
   const copilotPlugin = path.join(copilotMarketplace, "plugins", "cadre");
   const antigravityCliPlugin = path.join(home, ".gemini", "antigravity-cli", "plugins", "cadre");
   const antigravityIdePlugin = path.join(home, ".gemini", "config", "plugins", "cadre");
-  assert.equal(fs.existsSync(path.join(codexPlugin, "skills", "cadre")), false);
+  for (const plugin of [codexPlugin, claudePlugin]) {
+    assert.equal(fs.existsSync(path.join(plugin, "skills", "cadre")), false);
+  }
   for (const plugin of [codexPlugin, claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
     assert.equal(fs.existsSync(path.join(plugin, "assets")), false);
     assert.equal(fs.existsSync(path.join(plugin, "agents")), false);
@@ -119,35 +121,47 @@ test("cadre install writes thin plugins and invokes native installers", () => {
     assert.equal(fs.existsSync(path.join(plugin, "references")), false);
     assert.equal(fs.existsSync(path.join(plugin, "templates")), false);
   }
-  for (const plugin of [claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
+  for (const plugin of [copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
     assert.equal(fs.existsSync(path.join(plugin, "skills", "cadre", "SKILL.md")), true);
   }
   const codexSkillNames = fs.readdirSync(path.join(codexPlugin, "skills")).sort();
+  const claudeSkillNames = fs.readdirSync(path.join(claudePlugin, "skills")).sort();
   assert.deepEqual(codexSkillNames, workflowCommands);
+  assert.deepEqual(claudeSkillNames, workflowCommands);
   for (const command of workflowCommands) {
-    const skill = fs.readFileSync(path.join(codexPlugin, "skills", command, "SKILL.md"), "utf8");
+    const codexSkill = fs.readFileSync(path.join(codexPlugin, "skills", command, "SKILL.md"), "utf8");
+    const claudeSkill = fs.readFileSync(path.join(claudePlugin, "skills", command, "SKILL.md"), "utf8");
     const metadata = fs.readFileSync(path.join(codexPlugin, "skills", command, "agents", "openai.yaml"), "utf8");
-    assert.match(skill, new RegExp(`name: "${command}"`));
+    assert.match(codexSkill, new RegExp(`name: "${command}"`));
+    assert.doesNotMatch(codexSkill, /disable-model-invocation/);
+    assert.match(claudeSkill, new RegExp(`name: "${command}"`));
+    assert.match(claudeSkill, /disable-model-invocation: true/);
+    assert.equal(fs.existsSync(path.join(claudePlugin, "skills", command, "agents")), false);
     assert.match(metadata, /interface:\n  display_name: "Cadre [^"]+"\n  short_description: "[^"]+"/);
     assert.match(metadata, /allow_implicit_invocation: false/);
   }
-  const expectedSkills = path.join(home, "expected-codex-skills");
-  const rendered = spawnSync(
-    process.execPath,
-    [path.join(root, "scripts", "workflow-command-skills.mjs"), "--write", expectedSkills],
-    { cwd: root, encoding: "utf8" },
-  );
-  assert.equal(rendered.status, 0, rendered.stderr || rendered.stdout);
-  for (const command of workflowCommands) {
-    for (const relative of ["SKILL.md", path.join("agents", "openai.yaml")]) {
-      assert.equal(
-        fs.readFileSync(path.join(codexPlugin, "skills", command, relative), "utf8"),
-        fs.readFileSync(path.join(expectedSkills, command, relative), "utf8"),
-        `${command}/${relative} differs between build and source renderers`,
-      );
+  for (const [platform, plugin, relatives] of [
+    ["codex", codexPlugin, ["SKILL.md", path.join("agents", "openai.yaml")]],
+    ["claude", claudePlugin, ["SKILL.md"]],
+  ]) {
+    const expectedSkills = path.join(home, `expected-${platform}-skills`);
+    const rendered = spawnSync(
+      process.execPath,
+      [path.join(root, "scripts", "workflow-command-skills.mjs"), "--write", expectedSkills, "--platform", platform],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(rendered.status, 0, rendered.stderr || rendered.stdout);
+    for (const command of workflowCommands) {
+      for (const relative of relatives) {
+        assert.equal(
+          fs.readFileSync(path.join(plugin, "skills", command, relative), "utf8"),
+          fs.readFileSync(path.join(expectedSkills, command, relative), "utf8"),
+          `${platform} ${command}/${relative} differs between build and source renderers`,
+        );
+      }
     }
   }
-  for (const plugin of [claudePlugin, copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
+  for (const plugin of [copilotPlugin, antigravityCliPlugin, antigravityIdePlugin]) {
     assert.deepEqual(fs.readdirSync(path.join(plugin, "skills")).sort(), ["cadre"]);
   }
 
@@ -277,6 +291,7 @@ test("cadre install --check validates existing thin plugin", () => {
   const cadreHome = path.join(home, ".cadre");
   fs.mkdirSync(bin, { recursive: true });
   installFakeClient(bin, "codex", log);
+  installFakeClient(bin, "claude", log);
   installFakeClient(bin, "copilot", log);
   installFakeClient(bin, "agy", log);
 
@@ -307,6 +322,33 @@ test("cadre install --check validates existing thin plugin", () => {
   const missingCommand = runCli(["install", "--check", "--target", "codex"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
   assert.equal(missingCommand.status, 1);
   assert.match(missingCommand.stderr, /missing .*skills\/setup\/SKILL\.md/);
+
+  const claudeInstall = runCli(["install", "--target", "claude", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(claudeInstall.status, 0, claudeInstall.stderr || claudeInstall.stdout);
+  const claudeCheck = runCli(["install", "--check", "--target", "claude"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(claudeCheck.status, 0, claudeCheck.stderr || claudeCheck.stdout);
+  assert.match(claudeCheck.stdout, /Cadre claude plugin is installed/);
+  assert.match(claudeCheck.stdout, /Cadre claude MCP tool approvals are configured/);
+
+  const installedClaudePlugin = path.join(cadreHome, "marketplaces", "claude", "plugins", "cadre");
+  write(path.join(installedClaudePlugin, "skills", "cadre", "SKILL.md"), "# obsolete umbrella\n");
+  write(path.join(installedClaudePlugin, "skills", "cadre-setup", "SKILL.md"), "# obsolete prefixed command\n");
+  write(path.join(installedClaudePlugin, "skills", "setup", "agents", "openai.yaml"), "stale\n");
+  const staleClaudeCheck = runCli(["install", "--check", "--target", "claude"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(staleClaudeCheck.status, 1);
+  assert.match(staleClaudeCheck.stderr, /unexpected Cadre command skill/);
+  assert.match(staleClaudeCheck.stderr, /unexpected Cadre command skill directory/);
+
+  const claudeRefresh = runCli(["install", "--target", "claude", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(claudeRefresh.status, 0, claudeRefresh.stderr || claudeRefresh.stdout);
+  assert.equal(fs.existsSync(path.join(installedClaudePlugin, "skills", "cadre")), false);
+  assert.equal(fs.existsSync(path.join(installedClaudePlugin, "skills", "cadre-setup")), false);
+  assert.equal(fs.existsSync(path.join(installedClaudePlugin, "skills", "setup", "agents")), false);
+
+  fs.rmSync(path.join(installedClaudePlugin, "skills", "setup"), { recursive: true, force: true });
+  const missingClaudeCommand = runCli(["install", "--check", "--target", "claude"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
+  assert.equal(missingClaudeCommand.status, 1);
+  assert.match(missingClaudeCommand.stderr, /missing .*skills\/setup\/SKILL\.md/);
 
   const copilotInstall = runCli(["install", "--target", "copilot", "--yes"], installEnv(home, bin, { CADRE_HOME: cadreHome }));
   assert.equal(copilotInstall.status, 0, copilotInstall.stderr || copilotInstall.stdout);

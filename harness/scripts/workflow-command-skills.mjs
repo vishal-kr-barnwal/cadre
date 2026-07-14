@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPattern = /^[a-z][a-z0-9-]*$/;
+const claudeFrontmatterEnd = "\n---\n";
+
+export const WORKFLOW_COMMAND_PLATFORMS = ["codex", "claude"];
 
 function workflowDisplayName(workflow) {
   if (workflow === "newtrack") return "New Track";
@@ -25,6 +28,39 @@ function commandAgentManifest(workflow) {
     "  allow_implicit_invocation: false",
     "",
   ].join("\n");
+}
+
+function claudeCommandSkill(content) {
+  if (!content.startsWith("---\n")) {
+    throw new Error("Cadre workflow command template is missing YAML frontmatter");
+  }
+  const frontmatterEnd = content.indexOf(claudeFrontmatterEnd, 4);
+  if (frontmatterEnd < 0) {
+    throw new Error("Cadre workflow command template has unterminated YAML frontmatter");
+  }
+  const frontmatter = content.slice(4, frontmatterEnd);
+  if (/^disable-model-invocation:/m.test(frontmatter)) {
+    throw new Error("Cadre workflow command template must keep Claude invocation policy platform-specific");
+  }
+  return `${content.slice(0, frontmatterEnd)}\ndisable-model-invocation: true${content.slice(frontmatterEnd)}`;
+}
+
+function commandFiles(platform, workflow, content) {
+  if (platform === "claude") {
+    return { "SKILL.md": claudeCommandSkill(content) };
+  }
+  return {
+    "SKILL.md": content,
+    "agents/openai.yaml": commandAgentManifest(workflow),
+  };
+}
+
+function commandPlatform(options) {
+  const platform = options.platform ?? "codex";
+  if (!WORKFLOW_COMMAND_PLATFORMS.includes(platform)) {
+    throw new Error(`Unsupported Cadre workflow command platform: ${String(platform)}`);
+  }
+  return platform;
 }
 
 function readJson(file) {
@@ -94,7 +130,8 @@ export function loadWorkflowCommandSource(repoRoot = scriptRoot) {
   };
 }
 
-function renderWorkflowCommandSkills({ template, workflows }) {
+export function renderWorkflowCommandSkills({ template, workflows }, options = {}) {
+  const platform = commandPlatform(options);
   return workflows.map((workflow) => {
     const skillName = workflow;
     const content = template
@@ -104,20 +141,17 @@ function renderWorkflowCommandSkills({ template, workflows }) {
     return {
       command: skillName,
       workflow,
-      files: {
-        "SKILL.md": content,
-        "agents/openai.yaml": commandAgentManifest(workflow),
-      },
+      files: commandFiles(platform, workflow, content),
     };
   });
 }
 
-export function loadWorkflowCommandSkills(repoRoot = scriptRoot) {
-  return renderWorkflowCommandSkills(loadWorkflowCommandSource(repoRoot));
+export function loadWorkflowCommandSkills(repoRoot = scriptRoot, options = {}) {
+  return renderWorkflowCommandSkills(loadWorkflowCommandSource(repoRoot), options);
 }
 
-export function writeWorkflowCommandSkills(skillsRoot, repoRoot = scriptRoot) {
-  const skills = loadWorkflowCommandSkills(repoRoot);
+export function writeWorkflowCommandSkills(skillsRoot, repoRoot = scriptRoot, options = {}) {
+  const skills = loadWorkflowCommandSkills(repoRoot, options);
   fs.rmSync(skillsRoot, { recursive: true, force: true });
   for (const skill of skills) {
     const directory = path.join(skillsRoot, skill.command);
@@ -131,9 +165,18 @@ export function writeWorkflowCommandSkills(skillsRoot, repoRoot = scriptRoot) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [operation, destination, ...extra] = process.argv.slice(2);
-  if (operation !== "--write" || !destination || extra.length > 0) {
-    process.stderr.write("Usage: node scripts/workflow-command-skills.mjs --write <plugin-skills-root>\n");
+  const hasPlatform = extra.length === 2 && extra[0] === "--platform";
+  const platform = hasPlatform ? extra[1] : "codex";
+  if (
+    operation !== "--write"
+    || !destination
+    || (extra.length > 0 && !hasPlatform)
+    || !WORKFLOW_COMMAND_PLATFORMS.includes(platform)
+  ) {
+    process.stderr.write(
+      "Usage: node scripts/workflow-command-skills.mjs --write <plugin-skills-root> [--platform codex|claude]\n",
+    );
     process.exit(1);
   }
-  writeWorkflowCommandSkills(path.resolve(destination));
+  writeWorkflowCommandSkills(path.resolve(destination), scriptRoot, { platform });
 }

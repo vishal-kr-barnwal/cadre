@@ -16,10 +16,11 @@ import {
   uninstallCommands,
 } from "./install-targets";
 import { removeTarget, writeTarget } from "./install-writers";
+import { WorkflowCommandSkillSets } from "./workflow-command-skills";
 
 interface CliContext {
   skillShim: string;
-  commandSkills: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  commandSkills: WorkflowCommandSkillSets;
 }
 
 function usage(): string {

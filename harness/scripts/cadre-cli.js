@@ -489,9 +489,9 @@ function checkMcpConfig(target, file, runtime) {
   }
   return errors;
 }
-function checkCommandSkills(pluginRoot, commandSkills) {
+function checkCommandSkills(platform, pluginRoot, commandSkills) {
   const errors = [];
-  if (Object.keys(commandSkills).length === 0) return ["Cadre Codex workflow commands are missing"];
+  if (Object.keys(commandSkills).length === 0) return [`Cadre ${platform} workflow commands are missing`];
   for (const [command, files] of Object.entries(commandSkills)) {
     const commandRoot = import_node_path3.default.join(pluginRoot, "skills", command);
     if (import_node_fs2.default.existsSync(commandRoot) && !import_node_fs2.default.lstatSync(commandRoot).isDirectory()) {
@@ -547,14 +547,14 @@ function checkCommandSkills(pluginRoot, commandSkills) {
   }
   return errors;
 }
-function checkTarget(target, paths, runtime, commandSkills) {
+function checkTarget(target, paths, runtime, commandSkillSets) {
   const errors = [];
   for (const skillRoot of paths.skillRoots) {
     const skill = import_node_path3.default.join(skillRoot, "SKILL.md");
     if (!import_node_fs2.default.existsSync(skill)) errors.push(`missing ${skill}`);
   }
   for (const pluginRoot of paths.pluginRoots) {
-    if (target !== "codex") {
+    if (target !== "codex" && target !== "claude") {
       const skill = import_node_path3.default.join(pluginRoot, "skills", "cadre", "SKILL.md");
       if (!import_node_fs2.default.existsSync(skill)) errors.push(`missing ${skill}`);
     }
@@ -563,7 +563,9 @@ function checkTarget(target, paths, runtime, commandSkills) {
     if (!import_node_fs2.default.existsSync(files.mcp)) errors.push(`missing ${files.mcp}`);
     errors.push(...forbiddenThinPayload(pluginRoot).map((entry) => `thin plugin contains forbidden payload ${entry}`));
     if (import_node_fs2.default.existsSync(files.mcp)) errors.push(...checkMcpConfig(target, files.mcp, runtime));
-    if (target === "codex") errors.push(...checkCommandSkills(pluginRoot, commandSkills));
+    if (target === "codex" || target === "claude") {
+      errors.push(...checkCommandSkills(target, pluginRoot, commandSkillSets[target]));
+    }
   }
   if (paths.marketplaceFile && !import_node_fs2.default.existsSync(paths.marketplaceFile)) errors.push(`missing ${paths.marketplaceFile}`);
   return errors;
@@ -706,12 +708,13 @@ function writeCommandSkills(pluginRoot, commandSkills) {
     }
   }
 }
-function writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkills) {
-  if (target === "codex" && Object.keys(commandSkills).length === 0) {
-    throw new Error("Cadre Codex workflow commands are missing");
+function writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkillSets) {
+  const commandSkills = target === "codex" || target === "claude" ? commandSkillSets[target] : null;
+  if (commandSkills && Object.keys(commandSkills).length === 0) {
+    throw new Error(`Cadre ${target} workflow commands are missing`);
   }
   import_node_fs3.default.rmSync(pluginRoot, { recursive: true, force: true });
-  if (target === "codex") {
+  if (commandSkills) {
     writeCommandSkills(pluginRoot, commandSkills);
   } else {
     writeText(import_node_path4.default.join(pluginRoot, "skills", "cadre", "SKILL.md"), skillShim);
@@ -730,8 +733,8 @@ function writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkills) 
     writeJson(import_node_path4.default.join(pluginRoot, "mcp_config.json"), mcpConfig(target, runtime));
   }
 }
-function writeTarget(target, paths, runtime, skillShim, commandSkills) {
-  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkills);
+function writeTarget(target, paths, runtime, skillShim, commandSkillSets) {
+  for (const pluginRoot of paths.pluginRoots) writePluginRoot(target, pluginRoot, runtime, skillShim, commandSkillSets);
   for (const skillRoot of paths.skillRoots) {
     import_node_fs3.default.rmSync(skillRoot, { recursive: true, force: true });
     writeText(import_node_path4.default.join(skillRoot, "SKILL.md"), skillShim);
@@ -990,6 +993,8 @@ async function runCli(argv, context) {
 
 // src/cli/workflow-command-skills.ts
 var workflowPattern = /^[a-z][a-z0-9-]*$/;
+var claudeFrontmatterEnd = "\n---\n";
+var WORKFLOW_COMMAND_PLATFORMS = ["codex", "claude"];
 function workflowDisplayName(workflow) {
   if (workflow === "newtrack") return "New Track";
   return workflow.split("-").map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
@@ -1006,7 +1011,35 @@ function commandAgentManifest(workflow) {
     ""
   ].join("\n");
 }
-function renderWorkflowCommandSkills(template, workflows) {
+function claudeCommandSkill(content) {
+  if (!content.startsWith("---\n")) {
+    throw new Error("Cadre workflow command template is missing YAML frontmatter");
+  }
+  const frontmatterEnd = content.indexOf(claudeFrontmatterEnd, 4);
+  if (frontmatterEnd < 0) {
+    throw new Error("Cadre workflow command template has unterminated YAML frontmatter");
+  }
+  const frontmatter = content.slice(4, frontmatterEnd);
+  if (/^disable-model-invocation:/m.test(frontmatter)) {
+    throw new Error("Cadre workflow command template must keep Claude invocation policy platform-specific");
+  }
+  return `${content.slice(0, frontmatterEnd)}
+disable-model-invocation: true${content.slice(frontmatterEnd)}`;
+}
+function commandFiles(platform, workflow, content) {
+  if (platform === "claude") {
+    return { "SKILL.md": claudeCommandSkill(content) };
+  }
+  return {
+    "SKILL.md": content,
+    "agents/openai.yaml": commandAgentManifest(workflow)
+  };
+}
+function renderWorkflowCommandSkills(template, workflows, options = {}) {
+  const platform = options.platform ?? "codex";
+  if (!WORKFLOW_COMMAND_PLATFORMS.includes(platform)) {
+    throw new Error(`Unsupported Cadre workflow command platform: ${String(platform)}`);
+  }
   if (!template.includes("{{command}}") || !template.includes("{{workflow}}")) {
     throw new Error("Cadre workflow command template is missing required placeholders");
   }
@@ -1021,10 +1054,7 @@ function renderWorkflowCommandSkills(template, workflows) {
     if (content.includes("{{")) {
       throw new Error(`Unresolved workflow command placeholder: ${workflow}`);
     }
-    commandSkills[workflow] = {
-      "SKILL.md": content,
-      "agents/openai.yaml": commandAgentManifest(workflow)
-    };
+    commandSkills[workflow] = commandFiles(platform, workflow, content);
   }
   return commandSkills;
 }
@@ -1034,7 +1064,10 @@ var commandSkillTemplate = typeof __CADRE_COMMAND_SKILL_TEMPLATE__ === "string" 
 var workflowCommands = typeof __CADRE_WORKFLOW_COMMANDS__ !== "undefined" && Array.isArray(__CADRE_WORKFLOW_COMMANDS__) ? __CADRE_WORKFLOW_COMMANDS__ : [];
 runCli(process.argv.slice(2), {
   skillShim: typeof __CADRE_SKILL_SHIM__ === "string" ? __CADRE_SKILL_SHIM__ : "",
-  commandSkills: renderWorkflowCommandSkills(commandSkillTemplate, workflowCommands)
+  commandSkills: {
+    codex: renderWorkflowCommandSkills(commandSkillTemplate, workflowCommands, { platform: "codex" }),
+    claude: renderWorkflowCommandSkills(commandSkillTemplate, workflowCommands, { platform: "claude" })
+  }
 }).catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}

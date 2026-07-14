@@ -26,11 +26,12 @@ Atomic document review and hardened MCP runtime release.
   state, and restart-safe job interruption and recovery coverage.
 - Added generated `cadre/tech-stack.md` and, for polyrepo control repositories,
   `cadre/repos.md` projections during setup.
-- Added Codex command-picker discovery for every registered workflow through
-  generated, explicit-only `$cadre:*` skill shims. The shims bind one
-  workflow to the existing packet contract and do not add MCP tools or aliases.
-  Codex omits the redundant generic `$cadre:cadre` entry; other clients retain
-  their single Cadre skill.
+- Added Codex and Claude Code command-picker discovery for the same 19
+  registered workflows through generated, explicit-only `$cadre:*` and
+  `/cadre:*` skill shims. The shims bind one workflow to the existing packet
+  contract and do not add MCP tools or aliases. Neither client installs the
+  redundant generic `$cadre:cadre` or `/cadre:cadre` entry; Copilot and
+  Antigravity retain their single Cadre skill.
 
 ### Changed
 
@@ -116,9 +117,10 @@ Atomic document review and hardened MCP runtime release.
 ### Migration Notes
 
 - Re-run `cadre install` after upgrading so every native client receives the
-  2.2.0 manifest, skill shim, and MCP configuration. Codex also receives the
-  explicit workflow-picker entries; restart it or open a new task before
-  typing `$cadre:`.
+  2.2.0 manifest, skill shim, and MCP configuration. Codex and Claude Code also
+  receive the explicit workflow-picker entries. Restart Codex or open a new
+  task before typing `$cadre:`; run `/reload-plugins` in Claude Code or restart
+  it before typing `/cadre:`.
 - Regenerate styleguide projections under `cadre/styleguides/`, review the
   resulting diff, and remove the legacy `cadre/code_styleguides/` directory
   manually. Cadre diagnoses that legacy path but does not move or delete it.
