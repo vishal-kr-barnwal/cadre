@@ -5252,6 +5252,89 @@ function git(root, args) {
 function gitAvailable(root) {
   return git(root, ["rev-parse", "--is-inside-work-tree"]).status === 0;
 }
+function reviewHeadFiles(root, relativePaths) {
+  if (!gitAvailable(root)) return { ok: true, available: false, files: [] };
+  const paths = Array.from(new Set(relativePaths));
+  const head = git(root, ["rev-parse", "--verify", "HEAD"]);
+  if (head.status === 128) {
+    return { ok: true, available: true, files: paths.map((path56) => ({ path: path56, existed: false, content: null })) };
+  }
+  if (head.status !== 0) {
+    return {
+      ok: false,
+      available: true,
+      files: [],
+      error: String(head.stderr || "").trim() || "Unable to inspect the Git review baseline"
+    };
+  }
+  const files = [];
+  for (const relativePath of paths) {
+    const tree = git(root, ["ls-tree", "-z", "--full-tree", "HEAD", "--", relativePath]);
+    if (tree.status !== 0) {
+      return {
+        ok: false,
+        available: true,
+        files,
+        error: String(tree.stderr || "").trim() || `Unable to inspect Git baseline for ${relativePath}`
+      };
+    }
+    if (String(tree.stdout).length === 0) {
+      files.push({ path: relativePath, existed: false, content: null });
+      continue;
+    }
+    const blob = git(root, ["cat-file", "blob", `HEAD:${relativePath}`]);
+    if (blob.status === 0) {
+      files.push({ path: relativePath, existed: true, content: String(blob.stdout) });
+      continue;
+    }
+    return {
+      ok: false,
+      available: true,
+      files,
+      error: String(blob.stderr || "").trim() || `Unable to read Git baseline for ${relativePath}`
+    };
+  }
+  return { ok: true, available: true, files };
+}
+function inspectReviewGitState(root, relativePaths, headExpectations = []) {
+  if (!gitAvailable(root)) return { ok: true, stagedPaths: [], baselinePaths: [] };
+  const stagedPaths = [];
+  for (const relativePath of Array.from(new Set(relativePaths))) {
+    const result = git(root, ["diff", "--cached", "--quiet", "--ita-invisible-in-index", "--", relativePath]);
+    if (result.status === 1) {
+      stagedPaths.push(relativePath);
+      continue;
+    }
+    if (result.status !== 0) {
+      return {
+        ok: false,
+        stagedPaths,
+        baselinePaths: [],
+        error: String(result.stderr || "").trim() || `Unable to inspect staged review target ${relativePath}`
+      };
+    }
+  }
+  const head = reviewHeadFiles(root, headExpectations.map((expectation) => expectation.path));
+  if (!head.ok) {
+    return {
+      ok: false,
+      stagedPaths,
+      baselinePaths: [],
+      error: head.error || "Unable to inspect the Git review baseline"
+    };
+  }
+  const currentByPath = new Map(head.files.map((file) => [file.path, file]));
+  const baselinePaths = head.available ? headExpectations.filter((expected) => {
+    const current = currentByPath.get(expected.path) || { path: expected.path, existed: false, content: null };
+    if (expected.allowMissing === true && !current.existed) return false;
+    return current.existed !== expected.existed || current.existed && current.content !== expected.content;
+  }).map((expected) => expected.path) : [];
+  return {
+    ok: stagedPaths.length === 0 && baselinePaths.length === 0,
+    stagedPaths,
+    baselinePaths: Array.from(new Set(baselinePaths))
+  };
+}
 function addIntentToAdd(root, relativePaths) {
   if (relativePaths.length === 0 || !gitAvailable(root)) return { paths: [], warnings: [] };
   const paths = [];
@@ -5276,7 +5359,7 @@ function removeReviewIntentToAdd(root, relativePaths) {
   const removed = [];
   for (const relativePath of Array.from(new Set(relativePaths))) {
     if (git(root, ["cat-file", "-e", `HEAD:${relativePath}`]).status === 0) continue;
-    const stagedContent = git(root, ["diff", "--cached", "--quiet", "--", relativePath]);
+    const stagedContent = git(root, ["diff", "--cached", "--quiet", "--ita-invisible-in-index", "--", relativePath]);
     if (stagedContent.status !== 0) continue;
     const result = git(root, ["update-index", "--force-remove", "--", relativePath]);
     if (result.status === 0) removed.push(relativePath);
@@ -5453,7 +5536,9 @@ function styleGuideIdsForTechStack(techStack) {
   return Array.from(/* @__PURE__ */ new Set([...detected, ...techStackStyleGuideOverrides(techStack)])).sort();
 }
 function techStackFromArgs(args = {}) {
-  return isRecord(args.techStack) ? asJsonObject(args.techStack) : null;
+  const rawArgs3 = args;
+  const value = rawArgs3.techStack ?? rawArgs3.tech_stack;
+  return isRecord(value) ? asJsonObject(value) : null;
 }
 function loadTechStack(root) {
   return readJson(import_node_path24.default.join(root, "cadre", "tech-stack.json"), null);
@@ -5500,7 +5585,8 @@ function setupStyleGuides(root, args = {}) {
   const available = new Set(availableStyleGuideIds());
   const techStack = techStackForPacket(root, args) || {};
   const detected = styleGuideIdsForTechStack(techStack).filter((id) => available.has(id));
-  const requested = requestedStyleGuideIds(args.styleGuideIds);
+  const rawArgs3 = args;
+  const requested = requestedStyleGuideIds(rawArgs3.styleGuideIds ?? rawArgs3.style_guide_ids);
   const missing = requested.filter((id) => !available.has(id));
   const selected = Array.from(/* @__PURE__ */ new Set([
     ...available.has("general") ? ["general"] : [],
@@ -5587,6 +5673,11 @@ function setupLspWriteDisabled(args = {}) {
 function setupShouldWriteLsp(args, lspRecommendations) {
   if (setupLspWriteRequested(args)) return true;
   if (setupLspWriteDisabled(args)) return false;
+  const rawArgs3 = args;
+  const hasPreviewSelection = Object.prototype.hasOwnProperty.call(rawArgs3, "setupPreviewLspAdded") || Object.prototype.hasOwnProperty.call(rawArgs3, "setup_preview_lsp_added");
+  if (hasPreviewSelection) {
+    return asStringArray(rawArgs3.setupPreviewLspAdded || rawArgs3.setup_preview_lsp_added).length > 0;
+  }
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
 function setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles = []) {
@@ -8982,11 +9073,159 @@ function writeApprovalSession(root, session) {
 function removeApprovalSession(root, sessionId) {
   import_node_fs20.default.rmSync(sessionFile(root, sessionId), { force: true });
 }
+function approvalSessions(root, workflow) {
+  let names;
+  try {
+    names = import_node_fs20.default.readdirSync(sessionDirectory(root));
+  } catch {
+    return [];
+  }
+  return names.filter((name) => /^[a-f0-9]{24}\.json$/.test(name)).map((name) => readApprovalSession(root, name.slice(0, -5))).filter((session) => Boolean(session && session.workflow === workflow));
+}
+function safeSessionTarget(root, relativePath) {
+  const resolvedRoot = import_node_path36.default.resolve(root);
+  const target2 = import_node_path36.default.resolve(resolvedRoot, relativePath);
+  const relative = import_node_path36.default.relative(resolvedRoot, target2);
+  if (!relative || relative.startsWith("..") || import_node_path36.default.isAbsolute(relative)) return null;
+  return target2;
+}
+function fileContent(file) {
+  return fileExists(file) ? import_node_fs20.default.readFileSync(file, "utf8") : null;
+}
+function restoreFile(file, content) {
+  if (content === null) {
+    import_node_fs20.default.rmSync(file, { force: true });
+    return;
+  }
+  import_node_fs20.default.mkdirSync(import_node_path36.default.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.supersede-tmp`;
+  import_node_fs20.default.writeFileSync(temporary, content);
+  import_node_fs20.default.renameSync(temporary, file);
+}
+function supersessionOrder(sessions, activeSessionId) {
+  return [...sessions].sort((left, right) => {
+    if (left.session_id === activeSessionId) return -1;
+    if (right.session_id === activeSessionId) return 1;
+    const leftHasPreview = left.preview_files.length > 0 ? 1 : 0;
+    const rightHasPreview = right.preview_files.length > 0 ? 1 : 0;
+    if (leftHasPreview !== rightHasPreview) return leftHasPreview - rightHasPreview;
+    return Date.parse(right.updated_at) - Date.parse(left.updated_at);
+  });
+}
+function supersedeUnapprovedApprovalSessions(root, workflow, activeSessionId) {
+  return withLock(root, `approval-supersede-${workflow}`, () => {
+    const sessions = approvalSessions(root, workflow);
+    const active = sessions.find((session) => session.session_id === activeSessionId);
+    if (active && active.preview_files.length > 0) {
+      return { ok: true, skipped: true, reason: "active approval preview already exists" };
+    }
+    const candidates = sessions.filter((session) => session.session_id !== activeSessionId || session.preview_files.length === 0);
+    if (candidates.length === 0) return { ok: true, skipped: true, reason: "no superseded approval previews" };
+    const approved = candidates.filter((session) => session.approved_stages.length > 0);
+    if (approved.length > 0) {
+      return {
+        ok: false,
+        stage: "superseded_approval",
+        error: `Existing ${workflow} approval has reviewed stages and must be resumed or cancelled through Cadre before starting a new payload`,
+        session_ids: approved.map((session) => session.session_id)
+      };
+    }
+    const ordered = supersessionOrder(candidates, activeSessionId);
+    const virtual = /* @__PURE__ */ new Map();
+    const targets = /* @__PURE__ */ new Map();
+    const headExpectations = /* @__PURE__ */ new Map();
+    for (const session of ordered) {
+      const beforeByPath = new Map(session.before_files.map((entry) => [entry.path, entry]));
+      for (const snapshot of session.snapshot_files) {
+        if (snapshot.missing === true) continue;
+        const before = beforeByPath.get(snapshot.path);
+        const target2 = safeSessionTarget(root, snapshot.path);
+        if (!before || !target2) {
+          return {
+            ok: false,
+            stage: "superseded_approval",
+            error: `Superseded ${workflow} approval has an invalid restore record for ${snapshot.path}`,
+            session_id: session.session_id
+          };
+        }
+        const beforeContent = before.existed ? before.content : null;
+        const hasHeadSnapshot = typeof before.head_existed === "boolean";
+        headExpectations.set(snapshot.path, {
+          path: snapshot.path,
+          existed: hasHeadSnapshot ? before.head_existed : before.existed,
+          content: hasHeadSnapshot ? before.head_content ?? null : beforeContent,
+          ...!hasHeadSnapshot && before.existed ? { allowMissing: true } : {}
+        });
+        const current = virtual.has(snapshot.path) ? virtual.get(snapshot.path) : fileContent(target2);
+        if (current !== snapshot.content && current !== beforeContent) {
+          return {
+            ok: false,
+            stage: "superseded_approval_drift",
+            error: `Superseded ${workflow} review target changed after Cadre created it: ${snapshot.path}`,
+            session_id: session.session_id,
+            path: snapshot.path
+          };
+        }
+        targets.set(snapshot.path, target2);
+        virtual.set(snapshot.path, beforeContent);
+      }
+    }
+    const gitState = inspectReviewGitState(root, Array.from(virtual.keys()), Array.from(headExpectations.values()));
+    if (!gitState.ok) {
+      const changed = [...gitState.stagedPaths, ...gitState.baselinePaths];
+      const reason = gitState.error || (gitState.stagedPaths.length > 0 ? `Superseded ${workflow} review target has staged Git content: ${gitState.stagedPaths.join(", ")}` : `Superseded ${workflow} review target was committed or changed in Git after Cadre created it: ${gitState.baselinePaths.join(", ")}`);
+      return {
+        ok: false,
+        stage: "superseded_approval_git_drift",
+        error: reason,
+        paths: changed,
+        staged_paths: gitState.stagedPaths,
+        baseline_paths: gitState.baselinePaths
+      };
+    }
+    const diskBefore = /* @__PURE__ */ new Map();
+    try {
+      for (const [relativePath, content] of virtual) {
+        const target2 = targets.get(relativePath);
+        diskBefore.set(relativePath, fileContent(target2));
+        restoreFile(target2, content);
+      }
+    } catch (error) {
+      for (const [relativePath, content] of diskBefore) {
+        const target2 = targets.get(relativePath);
+        if (target2) restoreFile(target2, content);
+      }
+      return {
+        ok: false,
+        stage: "superseded_approval_restore",
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+    const intentToAddPaths = Array.from(new Set(ordered.flatMap((session) => session.intent_to_add_paths)));
+    const intentRemoved = removeReviewIntentToAdd(root, intentToAddPaths);
+    for (const session of ordered) removeApprovalSession(root, session.session_id);
+    return {
+      ok: true,
+      superseded: ordered.map((session) => session.session_id),
+      restored: Array.from(virtual.entries()).filter(([, content]) => content !== null).map(([relativePath]) => relativePath),
+      removed: Array.from(virtual.entries()).filter(([, content]) => content === null).map(([relativePath]) => relativePath),
+      intent_to_add_removed: intentRemoved
+    };
+  });
+}
 function captureApprovalBeforeFiles(root, files) {
+  const head = reviewHeadFiles(root, files.map((file) => file.path));
+  const headByPath = new Map(head.files.map((file) => [file.path, file]));
   return files.map((file) => {
     const target2 = import_node_path36.default.join(root, file.path);
     const existed = fileExists(target2);
-    return { path: file.path, existed, content: existed ? import_node_fs20.default.readFileSync(target2, "utf8") : null };
+    const headFile = head.ok && head.available ? headByPath.get(file.path) : null;
+    return {
+      path: file.path,
+      existed,
+      content: existed ? import_node_fs20.default.readFileSync(target2, "utf8") : null,
+      ...headFile ? { head_existed: headFile.existed, head_content: headFile.content } : {}
+    };
   });
 }
 function frozenReviewFiles(root, sessionId, fallback) {
@@ -9361,10 +9600,179 @@ function setupNativePrompts(args) {
   return [
     hasAnyArg(args.runtimeArgs, ["providerMode", "provider_mode", "provider"]) ? null : providerPrompt(args.provider),
     hasAnyArg(args.runtimeArgs, ["syncMode", "sync_mode"]) ? null : syncPrompt(args.syncMode),
-    styleGuidePrompt(args.styleGuides),
-    hasAnyArg(args.runtimeArgs, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) ? null : lspPrompt(args.lspSetup),
-    optionalMcpPrompt(args.integrations)
+    hasAnyArg(args.runtimeArgs, ["styleGuideIds", "style_guide_ids"]) ? null : styleGuidePrompt(args.styleGuides),
+    hasAnyArg(args.runtimeArgs, [
+      "writeLsp",
+      "write_lsp",
+      "setupLsp",
+      "setup_lsp",
+      "lsp",
+      "setupPreviewLspAdded",
+      "setup_preview_lsp_added"
+    ]) ? null : lspPrompt(args.lspSetup),
+    hasAnyArg(args.runtimeArgs, ["integrations"]) ? null : optionalMcpPrompt(args.integrations)
   ].filter((prompt) => prompt !== null);
+}
+
+// src/core/application/runtime/setup-evidence.ts
+function meaningfulValue(value) {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(meaningfulValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).some(meaningfulValue);
+}
+function normalizedText2(value) {
+  return typeof value === "string" ? value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim() : "";
+}
+function meaningfulEvidenceText(value) {
+  const normalized = normalizedText2(value);
+  if (!normalized) return false;
+  const placeholders = [
+    "todo",
+    "tbd",
+    "to be determined",
+    "placeholder",
+    "fill me",
+    "unknown",
+    "n a",
+    "structured product context for agents fill sections from repo evidence and user intent do not leave examples as final content"
+  ];
+  return !placeholders.some((placeholder) => normalized === placeholder || normalized.startsWith(`${placeholder} `));
+}
+function meaningfulEvidenceValue(value) {
+  if (typeof value === "string") return meaningfulEvidenceText(value);
+  if (Array.isArray(value)) return value.some(meaningfulEvidenceValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).some(meaningfulEvidenceValue);
+}
+function productSectionHasEvidence(value) {
+  if (!Array.isArray(value)) return false;
+  return value.map(asJsonObject).some((section) => {
+    const body = typeof section.body === "string" ? section.body.trim() : "";
+    if (!body) return meaningfulEvidenceValue(section.content || section.text);
+    return body.split(/\r?\n/).some((line) => {
+      const trimmed = line.replace(/^[-*]\s*/, "").trim();
+      if (!trimmed) return false;
+      const colon = trimmed.indexOf(":");
+      return meaningfulEvidenceText(colon < 0 ? trimmed : trimmed.slice(colon + 1));
+    });
+  });
+}
+function meaningfulProduct(value) {
+  if (!isRecord(value)) return false;
+  const product = asJsonObject(value);
+  const identity = [product.title, product.name, product.productName, product.product_name].some((entry) => typeof entry === "string" && entry.trim().length > 0);
+  if (!identity) return false;
+  const hasSummary = [product.summary, product.description, product.notes].some(meaningfulEvidenceText);
+  if (hasSummary) return true;
+  for (const field of [
+    "users",
+    "personas",
+    "audience",
+    "operators",
+    "integrators",
+    "accessBoundaries",
+    "access_boundaries",
+    "operatingModel",
+    "operating_model",
+    "coreWorkflows",
+    "core_workflows",
+    "workflows",
+    "setupWorkflow",
+    "setup_workflow",
+    "supportWorkflow",
+    "support_workflow",
+    "goals",
+    "domainModel",
+    "domain_model",
+    "entities",
+    "relationships",
+    "stateMachines",
+    "state_machines",
+    "invariants",
+    "productInvariants",
+    "product_invariants",
+    "nonGoals",
+    "non_goals",
+    "compatibility",
+    "migrationGuarantees",
+    "migration_guarantees",
+    "boundaries",
+    "entrypoints",
+    "sourceDirectories",
+    "source_directories",
+    "contracts",
+    "schemaFiles",
+    "schema_files",
+    "dataStores",
+    "data_stores",
+    "integrations",
+    "observability",
+    "retention",
+    "commands",
+    "testCommand",
+    "test_command",
+    "formatCommand",
+    "format_command",
+    "qualityBar",
+    "quality_bar",
+    "reviewFocus",
+    "review_focus",
+    "openQuestions",
+    "open_questions",
+    "risks"
+  ]) {
+    if (meaningfulEvidenceValue(product[field])) return true;
+  }
+  return productSectionHasEvidence(product.sections);
+}
+function meaningfulTechStack(value) {
+  if (!isRecord(value)) return false;
+  const techStack = asJsonObject(value);
+  for (const field of [
+    "languages",
+    "language",
+    "frameworks",
+    "runtimes",
+    "runtime",
+    "platforms",
+    "packageManagers",
+    "package_managers",
+    "build",
+    "buildCommand",
+    "build_command",
+    "test",
+    "testCommand",
+    "test_command",
+    "commands",
+    "datastores",
+    "dataStores",
+    "data_stores",
+    "database",
+    "services",
+    "dependencies",
+    "keyDependencies",
+    "key_dependencies",
+    "summary",
+    "notes"
+  ]) {
+    if (meaningfulEvidenceValue(techStack[field])) return true;
+  }
+  return false;
+}
+function setupIntentStrategyAnswered(args, kind) {
+  const raw = args;
+  const intent = asJsonObject(raw.intent);
+  const intentNames = kind === "product" ? ["product", "productOther", "productIntent", "productSummary"] : ["techStack", "techStackOther", "techStackIntent", "techStackSummary"];
+  const directNames = kind === "product" ? ["productOther", "productIntent", "productSummary"] : ["techStackOther", "techStackIntent", "techStackSummary"];
+  return directNames.some((name) => meaningfulValue(raw[name])) || intentNames.some((name) => meaningfulValue(intent[name]));
+}
+function setupMissingEvidence(args = {}) {
+  const raw = args;
+  return [
+    ...!meaningfulProduct(raw.product) ? ["product"] : [],
+    ...!meaningfulTechStack(raw.techStack ?? raw.tech_stack) ? ["techStack"] : []
+  ];
 }
 
 // src/core/application/runtime/intent-prompts.ts
@@ -9539,9 +9947,8 @@ function intentPrompt(workflow, id, title, question, selectionMode, choices, arg
 }
 function setupIntentPrompts(args = {}) {
   const prompts = [];
-  const product = isRecord(rawArgs(args).product) ? asJsonObject(rawArgs(args).product) : null;
-  const techStack = isRecord(rawArgs(args).techStack || rawArgs(args).tech_stack) ? asJsonObject(rawArgs(args).techStack || rawArgs(args).tech_stack) : null;
-  if (!product && !hasNamedValue(args, ["productIntent", "productSummary"])) {
+  const missing = new Set(setupMissingEvidence(args));
+  if (missing.has("product") && !setupIntentStrategyAnswered(args, "product")) {
     prompts.push(intentPrompt(
       "setup",
       "setup-product-intent",
@@ -9557,7 +9964,7 @@ function setupIntentPrompts(args = {}) {
       "intent.productOther"
     ));
   }
-  if (!techStack && !hasNamedValue(args, ["techStackIntent", "techStackSummary"])) {
+  if (missing.has("techStack") && !setupIntentStrategyAnswered(args, "techStack")) {
     prompts.push(intentPrompt(
       "setup",
       "setup-tech-stack-intent",
@@ -10108,7 +10515,13 @@ function approvalTransitionError(root, args, workflow, sessionId, payloadHash, s
   const approvalIntent = hasApprovalIntent(args);
   if (!approvalIntent) {
     const existing = readApprovalSession(root, sessionId);
-    if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash) return null;
+    if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash && (workflow !== "setup" || existing.preview_files.length > 0)) return null;
+    if (workflow === "setup") {
+      const superseded = supersedeUnapprovedApprovalSessions(root, workflow, sessionId);
+      if (superseded.ok === false) {
+        return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
+      }
+    }
     writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
@@ -13549,6 +13962,11 @@ function workflowSetup(root, args = {}) {
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const configOverrides = asJsonObject(rawArgs3.config);
+  const integrationObject = asJsonObject(rawArgs3.integrations);
+  const selectedIntegrationIds = Array.isArray(rawArgs3.integrations) ? asStringArray(rawArgs3.integrations) : asStringArray(integrationObject.optional_mcps);
+  const selectedIntegrations = Object.fromEntries(selectedIntegrationIds.map((id) => [id, { selected: true }]));
+  const integrationEntries = Object.fromEntries(Object.entries(integrationObject).filter(([key]) => key !== "optional_mcps"));
+  const integrationsPayload = isRecord(rawArgs3.integrations) || Array.isArray(rawArgs3.integrations) ? { ...selectedIntegrations, ...integrationEntries } : null;
   const requestedSyncMode = asOptionalString(rawArgs3.syncMode || rawArgs3.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs3.teamSize || rawArgs3.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
@@ -13560,7 +13978,7 @@ function workflowSetup(root, args = {}) {
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {},
-    ...isRecord(rawArgs3.integrations) ? { integrations: asJsonObject(rawArgs3.integrations) } : {},
+    ...integrationsPayload ? { integrations: integrationsPayload } : {},
     ...configOverrides
   };
   const setupStatePayload = {
@@ -13598,18 +14016,9 @@ function workflowSetup(root, args = {}) {
     }
   }
   const providerNeedsConfirmation = provider.requires_confirmation === true && !asOptionalString(rawArgs3.providerMode || rawArgs3.provider_mode || rawArgs3.provider);
-  const reviewFiles2 = providerNeedsConfirmation ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
-  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles2, styleGuides), args, lspWriteRequested);
-  const approval = providerNeedsConfirmation ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [] } : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles2, {
-    styleGuides: previewStyleGuides,
-    final_only_files: ["cadre/events.jsonl"]
-  });
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const approvalError = providerNeedsConfirmation ? null : stagedApprovalError(approval);
-  const qualityWarnings = setupGenerationWarnings(args);
-  const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
-  const nativePrompts = args.execute === true ? [] : setupNativePrompts({
+  const missingEvidence = setupMissingEvidence(args);
+  const intentPrompts = setupIntentPrompts(args);
+  const nativePrompts = setupNativePrompts({
     provider: asJsonObject(provider),
     syncMode: syncModeRecommendation,
     styleGuides: asJsonObject(styleGuides),
@@ -13617,6 +14026,18 @@ function workflowSetup(root, args = {}) {
     integrations: workspaceHealthResult.integrations,
     runtimeArgs: args
   });
+  const promptCollectionPending = missingEvidence.length > 0 || intentPrompts.length > 0 || nativePrompts.length > 0;
+  const reviewDeferred = providerNeedsConfirmation || promptCollectionPending;
+  const reviewFiles2 = reviewDeferred ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
+  const reviewArtifacts = reviewDeferred ? [] : appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles2, styleGuides), args, lspWriteRequested);
+  const approval = reviewDeferred ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [], deferred_for_clarification: true } : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles2, {
+    styleGuides: previewStyleGuides,
+    final_only_files: ["cadre/events.jsonl"]
+  });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
+  const approvalError = reviewDeferred ? null : stagedApprovalError(approval);
+  const qualityWarnings = setupGenerationWarnings(args);
   const warnings = [
     ...asStringArray(styleGuides.warnings),
     ...asStringArray(asJsonObject(stageReviewBundle).warnings),
@@ -13625,8 +14046,8 @@ function workflowSetup(root, args = {}) {
   const result = {
     ...summary,
     ok: true,
-    phase_state: args.execute !== true && intentPrompts.length > 0 ? "awaiting_clarification" : summary.phase_state,
-    ...args.execute !== true && intentPrompts.length > 0 ? { stage: "intent_clarification" } : {},
+    phase_state: promptCollectionPending ? "awaiting_clarification" : summary.phase_state,
+    ...promptCollectionPending ? { stage: "intent_clarification" } : {},
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace_health: workspaceHealthResult,
     workspace: workspaceHealthResult.workspace,
@@ -13643,6 +14064,7 @@ function workflowSetup(root, args = {}) {
     techStackSummary: techStackSummary(root, args),
     ...intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {},
     ...nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {},
+    ...missingEvidence.length > 0 ? { missing_payload: missingEvidence } : {},
     approval,
     review_artifacts: stageReviewArtifacts || reviewArtifacts,
     review_bundle: stageReviewBundle,
@@ -13650,8 +14072,9 @@ function workflowSetup(root, args = {}) {
     required_payload: args.execute === true ? ["product", "techStack"].concat(provider.requires_confirmation === true ? ["providerMode"] : []).concat(polyrepoRequested && !reposPayload ? ["repos"] : []) : [],
     next_actions: [
       ...intentPrompts.length > 0 || nativePrompts.length > 0 ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."] : [],
+      ...missingEvidence.length > 0 && intentPrompts.length === 0 ? [`Inspect the repository using the selected setup intent, then call setup again with structured evidence for: ${missingEvidence.join(", ")}.`] : [],
       ...provider.requires_confirmation === true ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."] : [],
-      "Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true."
+      ...!reviewDeferred ? ["Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true."] : []
     ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
@@ -13660,6 +14083,7 @@ function workflowSetup(root, args = {}) {
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none."
     ]
   };
+  if (promptCollectionPending) return result;
   if (args.execute !== true && approvalError) {
     return {
       ...result,
@@ -13673,8 +14097,7 @@ function workflowSetup(root, args = {}) {
   const cadreDir = import_node_path51.default.join(root, "cadre");
   const force = asBoolean(rawArgs3.force, false);
   const missingPayload = [
-    ...!isRecord(rawArgs3.product) ? ["product"] : [],
-    ...!techStackFromArgs(args) ? ["techStack"] : [],
+    ...setupMissingEvidence(args),
     ...provider.requires_confirmation === true || !providerMode ? ["providerMode"] : [],
     ...polyrepoRequested && !reposPayload ? ["repos"] : []
   ];
@@ -14952,16 +15375,19 @@ function workflowDecision(result) {
   const skills = asJsonObject(result.project_skills);
   const skillDecision = asJsonObject(skills.decision);
   if (Object.keys(skillDecision).length > 0) return skillDecision;
-  const prompts = Array.isArray(result.intent_prompts) ? asJsonArray(result.intent_prompts) : asJsonArray(result.native_prompts);
-  if (prompts.length > 0) return { kind: "clarification", prompts };
-  const approval = approvalDecision(result);
-  if (approval) return approval;
+  const intentPrompts = asJsonArray(result.intent_prompts);
+  const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
+  if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {
+    return { kind: "clarification", prompts, required: asStringArray(result.missing_payload) };
+  }
   if (result.phase_state === "pending_provider") {
     return { kind: "provider_evidence", required: jsonValue(result.required_evidence) || null };
   }
   if (result.ok === false) {
     return { kind: "blocked", reason: asOptionalString(result.error || result.reason || result.stage) || "Cadre workflow failed" };
   }
+  const approval = approvalDecision(result);
+  if (approval) return approval;
   const completed = ["executed", "complete", "completed"].includes(String(result.phase_state || ""));
   return { kind: completed ? "complete" : "ready" };
 }

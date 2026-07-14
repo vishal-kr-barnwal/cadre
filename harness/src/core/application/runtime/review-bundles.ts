@@ -99,6 +99,12 @@ export function setupLspWriteDisabled(args: RuntimeArgs = {}): boolean {
 export function setupShouldWriteLsp(args: RuntimeArgs, lspRecommendations: CoreResult): boolean {
   if (setupLspWriteRequested(args)) return true;
   if (setupLspWriteDisabled(args)) return false;
+  const rawArgs = args as UnknownRecord;
+  const hasPreviewSelection = Object.prototype.hasOwnProperty.call(rawArgs, "setupPreviewLspAdded")
+    || Object.prototype.hasOwnProperty.call(rawArgs, "setup_preview_lsp_added");
+  if (hasPreviewSelection) {
+    return asStringArray(rawArgs.setupPreviewLspAdded || rawArgs.setup_preview_lsp_added).length > 0;
+  }
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
 

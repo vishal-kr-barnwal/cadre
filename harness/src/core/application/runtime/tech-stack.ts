@@ -79,7 +79,9 @@ export function styleGuideIdsForTechStack(techStack: JsonObject): string[] {
 }
 
 export function techStackFromArgs(args: RuntimeArgs = {}): JsonObject | null {
-  return isRecord((args as UnknownRecord).techStack) ? asJsonObject((args as UnknownRecord).techStack) : null;
+  const rawArgs = args as UnknownRecord;
+  const value = rawArgs.techStack ?? rawArgs.tech_stack;
+  return isRecord(value) ? asJsonObject(value) : null;
 }
 
 export function loadTechStack(root: string): JsonObject | null {
@@ -133,7 +135,8 @@ export function setupStyleGuides(root: string, args: RuntimeArgs = {}): CoreResu
   const available = new Set(availableStyleGuideIds());
   const techStack = techStackForPacket(root, args) || {};
   const detected = styleGuideIdsForTechStack(techStack).filter((id) => available.has(id));
-  const requested = requestedStyleGuideIds((args as UnknownRecord).styleGuideIds);
+  const rawArgs = args as UnknownRecord;
+  const requested = requestedStyleGuideIds(rawArgs.styleGuideIds ?? rawArgs.style_guide_ids);
   const missing = requested.filter((id) => !available.has(id));
   const selected = Array.from(new Set([
     ...(available.has("general") ? ["general"] : []),

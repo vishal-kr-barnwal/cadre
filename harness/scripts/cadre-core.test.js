@@ -265,6 +265,85 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function seedLegacySetupPlaceholder(root, { tracked = false } = {}) {
+  const originalJson = `${JSON.stringify({
+    version: 1,
+    schema: "cadre.product.v1",
+    kind: "product",
+    title: "Original Product",
+    summary: "Product context committed before the legacy preview.",
+    sections: [],
+  }, null, 2)}\n`;
+  const originalMarkdown = "# Original Product\n\nProduct context committed before the legacy preview.\n";
+  const placeholderJson = `${JSON.stringify({
+    version: 1,
+    schema: "cadre.product.v1",
+    kind: "product",
+    title: "Product Context",
+    summary: "Structured product context for agents. Fill sections from repo evidence and user intent; do not leave examples as final content.",
+    sections: [],
+  }, null, 2)}\n`;
+  const placeholderMarkdown = "# Product Context\n\nStructured product context placeholder.\n";
+  const evidenceJson = `${JSON.stringify({
+    version: 1,
+    schema: "cadre.product.v1",
+    kind: "product",
+    title: "Evidence Product",
+    summary: "Repository-grounded product context.",
+    sections: [],
+  }, null, 2)}\n`;
+  const evidenceMarkdown = "# Evidence Product\n\nRepository-grounded product context.\n";
+  const files = [
+    { path: "cadre/product.json", title: "Product context canonical", kind: "json", source: "product", content: placeholderJson },
+    { path: "cadre/product.md", title: "Product context", kind: "markdown", source: "cadre/product.json", content: placeholderMarkdown },
+  ];
+  const failedFiles = [
+    { ...files[0], content: evidenceJson },
+    { ...files[1], content: evidenceMarkdown },
+  ];
+  const originalFiles = [
+    { ...files[0], content: originalJson },
+    { ...files[1], content: originalMarkdown },
+  ];
+  if (tracked) {
+    for (const file of originalFiles) write(path.join(root, file.path), file.content);
+    git(root, ["add", "--", ...originalFiles.map((file) => file.path)]);
+    git(root, ["commit", "-m", "seed original product context"]);
+  }
+  for (const file of files) write(path.join(root, file.path), file.content);
+  if (!tracked) git(root, ["add", "-N", "--", ...files.map((file) => file.path)]);
+  const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+  const placeholderSessionId = "111111111111111111111111";
+  const failedSessionId = "222222222222222222222222";
+  write(path.join(sessionDirectory, `${placeholderSessionId}.json`), `${JSON.stringify({
+    session_id: placeholderSessionId,
+    workflow: "setup",
+    payload_hash: "legacy-placeholder",
+    payload: { product: {}, techStack: {} },
+    approved_stages: [],
+    snapshot_files: files,
+    before_files: files.map((file, index) => tracked
+      ? { path: file.path, existed: true, content: originalFiles[index].content }
+      : { path: file.path, existed: false, content: null }),
+    preview_files: files.map((file) => ({ path: file.path })),
+    intent_to_add_paths: tracked ? [] : files.map((file) => file.path),
+    updated_at: "2026-07-14T00:00:00.000Z",
+  }, null, 2)}\n`);
+  write(path.join(sessionDirectory, `${failedSessionId}.json`), `${JSON.stringify({
+    session_id: failedSessionId,
+    workflow: "setup",
+    payload_hash: "legacy-evidence",
+    payload: { product: { title: "Evidence Product" }, techStack: { languages: ["TypeScript"] } },
+    approved_stages: [],
+    snapshot_files: failedFiles,
+    before_files: files.map((file) => ({ path: file.path, existed: true, content: file.content })),
+    preview_files: [],
+    intent_to_add_paths: [],
+    updated_at: "2026-07-14T00:01:00.000Z",
+  }, null, 2)}\n`);
+  return { files, placeholderSessionId, failedSessionId };
+}
+
 function gitSubject(root, ref = "HEAD") {
   return git(root, ["log", "-1", "--pretty=%s", ref]).stdout.trim();
 }
@@ -273,9 +352,28 @@ function gitNote(root, sha) {
   return JSON.parse(git(root, ["notes", "--ref", "refs/notes/cadre", "show", sha]).stdout);
 }
 
+function resolveSetupPrompts(root, args) {
+  const resolved = JSON.parse(JSON.stringify(args));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const preview = core.workflowPacket(root, resolved);
+    assert.deepEqual(preview.intent_prompts || [], [], "setup test payload must include product and tech-stack intent");
+    const prompts = preview.native_prompts || [];
+    if (prompts.length === 0) return { args: resolved, preview };
+    for (const prompt of prompts) {
+      const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
+      if (prompt.id === "setup-provider-mode") resolved.providerMode = recommended[0] || "local";
+      else if (prompt.id === "setup-sync-mode") resolved.syncMode = recommended[0] || "local";
+      else if (prompt.id === "setup-style-guides") resolved.styleGuideIds = recommended;
+      else if (prompt.id === "setup-lsp") resolved.writeLsp = recommended[0] !== "skip-lsp";
+      else if (prompt.id === "setup-optional-mcps") resolved.integrations = {};
+    }
+  }
+  assert.fail("setup native prompts did not resolve after explicit test answers");
+}
+
 function approveWorkflow(root, args) {
   const clone = (value) => JSON.parse(JSON.stringify(value));
-  const base = { ...clone(args), execute: false };
+  let base = { ...clone(args), execute: false };
   delete base.approvalComplete;
   delete base.approval_complete;
   delete base.approvedStages;
@@ -284,10 +382,17 @@ function approveWorkflow(root, args) {
   delete base.approval_stage;
   delete base.approvalSessionId;
   delete base.approval_session_id;
-  let preview = core.workflowPacket(root, base);
+  let preview;
+  if (base.workflow === "setup") {
+    const resolved = resolveSetupPrompts(root, base);
+    base = resolved.args;
+    preview = resolved.preview;
+  } else {
+    preview = core.workflowPacket(root, base);
+  }
   assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.errors || preview.warnings || {}));
   const approval = preview.approval;
-  if (!approval || approval.required !== true) return core.workflowPacket(root, { ...args, execute: true });
+  if (!approval || approval.required !== true) return core.workflowPacket(root, { ...clone(base), ...clone(args), execute: true });
   const approved = [];
   for (const stage of approval.stages || []) {
     approved.push(stage.id);
@@ -300,6 +405,7 @@ function approveWorkflow(root, args) {
     assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.approval || {}));
   }
   return core.workflowPacket(root, {
+    ...clone(base),
     ...clone(args),
     execute: true,
     approvalComplete: true,
@@ -1699,14 +1805,15 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-human-review-test-"));
   try {
     git(root, ["init"]);
-    const args = {
+    const resolved = resolveSetupPrompts(root, {
       workflow: "setup",
       providerMode: "local",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       reviewBundleDir: ".cadre-review",
-    };
-    const preview = core.workflowPacket(root, args);
+    });
+    const args = resolved.args;
+    const preview = resolved.preview;
     assert.equal(preview.ok, true);
     assert.equal(preview.approval.required, true);
     assert.equal(preview.approval.approval_complete, false);
@@ -1724,7 +1831,13 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     const manifest = readJson(preview.review_bundle.manifest_path);
     assert.equal(Object.prototype.hasOwnProperty.call(manifest, "commands"), false);
 
-    const blocked = core.workflowPacket(root, { ...args, execute: true });
+    const blocked = core.workflowPacket(root, {
+      ...args,
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: [],
+    });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.stage, "staged_approval");
     assert.equal(blocked.phase_state, "awaiting_staged_approval");
@@ -1821,6 +1934,11 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     });
 
     assert.equal(preview.ok, true);
+    assert.equal(preview.phase_state, "awaiting_clarification");
+    assert.equal(preview.approval.required, false);
+    assert.equal(preview.review_bundle ?? null, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.md")), false);
     assert.deepEqual(preview.native_prompts.map((prompt) => prompt.id), [
       "setup-provider-mode",
       "setup-sync-mode",
@@ -1893,8 +2011,141 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
     assert.ok(preview.intent_prompts.some((prompt) => prompt.id === "setup-product-intent"));
     assert.ok(preview.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
     assert.match(preview.next_actions[0], /Answer returned intent_prompts\/native_prompts/);
+    assert.equal(preview.approval.required, false);
+    assert.equal(preview.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.md")), false);
+    assert.equal(git(root, ["status", "--porcelain", "--", "cadre"]).stdout.trim(), "");
+
+    const emptyPayload = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: {},
+      techStack: {},
+    });
+    assert.equal(emptyPayload.phase_state, "awaiting_clarification");
+    assert.deepEqual(emptyPayload.missing_payload, ["product", "techStack"]);
+    assert.deepEqual(emptyPayload.intent_prompts.map((prompt) => prompt.id), ["setup-product-intent", "setup-tech-stack-intent"]);
+    assert.equal(emptyPayload.approval.required, false);
+    assert.equal(emptyPayload.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+
+    const blankPayload = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "   ", summary: "", users: [] },
+      techStack: { languages: [], frameworks: [] },
+    });
+    assert.deepEqual(blankPayload.missing_payload, ["product", "techStack"]);
+    assert.equal(blankPayload.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+
+    const placeholderPayload = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Product", summary: "TODO: inspect README" },
+      techStack: { summary: "TBD after manifest audit" },
+    });
+    assert.deepEqual(placeholderPayload.missing_payload, ["product", "techStack"]);
+    assert.equal(placeholderPayload.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+
+    const selectedIntent = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      intent: { product: "use-readme", techStack: "detect" },
+    });
+    assert.equal(selectedIntent.phase_state, "awaiting_clarification");
+    assert.deepEqual(selectedIntent.intent_prompts, []);
+    assert.deepEqual(selectedIntent.missing_payload, ["product", "techStack"]);
+    assert.match(selectedIntent.next_actions[0], /structured evidence for: product, techStack/);
+    assert.equal(selectedIntent.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+
+    const packet = core.workflowPacketV1(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      intent: { product: "use-readme", techStack: "detect" },
+    });
+    assert.equal(packet.decision.kind, "clarification");
+    assert.deepEqual(packet.decision.prompts, []);
+    assert.deepEqual(packet.decision.required, ["product", "techStack"]);
+    assert.deepEqual(packet.required, ["product", "techStack"]);
+
+    const evidencePreview = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: ["general"],
+      integrations: {},
+      product: {
+        title: "Brownfield Product",
+        summary: "Repository-grounded product context collected before review.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(evidencePreview.ok, true, evidencePreview.error);
+    assert.equal(evidencePreview.approval.current_stage, "product");
+    assert.equal(evidencePreview.review_bundle.mode, "target");
+    assert.equal(readJson(path.join(root, "cadre", "product.json")).title, "Brownfield Product");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8"), /# Brownfield Product/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow setup accepts Unicode evidence and renderer-supported product fields", () => {
+  const cases = [
+    {
+      product: { title: "既存製品", summary: "既存の利用者向けワークフローを管理します。" },
+      techStack: { summary: "実装スタックはリポジトリの証拠から確認済みです。" },
+    },
+    {
+      product: { title: "CLI Product", operatingModel: ["ローカル CLI"] },
+      techStack: { languages: ["日本語 DSL"] },
+    },
+  ];
+  for (const [index, setupCase] of cases.entries()) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `cadre-setup-unicode-evidence-${index}-`));
+    try {
+      git(root, ["init"]);
+      const preview = core.workflowPacket(root, {
+        workflow: "setup",
+        providerMode: "local",
+        syncMode: "local",
+        setupLsp: false,
+        styleGuideIds: [],
+        integrations: {},
+        ...setupCase,
+      });
+      assert.equal(preview.ok, true, preview.error);
+      assert.deepEqual(preview.missing_payload || [], []);
+      assert.equal(preview.approval.current_stage, "product");
+      assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -2513,8 +2764,10 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
-    assert.equal(blocked.ok, false);
-    assert.ok(blocked.missing_payload.includes("providerMode"));
+    assert.equal(blocked.ok, true);
+    assert.equal(blocked.phase_state, "awaiting_clarification");
+    assert.ok(blocked.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.equal(blocked.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
 
     const local = approveWorkflow(root, {
@@ -2548,8 +2801,10 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
-    assert.equal(blocked.ok, false);
-    assert.ok(blocked.missing_payload.includes("providerMode"));
+    assert.equal(blocked.ok, true);
+    assert.equal(blocked.phase_state, "awaiting_clarification");
+    assert.ok(blocked.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.equal(blocked.review_bundle, null);
     assert.equal(blocked.provider.detected.source, "unknown_remote");
 
     const local = approveWorkflow(root, {
@@ -2573,12 +2828,12 @@ test("workflow setup warns on unknown explicit style guide ids without dropping 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-missing-test-"));
   try {
     git(root, ["init"]);
-    const setup = core.workflowPacket(root, {
+    const setup = core.workflowPacket(root, resolveSetupPrompts(root, {
       workflow: "setup",
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
       styleGuideIds: "typescript not-a-guide",
-    });
+    }).args);
 
     assert.equal(setup.ok, true);
     assert.deepEqual(setup.styleGuides.missing, ["not-a-guide"]);
@@ -2974,8 +3229,10 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
     const args = {
       workflow: "setup",
       providerMode: "local",
+      syncMode: "local",
       setupLsp: false,
       styleGuideIds: ["general"],
+      integrations: {},
       product: { title: "Diff Product", summary: "Review the complete target diff." },
       techStack: { languages: ["TypeScript"] },
     };
@@ -3023,6 +3280,191 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
     assert.equal(fs.existsSync(sessionFile), false);
     assert.equal(git(root, ["diff", "--cached"]).stdout, "");
     assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup replaces an untouched template preview with repository evidence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-placeholder-recovery-test-"));
+  try {
+    git(root, ["init"]);
+    const base = {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+    };
+    const legacy = seedLegacySetupPlaceholder(root);
+    assert.equal(readJson(path.join(root, "cadre", "product.json")).title, "Product Context");
+    const placeholderSession = path.join(root, "cadre", "local", "approval-sessions", `${legacy.placeholderSessionId}.json`);
+    const failedSession = path.join(root, "cadre", "local", "approval-sessions", `${legacy.failedSessionId}.json`);
+    assert.equal(fs.existsSync(placeholderSession), true);
+    assert.equal(fs.existsSync(failedSession), true);
+
+    const evidence = core.workflowPacket(root, {
+      ...base,
+      product: {
+        title: "Evidence Product",
+        summary: "Product context derived from the existing repository.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(evidence.ok, true, evidence.error);
+    assert.equal(evidence.approval.current_stage, "product");
+    assert.equal(readJson(path.join(root, "cadre", "product.json")).title, "Evidence Product");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8"), /# Evidence Product/);
+    assert.equal(fs.existsSync(placeholderSession), false);
+    assert.equal(fs.existsSync(failedSession), false);
+    assert.equal(
+      fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${evidence.approval.session_id}.json`)),
+      true,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup supersedes an untouched tracked legacy preview without changing HEAD", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-tracked-placeholder-recovery-test-"));
+  try {
+    git(root, ["init"]);
+    const legacy = seedLegacySetupPlaceholder(root, { tracked: true });
+    const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const evidence = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Evidence Product", summary: "Repository-grounded context." },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(evidence.ok, true, evidence.error);
+    assert.equal(readJson(path.join(root, "cadre", "product.json")).title, "Evidence Product");
+    assert.equal(git(root, ["rev-parse", "HEAD"]).stdout.trim(), headBefore);
+    for (const sessionId of [legacy.placeholderSessionId, legacy.failedSessionId]) {
+      assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`)), false);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup preserves edited template previews instead of claiming Cadre ownership", () => {
+  for (const relativePath of ["cadre/product.json", "cadre/product.md"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-placeholder-drift-test-"));
+    try {
+      git(root, ["init"]);
+      const base = {
+        workflow: "setup",
+        providerMode: "local",
+        syncMode: "local",
+        setupLsp: false,
+        styleGuideIds: [],
+        integrations: {},
+      };
+      const legacy = seedLegacySetupPlaceholder(root);
+      const edited = path.join(root, relativePath);
+      if (relativePath.endsWith(".json")) {
+        const product = readJson(edited);
+        write(edited, `${JSON.stringify({ ...product, user_note: "Keep this edit" }, null, 2)}\n`);
+      } else {
+        fs.appendFileSync(edited, "\nUser-authored review note.\n");
+      }
+      const before = new Map([
+        ["cadre/product.json", fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8")],
+        ["cadre/product.md", fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8")],
+      ]);
+
+      const evidence = core.workflowPacket(root, {
+        ...base,
+        product: { title: "Evidence Product", summary: "Repository-grounded context." },
+        techStack: { languages: ["TypeScript"] },
+      });
+      assert.equal(evidence.ok, false);
+      assert.equal(evidence.stage, "staged_approval");
+      assert.match(evidence.error, new RegExp(relativePath.replace(".", "\\.")));
+      for (const [file, content] of before) {
+        assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+      }
+      assert.equal(
+        fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${legacy.placeholderSessionId}.json`)),
+        true,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("setup preserves staged or committed legacy previews and their owning sessions", () => {
+  for (const mode of ["staged", "committed", "tracked-committed"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `cadre-setup-placeholder-${mode}-test-`));
+    try {
+      git(root, ["init"]);
+      const legacy = seedLegacySetupPlaceholder(root, { tracked: mode === "tracked-committed" });
+      git(root, ["add", "--", "cadre/product.json"]);
+      if (mode !== "staged") git(root, ["commit", "-m", "keep reviewed placeholder"]);
+      const beforeFiles = new Map(legacy.files.map((file) => [file.path, fs.readFileSync(path.join(root, file.path), "utf8")]));
+      const beforeIndex = git(root, ["diff", "--cached", "--binary"]).stdout;
+
+      const evidence = core.workflowPacket(root, {
+        workflow: "setup",
+        providerMode: "local",
+        syncMode: "local",
+        setupLsp: false,
+        styleGuideIds: [],
+        integrations: {},
+        product: { title: "Evidence Product", summary: "Repository-grounded context." },
+        techStack: { languages: ["TypeScript"] },
+      });
+      assert.equal(evidence.ok, false);
+      assert.equal(evidence.stage, "staged_approval");
+      assert.match(evidence.error, mode === "staged" ? /staged Git content.*cadre\/product\.json/ : /committed.*cadre\/product\.json/);
+      for (const [file, content] of beforeFiles) {
+        assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+      }
+      assert.equal(git(root, ["diff", "--cached", "--binary"]).stdout, beforeIndex);
+      for (const sessionId of [legacy.placeholderSessionId, legacy.failedSessionId]) {
+        assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`)), true);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("setup consumes snake-case tech stack and style-guide selections", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-snake-alias-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      style_guide_ids: ["python"],
+      integrations: ["code_search"],
+      product: { title: "Alias Product", summary: "Validate supported setup aliases." },
+      tech_stack: { languages: ["Python"] },
+    });
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.approval.current_stage, "product");
+    assert.deepEqual(preview.styleGuides.requested, ["python"]);
+    assert.equal(preview.native_prompts.some((prompt) => prompt.id === "setup-style-guides"), false);
+    assert.equal(readJson(path.join(root, "cadre", "tech-stack.json")).languages[0], "Python");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "python.json")), true);
+    assert.deepEqual(readJson(path.join(root, "cadre", "config.json")).integrations, { code_search: { selected: true } });
+    const inventoryEntry = core.integrationInventory(root).optional_mcps.find((entry) => entry.kind === "code_search");
+    assert.equal(inventoryEntry.configured, true);
+    assert.equal(inventoryEntry.available, null);
+    assert.equal(inventoryEntry.source, "config.integrations.code_search");
+    const readinessEntry = core.mcpReadiness(root).optional_mcps.find((entry) => entry.kind === "code_search");
+    assert.equal(readinessEntry.configured, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -110,18 +110,19 @@ function workflowDecision(result: JsonObject): JsonObject {
   const skills = asJsonObject(result.project_skills);
   const skillDecision = asJsonObject(skills.decision);
   if (Object.keys(skillDecision).length > 0) return skillDecision;
-  const prompts = Array.isArray(result.intent_prompts)
-    ? asJsonArray(result.intent_prompts)
-    : asJsonArray(result.native_prompts);
-  if (prompts.length > 0) return { kind: "clarification", prompts };
-  const approval = approvalDecision(result);
-  if (approval) return approval;
+  const intentPrompts = asJsonArray(result.intent_prompts);
+  const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
+  if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {
+    return { kind: "clarification", prompts, required: asStringArray(result.missing_payload) };
+  }
   if (result.phase_state === "pending_provider") {
     return { kind: "provider_evidence", required: jsonValue(result.required_evidence) || null };
   }
   if (result.ok === false) {
     return { kind: "blocked", reason: asOptionalString(result.error || result.reason || result.stage) || "Cadre workflow failed" };
   }
+  const approval = approvalDecision(result);
+  if (approval) return approval;
   const completed = ["executed", "complete", "completed"].includes(String(result.phase_state || ""));
   return { kind: completed ? "complete" : "ready" };
 }

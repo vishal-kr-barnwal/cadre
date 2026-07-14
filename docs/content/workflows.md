@@ -66,6 +66,15 @@ text back as structured setup arguments such as `providerMode`, `syncMode`,
 as standalone Cadre state. Answer setup prompts before asking the user to
 approve the current setup review stage.
 
+Clarification-only setup calls do not create approval sessions or materialize
+setup review files. Target-path review begins only after product intent and
+native prompt answers are supplied as structured setup arguments. An
+evidence-backed retry can safely supersede an untouched, unapproved preview
+left by an earlier call, while user-edited review targets remain protected.
+Choosing a collection strategy such as `use-readme` or `detect` does not count
+as evidence by itself: the agent must still inspect the repository and return
+meaningful `product` and `techStack` objects before review begins.
+
 What setup writes:
 
 - `cadre/product.json` and generated `cadre/product.md`

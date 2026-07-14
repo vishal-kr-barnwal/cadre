@@ -167,6 +167,22 @@ async function callApprovedWorkflow(request, args) {
     name: "cadre_workflow",
     arguments: base,
   }));
+  for (let attempt = 0; preview.decision?.kind === "clarification" && attempt < 3; attempt += 1) {
+    assert.equal(args.workflow, "setup", `unexpected clarification for ${args.workflow}`);
+    for (const prompt of preview.decision.prompts || []) {
+      const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
+      if (prompt.id === "setup-provider-mode") base.input.providerMode = recommended[0] || "local";
+      else if (prompt.id === "setup-sync-mode") base.input.syncMode = recommended[0] || "local";
+      else if (prompt.id === "setup-style-guides") base.input.styleGuideIds = recommended;
+      else if (prompt.id === "setup-lsp") base.input.writeLsp = recommended[0] !== "skip-lsp";
+      else if (prompt.id === "setup-optional-mcps") base.input.integrations = {};
+      else assert.fail(`setup test payload left unresolved intent prompt ${prompt.id}`);
+    }
+    preview = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: base,
+    }));
+  }
   const approved = [];
   let sessionId = null;
   while (preview.decision?.kind === "approval" && preview.decision.stage) {
@@ -767,6 +783,30 @@ test("MCP root resolution rejects harness skill directories without project stat
     const parsedSetupAssist = parseTextJson(setupAssist);
     assert.equal(parsedSetupAssist.ok, true);
     assert.equal(parsedSetupAssist.workflow, "setup");
+    assert.equal(parsedSetupAssist.decision.kind, "clarification");
+    assert.ok(parsedSetupAssist.decision.prompts.some((prompt) => prompt.id === "setup-product-intent"));
+    assert.equal(fs.existsSync(path.join(root, "uninitialized", "cadre", "product.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "uninitialized", "cadre", "product.md")), false);
+    const selectedSetupIntent = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        workflow: "setup",
+        root: path.join(root, "uninitialized"),
+        input: {
+          providerMode: "local",
+          syncMode: "local",
+          setupLsp: false,
+          styleGuideIds: [],
+          integrations: {},
+          intent: { product: "use-readme", techStack: "detect" },
+        },
+      },
+    }));
+    assert.equal(selectedSetupIntent.decision.kind, "clarification");
+    assert.deepEqual(selectedSetupIntent.decision.prompts, []);
+    assert.deepEqual(selectedSetupIntent.decision.required, ["product", "techStack"]);
+    assert.deepEqual(selectedSetupIntent.required, ["product", "techStack"]);
+    assert.equal(fs.existsSync(path.join(root, "uninitialized", "cadre", "product.json")), false);
     for (const key of ["phase", "decision", "required", "next", "artifacts", "resources", "warnings", "errors"]) {
       assert.equal(Object.prototype.hasOwnProperty.call(parsedSetupAssist, key), true, `missing workflow envelope key ${key}`);
     }

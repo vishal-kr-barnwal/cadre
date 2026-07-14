@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed setup clarification so unanswered product or native prompts no longer
+  create approval sessions or materialize template setup files. Evidence-backed
+  retries safely supersede untouched unapproved setup previews while preserving
+  and reporting user-edited, staged, or newly committed review targets.
+- Fixed setup prompt contracts so empty objects and strategy selections do not
+  masquerade as product or tech-stack evidence, snake-case tech-stack and style
+  guide arguments are consumed consistently, and multi-select integration ids
+  persist in structured configuration.
+
 ## [2.2.0] - 2026-07-14
 
 Atomic document review, hardened MCP runtime, and native workflow discovery

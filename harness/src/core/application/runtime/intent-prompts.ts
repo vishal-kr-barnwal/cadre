@@ -2,6 +2,7 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 
 import { choice, hasAnyArg, nativePrompt } from "./native-prompts";
+import { setupIntentStrategyAnswered, setupMissingEvidence } from "./setup-evidence";
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
   return args as UnknownRecord;
@@ -215,11 +216,8 @@ export function intentPrompt(
 
 export function setupIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
   const prompts: JsonObject[] = [];
-  const product = isRecord(rawArgs(args).product) ? asJsonObject(rawArgs(args).product) : null;
-  const techStack = isRecord(rawArgs(args).techStack || rawArgs(args).tech_stack)
-    ? asJsonObject(rawArgs(args).techStack || rawArgs(args).tech_stack)
-    : null;
-  if (!product && !hasNamedValue(args, ["productIntent", "productSummary"])) {
+  const missing = new Set(setupMissingEvidence(args));
+  if (missing.has("product") && !setupIntentStrategyAnswered(args, "product")) {
     prompts.push(intentPrompt(
       "setup",
       "setup-product-intent",
@@ -235,7 +233,7 @@ export function setupIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
       "intent.productOther"
     ));
   }
-  if (!techStack && !hasNamedValue(args, ["techStackIntent", "techStackSummary"])) {
+  if (missing.has("techStack") && !setupIntentStrategyAnswered(args, "techStack")) {
     prompts.push(intentPrompt(
       "setup",
       "setup-tech-stack-intent",

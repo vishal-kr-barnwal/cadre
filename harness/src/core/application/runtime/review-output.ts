@@ -39,6 +39,123 @@ function gitAvailable(root: string): boolean {
   return git(root, ["rev-parse", "--is-inside-work-tree"]).status === 0;
 }
 
+export interface ReviewGitInspection {
+  ok: boolean;
+  stagedPaths: string[];
+  baselinePaths: string[];
+  error?: string;
+}
+
+export interface ReviewHeadFile {
+  path: string;
+  existed: boolean;
+  content: string | null;
+}
+
+export interface ReviewHeadExpectation extends ReviewHeadFile {
+  allowMissing?: boolean;
+}
+
+interface ReviewHeadFilesResult {
+  ok: boolean;
+  available: boolean;
+  files: ReviewHeadFile[];
+  error?: string;
+}
+
+export function reviewHeadFiles(root: string, relativePaths: string[]): ReviewHeadFilesResult {
+  if (!gitAvailable(root)) return { ok: true, available: false, files: [] };
+  const paths = Array.from(new Set(relativePaths));
+  const head = git(root, ["rev-parse", "--verify", "HEAD"]);
+  if (head.status === 128) {
+    return { ok: true, available: true, files: paths.map((path) => ({ path, existed: false, content: null })) };
+  }
+  if (head.status !== 0) {
+    return {
+      ok: false,
+      available: true,
+      files: [],
+      error: String(head.stderr || "").trim() || "Unable to inspect the Git review baseline",
+    };
+  }
+  const files: ReviewHeadFile[] = [];
+  for (const relativePath of paths) {
+    const tree = git(root, ["ls-tree", "-z", "--full-tree", "HEAD", "--", relativePath]);
+    if (tree.status !== 0) {
+      return {
+        ok: false,
+        available: true,
+        files,
+        error: String(tree.stderr || "").trim() || `Unable to inspect Git baseline for ${relativePath}`,
+      };
+    }
+    if (String(tree.stdout).length === 0) {
+      files.push({ path: relativePath, existed: false, content: null });
+      continue;
+    }
+    const blob = git(root, ["cat-file", "blob", `HEAD:${relativePath}`]);
+    if (blob.status === 0) {
+      files.push({ path: relativePath, existed: true, content: String(blob.stdout) });
+      continue;
+    }
+    return {
+      ok: false,
+      available: true,
+      files,
+      error: String(blob.stderr || "").trim() || `Unable to read Git baseline for ${relativePath}`,
+    };
+  }
+  return { ok: true, available: true, files };
+}
+
+export function inspectReviewGitState(
+  root: string,
+  relativePaths: string[],
+  headExpectations: ReviewHeadExpectation[] = [],
+): ReviewGitInspection {
+  if (!gitAvailable(root)) return { ok: true, stagedPaths: [], baselinePaths: [] };
+  const stagedPaths: string[] = [];
+  for (const relativePath of Array.from(new Set(relativePaths))) {
+    const result = git(root, ["diff", "--cached", "--quiet", "--ita-invisible-in-index", "--", relativePath]);
+    if (result.status === 1) {
+      stagedPaths.push(relativePath);
+      continue;
+    }
+    if (result.status !== 0) {
+      return {
+        ok: false,
+        stagedPaths,
+        baselinePaths: [],
+        error: String(result.stderr || "").trim() || `Unable to inspect staged review target ${relativePath}`,
+      };
+    }
+  }
+
+  const head = reviewHeadFiles(root, headExpectations.map((expectation) => expectation.path));
+  if (!head.ok) {
+    return {
+      ok: false,
+      stagedPaths,
+      baselinePaths: [],
+      error: head.error || "Unable to inspect the Git review baseline",
+    };
+  }
+  const currentByPath = new Map(head.files.map((file) => [file.path, file]));
+  const baselinePaths = head.available
+    ? headExpectations.filter((expected) => {
+        const current = currentByPath.get(expected.path) || { path: expected.path, existed: false, content: null };
+        if (expected.allowMissing === true && !current.existed) return false;
+        return current.existed !== expected.existed
+          || (current.existed && current.content !== expected.content);
+      }).map((expected) => expected.path)
+    : [];
+  return {
+    ok: stagedPaths.length === 0 && baselinePaths.length === 0,
+    stagedPaths,
+    baselinePaths: Array.from(new Set(baselinePaths)),
+  };
+}
+
 function addIntentToAdd(root: string, relativePaths: string[]): { paths: string[]; warnings: string[]; error?: string } {
   if (relativePaths.length === 0 || !gitAvailable(root)) return { paths: [], warnings: [] };
   const paths: string[] = [];
@@ -64,7 +181,7 @@ export function removeReviewIntentToAdd(root: string, relativePaths: string[]): 
   const removed: string[] = [];
   for (const relativePath of Array.from(new Set(relativePaths))) {
     if (git(root, ["cat-file", "-e", `HEAD:${relativePath}`]).status === 0) continue;
-    const stagedContent = git(root, ["diff", "--cached", "--quiet", "--", relativePath]);
+    const stagedContent = git(root, ["diff", "--cached", "--quiet", "--ita-invisible-in-index", "--", relativePath]);
     if (stagedContent.status !== 0) continue;
     const result = git(root, ["update-index", "--force-remove", "--", relativePath]);
     if (result.status === 0) removed.push(relativePath);

@@ -13,6 +13,7 @@ import {
   previewFileRecords,
   readApprovalSession,
   recordApprovalPreview,
+  supersedeUnapprovedApprovalSessions,
   writeApprovalSession,
   type ApprovalSession,
 } from "./approval-session-store";
@@ -226,7 +227,18 @@ function approvalTransitionError(
   const approvalIntent = hasApprovalIntent(args);
   if (!approvalIntent) {
     const existing = readApprovalSession(root, sessionId);
-    if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash) return null;
+    if (
+      existing
+      && existing.workflow === workflow
+      && existing.payload_hash === payloadHash
+      && (workflow !== "setup" || existing.preview_files.length > 0)
+    ) return null;
+    if (workflow === "setup") {
+      const superseded = supersedeUnapprovedApprovalSessions(root, workflow, sessionId);
+      if (superseded.ok === false) {
+        return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
+      }
+    }
     writeApprovalSession(root, {
       session_id: sessionId,
       workflow,

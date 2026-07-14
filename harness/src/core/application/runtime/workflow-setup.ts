@@ -17,6 +17,7 @@ import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { setupNativePrompts } from "./native-prompts";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
 import { appendLspReviewArtifacts, setupReviewArtifacts, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
+import { setupMissingEvidence } from "./setup-evidence";
 import { configuredCiProvider, lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
 import { appendRequiredLine, lspPreviewPayload, machineReviewFile } from "./setup-review-plan";
 import { renderStyleGuideMarkdown } from "./spec-docs";
@@ -58,6 +59,15 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const configOverrides = asJsonObject(rawArgs.config);
+  const integrationObject = asJsonObject(rawArgs.integrations);
+  const selectedIntegrationIds = Array.isArray(rawArgs.integrations)
+    ? asStringArray(rawArgs.integrations)
+    : asStringArray(integrationObject.optional_mcps);
+  const selectedIntegrations = Object.fromEntries(selectedIntegrationIds.map((id) => [id, { selected: true }]));
+  const integrationEntries = Object.fromEntries(Object.entries(integrationObject).filter(([key]) => key !== "optional_mcps"));
+  const integrationsPayload = isRecord(rawArgs.integrations) || Array.isArray(rawArgs.integrations)
+    ? { ...selectedIntegrations, ...integrationEntries }
+    : null;
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
@@ -69,7 +79,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     provider_mode: providerMode || "local",
     provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
     ...(asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {}),
-    ...(isRecord(rawArgs.integrations) ? { integrations: asJsonObject(rawArgs.integrations) } : {}),
+    ...(integrationsPayload ? { integrations: integrationsPayload } : {}),
     ...configOverrides,
   };
   const setupStatePayload: JsonObject = {
@@ -110,20 +120,9 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     }
   }
   const providerNeedsConfirmation = provider.requires_confirmation === true && !asOptionalString(rawArgs.providerMode || rawArgs.provider_mode || rawArgs.provider);
-  const reviewFiles = providerNeedsConfirmation ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
-  const reviewArtifacts = appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
-  const approval = providerNeedsConfirmation
-    ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [] }
-    : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles, {
-      styleGuides: previewStyleGuides,
-      final_only_files: ["cadre/events.jsonl"],
-    });
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const approvalError = providerNeedsConfirmation ? null : stagedApprovalError(approval);
-  const qualityWarnings = setupGenerationWarnings(args as JsonObject);
-  const intentPrompts = args.execute === true ? [] : setupIntentPrompts(args);
-  const nativePrompts = args.execute === true ? [] : setupNativePrompts({
+  const missingEvidence = setupMissingEvidence(args);
+  const intentPrompts = setupIntentPrompts(args);
+  const nativePrompts = setupNativePrompts({
     provider: asJsonObject(provider),
     syncMode: syncModeRecommendation,
     styleGuides: asJsonObject(styleGuides),
@@ -131,6 +130,22 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     integrations: workspaceHealthResult.integrations,
     runtimeArgs: args,
   });
+  const promptCollectionPending = missingEvidence.length > 0 || intentPrompts.length > 0 || nativePrompts.length > 0;
+  const reviewDeferred = providerNeedsConfirmation || promptCollectionPending;
+  const reviewFiles = reviewDeferred ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
+  const reviewArtifacts = reviewDeferred
+    ? []
+    : appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
+  const approval = reviewDeferred
+    ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [], deferred_for_clarification: true }
+    : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles, {
+      styleGuides: previewStyleGuides,
+      final_only_files: ["cadre/events.jsonl"],
+    });
+  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
+  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
+  const approvalError = reviewDeferred ? null : stagedApprovalError(approval);
+  const qualityWarnings = setupGenerationWarnings(args as JsonObject);
   const warnings = [
     ...asStringArray(styleGuides.warnings),
     ...asStringArray(asJsonObject(stageReviewBundle).warnings),
@@ -139,8 +154,8 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const result: CoreResult = {
     ...summary,
     ok: true,
-    phase_state: args.execute !== true && intentPrompts.length > 0 ? "awaiting_clarification" : summary.phase_state,
-    ...(args.execute !== true && intentPrompts.length > 0 ? { stage: "intent_clarification" } : {}),
+    phase_state: promptCollectionPending ? "awaiting_clarification" : summary.phase_state,
+    ...(promptCollectionPending ? { stage: "intent_clarification" } : {}),
     doctor: doctor(root, { hasCadreProject: isCadreProjectRoot(root) }),
     workspace_health: workspaceHealthResult,
     workspace: workspaceHealthResult.workspace,
@@ -159,6 +174,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     techStackSummary: techStackSummary(root, args),
     ...(intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {}),
     ...(nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {}),
+    ...(missingEvidence.length > 0 ? { missing_payload: missingEvidence } : {}),
     approval,
     review_artifacts: stageReviewArtifacts || reviewArtifacts,
     review_bundle: stageReviewBundle,
@@ -172,10 +188,15 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       ...(intentPrompts.length > 0 || nativePrompts.length > 0
         ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."]
         : []),
+      ...(missingEvidence.length > 0 && intentPrompts.length === 0
+        ? [`Inspect the repository using the selected setup intent, then call setup again with structured evidence for: ${missingEvidence.join(", ")}.`]
+        : []),
       ...(provider.requires_confirmation === true
         ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
         : []),
-      "Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true.",
+      ...(!reviewDeferred
+        ? ["Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true."]
+        : []),
     ],
     packet_notes: [
       "cadre-setup is packet-only: agents gather user intent, then pass confirmed structured JSON payloads to this packet.",
@@ -184,6 +205,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
   };
+  if (promptCollectionPending) return result;
   if (args.execute !== true && approvalError) {
     return {
       ...result,
@@ -198,8 +220,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const cadreDir = path.join(root, "cadre");
   const force = asBoolean(rawArgs.force, false);
   const missingPayload = [
-    ...(!isRecord(rawArgs.product) ? ["product"] : []),
-    ...(!techStackFromArgs(args) ? ["techStack"] : []),
+    ...setupMissingEvidence(args),
     ...(provider.requires_confirmation === true || !providerMode ? ["providerMode"] : []),
     ...(polyrepoRequested && !reposPayload ? ["repos"] : []),
   ];

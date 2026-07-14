@@ -204,8 +204,16 @@ export function setupNativePrompts(args: PromptArgs): JsonObject[] {
   return [
     hasAnyArg(args.runtimeArgs, ["providerMode", "provider_mode", "provider"]) ? null : providerPrompt(args.provider),
     hasAnyArg(args.runtimeArgs, ["syncMode", "sync_mode"]) ? null : syncPrompt(args.syncMode),
-    styleGuidePrompt(args.styleGuides),
-    hasAnyArg(args.runtimeArgs, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) ? null : lspPrompt(args.lspSetup),
-    optionalMcpPrompt(args.integrations),
+    hasAnyArg(args.runtimeArgs, ["styleGuideIds", "style_guide_ids"]) ? null : styleGuidePrompt(args.styleGuides),
+    hasAnyArg(args.runtimeArgs, [
+      "writeLsp",
+      "write_lsp",
+      "setupLsp",
+      "setup_lsp",
+      "lsp",
+      "setupPreviewLspAdded",
+      "setup_preview_lsp_added",
+    ]) ? null : lspPrompt(args.lspSetup),
+    hasAnyArg(args.runtimeArgs, ["integrations"]) ? null : optionalMcpPrompt(args.integrations),
   ].filter((prompt): prompt is JsonObject => prompt !== null);
 }

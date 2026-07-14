@@ -34,8 +34,9 @@ or provider evidence by hand.
 ## Staged Review Previews
 
 For workflows that require staged approval, Cadre separates review output from
-final execution. The first dry-run freezes the complete deterministic artifact
-set and writes it to the intended target paths, such as `cadre/product.md` or
+final execution. Once prerequisite clarification is complete, the first
+review-producing dry-run freezes the complete deterministic artifact set and
+writes it to the intended target paths, such as `cadre/product.md` or
 `cadre/tracks/<id>/plan.json`. The response marks this with
 `review_bundle.mode:"target"` and `mutates_worktree:true`, and each file reports
 its `target_path` or `review_path`.
