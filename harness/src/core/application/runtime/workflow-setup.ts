@@ -6,6 +6,7 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { appendJsonl, fileExists, writeJson } from "../../infrastructure/runtime/json-store";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
+import { scopedApprovalReviewFiles } from "./approval-stage-cursor";
 import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { renderJsonCodeblock } from "./artifact-actions";
 import { beginTrace, commitTrace } from "./commit-trace";
@@ -19,7 +20,7 @@ import { setupMissingEvidence } from "./setup-evidence";
 import { lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
 import { approvedSetupLspAdded, lspPreviewPayload, machineReviewFile, setupFinalReviewPlan } from "./setup-review-plan";
 import { setupStageReviewFiles } from "./setup-review-files";
-import { setupScopedReviewFiles, setupStageCollection } from "./setup-stage-lifecycle";
+import { setupStageCollection } from "./setup-stage-lifecycle";
 import { renderStyleGuideMarkdown } from "./spec-docs";
 import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
@@ -90,7 +91,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       syncMode: syncModeRecommendation,
     })
     : null;
-  const reviewFiles = setupScopedReviewFiles(plannedCollection.cursor, currentReviewFiles, finalPlan?.reviewFiles || []);
+  const reviewFiles = scopedApprovalReviewFiles(plannedCollection.cursor, currentReviewFiles, finalPlan?.reviewFiles || []);
   const requestedSession = asOptionalString(rawArgs.approvalSessionId || rawArgs.approval_session_id);
   const approvalStarted = Boolean(plannedCollection.cursor.session || requestedSession || plannedCollection.activeReady);
   const approval = approvalStarted

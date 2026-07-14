@@ -2857,12 +2857,18 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.deepEqual(missingProductEvidence.selected_levels, ["product"]);
     assert.deepEqual(missingProductEvidence.missing_payload, ["proposedContext.product"]);
     assert.equal(Object.prototype.hasOwnProperty.call(missingProductEvidence, "review_bundle"), false);
-    assert.deepEqual(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).sort() : [], sessionsBeforeRefresh);
+    const refreshSessionId = missingProductEvidence.approval.session_id;
+    assert.equal(missingProductEvidence.approval.current_stage, "product");
+    assert.deepEqual(
+      fs.readdirSync(sessionsDir).sort(),
+      [...sessionsBeforeRefresh, `${refreshSessionId}.json`].sort(),
+    );
+    assert.deepEqual(readJson(path.join(sessionsDir, `${refreshSessionId}.json`)).stage_records.product.snapshot_files, []);
     assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBeforeRefresh);
 
     const templateOnlyRefresh = core.workflowPacket(root, {
       workflow: "refresh",
-      refreshLevels: ["product"],
+      approvalSessionId: refreshSessionId,
       proposedContext: {
         product: JSON.parse(fs.readFileSync(path.join(__dirname, "..", "templates", "product.json"), "utf8")),
       },
@@ -2870,8 +2876,9 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.equal(templateOnlyRefresh.ok, false);
     assert.equal(templateOnlyRefresh.stage, "refresh_evidence");
     assert.deepEqual(templateOnlyRefresh.missing_payload, ["proposedContext.product"]);
+    assert.equal(templateOnlyRefresh.approval.session_id, refreshSessionId);
     assert.equal(Object.prototype.hasOwnProperty.call(templateOnlyRefresh, "review_bundle"), false);
-    assert.deepEqual(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).sort() : [], sessionsBeforeRefresh);
+    assert.deepEqual(fs.readdirSync(sessionsDir).sort(), [...sessionsBeforeRefresh, `${refreshSessionId}.json`].sort());
     assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBeforeRefresh);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -5233,14 +5240,12 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     });
     assert.equal(refreshBlocked.ok, false);
     assert.equal(refreshBlocked.stage, "staged_approval");
-    assert.deepEqual(refreshBlocked.selected_levels, ["patterns", "lsp"]);
+    assert.deepEqual(refreshBlocked.selected_levels, ["lsp", "patterns"]);
     assert.equal(refreshBlocked.refresh_analysis.kind, "cadre.refresh_analysis.v1");
-    const patternsCanonicalArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.jsonl");
-    assert.ok(patternsCanonicalArtifact);
-    const patternsArtifact = refreshBlocked.review_artifacts.find((artifact) => artifact.path === "cadre/patterns.md");
-    assert.ok(patternsArtifact);
-    assert.equal(Object.prototype.hasOwnProperty.call(patternsArtifact, "content"), false);
-    assert.ok(fs.existsSync(path.join(refreshBlocked.review_bundle.directory, "cadre", "patterns.md")));
+    assert.equal(refreshBlocked.approval.current_stage, "technical");
+    assert.deepEqual(refreshBlocked.review_artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
+    assert.ok(fs.existsSync(path.join(refreshBlocked.review_bundle.directory, "cadre", "lsp.json")));
+    assert.equal(fs.existsSync(path.join(refreshBlocked.review_bundle.directory, "cadre", "patterns.md")), false);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: YYYY-MM-DD/);
 
     const refresh = approveWorkflow(root, {
@@ -5251,8 +5256,8 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
     });
     assert.equal(refresh.ok, true);
     assert.equal(refresh.phase_state, "executed");
-    assert.deepEqual(refresh.selected_levels, ["patterns", "lsp"]);
-    assert.deepEqual(refresh.refreshed_documents.selected, ["patterns"]);
+    assert.deepEqual(refresh.selected_levels, ["lsp", "patterns"]);
+    assert.deepEqual(refresh.refreshed_documents.selected.sort(), ["lsp", "patterns"]);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.jsonl"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
     assert.match(fs.readFileSync(path.join(root, "cadre", "patterns.md"), "utf8"), /Last refreshed: \d{4}-\d{2}-\d{2}/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
@@ -5261,21 +5266,263 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
   }
 });
 
-test("LSP-only refresh uses execution authorization without document approval", () => {
+test("multi-level refresh collects and materializes only the active selected stage", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-multi-level-refresh-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+    write(path.join(root, "src", "index.ts"), "export const ready = true;\n");
+    const selectedLevels = [
+      "product",
+      "product-guidelines",
+      "tech-stack",
+      "style-guides",
+      "repository-topology",
+      "lsp",
+      "workflow",
+      "patterns",
+    ];
+    const stages = ["product", "product_guidelines", "technical", "workflow", "patterns"];
+    const missingProduct = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: [...selectedLevels].reverse(),
+      commitMode: "off",
+    });
+    const sessionId = missingProduct.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    assert.deepEqual(missingProduct.selected_levels, selectedLevels);
+    assert.equal(missingProduct.approval.current_stage, "product");
+    assert.deepEqual(missingProduct.missing_payload, ["proposedContext.product"]);
+    assert.deepEqual(readJson(sessionFile).stage_order, stages);
+    assert.ok(Object.values(readJson(sessionFile).stage_records).every((record) => record.snapshot_files.length === 0));
+
+    const product = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      proposedContext: {
+        product: { title: "Refresh Product", summary: "Evidence-backed brownfield product context." },
+      },
+    });
+    assert.deepEqual(product.review_artifacts.map((artifact) => artifact.path).sort(), ["cadre/product.json", "cadre/product.md"]);
+    for (const absent of ["product_guidelines.json", "tech-stack.json", "workflow.json", "patterns.jsonl", "repos.json", "lsp.json"]) {
+      assert.equal(fs.existsSync(path.join(root, "cadre", absent)), false, absent);
+    }
+
+    const missingGuidelines = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(missingGuidelines.approval.session_id, sessionId);
+    assert.equal(missingGuidelines.approval.current_stage, "product_guidelines");
+    assert.deepEqual(missingGuidelines.missing_payload, ["proposedContext.productGuidelines"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.json")), false);
+
+    const guidelines = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      proposedContext: {
+        productGuidelines: { title: "Refresh Guidelines", summary: "Keep reviewed refresh stages evidence-backed and recoverable." },
+      },
+    });
+    assert.deepEqual(guidelines.review_artifacts.map((artifact) => artifact.path).sort(), [
+      "cadre/product_guidelines.json",
+      "cadre/product_guidelines.md",
+    ]);
+
+    const missingTechnical = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(missingTechnical.approval.current_stage, "technical");
+    assert.deepEqual(missingTechnical.missing_payload, ["proposedContext.techStack", "proposedContext.repos"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
+
+    const technical = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      styleGuideIds: ["typescript"],
+      proposedContext: {
+        techStack: { languages: ["TypeScript"], runtimes: ["Node.js"] },
+        repos: {
+          mode: "polyrepo",
+          default_repo: "application",
+          repos: [{ name: "application", submodule_path: "repos/application", enabled: true }],
+        },
+      },
+    });
+    assert.equal(technical.ok, true, technical.error || JSON.stringify(technical.warnings || {}));
+    assert.equal(technical.approval.current_stage, "technical");
+    assert.deepEqual(technical.review_artifacts.map((artifact) => artifact.path).sort(), [
+      "cadre/lsp.json",
+      "cadre/repos.json",
+      "cadre/repos.md",
+      "cadre/styleguides/README.md",
+      "cadre/styleguides/general.json",
+      "cadre/styleguides/general.md",
+      "cadre/styleguides/index.json",
+      "cadre/styleguides/typescript.json",
+      "cadre/styleguides/typescript.md",
+      "cadre/tech-stack.json",
+      "cadre/tech-stack.md",
+    ]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "workflow.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "patterns.jsonl")), false);
+
+    const missingWorkflow = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(missingWorkflow.approval.current_stage, "workflow");
+    assert.deepEqual(missingWorkflow.missing_payload, ["proposedContext.workflowPolicy"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "workflow.json")), false);
+
+    const workflow = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      proposedContext: {
+        workflowPolicy: { title: "Refresh Workflow", summary: "Run focused validation after every approved refresh." },
+      },
+    });
+    assert.deepEqual(workflow.review_artifacts.map((artifact) => artifact.path).sort(), ["cadre/workflow.json", "cadre/workflow.md"]);
+
+    const missingPatterns = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "workflow",
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(missingPatterns.approval.current_stage, "patterns");
+    assert.deepEqual(missingPatterns.missing_payload, ["proposedContext.patterns"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "patterns.jsonl")), false);
+
+    const patterns = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      proposedContext: {
+        patterns: { text: "# Codebase Patterns\n\n## Refresh\n\nGenerate only the active selected stage." },
+      },
+    });
+    assert.deepEqual(patterns.review_artifacts.map((artifact) => artifact.path).sort(), ["cadre/patterns.jsonl", "cadre/patterns.md"]);
+    const approvedSnapshots = Object.values(readJson(sessionFile).stage_records)
+      .flatMap((record) => record.snapshot_files)
+      .map((file) => ({ path: file.path, content: file.content }));
+
+    const complete = core.workflowPacketV1(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "patterns",
+      approvedStages: stages,
+    });
+    assert.deepEqual(complete.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "refresh",
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: stages, complete: true },
+      },
+    });
+    const executed = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: stages,
+    });
+    assert.equal(executed.ok, true, executed.error);
+    for (const snapshot of approvedSnapshots) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("style-guide refresh analyzes drift and preserves selection unless removal is explicit", () => {
+  for (const explicit of [false, true]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `cadre-style-guide-refresh-${explicit ? "explicit" : "preserve"}-test-`));
+    try {
+      git(root, ["init"]);
+      write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+      write(path.join(root, "cadre", "tech-stack.json"), `${JSON.stringify({ languages: ["TypeScript"] }, null, 2)}\n`);
+      write(path.join(root, "cadre", "styleguides", "index.json"), `${JSON.stringify({ selected: ["general", "python", "custom-team"] }, null, 2)}\n`);
+      const customCanonical = `${JSON.stringify({ id: "custom-team", rules: [{ id: "team", text: "Preserve team conventions." }] }, null, 2)}\n`;
+      const customProjection = "# Custom team style\n\nPreserve team conventions.\n";
+      write(path.join(root, "cadre", "styleguides", "custom-team.json"), customCanonical);
+      write(path.join(root, "cadre", "styleguides", "custom-team.md"), customProjection);
+      git(root, ["add", "."]);
+      git(root, ["commit", "-m", "seed style-guide context"]);
+
+      const analysis = core.workflowPacket(root, { workflow: "refresh" }).refresh_analysis;
+      const finding = analysis.findings.find((entry) => entry.level === "style-guides");
+      assert.equal(finding.recommended, true);
+      assert.ok(finding.evidence.missing.includes("typescript"));
+
+      const preview = core.workflowPacket(root, {
+        workflow: "refresh",
+        refreshLevels: ["style-guides"],
+        ...(explicit ? { styleGuideIds: ["typescript"] } : {}),
+      });
+      assert.equal(preview.ok, true, preview.error);
+      assert.equal(preview.approval.current_stage, "technical");
+      const paths = preview.review_artifacts.map((artifact) => artifact.path);
+      assert.equal(paths.includes("cadre/styleguides/typescript.json"), true);
+      assert.equal(paths.includes("cadre/styleguides/python.json"), !explicit);
+      assert.equal(paths.includes("cadre/styleguides/custom-team.json"), false);
+      const index = readJson(path.join(root, "cadre", "styleguides", "index.json"));
+      assert.deepEqual(index.selected, explicit
+        ? ["general", "typescript"]
+        : ["custom-team", "general", "python", "typescript"]);
+      assert.equal(fs.readFileSync(path.join(root, "cadre", "styleguides", "custom-team.json"), "utf8"), customCanonical);
+      assert.equal(fs.readFileSync(path.join(root, "cadre", "styleguides", "custom-team.md"), "utf8"), customProjection);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("LSP-only refresh freezes the reviewed technical-stage configuration", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-only-refresh-test-"));
   try {
     git(root, ["init"]);
     write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
     write(path.join(root, "src", "index.ts"), "export const ready = true;\n");
-    const preview = core.workflowPacket(root, { workflow: "refresh", refreshLevels: ["lsp"] });
+    const preview = core.workflowPacket(root, { workflow: "refresh", refreshLevels: ["lsp"], commitMode: "off" });
     assert.equal(preview.ok, true, preview.error);
     assert.deepEqual(preview.selected_levels, ["lsp"]);
-    assert.equal(preview.approval.required, false);
-    assert.equal(preview.review_bundle, null);
-    const executed = core.workflowPacket(root, { workflow: "refresh", refreshLevels: ["lsp"], execute: true, commitMode: "off" });
+    assert.equal(preview.approval.required, true);
+    assert.equal(preview.approval.current_stage, "technical");
+    assert.deepEqual(preview.review_artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
+    const approvedLsp = fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8");
+    const approved = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "technical",
+      approvedStages: ["technical"],
+    });
+    assert.equal(approved.ok, true, approved.error);
+    assert.equal(approved.approval.current_stage, null);
+    const executed = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: ["technical"],
+    });
     assert.equal(executed.ok, true, executed.error);
     assert.equal(executed.phase_state, "executed");
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8"), approvedLsp);
+    assert.equal(executed.lsp_setup.reviewed_snapshot, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

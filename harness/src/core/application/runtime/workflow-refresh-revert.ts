@@ -1,4 +1,4 @@
-import { asJsonObject, asOptionalString, asString, asStringArray } from "../../../guards";
+import { asJsonObject, asOptionalString, asString, asStringArray, isRecord } from "../../../guards";
 import type { CadreTrack, RuntimeArgs } from "../../../types";
 
 import { utcNow } from "../../infrastructure/runtime/json-store";
@@ -9,10 +9,12 @@ import { artifactSync } from "./artifact-actions";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, PlannedGitAction } from "./contracts";
 import { refreshAnalysis, refreshLevelIds, refreshLevelPrompt, refreshSelectionProvided, unsupportedRefreshLevels } from "./refresh-analysis";
-import { missingRefreshEvidence, refreshReviewFiles } from "./refresh-documents";
+import { refreshCandidate } from "./refresh-documents";
+import { refreshStageCollection } from "./refresh-stage-lifecycle";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
-import { humanReviewState, packetReviewArtifact, reviewArtifactsFromFiles, setupLspReviewArtifacts, workflowReviewBundle } from "./review-bundles";
+import { humanReviewState, packetReviewArtifact, reviewArtifactsFromFiles } from "./review-bundles";
 import { lspSetup } from "./setup-infrastructure";
+import { lspPreviewPayload, machineReviewFile } from "./setup-review-plan";
 import { applyStagedApprovalSessionPayload, refreshApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import { selectedTrackId } from "./status";
 import { findTrack, trackContext } from "./track-context";
@@ -168,8 +170,65 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     };
   }
   const levels = refreshLevelIds(args, recommended);
-  const missingEvidence = missingRefreshEvidence(args, levels);
-  if (missingEvidence.length > 0) {
+  const stages = refreshApprovalStages(levels);
+  const lspSelected = levels.includes("lsp");
+  const lspPreview = lspSetup(root, { ...args, execute: false });
+  const topologyCandidate = refreshCandidate(args, "repository-topology");
+  const lspReviewFiles = lspSelected
+    ? [{
+      ...machineReviewFile(
+        "cadre/lsp.json",
+        "LSP configuration",
+        "refresh:lsp",
+        `${JSON.stringify(lspPreviewPayload(root, lspPreview, isRecord(topologyCandidate) ? asJsonObject(topologyCandidate) : null), null, 2)}\n`,
+      ),
+      documentId: "lsp",
+    }]
+    : [];
+  const documents = refreshStageCollection(root, args, levels, stages, lspReviewFiles);
+  const reviewFiles = documents.files;
+  const projectionsSelected = levels.includes("projections");
+  const diagnosticsOnly = levels.length === 0 || levels.every((level) => level === "diagnostics");
+  const semanticRefresh = stages.length > 0;
+  const mutatingRefresh = semanticRefresh || lspSelected || projectionsSelected;
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
+  const approval = semanticRefresh
+    ? stagedApprovalState(root, "refresh", args, stages, reviewFiles, {
+      selected_levels: levels,
+      final_only_files: [],
+    }, { allowEmptyActiveStage: true })
+    : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
+  const currentReviewBundle = asJsonObject(asJsonObject(approval).current_review_bundle);
+  const stageReviewBundle = Object.keys(currentReviewBundle).length > 0 ? currentReviewBundle : null;
+  const currentArtifacts = asJsonObject(approval).current_review_artifacts;
+  const stageReviewArtifacts = Array.isArray(currentArtifacts)
+    ? currentArtifacts.map(asJsonObject)
+    : reviewArtifacts;
+  const humanReview = semanticRefresh && stageReviewArtifacts.length > 0
+    ? humanReviewState("refresh", args, stageReviewArtifacts, stageReviewBundle)
+    : null;
+  const approvalError = semanticRefresh ? stagedApprovalError(approval) : null;
+  const cancelled = asJsonObject(approval).cancelled === true;
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
+  if (cancelled) {
+    return {
+      ...summary,
+      ok: true,
+      dry_run: true,
+      phase_state: "cancelled",
+      scope: levels,
+      selected_levels: levels,
+      refresh_analysis: analysis,
+      approval,
+      review_artifacts: [],
+      review_bundle: null,
+      warnings,
+    };
+  }
+  if (documents.missingEvidence.length > 0 && !approvalError) {
     return {
       ...summary,
       ok: false,
@@ -179,38 +238,15 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       scope: levels,
       selected_levels: levels,
       refresh_analysis: analysis,
-      missing_payload: missingEvidence,
-      required_payload: missingEvidence,
-      error: `Selected semantic refresh levels require evidence-backed canonical input: ${missingEvidence.join(", ")}`,
-      next_actions: ["Use the refresh analysis to supply complete structured candidates under proposedContext; Cadre will not generate templates for missing evidence."],
+      missing_payload: documents.missingEvidence,
+      required_payload: documents.missingEvidence,
+      approval,
+      warnings,
+      error: `Current refresh level requires evidence-backed canonical input: ${documents.missingEvidence.join(", ")}`,
+      next_actions: ["Use the refresh analysis to supply the current level under proposedContext, then resume with the returned approval session; this is not approval."],
     };
   }
-
-  const documents = refreshReviewFiles(root, args, levels);
-  const reviewFiles = documents.files;
-  const lspSelected = levels.includes("lsp");
-  const projectionsSelected = levels.includes("projections");
-  const diagnosticsOnly = levels.length === 0 || levels.every((level) => level === "diagnostics");
-  const mutatingRefresh = reviewFiles.length > 0 || lspSelected || projectionsSelected;
-  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  if (lspSelected) reviewArtifacts.push(...setupLspReviewArtifacts(args, true));
-  const reviewBundle = workflowReviewBundle(root, "refresh", args, reviewFiles);
-  const approval = reviewFiles.length > 0
-    ? stagedApprovalState(root, "refresh", args, refreshApprovalStages(levels), reviewFiles, {
-      selected_levels: levels,
-      final_only_files: [...(lspSelected ? ["cadre/lsp.json"] : [])],
-    })
-    : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
-  const humanReview = reviewFiles.length > 0 ? humanReviewState("refresh", args, reviewArtifactsFromFiles(reviewFiles), reviewBundle) : null;
-  const approvalError = reviewFiles.length > 0 ? stagedApprovalError(approval) : null;
-  const warnings = [
-    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
-    ...(approvalError ? [approvalError] : []),
-  ];
-  const awaitingDocumentReview = args.execute === true && reviewFiles.length > 0 && !stagedApprovalReady(approval);
-  const lspPreview = lspSetup(root, { ...args, execute: false });
+  const awaitingDocumentReview = args.execute === true && semanticRefresh && !stagedApprovalReady(approval);
   if (awaitingDocumentReview) {
     return {
       ...summary,
@@ -263,13 +299,13 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
   }
 
   const traceBefore = args.execute === true && mutatingRefresh ? beginTrace(root) : null;
-  const lsp = args.execute === true && lspSelected
-    ? lspSetup(root, { ...args, execute: true })
+  const lsp = lspSelected
+    ? { ...lspPreview, reviewed_snapshot: true, applied: args.execute === true && reviewValidation.ok !== false }
     : lspPreview;
   const projectionRepair = args.execute === true && projectionsSelected
     ? artifactSync(root, { scope: "project", execute: true, commitMode: "off" })
     : null;
-  const operationsOk = (!lspSelected || lsp.ok !== false) && (!projectionRepair || projectionRepair.ok !== false);
+  const operationsOk = !projectionRepair || projectionRepair.ok !== false;
   const approvalAudit = args.execute === true && reviewFiles.length > 0 && operationsOk
     ? recordApprovalCompletionFromArgs(root, args)
     : null;
@@ -340,7 +376,6 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     reused_review_files: asStringArray(asJsonObject(reviewValidation).files),
     warnings: [
       ...warnings,
-      ...(!operationsOk && lspSelected && lsp.ok === false ? [asOptionalString(lsp.error || lsp.reason) || "LSP refresh failed"] : []),
       ...(!operationsOk && projectionRepair?.ok === false ? [asOptionalString(projectionRepair.error) || "Projection refresh failed"] : []),
     ],
   };

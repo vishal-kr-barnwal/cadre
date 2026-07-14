@@ -2,6 +2,7 @@ import type { JsonObject, JsonValue, RuntimeArgs } from "../../../types";
 import { asJsonArray, asJsonObject, asOptionalString, asStringArray, isJsonValue } from "../../../guards";
 
 import type { CoreResult } from "./contracts";
+import { approvalPayload } from "./approval-request";
 import { workflowPacket } from "./workflow-packet";
 
 export type CadrePublicTool = "cadre_workflow" | "cadre_action" | "cadre_read";
@@ -65,6 +66,11 @@ function approvalDecision(result: JsonObject): JsonObject | null {
   if (approval.cancelled === true) return null;
   const currentStage = asOptionalString(approval.current_stage);
   if (!currentStage) {
+    if (
+      approval.session_id
+      && asStringArray(approval.pending_stages).length === 0
+      && approval.approval_error == null
+    ) return null;
     const human = asJsonObject(result.human_review);
     if (human.required === true && human.confirmed !== true) {
       return {
@@ -253,8 +259,7 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
   }
   const approval = asJsonObject(result.approval);
   if (
-    (workflow === "setup" || workflow === "skill")
-    && result.ok !== false
+    result.ok !== false
     && result.phase_state !== "pending_provider"
     && asStringArray(result.missing_payload).length === 0
     && args.execute !== true
@@ -275,6 +280,26 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
           approved_stages: jsonValue(approval.approved_stages) || [],
           complete: true,
         },
+      },
+    };
+  }
+  if (
+    workflow === "refresh"
+    && result.ok !== false
+    && args.execute !== true
+    && approval.required === false
+    && asStringArray(result.selected_levels).some((level) => level === "projections")
+  ) {
+    const input = approvalPayload(args);
+    delete input.workflow;
+    delete input.root;
+    return {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow,
+        input,
+        execute: true,
       },
     };
   }

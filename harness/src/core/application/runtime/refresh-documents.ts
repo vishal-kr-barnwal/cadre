@@ -1,15 +1,17 @@
 import path from "node:path";
-import { asJsonArray, asJsonObject, asOptionalString, isRecord } from "../../../guards";
+import { asJsonArray, asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
 import type { JsonObject, JsonValue, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
 import { readJsonl, renderJsonCodeblock, renderJsonlMarkdown } from "./artifact-actions";
 import { unapprovedTargetBaselineContent } from "./approval-session-store";
 import type { ReviewFile } from "./contracts";
 import type { RefreshLevel } from "./refresh-analysis";
 import { withGeneratedMarker, renderMarkdownDoc } from "./markdown-docs";
 import { documentReviewPair, jsonReviewFile, plainReviewFile, textReviewFile } from "./review-bundles";
+import { styleGuideReviewFiles } from "./setup-review-files";
 import { asArray } from "./status";
+import { availableStyleGuideIds, requestedStyleGuideIds, setupStyleGuides } from "./tech-stack";
 import { normalizeProjectDoc, templateJson } from "./workflow-response";
 
 interface ProjectDocumentSpec {
@@ -89,6 +91,8 @@ export function refreshCandidate(args: RuntimeArgs, level: RefreshLevel): unknow
       return raw.productGuidelines ?? raw.product_guidelines ?? proposed.productGuidelines ?? proposed.product_guidelines;
     case "tech-stack":
       return raw.techStack ?? raw.tech_stack ?? proposed.techStack ?? proposed.tech_stack;
+    case "style-guides":
+      return raw.styleGuideIds ?? raw.style_guide_ids ?? proposed.styleGuideIds ?? proposed.style_guide_ids;
     case "workflow":
       return raw.workflowPolicy ?? raw.workflow_policy ?? proposed.workflowPolicy ?? proposed.workflow_policy ?? proposed.workflow;
     case "patterns":
@@ -337,6 +341,31 @@ function repositoryTopologyFiles(root: string, rawValue: unknown): ReviewFile[] 
   );
 }
 
+function styleGuideFiles(root: string, args: RuntimeArgs): ReviewFile[] {
+  const rawIds = refreshCandidate(args, "style-guides");
+  const currentIds = asStringArray(readJson<JsonObject>(path.join(root, "cadre", "styleguides", "index.json"), {}).selected);
+  const techStack = refreshCandidate(args, "tech-stack");
+  const available = new Set(availableStyleGuideIds());
+  const requestedIds = rawIds === undefined ? currentIds : requestedStyleGuideIds(rawIds);
+  const customIds = requestedIds.filter((id) => (
+    !available.has(id) && fileExists(path.join(root, "cadre", "styleguides", `${id}.json`))
+  ));
+  const styleGuides = setupStyleGuides(root, {
+    ...args,
+    ...(isRecord(techStack) ? { techStack: asJsonObject(techStack) } : {}),
+    styleGuideIds: requestedIds,
+  });
+  const selected = Array.from(new Set([...asStringArray(styleGuides.selected), ...customIds])).sort();
+  const missing = asStringArray(styleGuides.missing).filter((id) => !customIds.includes(id));
+  return styleGuideReviewFiles({
+    ...styleGuides,
+    selected,
+    missing,
+    valid: missing.length === 0,
+    warnings: missing.length > 0 ? [`Unknown refresh style guide id(s) ignored: ${missing.join(", ")}`] : [],
+  }, selected.filter((id) => available.has(id)));
+}
+
 function stampedPatternEntries(entries: JsonObject[]): JsonObject[] {
   if (entries.length === 0) return [];
   const now = utcNow();
@@ -397,6 +426,7 @@ export function refreshReviewFiles(root: string, args: RuntimeArgs, levels: Refr
     if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root, spec, refreshCandidate(args, spec.level)));
   }
   if (levels.includes("tech-stack")) files.push(...techStackFiles(root, refreshCandidate(args, "tech-stack")));
+  if (levels.includes("style-guides")) files.push(...styleGuideFiles(root, args));
   if (levels.includes("patterns")) files.push(...(refreshedPatternsArtifacts(root, args)?.files || []));
   if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root, refreshCandidate(args, "repository-topology")));
   return {

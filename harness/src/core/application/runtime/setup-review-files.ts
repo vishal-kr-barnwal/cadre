@@ -76,8 +76,9 @@ function productGuidelineFiles(args: RuntimeArgs): ReviewFile[] {
   );
 }
 
-function styleGuideFiles(styleGuides: CoreResult): ReviewFile[] {
+export function styleGuideReviewFiles(styleGuides: CoreResult, generatedGuideIds?: string[]): ReviewFile[] {
   const selected = asStringArray(styleGuides.selected);
+  const generated = new Set(generatedGuideIds || selected);
   const index: JsonObject = {
     version: 1,
     schema: "cadre.styleguide_index.v1",
@@ -101,7 +102,7 @@ function styleGuideFiles(styleGuides: CoreResult): ReviewFile[] {
       ),
       "styleguides",
     ),
-    ...selected.flatMap((guideId) => {
+    ...selected.filter((guideId) => generated.has(guideId)).flatMap((guideId) => {
       const guide = templateJson(`styleguides/${guideId}.json`, {
         version: 1,
         schema: "cadre.styleguide.v1",
@@ -179,7 +180,7 @@ function technicalFiles(
         ),
       ),
     ),
-    ...styleGuideFiles(styleGuides),
+    ...styleGuideReviewFiles(styleGuides),
     ...repositoryFiles(args, polyrepoRequested),
     ...machineFiles,
   ];

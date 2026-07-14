@@ -5934,20 +5934,6 @@ function workflowReviewBundle(root2, workflow, args, reviewFiles2, manifestExtra
     files
   };
 }
-function setupLspReviewArtifacts(args = {}, writeRequested = setupLspWriteRequested(args)) {
-  if (writeRequested) {
-    return [
-      {
-        path: "cadre/lsp.json",
-        title: "LSP configuration",
-        kind: "json",
-        source: "lsp_setup",
-        write_requested: true
-      }
-    ];
-  }
-  return [];
-}
 function humanReviewState(workflow, args, artifacts, reviewBundle = null) {
   return {
     required: true,
@@ -11575,6 +11561,7 @@ function reviseApprovalStages(hasSpec, hasPlan) {
 }
 function refreshApprovalStages(levels) {
   const selected = new Set(levels);
+  const technicalSelected = ["tech-stack", "style-guides", "repository-topology", "lsp"].some((level) => selected.has(level));
   return [
     ...selected.has("product") ? [{
       id: "product",
@@ -11590,12 +11577,40 @@ function refreshApprovalStages(levels) {
       documentIds: ["product_guidelines"],
       inputKeys: ["proposedContext.productGuidelines", "proposedContext.product_guidelines", "proposed_context.productGuidelines", "proposed_context.product_guidelines"]
     }] : [],
-    ...selected.has("tech-stack") ? [{
-      id: "tech_stack",
-      title: "Tech Stack",
-      description: "Detected languages, frameworks, runtimes, dependencies, platforms, and commands.",
-      documentIds: ["tech_stack"],
-      inputKeys: ["proposedContext.techStack", "proposedContext.tech_stack", "proposed_context.techStack", "proposed_context.tech_stack"]
+    ...technicalSelected ? [{
+      id: "technical",
+      title: "Technical Context",
+      description: "Selected tech stack, style guides, repository topology, and language-server configuration as one atomic review set.",
+      documentIds: [
+        ...selected.has("tech-stack") ? ["tech_stack"] : [],
+        ...selected.has("style-guides") ? ["styleguides"] : [],
+        ...selected.has("repository-topology") ? ["repos"] : [],
+        ...selected.has("lsp") ? ["lsp"] : []
+      ],
+      inputKeys: [
+        "proposedContext.techStack",
+        "proposedContext.tech_stack",
+        "proposed_context.techStack",
+        "proposed_context.tech_stack",
+        "proposedContext.styleGuideIds",
+        "proposedContext.style_guide_ids",
+        "proposed_context.styleGuideIds",
+        "proposed_context.style_guide_ids",
+        "styleGuideIds",
+        "style_guide_ids",
+        "proposedContext.repositoryTopology",
+        "proposedContext.repository_topology",
+        "proposedContext.repos",
+        "proposed_context.repositoryTopology",
+        "proposed_context.repository_topology",
+        "proposed_context.repos",
+        "writeLsp",
+        "write_lsp",
+        "setupLsp",
+        "setup_lsp",
+        "lsp"
+      ],
+      fileMatches: selected.has("lsp") ? ["cadre/lsp.json"] : []
     }] : [],
     ...selected.has("workflow") ? [{
       id: "workflow",
@@ -11603,20 +11618,6 @@ function refreshApprovalStages(levels) {
       description: "Development, verification, review, commit, and coordination expectations.",
       documentIds: ["workflow"],
       inputKeys: ["proposedContext.workflowPolicy", "proposedContext.workflow_policy", "proposed_context.workflowPolicy", "proposed_context.workflow_policy"]
-    }] : [],
-    ...selected.has("repository-topology") ? [{
-      id: "repos",
-      title: "Repository Topology",
-      description: "Configured repositories, enabled state, default repository, and polyrepo routing.",
-      documentIds: ["repos"],
-      inputKeys: [
-        "proposedContext.repositoryTopology",
-        "proposedContext.repository_topology",
-        "proposedContext.repos",
-        "proposed_context.repositoryTopology",
-        "proposed_context.repository_topology",
-        "proposed_context.repos"
-      ]
     }] : [],
     ...selected.has("patterns") ? [{
       id: "patterns",
@@ -14367,10 +14368,11 @@ var REFRESH_LEVELS = [
   "product",
   "product-guidelines",
   "tech-stack",
-  "workflow",
-  "patterns",
+  "style-guides",
   "repository-topology",
   "lsp",
+  "workflow",
+  "patterns",
   "projections",
   "diagnostics"
 ];
@@ -14390,6 +14392,14 @@ var LEVEL_ALIASES = {
   "tech-stack": "tech-stack",
   tech_stack: "tech-stack",
   techstack: "tech-stack",
+  style: "style-guides",
+  styles: "style-guides",
+  styleguide: "style-guides",
+  styleguides: "style-guides",
+  "style-guide": "style-guides",
+  "style-guides": "style-guides",
+  style_guide: "style-guides",
+  style_guides: "style-guides",
   workflow: "workflow",
   "workflow-policy": "workflow",
   workflow_policy: "workflow",
@@ -14412,10 +14422,11 @@ var LEVEL_LABELS = {
   product: "Product Context",
   "product-guidelines": "Product Guidelines",
   "tech-stack": "Tech Stack",
-  workflow: "Workflow Policy",
-  patterns: "Project Patterns",
+  "style-guides": "Style Guides",
   "repository-topology": "Repository Topology",
   lsp: "Language Servers",
+  workflow: "Workflow Policy",
+  patterns: "Project Patterns",
   projections: "Generated Projections",
   diagnostics: "Analysis Only"
 };
@@ -14429,6 +14440,7 @@ function rawRequestedLevels(args) {
   const flags = [
     raw.all === true ? "all" : null,
     raw.patterns === true ? "patterns" : null,
+    raw.styleGuides === true || raw.style_guides === true ? "style-guides" : null,
     raw.docs === true ? "docs" : null,
     raw.projections === true ? "projections" : null,
     raw.diagnostics === true ? "diagnostics" : null,
@@ -14503,6 +14515,17 @@ function missingTechLanguages(repo, techStack) {
   const recorded = collectTechStackTokens(techStack).join(" ").toLowerCase();
   return detected.filter((language) => !recorded.includes(language.toLowerCase()));
 }
+function styleGuideDrift(root2, techStack) {
+  const available = new Set(availableStyleGuideIds());
+  const selected = asStringArray(readJson(import_node_path49.default.join(root2, "cadre", "styleguides", "index.json"), {}).selected);
+  const implied = Array.from(/* @__PURE__ */ new Set([
+    ...available.has("general") ? ["general"] : [],
+    ...styleGuideIdsForTechStack(techStack).filter((id) => available.has(id))
+  ])).sort();
+  const missing = implied.filter((id) => !selected.includes(id));
+  const missingFiles = selected.filter((id) => !import_node_fs29.default.existsSync(import_node_path49.default.join(root2, "cadre", "styleguides", `${id}.json`)));
+  return { selected, implied, missing, missing_files: missingFiles };
+}
 function projectionProblems(validation) {
   return asArray(validation.results).map(asJsonObject).filter((entry) => entry.ok === false);
 }
@@ -14538,6 +14561,7 @@ function refreshAnalysis(root2, args = {}) {
   const changes = detectedChangeText(args);
   const qualityWarnings = setupGenerationWarnings(context);
   const missingLanguages = missingTechLanguages(repo, asJsonObject(context.techStack));
+  const styleGuides = styleGuideDrift(root2, asJsonObject(context.techStack));
   const projectionIssues = projectionProblems(projectionValidation);
   const thinPatterns = patternsAreThin(root2);
   const lspMissing = asStringArray(lspPreview.missingFromConfig || lspPreview.missing_from_config);
@@ -14558,6 +14582,18 @@ function refreshAnalysis(root2, args = {}) {
       ...missingLanguages.length > 0 ? [`Repository languages are not recorded in the tech stack: ${missingLanguages.join(", ")}.`] : [],
       ...hasChange(changes, [/dependency/, /framework/, /runtime/, /database/, /package/, /toolchain/]) ? ["Reported changes may alter the recorded toolchain or dependencies."] : []
     ], missingLanguages.length > 0 ? "high" : "medium", { missing_languages: missingLanguages }),
+    finding("style-guides", [
+      ...asStringArray(styleGuides.missing).length > 0 ? [`Style guides implied by the recorded tech stack are not selected: ${asStringArray(styleGuides.missing).join(", ")}.`] : [],
+      ...asStringArray(styleGuides.missing_files).length > 0 ? [`Selected style guide files are missing: ${asStringArray(styleGuides.missing_files).join(", ")}.`] : [],
+      ...hasChange(changes, [/style guide/, /formatting convention/, /lint rule/, /language convention/]) ? ["Reported changes may alter project style-guide coverage."] : []
+    ], "medium", styleGuides),
+    finding("repository-topology", [
+      ...metadata.gitmodules === true && !topology.polyrepo ? [".gitmodules exists but Cadre repository topology is not configured as polyrepo."] : [],
+      ...hasChange(changes, [/submodule/, /polyrepo/, /repository topology/, /new repo/, /remove repo/]) ? ["Reported changes may alter repository topology."] : []
+    ], metadata.gitmodules === true && !topology.polyrepo ? "high" : "medium", { configured_polyrepo: topology.polyrepo, gitmodules: metadata.gitmodules }),
+    finding("lsp", [
+      ...lspMissing.length > 0 || lspAdded.length > 0 ? ["Detected language-server recommendations are not present in cadre/lsp.json."] : []
+    ], "high", { configured: lspStatus.configured === true, missing: lspMissing, added: lspAdded }),
     finding("workflow", [
       ...qualityWarnings.filter((warning) => warning.startsWith("workflow context")),
       ...hasChange(changes, [/test command/, /build command/, /lint/, /ci\b/, /review gate/, /release process/]) ? ["Reported changes may alter project commands or quality gates."] : []
@@ -14567,13 +14603,6 @@ function refreshAnalysis(root2, args = {}) {
       ...thinPatterns ? ["Project patterns contain no repository-specific evidence."] : [],
       ...hasChange(changes, [/architecture/, /convention/, /pattern/, /testing/, /gotcha/, /data flow/]) ? ["Reported changes contain reusable implementation or architecture learning."] : []
     ], "medium"),
-    finding("repository-topology", [
-      ...metadata.gitmodules === true && !topology.polyrepo ? [".gitmodules exists but Cadre repository topology is not configured as polyrepo."] : [],
-      ...hasChange(changes, [/submodule/, /polyrepo/, /repository topology/, /new repo/, /remove repo/]) ? ["Reported changes may alter repository topology."] : []
-    ], metadata.gitmodules === true && !topology.polyrepo ? "high" : "medium", { configured_polyrepo: topology.polyrepo, gitmodules: metadata.gitmodules }),
-    finding("lsp", [
-      ...lspMissing.length > 0 || lspAdded.length > 0 ? ["Detected language-server recommendations are not present in cadre/lsp.json."] : []
-    ], "high", { configured: lspStatus.configured === true, missing: lspMissing, added: lspAdded }),
     finding("projections", [
       ...projectionIssues.length > 0 ? [`${projectionIssues.length} project projection or canonical validation issue(s) were detected.`] : []
     ], "high", { issues: projectionIssues.slice(0, 20) }),
@@ -14604,10 +14633,11 @@ function refreshLevelPrompt(analysis) {
     product: "Refresh evidence-backed product users, workflows, domain context, and boundaries.",
     "product-guidelines": "Refresh product invariants, promises, decision rules, and review guidance.",
     "tech-stack": "Refresh languages, frameworks, runtimes, dependencies, and project commands.",
+    "style-guides": "Refresh the selected style-guide catalog and language-specific rule projections.",
+    "repository-topology": "Refresh configured repositories and polyrepo routing.",
+    lsp: "Review and write currently detected language-server recommendations.",
     workflow: "Refresh development, verification, review, and commit policy.",
     patterns: "Refresh reusable architecture, implementation, testing, and data patterns.",
-    "repository-topology": "Refresh configured repositories and polyrepo routing.",
-    lsp: "Write currently detected language-server recommendations.",
     projections: "Repair missing or stale generated projections from canonical state.",
     diagnostics: "Keep this run read-only and return analysis without refreshing documents."
   };
@@ -14631,6 +14661,226 @@ function refreshLevelPrompt(analysis) {
 
 // src/core/application/runtime/refresh-documents.ts
 var import_node_path50 = __toESM(require("node:path"));
+
+// src/core/application/runtime/setup-review-files.ts
+function projectDocumentPair(documentId, value, canonicalTitle, projectionTitle, renderTitle, source, filename) {
+  const canonicalPath = `cadre/${filename}.json`;
+  const projectionPath = `cadre/${filename}.md`;
+  const canonicalContent = `${JSON.stringify(value, null, 2)}
+`;
+  return documentReviewPair(
+    documentId,
+    jsonReviewFile(canonicalPath, canonicalTitle, source, value),
+    textReviewFile(
+      projectionPath,
+      projectionTitle,
+      canonicalPath,
+      withGeneratedMarker(
+        canonicalPath,
+        `cadre.${documentId}.v1`,
+        renderMarkdownDoc(value, renderTitle, canonicalPath),
+        { canonicalContent, projection: projectionPath }
+      )
+    )
+  );
+}
+function productFiles(args) {
+  const rawArgs6 = args;
+  return projectDocumentPair(
+    "product",
+    normalizeProjectDoc("product", rawArgs6.product, "product.json", "Product Context", "Project-Specific Product Notes"),
+    "Product context canonical",
+    "Product context",
+    "Product Context",
+    "product",
+    "product"
+  );
+}
+function productGuidelineFiles(args) {
+  const rawArgs6 = args;
+  return projectDocumentPair(
+    "product_guidelines",
+    normalizeProjectDoc(
+      "product_guidelines",
+      rawArgs6.productGuidelines || rawArgs6.product_guidelines,
+      "product_guidelines.json",
+      "Product Guidelines",
+      "Project-Specific Product Guideline Notes"
+    ),
+    "Product guidelines canonical",
+    "Product guidelines",
+    "Product Guidelines",
+    "productGuidelines",
+    "product_guidelines"
+  );
+}
+function styleGuideReviewFiles(styleGuides, generatedGuideIds) {
+  const selected = asStringArray(styleGuides.selected);
+  const generated = new Set(generatedGuideIds || selected);
+  const index = {
+    version: 1,
+    schema: "cadre.styleguide_index.v1",
+    selected
+  };
+  const indexContent = `${JSON.stringify(index, null, 2)}
+`;
+  return [
+    ...documentReviewPair(
+      "styleguides",
+      jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", index),
+      textReviewFile(
+        "cadre/styleguides/README.md",
+        "Style guide catalog",
+        "cadre/styleguides/index.json",
+        withGeneratedMarker(
+          "cadre/styleguides/index.json",
+          "cadre.styleguide_index.v1",
+          renderJsonCodeblock("Style guide catalog", index),
+          { canonicalContent: indexContent, projection: "cadre/styleguides/README.md" }
+        )
+      ),
+      "styleguides"
+    ),
+    ...selected.filter((guideId) => generated.has(guideId)).flatMap((guideId) => {
+      const guide = templateJson(`styleguides/${guideId}.json`, {
+        version: 1,
+        schema: "cadre.styleguide.v1",
+        id: guideId,
+        title: guideId,
+        rules: [],
+        source: "bundled_template"
+      });
+      const canonicalPath = `cadre/styleguides/${guideId}.json`;
+      const projectionPath = `cadre/styleguides/${guideId}.md`;
+      return documentReviewPair(
+        "styleguides",
+        jsonReviewFile(canonicalPath, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guide),
+        textReviewFile(
+          projectionPath,
+          `Code style guide: ${guideId}`,
+          canonicalPath,
+          withGeneratedMarker(canonicalPath, "cadre.styleguide.v1", renderStyleGuideMarkdown(guide), {
+            canonicalContent: `${JSON.stringify(guide, null, 2)}
+`,
+            projection: projectionPath
+          })
+        ),
+        "styleguides"
+      );
+    })
+  ];
+}
+function repositoryFiles(args, polyrepoRequested) {
+  if (!polyrepoRequested) return [];
+  const rawArgs6 = args;
+  const repos = isRecord(rawArgs6.repos) ? asJsonObject(rawArgs6.repos) : null;
+  if (!repos) return [];
+  const canonicalContent = `${JSON.stringify(repos, null, 2)}
+`;
+  return documentReviewPair(
+    "repos",
+    jsonReviewFile("cadre/repos.json", "Polyrepo topology canonical", "repos", repos),
+    textReviewFile(
+      "cadre/repos.md",
+      "Repository topology",
+      "cadre/repos.json",
+      withGeneratedMarker(
+        "cadre/repos.json",
+        "cadre.repos.v1",
+        renderJsonCodeblock("Repository topology", repos),
+        { canonicalContent, projection: "cadre/repos.md" }
+      )
+    )
+  );
+}
+function technicalFiles(root2, args, styleGuides, polyrepoRequested, machineFiles) {
+  const techStack = techStackForPacket(root2, args);
+  const projection = techStack || {};
+  const canonicalContent = `${JSON.stringify(projection, null, 2)}
+`;
+  return [
+    ...documentReviewPair(
+      "tech_stack",
+      jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
+      textReviewFile(
+        "cadre/tech-stack.md",
+        "Tech stack",
+        "cadre/tech-stack.json",
+        withGeneratedMarker(
+          "cadre/tech-stack.json",
+          "cadre.tech_stack.v1",
+          renderJsonCodeblock("Tech stack", projection),
+          { canonicalContent, projection: "cadre/tech-stack.md" }
+        )
+      )
+    ),
+    ...styleGuideReviewFiles(styleGuides),
+    ...repositoryFiles(args, polyrepoRequested),
+    ...machineFiles
+  ];
+}
+function workflowFiles(args) {
+  const rawArgs6 = args;
+  return projectDocumentPair(
+    "workflow",
+    normalizeProjectDoc(
+      "workflow",
+      rawArgs6.workflowPolicy || rawArgs6.workflow_policy,
+      "workflow.json",
+      "Project Workflow",
+      "Project-Specific Workflow Notes"
+    ),
+    "Workflow policy canonical",
+    "Workflow policy",
+    "Project Workflow",
+    "workflowPolicy",
+    "workflow"
+  );
+}
+function setupStageReviewFiles(root2, args, styleGuides, polyrepoRequested, stage, technicalMachineFiles = []) {
+  if (stage === "product") return productFiles(args);
+  if (stage === "product_guidelines") return productGuidelineFiles(args);
+  if (stage === "technical") return technicalFiles(root2, args, styleGuides, polyrepoRequested, technicalMachineFiles);
+  if (stage === "workflow") return workflowFiles(args);
+  return [];
+}
+function setupFinalReviewFiles(generatedAt, machineFiles) {
+  const seed = templateJson("patterns_seed.json", {
+    id: "initial",
+    kind: "patterns_seed",
+    text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n"
+  });
+  const text2 = typeof seed.text === "string" ? seed.text : "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
+  const entry = {
+    ...seed,
+    id: "initial",
+    kind: "patterns_seed",
+    recorded_at: generatedAt,
+    text: text2
+  };
+  const canonicalContent = `${JSON.stringify(entry)}
+`;
+  return [
+    ...documentReviewPair(
+      "patterns",
+      plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", canonicalContent),
+      textReviewFile(
+        "cadre/patterns.md",
+        "Project patterns",
+        "cadre/patterns.jsonl",
+        withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", text2, {
+          canonicalContent,
+          projection: "cadre/patterns.md"
+        })
+      ),
+      void 0,
+      "generated"
+    ),
+    ...machineFiles
+  ];
+}
+
+// src/core/application/runtime/refresh-documents.ts
 var PROJECT_DOCUMENTS = [
   {
     level: "product",
@@ -14686,6 +14936,8 @@ function refreshCandidate(args, level) {
       return raw.productGuidelines ?? raw.product_guidelines ?? proposed.productGuidelines ?? proposed.product_guidelines;
     case "tech-stack":
       return raw.techStack ?? raw.tech_stack ?? proposed.techStack ?? proposed.tech_stack;
+    case "style-guides":
+      return raw.styleGuideIds ?? raw.style_guide_ids ?? proposed.styleGuideIds ?? proposed.style_guide_ids;
     case "workflow":
       return raw.workflowPolicy ?? raw.workflow_policy ?? proposed.workflowPolicy ?? proposed.workflow_policy ?? proposed.workflow;
     case "patterns":
@@ -14913,6 +15165,28 @@ function repositoryTopologyFiles(root2, rawValue) {
     textReviewFile(projectionPath, "Repository topology", canonicalPath, projection)
   );
 }
+function styleGuideFiles(root2, args) {
+  const rawIds = refreshCandidate(args, "style-guides");
+  const currentIds = asStringArray(readJson(import_node_path50.default.join(root2, "cadre", "styleguides", "index.json"), {}).selected);
+  const techStack = refreshCandidate(args, "tech-stack");
+  const available = new Set(availableStyleGuideIds());
+  const requestedIds = rawIds === void 0 ? currentIds : requestedStyleGuideIds(rawIds);
+  const customIds = requestedIds.filter((id) => !available.has(id) && fileExists(import_node_path50.default.join(root2, "cadre", "styleguides", `${id}.json`)));
+  const styleGuides = setupStyleGuides(root2, {
+    ...args,
+    ...isRecord(techStack) ? { techStack: asJsonObject(techStack) } : {},
+    styleGuideIds: requestedIds
+  });
+  const selected = Array.from(/* @__PURE__ */ new Set([...asStringArray(styleGuides.selected), ...customIds])).sort();
+  const missing = asStringArray(styleGuides.missing).filter((id) => !customIds.includes(id));
+  return styleGuideReviewFiles({
+    ...styleGuides,
+    selected,
+    missing,
+    valid: missing.length === 0,
+    warnings: missing.length > 0 ? [`Unknown refresh style guide id(s) ignored: ${missing.join(", ")}`] : []
+  }, selected.filter((id) => available.has(id)));
+}
 function stampedPatternEntries(entries) {
   if (entries.length === 0) return [];
   const now = utcNow();
@@ -14968,12 +15242,211 @@ function refreshReviewFiles(root2, args, levels) {
     if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root2, spec, refreshCandidate(args, spec.level)));
   }
   if (levels.includes("tech-stack")) files.push(...techStackFiles(root2, refreshCandidate(args, "tech-stack")));
+  if (levels.includes("style-guides")) files.push(...styleGuideFiles(root2, args));
   if (levels.includes("patterns")) files.push(...refreshedPatternsArtifacts(root2, args)?.files || []);
   if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root2, refreshCandidate(args, "repository-topology")));
   return {
     files,
     documentIds: Array.from(new Set(files.map((file) => file.documentId).filter((value) => Boolean(value)))),
     paths: files.map((file) => file.path)
+  };
+}
+
+// src/core/application/runtime/approval-stage-cursor.ts
+function validRequestedPrefix(session, stages, requested, requestedStage) {
+  const order = stages.map((stage) => stage.id);
+  const previous = session.approved_stages;
+  if (requested.length < previous.length || requested.length > previous.length + 1) return false;
+  if (!requested.every((stageId, index) => stageId === order[index])) return false;
+  if (!previous.every((stageId, index) => stageId === requested[index])) return false;
+  return requested.length === previous.length || requestedStage === requested[requested.length - 1];
+}
+function approvalStageCursor(root2, args, workflow, stages) {
+  const sessionId = requestedApprovalSessionId(args);
+  const session = sessionId ? readApprovalSession(root2, sessionId) : null;
+  const validSession = session?.workflow === workflow ? session : null;
+  let approved = validSession?.approved_stages || [];
+  const requested = approvedStageIds(args);
+  if (validSession && validRequestedPrefix(validSession, stages, requested, requestedApprovalStage(args))) {
+    approved = requested;
+  }
+  return {
+    session: validSession,
+    approvedStageIds: approved,
+    activeStage: stages.find((stage) => !approved.includes(stage.id)) || null
+  };
+}
+function uniqueReviewFiles(files) {
+  const seen = /* @__PURE__ */ new Set();
+  return files.filter((file) => {
+    if (seen.has(file.path)) return false;
+    seen.add(file.path);
+    return true;
+  });
+}
+function scopedApprovalReviewFiles(cursor, currentFiles, newFinalFiles = []) {
+  const approvedSnapshots = cursor.approvedStageIds.flatMap((stageId) => cursor.session ? stageRecord(cursor.session, stageId)?.snapshot_files || [] : []);
+  const frozenFinalFiles = cursor.session?.final_snapshot_files || [];
+  return uniqueReviewFiles([
+    ...approvedSnapshots,
+    ...currentFiles,
+    ...frozenFinalFiles.length > 0 ? frozenFinalFiles : newFinalFiles
+  ]);
+}
+
+// src/core/application/runtime/refresh-stage-lifecycle.ts
+var TECHNICAL_LEVELS = /* @__PURE__ */ new Set(["tech-stack", "style-guides", "repository-topology", "lsp"]);
+function documentsFromFiles(files) {
+  return {
+    files,
+    documentIds: Array.from(new Set(files.flatMap((file) => file.documentId ? [file.documentId] : []))),
+    paths: files.map((file) => file.path)
+  };
+}
+function refreshStageCollection(root2, args, levels, stages, technicalMachineFiles = []) {
+  const cursor = approvalStageCursor(root2, args, "refresh", stages);
+  const activeLevels = cursor.activeStage?.id === "technical" ? levels.filter((level) => TECHNICAL_LEVELS.has(level)) : levels.filter((level) => cursor.activeStage?.id === "product" && level === "product" || cursor.activeStage?.id === "product_guidelines" && level === "product-guidelines" || cursor.activeStage?.id === "workflow" && level === "workflow" || cursor.activeStage?.id === "patterns" && level === "patterns");
+  const missingEvidence = missingRefreshEvidence(args, activeLevels);
+  const current = activeLevels.length > 0 && missingEvidence.length === 0 ? refreshReviewFiles(root2, args, activeLevels) : { files: [], documentIds: [], paths: [] };
+  const currentFiles = cursor.activeStage?.id === "technical" && missingEvidence.length === 0 ? [...current.files, ...technicalMachineFiles] : current.files;
+  return {
+    cursor,
+    activeLevels,
+    missingEvidence,
+    ...documentsFromFiles(scopedApprovalReviewFiles(cursor, currentFiles))
+  };
+}
+
+// src/core/application/runtime/setup-review-plan.ts
+var import_node_fs30 = __toESM(require("node:fs"));
+var import_node_path51 = __toESM(require("node:path"));
+function machineReviewFile(relativePath, title, source, content) {
+  return { ...plainReviewFile(relativePath, title, source, content), reviewRole: "machine" };
+}
+function appendRequiredLine(existing, required) {
+  const lines = existing.split(/\r?\n/).filter(Boolean);
+  if (!lines.includes(required)) lines.push(required);
+  return `${lines.join("\n")}
+`;
+}
+function requestedWorkspaceFolders(repos) {
+  if (!repos || repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return null;
+  return [
+    { name: ".", path: "." },
+    ...repos.repos.map(asJsonObject).flatMap((repo) => {
+      const name = asOptionalString(repo.name);
+      const submodulePath = asOptionalString(repo.submodule_path);
+      return repo.enabled !== false && name && submodulePath ? [{ name, path: submodulePath }] : [];
+    })
+  ];
+}
+function lspPreviewPayload(root2, recommendations, repos = null) {
+  const existing = readJson(import_node_path51.default.join(root2, "cadre", "lsp.json"), {});
+  const servers = Array.isArray(existing.servers) ? [...existing.servers] : [];
+  const known = new Set(servers.map((server) => asOptionalString(asJsonObject(server).id || asJsonObject(server).command)).filter(Boolean));
+  for (const value of Array.isArray(recommendations.recommended) ? recommendations.recommended : []) {
+    const recommendation = asJsonObject(value);
+    const id = asOptionalString(recommendation.id);
+    const command = asOptionalString(recommendation.command);
+    if (!id && !command || known.has(id || command || "")) continue;
+    servers.push({
+      ...id ? { id } : {},
+      ...command ? { command } : {},
+      args: asStringArray(recommendation.args),
+      extensions: asStringArray(recommendation.extensions),
+      ...Array.isArray(recommendation.filenames) ? { filenames: asStringArray(recommendation.filenames) } : {},
+      ...Array.isArray(recommendation.languageIds) ? { languageIds: asStringArray(recommendation.languageIds) } : {}
+    });
+    if (id) known.add(id);
+  }
+  return {
+    ...existing,
+    servers,
+    workspaceFolders: requestedWorkspaceFolders(repos) || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : [])
+  };
+}
+function lspServerIds(value) {
+  return Array.isArray(value.servers) ? value.servers.map(asJsonObject).map((server) => asOptionalString(server.id || server.command)).filter((id) => Boolean(id)) : [];
+}
+function parsedSnapshot(content) {
+  try {
+    const value = JSON.parse(content || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+function approvedSetupLspAdded(session) {
+  if (!session) return [];
+  const snapshot = session.snapshot_files.find((file) => file.path === "cadre/lsp.json");
+  if (!snapshot) return [];
+  const before = session.before_files.find((file) => file.path === "cadre/lsp.json");
+  const previous = new Set(lspServerIds(parsedSnapshot(before?.content)));
+  return lspServerIds(parsedSnapshot(snapshot.content)).filter((id) => !previous.has(id));
+}
+function setupFinalReviewPlan(input) {
+  const { root: root2, args, polyrepoRequested, providerMode, providerRemoteHost, integrationsPayload, syncMode } = input;
+  const rawArgs6 = args;
+  const configOverrides = asJsonObject(rawArgs6.config);
+  const generatedAt = utcNow();
+  const configPayload = {
+    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
+    packet_only: true,
+    sync_mode: syncMode,
+    provider_mode: providerMode || "local",
+    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
+    ...providerRemoteHost ? { remote_host: providerRemoteHost } : {},
+    ...integrationsPayload ? { integrations: integrationsPayload } : {},
+    ...configOverrides
+  };
+  const setupStatePayload = {
+    version: 1,
+    packet_only: true,
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
+    initialized_at: generatedAt,
+    updated_at: generatedAt
+  };
+  const trackIndex = trackIndexPayload(root2, []);
+  const machineFiles = [
+    machineReviewFile(
+      "cadre/.gitignore",
+      "Cadre local-state ignore",
+      "setup:native-state",
+      appendRequiredLine(fileExists(import_node_path51.default.join(root2, "cadre", ".gitignore")) ? import_node_fs30.default.readFileSync(import_node_path51.default.join(root2, "cadre", ".gitignore"), "utf8") : "", "/local/")
+    ),
+    machineReviewFile("cadre/config.json", "Cadre configuration", "setup:config", `${JSON.stringify(configPayload, null, 2)}
+`),
+    machineReviewFile("cadre/setup_state.json", "Cadre setup state", "setup:state", `${JSON.stringify(setupStatePayload, null, 2)}
+`),
+    machineReviewFile("cadre/tracks.json", "Initial track index", "setup:track-index", `${JSON.stringify(trackIndex, null, 2)}
+`)
+  ];
+  const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs6.writeGitattributes === true || rawArgs6.write_gitattributes === true;
+  if (gitattributesNeeded) {
+    const attributesPath = import_node_path51.default.join(root2, ".gitattributes");
+    machineFiles.push(machineReviewFile(
+      ".gitattributes",
+      "Cadre merge attributes",
+      "setup:gitattributes",
+      appendRequiredLine(fileExists(attributesPath) ? import_node_fs30.default.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours")
+    ));
+  }
+  const ciProvider = configuredCiProvider(root2, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
+  if (ciProvider && rawArgs6.writeCi !== false && rawArgs6.write_ci !== false) {
+    const ciTemplate = polyrepoRequested ? ciProvider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml" : ciProvider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml";
+    const ciPath = ciProvider === "github" ? `.github/workflows/${polyrepoRequested ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml"}` : ".gitlab-ci.yml";
+    if (!fileExists(import_node_path51.default.join(root2, ciPath)) || rawArgs6.force === true) {
+      machineFiles.push(machineReviewFile(ciPath, "Cadre CI workflow", `template:${ciTemplate}`, templateText(ciTemplate, "")));
+    }
+  }
+  return {
+    generatedAt,
+    configPayload,
+    setupStatePayload,
+    trackIndex,
+    gitattributesNeeded,
+    ciProvider,
+    reviewFiles: setupFinalReviewFiles(generatedAt, machineFiles)
   };
 }
 
@@ -15114,8 +15587,58 @@ function workflowRefresh(root2, args = {}) {
     };
   }
   const levels = refreshLevelIds(args, recommended);
-  const missingEvidence = missingRefreshEvidence(args, levels);
-  if (missingEvidence.length > 0) {
+  const stages = refreshApprovalStages(levels);
+  const lspSelected = levels.includes("lsp");
+  const lspPreview = lspSetup(root2, { ...args, execute: false });
+  const topologyCandidate = refreshCandidate(args, "repository-topology");
+  const lspReviewFiles = lspSelected ? [{
+    ...machineReviewFile(
+      "cadre/lsp.json",
+      "LSP configuration",
+      "refresh:lsp",
+      `${JSON.stringify(lspPreviewPayload(root2, lspPreview, isRecord(topologyCandidate) ? asJsonObject(topologyCandidate) : null), null, 2)}
+`
+    ),
+    documentId: "lsp"
+  }] : [];
+  const documents = refreshStageCollection(root2, args, levels, stages, lspReviewFiles);
+  const reviewFiles2 = documents.files;
+  const projectionsSelected = levels.includes("projections");
+  const diagnosticsOnly = levels.length === 0 || levels.every((level) => level === "diagnostics");
+  const semanticRefresh = stages.length > 0;
+  const mutatingRefresh = semanticRefresh || lspSelected || projectionsSelected;
+  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
+  const approval = semanticRefresh ? stagedApprovalState(root2, "refresh", args, stages, reviewFiles2, {
+    selected_levels: levels,
+    final_only_files: []
+  }, { allowEmptyActiveStage: true }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
+  const currentReviewBundle = asJsonObject(asJsonObject(approval).current_review_bundle);
+  const stageReviewBundle = Object.keys(currentReviewBundle).length > 0 ? currentReviewBundle : null;
+  const currentArtifacts = asJsonObject(approval).current_review_artifacts;
+  const stageReviewArtifacts = Array.isArray(currentArtifacts) ? currentArtifacts.map(asJsonObject) : reviewArtifacts;
+  const humanReview = semanticRefresh && stageReviewArtifacts.length > 0 ? humanReviewState("refresh", args, stageReviewArtifacts, stageReviewBundle) : null;
+  const approvalError = semanticRefresh ? stagedApprovalError(approval) : null;
+  const cancelled = asJsonObject(approval).cancelled === true;
+  const warnings = [
+    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
+    ...approvalError ? [approvalError] : []
+  ];
+  if (cancelled) {
+    return {
+      ...summary,
+      ok: true,
+      dry_run: true,
+      phase_state: "cancelled",
+      scope: levels,
+      selected_levels: levels,
+      refresh_analysis: analysis,
+      approval,
+      review_artifacts: [],
+      review_bundle: null,
+      warnings
+    };
+  }
+  if (documents.missingEvidence.length > 0 && !approvalError) {
     return {
       ...summary,
       ok: false,
@@ -15125,35 +15648,15 @@ function workflowRefresh(root2, args = {}) {
       scope: levels,
       selected_levels: levels,
       refresh_analysis: analysis,
-      missing_payload: missingEvidence,
-      required_payload: missingEvidence,
-      error: `Selected semantic refresh levels require evidence-backed canonical input: ${missingEvidence.join(", ")}`,
-      next_actions: ["Use the refresh analysis to supply complete structured candidates under proposedContext; Cadre will not generate templates for missing evidence."]
+      missing_payload: documents.missingEvidence,
+      required_payload: documents.missingEvidence,
+      approval,
+      warnings,
+      error: `Current refresh level requires evidence-backed canonical input: ${documents.missingEvidence.join(", ")}`,
+      next_actions: ["Use the refresh analysis to supply the current level under proposedContext, then resume with the returned approval session; this is not approval."]
     };
   }
-  const documents = refreshReviewFiles(root2, args, levels);
-  const reviewFiles2 = documents.files;
-  const lspSelected = levels.includes("lsp");
-  const projectionsSelected = levels.includes("projections");
-  const diagnosticsOnly = levels.length === 0 || levels.every((level) => level === "diagnostics");
-  const mutatingRefresh = reviewFiles2.length > 0 || lspSelected || projectionsSelected;
-  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
-  if (lspSelected) reviewArtifacts.push(...setupLspReviewArtifacts(args, true));
-  const reviewBundle = workflowReviewBundle(root2, "refresh", args, reviewFiles2);
-  const approval = reviewFiles2.length > 0 ? stagedApprovalState(root2, "refresh", args, refreshApprovalStages(levels), reviewFiles2, {
-    selected_levels: levels,
-    final_only_files: [...lspSelected ? ["cadre/lsp.json"] : []]
-  }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
-  const humanReview = reviewFiles2.length > 0 ? humanReviewState("refresh", args, reviewArtifactsFromFiles(reviewFiles2), reviewBundle) : null;
-  const approvalError = reviewFiles2.length > 0 ? stagedApprovalError(approval) : null;
-  const warnings = [
-    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
-    ...approvalError ? [approvalError] : []
-  ];
-  const awaitingDocumentReview = args.execute === true && reviewFiles2.length > 0 && !stagedApprovalReady(approval);
-  const lspPreview = lspSetup(root2, { ...args, execute: false });
+  const awaitingDocumentReview = args.execute === true && semanticRefresh && !stagedApprovalReady(approval);
   if (awaitingDocumentReview) {
     return {
       ...summary,
@@ -15203,9 +15706,9 @@ function workflowRefresh(root2, args = {}) {
     };
   }
   const traceBefore = args.execute === true && mutatingRefresh ? beginTrace(root2) : null;
-  const lsp = args.execute === true && lspSelected ? lspSetup(root2, { ...args, execute: true }) : lspPreview;
+  const lsp = lspSelected ? { ...lspPreview, reviewed_snapshot: true, applied: args.execute === true && reviewValidation.ok !== false } : lspPreview;
   const projectionRepair = args.execute === true && projectionsSelected ? artifactSync(root2, { scope: "project", execute: true, commitMode: "off" }) : null;
-  const operationsOk = (!lspSelected || lsp.ok !== false) && (!projectionRepair || projectionRepair.ok !== false);
+  const operationsOk = !projectionRepair || projectionRepair.ok !== false;
   const approvalAudit = args.execute === true && reviewFiles2.length > 0 && operationsOk ? recordApprovalCompletionFromArgs(root2, args) : null;
   const controlCommit = args.execute === true && mutatingRefresh && operationsOk ? commitTrace(root2, args, {
     kind: "control",
@@ -15262,24 +15765,23 @@ function workflowRefresh(root2, args = {}) {
     reused_review_files: asStringArray(asJsonObject(reviewValidation).files),
     warnings: [
       ...warnings,
-      ...!operationsOk && lspSelected && lsp.ok === false ? [asOptionalString(lsp.error || lsp.reason) || "LSP refresh failed"] : [],
       ...!operationsOk && projectionRepair?.ok === false ? [asOptionalString(projectionRepair.error) || "Projection refresh failed"] : []
     ]
   };
 }
 
 // src/core/application/runtime/workflow-release-revise.ts
-var import_node_fs30 = __toESM(require("node:fs"));
-var import_node_path51 = __toESM(require("node:path"));
+var import_node_fs31 = __toESM(require("node:fs"));
+var import_node_path52 = __toESM(require("node:path"));
 function releaseArtifactPlan(root2, args = {}) {
   const completed = listTracks(root2).filter((track) => (track.metadata.status || "new") === "completed").map((track) => asJsonObject(metadataTrackSummary(track)));
   const rawArgs6 = args;
   const version = String(args.releaseVersion || args.release_version || args.bump || args.mode || `release-${utcNow().slice(0, 10)}`);
   const generatedAt = asOptionalString(rawArgs6.generatedAt || rawArgs6.generated_at) || utcNow();
-  const releaseDir = import_node_path51.default.join(root2, "cadre", "releases");
+  const releaseDir = import_node_path52.default.join(root2, "cadre", "releases");
   const releaseSlug = safeName(version);
-  const releaseMd = import_node_path51.default.join(releaseDir, `${releaseSlug}.md`);
-  const releaseJson = import_node_path51.default.join(releaseDir, `${releaseSlug}.json`);
+  const releaseMd = import_node_path52.default.join(releaseDir, `${releaseSlug}.md`);
+  const releaseJson = import_node_path52.default.join(releaseDir, `${releaseSlug}.json`);
   const notesBody = asOptionalString(args.releaseNotes || args.release_notes) || [
     `# Release - ${version}`,
     "",
@@ -15307,13 +15809,13 @@ function releaseArtifactPlan(root2, args = {}) {
 `
   };
   const notes = withGeneratedMarker(
-    import_node_path51.default.relative(root2, releaseJson),
+    import_node_path52.default.relative(root2, releaseJson),
     "cadre.release.v1",
     notesBody,
     {
       canonicalContent: `${JSON.stringify(metadata, null, 2)}
 `,
-      projection: import_node_path51.default.relative(root2, releaseMd)
+      projection: import_node_path52.default.relative(root2, releaseMd)
     }
   );
   const gitActions = rawArgs6.createTag === true || rawArgs6.create_tag === true || rawArgs6.tag === true ? [plannedGitAction("release-tag", "tag_release", ".", root2, ["tag", "-a", version, "-m", `Cadre release ${version}`], `Create release tag ${version}`)] : [];
@@ -15323,13 +15825,13 @@ function releaseReviewFiles(root2, plan) {
   return documentReviewPair(
     "release_notes",
     jsonReviewFile(
-      import_node_path51.default.relative(root2, plan.releaseJson),
+      import_node_path52.default.relative(root2, plan.releaseJson),
       "Release metadata",
       "releaseMetadata",
       plan.metadata
     ),
     textReviewFile(
-      import_node_path51.default.relative(root2, plan.releaseMd),
+      import_node_path52.default.relative(root2, plan.releaseMd),
       "Release notes",
       "releaseNotes",
       plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
@@ -15381,7 +15883,7 @@ function workflowRelease(root2, args = {}) {
     ...summary,
     release_version: plan.version,
     completed_tracks: plan.completed,
-    release_artifacts: [import_node_path51.default.relative(root2, plan.releaseMd), import_node_path51.default.relative(root2, plan.releaseJson)],
+    release_artifacts: [import_node_path52.default.relative(root2, plan.releaseMd), import_node_path52.default.relative(root2, plan.releaseJson)],
     git_actions: plan.gitActions,
     approval,
     human_review: humanReview,
@@ -15422,17 +15924,17 @@ function workflowRelease(root2, args = {}) {
   }
   const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root2);
-  import_node_fs30.default.mkdirSync(plan.releaseDir, { recursive: true });
-  if (!reusedReviewFiles.has(import_node_path51.default.relative(root2, plan.releaseMd))) {
-    import_node_fs30.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
+  import_node_fs31.default.mkdirSync(plan.releaseDir, { recursive: true });
+  if (!reusedReviewFiles.has(import_node_path52.default.relative(root2, plan.releaseMd))) {
+    import_node_fs31.default.writeFileSync(plan.releaseMd, plan.notes.endsWith("\n") ? plan.notes : `${plan.notes}
 `);
   }
-  if (!reusedReviewFiles.has(import_node_path51.default.relative(root2, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
-  const indexPatch = patchJsonFile(import_node_path51.default.join(root2, "cadre", "setup_state.json"), (current) => {
+  if (!reusedReviewFiles.has(import_node_path52.default.relative(root2, plan.releaseJson))) writeJson(plan.releaseJson, plan.metadata);
+  const indexPatch = patchJsonFile(import_node_path52.default.join(root2, "cadre", "setup_state.json"), (current) => {
     current.last_release = {
       version: plan.version,
-      path: import_node_path51.default.relative(root2, plan.releaseMd),
-      metadata: import_node_path51.default.relative(root2, plan.releaseJson),
+      path: import_node_path52.default.relative(root2, plan.releaseMd),
+      metadata: import_node_path52.default.relative(root2, plan.releaseJson),
       completed_tracks: plan.completed.length,
       released_at: plan.generatedAt
     };
@@ -15515,26 +16017,26 @@ function workflowRevise(root2, args = {}) {
   if (track && revisedSpec) {
     reviewFiles2.push(...documentReviewPair(
       "spec",
-      jsonReviewFile(import_node_path51.default.relative(root2, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec),
+      jsonReviewFile(import_node_path52.default.relative(root2, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec),
       textReviewFile(
-        import_node_path51.default.relative(root2, track.spec_path),
+        import_node_path52.default.relative(root2, track.spec_path),
         "Revised track spec",
         "spec.json",
-        withGeneratedMarker(import_node_path51.default.relative(root2, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path51.default.relative(root2, trackSpecJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedSpec, null, 2)}
-`, projection: import_node_path51.default.relative(root2, track.spec_path) })
+        withGeneratedMarker(import_node_path52.default.relative(root2, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path52.default.relative(root2, trackSpecJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedSpec, null, 2)}
+`, projection: import_node_path52.default.relative(root2, track.spec_path) })
       )
     ));
   }
   if (track && revisedPlan) {
     reviewFiles2.push(...documentReviewPair(
       "plan",
-      jsonReviewFile(import_node_path51.default.relative(root2, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan),
+      jsonReviewFile(import_node_path52.default.relative(root2, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan),
       textReviewFile(
-        import_node_path51.default.relative(root2, track.plan_path),
+        import_node_path52.default.relative(root2, track.plan_path),
         "Revised track plan",
         "plan.json",
-        withGeneratedMarker(import_node_path51.default.relative(root2, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path51.default.relative(root2, trackPlanJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedPlan, null, 2)}
-`, projection: import_node_path51.default.relative(root2, track.plan_path) })
+        withGeneratedMarker(import_node_path52.default.relative(root2, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path52.default.relative(root2, trackPlanJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedPlan, null, 2)}
+`, projection: import_node_path52.default.relative(root2, track.plan_path) })
       )
     ));
   }
@@ -15615,20 +16117,20 @@ function workflowRevise(root2, args = {}) {
   const writeResult = withTrackLock(root2, track.track_id, () => {
     const written = [];
     if (revisedSpec) {
-      if (!reusedReviewFiles.has(import_node_path51.default.relative(root2, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      if (!reusedReviewFiles.has(import_node_path51.default.relative(root2, track.spec_path))) {
-        import_node_fs30.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path51.default.relative(root2, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path51.default.relative(root2, trackSpecJsonPath(track)))));
+      if (!reusedReviewFiles.has(import_node_path52.default.relative(root2, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
+      if (!reusedReviewFiles.has(import_node_path52.default.relative(root2, track.spec_path))) {
+        import_node_fs31.default.writeFileSync(track.spec_path, withGeneratedMarker(import_node_path52.default.relative(root2, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, import_node_path52.default.relative(root2, trackSpecJsonPath(track)))));
       }
-      written.push(import_node_path51.default.relative(root2, trackSpecJsonPath(track)));
-      written.push(import_node_path51.default.relative(root2, track.spec_path));
+      written.push(import_node_path52.default.relative(root2, trackSpecJsonPath(track)));
+      written.push(import_node_path52.default.relative(root2, track.spec_path));
     }
     if (revisedPlan) {
-      if (!reusedReviewFiles.has(import_node_path51.default.relative(root2, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      if (!reusedReviewFiles.has(import_node_path51.default.relative(root2, track.plan_path))) {
-        import_node_fs30.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path51.default.relative(root2, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path51.default.relative(root2, trackPlanJsonPath(track)))));
+      if (!reusedReviewFiles.has(import_node_path52.default.relative(root2, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
+      if (!reusedReviewFiles.has(import_node_path52.default.relative(root2, track.plan_path))) {
+        import_node_fs31.default.writeFileSync(track.plan_path, withGeneratedMarker(import_node_path52.default.relative(root2, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, import_node_path52.default.relative(root2, trackPlanJsonPath(track)))));
       }
-      written.push(import_node_path51.default.relative(root2, trackPlanJsonPath(track)));
-      written.push(import_node_path51.default.relative(root2, track.plan_path));
+      written.push(import_node_path52.default.relative(root2, trackPlanJsonPath(track)));
+      written.push(import_node_path52.default.relative(root2, track.plan_path));
     }
     return { ok: true, written, revised_at: utcNow() };
   });
@@ -15667,384 +16169,16 @@ function workflowRevise(root2, args = {}) {
 var import_node_fs32 = __toESM(require("node:fs"));
 var import_node_path53 = __toESM(require("node:path"));
 
-// src/core/application/runtime/setup-review-plan.ts
-var import_node_fs31 = __toESM(require("node:fs"));
-var import_node_path52 = __toESM(require("node:path"));
-
-// src/core/application/runtime/setup-review-files.ts
-function projectDocumentPair(documentId, value, canonicalTitle, projectionTitle, renderTitle, source, filename) {
-  const canonicalPath = `cadre/${filename}.json`;
-  const projectionPath = `cadre/${filename}.md`;
-  const canonicalContent = `${JSON.stringify(value, null, 2)}
-`;
-  return documentReviewPair(
-    documentId,
-    jsonReviewFile(canonicalPath, canonicalTitle, source, value),
-    textReviewFile(
-      projectionPath,
-      projectionTitle,
-      canonicalPath,
-      withGeneratedMarker(
-        canonicalPath,
-        `cadre.${documentId}.v1`,
-        renderMarkdownDoc(value, renderTitle, canonicalPath),
-        { canonicalContent, projection: projectionPath }
-      )
-    )
-  );
-}
-function productFiles(args) {
-  const rawArgs6 = args;
-  return projectDocumentPair(
-    "product",
-    normalizeProjectDoc("product", rawArgs6.product, "product.json", "Product Context", "Project-Specific Product Notes"),
-    "Product context canonical",
-    "Product context",
-    "Product Context",
-    "product",
-    "product"
-  );
-}
-function productGuidelineFiles(args) {
-  const rawArgs6 = args;
-  return projectDocumentPair(
-    "product_guidelines",
-    normalizeProjectDoc(
-      "product_guidelines",
-      rawArgs6.productGuidelines || rawArgs6.product_guidelines,
-      "product_guidelines.json",
-      "Product Guidelines",
-      "Project-Specific Product Guideline Notes"
-    ),
-    "Product guidelines canonical",
-    "Product guidelines",
-    "Product Guidelines",
-    "productGuidelines",
-    "product_guidelines"
-  );
-}
-function styleGuideFiles(styleGuides) {
-  const selected = asStringArray(styleGuides.selected);
-  const index = {
-    version: 1,
-    schema: "cadre.styleguide_index.v1",
-    selected
-  };
-  const indexContent = `${JSON.stringify(index, null, 2)}
-`;
-  return [
-    ...documentReviewPair(
-      "styleguides",
-      jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", index),
-      textReviewFile(
-        "cadre/styleguides/README.md",
-        "Style guide catalog",
-        "cadre/styleguides/index.json",
-        withGeneratedMarker(
-          "cadre/styleguides/index.json",
-          "cadre.styleguide_index.v1",
-          renderJsonCodeblock("Style guide catalog", index),
-          { canonicalContent: indexContent, projection: "cadre/styleguides/README.md" }
-        )
-      ),
-      "styleguides"
-    ),
-    ...selected.flatMap((guideId) => {
-      const guide = templateJson(`styleguides/${guideId}.json`, {
-        version: 1,
-        schema: "cadre.styleguide.v1",
-        id: guideId,
-        title: guideId,
-        rules: [],
-        source: "bundled_template"
-      });
-      const canonicalPath = `cadre/styleguides/${guideId}.json`;
-      const projectionPath = `cadre/styleguides/${guideId}.md`;
-      return documentReviewPair(
-        "styleguides",
-        jsonReviewFile(canonicalPath, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guide),
-        textReviewFile(
-          projectionPath,
-          `Code style guide: ${guideId}`,
-          canonicalPath,
-          withGeneratedMarker(canonicalPath, "cadre.styleguide.v1", renderStyleGuideMarkdown(guide), {
-            canonicalContent: `${JSON.stringify(guide, null, 2)}
-`,
-            projection: projectionPath
-          })
-        ),
-        "styleguides"
-      );
-    })
-  ];
-}
-function repositoryFiles(args, polyrepoRequested) {
-  if (!polyrepoRequested) return [];
-  const rawArgs6 = args;
-  const repos = isRecord(rawArgs6.repos) ? asJsonObject(rawArgs6.repos) : null;
-  if (!repos) return [];
-  const canonicalContent = `${JSON.stringify(repos, null, 2)}
-`;
-  return documentReviewPair(
-    "repos",
-    jsonReviewFile("cadre/repos.json", "Polyrepo topology canonical", "repos", repos),
-    textReviewFile(
-      "cadre/repos.md",
-      "Repository topology",
-      "cadre/repos.json",
-      withGeneratedMarker(
-        "cadre/repos.json",
-        "cadre.repos.v1",
-        renderJsonCodeblock("Repository topology", repos),
-        { canonicalContent, projection: "cadre/repos.md" }
-      )
-    )
-  );
-}
-function technicalFiles(root2, args, styleGuides, polyrepoRequested, machineFiles) {
-  const techStack = techStackForPacket(root2, args);
-  const projection = techStack || {};
-  const canonicalContent = `${JSON.stringify(projection, null, 2)}
-`;
-  return [
-    ...documentReviewPair(
-      "tech_stack",
-      jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-      textReviewFile(
-        "cadre/tech-stack.md",
-        "Tech stack",
-        "cadre/tech-stack.json",
-        withGeneratedMarker(
-          "cadre/tech-stack.json",
-          "cadre.tech_stack.v1",
-          renderJsonCodeblock("Tech stack", projection),
-          { canonicalContent, projection: "cadre/tech-stack.md" }
-        )
-      )
-    ),
-    ...styleGuideFiles(styleGuides),
-    ...repositoryFiles(args, polyrepoRequested),
-    ...machineFiles
-  ];
-}
-function workflowFiles(args) {
-  const rawArgs6 = args;
-  return projectDocumentPair(
-    "workflow",
-    normalizeProjectDoc(
-      "workflow",
-      rawArgs6.workflowPolicy || rawArgs6.workflow_policy,
-      "workflow.json",
-      "Project Workflow",
-      "Project-Specific Workflow Notes"
-    ),
-    "Workflow policy canonical",
-    "Workflow policy",
-    "Project Workflow",
-    "workflowPolicy",
-    "workflow"
-  );
-}
-function setupStageReviewFiles(root2, args, styleGuides, polyrepoRequested, stage, technicalMachineFiles = []) {
-  if (stage === "product") return productFiles(args);
-  if (stage === "product_guidelines") return productGuidelineFiles(args);
-  if (stage === "technical") return technicalFiles(root2, args, styleGuides, polyrepoRequested, technicalMachineFiles);
-  if (stage === "workflow") return workflowFiles(args);
-  return [];
-}
-function setupFinalReviewFiles(generatedAt, machineFiles) {
-  const seed = templateJson("patterns_seed.json", {
-    id: "initial",
-    kind: "patterns_seed",
-    text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n"
-  });
-  const text2 = typeof seed.text === "string" ? seed.text : "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
-  const entry = {
-    ...seed,
-    id: "initial",
-    kind: "patterns_seed",
-    recorded_at: generatedAt,
-    text: text2
-  };
-  const canonicalContent = `${JSON.stringify(entry)}
-`;
-  return [
-    ...documentReviewPair(
-      "patterns",
-      plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", canonicalContent),
-      textReviewFile(
-        "cadre/patterns.md",
-        "Project patterns",
-        "cadre/patterns.jsonl",
-        withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", text2, {
-          canonicalContent,
-          projection: "cadre/patterns.md"
-        })
-      ),
-      void 0,
-      "generated"
-    ),
-    ...machineFiles
-  ];
-}
-
-// src/core/application/runtime/setup-review-plan.ts
-function machineReviewFile(relativePath, title, source, content) {
-  return { ...plainReviewFile(relativePath, title, source, content), reviewRole: "machine" };
-}
-function appendRequiredLine(existing, required) {
-  const lines = existing.split(/\r?\n/).filter(Boolean);
-  if (!lines.includes(required)) lines.push(required);
-  return `${lines.join("\n")}
-`;
-}
-function requestedWorkspaceFolders(repos) {
-  if (!repos || repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return null;
-  return [
-    { name: ".", path: "." },
-    ...repos.repos.map(asJsonObject).flatMap((repo) => {
-      const name = asOptionalString(repo.name);
-      const submodulePath = asOptionalString(repo.submodule_path);
-      return repo.enabled !== false && name && submodulePath ? [{ name, path: submodulePath }] : [];
-    })
-  ];
-}
-function lspPreviewPayload(root2, recommendations, repos = null) {
-  const existing = readJson(import_node_path52.default.join(root2, "cadre", "lsp.json"), {});
-  const servers = Array.isArray(existing.servers) ? [...existing.servers] : [];
-  const known = new Set(servers.map((server) => asOptionalString(asJsonObject(server).id || asJsonObject(server).command)).filter(Boolean));
-  for (const value of Array.isArray(recommendations.recommended) ? recommendations.recommended : []) {
-    const recommendation = asJsonObject(value);
-    const id = asOptionalString(recommendation.id);
-    const command = asOptionalString(recommendation.command);
-    if (!id && !command || known.has(id || command || "")) continue;
-    servers.push({
-      ...id ? { id } : {},
-      ...command ? { command } : {},
-      args: asStringArray(recommendation.args),
-      extensions: asStringArray(recommendation.extensions),
-      ...Array.isArray(recommendation.filenames) ? { filenames: asStringArray(recommendation.filenames) } : {},
-      ...Array.isArray(recommendation.languageIds) ? { languageIds: asStringArray(recommendation.languageIds) } : {}
-    });
-    if (id) known.add(id);
-  }
-  return {
-    ...existing,
-    servers,
-    workspaceFolders: requestedWorkspaceFolders(repos) || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : [])
-  };
-}
-function lspServerIds(value) {
-  return Array.isArray(value.servers) ? value.servers.map(asJsonObject).map((server) => asOptionalString(server.id || server.command)).filter((id) => Boolean(id)) : [];
-}
-function parsedSnapshot(content) {
-  try {
-    const value = JSON.parse(content || "{}");
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  } catch {
-    return {};
-  }
-}
-function approvedSetupLspAdded(session) {
-  if (!session) return [];
-  const snapshot = session.snapshot_files.find((file) => file.path === "cadre/lsp.json");
-  if (!snapshot) return [];
-  const before = session.before_files.find((file) => file.path === "cadre/lsp.json");
-  const previous = new Set(lspServerIds(parsedSnapshot(before?.content)));
-  return lspServerIds(parsedSnapshot(snapshot.content)).filter((id) => !previous.has(id));
-}
-function setupFinalReviewPlan(input) {
-  const { root: root2, args, polyrepoRequested, providerMode, providerRemoteHost, integrationsPayload, syncMode } = input;
-  const rawArgs6 = args;
-  const configOverrides = asJsonObject(rawArgs6.config);
-  const generatedAt = utcNow();
-  const configPayload = {
-    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
-    packet_only: true,
-    sync_mode: syncMode,
-    provider_mode: providerMode || "local",
-    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
-    ...providerRemoteHost ? { remote_host: providerRemoteHost } : {},
-    ...integrationsPayload ? { integrations: integrationsPayload } : {},
-    ...configOverrides
-  };
-  const setupStatePayload = {
-    version: 1,
-    packet_only: true,
-    topology: polyrepoRequested ? "polyrepo" : "monorepo",
-    initialized_at: generatedAt,
-    updated_at: generatedAt
-  };
-  const trackIndex = trackIndexPayload(root2, []);
-  const machineFiles = [
-    machineReviewFile(
-      "cadre/.gitignore",
-      "Cadre local-state ignore",
-      "setup:native-state",
-      appendRequiredLine(fileExists(import_node_path52.default.join(root2, "cadre", ".gitignore")) ? import_node_fs31.default.readFileSync(import_node_path52.default.join(root2, "cadre", ".gitignore"), "utf8") : "", "/local/")
-    ),
-    machineReviewFile("cadre/config.json", "Cadre configuration", "setup:config", `${JSON.stringify(configPayload, null, 2)}
-`),
-    machineReviewFile("cadre/setup_state.json", "Cadre setup state", "setup:state", `${JSON.stringify(setupStatePayload, null, 2)}
-`),
-    machineReviewFile("cadre/tracks.json", "Initial track index", "setup:track-index", `${JSON.stringify(trackIndex, null, 2)}
-`)
-  ];
-  const gitattributesNeeded = polyrepoRequested || configPayload.sync_mode === "shared" || rawArgs6.writeGitattributes === true || rawArgs6.write_gitattributes === true;
-  if (gitattributesNeeded) {
-    const attributesPath = import_node_path52.default.join(root2, ".gitattributes");
-    machineFiles.push(machineReviewFile(
-      ".gitattributes",
-      "Cadre merge attributes",
-      "setup:gitattributes",
-      appendRequiredLine(fileExists(attributesPath) ? import_node_fs31.default.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours")
-    ));
-  }
-  const ciProvider = configuredCiProvider(root2, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
-  if (ciProvider && rawArgs6.writeCi !== false && rawArgs6.write_ci !== false) {
-    const ciTemplate = polyrepoRequested ? ciProvider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml" : ciProvider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml";
-    const ciPath = ciProvider === "github" ? `.github/workflows/${polyrepoRequested ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml"}` : ".gitlab-ci.yml";
-    if (!fileExists(import_node_path52.default.join(root2, ciPath)) || rawArgs6.force === true) {
-      machineFiles.push(machineReviewFile(ciPath, "Cadre CI workflow", `template:${ciTemplate}`, templateText(ciTemplate, "")));
-    }
-  }
-  return {
-    generatedAt,
-    configPayload,
-    setupStatePayload,
-    trackIndex,
-    gitattributesNeeded,
-    ciProvider,
-    reviewFiles: setupFinalReviewFiles(generatedAt, machineFiles)
-  };
-}
-
 // src/core/application/runtime/setup-stage-lifecycle.ts
 function setupStageId(value) {
   return value === "product" || value === "product_guidelines" || value === "technical" || value === "workflow" ? value : null;
 }
-function validRequestedPrefix(session, stages, requested, requestedStage) {
-  const order = stages.map((stage) => stage.id);
-  const previous = session.approved_stages;
-  if (requested.length < previous.length || requested.length > previous.length + 1) return false;
-  if (!requested.every((stageId, index) => stageId === order[index])) return false;
-  if (!previous.every((stageId, index) => stageId === requested[index])) return false;
-  return requested.length === previous.length || requestedStage === requested[requested.length - 1];
-}
 function setupApprovalCursor(root2, args, stages) {
-  const sessionId = requestedApprovalSessionId(args);
-  const session = sessionId ? readApprovalSession(root2, sessionId) : null;
-  const validSession = session?.workflow === "setup" ? session : null;
-  let approved = validSession?.approved_stages || [];
-  const requested = approvedStageIds(args);
-  if (validSession && validRequestedPrefix(validSession, stages, requested, requestedApprovalStage(args))) {
-    approved = requested;
-  }
-  const active = stages.find((stage) => !approved.includes(stage.id));
+  const cursor = approvalStageCursor(root2, args, "setup", stages);
   return {
-    session: validSession,
-    approvedStageIds: approved,
-    activeStage: setupStageId(active?.id)
+    session: cursor.session,
+    approvedStageIds: cursor.approvedStageIds,
+    activeStage: setupStageId(cursor.activeStage?.id)
   };
 }
 function setupStageCollection(root2, args, stages, polyrepoRequested, context) {
@@ -16061,27 +16195,6 @@ function setupStageCollection(root2, args, stages, polyrepoRequested, context) {
     pending,
     activeReady: Boolean(cursor.activeStage) && !pending
   };
-}
-function uniqueReviewFiles(files) {
-  const seen = /* @__PURE__ */ new Set();
-  return files.filter((file) => {
-    if (seen.has(file.path)) return false;
-    seen.add(file.path);
-    return true;
-  });
-}
-function approvedSnapshots(cursor) {
-  return cursor.approvedStageIds.flatMap((stageId) => {
-    return cursor.session ? stageRecord(cursor.session, stageId)?.snapshot_files || [] : [];
-  });
-}
-function setupScopedReviewFiles(cursor, currentFiles, newFinalFiles) {
-  const frozenFinalFiles = cursor.session?.final_snapshot_files || [];
-  return uniqueReviewFiles([
-    ...approvedSnapshots(cursor),
-    ...currentFiles,
-    ...frozenFinalFiles.length > 0 ? frozenFinalFiles : newFinalFiles
-  ]);
 }
 
 // src/core/application/runtime/workflow-setup.ts
@@ -16134,7 +16247,7 @@ function workflowSetup(root2, args = {}) {
     integrationsPayload,
     syncMode: syncModeRecommendation
   }) : null;
-  const reviewFiles2 = setupScopedReviewFiles(plannedCollection.cursor, currentReviewFiles, finalPlan?.reviewFiles || []);
+  const reviewFiles2 = scopedApprovalReviewFiles(plannedCollection.cursor, currentReviewFiles, finalPlan?.reviewFiles || []);
   const requestedSession = asOptionalString(rawArgs6.approvalSessionId || rawArgs6.approval_session_id);
   const approvalStarted = Boolean(plannedCollection.cursor.session || requestedSession || plannedCollection.activeReady);
   const approval = approvalStarted ? stagedApprovalState(root2, "setup", args, stages, reviewFiles2, {
@@ -17479,6 +17592,7 @@ function approvalDecision(result) {
   if (approval.cancelled === true) return null;
   const currentStage = asOptionalString(approval.current_stage);
   if (!currentStage) {
+    if (approval.session_id && asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null) return null;
     const human = asJsonObject(result.human_review);
     if (human.required === true && human.confirmed !== true) {
       return {
@@ -17636,7 +17750,7 @@ function nextCall(root2, workflow, result, resources, args) {
     return { tool: "cadre_read", arguments: { uri: resources[0] } };
   }
   const approval = asJsonObject(result.approval);
-  if ((workflow === "setup" || workflow === "skill") && result.ok !== false && result.phase_state !== "pending_provider" && asStringArray(result.missing_payload).length === 0 && args.execute !== true && approval.cancelled !== true && asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
+  if (result.ok !== false && result.phase_state !== "pending_provider" && asStringArray(result.missing_payload).length === 0 && args.execute !== true && approval.cancelled !== true && asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
     return {
       tool: "cadre_workflow",
       arguments: {
@@ -17649,6 +17763,20 @@ function nextCall(root2, workflow, result, resources, args) {
           approved_stages: jsonValue(approval.approved_stages) || [],
           complete: true
         }
+      }
+    };
+  }
+  if (workflow === "refresh" && result.ok !== false && args.execute !== true && approval.required === false && asStringArray(result.selected_levels).some((level) => level === "projections")) {
+    const input = approvalPayload(args);
+    delete input.workflow;
+    delete input.root;
+    return {
+      tool: "cadre_workflow",
+      arguments: {
+        root: root2,
+        workflow,
+        input,
+        execute: true
       }
     };
   }

@@ -516,3 +516,87 @@ test("public skill packets execute the exact session-only continuation after laz
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("public refresh packets execute the exact frozen technical-stage continuation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-refresh-staging-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    fs.mkdirSync(path.join(root, "cadre"), { recursive: true });
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    fs.writeFileSync(path.join(root, "cadre", "setup_state.json"), "{\"version\":1}\n");
+    fs.writeFileSync(path.join(root, "src", "index.ts"), "export const ready = true;\n");
+
+    let packet = invoke({
+      root,
+      workflow: "refresh",
+      input: { refreshLevels: ["lsp"], commitMode: "off" },
+      execute: false,
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "technical");
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
+    const sessionId = packet.decision.session_id;
+    const approvedContent = fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8");
+
+    packet = invoke({
+      root,
+      workflow: "refresh",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "technical", approved_stages: ["technical"] },
+    });
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "refresh",
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: ["technical"], complete: true },
+      },
+    });
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8"), approvedContent);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("projection-only refresh continuation preserves execution options", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-projection-refresh-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    fs.mkdirSync(path.join(root, "cadre"), { recursive: true });
+    fs.writeFileSync(path.join(root, "cadre", "setup_state.json"), "{\"version\":1}\n");
+    let packet = invoke({
+      root,
+      workflow: "refresh",
+      input: { refreshLevels: ["projections"], commitMode: "off", force: true },
+      execute: false,
+    });
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "refresh",
+        input: { refreshLevels: ["projections"], commitMode: "off", force: true },
+        execute: true,
+      },
+    });
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

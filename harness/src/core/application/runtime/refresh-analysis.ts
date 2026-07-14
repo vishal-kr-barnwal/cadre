@@ -11,7 +11,7 @@ import { choice, nativePrompt } from "./native-prompts";
 import { repoMap } from "./repo-map";
 import { lspSetup } from "./setup-infrastructure";
 import { asArray } from "./status";
-import { collectTechStackTokens } from "./tech-stack";
+import { availableStyleGuideIds, collectTechStackTokens, styleGuideIdsForTechStack } from "./tech-stack";
 import { lspConfigStatus } from "./workspace-health";
 import { dependencyGraph, workspaceDiagnostics } from "./workspace-intel";
 
@@ -19,10 +19,11 @@ export const REFRESH_LEVELS = [
   "product",
   "product-guidelines",
   "tech-stack",
-  "workflow",
-  "patterns",
+  "style-guides",
   "repository-topology",
   "lsp",
+  "workflow",
+  "patterns",
   "projections",
   "diagnostics",
 ] as const;
@@ -45,6 +46,14 @@ const LEVEL_ALIASES: Record<string, RefreshLevel | "all" | "all-recommended"> = 
   "tech-stack": "tech-stack",
   tech_stack: "tech-stack",
   techstack: "tech-stack",
+  style: "style-guides",
+  styles: "style-guides",
+  styleguide: "style-guides",
+  styleguides: "style-guides",
+  "style-guide": "style-guides",
+  "style-guides": "style-guides",
+  style_guide: "style-guides",
+  style_guides: "style-guides",
   workflow: "workflow",
   "workflow-policy": "workflow",
   workflow_policy: "workflow",
@@ -68,10 +77,11 @@ const LEVEL_LABELS: Record<RefreshLevel, string> = {
   product: "Product Context",
   "product-guidelines": "Product Guidelines",
   "tech-stack": "Tech Stack",
-  workflow: "Workflow Policy",
-  patterns: "Project Patterns",
+  "style-guides": "Style Guides",
   "repository-topology": "Repository Topology",
   lsp: "Language Servers",
+  workflow: "Workflow Policy",
+  patterns: "Project Patterns",
   projections: "Generated Projections",
   diagnostics: "Analysis Only",
 };
@@ -88,6 +98,7 @@ function rawRequestedLevels(args: RuntimeArgs): string[] {
   const flags = [
     raw.all === true ? "all" : null,
     raw.patterns === true ? "patterns" : null,
+    raw.styleGuides === true || raw.style_guides === true ? "style-guides" : null,
     raw.docs === true ? "docs" : null,
     raw.projections === true ? "projections" : null,
     raw.diagnostics === true ? "diagnostics" : null,
@@ -172,6 +183,18 @@ function missingTechLanguages(repo: JsonObject, techStack: JsonObject): string[]
   return detected.filter((language) => !recorded.includes(language.toLowerCase()));
 }
 
+function styleGuideDrift(root: string, techStack: JsonObject): JsonObject {
+  const available = new Set(availableStyleGuideIds());
+  const selected = asStringArray(readJson<JsonObject>(path.join(root, "cadre", "styleguides", "index.json"), {}).selected);
+  const implied = Array.from(new Set([
+    ...(available.has("general") ? ["general"] : []),
+    ...styleGuideIdsForTechStack(techStack).filter((id) => available.has(id)),
+  ])).sort();
+  const missing = implied.filter((id) => !selected.includes(id));
+  const missingFiles = selected.filter((id) => !fs.existsSync(path.join(root, "cadre", "styleguides", `${id}.json`)));
+  return { selected, implied, missing, missing_files: missingFiles };
+}
+
 function projectionProblems(validation: JsonObject): JsonObject[] {
   return asArray(validation.results).map(asJsonObject).filter((entry) => entry.ok === false);
 }
@@ -216,6 +239,7 @@ export function refreshAnalysis(root: string, args: RuntimeArgs = {}): JsonObjec
   const changes = detectedChangeText(args);
   const qualityWarnings = setupGenerationWarnings(context);
   const missingLanguages = missingTechLanguages(repo, asJsonObject(context.techStack));
+  const styleGuides = styleGuideDrift(root, asJsonObject(context.techStack));
   const projectionIssues = projectionProblems(projectionValidation);
   const thinPatterns = patternsAreThin(root);
   const lspMissing = asStringArray(lspPreview.missingFromConfig || lspPreview.missing_from_config);
@@ -237,6 +261,24 @@ export function refreshAnalysis(root: string, args: RuntimeArgs = {}): JsonObjec
       ...(missingLanguages.length > 0 ? [`Repository languages are not recorded in the tech stack: ${missingLanguages.join(", ")}.`] : []),
       ...(hasChange(changes, [/dependency/, /framework/, /runtime/, /database/, /package/, /toolchain/]) ? ["Reported changes may alter the recorded toolchain or dependencies."] : []),
     ], missingLanguages.length > 0 ? "high" : "medium", { missing_languages: missingLanguages }),
+    finding("style-guides", [
+      ...(asStringArray(styleGuides.missing).length > 0
+        ? [`Style guides implied by the recorded tech stack are not selected: ${asStringArray(styleGuides.missing).join(", ")}.`]
+        : []),
+      ...(asStringArray(styleGuides.missing_files).length > 0
+        ? [`Selected style guide files are missing: ${asStringArray(styleGuides.missing_files).join(", ")}.`]
+        : []),
+      ...(hasChange(changes, [/style guide/, /formatting convention/, /lint rule/, /language convention/])
+        ? ["Reported changes may alter project style-guide coverage."]
+        : []),
+    ], "medium", styleGuides),
+    finding("repository-topology", [
+      ...(metadata.gitmodules === true && !topology.polyrepo ? [".gitmodules exists but Cadre repository topology is not configured as polyrepo."] : []),
+      ...(hasChange(changes, [/submodule/, /polyrepo/, /repository topology/, /new repo/, /remove repo/]) ? ["Reported changes may alter repository topology."] : []),
+    ], metadata.gitmodules === true && !topology.polyrepo ? "high" : "medium", { configured_polyrepo: topology.polyrepo, gitmodules: metadata.gitmodules }),
+    finding("lsp", [
+      ...(lspMissing.length > 0 || lspAdded.length > 0 ? ["Detected language-server recommendations are not present in cadre/lsp.json."] : []),
+    ], "high", { configured: lspStatus.configured === true, missing: lspMissing, added: lspAdded }),
     finding("workflow", [
       ...qualityWarnings.filter((warning) => warning.startsWith("workflow context")),
       ...(hasChange(changes, [/test command/, /build command/, /lint/, /ci\b/, /review gate/, /release process/]) ? ["Reported changes may alter project commands or quality gates."] : []),
@@ -246,13 +288,6 @@ export function refreshAnalysis(root: string, args: RuntimeArgs = {}): JsonObjec
       ...(thinPatterns ? ["Project patterns contain no repository-specific evidence."] : []),
       ...(hasChange(changes, [/architecture/, /convention/, /pattern/, /testing/, /gotcha/, /data flow/]) ? ["Reported changes contain reusable implementation or architecture learning."] : []),
     ], "medium"),
-    finding("repository-topology", [
-      ...(metadata.gitmodules === true && !topology.polyrepo ? [".gitmodules exists but Cadre repository topology is not configured as polyrepo."] : []),
-      ...(hasChange(changes, [/submodule/, /polyrepo/, /repository topology/, /new repo/, /remove repo/]) ? ["Reported changes may alter repository topology."] : []),
-    ], metadata.gitmodules === true && !topology.polyrepo ? "high" : "medium", { configured_polyrepo: topology.polyrepo, gitmodules: metadata.gitmodules }),
-    finding("lsp", [
-      ...(lspMissing.length > 0 || lspAdded.length > 0 ? ["Detected language-server recommendations are not present in cadre/lsp.json."] : []),
-    ], "high", { configured: lspStatus.configured === true, missing: lspMissing, added: lspAdded }),
     finding("projections", [
       ...(projectionIssues.length > 0 ? [`${projectionIssues.length} project projection or canonical validation issue(s) were detected.`] : []),
     ], "high", { issues: projectionIssues.slice(0, 20) }),
@@ -284,10 +319,11 @@ export function refreshLevelPrompt(analysis: JsonObject): JsonObject {
     product: "Refresh evidence-backed product users, workflows, domain context, and boundaries.",
     "product-guidelines": "Refresh product invariants, promises, decision rules, and review guidance.",
     "tech-stack": "Refresh languages, frameworks, runtimes, dependencies, and project commands.",
+    "style-guides": "Refresh the selected style-guide catalog and language-specific rule projections.",
+    "repository-topology": "Refresh configured repositories and polyrepo routing.",
+    lsp: "Review and write currently detected language-server recommendations.",
     workflow: "Refresh development, verification, review, and commit policy.",
     patterns: "Refresh reusable architecture, implementation, testing, and data patterns.",
-    "repository-topology": "Refresh configured repositories and polyrepo routing.",
-    lsp: "Write currently detected language-server recommendations.",
     projections: "Repair missing or stale generated projections from canonical state.",
     diagnostics: "Keep this run read-only and return analysis without refreshing documents.",
   };
