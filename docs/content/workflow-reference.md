@@ -16,8 +16,8 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 | Concern | Contract |
 |---|---|
 | Root | Required on every project-scoped call and resolved internally. |
-| Preview | `execute:false` returns the current decision and may materialize one review stage. |
-| Approval | Only explicit human approval belongs in the `approval` field. |
+| Preview | `execute:false` returns the current decision and materializes the complete deterministic artifact diff for document workflows. |
+| Approval | Only explicit approval of a human-facing document belongs in the `approval` field; its canonical/projection pair is one unit. |
 | Execution | `execute:true` is valid only after prerequisites and current approvals are satisfied. |
 | Next action | A response contains at most one deterministic next tool call. |
 | Skills | Applicable repository skills are selected by workflow, repo target, and optional explicit IDs. |
@@ -29,8 +29,9 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 
 - Inputs: topology, provider/sync choices, project identity, style-guide choices,
   infrastructure options, and approved setup artifacts.
-- Approval: staged review of product context, guidelines, tech stack, workflow,
-  patterns, configuration, and other generated setup artifacts.
+- Approval: product context, guidelines, tech stack, workflow, optional repo
+  topology, and one collective styleguide document set. Patterns and machine
+  configuration are generated without separate approval.
 - Output: canonical `cadre/` context, projections, native state defaults,
   optional shared-sync attributes, and hosted CI scaffolding.
 - Common failures: ambiguous provider remotes, weak project intent, dirty target
@@ -66,7 +67,8 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 
 - Inputs: symptom, reproduction, expected/actual behavior, evidence, and
   optional track/repository target.
-- Approval: follows returned actions; scope revision requires the revise flow.
+- Approval: none for diagnostics; requested configuration writes require
+  `execute:true`.
 - Output: bounded diagnosis context, test/diagnostic evidence, and a next debug
   action or track update.
 - Common failures: no reproduction evidence, ambiguous root, unrelated active
@@ -99,7 +101,7 @@ integrations, and generated state.
 **Purpose:** Record a blocker, risk, or coordination flag.
 
 - Inputs: target, reason, severity/context, and optional owner or track.
-- Approval: human review before confirmed mutation.
+- Approval: no document approval; mutation requires `execute:true`.
 - Output: native flag/event state and updated status visibility.
 - Common failures: unknown target, empty reason, conflicting ownership, or stale
   reviewed state.
@@ -133,7 +135,8 @@ integrations, and generated state.
 **Purpose:** Publish reviewed work from a single repository or monorepo.
 
 - Inputs: reviewed track, publication intent, and provider evidence/actions.
-- Approval: human review of the publication plan and provider actions.
+- Approval: no document approval; `execute:true` plus provider and review gates
+  authorizes the publication actions.
 - Output: ship plan, provider action queue, publication evidence, trace records,
   and control/product commit state.
 - Common failures: unreviewed or unpinned work, missing provider evidence,
@@ -145,7 +148,8 @@ integrations, and generated state.
 
 - Inputs: track, resolved repo group, merge order, provider evidence, and
   publication confirmation.
-- Approval: human review of repo-scoped actions and merge train.
+- Approval: no document approval; `execute:true` plus provider and review gates
+  authorizes repo-scoped actions.
 - Output: land plan, grouped provider actions, repo publication evidence,
   control-plane updates, and trace records.
 - Common failures: ambiguous repo selection, inconsistent reviewed SHAs,
@@ -158,7 +162,7 @@ or session.
 
 - Inputs: track/task, recipient or audience, summary, evidence, blockers, and
   requested next action.
-- Approval: staged handoff artifact review.
+- Approval: one `HANDOFF.md` review; `handoff.json` is approved atomically with it.
 - Output: canonical handoff record, inbox message, projection, and event.
 - Common failures: missing recipient/context, stale task ownership, or an
   incomplete current-state summary.
@@ -169,7 +173,7 @@ or session.
 history.
 
 - Inputs: track target, completion/closure reason, and archive confirmation.
-- Approval: human review before mutation.
+- Approval: no document approval; archive mutation requires `execute:true`.
 - Output: archived track state with retained spec, plan, journal, review,
   events, and traceability.
 - Common failures: active tasks, unfinished publication, pending workers,
@@ -180,8 +184,8 @@ history.
 **Purpose:** Create target-project release artifacts from shipped/landed tracks.
 
 - Inputs: optional bump and `releaseVersion`.
-- Approval: staged release-notes review before confirmed artifacts and optional
-  local tag behavior.
+- Approval: one release-notes review. Release JSON is the atomic canonical pair;
+  optional local tagging runs under final `execute:true` without another approval.
 - Output: release Markdown/JSON, setup-state release metadata, and release plan.
 - Common failures: invalid version, incomplete tracks, missing review evidence,
   target drift, or an existing conflicting tag.
@@ -195,7 +199,8 @@ package.
 changes.
 
 - Inputs: refresh reason, scopes, detected changes, and proposed context.
-- Approval: staged previews for affected context artifacts.
+- Approval: one patterns-document review when patterns change. LSP/config-only
+  refreshes require execution but no content approval.
 - Output: updated canonical context/projections, patterns, tech stack, repo map,
   and refresh events as applicable.
 - Common failures: vague change evidence, invalid generated content, dirty
@@ -206,7 +211,8 @@ changes.
 **Purpose:** Deliberately reverse a Cadre-managed local change.
 
 - Inputs: exact target/change and reason.
-- Approval: human review before mutation.
+- Approval: no document approval; revert mutation requires `execute:true` and
+  automatically repairs affected registered projections.
 - Output: reverted product/control state plus trace event.
 - Common failures: ambiguous target, non-Cadre/user-owned change, published
   history requiring provider coordination, or destructive scope.
@@ -216,7 +222,8 @@ changes.
 **Purpose:** Define or run reusable Cadre workflow formulas and local wisps.
 
 - Inputs: formula ID/definition, run parameters, and optional target context.
-- Approval: definition or mutation follows returned packet decisions.
+- Approval: no document approval for current operations; mutations require
+  `execute:true`.
 - Output: formula catalog state and an ignored local wisp run unless configured
   for trace commits.
 - Common failures: invalid formula schema, unsafe step, missing dependency, or
@@ -228,7 +235,8 @@ changes.
 their projections.
 
 - Inputs: action/scope, artifact identity, and sync confirmation.
-- Approval: staged target preview before confirmed synchronization.
+- Approval: none for generated projection repair; synchronization requires
+  `execute:true` and refuses unmarked user-owned Markdown.
 - Output: artifact catalog/schema, preview, diff, or synchronized projection.
 - Common failures: unknown artifact, malformed canonical JSON, projection drift,
   dirty target, or missing template.
@@ -239,7 +247,8 @@ their projections.
 
 - Inputs: management action, skill ID, source/manifest changes, selectors,
   references, formatting request, and optional workflow/repo context.
-- Approval: staged review for source or management mutations.
+- Approval: create/update reviews `SKILL.md` and one collective changed-reference
+  set. Rename/remove require `execute:true` without a content approval.
 - Output: catalog/selection diagnostics, validated manifest, projection,
   enablement state, or exact next action.
 - Common failures: schema/version mismatch, unsafe path, duplicate ID, invalid

@@ -7,6 +7,36 @@ order: 240
 
 # Release Notes
 
+## Unreleased - Atomic Canonical/Projection Review
+
+Cadre now treats every registered human-facing document as one canonical and
+projection pair. The first target-mode review call freezes and writes the
+complete deterministic workflow diff at final repository paths, while the
+approval prompt points only to the current Markdown document. New files use Git
+intent-to-add so their content appears in ordinary `git diff` without staging
+that content.
+
+Key changes:
+
+- projection generation is atomic with canonical mutation, and commit and
+  validation paths reject missing or stale pairs;
+- approval sessions live under ignored `cadre/local/approval-sessions/`, can be
+  safely cancelled, and append a compact `approval.completed` event only after
+  successful execution;
+- `cadre-artifacts` repairs marked drift with `execute:true` and no projection
+  approval stage;
+- archive, revert, flag, ship, land, debug repair, and other non-document
+  mutations use execution authorization rather than synthetic human approval;
+- styleguide projections now live beside their canonicals as
+  `cadre/styleguides/README.md` and `cadre/styleguides/<id>.md`;
+- the old `cadre/code_styleguides/` path is diagnostic-only and is never
+  dual-written, moved, or deleted automatically;
+- setup now generates `tech-stack.md`, and polyrepo setup generates `repos.md`.
+
+This styleguide path change is intentionally breaking. Regenerate projections
+into `cadre/styleguides/`, review the resulting diff, and remove the legacy
+directory manually.
+
 ## 2.1.0 - 2026-07-12
 
 Cadre 2.1.0 makes the agent-facing runtime smaller while making repository
@@ -122,8 +152,9 @@ diagnostics show a real optional-rule omission.
   exceed the safe packet contract.
 - Hosted provider evidence still comes from supported provider integrations;
   the compact envelope does not introduce a CLI evidence fallback.
-- Target-path staged review behavior from 2.0.0 is unchanged: a written preview
-  is reviewable worktree output, not approval.
+- In 2.1.0, target-path staged review behavior from 2.0.0 remained unchanged: a
+  written preview was reviewable worktree output, not approval. The Unreleased
+  flow above supersedes its current-stage-only materialization behavior.
 
 The signed `release-2.1.0` tag is the source of the GitHub release. Publishing
 that release triggers the repository's Trusted Publishing and documentation

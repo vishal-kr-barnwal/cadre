@@ -31,14 +31,14 @@ status, debug, validate, handoff, refresh, revise, revert, flag, formula, artifa
 
 Reviewable staged workflows write target-path previews by default. A dry-run
 returns `approval.current_stage` plus a `review_bundle` whose
-`mode:"target"` and `mutates_worktree:true` fields mean the current stage has
-been written to the intended root-relative path. Review the returned
+`mode:"target"` and `mutates_worktree:true` fields mean the complete frozen
+artifact set has been written to intended root-relative paths. Review the returned
 `target_path` or `review_path` with normal `git diff`.
 
-Only the active stage is written in target mode. Later stages appear only after
-the previous stage has explicit user approval. Final `execute:true` regenerates
-the payload, verifies approved target files still match the reviewed preview,
-and fails if a preview drifted after approval.
+Only the active human-facing document is awaiting approval; all deterministic
+files are already visible. Its canonical JSON/JSONL and projection share one
+approval and hash snapshot. Final `execute:true` verifies the frozen files and
+fails if either side drifted after approval.
 
 Use `reviewOutputMode:"bundle"`, `review_output_mode:"bundle"`, or an explicit
 `reviewBundleDir` for the older non-mutating temp-bundle review behavior.
@@ -70,7 +70,7 @@ What setup writes:
 
 - `cadre/product.json` and generated `cadre/product.md`
 - `cadre/product_guidelines.json` and generated `cadre/product_guidelines.md`
-- `cadre/tech-stack.json`
+- `cadre/tech-stack.json` and generated `cadre/tech-stack.md`
 - `cadre/workflow.json` and generated `cadre/workflow.md`
 - `cadre/patterns.jsonl` and generated `cadre/patterns.md`
 - `cadre/tracks.json`
@@ -79,9 +79,9 @@ What setup writes:
 - `cadre/messages/*.jsonl`
 - `cadre/formulas/*.json` when reusable formulas are added
 - git-ignored `cadre/local/wisps/*.json`
-- optional `cadre/repos.json`
+- optional `cadre/repos.json` and generated `cadre/repos.md`
 - optional `cadre/lsp.json`
-- selected `cadre/styleguides/*.json` and generated `cadre/code_styleguides/*.md`
+- selected `cadre/styleguides/*.json` and colocated generated `cadre/styleguides/*.md`
 - matching repository-owned `cadre/skills/*/skill.json` atomic rules when present
 
 Setup has no external task-memory CLI prerequisite.
@@ -434,7 +434,7 @@ Artifact sync can:
 - Return JSON schemas for spec, plan, style guide, release, journal, and
   evidence artifacts.
 - Validate canonicals and preview generated projections.
-- Return diffs and staged review output before any confirmed mutation.
+- Return missing, stale, unmarked, and legacy-path diagnostics in dry-run mode.
 
 Common scopes:
 
@@ -445,9 +445,10 @@ Common scopes:
 - `project`: product context, product guidelines, workflow policy, patterns,
   and project-level projections.
 
-Confirmed sync requires the staged dry-run preview first, then `execute:true`
-and `approvalComplete:true`. Unmarked generated projections are skipped unless
-the user explicitly approves `force:true`.
+Confirmed sync requires `execute:true` but no document approval. Cadre repairs
+missing or stale marked projections atomically. It refuses to overwrite
+unmarked user-owned Markdown and reports the conflict; projection repair never
+opens a projection-only approval stage.
 
 ## `cadre-revert`
 
@@ -457,8 +458,9 @@ In monorepo mode, reverts apply to the track's recorded commits. In polyrepo
 mode, SHAs are grouped per repo and reverted in reverse order inside each repo.
 Cadre halts on conflicts and reports recovery steps.
 
-Reverts require reviewing the packet-planned git actions before confirmed
-execution.
+Reverts require execution authorization for the packet-planned git actions;
+they do not create a separate Cadre document approval. Any restored registered
+canonical regenerates its projection before completion.
 
 ## `cadre-archive`
 

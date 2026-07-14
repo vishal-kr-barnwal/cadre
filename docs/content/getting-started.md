@@ -78,10 +78,10 @@ quality gate, optional CI templates, and LSP setup. Setup dry-runs can return
 native recommendation prompts for Codex, Claude, Copilot, and Antigravity so
 you can select one or more recommended options, or type a custom "Other" value.
 Discovery packets can inspect the fresh repository before `cadre/` exists; Cadre
-staged dry-runs may write the active review preview to the intended target path
+staged dry-runs may write the complete deterministic review diff to intended target paths
 so you can inspect `git diff`, but durable execution, trace records, indexes,
-events, and side effects still require explicit staged approval and
-`execute:true`. Pass `reviewOutputMode:"bundle"` when you need the older
+events, and side effects still require `execute:true`; explicit approval is
+reserved for the human-facing documents. Pass `reviewOutputMode:"bundle"` when you need the older
 non-mutating temp-bundle review.
 When language-server recommendations are detected, setup writes `cadre/lsp.json`
 by default unless you opt out. The workflow is packet-owned: the agent should
@@ -96,7 +96,7 @@ Successful setup creates:
 |------|---------|
 | `cadre/product.json` and `cadre/product.md` | Canonical product context plus generated human projection. |
 | `cadre/product_guidelines.json` and `cadre/product_guidelines.md` | Canonical product principles, trust boundaries, non-goals, decision rules, and review checklist. |
-| `cadre/tech-stack.json` | Languages, frameworks, package managers, platforms, and test commands. |
+| `cadre/tech-stack.json` and `cadre/tech-stack.md` | Languages, frameworks, package managers, platforms, and test commands plus projection. |
 | `cadre/workflow.json` and `cadre/workflow.md` | Canonical development, verification, review, and commit expectations plus projection. |
 | `cadre/patterns.jsonl` and `cadre/patterns.md` | Append-only pattern events plus generated pattern summary. |
 | `cadre/tracks.json` | Generated project-level track index rebuilt from track metadata. |
@@ -105,19 +105,20 @@ Successful setup creates:
 | `cadre/messages/*.jsonl` | Native inbox/outbox state for handoff and delegation records. |
 | `cadre/formulas/*.json` | Native formula templates when the project adds reusable workflows. |
 | `cadre/local/wisps/*.json` | Git-ignored local formula runs. |
-| `cadre/repos.json` | Polyrepo topology when enabled. |
+| `cadre/local/approval-sessions/*.json` | Git-ignored resumable review snapshots. |
+| `cadre/repos.json` and `cadre/repos.md` | Polyrepo topology and projection when enabled. |
 | `cadre/lsp.json` | Language-server configuration generated during setup when recommendations exist. |
-| `cadre/styleguides/*.json` and `cadre/code_styleguides/*.md` | Canonical style guidance plus generated guide projections. |
-| `cadre/skills/<skill-id>/skill.json` | Structured repository-authored rules selected by Cadre workflows. An optional `SKILL.md` may document them for humans. |
+| `cadre/styleguides/*.json` and `cadre/styleguides/*.md` | Canonical style guidance plus colocated generated guide projections. |
+| `cadre/skills/<skill-id>/skill.json` and `SKILL.md` | Structured repository-authored rules plus required human projection. |
 
 Track directories later live under `cadre/tracks/<track_id>/` and contain
 `metadata.json`, canonical `spec.json` and `plan.json`, generated `spec.md` and
 `plan.md`, append-only `learnings.jsonl`, generated `learnings.md`, and optional
 handoff or revision artifacts.
 
-Use `cadre-artifacts sync` when generated projections need refreshing or you
-want a staged target preview showing canonical artifact drift before applying
-confirmed changes.
+Use `cadre-artifacts sync` to regenerate marked projections from canonical
+state. Projection synchronization uses `execute:true` but does not require a
+separate content approval.
 Markdown-only projects are not supported by this migration path.
 
 ## Add Project Skills

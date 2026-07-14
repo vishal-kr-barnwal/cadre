@@ -31,10 +31,14 @@ Starts or continues a workflow.
 | `workflow` | yes | One workflow ID from the packaged skill contract. |
 | `input` | no | Workflow-specific structured input. |
 | `execute` | no | `false` previews/decides; `true` requests the confirmed mutation path. |
-| `approval` | no | Explicit current-stage approval supplied only after human confirmation. |
+| `approval` | no | Explicit approval of the current human-facing document; canonical JSON and its projection are one pair. |
 
 The response contains the current decision, compact evidence, and at most one
 deterministic next call.
+
+`execute:true` is execution authorization for mutations and external side
+effects. It does not stand in for document approval, and read-only workflows do
+not require either field.
 
 ## cadre_action
 

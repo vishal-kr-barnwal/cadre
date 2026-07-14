@@ -60,7 +60,7 @@ maintain Cadre state by hand.
 
 - `cadre/product.json` plus generated `cadre/product.md`
 - `cadre/product_guidelines.json` plus generated `cadre/product_guidelines.md`
-- `cadre/tech-stack.json`
+- `cadre/tech-stack.json` plus generated `cadre/tech-stack.md`
 - `cadre/workflow.json` plus generated `cadre/workflow.md`
 - `cadre/tracks.json` as the generated track index
 - `cadre/patterns.jsonl` plus generated `cadre/patterns.md`
@@ -69,10 +69,11 @@ maintain Cadre state by hand.
 - `cadre/messages/outbox.jsonl` and `cadre/messages/inbox.jsonl`
 - `cadre/formulas/*.json` when formulas are added
 - git-ignored `cadre/local/wisps/*.json` for local ephemeral formula runs
-- `cadre/styleguides/*.json` plus generated `cadre/code_styleguides/*.md`
-- optional `cadre/repos.json` for polyrepo topology
+- `cadre/styleguides/index.json` plus generated `cadre/styleguides/README.md`
+- `cadre/styleguides/<id>.json` plus generated `cadre/styleguides/<id>.md`
+- optional `cadre/repos.json` plus generated `cadre/repos.md` for polyrepo topology
 - optional `cadre/lsp.json` for LSP recommendations
-- repository-authored `cadre/skills/<skill-id>/skill.json` rule manifests with optional `SKILL.md` human projections
+- repository-authored `cadre/skills/<skill-id>/skill.json` rule manifests with generated `SKILL.md` human projections
 
 Setup also initializes native Cadre state, can configure shared-sync merge
 attributes, and can scaffold hosted CI checks when requested.

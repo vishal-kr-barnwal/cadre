@@ -38,13 +38,15 @@ decision and stage rather than parsing prose.
 
 ## Staged Approval
 
-Review-heavy workflows materialize only the current approval stage. In default
-target mode, the preview is written to its intended repository path and appears
-in ordinary `git diff` output. Bundle mode remains available for a non-mutating
-temporary review directory.
+Review-heavy workflows freeze and materialize their complete deterministic
+artifact diff on the first call. In default target mode, canonical files and
+their projections are written to intended repository paths; new files use Git
+intent-to-add so ordinary `git diff` includes their content. The current stage
+identifies only the human-facing document awaiting approval. Bundle mode remains
+available for a non-mutating temporary review directory.
 
-Final execution regenerates expected content and validates it against the
-approved preview and on-disk target. Drift fails closed.
+Final execution validates the frozen snapshot against the on-disk target.
+Canonical/projection drift fails closed and never opens a projection-only stage.
 
 ## Project-Skill Loading
 

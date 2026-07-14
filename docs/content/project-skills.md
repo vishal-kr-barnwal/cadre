@@ -540,14 +540,19 @@ must be removed and recreated rather than silently repaired or renamed.
 
 Mutation review stages are dynamic:
 
-- `identity` reviews directory creation, rename, or removal.
-- `manifest` reviews canonical `skill.json` and generated `SKILL.md`.
-- `references` appears when reference files are added, changed, moved, or removed.
+- `skill` reviews canonical `skill.json` and generated `SKILL.md` as one pair
+  for create or update.
+- `references` is one collective approval when reference files are added,
+  changed, moved, or removed.
+- rename and remove use execution authorization and do not invent a document
+  approval stage.
 
-Approve only the packet's current stage using its session ID and returned
-approval arguments. After every stage is recorded, call the same semantic
-request with `execute: true` and `approvalComplete: true`. If reviewed files or
-the source skill change during approval, Cadre rejects the stale session.
+The first target-mode call writes the complete skill diff at final repository
+paths. Approve only the current human-facing document using its session ID and
+returned approval arguments. After every document is recorded, call the same
+semantic request with `execute: true` and `approvalComplete: true`. If reviewed
+files or the source skill change during approval, Cadre rejects the stale
+session.
 
 `SKILL.md` is regenerated deterministically after every successful create,
 update, or rename. It is a human projection of metadata, selectors, rules, and

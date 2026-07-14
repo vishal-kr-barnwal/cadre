@@ -33,20 +33,21 @@ or provider evidence by hand.
 ## Staged Review Previews
 
 For workflows that require staged approval, Cadre separates review output from
-final execution. Dry-run review writes only the active stage's generated files
-to their intended target paths by default, such as `cadre/product.md` or
+final execution. The first dry-run freezes the complete deterministic artifact
+set and writes it to the intended target paths, such as `cadre/product.md` or
 `cadre/tracks/<id>/plan.json`. The response marks this with
 `review_bundle.mode:"target"` and `mutates_worktree:true`, and each file reports
 its `target_path` or `review_path`.
 
 That target preview is intentionally worktree-mutating so humans and agents can
-use ordinary `git diff`. It is not approval. Each stage still requires explicit
-approval, and later-stage files are not written until earlier stages are
-approved.
+use ordinary `git diff`. New files are marked intent-to-add so their content is
+included without being staged. Materialization is not approval: Cadre asks for
+one human-facing document at a time, while its canonical and generated
+projection remain one hash-pinned artifact pair.
 
-Final `execute:true` regenerates the payload, verifies the approved target files
-still match the reviewed content, and fails closed when preview output drifted
-after approval. Callers that need non-mutating review can pass
+Final `execute:true` verifies the frozen target files still match the reviewed
+content and fails closed when either side of a pair drifted after approval.
+Projection repair itself never creates a projection-only approval. Callers that need non-mutating review can pass
 `reviewOutputMode:"bundle"` or `reviewBundleDir`; bundle responses keep the
 legacy manifest and temp file paths.
 
