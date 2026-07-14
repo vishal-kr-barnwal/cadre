@@ -37,6 +37,27 @@ Before ship or land, confirm:
 - required provider evidence is available;
 - no worker or merge-back operation remains unfinished.
 
+## Refresh Project Context
+
+Treat refresh as an analysis and selection loop, not as a command that rewrites
+all context automatically:
+
+1. Call `cadre-refresh` without a level. Cadre inspects repository metadata,
+   workspace and dependency evidence, topology, LSP recommendations, and
+   projection health without mutating files.
+2. Present its recommended multi-select levels to the user. The available
+   levels are product, product guidelines, tech stack, workflow, patterns,
+   repository topology, LSP, projections, and diagnostics.
+3. Inspect the repository for every selected semantic level and pass complete
+   candidates under `proposedContext`. Do not submit empty objects or template
+   text merely to pass the gate.
+4. Review and approve the selected semantic canonical/projection pairs in
+   order, then use the returned final execution call.
+
+`diagnostics` is read-only. `lsp` and `projections` need explicit execution
+authorization but no document approval. The remaining levels require
+evidence-backed content and staged approval.
+
 ## Upgrade The Installed Runtime
 
 After installing a new `cadre-ai` package version, refresh native client
@@ -96,6 +117,21 @@ When a workflow fails, recover from the narrowest authoritative evidence:
 Do not delete locks, task state, approval sessions, or generated indexes as a
 first response. See [Troubleshooting](troubleshooting.md) for symptom-specific
 procedures.
+
+## Staged Preview Recovery
+
+When a corrected payload targets files from an untouched, wholly unapproved
+preview, rerun the workflow with the corrected payload. Cadre atomically
+restores the recorded baseline and removes review-only Git intent-to-add state
+before producing the new preview.
+
+If any overlapping stage was approved, resume or explicitly cancel that
+approval instead of starting a competing payload. Cancellation uses the same
+workflow and returned `approvalSessionId` with `approvalCancel:true`. It succeeds only
+when preview content, the Git index, and the recorded HEAD baseline are
+unchanged. If validation or restoration fails, Cadre keeps the session and
+reports the paths that need deliberate recovery; never delete the session or
+overwrite those files manually.
 
 ## Maintenance Checklist
 

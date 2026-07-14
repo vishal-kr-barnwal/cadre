@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an analysis-first refresh lifecycle. Cadre now inspects repository and
+  control-plane drift before asking for a multi-select refresh level, with
+  recommendations across product context, product guidelines, tech stack,
+  workflow policy, patterns, repository topology, LSP, generated projections,
+  and read-only diagnostics.
+
+### Changed
+
+- Changed refresh from a patterns-focused operation into an evidence-backed,
+  level-specific workflow. Selected semantic documents require structured
+  candidates, receive staged canonical/projection review, and execute only
+  after their approvals; LSP and projection maintenance remain explicit
+  non-document operations.
+- Generalized safe preview supersession across staged workflows. A new payload
+  may replace untouched, wholly unapproved overlapping previews, while Cadre
+  refuses to replace reviewed, edited, staged, or committed targets.
+- Changed approval cancellation to validate workflow ownership, worktree
+  content, Git index state, and the recorded HEAD baseline before restoring
+  target files. Failed cancellation keeps the session available for recovery.
+
 ### Fixed
 
 - Fixed setup clarification so unanswered product or native prompts no longer
@@ -12,6 +34,16 @@
   masquerade as product or tech-stack evidence, snake-case tech-stack and style
   guide arguments are consumed consistently, and multi-select integration ids
   persist in structured configuration.
+- Fixed new-track and revision clarification so schema-shaped empty objects,
+  generic text, or strategy-only answers cannot materialize template review
+  artifacts. Handoff now requires substantive handoff text, and release
+  requires completed-track evidence or substantive release notes instead of
+  creating empty default documents.
+- Fixed failed target-preview materialization so it does not leave an orphaned
+  approval session that blocks the next evidence-backed attempt.
+- Fixed refresh retries so partial candidates derive from the recorded
+  pre-preview canonical baseline, and template-equal candidates are rejected as
+  missing evidence instead of preserving or reintroducing placeholder content.
 
 ## [2.2.0] - 2026-07-14
 

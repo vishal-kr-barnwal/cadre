@@ -40,6 +40,14 @@ files are already visible. Its canonical JSON/JSONL and projection share one
 approval and hash snapshot. Final `execute:true` verifies the frozen files and
 fails if either side drifted after approval.
 
+Starting a different payload that targets the same files safely supersedes an
+untouched preview only when every overlapping stage is still unapproved. Cadre
+restores the recorded pre-preview files and Git intent-to-add state before
+materializing the replacement. It refuses supersession when a stage was
+approved or a target was edited, staged, or committed. Explicit cancellation
+uses the same worktree, index, and HEAD-baseline checks and retains the approval
+session if restoration cannot complete safely.
+
 Use `reviewOutputMode:"bundle"`, `review_output_mode:"bundle"`, or an explicit
 `reviewBundleDir` for the older non-mutating temp-bundle review behavior.
 Existing `reviewBundle:false` / `reviewFiles:false` still disables review files.
@@ -69,8 +77,9 @@ approve the current setup review stage.
 Clarification-only setup calls do not create approval sessions or materialize
 setup review files. Target-path review begins only after product intent and
 native prompt answers are supplied as structured setup arguments. An
-evidence-backed retry can safely supersede an untouched, unapproved preview
-left by an earlier call, while user-edited review targets remain protected.
+evidence-backed retry uses the shared staged-preview supersession rules, so an
+untouched, unapproved preview can be replaced while changed review targets
+remain protected.
 Choosing a collection strategy such as `use-readme` or `detect` does not count
 as evidence by itself: the agent must still inspect the repository and return
 meaningful `product` and `techStack` objects before review begins.
@@ -130,6 +139,10 @@ When the request is vague, `cadre-newtrack` returns `intent_prompts` and
 `phase_state:"awaiting_clarification"` instead of generating a spec or plan.
 Agents should ask for goal, outcome, acceptance criteria, and scope before
 drafting structured `spec` and `plan` JSON.
+Schema-shaped objects are not enough by themselves: the spec must contain
+meaningful project-specific intent and the plan must contain substantive
+phases and tasks. Empty objects, generic placeholders, and strategy-only
+answers do not create track review files or approval sessions.
 Agents should load the `spec` and `plan` artifact schemas before drafting.
 If a payload uses aliases such as `acceptanceCriteria` or top-level
 `plan.tasks`, Cadre returns `stage:"schema_validation"` with schema resources
@@ -390,26 +403,48 @@ handoff context.
 Writing a handoff requires reviewing the packet-generated handoff target
 preview and confirming the packet write.
 
+Cadre requires substantive `handoffText` before it creates that preview. If the
+content is missing or generic, it returns clarification for current state,
+blockers and decisions, and the exact next action; it does not synthesize a
+timestamped placeholder handoff.
+
 ## `cadre-refresh`
 
-Refreshes derived context and setup recommendations.
+Refreshes project context after first analyzing repository and control-plane
+drift. The workflow always follows this order:
 
-Refresh can update:
+1. Cadre performs a read-only analysis of repository metadata, languages,
+   dependencies, workspace commands, configured topology, LSP recommendations,
+   projection health, and any caller-supplied `detectedChanges`.
+2. It returns `refresh_analysis`, recommended levels, and a native multi-select
+   `intent_prompts` question. The user chooses the levels; recommendations do
+   not execute automatically.
+3. For every selected semantic level, the agent gathers repository evidence
+   and supplies a complete structured candidate under `proposedContext`.
+4. Cadre materializes canonical/projection pairs for the selected semantic
+   documents and obtains staged approval for each one.
+5. A confirmed `execute:true` call validates the approved files, applies the
+   selected LSP or projection operations, and records the refresh.
 
-- Track index and project learning stamps.
-- LSP recommendations with `cadre-refresh --lsp`.
-- Repo topology and enabled repos with repo-scoped refresh.
-- Shared-sync configuration and generated project context.
+Available levels are:
 
-Refresh is useful after toolchain changes, repo topology changes, or stale
-project context.
+| Level | Result |
+|---|---|
+| `product` | Refreshes `cadre/product.json` and `cadre/product.md`. |
+| `product-guidelines` | Refreshes the product-guidelines canonical/projection pair. |
+| `tech-stack` | Refreshes detected languages, frameworks, dependencies, platforms, and commands. |
+| `workflow` | Refreshes development, verification, review, commit, and coordination policy. |
+| `patterns` | Refreshes evidence-backed architecture, implementation, testing, and data patterns. |
+| `repository-topology` | Refreshes configured repositories, enabled state, default repository, and polyrepo routing. |
+| `lsp` | Writes detected language-server recommendations after execution authorization. |
+| `projections` | Repairs missing or stale generated project projections from canonical state. |
+| `diagnostics` | Returns analysis only and does not mutate the project. |
 
-When refresh scope is unclear, Cadre asks first with an `intent_prompts`
-selection for patterns, LSP, docs/projections, diagnostics, or all supported
-refreshes.
-
-Document refreshes use staged target previews for proposed context files and
-require confirmation before final execution.
+The six semantic levels (`product` through `repository-topology`) do not fall
+back to templates. Selecting one without meaningful corresponding evidence in
+`proposedContext` returns `stage:"refresh_evidence"` and does not create review
+files. LSP and projection maintenance do not need document approval; semantic
+documents use staged target previews and the shared supersession/drift rules.
 
 ## `cadre-revise`
 
@@ -430,6 +465,9 @@ before the confirmed write.
 When the revision reason or target is unclear, `cadre-revise` returns
 `intent_prompts` instead of generating changes. Agents should ask what changed
 and whether the spec, plan, or both should be updated.
+An empty or generic `spec`/`plan` object does not satisfy this gate. Cadre waits
+for a meaningful changed artifact and rationale without materializing template
+revision files.
 
 ## `cadre-artifacts`
 
@@ -491,6 +529,11 @@ it provides structured Cadre evidence for it.
 
 Release notes and metadata are reviewed from packet-generated target previews
 before the confirmed write or optional tag action.
+
+When no completed Cadre track supplies release evidence, the caller must
+provide substantive `releaseNotes`. Cadre returns clarification instead of
+creating an empty default release; completed tracks remain a valid source for
+generated notes.
 
 ## `cadre-validate`
 

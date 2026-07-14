@@ -7,6 +7,24 @@ order: 240
 
 # Release Notes
 
+## Unreleased
+
+The next Cadre update makes refresh analysis-first and extends placeholder-safe
+clarification and target-preview recovery across staged workflows.
+
+- `cadre-refresh` now analyzes repository and control-plane drift before asking
+  the user to choose one or more recommended levels: product, product
+  guidelines, tech stack, workflow, patterns, repository topology, LSP,
+  projections, or diagnostics. Semantic levels require evidence-backed
+  `proposedContext`, use staged canonical/projection approval, and never fall
+  back to setup templates.
+- New-track, revise, handoff, and release wait for meaningful workflow evidence
+  instead of materializing empty or generic default artifacts.
+- Corrected staged payloads can safely supersede untouched, wholly unapproved
+  overlapping previews. Cancellation validates the worktree, Git index, and
+  recorded HEAD baseline atomically, preserving both user work and the session
+  whenever safe restoration is not possible.
+
 ## 2.2.0 - 2026-07-14
 
 Cadre 2.2.0 makes canonical state and its human-facing projection one atomic

@@ -26,6 +26,70 @@ Fix:
 - If setup never created native state, rerun `cadre-setup` with reviewed
   structured payloads.
 
+## Refresh Stops At Analysis Or Evidence Collection
+
+Symptoms:
+
+- The first `cadre-refresh` call returns `stage:"refresh_analysis"` instead of
+  changing files.
+- A selected semantic level returns `stage:"refresh_evidence"` and lists a
+  missing `proposedContext` field.
+
+This is the intended refresh lifecycle. Cadre analyzes before it asks what to
+refresh, and recommendations are not authorization.
+
+Fix:
+
+1. Present the returned multi-select prompt and pass the chosen ids as
+   `refreshLevels`.
+2. For product, product guidelines, tech stack, workflow, patterns, or
+   repository topology, inspect the repository and supply the corresponding
+   substantive `proposedContext` candidate.
+3. Review the generated canonical/projection pairs and continue their staged
+   approvals before final execution.
+
+Choose `diagnostics` for an analysis-only run. Choose `lsp` or `projections`
+for their explicit non-document maintenance operations. Do not copy setup
+templates or pass empty objects to satisfy a semantic evidence request.
+
+## A Workflow Refuses To Create A Placeholder
+
+Symptoms:
+
+- New-track or revise returns intent clarification even though `{}` objects
+  were supplied.
+- Handoff requests substantive `handoffText`.
+- Release requests completed-track evidence or substantive `releaseNotes`.
+
+Cadre no longer writes default artifacts before it has workflow-specific
+evidence. Supply meaningful project content requested by `intent_prompts`, then
+rerun the same workflow. Clarification calls do not create target previews or
+approval sessions.
+
+## A Corrected Payload Overlaps An Existing Preview
+
+Symptoms:
+
+- Cadre reports an overlapping reviewed approval.
+- Preview replacement or cancellation reports worktree, index, or HEAD drift.
+- A corrected request still shows files from an earlier staged review.
+
+Fix:
+
+- Inspect the target paths with `git diff` and `git status`.
+- If the earlier preview is untouched and wholly unapproved, rerun the
+  corrected payload; Cadre supersedes it and restores its baseline
+  automatically.
+- If any stage was approved, resume that session or cancel it through the same
+  workflow with its returned `approvalSessionId` and `approvalCancel:true`.
+- If a file was edited, staged, or committed, preserve that work and reconcile
+  it deliberately. Cadre will not overwrite it or silently roll Git state
+  backward.
+
+Cancellation is atomic and Git-aware. When it cannot restore every target
+safely, it keeps the approval session for recovery. Do not remove approval
+session files manually.
+
 ## Cadre MCP Is Unavailable
 
 Symptoms:

@@ -16,8 +16,11 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 | Concern | Contract |
 |---|---|
 | Root | Required on every project-scoped call and resolved internally. |
+| Clarification | Calls that lack meaningful workflow evidence return prompts without creating approval sessions or template artifacts. |
 | Preview | `execute:false` returns the current decision and materializes the complete deterministic artifact diff for document workflows. |
 | Approval | Only explicit approval of a human-facing document belongs in the `approval` field; its canonical/projection pair is one unit. |
+| Supersession | A new payload can replace untouched, wholly unapproved overlapping previews. Approved, edited, staged, or committed targets are preserved and reported. |
+| Cancellation | `approvalCancel:true` with the returned `approvalSessionId` restores a target preview only after workflow, content, Git-index, and HEAD-baseline validation; failure retains the session. |
 | Execution | `execute:true` is valid only after prerequisites and current approvals are satisfied. |
 | Continuation | `next` is the sole immediate single-agent Cadre continuation. The only callbacks outside it are provider `decision.required.write_back` after external evidence collection, each parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact completion or recovery callbacks reissued under `data.worker_callbacks[].record_finish_packet`. |
 | Skills | Applicable repository skills are selected by workflow, repo target, and optional explicit IDs. |
@@ -43,7 +46,9 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 
 - Inputs: desired outcome, constraints, optional ID/skill selectors, spec, and
   plan payloads.
-- Approval: clarification when intent is weak, then spec and plan stages.
+- Approval: clarification until the structured spec and plan contain
+  substantive project-specific evidence, then spec and plan stages. Empty or
+  generic objects do not materialize previews.
 - Output: canonical track spec/plan, task graph, projections, events, and an
   exact `next` call when implementation can proceed.
 - Common failures: untestable acceptance criteria, missing task dependencies,
@@ -111,7 +116,9 @@ integrations, and generated state.
 **Purpose:** Change an accepted track spec or plan deliberately.
 
 - Inputs: reason, changed scope/criteria/tasks, and affected track.
-- Approval: staged spec changes followed by plan changes.
+- Approval: clarification until the reason and changed spec/plan are
+  meaningful, then staged spec changes followed by plan changes. There is no
+  template revision fallback.
 - Output: updated canonical artifacts, projections, task graph, and revision
   events.
 - Common failures: missing rationale, incompatible completed work, invalid
@@ -162,7 +169,9 @@ or session.
 
 - Inputs: track/task, recipient or audience, summary, evidence, blockers, and
   requested next action.
-- Approval: one `HANDOFF.md` review; `handoff.json` is approved atomically with it.
+- Approval: clarification requires substantive `handoffText`, then one
+  `HANDOFF.md` review; `handoff.json` is approved atomically with it. Missing or
+  generic content does not create a placeholder handoff.
 - Output: canonical handoff record, inbox message, projection, and event.
 - Common failures: missing recipient/context, stale task ownership, or an
   incomplete current-state summary.
@@ -183,9 +192,11 @@ history.
 
 **Purpose:** Create target-project release artifacts from shipped/landed tracks.
 
-- Inputs: optional bump and `releaseVersion`.
-- Approval: one release-notes review. Release JSON is the atomic canonical pair;
-  optional local tagging runs under final `execute:true` without another approval.
+- Inputs: optional bump and `releaseVersion`, plus completed-track evidence or
+  substantive `releaseNotes` when no completed track is available.
+- Approval: clarification blocks empty default releases, then one release-notes
+  review. Release JSON is the atomic canonical pair; optional local tagging
+  runs under final `execute:true` without another approval.
 - Output: release Markdown/JSON and setup-state release metadata.
 - Common failures: invalid version, incomplete tracks, missing review evidence,
   target drift, or an existing conflicting tag.
@@ -198,13 +209,23 @@ package.
 **Purpose:** Synchronize canonical project context with material repository
 changes.
 
-- Inputs: refresh reason, scopes, detected changes, and proposed context.
-- Approval: one patterns-document review when patterns change. LSP/config-only
-  refreshes require execution but no content approval.
-- Output: updated canonical context/projections, patterns, tech stack, repo map,
-  and refresh events as applicable.
-- Common failures: vague change evidence, invalid generated content, dirty
-  target previews, or conflicting manual edits.
+- Inputs: optional reason and `detectedChanges` for analysis, selected
+  `refreshLevels`, and evidence-backed semantic candidates under
+  `proposedContext`.
+- Analysis: the first call is read-only and returns `refresh_analysis` plus a
+  recommended native multi-select. Available levels are `product`,
+  `product-guidelines`, `tech-stack`, `workflow`, `patterns`,
+  `repository-topology`, `lsp`, `projections`, and `diagnostics`.
+- Approval: selected semantic levels each receive staged review of their
+  canonical/projection pair. `lsp` and `projections` require execution
+  authorization but no document approval; `diagnostics` is read-only.
+- Evidence: semantic selections require complete structured candidates and
+  never fall back to setup templates. Missing evidence returns
+  `stage:"refresh_evidence"` before previews or sessions are created.
+- Output: analysis, selected-level results, updated semantic documents, LSP
+  configuration, projection repair, and refresh trace evidence as applicable.
+- Common failures: unsupported levels, missing semantic evidence, stale
+  approval, dirty/staged/committed targets, or conflicting manual edits.
 
 ## cadre-revert
 
