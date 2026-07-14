@@ -445,7 +445,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     before: traceBefore,
     forceEnabled: true,
     allowDirty: true,
-    includeDirtyFiles: [...asStringArray(reviewValidation.files), "cadre/.gitignore"],
+    includeDirtyFiles: Array.from(new Set([...written, ...asStringArray(reviewValidation.files), "cadre/.gitignore"])),
     note: {
       event_id: asOptionalString(asJsonObject(setupEvent.event).id) || null,
       topology: polyrepoRequested ? "polyrepo" : "monorepo",

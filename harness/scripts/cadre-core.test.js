@@ -1831,6 +1831,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.ok(fs.existsSync(preview.review_bundle.manifest_path));
     const manifest = readJson(preview.review_bundle.manifest_path);
     assert.equal(Object.prototype.hasOwnProperty.call(manifest, "commands"), false);
+    assert.deepEqual(manifest.files.map((file) => file.path).sort(), ["cadre/product.json", "cadre/product.md"]);
 
     const blocked = core.workflowPacket(root, {
       ...args,
@@ -1853,6 +1854,8 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.equal(approvedMinimal.ok, true, approvedMinimal.error || JSON.stringify(approvedMinimal.approval || {}));
     assert.equal(approvedMinimal.approval.current_stage, "product_guidelines");
     assert.deepEqual(approvedMinimal.approval.approved_stages, ["product"]);
+    const guidelinesManifest = readJson(approvedMinimal.review_bundle.manifest_path);
+    assert.deepEqual(guidelinesManifest.files.map((file) => file.path).sort(), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
     const persistedSession = readJson(path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`));
     assert.equal(persistedSession.schema_version, 2);
     assert.deepEqual(persistedSession.stage_order, ["product", "product_guidelines", "tech_stack", "workflow", "styleguides"]);
@@ -1868,8 +1871,9 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       product: { name: "Accidental payload drift should not replace reviewed session payload" },
       providerMode: "github",
     });
-    assert.equal(approvedWithAccidentalPayload.ok, true, approvedWithAccidentalPayload.error || JSON.stringify(approvedWithAccidentalPayload.approval || {}));
-    assert.equal(approvedWithAccidentalPayload.approval.current_stage, "tech_stack");
+    assert.equal(approvedWithAccidentalPayload.ok, false);
+    assert.match(approvedWithAccidentalPayload.error, /cannot amend staged input/i);
+    assert.equal(approvedWithAccidentalPayload.approval.current_stage, "product_guidelines");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -3047,19 +3051,32 @@ test("workflow newtrack writes template-backed track learnings", () => {
     });
     assert.equal(setup.ok, true);
 
-    const blocked = core.workflowPacket(root, {
+    const specPreview = core.workflowPacket(root, {
       workflow: "newtrack",
-      execute: true,
       trackId: "blocked_20260618",
       spec: sampleSpec("spec"),
       plan: samplePlan("blocked_20260618"),
-      approvedStages: ["spec"],
       reviewBundleDir: ".newtrack-review",
     });
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.stage, "staged_approval");
+    assert.equal(specPreview.ok, true, specPreview.error);
+    assert.equal(specPreview.approval.current_stage, "spec");
+    assert.deepEqual(readJson(specPreview.review_bundle.manifest_path).files.map((file) => file.path).sort(), [
+      "cadre/tracks/blocked_20260618/spec.json",
+      "cadre/tracks/blocked_20260618/spec.md",
+    ]);
+    const blocked = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: specPreview.approval.session_id,
+      approvalStage: "spec",
+      approvedStages: ["spec"],
+    });
+    assert.equal(blocked.ok, true, blocked.error);
     assert.equal(blocked.approval.approval_complete, false);
     assert.equal(blocked.approval.current_stage, "plan");
+    assert.deepEqual(readJson(blocked.review_bundle.manifest_path).files.map((file) => file.path).sort(), [
+      "cadre/tracks/blocked_20260618/plan.json",
+      "cadre/tracks/blocked_20260618/plan.md",
+    ]);
     const blockedPlanArtifact = blocked.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/blocked_20260618/plan.md");
     assert.ok(blockedPlanArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(blockedPlanArtifact, "content"), false);
@@ -3543,7 +3560,7 @@ test("approved target execution rejects staged and committed HEAD drift while re
   }
 });
 
-test("target setup materializes the complete diff with intent-to-add and cancel restores it", () => {
+test("target setup materializes only the active stage and cancel restores all materialized state", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-target-setup-cancel-test-"));
   try {
     git(root, ["init"]);
@@ -3564,9 +3581,12 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
     assert.equal(preview.approval.current_document.canonical_path, "cadre/product.json");
     assert.equal(preview.approval.current_document.projection_path, "cadre/product.md");
     assert.deepEqual(Object.keys(preview.approval.current_document.snapshot_hashes).sort(), ["cadre/product.json", "cadre/product.md"]);
+    for (const file of ["cadre/product.json", "cadre/product.md", "cadre/.gitignore"]) {
+      assert.equal(fs.existsSync(path.join(root, file)), true, file);
+    }
     for (const file of [
-      "cadre/product.json",
-      "cadre/product.md",
+      "cadre/product_guidelines.json",
+      "cadre/product_guidelines.md",
       "cadre/tech-stack.json",
       "cadre/tech-stack.md",
       "cadre/workflow.json",
@@ -3578,10 +3598,9 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
       "cadre/config.json",
       "cadre/setup_state.json",
       "cadre/tracks.json",
-      "cadre/.gitignore",
-    ]) assert.equal(fs.existsSync(path.join(root, file)), true, file);
-    assert.ok(preview.approval.intent_to_add_paths.includes("cadre/product.json"));
-    assert.ok(preview.approval.intent_to_add_paths.includes("cadre/config.json"));
+    ]) assert.equal(fs.existsSync(path.join(root, file)), false, file);
+    assert.deepEqual(preview.approval.intent_to_add_paths.sort(), ["cadre/product.json", "cadre/product.md"]);
+    assert.deepEqual(preview.approval.approved_review_paths, []);
     assert.match(git(root, ["diff", "--", "cadre/product.json"]).stdout, /Diff Product/);
     assert.equal(git(root, ["diff", "--cached"]).stdout, "");
     const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`);
@@ -3611,6 +3630,176 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
     assert.equal(fs.existsSync(sessionFile), false);
     assert.equal(git(root, ["diff", "--cached"]).stdout, "");
     assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup amends only its current unapproved stage without resetting the approved prefix", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-current-stage-amendment-test-"));
+  try {
+    git(root, ["init"]);
+    const args = {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Stable Product", summary: "The approved product snapshot." },
+      productGuidelines: { title: "Guidelines", summary: "Initial guideline draft." },
+      techStack: { languages: ["TypeScript"] },
+    };
+    const initial = core.workflowPacket(root, args);
+    assert.equal(initial.ok, true, initial.error);
+    const sessionId = initial.approval.session_id;
+    const productBefore = new Map([
+      ["cadre/product.json", fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8")],
+      ["cadre/product.md", fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8")],
+    ]);
+    const productApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(productApproved.ok, true, productApproved.error);
+    const guidelinesBefore = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const sessionBeforeRejectedChange = fs.readFileSync(sessionFile, "utf8");
+    const indexBeforeRejectedChange = git(root, ["diff", "--cached", "--binary"]).stdout;
+
+    const rejectedApprovedChange = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      product: { summary: "Attempt to replace approved product input." },
+    });
+    assert.equal(rejectedApprovedChange.ok, false);
+    assert.match(rejectedApprovedChange.error, /Only current stage product_guidelines input may change.*product/i);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBeforeRejectedChange);
+    assert.equal(git(root, ["diff", "--cached", "--binary"]).stdout, indexBeforeRejectedChange);
+    for (const [file, content] of productBefore) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8"), guidelinesBefore);
+
+    const amended = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      product_guidelines: { summary: "Corrected evidence-backed guideline draft." },
+    });
+    assert.equal(amended.ok, true, amended.error);
+    assert.equal(amended.approval.session_id, sessionId);
+    assert.equal(amended.approval.current_stage, "product_guidelines");
+    assert.deepEqual(amended.approval.approved_stages, ["product"]);
+    assert.deepEqual(amended.approval.approved_review_paths.sort(), ["cadre/product.json", "cadre/product.md"]);
+    for (const [file, content] of productBefore) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8"), /Corrected evidence-backed guideline draft/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
+    assert.deepEqual(fs.readdirSync(path.dirname(sessionFile)).filter((name) => name.endsWith(".json")), [`${sessionId}.json`]);
+    const amendedSession = readJson(sessionFile);
+    assert.equal(amendedSession.payload.productGuidelines.summary, "Corrected evidence-backed guideline draft.");
+    assert.equal(Object.prototype.hasOwnProperty.call(amendedSession.payload, "product_guidelines"), false);
+
+    const guidelinesApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(guidelinesApproved.ok, true, guidelinesApproved.error);
+    assert.deepEqual(guidelinesApproved.approval.approved_review_paths.sort(), [
+      "cadre/product.json",
+      "cadre/product.md",
+      "cadre/product_guidelines.json",
+      "cadre/product_guidelines.md",
+    ].sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup cancellation restores an existing Cadre ignore file exactly", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-existing-ignore-cancel-test-"));
+  try {
+    git(root, ["init"]);
+    const ignorePath = path.join(root, "cadre", ".gitignore");
+    const original = "# Keep project-local rules\n/custom-cache/\n";
+    write(ignorePath, original);
+    git(root, ["add", "cadre/.gitignore"]);
+    git(root, ["commit", "-m", "seed Cadre ignore"]);
+    const preview = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Ignore Product", summary: "Verify native-state rollback." },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(preview.ok, true, preview.error);
+    assert.match(fs.readFileSync(ignorePath, "utf8"), /\/local\//);
+    const cancelled = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(fs.readFileSync(ignorePath, "utf8"), original);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup rejects current-stage amendment after target drift and succeeds after restoration", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-current-stage-drift-test-"));
+  try {
+    git(root, ["init"]);
+    const initial = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Drift Product", summary: "Stable product evidence." },
+      productGuidelines: { title: "Guidelines", summary: "Initial guideline draft." },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(initial.ok, true, initial.error);
+    const sessionId = initial.approval.session_id;
+    const productApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(productApproved.ok, true, productApproved.error);
+    const projectionPath = path.join(root, "cadre", "product_guidelines.md");
+    const previewBytes = fs.readFileSync(projectionPath, "utf8");
+    fs.appendFileSync(projectionPath, "\nUser review note.\n");
+    const editedBytes = fs.readFileSync(projectionPath, "utf8");
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const sessionBytes = fs.readFileSync(sessionFile, "utf8");
+
+    const rejected = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      productGuidelines: { summary: "Replacement after drift must fail." },
+    });
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /changed after Cadre created the product_guidelines preview/);
+    assert.equal(fs.readFileSync(projectionPath, "utf8"), editedBytes);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBytes);
+
+    write(projectionPath, previewBytes);
+    const amended = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      productGuidelines: { summary: "Replacement after restoration succeeds." },
+    });
+    assert.equal(amended.ok, true, amended.error);
+    assert.match(fs.readFileSync(projectionPath, "utf8"), /Replacement after restoration succeeds/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -3824,8 +4013,10 @@ test("setup consumes snake-case tech stack and style-guide selections", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-snake-alias-test-"));
   try {
     git(root, ["init"]);
-    const preview = core.workflowPacket(root, {
+    const preview = approveWorkflow(root, {
       workflow: "setup",
+      execute: true,
+      approvalComplete: true,
       providerMode: "local",
       syncMode: "local",
       setupLsp: false,
@@ -3835,7 +4026,7 @@ test("setup consumes snake-case tech stack and style-guide selections", () => {
       tech_stack: { languages: ["Python"] },
     });
     assert.equal(preview.ok, true, preview.error);
-    assert.equal(preview.approval.current_stage, "product");
+    assert.equal(preview.approval.approval_complete, true);
     assert.deepEqual(preview.styleGuides.requested, ["python"]);
     assert.equal(preview.native_prompts.some((prompt) => prompt.id === "setup-style-guides"), false);
     assert.equal(readJson(path.join(root, "cadre", "tech-stack.json")).languages[0], "Python");

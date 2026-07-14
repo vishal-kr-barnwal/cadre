@@ -50,10 +50,13 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
     };
   }
   if (reviewOutputMode(args) !== "target") {
+    const snapshots = new Map(session.snapshot_files.map((file) => [file.path, file]));
     const driftedBefore = session.before_files.filter((before) => {
       const target = path.join(root, before.path);
       const current = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
-      return current !== (before.existed ? before.content : null);
+      const snapshot = snapshots.get(before.path);
+      return current !== (before.existed ? before.content : null)
+        && (snapshot?.missing === true || current !== snapshot?.content);
     }).map((before) => before.path);
     if (driftedBefore.length > 0) {
       return {
@@ -90,11 +93,48 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
       errors.push(`Approved target review file is missing: ${relativePath}`);
     }
   }
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      stage: "staged_review_drift",
+      error: errors[0],
+      errors,
+      files: Array.from(new Set(paths)).sort(),
+    };
+  }
+  const finalBefore = new Map((session.final_before_files || []).map((file) => [file.path, file]));
+  const finalFiles = (session.final_snapshot_files || []).filter((file) => file.missing !== true);
+  const finalDrift = finalFiles.find((file) => {
+    const before = finalBefore.get(file.path);
+    if (!before) return true;
+    const target = path.join(root, file.path);
+    const current = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
+    return current !== (before.existed ? before.content : null) && current !== file.content;
+  });
+  if (finalDrift) {
+    return {
+      ok: false,
+      stage: "staged_review_drift",
+      error: `Final workflow target changed after staged review began: ${finalDrift.path}`,
+      errors: [`Final workflow target changed after staged review began: ${finalDrift.path}`],
+      files: Array.from(new Set(paths)).sort(),
+    };
+  }
+  const finalMutation = writeArtifactFilesAtomic(root, finalFiles.map((file) => ({ path: file.path, content: file.content })));
+  if (finalMutation.ok === false) {
+    return {
+      ok: false,
+      stage: "staged_review_materialize",
+      error: finalMutation.error,
+      errors: [finalMutation.error || "Unable to materialize final workflow files"],
+      files: Array.from(new Set(paths)).sort(),
+    };
+  }
   return {
-    ok: errors.length === 0,
-    stage: errors.length > 0 ? "staged_review_drift" : undefined,
-    error: errors[0],
-    errors,
-    files: Array.from(new Set(paths)).sort(),
+    ok: true,
+    errors: [],
+    files: Array.from(new Set([...paths, ...finalFiles.map((file) => file.path)])).sort(),
+    materialized_final_files: finalFiles.map((file) => file.path),
+    final_mutation: asJsonObject(finalMutation),
   };
 }

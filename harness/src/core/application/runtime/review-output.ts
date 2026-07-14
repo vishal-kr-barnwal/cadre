@@ -9,6 +9,7 @@ import type { ReviewFile } from "./contracts";
 import { fileExists } from "../../infrastructure/runtime/json-store";
 import { hasGeneratedMarker } from "./markdown-docs";
 import { writeArtifactFilesAtomic } from "./artifact-pairs";
+import type { ApprovalBeforeFile, ApprovalStageRecord } from "./approval-session-model";
 
 export function reviewOutputMode(args: RuntimeArgs = {}): "target" | "bundle" {
   const rawArgs = args as UnknownRecord;
@@ -243,7 +244,51 @@ function reviewStats(text: string): JsonObject {
   };
 }
 
-export function targetReviewBundle(root: string, workflow: string, args: RuntimeArgs, reviewFiles: ReviewFile[], manifestExtras: JsonObject): JsonObject | null {
+function stageHeadExpectation(before: ApprovalBeforeFile): ReviewHeadExpectation {
+  const hasHead = typeof before.head_existed === "boolean";
+  return {
+    path: before.path,
+    existed: hasHead ? before.head_existed! : before.existed,
+    content: hasHead ? (before.head_content ?? null) : before.existed ? before.content : null,
+    ...(!hasHead && before.existed ? { allowMissing: true } : {}),
+  };
+}
+
+export function stageReviewDriftError(root: string, record: ApprovalStageRecord): string | null {
+  const previewed = record.preview_files.length > 0;
+  const beforeByPath = new Map(record.before_files.map((file) => [file.path, file]));
+  for (const snapshot of record.snapshot_files) {
+    const before = beforeByPath.get(snapshot.path);
+    const target = safeTargetPath(root, snapshot.path);
+    if (!before || !target) return `Approval stage ${record.stage_id} has no valid baseline for ${snapshot.path}`;
+    const current = fileExists(target) ? fs.readFileSync(target, "utf8") : null;
+    const expected = previewed && snapshot.missing !== true
+      ? snapshot.content
+      : before.existed ? before.content : null;
+    if (current !== expected) {
+      return previewed
+        ? `Review target changed after Cadre created the ${record.stage_id} preview: ${snapshot.path}`
+        : `Review target changed before Cadre activated stage ${record.stage_id}: ${snapshot.path}`;
+    }
+  }
+  const gitState = inspectReviewGitState(root, record.before_files.map((file) => file.path), record.before_files.map(stageHeadExpectation));
+  if (!gitState.ok) {
+    return gitState.error
+      || (gitState.stagedPaths.length > 0
+        ? `Current-stage review target has staged Git content: ${gitState.stagedPaths[0]}`
+        : `Current-stage review baseline changed in Git: ${gitState.baselinePaths[0]}`);
+  }
+  return null;
+}
+
+export function targetReviewBundle(
+  root: string,
+  workflow: string,
+  args: RuntimeArgs,
+  reviewFiles: ReviewFile[],
+  manifestExtras: JsonObject,
+  previousStage: ApprovalStageRecord | null = null,
+): JsonObject | null {
   const stage = asOptionalString(manifestExtras.approval_stage);
   if (!stage) return null;
   const warnings: string[] = [];
@@ -252,7 +297,26 @@ export function targetReviewBundle(root: string, workflow: string, args: Runtime
   const pendingWrites: Array<{ path: string; content: string }> = [];
   const before = new Map<string, { existed: boolean; content: string }>();
   const newPaths: string[] = [];
-  const continuingSession = Boolean(args.approvalSessionId || args.approval_session_id);
+  const replacementError = previousStage ? stageReviewDriftError(root, previousStage) : null;
+  if (replacementError) {
+    return {
+      ok: false,
+      mode: "target",
+      workflow,
+      directory: root,
+      manifest_path: null,
+      content_in_response: false,
+      mutates_worktree: true,
+      intent_to_add_paths: previousStage?.intent_to_add_paths || [],
+      warnings,
+      errors: [replacementError],
+      error: replacementError,
+      files: [],
+      ...manifestExtras,
+    };
+  }
+  const replacementPaths = new Set(previousStage?.preview_files.map((file) => asOptionalString(file.path)).filter((file): file is string => Boolean(file)) || []);
+  const continuingLegacySession = Boolean(args.approvalSessionId || args.approval_session_id) && !previousStage;
   for (const file of reviewFiles) {
     const targetPath = safeTargetPath(root, file.path);
     if (!targetPath) {
@@ -264,7 +328,7 @@ export function targetReviewBundle(root: string, workflow: string, args: Runtime
     before.set(file.path, { existed: exists, content: existing });
     const changed = file.missing !== true && (!exists || existing !== file.content);
     const generatedProjection = exists && hasGeneratedMarker(existing);
-    if (continuingSession && changed) {
+    if (continuingLegacySession && changed) {
       errors.push(`Review target changed after the approval snapshot was created: ${file.path}`);
       files.push({
         path: file.path,
@@ -279,7 +343,7 @@ export function targetReviewBundle(root: string, workflow: string, args: Runtime
       });
       continue;
     }
-    if (exists && changed && targetFileDirty(root, file.path) && !generatedProjection && args.force !== true) {
+    if (exists && changed && !replacementPaths.has(file.path) && targetFileDirty(root, file.path) && !generatedProjection && args.force !== true) {
       errors.push(`Refusing to overwrite dirty review target ${file.path}`);
       files.push({
         path: file.path,
@@ -330,7 +394,7 @@ export function targetReviewBundle(root: string, workflow: string, args: Runtime
       }
       if (restoreWrites.length > 0) writeArtifactFilesAtomic(root, restoreWrites, { lockName: `review-${workflow}-rollback` });
     } else {
-      intentPaths = intent.paths;
+      intentPaths = Array.from(new Set([...(previousStage?.intent_to_add_paths || []), ...intent.paths]));
     }
   }
   const error = errors[0] || null;

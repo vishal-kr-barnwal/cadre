@@ -8,6 +8,7 @@ import { withLock } from "../../infrastructure/runtime/locking";
 import type { CoreResult, ReviewFile } from "./contracts";
 import {
   recordCompleteBundlePreview,
+  recordStagePreview,
   synchronizeApprovalSession,
   type ApprovalBeforeFile,
   type ApprovalSession,
@@ -319,8 +320,16 @@ export function frozenReviewFiles(root: string, sessionId: string, fallback: Rev
   return session?.snapshot_files?.length ? session.snapshot_files : fallback;
 }
 
-export function recordApprovalPreview(root: string, sessionId: string, workflow: string, payloadHash: string, bundle: JsonObject | null): void {
-  const session = readApprovalSession(root, sessionId);
+export function recordApprovalPreview(
+  root: string,
+  sessionId: string,
+  workflow: string,
+  payloadHash: string,
+  stageId: string,
+  bundle: JsonObject | null,
+  candidateSession?: ApprovalSession,
+): void {
+  const session = candidateSession || readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) return;
   const previewFiles = bundle && Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
   if (!bundle || bundle.ok === false || previewFiles.length === 0) {
@@ -328,7 +337,9 @@ export function recordApprovalPreview(root: string, sessionId: string, workflow:
     return;
   }
   writeApprovalSession(root, {
-    ...recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths)),
+    ...(session.schema_version === 2
+      ? recordStagePreview(session, stageId, previewFiles, asStringArray(bundle.intent_to_add_paths))
+      : recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths))),
     updated_at: utcNow(),
   });
 }
@@ -343,18 +354,19 @@ export function cancelApprovalSession(root: string, sessionId: string, expectedW
     }
     const outputMode = asOptionalString(session.payload.reviewOutputMode || session.payload.review_output_mode);
     const explicitBundleDirectory = asOptionalString(session.payload.reviewBundleDir || session.payload.review_bundle_dir || session.payload.reviewDir || session.payload.review_dir);
-    if (explicitBundleDirectory || outputMode === "bundle" || outputMode === "temp" || outputMode === "temporary") {
-      const intentRemoval = removeReviewIntentToAddAtomic(root, session.intent_to_add_paths);
-      if (!intentRemoval.ok) return { ok: false, cancelled: false, session_retained: true, error: intentRemoval.error };
-      removeApprovalSession(root, sessionId);
-      return { ok: true, cancelled: true, session_id: sessionId, restored: [], removed: [], intent_to_add_removed: intentRemoval.paths };
-    }
-
-    const previewPaths = new Set(session.preview_files
+    const targetMode = !explicitBundleDirectory && !["bundle", "temp", "temporary"].includes(outputMode || "");
+    const previewPaths = new Set((targetMode ? session.preview_files : [])
       .filter((file) => file.missing !== true)
       .map((file) => asOptionalString(file.path))
       .filter((file): file is string => Boolean(file)));
     const beforeByPath = new Map(session.before_files.map((before) => [before.path, before]));
+    const nativeIgnore = session.snapshot_files.find((file) => file.path === "cadre/.gitignore" && file.missing !== true);
+    const nativeIgnoreBefore = beforeByPath.get("cadre/.gitignore");
+    const nativeIgnoreBaseline = nativeIgnoreBefore?.existed ? nativeIgnoreBefore.content : null;
+    const nativeIgnoreCurrent = nativeIgnore ? fileContent(path.join(root, nativeIgnore.path)) : null;
+    if (nativeIgnore && nativeIgnoreBefore && nativeIgnoreCurrent === nativeIgnore.content && nativeIgnoreCurrent !== nativeIgnoreBaseline) {
+      previewPaths.add(nativeIgnore.path);
+    }
     const restorePlan = new Map<string, { target: string; before: string | null; preview: string }>();
     const expectations: ReviewHeadExpectation[] = [];
     for (const snapshot of session.snapshot_files) {
@@ -461,8 +473,4 @@ export function closeApprovalSessionFromArgs(root: string, args: RuntimeArgs): C
 
 export function previewFileRecords(session: ApprovalSession | null): JsonObject[] {
   return session?.preview_files?.map(asJsonObject).filter((file) => file.missing !== true) || [];
-}
-
-export function sessionPreviewHash(file: JsonObject): string | null {
-  return asOptionalString(file.sha256) || null;
 }

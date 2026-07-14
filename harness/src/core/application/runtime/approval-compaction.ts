@@ -40,6 +40,7 @@ export function compactApproval(value: unknown): JsonObject | null {
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     intent_to_add_paths: asStringArray(approval.intent_to_add_paths),
+    approved_review_paths: asStringArray(approval.approved_review_paths),
     final_only_files: asStringArray(approval.final_only_files),
     current_document: compactCurrentDocument(approval.current_document),
     stages: stages.map((stage) => ({ id: asOptionalString(stage.id) || null })),

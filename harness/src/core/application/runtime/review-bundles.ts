@@ -11,6 +11,7 @@ import { normalizeClaimPath } from "./collision";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { reviewOutputMode, targetReviewBundle } from "./review-output";
+import type { ApprovalStageRecord } from "./approval-session-model";
 import { renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { humanReviewConfirmed, requestedStyleGuideIds, styleGuideIdsForTechStack, techStackForPacket } from "./tech-stack";
@@ -232,7 +233,14 @@ export function setupReviewArtifacts(reviewFiles: ReviewFile[], styleGuides: Cor
   return artifacts;
 }
 
-export function workflowReviewBundle(root: string, workflow: string, args: RuntimeArgs, reviewFiles: ReviewFile[], manifestExtras: JsonObject = {}): JsonObject | null {
+export function workflowReviewBundle(
+  root: string,
+  workflow: string,
+  args: RuntimeArgs,
+  reviewFiles: ReviewFile[],
+  manifestExtras: JsonObject = {},
+  previousStage: ApprovalStageRecord | null = null,
+): JsonObject | null {
   const rawArgs = args as UnknownRecord;
   if (reviewFiles.length === 0) return null;
   if (
@@ -240,7 +248,7 @@ export function workflowReviewBundle(root: string, workflow: string, args: Runti
     || rawArgs.reviewBundle === false
     || rawArgs.reviewFiles === false
   ) return null;
-  if (reviewOutputMode(args) === "target") return targetReviewBundle(root, workflow, args, reviewFiles, manifestExtras);
+  if (reviewOutputMode(args) === "target") return targetReviewBundle(root, workflow, args, reviewFiles, manifestExtras, previousStage);
   const explicitDir = asOptionalString(rawArgs.reviewBundleDir || rawArgs.review_bundle_dir || rawArgs.reviewDir || rawArgs.review_dir);
   const rootHash = crypto.createHash("sha256").update(root).digest("hex").slice(0, 12);
   const defaultDirectory = path.join(os.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(path.basename(root))}-${rootHash}`);

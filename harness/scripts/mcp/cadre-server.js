@@ -2051,6 +2051,7 @@ function compactApproval(value) {
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     intent_to_add_paths: asStringArray(approval.intent_to_add_paths),
+    approved_review_paths: asStringArray(approval.approved_review_paths),
     final_only_files: asStringArray(approval.final_only_files),
     current_document: compactCurrentDocument(approval.current_document),
     stages: stages.map((stage) => ({ id: asOptionalString(stage.id) || null })),
@@ -5507,7 +5508,35 @@ function reviewStats(text2) {
     sha256: import_node_crypto2.default.createHash("sha256").update(normalized).digest("hex")
   };
 }
-function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras) {
+function stageHeadExpectation(before) {
+  const hasHead = typeof before.head_existed === "boolean";
+  return {
+    path: before.path,
+    existed: hasHead ? before.head_existed : before.existed,
+    content: hasHead ? before.head_content ?? null : before.existed ? before.content : null,
+    ...!hasHead && before.existed ? { allowMissing: true } : {}
+  };
+}
+function stageReviewDriftError(root2, record) {
+  const previewed = record.preview_files.length > 0;
+  const beforeByPath = new Map(record.before_files.map((file) => [file.path, file]));
+  for (const snapshot of record.snapshot_files) {
+    const before = beforeByPath.get(snapshot.path);
+    const target2 = safeTargetPath(root2, snapshot.path);
+    if (!before || !target2) return `Approval stage ${record.stage_id} has no valid baseline for ${snapshot.path}`;
+    const current = fileExists(target2) ? import_node_fs13.default.readFileSync(target2, "utf8") : null;
+    const expected = previewed && snapshot.missing !== true ? snapshot.content : before.existed ? before.content : null;
+    if (current !== expected) {
+      return previewed ? `Review target changed after Cadre created the ${record.stage_id} preview: ${snapshot.path}` : `Review target changed before Cadre activated stage ${record.stage_id}: ${snapshot.path}`;
+    }
+  }
+  const gitState = inspectReviewGitState(root2, record.before_files.map((file) => file.path), record.before_files.map(stageHeadExpectation));
+  if (!gitState.ok) {
+    return gitState.error || (gitState.stagedPaths.length > 0 ? `Current-stage review target has staged Git content: ${gitState.stagedPaths[0]}` : `Current-stage review baseline changed in Git: ${gitState.baselinePaths[0]}`);
+  }
+  return null;
+}
+function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras, previousStage = null) {
   const stage = asOptionalString(manifestExtras.approval_stage);
   if (!stage) return null;
   const warnings = [];
@@ -5516,7 +5545,26 @@ function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras)
   const pendingWrites = [];
   const before = /* @__PURE__ */ new Map();
   const newPaths = [];
-  const continuingSession = Boolean(args.approvalSessionId || args.approval_session_id);
+  const replacementError = previousStage ? stageReviewDriftError(root2, previousStage) : null;
+  if (replacementError) {
+    return {
+      ok: false,
+      mode: "target",
+      workflow,
+      directory: root2,
+      manifest_path: null,
+      content_in_response: false,
+      mutates_worktree: true,
+      intent_to_add_paths: previousStage?.intent_to_add_paths || [],
+      warnings,
+      errors: [replacementError],
+      error: replacementError,
+      files: [],
+      ...manifestExtras
+    };
+  }
+  const replacementPaths = new Set(previousStage?.preview_files.map((file) => asOptionalString(file.path)).filter((file) => Boolean(file)) || []);
+  const continuingLegacySession = Boolean(args.approvalSessionId || args.approval_session_id) && !previousStage;
   for (const file of reviewFiles2) {
     const targetPath = safeTargetPath(root2, file.path);
     if (!targetPath) {
@@ -5528,7 +5576,7 @@ function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras)
     before.set(file.path, { existed: exists, content: existing });
     const changed = file.missing !== true && (!exists || existing !== file.content);
     const generatedProjection = exists && hasGeneratedMarker(existing);
-    if (continuingSession && changed) {
+    if (continuingLegacySession && changed) {
       errors.push(`Review target changed after the approval snapshot was created: ${file.path}`);
       files.push({
         path: file.path,
@@ -5543,7 +5591,7 @@ function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras)
       });
       continue;
     }
-    if (exists && changed && targetFileDirty(root2, file.path) && !generatedProjection && args.force !== true) {
+    if (exists && changed && !replacementPaths.has(file.path) && targetFileDirty(root2, file.path) && !generatedProjection && args.force !== true) {
       errors.push(`Refusing to overwrite dirty review target ${file.path}`);
       files.push({
         path: file.path,
@@ -5594,7 +5642,7 @@ function targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras)
       }
       if (restoreWrites.length > 0) writeArtifactFilesAtomic(root2, restoreWrites, { lockName: `review-${workflow}-rollback` });
     } else {
-      intentPaths = intent.paths;
+      intentPaths = Array.from(/* @__PURE__ */ new Set([...previousStage?.intent_to_add_paths || [], ...intent.paths]));
     }
   }
   const error = errors[0] || null;
@@ -5962,11 +6010,11 @@ function setupReviewArtifacts(reviewFiles2, styleGuides) {
   ];
   return artifacts;
 }
-function workflowReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras = {}) {
+function workflowReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras = {}, previousStage = null) {
   const rawArgs6 = args;
   if (reviewFiles2.length === 0) return null;
   if (args.execute === true && (humanReviewConfirmed(args) || rawArgs6.approvalComplete === true || rawArgs6.approval_complete === true) || rawArgs6.reviewBundle === false || rawArgs6.reviewFiles === false) return null;
-  if (reviewOutputMode(args) === "target") return targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras);
+  if (reviewOutputMode(args) === "target") return targetReviewBundle(root2, workflow, args, reviewFiles2, manifestExtras, previousStage);
   const explicitDir = asOptionalString(rawArgs6.reviewBundleDir || rawArgs6.review_bundle_dir || rawArgs6.reviewDir || rawArgs6.review_dir);
   const rootHash = import_node_crypto3.default.createHash("sha256").update(root2).digest("hex").slice(0, 12);
   const defaultDirectory = import_node_path25.default.join(import_node_os2.default.tmpdir(), `cadre-${safeName(workflow)}-review-${safeName(import_node_path25.default.basename(root2))}-${rootHash}`);
@@ -9251,6 +9299,9 @@ function createStageLedger(stages, snapshots, beforeFiles) {
 function isStageLedgerSession(session) {
   return session.schema_version === 2 && Array.isArray(session.stage_order) && Boolean(session.stage_records);
 }
+function stageRecord(session, stageId) {
+  return isStageLedgerSession(session) ? session.stage_records?.[stageId] || null : null;
+}
 function synchronizedStageRecord(session, record) {
   const approved = session.approved_stages.includes(record.stage_id);
   return {
@@ -9342,6 +9393,43 @@ function recordCompleteBundlePreview(session, previewFiles, intentToAddPaths) {
     }),
     final_intent_to_add_paths: intentToAddPaths.filter((filePath) => !claimedIntentPaths.has(filePath))
   });
+}
+function recordStagePreview(session, stageId, previewFiles, intentToAddPaths) {
+  if (!isStageLedgerSession(session)) {
+    return {
+      ...session,
+      preview_files: uniquePreviewFiles([...session.preview_files, ...previewFiles]),
+      intent_to_add_paths: Array.from(/* @__PURE__ */ new Set([...session.intent_to_add_paths, ...intentToAddPaths]))
+    };
+  }
+  const record = session.stage_records?.[stageId];
+  if (!record) throw new Error(`Approval session is missing stage record: ${stageId}`);
+  const ownedPaths = new Set(record.snapshot_files.map((file) => file.path));
+  const invalidPreview = previewFiles.find((file) => {
+    const filePath = previewPath(file);
+    return !filePath || !ownedPaths.has(filePath);
+  });
+  if (invalidPreview) {
+    throw new Error(`Approval preview contains a file outside stage ${stageId}: ${previewPath(invalidPreview) || "(missing path)"}`);
+  }
+  const invalidIntent = intentToAddPaths.find((filePath) => !ownedPaths.has(filePath));
+  if (invalidIntent) throw new Error(`Approval intent-to-add path belongs outside stage ${stageId}: ${invalidIntent}`);
+  return synchronizeApprovalSession({
+    ...session,
+    stage_records: {
+      ...session.stage_records,
+      [stageId]: {
+        ...record,
+        preview_files: uniquePreviewFiles(previewFiles),
+        intent_to_add_paths: Array.from(new Set(intentToAddPaths))
+      }
+    }
+  });
+}
+function previewFilesForStages(session, stageIds) {
+  if (!session) return [];
+  if (!isStageLedgerSession(session) || !stageIds) return session.preview_files || [];
+  return uniquePreviewFiles(stageIds.flatMap((stageId) => session.stage_records?.[stageId]?.preview_files || []));
 }
 
 // src/core/application/runtime/approval-session-store.ts
@@ -9585,12 +9673,8 @@ function captureApprovalBeforeFiles(root2, files) {
     };
   });
 }
-function frozenReviewFiles(root2, sessionId, fallback) {
-  const session = readApprovalSession(root2, sessionId);
-  return session?.snapshot_files?.length ? session.snapshot_files : fallback;
-}
-function recordApprovalPreview(root2, sessionId, workflow, payloadHash, bundle) {
-  const session = readApprovalSession(root2, sessionId);
+function recordApprovalPreview(root2, sessionId, workflow, payloadHash, stageId, bundle, candidateSession) {
+  const session = candidateSession || readApprovalSession(root2, sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) return;
   const previewFiles = bundle && Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
   if (!bundle || bundle.ok === false || previewFiles.length === 0) {
@@ -9598,7 +9682,7 @@ function recordApprovalPreview(root2, sessionId, workflow, payloadHash, bundle) 
     return;
   }
   writeApprovalSession(root2, {
-    ...recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths)),
+    ...session.schema_version === 2 ? recordStagePreview(session, stageId, previewFiles, asStringArray(bundle.intent_to_add_paths)) : recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths)),
     updated_at: utcNow()
   });
 }
@@ -9612,14 +9696,16 @@ function cancelApprovalSession(root2, sessionId, expectedWorkflow) {
     }
     const outputMode = asOptionalString(session.payload.reviewOutputMode || session.payload.review_output_mode);
     const explicitBundleDirectory = asOptionalString(session.payload.reviewBundleDir || session.payload.review_bundle_dir || session.payload.reviewDir || session.payload.review_dir);
-    if (explicitBundleDirectory || outputMode === "bundle" || outputMode === "temp" || outputMode === "temporary") {
-      const intentRemoval2 = removeReviewIntentToAddAtomic(root2, session.intent_to_add_paths);
-      if (!intentRemoval2.ok) return { ok: false, cancelled: false, session_retained: true, error: intentRemoval2.error };
-      removeApprovalSession(root2, sessionId);
-      return { ok: true, cancelled: true, session_id: sessionId, restored: [], removed: [], intent_to_add_removed: intentRemoval2.paths };
-    }
-    const previewPaths = new Set(session.preview_files.filter((file) => file.missing !== true).map((file) => asOptionalString(file.path)).filter((file) => Boolean(file)));
+    const targetMode = !explicitBundleDirectory && !["bundle", "temp", "temporary"].includes(outputMode || "");
+    const previewPaths = new Set((targetMode ? session.preview_files : []).filter((file) => file.missing !== true).map((file) => asOptionalString(file.path)).filter((file) => Boolean(file)));
     const beforeByPath = new Map(session.before_files.map((before) => [before.path, before]));
+    const nativeIgnore = session.snapshot_files.find((file) => file.path === "cadre/.gitignore" && file.missing !== true);
+    const nativeIgnoreBefore = beforeByPath.get("cadre/.gitignore");
+    const nativeIgnoreBaseline = nativeIgnoreBefore?.existed ? nativeIgnoreBefore.content : null;
+    const nativeIgnoreCurrent = nativeIgnore ? fileContent(import_node_path36.default.join(root2, nativeIgnore.path)) : null;
+    if (nativeIgnore && nativeIgnoreBefore && nativeIgnoreCurrent === nativeIgnore.content && nativeIgnoreCurrent !== nativeIgnoreBaseline) {
+      previewPaths.add(nativeIgnore.path);
+    }
     const restorePlan = /* @__PURE__ */ new Map();
     const expectations = [];
     for (const snapshot of session.snapshot_files) {
@@ -10713,14 +10799,481 @@ function reviseIntentPrompts(args = {}, trackId = null) {
   return prompts;
 }
 
-// src/core/application/runtime/staged-approval.ts
+// src/core/application/runtime/approval-session-integrity.ts
 var import_node_crypto5 = __toESM(require("node:crypto"));
-var import_node_path38 = __toESM(require("node:path"));
+function stableJson(value) {
+  if (value === void 0) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function changedPaths(before, after, prefix = "") {
+  if (stableJson(before) === stableJson(after)) return [];
+  const left = plainObject(before);
+  const right = plainObject(after);
+  if (left || right) {
+    const keys = Array.from(/* @__PURE__ */ new Set([...Object.keys(left || {}), ...Object.keys(right || {})])).sort();
+    return keys.flatMap((key) => changedPaths(left?.[key], right?.[key], prefix ? `${prefix}.${key}` : key));
+  }
+  return prefix ? [prefix] : ["(payload)"];
+}
+function pathAllowed(changedPath, inputKey) {
+  return changedPath === inputKey || changedPath.startsWith(`${inputKey}.`);
+}
+function currentStagePayloadError(session, activeStage, payload) {
+  const changes = changedPaths(session.payload, payload);
+  const allowed = activeStage.inputKeys || [];
+  const disallowed = changes.find((changedPath) => !allowed.some((inputKey) => pathAllowed(changedPath, inputKey)));
+  return disallowed ? `Only current stage ${activeStage.id} input may change; ${disallowed} belongs to another stage or to the frozen session contract.` : null;
+}
+function reviewFileIdentity(file) {
+  const stableContent = file.content.replace(/canonical_hash="[a-f0-9]+"/g, 'canonical_hash="<session-time>"').replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g, "<session-time>");
+  return {
+    path: file.path,
+    title: file.title,
+    content: stableContent,
+    kind: file.kind,
+    source: file.source,
+    missing: file.missing === true,
+    document_id: file.documentId || null,
+    review_role: file.reviewRole || null,
+    canonical_path: file.canonicalPath || null,
+    projection_path: file.projectionPath || null,
+    approval_group: file.approvalGroup || null
+  };
+}
+function sameReviewFiles(left, right) {
+  const normalize = (files) => [...files].sort((first, second) => first.path.localeCompare(second.path)).map(reviewFileIdentity);
+  return stableJson(normalize(left)) === stableJson(normalize(right));
+}
+function stageSnapshotError(session, stages, reviewFiles2, stageIds) {
+  for (const stageId of stageIds) {
+    const stage = stages.find((candidate) => candidate.id === stageId);
+    const record = stageRecord(session, stageId);
+    if (!stage || !record) return `Approval session is missing stage ownership for ${stageId}.`;
+    if (!sameReviewFiles(record.snapshot_files, filesForApprovalStage(reviewFiles2, stage))) {
+      return `Generated files for ${stageId} changed after its stage snapshot was created; cancel and restart or explicitly reopen that stage.`;
+    }
+  }
+  return null;
+}
+function normalizedHash(content) {
+  return import_node_crypto5.default.createHash("sha256").update(content.replace(/\n*$/, "\n")).digest("hex");
+}
+function stagePreviewError(record) {
+  const previews = new Map(record.preview_files.flatMap((file) => {
+    const filePath = asOptionalString(file.path);
+    return filePath ? [[filePath, file]] : [];
+  }));
+  for (const snapshot of record.snapshot_files.filter((file) => file.missing !== true)) {
+    const preview = previews.get(snapshot.path);
+    if (!preview) return `Approval stage ${record.stage_id} has no materialized preview for ${snapshot.path}.`;
+    if (asOptionalString(preview.sha256) !== normalizedHash(snapshot.content)) {
+      return `Approval stage ${record.stage_id} preview hash does not match its snapshot: ${snapshot.path}.`;
+    }
+  }
+  return null;
+}
+function sessionTargetDriftError(root2, args, session, stageIds) {
+  if (reviewOutputMode(args) !== "target") return null;
+  for (const stageId of stageIds) {
+    const record = stageRecord(session, stageId);
+    if (!record) return `Approval session is missing stage ownership for ${stageId}.`;
+    const error = stageReviewDriftError(root2, record);
+    if (error) return error;
+  }
+  return null;
+}
+
+// src/core/application/runtime/approval-session-continuation.ts
+function sameStageOrder(session, stages) {
+  const expected = stages.map((stage) => stage.id);
+  return expected.length === session.stage_order?.length && expected.every((stageId, index) => session.stage_order?.[index] === stageId);
+}
+function samePaths(left, right) {
+  const leftPaths = left.map((file) => file.path).sort();
+  const rightPaths = right.map((file) => file.path).sort();
+  return leftPaths.length === rightPaths.length && leftPaths.every((file, index) => file === rightPaths[index]);
+}
+function beforeFilesForReview(root2, reviewFiles2, known) {
+  const knownByPath = new Map(known.map((file) => [file.path, file]));
+  const missing = captureApprovalBeforeFiles(root2, reviewFiles2.filter((file) => !knownByPath.has(file.path)));
+  const capturedByPath = new Map(missing.map((file) => [file.path, file]));
+  return reviewFiles2.map((file) => knownByPath.get(file.path) || capturedByPath.get(file.path)).filter(Boolean);
+}
+function prepareApprovalContinuation(root2, session, stages, payload, payloadHash, reviewFiles2) {
+  const base = { session, activeStage: null, activeFiles: [], previousRecord: null };
+  if (!isStageLedgerSession(session)) {
+    return {
+      ...base,
+      ok: false,
+      stage: "legacy_approval_session",
+      error: session.approved_stages.length > 0 ? "This approval session predates stage-owned reviews and has approved stages; cancel and restart it before continuing." : "This approval session predates stage-owned reviews; cancel and restart it before continuing."
+    };
+  }
+  if (!sameStageOrder(session, stages)) {
+    return { ...base, ok: false, stage: "approval_stage_order", error: "Approval stages changed after the session started; cancel and restart the review." };
+  }
+  const activeStage = stages.find((stage) => !session.approved_stages.includes(stage.id)) || null;
+  if (!activeStage) {
+    return { ...base, ok: false, stage: "approval_complete", error: "Every approval stage is already approved; execute or cancel the session instead of changing its payload." };
+  }
+  const payloadError = currentStagePayloadError(session, activeStage, payload);
+  if (payloadError) return { ...base, activeStage, ok: false, stage: "approval_payload_scope", error: payloadError };
+  const approvedSnapshotError = stageSnapshotError(session, stages, reviewFiles2, session.approved_stages);
+  if (approvedSnapshotError) {
+    return { ...base, activeStage, ok: false, stage: "approved_stage_changed", error: approvedSnapshotError };
+  }
+  const previousRecord = stageRecord(session, activeStage.id);
+  if (!previousRecord) {
+    return { ...base, ok: false, stage: "approval_stage_record", error: `Approval session is missing stage record: ${activeStage.id}` };
+  }
+  const activeFiles = filesForApprovalStage(reviewFiles2, activeStage);
+  if (activeFiles.length === 0) {
+    return { ...base, activeStage, previousRecord, ok: false, stage: "approval_stage_files", error: `Current approval stage ${activeStage.id} has no review files.` };
+  }
+  if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, activeFiles)) {
+    return {
+      ...base,
+      activeStage,
+      activeFiles,
+      previousRecord,
+      ok: false,
+      stage: "approval_stage_paths",
+      error: `Current stage ${activeStage.id} changed its review paths; cancel and restart before changing stage membership.`
+    };
+  }
+  const beforeFiles = beforeFilesForReview(root2, activeFiles, previousRecord.before_files);
+  const stageRecords = { ...session.stage_records };
+  const ownedPaths = /* @__PURE__ */ new Set();
+  for (const stage of stages) {
+    const record = stageRecords[stage.id];
+    if (!record) continue;
+    const stageFiles = filesForApprovalStage(reviewFiles2, stage);
+    for (const file of stageFiles) ownedPaths.add(file.path);
+    if (session.approved_stages.includes(stage.id)) continue;
+    stageRecords[stage.id] = stage.id === activeStage.id ? {
+      ...record,
+      revision: record.revision + 1,
+      snapshot_files: activeFiles,
+      before_files: beforeFiles
+    } : {
+      ...record,
+      snapshot_files: stageFiles,
+      before_files: beforeFilesForReview(root2, stageFiles, record.before_files)
+    };
+  }
+  const finalFiles = reviewFiles2.filter((file) => !ownedPaths.has(file.path));
+  const nextSession = synchronizeApprovalSession({
+    ...session,
+    payload,
+    payload_hash: payloadHash,
+    stage_records: stageRecords,
+    final_snapshot_files: finalFiles,
+    final_before_files: beforeFilesForReview(root2, finalFiles, session.final_before_files || [])
+  });
+  const candidateRecord = stageRecord(nextSession, activeStage.id);
+  return {
+    ok: true,
+    session: nextSession,
+    activeStage,
+    activeFiles,
+    previousRecord: previousRecord.preview_files.length > 0 ? previousRecord : candidateRecord
+  };
+}
+
+// src/core/application/runtime/approval-request.ts
+var import_node_crypto6 = __toESM(require("node:crypto"));
+var import_node_path37 = __toESM(require("node:path"));
+var CONTROL_KEYS = /* @__PURE__ */ new Set([
+  "execute",
+  "approvalComplete",
+  "approval_complete",
+  "approvalCancel",
+  "approval_cancel",
+  "approvalStage",
+  "approval_stage",
+  "approvedStages",
+  "approved_stages",
+  "approvalSessionId",
+  "approval_session_id",
+  "responseMode",
+  "response_mode",
+  "detail",
+  "compact",
+  "skipSync"
+]);
+var PAYLOAD_ALIAS_GROUPS = [
+  ["productGuidelines", "product_guidelines"],
+  ["techStack", "tech_stack"],
+  ["workflowPolicy", "workflow_policy"],
+  ["styleGuideIds", "style_guide_ids"],
+  ["styleGuides", "style_guides"],
+  ["proposedContext", "proposed_context"]
+];
+var PROPOSED_CONTEXT_ALIAS_GROUPS = [
+  ["productGuidelines", "product_guidelines"],
+  ["techStack", "tech_stack"],
+  ["workflowPolicy", "workflow_policy"],
+  ["repositoryTopology", "repository_topology"]
+];
+var APPROVAL_INPUT_ERROR = "_cadreApprovalInputError";
+function rawArgs3(args) {
+  return args;
+}
+function stableJson2(value) {
+  if (value === void 0) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson2).join(",")}]`;
+  const record = value;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson2(record[key])}`).join(",")}}`;
+}
+function sha(value) {
+  return import_node_crypto6.default.createHash("sha256").update(value).digest("hex");
+}
+function approvalComplete(args = {}) {
+  const raw = rawArgs3(args);
+  return raw.approvalComplete === true || raw.approval_complete === true;
+}
+function approvedStageIds(args = {}) {
+  const raw = rawArgs3(args);
+  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages)));
+}
+function requestedApprovalStage(args = {}) {
+  const raw = rawArgs3(args);
+  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
+}
+function requestedApprovalSessionId(args = {}) {
+  const raw = rawArgs3(args);
+  return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
+}
+function hasApprovalIntent(args) {
+  const raw = rawArgs3(args);
+  return approvedStageIds(args).length > 0 || approvalComplete(args) || raw.approvalStage !== void 0 || raw.approval_stage !== void 0 || raw.approvalCancel === true || raw.approval_cancel === true;
+}
+function approvalCancelRequested(args) {
+  const raw = rawArgs3(args);
+  return raw.approvalCancel === true || raw.approval_cancel === true;
+}
+function controlPayload(args) {
+  const controls = {};
+  for (const [key, value] of Object.entries(rawArgs3(args))) {
+    if (CONTROL_KEYS.has(key)) controls[key] = value;
+  }
+  return controls;
+}
+function canonicalAliases(value, groups) {
+  const canonical = { ...value };
+  for (const aliases of groups) {
+    const canonicalKey = aliases[0];
+    if (!canonicalKey) continue;
+    const selected = aliases.find((key) => canonical[key] !== void 0);
+    if (!selected) continue;
+    const selectedValue = canonical[selected];
+    for (const alias of aliases) delete canonical[alias];
+    canonical[canonicalKey] = selectedValue;
+  }
+  return canonical;
+}
+function canonicalPayload(value) {
+  const canonical = canonicalAliases(value, PAYLOAD_ALIAS_GROUPS);
+  const proposedContext2 = plainObject2(canonical.proposedContext);
+  if (proposedContext2) canonical.proposedContext = canonicalAliases(proposedContext2, PROPOSED_CONTEXT_ALIAS_GROUPS);
+  return canonical;
+}
+function approvalPayload(args) {
+  const payload = {};
+  for (const [key, value] of Object.entries(rawArgs3(args))) {
+    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR) payload[key] = value;
+  }
+  return canonicalPayload(payload);
+}
+function changedApprovalInput(sessionPayload, args) {
+  for (const [key, value] of Object.entries(approvalPayload(args))) {
+    if (stableJson2(sessionPayload[key]) !== stableJson2(value)) return key;
+  }
+  return null;
+}
+function plainObject2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function mergePayload(base, update) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(update)) {
+    const left = plainObject2(merged[key]);
+    const right = plainObject2(value);
+    merged[key] = left && right ? mergePayload(left, right) : value;
+  }
+  return merged;
+}
+function applyApprovalSessionPayload(root2, args = {}, workflow) {
+  const sessionId = requestedApprovalSessionId(args);
+  if (!sessionId) return args;
+  const session = readApprovalSession(root2, sessionId);
+  if (!session || session.workflow !== workflow) return args;
+  if (hasApprovalIntent(args)) {
+    const changedInput = changedApprovalInput(session.payload, args);
+    const controls = controlPayload(args);
+    if (approvalComplete(args) && !controls.approvedStages && !controls.approved_stages) {
+      controls.approvedStages = session.approved_stages;
+    }
+    return {
+      ...session.payload,
+      ...controls,
+      ...changedInput ? { [APPROVAL_INPUT_ERROR]: `Approval packets cannot amend staged input (${changedInput}); update the current stage in a separate call before approving it.` } : {}
+    };
+  }
+  return {
+    ...mergePayload(canonicalPayload(session.payload), approvalPayload(args)),
+    ...controlPayload(args)
+  };
+}
+function approvalPayloadHash(workflow, stages, args, extras) {
+  return sha(stableJson2({
+    workflow,
+    stages: stages.map((stage) => ({
+      id: stage.id,
+      title: stage.title,
+      description: stage.description,
+      documentIds: stage.documentIds,
+      inputKeys: stage.inputKeys || []
+    })),
+    payload: approvalPayload(args),
+    extras
+  }));
+}
+function derivedApprovalSessionId(workflow, root2, payloadHash) {
+  return sha(`${workflow}
+${import_node_path37.default.resolve(root2)}
+${payloadHash}`).slice(0, 24);
+}
+function approvalStageHash(workflow, stage, files, extras) {
+  return sha(stableJson2({ workflow, stage: stage.id, files, extras }));
+}
+
+// src/core/application/runtime/approval-session-transition.ts
+function approvalOrderError(stageIds, approved) {
+  const known = new Set(stageIds);
+  const unknown = approved.find((stage) => !known.has(stage));
+  if (unknown) return `Unknown approval stage: ${unknown}`;
+  for (let index = 0; index < approved.length; index += 1) {
+    if (approved[index] !== stageIds[index]) {
+      return `Approval stages must be approved in order; expected ${stageIds[index]} before ${approved[index]}.`;
+    }
+  }
+  return null;
+}
+function createSession(root2, sessionId, workflow, payloadHash, payload, stages, snapshotFiles) {
+  const beforeFiles = captureApprovalBeforeFiles(root2, snapshotFiles);
+  const session = {
+    session_id: sessionId,
+    workflow,
+    payload_hash: payloadHash,
+    payload,
+    approved_stages: [],
+    ...createStageLedger(stages, snapshotFiles, beforeFiles),
+    snapshot_files: snapshotFiles,
+    before_files: beforeFiles,
+    preview_files: [],
+    intent_to_add_paths: [],
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeApprovalSession(root2, session);
+  return readApprovalSession(root2, sessionId) || session;
+}
+function transitionApprovalSession(root2, args, workflow, sessionId, payloadHash, stages, approved, snapshotFiles) {
+  const stageIds = stages.map((stage) => stage.id);
+  if (stageIds.length === 0) return { session: null, error: null };
+  const orderError = approvalOrderError(stageIds, approved);
+  if (orderError) return { session: readApprovalSession(root2, sessionId), error: orderError };
+  const requestedSession = requestedApprovalSessionId(args);
+  const payload = approvalPayload(args);
+  const approvalIntent = hasApprovalIntent(args);
+  const inputError = asOptionalString(args[APPROVAL_INPUT_ERROR]);
+  if (inputError) return { session: requestedSession ? readApprovalSession(root2, requestedSession) : null, error: inputError };
+  if (!approvalIntent) {
+    if (requestedSession) {
+      const existing2 = readApprovalSession(root2, requestedSession);
+      if (!existing2 || existing2.workflow !== workflow) {
+        return { session: existing2, error: `Approval session was not found for ${workflow}.` };
+      }
+      return { session: existing2, error: null };
+    }
+    const existing = readApprovalSession(root2, sessionId);
+    if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash && existing.preview_files.length > 0) {
+      return { session: existing, error: null };
+    }
+    const superseded = supersedeUnapprovedApprovalSessions(root2, workflow, sessionId, snapshotFiles);
+    if (superseded.ok === false) {
+      return {
+        session: existing,
+        error: asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`
+      };
+    }
+    return { session: createSession(root2, sessionId, workflow, payloadHash, payload, stages, snapshotFiles), error: null };
+  }
+  if (!requestedSession) return { session: null, error: "approvalSessionId is required when approving staged workflow output." };
+  const session = readApprovalSession(root2, requestedSession);
+  if (!session || session.workflow !== workflow) {
+    return { session, error: "Approval session was not found for this workflow; restart staged review." };
+  }
+  if (requestedSession !== sessionId) {
+    return { session, error: "Approval session is stale for the current generated payload; restart staged review from the current stage." };
+  }
+  if (!isStageLedgerSession(session)) {
+    return { session, error: "This approval session predates stage-owned reviews; cancel and restart it before approving." };
+  }
+  if (session.payload_hash !== payloadHash) {
+    return { session, error: "Approval payload changed while recording approval; amend the current stage in a separate call first." };
+  }
+  if (session.stage_order?.length !== stageIds.length || session.stage_order.some((stage, index) => stage !== stageIds[index])) {
+    return { session, error: "Approval stages changed after the session started; cancel and restart the review." };
+  }
+  const previous = session.approved_stages || [];
+  const previousOrderError = approvalOrderError(stageIds, previous);
+  if (previousOrderError) return { session, error: previousOrderError };
+  if (approved.length < previous.length || previous.some((stage, index) => approved[index] !== stage)) {
+    return { session, error: "Approved stages must preserve the current approval session history." };
+  }
+  const delta = approved.slice(previous.length);
+  if (approvalComplete(args)) {
+    if (approved.length !== stageIds.length) {
+      return { session, error: "approvalComplete requires every staged approval to be recorded first." };
+    }
+    if (delta.length > 0) {
+      return { session, error: "Record the final stage approval in a dry-run call before using approvalComplete." };
+    }
+    return { session, error: null };
+  }
+  if (delta.length !== 1) return { session, error: "Approve exactly one new stage per packet call." };
+  const nextExpected = stageIds[previous.length];
+  if (delta[0] !== nextExpected) return { session, error: `Next approval stage must be ${nextExpected}.` };
+  if (requestedApprovalStage(args) !== nextExpected) {
+    return { session, error: `approvalStage is required and must match the newly approved stage ${nextExpected}.` };
+  }
+  const record = stageRecord(session, nextExpected);
+  if (!record) return { session, error: `Approval session is missing stage record: ${nextExpected}` };
+  const previewError = stagePreviewError(record);
+  if (previewError) return { session, error: previewError };
+  const driftError = sessionTargetDriftError(root2, args, session, [...previous, nextExpected]);
+  if (driftError) return { session, error: driftError };
+  const updated = {
+    ...session,
+    approved_stages: approved,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeApprovalSession(root2, updated);
+  return { session: readApprovalSession(root2, sessionId) || updated, error: null };
+}
 
 // src/core/application/runtime/approval-review-validation.ts
 var import_node_fs22 = __toESM(require("node:fs"));
-var import_node_path37 = __toESM(require("node:path"));
-function approvalComplete(args) {
+var import_node_path38 = __toESM(require("node:path"));
+function approvalComplete2(args) {
   const raw = args;
   return raw.approvalComplete === true || raw.approval_complete === true;
 }
@@ -10729,7 +11282,7 @@ function requestedSessionId(args) {
   return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
 }
 function validateApprovedTargetReviewFiles(root2, args = {}) {
-  if (!approvalComplete(args)) return { ok: true, skipped: true, reason: "approval is not complete" };
+  if (!approvalComplete2(args)) return { ok: true, skipped: true, reason: "approval is not complete" };
   const sessionId = requestedSessionId(args);
   if (!sessionId) return { ok: false, stage: "staged_review_drift", error: "approvalSessionId is required to validate target review files" };
   const session = readApprovalSession(root2, sessionId);
@@ -10754,10 +11307,12 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
     };
   }
   if (reviewOutputMode(args) !== "target") {
+    const snapshots = new Map(session.snapshot_files.map((file) => [file.path, file]));
     const driftedBefore = session.before_files.filter((before) => {
-      const target2 = import_node_path37.default.join(root2, before.path);
+      const target2 = import_node_path38.default.join(root2, before.path);
       const current = import_node_fs22.default.existsSync(target2) ? import_node_fs22.default.readFileSync(target2, "utf8") : null;
-      return current !== (before.existed ? before.content : null);
+      const snapshot = snapshots.get(before.path);
+      return current !== (before.existed ? before.content : null) && (snapshot?.missing === true || current !== snapshot?.content);
     }).map((before) => before.path);
     if (driftedBefore.length > 0) {
       return {
@@ -10785,7 +11340,7 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
     const relativePath = asOptionalString(file.path);
     const expectedHash = asOptionalString(file.sha256);
     if (!relativePath || !expectedHash) continue;
-    const target2 = import_node_path37.default.resolve(root2, relativePath);
+    const target2 = import_node_path38.default.resolve(root2, relativePath);
     try {
       const stats = reviewStats2(import_node_fs22.default.readFileSync(target2, "utf8"));
       if (stats.sha256 !== expectedHash) errors.push(`Approved target review file changed after review: ${relativePath}`);
@@ -10794,12 +11349,49 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
       errors.push(`Approved target review file is missing: ${relativePath}`);
     }
   }
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      stage: "staged_review_drift",
+      error: errors[0],
+      errors,
+      files: Array.from(new Set(paths)).sort()
+    };
+  }
+  const finalBefore = new Map((session.final_before_files || []).map((file) => [file.path, file]));
+  const finalFiles = (session.final_snapshot_files || []).filter((file) => file.missing !== true);
+  const finalDrift = finalFiles.find((file) => {
+    const before = finalBefore.get(file.path);
+    if (!before) return true;
+    const target2 = import_node_path38.default.join(root2, file.path);
+    const current = import_node_fs22.default.existsSync(target2) ? import_node_fs22.default.readFileSync(target2, "utf8") : null;
+    return current !== (before.existed ? before.content : null) && current !== file.content;
+  });
+  if (finalDrift) {
+    return {
+      ok: false,
+      stage: "staged_review_drift",
+      error: `Final workflow target changed after staged review began: ${finalDrift.path}`,
+      errors: [`Final workflow target changed after staged review began: ${finalDrift.path}`],
+      files: Array.from(new Set(paths)).sort()
+    };
+  }
+  const finalMutation = writeArtifactFilesAtomic(root2, finalFiles.map((file) => ({ path: file.path, content: file.content })));
+  if (finalMutation.ok === false) {
+    return {
+      ok: false,
+      stage: "staged_review_materialize",
+      error: finalMutation.error,
+      errors: [finalMutation.error || "Unable to materialize final workflow files"],
+      files: Array.from(new Set(paths)).sort()
+    };
+  }
   return {
-    ok: errors.length === 0,
-    stage: errors.length > 0 ? "staged_review_drift" : void 0,
-    error: errors[0],
-    errors,
-    files: Array.from(new Set(paths)).sort()
+    ok: true,
+    errors: [],
+    files: Array.from(/* @__PURE__ */ new Set([...paths, ...finalFiles.map((file) => file.path)])).sort(),
+    materialized_final_files: finalFiles.map((file) => file.path),
+    final_mutation: asJsonObject(finalMutation)
   };
 }
 
@@ -10810,37 +11402,43 @@ function setupApprovalStages(polyrepoRequested) {
       id: "product",
       title: "Product Context",
       description: "Product summary, users, workflows, domain model, invariants, and boundaries.",
-      documentIds: ["product"]
+      documentIds: ["product"],
+      inputKeys: ["product"]
     },
     {
       id: "product_guidelines",
       title: "Product Guidelines",
       description: "Product principles, user promises, trust boundaries, non-goals, decision rules, and review checklist.",
-      documentIds: ["product_guidelines"]
+      documentIds: ["product_guidelines"],
+      inputKeys: ["productGuidelines", "product_guidelines"]
     },
     {
       id: "tech_stack",
       title: "Tech Stack",
       description: "Structured languages, frameworks, package managers, platforms, and project commands.",
-      documentIds: ["tech_stack"]
+      documentIds: ["tech_stack"],
+      inputKeys: ["techStack", "tech_stack"]
     },
     {
       id: "workflow",
       title: "Workflow Policy",
       description: "Development, verification, review, commit, and coordination expectations.",
-      documentIds: ["workflow"]
+      documentIds: ["workflow"],
+      inputKeys: ["workflowPolicy", "workflow_policy"]
     },
     ...polyrepoRequested ? [{
       id: "repos",
       title: "Repository Topology",
       description: "Human-readable repository topology and its canonical JSON.",
-      documentIds: ["repos"]
+      documentIds: ["repos"],
+      inputKeys: ["repos", "topology"]
     }] : [],
     {
       id: "styleguides",
       title: "Style Guides",
       description: "Generated style-guide selection and projections derived from the tech stack.",
-      documentIds: ["styleguides"]
+      documentIds: ["styleguides"],
+      inputKeys: ["styleGuideIds", "style_guide_ids", "styleGuides", "style_guides"]
     }
   ];
 }
@@ -10850,13 +11448,15 @@ function newTrackApprovalStages() {
       id: "spec",
       title: "Track Spec",
       description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
-      documentIds: ["spec"]
+      documentIds: ["spec"],
+      inputKeys: ["spec", "description"]
     },
     {
       id: "plan",
       title: "Track Plan",
       description: "Phases, tasks, dependencies, file claims, and manual verification tasks.",
-      documentIds: ["plan"]
+      documentIds: ["plan"],
+      inputKeys: ["plan"]
     }
   ];
 }
@@ -10866,13 +11466,15 @@ function reviseApprovalStages(hasSpec, hasPlan) {
       id: "spec_changes",
       title: "Spec Changes",
       description: "Revised track requirements, acceptance criteria, and scope.",
-      documentIds: ["spec"]
+      documentIds: ["spec"],
+      inputKeys: ["spec"]
     }] : [],
     ...hasPlan ? [{
       id: "plan_changes",
       title: "Plan Changes",
       description: "Revised phases, tasks, dependencies, and manual verification tasks.",
-      documentIds: ["plan"]
+      documentIds: ["plan"],
+      inputKeys: ["plan"]
     }] : []
   ];
 }
@@ -10883,37 +11485,50 @@ function refreshApprovalStages(levels) {
       id: "product",
       title: "Product Context",
       description: "Evidence-backed product summary, users, workflows, domain model, invariants, and boundaries.",
-      documentIds: ["product"]
+      documentIds: ["product"],
+      inputKeys: ["proposedContext.product", "proposed_context.product"]
     }] : [],
     ...selected.has("product-guidelines") ? [{
       id: "product_guidelines",
       title: "Product Guidelines",
       description: "Evidence-backed product principles, promises, trust boundaries, rules, and review checklist.",
-      documentIds: ["product_guidelines"]
+      documentIds: ["product_guidelines"],
+      inputKeys: ["proposedContext.productGuidelines", "proposedContext.product_guidelines", "proposed_context.productGuidelines", "proposed_context.product_guidelines"]
     }] : [],
     ...selected.has("tech-stack") ? [{
       id: "tech_stack",
       title: "Tech Stack",
       description: "Detected languages, frameworks, runtimes, dependencies, platforms, and commands.",
-      documentIds: ["tech_stack"]
+      documentIds: ["tech_stack"],
+      inputKeys: ["proposedContext.techStack", "proposedContext.tech_stack", "proposed_context.techStack", "proposed_context.tech_stack"]
     }] : [],
     ...selected.has("workflow") ? [{
       id: "workflow",
       title: "Workflow Policy",
       description: "Development, verification, review, commit, and coordination expectations.",
-      documentIds: ["workflow"]
+      documentIds: ["workflow"],
+      inputKeys: ["proposedContext.workflowPolicy", "proposedContext.workflow_policy", "proposed_context.workflowPolicy", "proposed_context.workflow_policy"]
     }] : [],
     ...selected.has("repository-topology") ? [{
       id: "repos",
       title: "Repository Topology",
       description: "Configured repositories, enabled state, default repository, and polyrepo routing.",
-      documentIds: ["repos"]
+      documentIds: ["repos"],
+      inputKeys: [
+        "proposedContext.repositoryTopology",
+        "proposedContext.repository_topology",
+        "proposedContext.repos",
+        "proposed_context.repositoryTopology",
+        "proposed_context.repository_topology",
+        "proposed_context.repos"
+      ]
     }] : [],
     ...selected.has("patterns") ? [{
       id: "patterns",
       title: "Project Patterns",
       description: "Evidence-backed project patterns canonical JSONL and generated projection.",
-      documentIds: ["patterns"]
+      documentIds: ["patterns"],
+      inputKeys: ["proposedContext.patterns", "proposed_context.patterns"]
     }] : []
   ];
 }
@@ -10943,253 +11558,30 @@ function stageApprovalPrompt(workflow, stage, sessionId, files) {
   const projection = files.find((file) => file.reviewRole === "human")?.projectionPath || files.find((file) => file.kind === "markdown")?.path || stage.title;
   return `Approve Cadre ${workflow} document "${stage.id}" after reviewing ${projection}? Reply "approve ${stage.id}" to approve its exact canonical/projection pair for session ${sessionId}.`;
 }
-function rawArgs3(args) {
-  return args;
-}
-function approvalComplete2(args = {}) {
-  const raw = rawArgs3(args);
-  return raw.approvalComplete === true || raw.approval_complete === true;
-}
-function approvedStageIds(args = {}) {
-  const raw = rawArgs3(args);
-  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages)));
-}
-function requestedApprovalStage(args = {}) {
-  const raw = rawArgs3(args);
-  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
-}
-function requestedApprovalSessionId(args = {}) {
-  const raw = rawArgs3(args);
-  return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
-}
 function filesForStage(files, stage) {
   return filesForApprovalStage(files, stage);
 }
-function stableJson(value) {
-  if (value == null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  const record = value;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
-}
-function sha(value) {
-  return import_node_crypto5.default.createHash("sha256").update(value).digest("hex");
-}
-function hasApprovalIntent(args) {
-  const raw = rawArgs3(args);
-  return approvedStageIds(args).length > 0 || approvalComplete2(args) || raw.approvalStage !== void 0 || raw.approval_stage !== void 0 || raw.approvalCancel === true || raw.approval_cancel === true;
-}
-function approvalCancelRequested(args) {
-  const raw = rawArgs3(args);
-  return raw.approvalCancel === true || raw.approval_cancel === true;
-}
-function approvalControlPayload(args) {
-  const raw = rawArgs3(args);
-  const controls = {};
-  for (const key of [
-    "execute",
-    "approvalComplete",
-    "approval_complete",
-    "approvalCancel",
-    "approval_cancel",
-    "approvalStage",
-    "approval_stage",
-    "approvedStages",
-    "approved_stages",
-    "approvalSessionId",
-    "approval_session_id",
-    "reviewBundleDir",
-    "review_bundle_dir",
-    "reviewDir",
-    "review_dir",
-    "reviewOutputMode",
-    "review_output_mode",
-    "responseMode",
-    "response_mode",
-    "detail",
-    "compact"
-  ]) {
-    if (raw[key] !== void 0) controls[key] = raw[key];
-  }
-  return controls;
-}
 function applyStagedApprovalSessionPayload(root2, args = {}, workflow) {
-  if (!hasApprovalIntent(args)) return args;
-  const sessionId = requestedApprovalSessionId(args);
-  if (!sessionId) return args;
-  const session = readApprovalSession(root2, sessionId);
-  if (!session || session.workflow !== workflow) return args;
-  const controls = approvalControlPayload(args);
-  if (approvalComplete2(args) && !controls.approvedStages && !controls.approved_stages) {
-    controls.approvedStages = session.approved_stages;
-  }
-  return {
-    ...session.payload,
-    ...controls
-  };
+  return applyApprovalSessionPayload(root2, args, workflow);
 }
 function stageHash(workflow, stage, files, extras) {
-  return sha(stableJson({
-    workflow,
-    stage: stage.id,
-    files: filesForStage(files, stage).map((file) => ({
-      path: file.path,
-      source: file.source,
-      kind: file.kind,
-      missing: file.missing === true,
-      content: file.content
-    })),
-    extras
-  }));
+  return approvalStageHash(workflow, stage, filesForStage(files, stage).map((file) => ({
+    path: file.path,
+    source: file.source,
+    kind: file.kind,
+    missing: file.missing === true,
+    content: file.content
+  })), extras);
 }
-function approvalPayload(args) {
-  const raw = rawArgs3(args);
-  const ignored = /* @__PURE__ */ new Set([
-    "execute",
-    "approvalComplete",
-    "approval_complete",
-    "approvalCancel",
-    "approval_cancel",
-    "approvalStage",
-    "approval_stage",
-    "approvedStages",
-    "approved_stages",
-    "approvalSessionId",
-    "approval_session_id",
-    "responseMode",
-    "response_mode",
-    "detail",
-    "compact"
-  ]);
-  const payload = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (!ignored.has(key)) payload[key] = value;
-  }
-  return payload;
-}
-function approvalPayloadHash(workflow, stages, args, extras) {
-  return sha(stableJson({
-    workflow,
-    stages: stages.map((stage) => ({
-      id: stage.id,
-      title: stage.title,
-      description: stage.description
-    })),
-    payload: approvalPayload(args),
-    extras
-  }));
-}
-function approvalSessionId(workflow, root2, payloadHash) {
-  return sha(`${workflow}
-${import_node_path38.default.resolve(root2)}
-${payloadHash}`).slice(0, 24);
-}
-function approvalOrderError(stageIds, approved) {
-  const known = new Set(stageIds);
-  const unknown = approved.find((stage) => !known.has(stage));
-  if (unknown) return `Unknown approval stage: ${unknown}`;
-  for (let index = 0; index < approved.length; index += 1) {
-    if (approved[index] !== stageIds[index]) return `Approval stages must be approved in order; expected ${stageIds[index]} before ${approved[index]}.`;
-  }
-  return null;
-}
-function approvalTransitionError(root2, args, workflow, sessionId, payloadHash, stages, approved, snapshotFiles) {
-  const stageIds = stages.map((stage) => stage.id);
-  if (stageIds.length === 0) return null;
-  const orderError = approvalOrderError(stageIds, approved);
-  if (orderError) return orderError;
-  const requestedSession = requestedApprovalSessionId(args);
-  const payload = approvalPayload(args);
-  const approvalIntent = hasApprovalIntent(args);
-  if (!approvalIntent) {
-    const existing = readApprovalSession(root2, sessionId);
-    if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash && existing.preview_files.length > 0) return null;
-    const superseded = supersedeUnapprovedApprovalSessions(root2, workflow, sessionId, snapshotFiles);
-    if (superseded.ok === false) {
-      return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
-    }
-    const beforeFiles = captureApprovalBeforeFiles(root2, snapshotFiles);
-    writeApprovalSession(root2, {
-      session_id: sessionId,
-      workflow,
-      payload_hash: payloadHash,
-      payload,
-      approved_stages: [],
-      ...createStageLedger(stages, snapshotFiles, beforeFiles),
-      snapshot_files: snapshotFiles,
-      before_files: beforeFiles,
-      preview_files: [],
-      intent_to_add_paths: [],
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    return null;
-  }
-  if (!requestedSession) return "approvalSessionId is required when approving staged workflow output.";
-  if (approvalComplete2(args)) {
-    const requested = readApprovalSession(root2, requestedSession);
-    if (requested && requested.workflow === workflow && approved.length === stageIds.length && requested.approved_stages.length === stageIds.length && requested.approved_stages.every((stage, index) => stage === stageIds[index] && approved[index] === stage)) {
-      return null;
-    }
-  }
-  if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
-  const session = readApprovalSession(root2, sessionId);
-  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
-    const beforeFiles = captureApprovalBeforeFiles(root2, snapshotFiles);
-    writeApprovalSession(root2, {
-      session_id: sessionId,
-      workflow,
-      payload_hash: payloadHash,
-      payload,
-      approved_stages: [],
-      ...createStageLedger(stages, snapshotFiles, beforeFiles),
-      snapshot_files: snapshotFiles,
-      before_files: beforeFiles,
-      preview_files: [],
-      intent_to_add_paths: [],
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    return "Approval session was not found for this payload; review the current stage before approving.";
-  }
-  if (session.preview_files.length === 0) return "Approval preview was not materialized; restart staged review before approving.";
-  const previous = session.approved_stages || [];
-  const previousOrderError = approvalOrderError(stageIds, previous);
-  if (previousOrderError) return previousOrderError;
-  if (approved.length < previous.length || previous.some((stage, index) => approved[index] !== stage)) {
-    return "Approved stages must preserve the current approval session history.";
-  }
-  const delta = approved.slice(previous.length);
-  if (approvalComplete2(args)) {
-    if (approved.length !== stageIds.length) return "approvalComplete requires every staged approval to be recorded first.";
-    if (delta.length > 0) return "Record the final stage approval in a dry-run call before using approvalComplete.";
-    return null;
-  }
-  if (delta.length !== 1) return "Approve exactly one new stage per packet call.";
-  const nextExpected = stageIds[previous.length];
-  if (delta[0] !== nextExpected) return `Next approval stage must be ${nextExpected}.`;
-  const requestedStage = requestedApprovalStage(args);
-  if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
-  writeApprovalSession(root2, {
-    ...session,
-    session_id: sessionId,
-    workflow,
-    payload_hash: payloadHash,
-    payload: session.payload || payload,
-    approved_stages: approved,
-    snapshot_files: session.snapshot_files || snapshotFiles,
-    before_files: session.before_files || captureApprovalBeforeFiles(root2, snapshotFiles),
-    preview_files: session.preview_files || [],
-    intent_to_add_paths: session.intent_to_add_paths || [],
-    updated_at: (/* @__PURE__ */ new Date()).toISOString()
-  });
-  return null;
-}
-function approvedPreviewFiles(session, _approvedIds) {
-  return previewFileRecords(session);
+function approvedPreviewFiles(session, approvedIds) {
+  return previewFilesForStages(session, approvedIds).filter((file) => file.missing !== true);
 }
 function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras = {}) {
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
-  const sessionId = approvalSessionId(workflow, root2, payloadHash);
   const requestedSessionId2 = requestedApprovalSessionId(args);
+  const requestedSession = requestedSessionId2 ? readApprovalSession(root2, requestedSessionId2) : null;
+  const sessionId = requestedSession?.workflow === workflow ? requestedSessionId2 : derivedApprovalSessionId(workflow, root2, payloadHash);
   if (approvalCancelRequested(args)) {
     if (!requestedSessionId2) {
       return {
@@ -11220,29 +11612,56 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
       current_review_bundle: null
     };
   }
-  const frozenFiles = requestedSessionId2 ? frozenReviewFiles(root2, requestedSessionId2, reviewFiles2) : reviewFiles2;
-  let approvalError = approvalTransitionError(root2, args, workflow, sessionId, payloadHash, stages, approvedIds, frozenFiles);
-  const effectiveFiles = frozenReviewFiles(root2, sessionId, frozenFiles);
-  const approved = new Set(approvedIds);
-  const pending = stages.filter((stage) => !approved.has(stage.id));
-  const requested = requestedApprovalStage(args);
-  const active = stages.find((stage) => stage.id === requested && !approved.has(stage.id)) || pending[0] || null;
-  const activeFiles = active ? filesForStage(effectiveFiles, active) : [];
-  const stageBundle = active ? workflowReviewBundle(root2, workflow, args, effectiveFiles, {
+  const transition = transitionApprovalSession(root2, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles2);
+  let approvalError = transition.error;
+  let session = transition.session;
+  let active = session ? stages.find((stage) => !session.approved_stages.includes(stage.id)) || null : null;
+  let activeFiles = active && session ? stageRecord(session, active.id)?.snapshot_files || [] : [];
+  let previousRecord = active && session ? stageRecord(session, active.id) : null;
+  let candidateSession;
+  if (!approvalError && session && active) {
+    const driftError = sessionTargetDriftError(root2, args, session, session.approved_stages);
+    const continuation = driftError ? null : prepareApprovalContinuation(
+      root2,
+      session,
+      stages,
+      approvalPayload(args),
+      payloadHash,
+      reviewFiles2
+    );
+    approvalError = driftError || continuation?.error || null;
+    if (continuation?.ok) {
+      candidateSession = continuation.session;
+      active = continuation.activeStage;
+      activeFiles = continuation.activeFiles;
+      previousRecord = continuation.previousRecord;
+    }
+  }
+  const approvedBeforeBundle = new Set(session?.approved_stages || approvedIds);
+  const pendingBeforeBundle = stages.filter((stage) => !approvedBeforeBundle.has(stage.id));
+  const stageBundle = active && !approvalError && candidateSession ? workflowReviewBundle(root2, workflow, args, activeFiles, {
     ...extras,
     approval_stage: active.id,
-    approved_stages: Array.from(approved),
-    pending_stages: pending.map((stage) => stage.id)
-  }) : null;
-  if (active) recordApprovalPreview(root2, sessionId, workflow, payloadHash, asJsonObject(stageBundle));
-  const bundleError = active && !stageBundle ? "Approval preview could not be materialized; review output must remain enabled for staged approval." : asOptionalString(asJsonObject(stageBundle).error);
+    approved_stages: Array.from(approvedBeforeBundle),
+    pending_stages: pendingBeforeBundle.map((stage) => stage.id)
+  }, previousRecord) : null;
+  if (active && candidateSession) {
+    recordApprovalPreview(root2, sessionId, workflow, payloadHash, active.id, stageBundle ? asJsonObject(stageBundle) : null, candidateSession);
+  }
+  const bundleError = active && !approvalError && !stageBundle ? "Approval preview could not be materialized; review output must remain enabled for staged approval." : asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
-  const session = readApprovalSession(root2, sessionId);
-  const approvedFiles = approvedPreviewFiles(session, approvedIds);
+  session = readApprovalSession(root2, sessionId) || session;
+  const authoritativeApprovedIds = session?.approved_stages || approvedIds;
+  const approved = new Set(authoritativeApprovedIds);
+  const pending = stages.filter((stage) => !approved.has(stage.id));
+  active = stages.find((stage) => !approved.has(stage.id)) || null;
+  const effectiveFiles = session?.snapshot_files || reviewFiles2;
+  activeFiles = active ? (session ? stageRecord(session, active.id)?.snapshot_files : null) || filesForStage(effectiveFiles, active) : [];
+  const approvedFiles = approvedPreviewFiles(session, authoritativeApprovedIds);
   const approvedPaths = Array.from(new Set(approvedFiles.map((file) => asOptionalString(file.path)).filter((file) => Boolean(file)))).sort();
-  const complete = approvalComplete2(args);
+  const complete = approvalComplete(args);
   const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, effectiveFiles, extras)]));
-  const validForExecute = !approvalError && complete && approvedIds.length === stages.length;
+  const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
   const manualPrompt = active ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
   return {
     version: 1,
@@ -11250,7 +11669,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
     workflow,
     required: true,
     session_id: sessionId,
-    payload_hash: payloadHash,
+    payload_hash: session?.payload_hash || payloadHash,
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
     explicit_user_approval_required: true,
@@ -15569,7 +15988,7 @@ function workflowSetup(root2, args = {}) {
     before: traceBefore,
     forceEnabled: true,
     allowDirty: true,
-    includeDirtyFiles: [...asStringArray(reviewValidation.files), "cadre/.gitignore"],
+    includeDirtyFiles: Array.from(/* @__PURE__ */ new Set([...written, ...asStringArray(reviewValidation.files), "cadre/.gitignore"])),
     note: {
       event_id: asOptionalString(asJsonObject(setupEvent.event).id) || null,
       topology: polyrepoRequested ? "polyrepo" : "monorepo",
@@ -15831,7 +16250,7 @@ function workflowLand(root2, args = {}) {
 }
 
 // src/core/application/runtime/workflow-skill.ts
-var import_node_crypto6 = __toESM(require("node:crypto"));
+var import_node_crypto7 = __toESM(require("node:crypto"));
 var import_node_fs33 = __toESM(require("node:fs"));
 var import_node_path56 = __toESM(require("node:path"));
 
@@ -16099,7 +16518,7 @@ function readManifest(root2, id) {
   }
 }
 function hashDirectory(directory) {
-  const hash = import_node_crypto6.default.createHash("sha256");
+  const hash = import_node_crypto7.default.createHash("sha256");
   const visit = (current) => {
     if (!import_node_fs33.default.existsSync(current)) {
       hash.update("missing");
@@ -19989,7 +20408,7 @@ function createMcpRuntime(deps) {
 // src/mcp/infrastructure/job-manager.ts
 var import_node_fs42 = __toESM(require("node:fs"));
 var import_node_path69 = __toESM(require("node:path"));
-var import_node_crypto7 = __toESM(require("node:crypto"));
+var import_node_crypto8 = __toESM(require("node:crypto"));
 var import_node_child_process12 = require("node:child_process");
 var JOB_ID_PATTERN = /^job_[a-z0-9-]{1,96}$/i;
 var MAX_JOB_ARTIFACT_BYTES = 2 * 1024 * 1024;
@@ -20069,7 +20488,7 @@ var JobManager = class {
         if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Unsafe Cadre job artifact");
       }
       const relativeArtifactPath = this.artifactPath(job.id);
-      temporaryPath2 = `${artifactPath}.${import_node_crypto7.default.randomUUID()}.tmp`;
+      temporaryPath2 = `${artifactPath}.${import_node_crypto8.default.randomUUID()}.tmp`;
       const noFollow = typeof import_node_fs42.default.constants.O_NOFOLLOW === "number" ? import_node_fs42.default.constants.O_NOFOLLOW : 0;
       descriptor = import_node_fs42.default.openSync(
         temporaryPath2,
@@ -20163,7 +20582,7 @@ var JobManager = class {
   start(type, root2, args = {}) {
     this.cleanup();
     root2 = import_node_fs42.default.realpathSync(root2);
-    const id = `job_${import_node_crypto7.default.randomUUID()}`;
+    const id = `job_${import_node_crypto8.default.randomUUID()}`;
     const runner = currentMcpServerPath();
     if (!runner) throw new Error("Cadre MCP runtime not found for async job runner");
     const proc = (0, import_node_child_process12.spawn)(process.execPath, [runner, "--cadre-job-runner"], {
@@ -20337,14 +20756,14 @@ var LspDaemonClient = class {
 };
 
 // src/mcp/infrastructure/project-source-reader.ts
-var import_node_crypto8 = require("node:crypto");
+var import_node_crypto9 = require("node:crypto");
 var DEFAULT_CAPABILITY_TTL_MS = 5 * 60 * 1e3;
 var MAX_ACTIVE_CAPABILITIES = 1024;
 var PATH_ERROR = "path must identify an existing project-local file";
 var SOURCE_ERROR = "source must be a text file no larger than 128 KiB";
 var CAPABILITY_ERROR = "a valid project-source capability is required";
 function digest(bytes) {
-  return (0, import_node_crypto8.createHash)("sha256").update(bytes).digest("hex");
+  return (0, import_node_crypto9.createHash)("sha256").update(bytes).digest("hex");
 }
 var NodeProjectSourceReader = class {
   constructor(capabilityTtlMs = DEFAULT_CAPABILITY_TTL_MS, now = Date.now) {
@@ -20361,7 +20780,7 @@ var NodeProjectSourceReader = class {
       if (typeof oldest !== "string") break;
       this.capabilities.delete(oldest);
     }
-    const token = (0, import_node_crypto8.randomBytes)(32).toString("base64url");
+    const token = (0, import_node_crypto9.randomBytes)(32).toString("base64url");
     const expiresAt = this.now() + this.capabilityTtlMs;
     this.capabilities.set(token, {
       canonicalRoot: source.canonicalRoot,
