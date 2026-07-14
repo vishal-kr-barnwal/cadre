@@ -3,28 +3,27 @@ import path from "node:path";
 import { asBoolean, asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
+import { appendJsonl, fileExists, writeJson } from "../../infrastructure/runtime/json-store";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
 import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { renderJsonCodeblock } from "./artifact-actions";
 import { beginTrace, commitTrace } from "./commit-trace";
-import type { CoreResult, ReviewFile } from "./contracts";
+import type { CoreResult } from "./contracts";
 import { setupGenerationWarnings } from "./generation-quality";
 import { summarizeLspSetupResult } from "./health-summaries";
-import { setupIntentPrompts } from "./intent-prompts";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
-import { setupNativePrompts } from "./native-prompts";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
-import { appendLspReviewArtifacts, setupReviewArtifacts, setupReviewFiles, setupShouldWriteLsp } from "./review-bundles";
+import { setupShouldWriteLsp } from "./review-bundles";
 import { setupMissingEvidence } from "./setup-evidence";
-import { configuredCiProvider, lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
-import { appendRequiredLine, lspPreviewPayload, machineReviewFile } from "./setup-review-plan";
+import { lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
+import { approvedSetupLspAdded, lspPreviewPayload, machineReviewFile, setupFinalReviewPlan } from "./setup-review-plan";
+import { setupStageReviewFiles } from "./setup-review-files";
+import { setupScopedReviewFiles, setupStageCollection } from "./setup-stage-lifecycle";
 import { renderStyleGuideMarkdown } from "./spec-docs";
 import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { trackIndexPayload } from "./status";
 import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
-import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, templateText, workflowResponseMode, workflowSummary } from "./workflow-response";
+import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
 
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
@@ -43,19 +42,6 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const providerMode = asOptionalString(provider.provider_mode);
   const lspRecommendations = lspSetup(root, { ...args, execute: false });
   const lspWriteRequested = setupShouldWriteLsp(args, lspRecommendations);
-  const hasPreviewLspAdded = Object.prototype.hasOwnProperty.call(rawArgs, "setupPreviewLspAdded")
-    || Object.prototype.hasOwnProperty.call(rawArgs, "setup_preview_lsp_added");
-  const previewLspAdded = hasPreviewLspAdded
-    ? asStringArray(rawArgs.setupPreviewLspAdded || rawArgs.setup_preview_lsp_added)
-    : asStringArray(lspRecommendations.missingFromConfig);
-  const previewStyleGuides = isRecord(rawArgs.setupPreviewStyleGuides || rawArgs.setup_preview_style_guides)
-    ? asJsonObject(rawArgs.setupPreviewStyleGuides || rawArgs.setup_preview_style_guides)
-    : {
-      selected: asStringArray(styleGuides.selected),
-      missing: asStringArray(styleGuides.missing),
-      warnings: asStringArray(styleGuides.warnings),
-    };
-  const approvalArgs = { ...args, setupPreviewLspAdded: previewLspAdded, setupPreviewStyleGuides: previewStyleGuides } as RuntimeArgs;
   const detailMode = workflowResponseMode(args) === "detail";
   const workspaceHealthResult = workspaceHealth(root, { ...args, responseMode: detailMode ? "detail" : "compact" });
   const configOverrides = asJsonObject(rawArgs.config);
@@ -71,80 +57,67 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   const requestedSyncMode = asOptionalString(rawArgs.syncMode || rawArgs.sync_mode || configOverrides.sync_mode);
   const teamSize = Number(rawArgs.teamSize || rawArgs.team_size || 0);
   const syncModeRecommendation = requestedSyncMode || (teamSize >= 2 ? "shared" : "local");
-  const generatedAt = utcNow();
-  const configPayload: JsonObject = {
-    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
-    packet_only: true,
-    sync_mode: syncModeRecommendation,
-    provider_mode: providerMode || "local",
-    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
-    ...(asOptionalString(provider.remote_host) ? { remote_host: asOptionalString(provider.remote_host) } : {}),
-    ...(integrationsPayload ? { integrations: integrationsPayload } : {}),
-    ...configOverrides,
-  };
-  const setupStatePayload: JsonObject = {
-    version: 1,
-    packet_only: true,
-    topology: polyrepoRequested ? "polyrepo" : "monorepo",
-    initialized_at: generatedAt,
-    updated_at: generatedAt,
-  };
-  const trackIndex = trackIndexPayload(root, []);
-  const machineFiles: ReviewFile[] = [
-    machineReviewFile("cadre/.gitignore", "Cadre local-state ignore", "setup:native-state", appendRequiredLine(fileExists(path.join(root, "cadre", ".gitignore")) ? fs.readFileSync(path.join(root, "cadre", ".gitignore"), "utf8") : "", "/local/")),
-    machineReviewFile("cadre/config.json", "Cadre configuration", "setup:config", `${JSON.stringify(configPayload, null, 2)}\n`),
-    machineReviewFile("cadre/setup_state.json", "Cadre setup state", "setup:state", `${JSON.stringify(setupStatePayload, null, 2)}\n`),
-    machineReviewFile("cadre/tracks.json", "Initial track index", "setup:track-index", `${JSON.stringify(trackIndex, null, 2)}\n`),
-  ];
-  if (lspWriteRequested) {
-    machineFiles.push(machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(lspPreviewPayload(root, lspRecommendations, reposPayload), null, 2)}\n`));
-  }
-  const gitattributesNeeded = polyrepoRequested
-    || configPayload.sync_mode === "shared"
-    || rawArgs.writeGitattributes === true
-    || rawArgs.write_gitattributes === true;
-  if (gitattributesNeeded) {
-    const attributesPath = path.join(root, ".gitattributes");
-    machineFiles.push(machineReviewFile(".gitattributes", "Cadre merge attributes", "setup:gitattributes", appendRequiredLine(fileExists(attributesPath) ? fs.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours")));
-  }
-  const ciProvider = configuredCiProvider(root, args) || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
-  if (ciProvider && rawArgs.writeCi !== false && rawArgs.write_ci !== false) {
-    const ciTemplate = polyrepoRequested
-      ? (ciProvider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml")
-      : (ciProvider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml");
-    const ciPath = ciProvider === "github"
-      ? `.github/workflows/${polyrepoRequested ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml"}`
-      : ".gitlab-ci.yml";
-    if (!fileExists(path.join(root, ciPath)) || rawArgs.force === true) {
-      machineFiles.push(machineReviewFile(ciPath, "Cadre CI workflow", `template:${ciTemplate}`, templateText(ciTemplate, "")));
-    }
-  }
-  const providerNeedsConfirmation = provider.requires_confirmation === true && !asOptionalString(rawArgs.providerMode || rawArgs.provider_mode || rawArgs.provider);
-  const missingEvidence = setupMissingEvidence(args);
-  const intentPrompts = setupIntentPrompts(args);
-  const nativePrompts = setupNativePrompts({
+  const stages = setupApprovalStages(polyrepoRequested);
+  const promptContext = {
     provider: asJsonObject(provider),
     syncMode: syncModeRecommendation,
     styleGuides: asJsonObject(styleGuides),
     lspSetup: asJsonObject(lspRecommendations),
     integrations: workspaceHealthResult.integrations,
-    runtimeArgs: args,
-  });
-  const promptCollectionPending = missingEvidence.length > 0 || intentPrompts.length > 0 || nativePrompts.length > 0;
-  const reviewDeferred = providerNeedsConfirmation || promptCollectionPending;
-  const reviewFiles = reviewDeferred ? [] : setupReviewFiles(root, args, styleGuides, polyrepoRequested, machineFiles);
-  const reviewArtifacts = reviewDeferred
-    ? []
-    : appendLspReviewArtifacts(setupReviewArtifacts(reviewFiles, styleGuides), args, lspWriteRequested);
-  const approval = reviewDeferred
-    ? { required: false, valid_for_execute: false, current_stage: null, pending_stages: [], deferred_for_clarification: true }
-    : stagedApprovalState(root, "setup", approvalArgs, setupApprovalStages(polyrepoRequested), reviewFiles, {
-      styleGuides: previewStyleGuides,
+  };
+  const plannedCollection = setupStageCollection(root, args, stages, polyrepoRequested, promptContext);
+  const technicalReady = plannedCollection.cursor.activeStage === "technical" && plannedCollection.activeReady;
+  const previewLspPayload = technicalReady && lspWriteRequested
+    ? lspPreviewPayload(root, lspRecommendations, reposPayload)
+    : null;
+  const technicalMachineFiles = technicalReady && lspWriteRequested && previewLspPayload
+    ? [machineReviewFile("cadre/lsp.json", "LSP configuration", "setup:lsp", `${JSON.stringify(previewLspPayload, null, 2)}\n`)]
+    : [];
+  const currentReviewFiles = plannedCollection.activeReady
+    ? setupStageReviewFiles(root, args, styleGuides, polyrepoRequested, plannedCollection.cursor.activeStage, technicalMachineFiles)
+    : [];
+  const hasFrozenFinalFiles = (plannedCollection.cursor.session?.final_snapshot_files?.length || 0) > 0;
+  const finalPlan = plannedCollection.cursor.activeStage === "workflow"
+    && plannedCollection.activeReady
+    && !hasFrozenFinalFiles
+    ? setupFinalReviewPlan({
+      root,
+      args,
+      polyrepoRequested,
+      providerMode: providerMode || null,
+      providerRemoteHost: asOptionalString(provider.remote_host) || null,
+      integrationsPayload,
+      syncMode: syncModeRecommendation,
+    })
+    : null;
+  const reviewFiles = setupScopedReviewFiles(plannedCollection.cursor, currentReviewFiles, finalPlan?.reviewFiles || []);
+  const requestedSession = asOptionalString(rawArgs.approvalSessionId || rawArgs.approval_session_id);
+  const approvalStarted = Boolean(plannedCollection.cursor.session || requestedSession || plannedCollection.activeReady);
+  const approval = approvalStarted
+    ? stagedApprovalState(root, "setup", args, stages, reviewFiles, {
       final_only_files: ["cadre/events.jsonl"],
-    });
+    }, { allowEmptyActiveStage: true })
+    : {
+      required: true,
+      valid_for_execute: false,
+      current_stage: "product",
+      approved_stages: [],
+      pending_stages: stages.map((stage) => stage.id),
+      deferred_for_clarification: true,
+      session_id: null,
+    };
+  const cancelled = asJsonObject(approval).cancelled === true;
+  const collection = cancelled
+    ? { ...plannedCollection, missingEvidence: [], intentPrompts: [], nativePrompts: [], pending: false }
+    : setupStageCollection(root, args, stages, polyrepoRequested, promptContext);
+  const { missingEvidence, intentPrompts, nativePrompts } = collection;
   const stageReviewBundle = asJsonObject(approval).current_review_bundle;
   const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const approvalError = reviewDeferred ? null : stagedApprovalError(approval);
+  const approvalError = stagedApprovalError(approval);
+  const promptCollectionPending = collection.pending && !approvalError;
+  const visibleMissingEvidence = approvalError ? [] : missingEvidence;
+  const visibleIntentPrompts = approvalError ? [] : intentPrompts;
+  const visibleNativePrompts = approvalError ? [] : nativePrompts;
   const qualityWarnings = setupGenerationWarnings(args as JsonObject);
   const warnings = [
     ...asStringArray(styleGuides.warnings),
@@ -172,29 +145,29 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     styleGuides,
     templates: templateManifest(),
     techStackSummary: techStackSummary(root, args),
-    ...(intentPrompts.length > 0 ? { intent_prompts: intentPrompts } : {}),
-    ...(nativePrompts.length > 0 ? { native_prompts: nativePrompts } : {}),
-    ...(missingEvidence.length > 0 ? { missing_payload: missingEvidence } : {}),
+    ...(visibleIntentPrompts.length > 0 ? { intent_prompts: visibleIntentPrompts } : {}),
+    ...(visibleNativePrompts.length > 0 ? { native_prompts: visibleNativePrompts } : {}),
+    ...(visibleMissingEvidence.length > 0 ? { missing_payload: visibleMissingEvidence } : {}),
     approval,
-    review_artifacts: stageReviewArtifacts || reviewArtifacts,
+    review_artifacts: stageReviewArtifacts || [],
     review_bundle: stageReviewBundle,
     warnings: approvalError ? [...warnings, approvalError] : warnings,
     required_payload: args.execute === true
-      ? ["product", "techStack"]
+      ? ["product", "productGuidelines", "techStack", "workflowPolicy"]
         .concat(provider.requires_confirmation === true ? ["providerMode"] : [])
         .concat(polyrepoRequested && !reposPayload ? ["repos"] : [])
       : [],
     next_actions: [
-      ...(intentPrompts.length > 0 || nativePrompts.length > 0
+      ...(visibleIntentPrompts.length > 0 || visibleNativePrompts.length > 0
         ? ["Answer returned intent_prompts/native_prompts with the client native selector, then call setup again with structured arguments."]
         : []),
-      ...(missingEvidence.length > 0 && intentPrompts.length === 0
-        ? [`Inspect the repository using the selected setup intent, then call setup again with structured evidence for: ${missingEvidence.join(", ")}.`]
+      ...(visibleMissingEvidence.length > 0 && visibleIntentPrompts.length === 0
+        ? [`Inspect the repository using the selected setup intent, then call setup again with structured evidence for: ${visibleMissingEvidence.join(", ")}.`]
         : []),
-      ...(provider.requires_confirmation === true
+      ...(collection.cursor.activeStage === "technical" && provider.requires_confirmation === true
         ? ["Choose providerMode: local, github, or gitlab before setup writes cadre/config.json."]
         : []),
-      ...(!reviewDeferred
+      ...(!cancelled && !approvalError && !promptCollectionPending && collection.cursor.activeStage
         ? ["Approve setup one stage at a time with approvedStages; after every stage is approved, call setup with execute:true and approvalComplete:true."]
         : []),
     ],
@@ -205,7 +178,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
   };
-  if (promptCollectionPending) return result;
+  if (promptCollectionPending && !approvalError) return result;
   if (args.execute !== true && approvalError) {
     return {
       ...result,
@@ -241,6 +214,23 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       error: approvalError || "Staged approval is required before writing setup artifacts",
     };
   }
+  const executionPlan = setupFinalReviewPlan({
+    root,
+    args,
+    polyrepoRequested,
+    providerMode: providerMode || null,
+    providerRemoteHost: asOptionalString(provider.remote_host) || null,
+    integrationsPayload,
+    syncMode: syncModeRecommendation,
+  });
+  const {
+    configPayload,
+    setupStatePayload,
+    trackIndex,
+    gitattributesNeeded,
+    ciProvider,
+    generatedAt,
+  } = executionPlan;
   const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
@@ -351,7 +341,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     ...patternsSeed,
     id: "initial",
     kind: "patterns_seed",
-    recorded_at: utcNow(),
+    recorded_at: generatedAt,
     text: patternsText,
   });
   writeText("patterns.md", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText));
@@ -403,12 +393,13 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     );
   }
   const lspSetupExecution = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
+  const approvedLspAdded = approvedSetupLspAdded(plannedCollection.cursor.session);
   const lspSetupResult = lspWriteRequested
     ? {
       ...lspSetupExecution,
       written: lspSetupExecution.ok !== false,
       added: Array.from(new Set([
-        ...previewLspAdded,
+        ...approvedLspAdded,
         ...asStringArray(lspSetupExecution.added),
       ])),
       preview_materialized: true,

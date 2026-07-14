@@ -2,6 +2,7 @@ import { asOptionalString } from "../../../guards";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
+import { initializeApprovalSessionAncillary } from "./approval-session-ancillary";
 import {
   createStageLedger,
   isStageLedgerSession,
@@ -52,6 +53,7 @@ function createSession(
   snapshotFiles: ReviewFile[],
 ): ApprovalSession {
   const beforeFiles = captureApprovalBeforeFiles(root, snapshotFiles);
+  const ancillary = initializeApprovalSessionAncillary(root, snapshotFiles);
   const session: ApprovalSession = {
     session_id: sessionId,
     workflow,
@@ -63,6 +65,8 @@ function createSession(
     before_files: beforeFiles,
     preview_files: [],
     intent_to_add_paths: [],
+    ancillary_snapshot_files: ancillary.snapshots,
+    ancillary_before_files: ancillary.beforeFiles,
     updated_at: new Date().toISOString(),
   };
   writeApprovalSession(root, session);

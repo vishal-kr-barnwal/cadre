@@ -6,6 +6,7 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
 import { withLock } from "../../infrastructure/runtime/locking";
 import type { CoreResult, ReviewFile } from "./contracts";
+import { approvalRestoreBeforeFiles, approvalRestoreSnapshots } from "./approval-session-ancillary";
 import {
   recordCompleteBundlePreview,
   recordStagePreview,
@@ -207,8 +208,8 @@ export function supersedeUnapprovedApprovalSessions(
     const targets = new Map<string, string>();
     const headExpectations = new Map<string, ReviewHeadExpectation>();
     for (const session of ordered) {
-      const beforeByPath = new Map(session.before_files.map((entry) => [entry.path, entry]));
-      for (const snapshot of session.snapshot_files) {
+      const beforeByPath = new Map(approvalRestoreBeforeFiles(session).map((entry) => [entry.path, entry]));
+      for (const snapshot of approvalRestoreSnapshots(session)) {
         if (snapshot.missing === true) continue;
         const before = beforeByPath.get(snapshot.path);
         const target = safeSessionTarget(root, snapshot.path);
@@ -359,8 +360,9 @@ export function cancelApprovalSession(root: string, sessionId: string, expectedW
       .filter((file) => file.missing !== true)
       .map((file) => asOptionalString(file.path))
       .filter((file): file is string => Boolean(file)));
-    const beforeByPath = new Map(session.before_files.map((before) => [before.path, before]));
-    const nativeIgnore = session.snapshot_files.find((file) => file.path === "cadre/.gitignore" && file.missing !== true);
+    const restoreSnapshots = approvalRestoreSnapshots(session);
+    const beforeByPath = new Map(approvalRestoreBeforeFiles(session).map((before) => [before.path, before]));
+    const nativeIgnore = restoreSnapshots.find((file) => file.path === "cadre/.gitignore" && file.missing !== true);
     const nativeIgnoreBefore = beforeByPath.get("cadre/.gitignore");
     const nativeIgnoreBaseline = nativeIgnoreBefore?.existed ? nativeIgnoreBefore.content : null;
     const nativeIgnoreCurrent = nativeIgnore ? fileContent(path.join(root, nativeIgnore.path)) : null;
@@ -369,7 +371,7 @@ export function cancelApprovalSession(root: string, sessionId: string, expectedW
     }
     const restorePlan = new Map<string, { target: string; before: string | null; preview: string }>();
     const expectations: ReviewHeadExpectation[] = [];
-    for (const snapshot of session.snapshot_files) {
+    for (const snapshot of restoreSnapshots) {
       if (!previewPaths.has(snapshot.path) || snapshot.missing === true) continue;
       const before = beforeByPath.get(snapshot.path);
       const target = safeSessionTarget(root, snapshot.path);

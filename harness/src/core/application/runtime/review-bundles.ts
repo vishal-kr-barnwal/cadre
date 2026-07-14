@@ -2,22 +2,19 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import { fileExists, readJson, safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
-import { renderJsonCodeblock } from "./artifact-actions";
 import { normalizeClaimPath } from "./collision";
 import type { CoreResult, ReviewFile } from "./contracts";
-import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { reviewOutputMode, targetReviewBundle } from "./review-output";
 import type { ApprovalStageRecord } from "./approval-session-model";
-import { renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { humanReviewConfirmed, requestedStyleGuideIds, styleGuideIdsForTechStack, techStackForPacket } from "./tech-stack";
 import { findTrack } from "./track-context";
 import { parsePlanFile } from "./track-schedule";
-import { normalizeProjectDoc, templateJson } from "./workflow-response";
+import { templateJson } from "./workflow-response";
 
 export function reviewStats(text: string): JsonObject {
   const normalized = text.replace(/\n*$/, "\n");
@@ -109,97 +106,6 @@ export function setupShouldWriteLsp(args: RuntimeArgs, lspRecommendations: CoreR
   return Array.isArray(lspRecommendations.recommended) && lspRecommendations.recommended.length > 0;
 }
 
-export function setupReviewFiles(root: string, args: RuntimeArgs, styleGuides: CoreResult, polyrepoRequested: boolean, machineFiles: ReviewFile[] = []): ReviewFile[] {
-  const rawArgs = args as UnknownRecord;
-  const techStack = techStackForPacket(root, args);
-  const techStackProjection = techStack || {};
-  const productJson = normalizeProjectDoc("product", rawArgs.product, "product.json", "Product Context", "Project-Specific Product Notes");
-  const productGuidelinesJson = normalizeProjectDoc(
-    "product_guidelines",
-    rawArgs.productGuidelines || rawArgs.product_guidelines,
-    "product_guidelines.json",
-    "Product Guidelines",
-    "Project-Specific Product Guideline Notes"
-  );
-  const workflowJson = normalizeProjectDoc("workflow", rawArgs.workflowPolicy || rawArgs.workflow_policy, "workflow.json", "Project Workflow", "Project-Specific Workflow Notes");
-  const patternsSeed = templateJson("patterns_seed.json", { id: "initial", kind: "patterns_seed", text: "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n" });
-  const patternsText = asOptionalString(patternsSeed.text) || "# Codebase Patterns\n\nLast refreshed: YYYY-MM-DD\n";
-  const patternsEntry: JsonObject = {
-    ...patternsSeed,
-    id: "initial",
-    kind: "patterns_seed",
-    recorded_at: utcNow(),
-    text: patternsText,
-  };
-  const selectedStyleGuides = asStringArray(styleGuides.selected);
-  const styleGuideIndex: JsonObject = {
-    version: 1,
-    schema: "cadre.styleguide_index.v1",
-    selected: selectedStyleGuides,
-  };
-  const productCanonical = `${JSON.stringify(productJson, null, 2)}\n`;
-  const guidelinesCanonical = `${JSON.stringify(productGuidelinesJson, null, 2)}\n`;
-  const techCanonical = `${JSON.stringify(techStackProjection, null, 2)}\n`;
-  const workflowCanonical = `${JSON.stringify(workflowJson, null, 2)}\n`;
-  const patternsCanonical = `${JSON.stringify(patternsEntry)}\n`;
-  const styleIndexCanonical = `${JSON.stringify(styleGuideIndex, null, 2)}\n`;
-  const files: ReviewFile[] = [
-    ...documentReviewPair("product",
-      jsonReviewFile("cadre/product.json", "Product context canonical", "product", productJson),
-      textReviewFile("cadre/product.md", "Product context", "cadre/product.json", withGeneratedMarker("cadre/product.json", "cadre.product.v1", renderMarkdownDoc(productJson, "Product Context", "cadre/product.json"), { canonicalContent: productCanonical, projection: "cadre/product.md" }))),
-    ...documentReviewPair("product_guidelines",
-      jsonReviewFile("cadre/product_guidelines.json", "Product guidelines canonical", "productGuidelines", productGuidelinesJson),
-      textReviewFile("cadre/product_guidelines.md", "Product guidelines", "cadre/product_guidelines.json", withGeneratedMarker("cadre/product_guidelines.json", "cadre.product_guidelines.v1", renderMarkdownDoc(productGuidelinesJson, "Product Guidelines", "cadre/product_guidelines.json"), { canonicalContent: guidelinesCanonical, projection: "cadre/product_guidelines.md" }))),
-    ...documentReviewPair("tech_stack",
-      jsonReviewFile("cadre/tech-stack.json", "Structured tech stack", "techStack", techStack),
-      textReviewFile("cadre/tech-stack.md", "Tech stack", "cadre/tech-stack.json", withGeneratedMarker("cadre/tech-stack.json", "cadre.tech_stack.v1", renderJsonCodeblock("Tech stack", techStackProjection), { canonicalContent: techCanonical, projection: "cadre/tech-stack.md" }))),
-    ...documentReviewPair("workflow",
-      jsonReviewFile("cadre/workflow.json", "Workflow policy canonical", "workflowPolicy", workflowJson),
-      textReviewFile("cadre/workflow.md", "Workflow policy", "cadre/workflow.json", withGeneratedMarker("cadre/workflow.json", "cadre.workflow.v1", renderMarkdownDoc(workflowJson, "Project Workflow", "cadre/workflow.json"), { canonicalContent: workflowCanonical, projection: "cadre/workflow.md" }))),
-    ...documentReviewPair("patterns",
-      plainReviewFile("cadre/patterns.jsonl", "Project patterns canonical", "template:patterns_seed.json", patternsCanonical),
-      textReviewFile("cadre/patterns.md", "Project patterns", "cadre/patterns.jsonl", withGeneratedMarker("cadre/patterns.jsonl", "cadre.patterns.v1", patternsText, { canonicalContent: patternsCanonical, projection: "cadre/patterns.md" })), undefined, "generated"),
-    ...documentReviewPair("styleguides",
-      jsonReviewFile("cadre/styleguides/index.json", "Style guide catalog canonical", "tech-stack.json/styleGuideIds", styleGuideIndex),
-      textReviewFile("cadre/styleguides/README.md", "Style guide catalog", "cadre/styleguides/index.json", withGeneratedMarker("cadre/styleguides/index.json", "cadre.styleguide_index.v1", renderJsonCodeblock("Style guide catalog", styleGuideIndex), { canonicalContent: styleIndexCanonical, projection: "cadre/styleguides/README.md" })), "styleguides"),
-    ...selectedStyleGuides.flatMap((guideId) => {
-      const guideJson = templateJson(`styleguides/${guideId}.json`, {
-        version: 1,
-        schema: "cadre.styleguide.v1",
-        id: guideId,
-        title: guideId,
-        rules: [],
-        source: "bundled_template",
-      });
-      const canonicalPath = `cadre/styleguides/${guideId}.json`;
-      const projectionPath = `cadre/styleguides/${guideId}.md`;
-      const canonicalContent = `${JSON.stringify(guideJson, null, 2)}\n`;
-      return documentReviewPair("styleguides",
-        jsonReviewFile(canonicalPath, `Code style guide canonical: ${guideId}`, "tech-stack.json/styleGuideIds", guideJson),
-        textReviewFile(
-          projectionPath,
-          `Code style guide: ${guideId}`,
-          `cadre/styleguides/${guideId}.json`,
-          withGeneratedMarker(canonicalPath, "cadre.styleguide.v1", renderStyleGuideMarkdown(guideJson), { canonicalContent, projection: projectionPath })
-        ), "styleguides");
-    }),
-  ];
-  if (polyrepoRequested) {
-    const repos = isRecord(rawArgs.repos) ? asJsonObject(rawArgs.repos) : null;
-    if (repos) {
-      const reposValue = asJsonObject(repos);
-      const canonicalContent = `${JSON.stringify(reposValue, null, 2)}\n`;
-      files.push(...documentReviewPair("repos",
-        jsonReviewFile("cadre/repos.json", "Polyrepo topology canonical", "repos", reposValue),
-        textReviewFile("cadre/repos.md", "Repository topology", "cadre/repos.json", withGeneratedMarker("cadre/repos.json", "cadre.repos.v1", renderJsonCodeblock("Repository topology", reposValue), { canonicalContent, projection: "cadre/repos.md" }))));
-    } else {
-      files.push({ ...jsonReviewFile("cadre/repos.json", "Polyrepo topology canonical", "repos", null), documentId: "repos", reviewRole: "canonical", canonicalPath: "cadre/repos.json", projectionPath: "cadre/repos.md" });
-    }
-  }
-  files.push(...machineFiles);
-  return files;
-}
-
 export function reviewArtifactsFromFiles(reviewFiles: ReviewFile[]): JsonObject[] {
   return reviewFiles.map((file) => ({
       path: file.path,
@@ -214,22 +120,6 @@ export function reviewArtifactsFromFiles(reviewFiles: ReviewFile[]): JsonObject[
       missing: file.missing === true,
       ...reviewStats(file.content),
     }));
-}
-
-export function setupReviewArtifacts(reviewFiles: ReviewFile[], styleGuides: CoreResult): JsonObject[] {
-  const artifacts: JsonObject[] = [
-    ...reviewArtifactsFromFiles(reviewFiles),
-    {
-      path: "cadre/styleguides/*.json",
-      title: "Selected code style guides",
-      kind: "selection",
-      source: "tech-stack.json/styleGuideIds",
-      selected: asStringArray(styleGuides.selected),
-      missing: asStringArray(styleGuides.missing),
-      warnings: asStringArray(styleGuides.warnings),
-    },
-  ];
-  return artifacts;
 }
 
 export function workflowReviewBundle(
@@ -303,16 +193,6 @@ export function workflowReviewBundle(
   };
 }
 
-export function setupReviewBundle(root: string, args: RuntimeArgs, reviewFiles: ReviewFile[], styleGuides: CoreResult): JsonObject | null {
-  return workflowReviewBundle(root, "setup", args, reviewFiles, {
-    styleGuides: {
-      selected: asStringArray(styleGuides.selected),
-      missing: asStringArray(styleGuides.missing),
-      warnings: asStringArray(styleGuides.warnings),
-    },
-  });
-}
-
 export function setupLspReviewArtifacts(args: RuntimeArgs = {}, writeRequested = setupLspWriteRequested(args)): JsonObject[] {
   if (writeRequested) {
     return [
@@ -326,11 +206,6 @@ export function setupLspReviewArtifacts(args: RuntimeArgs = {}, writeRequested =
     ];
   }
   return [];
-}
-
-export function appendLspReviewArtifacts(artifacts: JsonObject[], args: RuntimeArgs = {}, writeRequested = setupLspWriteRequested(args)): JsonObject[] {
-  artifacts.push(...setupLspReviewArtifacts(args, writeRequested));
-  return artifacts;
 }
 
 export function humanReviewState(workflow: string, args: RuntimeArgs, artifacts: JsonObject[], reviewBundle: JsonObject | null = null): JsonObject {

@@ -1,5 +1,6 @@
 import { asJsonObject, isRecord } from "../../../guards";
-import type { RuntimeArgs, UnknownRecord } from "../../../types";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
+import { packagedTemplateJson } from "./packaged-assets";
 
 function meaningfulValue(value: unknown): boolean {
   if (typeof value === "string") return value.trim().length > 0;
@@ -26,6 +27,8 @@ function meaningfulEvidenceText(value: unknown): boolean {
     "unknown",
     "n a",
     "structured product context for agents fill sections from repo evidence and user intent do not leave examples as final content",
+    "structured product rules for implementation and review decisions fill from product context repo evidence and user intent",
+    "structured project workflow policy for cadre agents fill project specific commands and review gates from repo evidence",
   ];
   return !placeholders.some((placeholder) => normalized === placeholder || normalized.startsWith(`${placeholder} `));
 }
@@ -45,6 +48,7 @@ function productSectionHasEvidence(value: unknown): boolean {
     return body.split(/\r?\n/).some((line) => {
       const trimmed = line.replace(/^[-*]\s*/, "").trim();
       if (!trimmed) return false;
+      if (!meaningfulEvidenceText(trimmed)) return false;
       const colon = trimmed.indexOf(":");
       return meaningfulEvidenceText(colon < 0 ? trimmed : trimmed.slice(colon + 1));
     });
@@ -91,6 +95,82 @@ function meaningfulTechStack(value: unknown): boolean {
   return false;
 }
 
+function policySectionHasEvidence(value: unknown, templateFilename: string): boolean {
+  if (!Array.isArray(value)) return false;
+  const template = packagedTemplateJson(templateFilename);
+  const templateSections: JsonObject[] = Array.isArray(template?.sections)
+    ? template.sections.map(asJsonObject)
+    : [];
+  const templateLinesById = new Map<string, Set<string>>(templateSections.map((section) => [
+    String(section.id || ""),
+    new Set(String(section.body || "").split(/\r?\n/).map(normalizedText).filter(Boolean)),
+  ]));
+  return value.map(asJsonObject).some((section) => {
+    if (meaningfulEvidenceValue(section.content || section.text)) return true;
+    const body = typeof section.body === "string" ? section.body : "";
+    const templateLines = templateLinesById.get(String(section.id || "")) || new Set<string>();
+    return body.split(/\r?\n/).some((line) => {
+      const text = line.replace(/^[-*]\s*/, "").trim();
+      if (!text) return false;
+      if (templateLines.has(normalizedText(line))) return false;
+      if (!meaningfulEvidenceText(text)) return false;
+      const colon = text.indexOf(":");
+      return meaningfulEvidenceText(colon < 0 ? text : text.slice(colon + 1));
+    });
+  });
+}
+
+function meaningfulPolicy(value: unknown, fields: string[], templateFilename: string): boolean {
+  if (!isRecord(value)) return false;
+  const policy = asJsonObject(value);
+  if ([policy.summary, policy.description, policy.notes].some(meaningfulEvidenceText)) return true;
+  if (fields.some((field) => meaningfulEvidenceValue(policy[field]))) return true;
+  return policySectionHasEvidence(policy.sections, templateFilename);
+}
+
+function meaningfulProductGuidelines(value: unknown): boolean {
+  return meaningfulPolicy(value, [
+    "principles", "userPromises", "user_promises", "promises", "qualityBar", "quality_bar",
+    "trustAndSafety", "trust_and_safety", "safety", "boundaries", "rules", "domainRules",
+    "domain_rules", "workflowRules", "workflow_rules", "stateMachines", "state_machines",
+    "concurrencyRules", "concurrency_rules", "dataOwnership", "data_ownership", "dataStores",
+    "data_stores", "contracts", "schemaFiles", "schema_files", "nonGoals", "non_goals",
+    "decisionRules", "decision_rules", "reviewChecklist", "review_checklist", "reviewFocus",
+    "review_focus",
+  ], "product_guidelines.json");
+}
+
+function meaningfulWorkflowPolicy(value: unknown): boolean {
+  return meaningfulPolicy(value, [
+    "principles", "providerMode", "provider_mode", "taskLifecycle", "task_lifecycle", "commands",
+    "completeTaskPolicy", "complete_task_policy", "commitPolicy", "commit_policy", "branchPolicy",
+    "branch_policy", "topology", "repos", "repoCommands", "repo_commands", "testCommand",
+    "test_command", "preferredTestCommand", "preferred_test_command", "coverageCommand",
+    "coverage_command", "reviewFocus", "review_focus", "qualityBar", "quality_bar", "reviewGate",
+    "review_gate", "phaseCompletion", "phase_completion", "manualVerification", "manual_verification",
+    "coveragePolicy", "coverage_policy", "formatCommand", "format_command", "buildCommand",
+    "build_command", "developmentCommands", "development_commands",
+  ], "workflow.json");
+}
+
+export type SetupEvidenceStage = "product" | "product_guidelines" | "technical" | "workflow";
+
+function meaningfulRepos(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const repos = asJsonObject(value);
+  if (repos.mode !== "polyrepo" || !Array.isArray(repos.repos) || repos.repos.length === 0) return false;
+  const meaningfulRepoText = (entry: unknown): boolean => typeof entry === "string"
+    && meaningfulEvidenceText(entry)
+    && !/(?:^|[^a-z])replace(?:_|[^a-z]|$)|example\.com|your[-_/ ]?(?:org|repo|project)/i.test(entry);
+  const enabled = repos.repos.map(asJsonObject).filter((repo) => repo.enabled !== false);
+  if (enabled.length === 0 || !enabled.every((repo) => (
+    meaningfulRepoText(repo.name)
+    && [repo.submodule_path, repo.path, repo.url].some(meaningfulRepoText)
+  ))) return false;
+  const defaultRepo = typeof repos.default_repo === "string" ? repos.default_repo : null;
+  return !defaultRepo || (meaningfulRepoText(defaultRepo) && enabled.some((repo) => repo.name === defaultRepo));
+}
+
 export function setupIntentStrategyAnswered(args: RuntimeArgs, kind: "product" | "techStack"): boolean {
   const raw = args as UnknownRecord;
   const intent = asJsonObject(raw.intent);
@@ -108,6 +188,25 @@ export function setupMissingEvidence(args: RuntimeArgs = {}): string[] {
   const raw = args as UnknownRecord;
   return [
     ...(!meaningfulProduct(raw.product) ? ["product"] : []),
+    ...(!meaningfulProductGuidelines(raw.productGuidelines ?? raw.product_guidelines) ? ["productGuidelines"] : []),
     ...(!meaningfulTechStack(raw.techStack ?? raw.tech_stack) ? ["techStack"] : []),
+    ...(!meaningfulWorkflowPolicy(raw.workflowPolicy ?? raw.workflow_policy) ? ["workflowPolicy"] : []),
+  ];
+}
+
+export function setupStageMissingEvidence(
+  args: RuntimeArgs,
+  stage: SetupEvidenceStage | null,
+  polyrepoRequested = false,
+): string[] {
+  if (!stage) return [];
+  const missing = new Set(setupMissingEvidence(args));
+  if (stage === "product") return missing.has("product") ? ["product"] : [];
+  if (stage === "product_guidelines") return missing.has("productGuidelines") ? ["productGuidelines"] : [];
+  if (stage === "workflow") return missing.has("workflowPolicy") ? ["workflowPolicy"] : [];
+  const raw = args as UnknownRecord;
+  return [
+    ...(missing.has("techStack") ? ["techStack"] : []),
+    ...(polyrepoRequested && !meaningfulRepos(raw.repos) ? ["repos"] : []),
   ];
 }

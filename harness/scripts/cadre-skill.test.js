@@ -32,15 +32,24 @@ function project() {
 }
 
 function approvePreviewAndExecute(root, input, preview) {
+  if (preview.approval?.required !== true) {
+    return core.workflowPacket(root, { workflow: "skill", ...input, execute: true });
+  }
   let result = preview;
   const session = preview.approval.session_id;
-  const approved = [];
-  for (const stage of preview.approval.stages) {
-    approved.push(stage.id);
-    result = core.workflowPacket(root, { workflow: "skill", ...input, approvalSessionId: session, approvalStage: stage.id, approvedStages: [...approved] });
+  for (let attempt = 0; result.approval.current_stage && attempt < 10; attempt += 1) {
+    const stage = result.approval.current_stage;
+    const approved = [...(result.approval.approved_stages || []), stage];
+    result = core.workflowPacket(root, { workflow: "skill", approvalSessionId: session, approvalStage: stage, approvedStages: approved });
     assert.equal(result.ok, true, result.error);
   }
-  return core.workflowPacket(root, { workflow: "skill", ...input, execute: true, approvalComplete: true, approvalSessionId: session, approvedStages: approved });
+  return core.workflowPacket(root, {
+    workflow: "skill",
+    execute: true,
+    approvalComplete: true,
+    approvalSessionId: session,
+    approvedStages: result.approval.approved_stages,
+  });
 }
 
 function approveAndExecute(root, input) {
@@ -127,6 +136,15 @@ test("skill review defaults to target mode while explicit bundle mode stays non-
     assert.equal(target.approval.current_document.id, "skill");
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "skill.json")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "SKILL.md")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md")), false);
+    const references = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: target.approval.session_id,
+      approvalStage: "skill",
+      approvedStages: ["skill"],
+    });
+    assert.equal(references.ok, true, references.error);
+    assert.equal(references.approval.current_stage, "references");
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md")), true);
     const targetCancel = core.workflowPacket(root, { workflow: "skill", approvalSessionId: target.approval.session_id, approvalCancel: true });
     assert.equal(targetCancel.approval.cancelled, true);
@@ -159,8 +177,17 @@ test("changed skill create and update retries replace previews from their origin
     assert.notEqual(replacementCreate.approval.session_id, firstCreate.approval.session_id);
     assert.equal(fs.existsSync(firstCreateSession), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "skill.json"), "utf8")).description, "Replacement UI guidance");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md")), false);
+    const replacementReferences = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: replacementCreate.approval.session_id,
+      approvalStage: "skill",
+      approvedStages: ["skill"],
+    });
+    assert.equal(replacementReferences.ok, true, replacementReferences.error);
+    assert.equal(replacementReferences.approval.current_stage, "references");
     assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md"), "utf8"), "# Guide\n\nUse accessible controls.\n");
-    const created = approvePreviewAndExecute(root, replacementCreateInput, replacementCreate);
+    const created = approvePreviewAndExecute(root, replacementCreateInput, replacementReferences);
     assert.equal(created.ok, true, created.error);
 
     const firstUpdateInput = {

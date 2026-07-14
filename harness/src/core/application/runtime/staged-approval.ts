@@ -23,6 +23,7 @@ import {
   cancelApprovalSession,
   readApprovalSession,
   recordApprovalPreview,
+  writeApprovalSession,
   type ApprovalSession,
 } from "./approval-session-store";
 import type { ApprovalStage } from "./staged-approval-stages";
@@ -38,13 +39,15 @@ export {
 } from "./staged-approval-stages";
 
 function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string, files: ReviewFile[]): string {
-  const projection = files.find((file) => file.reviewRole === "human")?.projectionPath
-    || files.find((file) => file.kind === "markdown")?.path
-    || stage.title;
-  return `Approve Cadre ${workflow} document "${stage.id}" after reviewing ${projection}? Reply "approve ${stage.id}" to approve its exact canonical/projection pair for session ${sessionId}.`;
+  const paths = files.map((file) => file.path).join(", ") || stage.title;
+  return `Approve Cadre ${workflow} stage "${stage.id}" as one atomic review set after reviewing: ${paths}? Reply "approve ${stage.id}" to approve this exact ${files.length}-file set for session ${sessionId}.`;
 }
 
 export { approvalComplete, approvedStageIds, requestedApprovalSessionId, requestedApprovalStage } from "./approval-request";
+
+export interface StagedApprovalOptions {
+  allowEmptyActiveStage?: boolean;
+}
 
 function filesForStage(files: ReviewFile[], stage: ApprovalStage): ReviewFile[] {
   return filesForApprovalStage(files, stage);
@@ -74,7 +77,8 @@ export function stagedApprovalState(
   args: RuntimeArgs,
   stages: ApprovalStage[],
   reviewFiles: ReviewFile[],
-  extras: JsonObject = {}
+  extras: JsonObject = {},
+  options: StagedApprovalOptions = {},
 ): JsonObject {
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
@@ -131,6 +135,7 @@ export function stagedApprovalState(
       approvalPayload(args),
       payloadHash,
       reviewFiles,
+      options,
     );
     approvalError = driftError || continuation?.error || null;
     if (continuation?.ok) {
@@ -142,7 +147,7 @@ export function stagedApprovalState(
   }
   const approvedBeforeBundle = new Set(session?.approved_stages || approvedIds);
   const pendingBeforeBundle = stages.filter((stage) => !approvedBeforeBundle.has(stage.id));
-  const stageBundle = active && !approvalError && candidateSession
+  const stageBundle = active && activeFiles.length > 0 && !approvalError && candidateSession
     ? workflowReviewBundle(root, workflow, args, activeFiles, {
       ...extras,
       approval_stage: active.id,
@@ -150,10 +155,12 @@ export function stagedApprovalState(
       pending_stages: pendingBeforeBundle.map((stage) => stage.id),
     }, previousRecord)
     : null;
-  if (active && candidateSession) {
-    recordApprovalPreview(root, sessionId, workflow, payloadHash, active.id, stageBundle ? asJsonObject(stageBundle) : null, candidateSession);
+  if (active && candidateSession && stageBundle) {
+    recordApprovalPreview(root, sessionId, workflow, payloadHash, active.id, asJsonObject(stageBundle), candidateSession);
+  } else if (active && candidateSession && options.allowEmptyActiveStage && activeFiles.length === 0 && !approvalError) {
+    writeApprovalSession(root, { ...candidateSession, updated_at: new Date().toISOString() });
   }
-  const bundleError = active && !approvalError && !stageBundle
+  const bundleError = active && activeFiles.length > 0 && !approvalError && !stageBundle
     ? "Approval preview could not be materialized; review output must remain enabled for staged approval."
     : asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
@@ -169,9 +176,10 @@ export function stagedApprovalState(
   const approvedFiles = approvedPreviewFiles(session, authoritativeApprovedIds);
   const approvedPaths = Array.from(new Set(approvedFiles.map((file) => asOptionalString(file.path)).filter((file): file is string => Boolean(file)))).sort();
   const complete = approvalComplete(args);
+  const deferredForClarification = Boolean(active && activeFiles.length === 0 && options.allowEmptyActiveStage && !approvalError);
   const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, effectiveFiles, extras)]));
   const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
-  const manualPrompt = active ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
+  const manualPrompt = active && !deferredForClarification ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
   return {
     version: 1,
     kind: "cadre.staged_approval.v1",
@@ -182,10 +190,14 @@ export function stagedApprovalState(
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
     explicit_user_approval_required: true,
-    manual_approval_required: true,
+    manual_approval_required: !deferredForClarification,
     manual_approval_prompt: manualPrompt,
+    deferred_for_clarification: deferredForClarification,
+    resume_without_approval: deferredForClarification ? { approval: { session_id: sessionId } } : null,
     approval_instruction: active
-      ? `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.`
+      ? deferredForClarification
+        ? `Collect only the missing ${active.id} input, then resume session ${sessionId} without recording approval.`
+        : `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.`
       : "Ask the user for explicit staged approval before sending any staged approval packet.",
     not_approval: [
       "Agent review is not approval.",
@@ -237,7 +249,9 @@ export function stagedApprovalState(
       ? approvalError
         ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."]
         : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`]
-      : active
+      : active && deferredForClarification
+        ? [`Resume ${workflow} with approval.session_id:${sessionId} after collecting only the missing ${active.id} input; this continuation is not approval.`]
+        : active
         ? [
           `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,
           `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,

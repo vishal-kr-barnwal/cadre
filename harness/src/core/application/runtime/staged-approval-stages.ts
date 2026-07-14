@@ -14,7 +14,10 @@ export function setupApprovalStages(polyrepoRequested: boolean): ApprovalStage[]
       title: "Product Context",
       description: "Product summary, users, workflows, domain model, invariants, and boundaries.",
       documentIds: ["product"],
-      inputKeys: ["product"],
+      inputKeys: [
+        "product", "intent.product", "intent.productOther", "intent.productIntent", "intent.productSummary",
+        "productOther", "productIntent", "productSummary",
+      ],
     },
     {
       id: "product_guidelines",
@@ -31,10 +34,11 @@ export function setupApprovalStages(polyrepoRequested: boolean): ApprovalStage[]
       fileMatches: ["cadre/lsp.json"],
       inputKeys: [
         "techStack", "tech_stack",
+        "intent.techStack", "intent.techStackOther", "intent.techStackIntent", "intent.techStackSummary",
+        "techStackOther", "techStackIntent", "techStackSummary",
         "styleGuideIds", "style_guide_ids", "styleGuides", "style_guides",
-        "setupPreviewStyleGuides", "setup_preview_style_guides",
         "writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp",
-        "setupPreviewLspAdded", "setup_preview_lsp_added", "lspSetupOther",
+        "lspSetupOther",
         "providerMode", "provider_mode", "provider", "providerModeOther",
         "syncMode", "sync_mode", "syncModeOther", "teamSize", "team_size",
         "integrations", "config",

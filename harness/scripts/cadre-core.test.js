@@ -352,23 +352,63 @@ function gitNote(root, sha) {
   return JSON.parse(git(root, ["notes", "--ref", "refs/notes/cadre", "show", sha]).stdout);
 }
 
-function resolveSetupPrompts(root, args) {
+function withSetupTestEvidence(args) {
   const resolved = JSON.parse(JSON.stringify(args));
+  if (resolved.productGuidelines == null && resolved.product_guidelines == null) {
+    resolved.productGuidelines = {
+      title: "Product Guidelines",
+      summary: "Preserve explicit user intent, evidence, and safe review boundaries.",
+    };
+  }
+  if (resolved.workflowPolicy == null && resolved.workflow_policy == null) {
+    resolved.workflowPolicy = {
+      title: "Project Workflow",
+      summary: "Review each Cadre stage explicitly and run focused validation before completion.",
+    };
+  }
+  return resolved;
+}
+
+function applyRecommendedSetupPromptAnswers(target, prompts) {
+  for (const prompt of prompts) {
+    const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
+    if (prompt.id === "setup-provider-mode") target.providerMode = recommended[0] || "local";
+    else if (prompt.id === "setup-sync-mode") target.syncMode = recommended[0] || "local";
+    else if (prompt.id === "setup-style-guides") target.styleGuideIds = recommended;
+    else if (prompt.id === "setup-lsp") target.writeLsp = recommended[0] !== "skip-lsp";
+    else if (prompt.id === "setup-optional-mcps") target.integrations = {};
+    else assert.fail(`setup test payload left unresolved prompt ${prompt.id}`);
+  }
+}
+
+function resolveSetupPrompts(root, args) {
+  const resolved = withSetupTestEvidence(args);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const preview = core.workflowPacket(root, resolved);
-    assert.deepEqual(preview.intent_prompts || [], [], "setup test payload must include product and tech-stack intent");
+    assert.deepEqual(preview.intent_prompts || [], [], "setup test payload must include current-stage evidence");
     const prompts = preview.native_prompts || [];
     if (prompts.length === 0) return { args: resolved, preview };
-    for (const prompt of prompts) {
-      const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
-      if (prompt.id === "setup-provider-mode") resolved.providerMode = recommended[0] || "local";
-      else if (prompt.id === "setup-sync-mode") resolved.syncMode = recommended[0] || "local";
-      else if (prompt.id === "setup-style-guides") resolved.styleGuideIds = recommended;
-      else if (prompt.id === "setup-lsp") resolved.writeLsp = recommended[0] !== "skip-lsp";
-      else if (prompt.id === "setup-optional-mcps") resolved.integrations = {};
-    }
+    applyRecommendedSetupPromptAnswers(resolved, prompts);
   }
   assert.fail("setup native prompts did not resolve after explicit test answers");
+}
+
+function advanceSetupToTechnical(root, args) {
+  const base = withSetupTestEvidence({ ...args, workflow: "setup", execute: false });
+  delete base.approvalComplete;
+  delete base.approval_complete;
+  let preview = core.workflowPacket(root, base);
+  for (const stage of ["product", "product_guidelines"]) {
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.approval.current_stage, stage);
+    preview = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: stage,
+      approvedStages: [...(preview.approval.approved_stages || []), stage],
+    });
+  }
+  return preview;
 }
 
 function approveWorkflow(root, args) {
@@ -382,36 +422,57 @@ function approveWorkflow(root, args) {
   delete base.approval_stage;
   delete base.approvalSessionId;
   delete base.approval_session_id;
-  let preview;
-  if (base.workflow === "setup") {
-    const resolved = resolveSetupPrompts(root, base);
-    base = resolved.args;
-    preview = resolved.preview;
-  } else {
-    preview = core.workflowPacket(root, base);
-  }
-  assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.errors || preview.warnings || {}));
-  const approval = preview.approval;
-  if (!approval || approval.required !== true) return core.workflowPacket(root, { ...clone(base), ...clone(args), execute: true });
-  const approved = [];
-  for (const stage of approval.stages || []) {
-    approved.push(stage.id);
-    preview = core.workflowPacket(root, {
-      ...clone(base),
-      approvalSessionId: approval.session_id,
-      approvalStage: stage.id,
+  const responseControls = Object.fromEntries(
+    ["responseMode", "response_mode", "detail", "compact"]
+      .filter((key) => base[key] !== undefined)
+      .map((key) => [key, base[key]]),
+  );
+  if (base.workflow === "setup") base = withSetupTestEvidence(base);
+  let preview = core.workflowPacket(root, base);
+  let sessionId = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.errors || preview.warnings || {}));
+    const approval = preview.approval || {};
+    sessionId = approval.session_id || sessionId;
+    const intentPrompts = preview.intent_prompts || [];
+    if (intentPrompts.length > 0) assert.fail(`setup test payload left unresolved intent prompt ${intentPrompts[0].id}`);
+    const nativePrompts = preview.native_prompts || [];
+    if (nativePrompts.length > 0) {
+      assert.equal(base.workflow, "setup", `unexpected native prompt for ${base.workflow}`);
+      const answers = {};
+      applyRecommendedSetupPromptAnswers(answers, nativePrompts);
+      Object.assign(base, answers);
+      preview = core.workflowPacket(root, {
+        workflow: "setup",
+        ...responseControls,
+        ...(sessionId ? { approvalSessionId: sessionId } : {}),
+        ...answers,
+      });
+      continue;
+    }
+    if (approval.required !== true) return core.workflowPacket(root, { ...clone(base), ...clone(args), execute: true });
+    if (approval.current_stage) {
+      const approved = [...(approval.approved_stages || []), approval.current_stage];
+      preview = core.workflowPacket(root, {
+        workflow: base.workflow,
+        ...responseControls,
+        approvalSessionId: sessionId,
+        approvalStage: approval.current_stage,
+        approvedStages: approved,
+      });
+      continue;
+    }
+    const approved = approval.approved_stages || [];
+    return core.workflowPacket(root, {
+      workflow: base.workflow,
+      ...responseControls,
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
       approvedStages: approved,
     });
-    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.approval || {}));
   }
-  return core.workflowPacket(root, {
-    ...clone(base),
-    ...clone(args),
-    execute: true,
-    approvalComplete: true,
-    approvalSessionId: approval.session_id,
-    approvedStages: approved,
-  });
+  assert.fail(`approval loop did not complete for ${base.workflow}`);
 }
 
 function setupTraceableProject(root) {
@@ -1862,12 +1923,15 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.deepEqual(approvedMinimal.approval.approved_stages, ["product"]);
     const guidelinesManifest = readJson(approvedMinimal.review_bundle.manifest_path);
     assert.deepEqual(guidelinesManifest.files.map((file) => file.path).sort(), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
-    const persistedSession = readJson(path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`));
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`);
+    const persistedSession = readJson(sessionFile);
     assert.equal(persistedSession.schema_version, 2);
     assert.deepEqual(persistedSession.stage_order, ["product", "product_guidelines", "technical", "workflow"]);
     assert.equal(persistedSession.stage_records.product.status, "approved");
     assert.equal(persistedSession.stage_records.product_guidelines.status, "previewed");
-    assert.ok(persistedSession.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
+    assert.deepEqual(persistedSession.stage_records.technical.snapshot_files, []);
+    assert.deepEqual(persistedSession.stage_records.workflow.snapshot_files, []);
+    assert.deepEqual(persistedSession.final_snapshot_files, []);
 
     const approvedWithAccidentalPayload = core.workflowPacket(root, {
       workflow: "setup",
@@ -1901,6 +1965,46 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       "cadre/tech-stack.json",
       "cadre/tech-stack.md",
     ]);
+    const technicalSession = readJson(sessionFile);
+    assert.deepEqual(technicalSession.final_snapshot_files, []);
+
+    const technicalApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "technical",
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(technicalApproved.ok, true, technicalApproved.error);
+    assert.equal(technicalApproved.approval.current_stage, "workflow");
+    const workflowManifest = readJson(technicalApproved.review_bundle.manifest_path);
+    assert.deepEqual(workflowManifest.files.map((file) => file.path).sort(), ["cadre/workflow.json", "cadre/workflow.md"]);
+    const workflowSession = readJson(sessionFile);
+    assert.ok(workflowSession.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
+    assert.ok(workflowSession.final_snapshot_files.some((file) => file.path === "cadre/patterns.jsonl"));
+
+    const workflowApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "workflow",
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(workflowApproved.ok, true, workflowApproved.error);
+    assert.equal(workflowApproved.approval.current_stage, null);
+    assert.deepEqual(workflowApproved.approval.pending_stages, []);
+    const approvedSession = readJson(sessionFile);
+    const approvedSnapshots = approvedSession.snapshot_files.filter((file) => file.missing !== true);
+    const executed = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    for (const snapshot of approvedSnapshots) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(sessionFile), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1975,20 +2079,40 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     git(root, ["init"]);
     write(path.join(root, "src", "app.ts"), "export const app = true;\n");
 
-    const preview = core.workflowPacket(root, {
+    const args = withSetupTestEvidence({
       workflow: "setup",
       teamSize: 3,
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"], frameworks: ["React"] },
       responseMode: "detail",
     });
+    const productPreview = core.workflowPacket(root, args);
+    assert.equal(productPreview.approval.current_stage, "product");
+    assert.deepEqual(productPreview.native_prompts || [], []);
+    const guidelinePreview = core.workflowPacket(root, {
+      workflow: "setup",
+      responseMode: "detail",
+      approvalSessionId: productPreview.approval.session_id,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(guidelinePreview.approval.current_stage, "product_guidelines");
+    assert.deepEqual(guidelinePreview.native_prompts || [], []);
+    const preview = core.workflowPacket(root, {
+      workflow: "setup",
+      responseMode: "detail",
+      approvalSessionId: productPreview.approval.session_id,
+      approvalStage: "product_guidelines",
+      approvedStages: ["product", "product_guidelines"],
+    });
 
     assert.equal(preview.ok, true);
     assert.equal(preview.phase_state, "awaiting_clarification");
-    assert.equal(preview.approval.required, false);
+    assert.equal(preview.approval.required, true);
+    assert.equal(preview.approval.current_stage, "technical");
+    assert.equal(preview.approval.session_id, productPreview.approval.session_id);
     assert.equal(preview.review_bundle ?? null, null);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "product.md")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
     assert.deepEqual(preview.native_prompts.map((prompt) => prompt.id), [
       "setup-provider-mode",
       "setup-sync-mode",
@@ -2033,9 +2157,8 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
 
     const compact = core.workflowPacket(root, {
       workflow: "setup",
-      teamSize: 3,
-      product: { title: "Product", summary: "Test product" },
-      techStack: { languages: ["TypeScript"], frameworks: ["React"] },
+      approvalSessionId: productPreview.approval.session_id,
+      responseMode: "compact",
     });
     const compactProvider = compact.native_prompts.find((prompt) => prompt.id === "setup-provider-mode");
     assert.equal(compactProvider.selectionMode, "single");
@@ -2059,9 +2182,10 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
     assert.equal(preview.phase_state, "awaiting_clarification");
     assert.equal(preview.stage, "intent_clarification");
     assert.ok(preview.intent_prompts.some((prompt) => prompt.id === "setup-product-intent"));
-    assert.ok(preview.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.deepEqual(preview.native_prompts || [], []);
     assert.match(preview.next_actions[0], /Answer returned intent_prompts\/native_prompts/);
-    assert.equal(preview.approval.required, false);
+    assert.equal(preview.approval.required, true);
+    assert.equal(preview.approval.session_id, null);
     assert.equal(preview.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.md")), false);
@@ -2078,9 +2202,9 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
       techStack: {},
     });
     assert.equal(emptyPayload.phase_state, "awaiting_clarification");
-    assert.deepEqual(emptyPayload.missing_payload, ["product", "techStack"]);
-    assert.deepEqual(emptyPayload.intent_prompts.map((prompt) => prompt.id), ["setup-product-intent", "setup-tech-stack-intent"]);
-    assert.equal(emptyPayload.approval.required, false);
+    assert.deepEqual(emptyPayload.missing_payload, ["product"]);
+    assert.deepEqual(emptyPayload.intent_prompts.map((prompt) => prompt.id), ["setup-product-intent"]);
+    assert.equal(emptyPayload.approval.required, true);
     assert.equal(emptyPayload.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
 
@@ -2094,7 +2218,7 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
       product: { title: "   ", summary: "", users: [] },
       techStack: { languages: [], frameworks: [] },
     });
-    assert.deepEqual(blankPayload.missing_payload, ["product", "techStack"]);
+    assert.deepEqual(blankPayload.missing_payload, ["product"]);
     assert.equal(blankPayload.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
 
@@ -2108,7 +2232,7 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
       product: { title: "Product", summary: "TODO: inspect README" },
       techStack: { summary: "TBD after manifest audit" },
     });
-    assert.deepEqual(placeholderPayload.missing_payload, ["product", "techStack"]);
+    assert.deepEqual(placeholderPayload.missing_payload, ["product"]);
     assert.equal(placeholderPayload.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
 
@@ -2123,8 +2247,8 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
     });
     assert.equal(selectedIntent.phase_state, "awaiting_clarification");
     assert.deepEqual(selectedIntent.intent_prompts, []);
-    assert.deepEqual(selectedIntent.missing_payload, ["product", "techStack"]);
-    assert.match(selectedIntent.next_actions[0], /structured evidence for: product, techStack/);
+    assert.deepEqual(selectedIntent.missing_payload, ["product"]);
+    assert.match(selectedIntent.next_actions[0], /structured evidence for: product/);
     assert.equal(selectedIntent.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
 
@@ -2139,8 +2263,8 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
     });
     assert.equal(packet.decision.kind, "clarification");
     assert.deepEqual(packet.decision.prompts, []);
-    assert.deepEqual(packet.decision.required, ["product", "techStack"]);
-    assert.deepEqual(packet.required, ["product", "techStack"]);
+    assert.deepEqual(packet.decision.required, ["product"]);
+    assert.deepEqual(packet.required, ["product"]);
 
     const evidencePreview = core.workflowPacket(root, {
       workflow: "setup",
@@ -2160,6 +2284,192 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
     assert.equal(evidencePreview.review_bundle.mode, "target");
     assert.equal(readJson(path.join(root, "cadre", "product.json")).title, "Brownfield Product");
     assert.match(fs.readFileSync(path.join(root, "cadre", "product.md"), "utf8"), /# Brownfield Product/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup rejects bundled guideline and workflow scaffolds until same-session evidence replaces them", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-policy-template-evidence-test-"));
+  try {
+    git(root, ["init"]);
+    const productGuidelinesTemplate = readJson(path.join(__dirname, "..", "templates", "product_guidelines.json"));
+    const workflowTemplate = readJson(path.join(__dirname, "..", "templates", "workflow.json"));
+    const productPreview = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Brownfield Product", summary: "Repository-grounded product behavior." },
+      productGuidelines: productGuidelinesTemplate,
+      techStack: { languages: ["TypeScript"] },
+      workflowPolicy: workflowTemplate,
+    });
+    const sessionId = productPreview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const guidelineClarification = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(guidelineClarification.ok, true, guidelineClarification.error);
+    assert.equal(guidelineClarification.phase_state, "awaiting_clarification");
+    assert.equal(guidelineClarification.approval.session_id, sessionId);
+    assert.equal(guidelineClarification.approval.current_stage, "product_guidelines");
+    assert.deepEqual(guidelineClarification.missing_payload, ["productGuidelines"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product_guidelines.json")), false);
+    let session = readJson(sessionFile);
+    assert.deepEqual(session.stage_records.product_guidelines.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+
+    const guidelinePreview = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      productGuidelines: {
+        title: "Product Guidelines",
+        summary: "Preserve tenant isolation and make failed operations recoverable.",
+      },
+    });
+    assert.equal(guidelinePreview.approval.current_stage, "product_guidelines");
+    assert.deepEqual(guidelinePreview.review_artifacts.map((file) => file.path).sort(), [
+      "cadre/product_guidelines.json",
+      "cadre/product_guidelines.md",
+    ]);
+    const technicalPreview = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(technicalPreview.approval.current_stage, "technical");
+    const workflowClarification = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(workflowClarification.approval.current_stage, "workflow");
+    assert.deepEqual(workflowClarification.missing_payload, ["workflowPolicy"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "workflow.json")), false);
+    session = readJson(sessionFile);
+    assert.deepEqual(session.stage_records.workflow.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+
+    const decoratedTemplate = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      workflowPolicy: { ...workflowTemplate, generated_at: "2026-07-14T00:00:00.000Z" },
+    });
+    assert.equal(decoratedTemplate.phase_state, "awaiting_clarification");
+    assert.deepEqual(decoratedTemplate.missing_payload, ["workflowPolicy"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "workflow.json")), false);
+    assert.deepEqual(readJson(sessionFile).final_snapshot_files, []);
+
+    const workflowPreview = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      workflowPolicy: {
+        title: "Project Workflow",
+        summary: "Run focused tests, preserve review evidence, and record explicit stage approval.",
+      },
+    });
+    assert.equal(workflowPreview.approval.current_stage, "workflow");
+    assert.deepEqual(workflowPreview.review_artifacts.map((file) => file.path).sort(), [
+      "cadre/workflow.json",
+      "cadre/workflow.md",
+    ]);
+    assert.ok(readJson(sessionFile).final_snapshot_files.some((file) => file.path === "cadre/config.json"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup rejects technical placeholders without materializing technical artifacts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-technical-placeholder-test-"));
+  try {
+    git(root, ["init"]);
+    const technical = advanceSetupToTechnical(root, {
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      topology: "polyrepo",
+      product: {
+        title: "Brownfield Product",
+        summary: "Repository-grounded behavior must be approved before technical analysis.",
+      },
+      productGuidelines: {
+        title: "Product Guidelines",
+        summary: "Preserve evidence and review boundaries while initializing existing repositories.",
+      },
+    });
+    const sessionId = technical.approval.session_id;
+    const reposTemplate = readJson(path.join(__dirname, "..", "templates", "repos.json"));
+    const placeholder = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      topology: "polyrepo",
+      techStack: { summary: "TBD after manifest audit" },
+      repos: reposTemplate,
+    });
+
+    assert.equal(placeholder.ok, true, placeholder.error);
+    assert.equal(placeholder.phase_state, "awaiting_clarification");
+    assert.equal(placeholder.approval.session_id, sessionId);
+    assert.equal(placeholder.approval.current_stage, "technical");
+    assert.deepEqual(placeholder.missing_payload, ["techStack", "repos"]);
+    assert.deepEqual(placeholder.review_artifacts || [], []);
+    assert.equal(placeholder.review_bundle ?? null, null);
+
+    const session = readJson(path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`));
+    assert.deepEqual(session.stage_records.technical.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    for (const relativePath of [
+      "cadre/tech-stack.json",
+      "cadre/tech-stack.md",
+      "cadre/repos.json",
+      "cadre/repos.md",
+    ]) {
+      assert.equal(fs.existsSync(path.join(root, relativePath)), false, `${relativePath} must stay absent`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup approval drift is blocked instead of masquerading as next-stage clarification", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-approval-error-envelope-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, {
+      workflow: "setup",
+      product: { title: "Drift Product", summary: "Exercise public approval error precedence." },
+    });
+    const productPath = path.join(root, "cadre", "product.md");
+    const original = fs.readFileSync(productPath, "utf8");
+    fs.writeFileSync(productPath, `${original}\nmanual drift\n`);
+    const packet = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "product",
+      approvedStages: ["product"],
+    });
+    assert.equal(packet.ok, false);
+    assert.equal(packet.decision.kind, "blocked");
+    assert.match(packet.decision.reason, /changed after .*preview|drift/i);
+    assert.deepEqual(packet.required, []);
+    assert.equal(packet.next, null);
+    fs.writeFileSync(productPath, original);
+    const cancelled = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: preview.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2919,26 +3229,23 @@ test("workflow setup asks for provider mode when remotes are ambiguous", () => {
     git(root, ["remote", "add", "origin", "git@github.com:org/app.git"]);
     git(root, ["remote", "add", "mirror", "git@gitlab.com:org/app.git"]);
 
-    const dryRun = core.workflowPacket(root, {
-      workflow: "setup",
+    const dryRun = advanceSetupToTechnical(root, {
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
     assert.equal(dryRun.ok, true);
     assert.equal(dryRun.provider.requires_confirmation, true);
     assert.ok(dryRun.next_actions.some((action) => action.includes("providerMode")));
-
-    const blocked = core.workflowPacket(root, {
-      workflow: "setup",
-      execute: true,
-      product: { title: "Product", summary: "Test product" },
-      techStack: { languages: ["TypeScript"] },
-    });
-    assert.equal(blocked.ok, true);
-    assert.equal(blocked.phase_state, "awaiting_clarification");
-    assert.ok(blocked.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
-    assert.equal(blocked.review_bundle, null);
+    assert.equal(dryRun.phase_state, "awaiting_clarification");
+    assert.ok(dryRun.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.equal(dryRun.review_bundle, null);
     assert.equal(fs.existsSync(path.join(root, "cadre", "config.json")), false);
+    const cancelled = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: dryRun.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
 
     const local = approveWorkflow(root, {
       workflow: "setup",
@@ -2965,9 +3272,7 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     git(root, ["init"]);
     git(root, ["remote", "add", "origin", "git@example.internal:org/app.git"]);
 
-    const blocked = core.workflowPacket(root, {
-      workflow: "setup",
-      execute: true,
+    const blocked = advanceSetupToTechnical(root, {
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
     });
@@ -2976,6 +3281,12 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
     assert.ok(blocked.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
     assert.equal(blocked.review_bundle, null);
     assert.equal(blocked.provider.detected.source, "unknown_remote");
+    const cancelled = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: blocked.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
 
     const local = approveWorkflow(root, {
       workflow: "setup",
@@ -3641,12 +3952,12 @@ test("target setup materializes only the active stage and cancel restores all ma
     assert.equal(session.schema_version, 2);
     assert.deepEqual(session.stage_order, ["product", "product_guidelines", "technical", "workflow"]);
     assert.deepEqual(session.stage_records.product.snapshot_files.map((file) => file.path), ["cadre/product.json", "cadre/product.md"]);
-    assert.deepEqual(session.stage_records.product_guidelines.snapshot_files.map((file) => file.path), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
-    assert.ok(session.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
-    assert.deepEqual(session.snapshot_files.map((file) => file.path), [
-      ...session.stage_order.flatMap((stageId) => session.stage_records[stageId].snapshot_files.map((file) => file.path)),
-      ...session.final_snapshot_files.map((file) => file.path),
-    ]);
+    assert.deepEqual(session.stage_records.product_guidelines.snapshot_files, []);
+    assert.deepEqual(session.stage_records.technical.snapshot_files, []);
+    assert.deepEqual(session.stage_records.workflow.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.deepEqual(session.snapshot_files.map((file) => file.path), ["cadre/product.json", "cadre/product.md"]);
+    assert.deepEqual(session.ancillary_snapshot_files.map((file) => file.path), ["cadre/.gitignore"]);
     assert.equal(git(root, ["check-ignore", "-q", "--", path.relative(root, sessionFile)]).status, 0);
 
     const cancelled = core.workflowPacket(root, {

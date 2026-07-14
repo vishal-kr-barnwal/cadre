@@ -30,23 +30,6 @@ const MAX_DATA_ARRAY_ITEMS = 30;
 const MAX_DATA_DEPTH = 6;
 const MAX_DATA_OBJECT_KEYS = 50;
 const MAX_DATA_STRING_CHARS = 4_000;
-const APPROVAL_INPUT_KEYS = new Set([
-  "root",
-  "workflow",
-  "execute",
-  "approval",
-  "approvalStage",
-  "approval_stage",
-  "approvalSessionId",
-  "approval_session_id",
-  "approvedStages",
-  "approved_stages",
-  "approvalComplete",
-  "approval_complete",
-  "approvalCancel",
-  "approval_cancel",
-]);
-
 function jsonValue(value: unknown): JsonValue | undefined {
   return isJsonValue(value) ? value : undefined;
 }
@@ -110,10 +93,23 @@ function workflowDecision(result: JsonObject): JsonObject {
   const skills = asJsonObject(result.project_skills);
   const skillDecision = asJsonObject(skills.decision);
   if (Object.keys(skillDecision).length > 0) return skillDecision;
+  const approvalError = asOptionalString(asJsonObject(result.approval).approval_error);
+  if (approvalError) return { kind: "blocked", reason: approvalError };
   const intentPrompts = asJsonArray(result.intent_prompts);
   const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
   if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {
-    return { kind: "clarification", prompts, required: asStringArray(result.missing_payload) };
+    const approval = asJsonObject(result.approval);
+    const sessionId = asOptionalString(approval.session_id) || null;
+    return {
+      kind: "clarification",
+      prompts,
+      required: asStringArray(result.missing_payload),
+      session_id: sessionId,
+      current_stage: asOptionalString(approval.current_stage) || null,
+      approved_stages: asStringArray(approval.approved_stages),
+      pending_stages: asStringArray(approval.pending_stages),
+      resume: sessionId ? { approval: { session_id: sessionId } } : null,
+    };
   }
   if (result.phase_state === "pending_provider") {
     return { kind: "provider_evidence", required: jsonValue(result.required_evidence) || null };
@@ -255,25 +251,32 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
   if (workflow === "skill" && result.phase_state === "awaiting_formatting" && resources[0]) {
     return { tool: "cadre_read", arguments: { uri: resources[0] } };
   }
-  if (workflow === "skill") {
-    const approval = asJsonObject(result.approval);
-    if (approval.cancelled !== true && asStringArray(approval.pending_stages).length === 0 && approval.approval_error == null && approval.session_id) {
-      const input = Object.fromEntries(Object.entries(args).filter(([key]) => !APPROVAL_INPUT_KEYS.has(key))) as JsonObject;
-      return {
-        tool: "cadre_workflow",
-        arguments: {
-          root,
-          workflow,
-          input,
-          execute: true,
-          approval: {
-            session_id: approval.session_id as JsonValue,
-            approved_stages: jsonValue(approval.approved_stages) || [],
-            complete: true,
-          },
+  const approval = asJsonObject(result.approval);
+  if (
+    (workflow === "setup" || workflow === "skill")
+    && result.ok !== false
+    && result.phase_state !== "pending_provider"
+    && asStringArray(result.missing_payload).length === 0
+    && args.execute !== true
+    && approval.cancelled !== true
+    && asStringArray(approval.pending_stages).length === 0
+    && approval.approval_error == null
+    && approval.session_id
+  ) {
+    return {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow,
+        input: {},
+        execute: true,
+        approval: {
+          session_id: approval.session_id as JsonValue,
+          approved_stages: jsonValue(approval.approved_stages) || [],
+          complete: true,
         },
-      };
-    }
+      },
+    };
   }
   if (result.phase_state === "pending_provider") {
     const providerActions = resources.find((uri) => uri.startsWith("cadre://provider-actions"));

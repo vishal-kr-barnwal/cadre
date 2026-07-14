@@ -37,6 +37,8 @@ export interface ApprovalSession {
   final_before_files?: ApprovalBeforeFile[];
   final_preview_files?: JsonObject[];
   final_intent_to_add_paths?: string[];
+  ancillary_snapshot_files?: ReviewFile[];
+  ancillary_before_files?: ApprovalBeforeFile[];
   snapshot_files: ReviewFile[];
   before_files: ApprovalBeforeFile[];
   preview_files: JsonObject[];
@@ -153,6 +155,8 @@ export function synchronizeApprovalSession(session: ApprovalSession): ApprovalSe
     final_before_files: uniqueByPath(session.final_before_files || []),
     final_preview_files: uniquePreviewFiles(session.final_preview_files || []),
     final_intent_to_add_paths: Array.from(new Set(session.final_intent_to_add_paths || [])),
+    ancillary_snapshot_files: uniqueByPath(session.ancillary_snapshot_files || []),
+    ancillary_before_files: uniqueByPath(session.ancillary_before_files || []),
     snapshot_files: uniqueByPath([
       ...orderedRecords.flatMap((record) => record.snapshot_files),
       ...(session.final_snapshot_files || []),

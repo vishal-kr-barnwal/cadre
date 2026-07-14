@@ -5,8 +5,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const esbuild = require("esbuild");
+const core = require("./cadre-core.js");
 
 const harnessRoot = path.resolve(__dirname, "..");
 const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-packet-contracts-"));
@@ -24,8 +26,23 @@ function loadPacket(name) {
   return require(outfile);
 }
 
+function loadSource(name, entry) {
+  const outfile = path.join(bundleRoot, `${name}.cjs`);
+  esbuild.buildSync({
+    entryPoints: [path.join(harnessRoot, "src", ...entry)],
+    outfile,
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    target: "node20",
+    logLevel: "silent",
+  });
+  return require(outfile);
+}
+
 const { parallelPacket } = loadPacket("parallel");
 const { jobPacket } = loadPacket("job");
+const { parseWorkflowToolRequest, workflowRuntimeArgs } = loadSource("workflow-tool-requests", ["mcp", "application", "tool-requests.ts"]);
 
 test.after(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
 
@@ -255,4 +272,247 @@ test("persisted running jobs fail closed after a server restart", () => {
   assert.equal(response.ok, false);
   assert.equal(response.next, null);
   assert.match(response.errors.join(" "), /interrupted.*restart/i);
+});
+
+test("public setup packets preserve one lazy session across evidence, prompts, approvals, and execution", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-setup-staging-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  const artifactPaths = (packet) => packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort();
+  const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+  const onlySession = (sessionId) => {
+    assert.deepEqual(fs.readdirSync(sessionDirectory).filter((file) => file.endsWith(".json")), [`${sessionId}.json`]);
+    return JSON.parse(fs.readFileSync(path.join(sessionDirectory, `${sessionId}.json`), "utf8"));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    spawnSync("git", ["config", "user.email", "setup@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Setup Test"], { cwd: root });
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    fs.mkdirSync(path.join(root, "repos", "app", "src"), { recursive: true });
+    fs.writeFileSync(path.join(root, "package.json"), `${JSON.stringify({ scripts: { test: "node --test" } }, null, 2)}\n`);
+    fs.writeFileSync(path.join(root, "tsconfig.json"), "{}\n");
+    fs.writeFileSync(path.join(root, "src", "app.ts"), "export const app = true;\n");
+    fs.writeFileSync(path.join(root, "repos", "app", "src", "app.ts"), "export const nested = true;\n");
+
+    const baseInput = {
+      product: { title: "Packet Product", summary: "Coordinate a repository-grounded staged setup." },
+      productGuidelines: { title: "Product Guidelines", summary: "Keep recovery explicit and preserve reviewed evidence." },
+      techStack: { languages: ["TypeScript"] },
+      workflowPolicy: { title: "Project Workflow", summary: "Run focused tests and record explicit stage approvals." },
+      topology: "polyrepo",
+      repos: {
+        mode: "polyrepo",
+        default_repo: "app",
+        repos: [{ name: "app", submodule_path: "repos/app", url: "git@github.com:org/app.git", enabled: true }],
+      },
+      providerMode: "local",
+      syncMode: "local",
+      integrations: {},
+    };
+    let packet = invoke({ root, workflow: "setup", input: baseInput, execute: false });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "product");
+    assert.deepEqual(artifactPaths(packet), ["cadre/product.json", "cadre/product.md"]);
+    const sessionId = packet.decision.session_id;
+    let session = onlySession(sessionId);
+    assert.deepEqual(session.stage_order, ["product", "product_guidelines", "technical", "workflow"]);
+    assert.deepEqual(session.stage_records.product.snapshot_files.map((file) => file.path), ["cadre/product.json", "cadre/product.md"]);
+    assert.deepEqual(session.stage_records.product_guidelines.snapshot_files, []);
+    assert.deepEqual(session.stage_records.technical.snapshot_files, []);
+    assert.deepEqual(session.stage_records.workflow.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "product", approved_stages: ["product"] },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "product_guidelines");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(artifactPaths(packet), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
+    onlySession(sessionId);
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "product_guidelines", approved_stages: ["product", "product_guidelines"] },
+    });
+    assert.equal(packet.decision.kind, "clarification");
+    assert.equal(packet.decision.current_stage, "technical");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.decision.approved_stages, ["product", "product_guidelines"]);
+    assert.deepEqual(packet.decision.resume, { approval: { session_id: sessionId } });
+    assert.deepEqual(packet.decision.prompts.map((prompt) => prompt.id).sort(), ["setup-lsp", "setup-style-guides"]);
+    assert.deepEqual(artifactPaths(packet), []);
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: { styleGuideIds: ["general", "typescript"] },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.decision.kind, "clarification");
+    assert.deepEqual(packet.decision.prompts.map((prompt) => prompt.id), ["setup-lsp"]);
+    session = onlySession(sessionId);
+    assert.deepEqual(session.payload.styleGuideIds, ["general", "typescript"]);
+    assert.deepEqual(session.stage_records.technical.snapshot_files, []);
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: { writeLsp: true },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "technical");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(artifactPaths(packet), [
+      "cadre/lsp.json",
+      "cadre/repos.json",
+      "cadre/repos.md",
+      "cadre/styleguides/README.md",
+      "cadre/styleguides/general.json",
+      "cadre/styleguides/general.md",
+      "cadre/styleguides/index.json",
+      "cadre/styleguides/typescript.json",
+      "cadre/styleguides/typescript.md",
+      "cadre/tech-stack.json",
+      "cadre/tech-stack.md",
+    ]);
+    session = onlySession(sessionId);
+    assert.deepEqual(session.final_snapshot_files, []);
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "technical", approved_stages: ["product", "product_guidelines", "technical"] },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "workflow");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(artifactPaths(packet), ["cadre/workflow.json", "cadre/workflow.md"]);
+    session = onlySession(sessionId);
+    assert.ok(session.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
+    const firstFinalSnapshot = JSON.stringify(session.final_snapshot_files);
+
+    packet = invoke({ root, workflow: "setup", input: {}, execute: false, approval: { session_id: sessionId } });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "workflow");
+    assert.equal(JSON.stringify(onlySession(sessionId).final_snapshot_files), firstFinalSnapshot);
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: {
+        session_id: sessionId,
+        stage: "workflow",
+        approved_stages: ["product", "product_guidelines", "technical", "workflow"],
+      },
+    });
+    const approvedStages = ["product", "product_guidelines", "technical", "workflow"];
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "setup",
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: approvedStages, complete: true },
+      },
+    });
+    const approvedSession = onlySession(sessionId);
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+    assert.equal(packet.data.control_commit.ok, true);
+    for (const snapshot of approvedSession.snapshot_files.filter((file) => file.missing !== true)) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(path.join(sessionDirectory, `${sessionId}.json`)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("public skill packets execute the exact session-only continuation after lazy stage approval", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-skill-staging-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    spawnSync("git", ["config", "user.email", "skill@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Skill Test"], { cwd: root });
+    fs.mkdirSync(path.join(root, "cadre"), { recursive: true });
+    fs.writeFileSync(path.join(root, "cadre", "config.json"), "{}\n");
+    spawnSync("git", ["add", "."], { cwd: root });
+    spawnSync("git", ["commit", "-m", "initial"], { cwd: root });
+    const input = {
+      operation: "create",
+      skillId: "api-guidance",
+      changes: [
+        { type: "metadata.set", name: "API Guidance", description: "Project API review rules" },
+        { type: "selectors.set", workflows: ["implement", "review"], file_patterns: ["src/api/**"] },
+        { type: "rule.upsert", id: "compatibility", text: "Preserve API compatibility.", references: ["guide"] },
+        { type: "reference.upsert", id: "guide", path: "references/guide.md", content: "# API Guide\n\nReview compatibility." },
+      ],
+    };
+    let packet = invoke({ root, workflow: "skill", input, execute: false });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "skill");
+    const sessionId = packet.decision.session_id;
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "api-guidance", "references", "guide.md")), false);
+
+    packet = invoke({
+      root,
+      workflow: "skill",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "skill", approved_stages: ["skill"] },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "references");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "api-guidance", "references", "guide.md")), true);
+
+    packet = invoke({
+      root,
+      workflow: "skill",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "references", approved_stages: ["skill", "references"] },
+    });
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "skill",
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: ["skill", "references"], complete: true },
+      },
+    });
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "api-guidance", "skill.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "api-guidance", "references", "guide.md")), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

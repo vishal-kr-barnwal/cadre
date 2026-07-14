@@ -23,6 +23,10 @@ export interface ApprovalContinuationPlan {
   previousRecord: ApprovalStageRecord | null;
 }
 
+export interface ApprovalContinuationOptions {
+  allowEmptyActiveStage?: boolean;
+}
+
 function sameStageOrder(session: ApprovalSession, stages: ApprovalStage[]): boolean {
   const expected = stages.map((stage) => stage.id);
   return expected.length === session.stage_order?.length
@@ -53,6 +57,7 @@ export function prepareApprovalContinuation(
   payload: JsonObject,
   payloadHash: string,
   reviewFiles: ReviewFile[],
+  options: ApprovalContinuationOptions = {},
 ): ApprovalContinuationPlan {
   const base = { session, activeStage: null, activeFiles: [], previousRecord: null };
   if (!isStageLedgerSession(session)) {
@@ -83,7 +88,7 @@ export function prepareApprovalContinuation(
     return { ...base, ok: false, stage: "approval_stage_record", error: `Approval session is missing stage record: ${activeStage.id}` };
   }
   const activeFiles = filesForApprovalStage(reviewFiles, activeStage);
-  if (activeFiles.length === 0) {
+  if (activeFiles.length === 0 && (!options.allowEmptyActiveStage || previousRecord.preview_files.length > 0)) {
     return { ...base, activeStage, previousRecord, ok: false, stage: "approval_stage_files", error: `Current approval stage ${activeStage.id} has no review files.` };
   }
   if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, activeFiles)) {

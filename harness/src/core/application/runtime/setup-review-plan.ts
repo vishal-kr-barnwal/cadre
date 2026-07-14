@@ -1,10 +1,16 @@
+import fs from "node:fs";
 import path from "node:path";
 
-import type { JsonObject } from "../../../types";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
-import { readJson } from "../../infrastructure/runtime/json-store";
+import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { plainReviewFile } from "./review-bundles";
+import { configuredCiProvider } from "./setup-infrastructure";
+import { setupFinalReviewFiles } from "./setup-review-files";
+import type { ApprovalSession } from "./approval-session-model";
+import { trackIndexPayload } from "./status";
+import { templateJson, templateText } from "./workflow-response";
 
 export function machineReviewFile(relativePath: string, title: string, source: string, content: string): ReviewFile {
   return { ...plainReviewFile(relativePath, title, source, content), reviewRole: "machine" };
@@ -52,5 +58,122 @@ export function lspPreviewPayload(root: string, recommendations: CoreResult, rep
     servers,
     workspaceFolders: requestedWorkspaceFolders(repos)
       || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : []),
+  };
+}
+
+function lspServerIds(value: JsonObject): string[] {
+  return Array.isArray(value.servers)
+    ? value.servers.map(asJsonObject)
+      .map((server) => asOptionalString(server.id || server.command))
+      .filter((id): id is string => Boolean(id))
+    : [];
+}
+
+function parsedSnapshot(content: string | null | undefined): JsonObject {
+  try {
+    const value = JSON.parse(content || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
+  } catch {
+    return {};
+  }
+}
+
+export function approvedSetupLspAdded(session: ApprovalSession | null): string[] {
+  if (!session) return [];
+  const snapshot = session.snapshot_files.find((file) => file.path === "cadre/lsp.json");
+  if (!snapshot) return [];
+  const before = session.before_files.find((file) => file.path === "cadre/lsp.json");
+  const previous = new Set(lspServerIds(parsedSnapshot(before?.content)));
+  return lspServerIds(parsedSnapshot(snapshot.content)).filter((id) => !previous.has(id));
+}
+
+export interface SetupFinalReviewPlan {
+  generatedAt: string;
+  configPayload: JsonObject;
+  setupStatePayload: JsonObject;
+  trackIndex: JsonObject;
+  gitattributesNeeded: boolean;
+  ciProvider: "github" | "gitlab" | null;
+  reviewFiles: ReviewFile[];
+}
+
+interface SetupFinalReviewPlanArgs {
+  root: string;
+  args: RuntimeArgs;
+  polyrepoRequested: boolean;
+  providerMode: string | null;
+  providerRemoteHost: string | null;
+  integrationsPayload: JsonObject | null;
+  syncMode: string;
+}
+
+export function setupFinalReviewPlan(input: SetupFinalReviewPlanArgs): SetupFinalReviewPlan {
+  const { root, args, polyrepoRequested, providerMode, providerRemoteHost, integrationsPayload, syncMode } = input;
+  const rawArgs = args as UnknownRecord;
+  const configOverrides = asJsonObject(rawArgs.config);
+  const generatedAt = utcNow();
+  const configPayload: JsonObject = {
+    ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
+    packet_only: true,
+    sync_mode: syncMode,
+    provider_mode: providerMode || "local",
+    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
+    ...(providerRemoteHost ? { remote_host: providerRemoteHost } : {}),
+    ...(integrationsPayload ? { integrations: integrationsPayload } : {}),
+    ...configOverrides,
+  };
+  const setupStatePayload: JsonObject = {
+    version: 1,
+    packet_only: true,
+    topology: polyrepoRequested ? "polyrepo" : "monorepo",
+    initialized_at: generatedAt,
+    updated_at: generatedAt,
+  };
+  const trackIndex = trackIndexPayload(root, []);
+  const machineFiles: ReviewFile[] = [
+    machineReviewFile(
+      "cadre/.gitignore",
+      "Cadre local-state ignore",
+      "setup:native-state",
+      appendRequiredLine(fileExists(path.join(root, "cadre", ".gitignore")) ? fs.readFileSync(path.join(root, "cadre", ".gitignore"), "utf8") : "", "/local/"),
+    ),
+    machineReviewFile("cadre/config.json", "Cadre configuration", "setup:config", `${JSON.stringify(configPayload, null, 2)}\n`),
+    machineReviewFile("cadre/setup_state.json", "Cadre setup state", "setup:state", `${JSON.stringify(setupStatePayload, null, 2)}\n`),
+    machineReviewFile("cadre/tracks.json", "Initial track index", "setup:track-index", `${JSON.stringify(trackIndex, null, 2)}\n`),
+  ];
+  const gitattributesNeeded = polyrepoRequested
+    || configPayload.sync_mode === "shared"
+    || rawArgs.writeGitattributes === true
+    || rawArgs.write_gitattributes === true;
+  if (gitattributesNeeded) {
+    const attributesPath = path.join(root, ".gitattributes");
+    machineFiles.push(machineReviewFile(
+      ".gitattributes",
+      "Cadre merge attributes",
+      "setup:gitattributes",
+      appendRequiredLine(fileExists(attributesPath) ? fs.readFileSync(attributesPath, "utf8") : "", "cadre/tracks/**/parallel_state.json merge=ours"),
+    ));
+  }
+  const ciProvider = configuredCiProvider(root, args)
+    || (providerMode === "github" || providerMode === "gitlab" ? providerMode : null);
+  if (ciProvider && rawArgs.writeCi !== false && rawArgs.write_ci !== false) {
+    const ciTemplate = polyrepoRequested
+      ? (ciProvider === "github" ? "ci/cadre-merge-train.github.yml" : "ci/cadre-merge-train.gitlab.yml")
+      : (ciProvider === "github" ? "ci/cadre-monorepo-check.github.yml" : "ci/cadre-monorepo-check.gitlab.yml");
+    const ciPath = ciProvider === "github"
+      ? `.github/workflows/${polyrepoRequested ? "cadre-merge-train.yml" : "cadre-monorepo-check.yml"}`
+      : ".gitlab-ci.yml";
+    if (!fileExists(path.join(root, ciPath)) || rawArgs.force === true) {
+      machineFiles.push(machineReviewFile(ciPath, "Cadre CI workflow", `template:${ciTemplate}`, templateText(ciTemplate, "")));
+    }
+  }
+  return {
+    generatedAt,
+    configPayload,
+    setupStatePayload,
+    trackIndex,
+    gitattributesNeeded,
+    ciProvider,
+    reviewFiles: setupFinalReviewFiles(generatedAt, machineFiles),
   };
 }

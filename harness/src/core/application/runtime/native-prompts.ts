@@ -211,8 +211,6 @@ export function setupNativePrompts(args: PromptArgs): JsonObject[] {
       "setupLsp",
       "setup_lsp",
       "lsp",
-      "setupPreviewLspAdded",
-      "setup_preview_lsp_added",
     ]) ? null : lspPrompt(args.lspSetup),
     hasAnyArg(args.runtimeArgs, ["integrations"]) ? null : optionalMcpPrompt(args.integrations),
   ].filter((prompt): prompt is JsonObject => prompt !== null);

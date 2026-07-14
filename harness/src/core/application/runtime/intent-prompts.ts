@@ -2,7 +2,7 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 
 import { choice, nativePrompt } from "./native-prompts";
-import { setupIntentStrategyAnswered, setupMissingEvidence } from "./setup-evidence";
+import { setupIntentStrategyAnswered, setupMissingEvidence, setupStageMissingEvidence, type SetupEvidenceStage } from "./setup-evidence";
 import { meaningfulRevisionArtifact, meaningfulRevisionPayload } from "./workflow-evidence";
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
@@ -210,10 +210,10 @@ export function intentPrompt(
   return nativePrompt(id, title, question, selectionMode, choices, target(workflow, argument, customArgument), customArgument);
 }
 
-export function setupIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
+export function setupIntentPrompts(args: RuntimeArgs = {}, stage: SetupEvidenceStage | null = null): JsonObject[] {
   const prompts: JsonObject[] = [];
-  const missing = new Set(setupMissingEvidence(args));
-  if (missing.has("product") && !setupIntentStrategyAnswered(args, "product")) {
+  const missing = new Set(stage ? setupStageMissingEvidence(args, stage) : setupMissingEvidence(args));
+  if ((stage === null || stage === "product") && missing.has("product") && !setupIntentStrategyAnswered(args, "product")) {
     prompts.push(intentPrompt(
       "setup",
       "setup-product-intent",
@@ -229,7 +229,7 @@ export function setupIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
       "intent.productOther"
     ));
   }
-  if (missing.has("techStack") && !setupIntentStrategyAnswered(args, "techStack")) {
+  if ((stage === null || stage === "technical") && missing.has("techStack") && !setupIntentStrategyAnswered(args, "techStack")) {
     prompts.push(intentPrompt(
       "setup",
       "setup-tech-stack-intent",

@@ -162,49 +162,90 @@ async function callApprovedWorkflow(request, args) {
   delete input.workflow;
   delete input.execute;
   delete input.approvalComplete;
+  if (args.workflow === "setup") {
+    if (input.productGuidelines == null && input.product_guidelines == null) {
+      input.productGuidelines = {
+        title: "Product Guidelines",
+        summary: "Preserve explicit intent, evidence, and safe review boundaries.",
+      };
+    }
+    if (input.workflowPolicy == null && input.workflow_policy == null) {
+      input.workflowPolicy = {
+        title: "Project Workflow",
+        summary: "Review each Cadre stage and run focused validation before completion.",
+      };
+    }
+  }
   const base = { root: args.root, workflow: args.workflow, input, execute: false };
   let preview = parseTextJson(await request("tools/call", {
     name: "cadre_workflow",
     arguments: base,
   }));
-  for (let attempt = 0; preview.decision?.kind === "clarification" && attempt < 3; attempt += 1) {
-    assert.equal(args.workflow, "setup", `unexpected clarification for ${args.workflow}`);
-    for (const prompt of preview.decision.prompts || []) {
-      const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
-      if (prompt.id === "setup-provider-mode") base.input.providerMode = recommended[0] || "local";
-      else if (prompt.id === "setup-sync-mode") base.input.syncMode = recommended[0] || "local";
-      else if (prompt.id === "setup-style-guides") base.input.styleGuideIds = recommended;
-      else if (prompt.id === "setup-lsp") base.input.writeLsp = recommended[0] !== "skip-lsp";
-      else if (prompt.id === "setup-optional-mcps") base.input.integrations = {};
-      else assert.fail(`setup test payload left unresolved intent prompt ${prompt.id}`);
-    }
-    preview = parseTextJson(await request("tools/call", {
-      name: "cadre_workflow",
-      arguments: base,
-    }));
-  }
-  const approved = [];
   let sessionId = null;
-  while (preview.decision?.kind === "approval" && preview.decision.stage) {
-    sessionId = preview.decision.session_id || sessionId;
-    approved.push(preview.decision.stage);
-    preview = parseTextJson(await request("tools/call", {
+  let approved = [];
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    assert.equal(preview.ok, true, JSON.stringify(preview.errors));
+    sessionId = preview.decision?.session_id || sessionId;
+    if (Array.isArray(preview.decision?.approved_stages)) approved = preview.decision.approved_stages;
+    if (preview.decision?.kind === "clarification") {
+      assert.equal(args.workflow, "setup", `unexpected clarification for ${args.workflow}`);
+      const answers = {};
+      for (const prompt of preview.decision.prompts || []) {
+        const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
+        if (prompt.id === "setup-provider-mode") answers.providerMode = recommended[0] || "local";
+        else if (prompt.id === "setup-sync-mode") answers.syncMode = recommended[0] || "local";
+        else if (prompt.id === "setup-style-guides") answers.styleGuideIds = recommended;
+        else if (prompt.id === "setup-lsp") answers.writeLsp = recommended[0] !== "skip-lsp";
+        else if (prompt.id === "setup-optional-mcps") answers.integrations = {};
+        else assert.fail(`setup test payload left unresolved intent prompt ${prompt.id}`);
+      }
+      assert.ok(Object.keys(answers).length > 0, `setup test payload is missing required evidence: ${(preview.decision.required || []).join(", ")}`);
+      Object.assign(base.input, answers);
+      preview = parseTextJson(await request("tools/call", {
+        name: "cadre_workflow",
+        arguments: {
+          root: base.root,
+          workflow: base.workflow,
+          input: answers,
+          execute: false,
+          ...(sessionId ? { approval: { session_id: sessionId } } : {}),
+        },
+      }));
+      continue;
+    }
+    if (preview.decision?.kind === "approval" && preview.decision.stage) {
+      sessionId = preview.decision.session_id || sessionId;
+      approved = [...(preview.decision.approved_stages || []), preview.decision.stage];
+      preview = parseTextJson(await request("tools/call", {
+        name: "cadre_workflow",
+        arguments: {
+          root: base.root,
+          workflow: base.workflow,
+          input: {},
+          execute: false,
+          approval: { session_id: sessionId, stage: preview.decision.stage, approved_stages: approved },
+        },
+      }));
+      continue;
+    }
+    if (preview.next?.tool === "cadre_workflow") {
+      return parseTextJson(await request("tools/call", {
+        name: preview.next.tool,
+        arguments: preview.next.arguments,
+      }));
+    }
+    return parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: {
-        ...clone(base),
-        approval: { session_id: sessionId, stage: approved.at(-1), approved_stages: approved },
+        root: base.root,
+        workflow: base.workflow,
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: approved, complete: true },
       },
     }));
-    assert.equal(preview.ok, true, JSON.stringify(preview.errors));
   }
-  return parseTextJson(await request("tools/call", {
-    name: "cadre_workflow",
-    arguments: {
-      ...clone(base),
-      execute: true,
-      approval: { session_id: sessionId, approved_stages: approved, complete: true },
-    },
-  }));
+  assert.fail(`approval loop did not complete for ${args.workflow}`);
 }
 
 function requestDaemon(daemon, method, params = {}) {
@@ -804,8 +845,8 @@ test("MCP root resolution rejects harness skill directories without project stat
     }));
     assert.equal(selectedSetupIntent.decision.kind, "clarification");
     assert.deepEqual(selectedSetupIntent.decision.prompts, []);
-    assert.deepEqual(selectedSetupIntent.decision.required, ["product", "techStack"]);
-    assert.deepEqual(selectedSetupIntent.required, ["product", "techStack"]);
+    assert.deepEqual(selectedSetupIntent.decision.required, ["product"]);
+    assert.deepEqual(selectedSetupIntent.required, ["product"]);
     assert.equal(fs.existsSync(path.join(root, "uninitialized", "cadre", "product.json")), false);
     for (const key of ["phase", "decision", "required", "next", "artifacts", "resources", "warnings", "errors"]) {
       assert.equal(Object.prototype.hasOwnProperty.call(parsedSetupAssist, key), true, `missing workflow envelope key ${key}`);

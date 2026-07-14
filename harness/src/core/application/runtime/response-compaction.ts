@@ -292,6 +292,7 @@ function compactSetupResponse(result: CoreResult): CoreResult {
     ci_setup: result.ci_setup,
     polyrepo_setup: result.polyrepo_setup,
     force: result.force,
+    control_commit: result.control_commit,
     doctor_summary: isRecord(result.doctor)
       ? {
         ok: asJsonObject(result.doctor).ok !== false,
