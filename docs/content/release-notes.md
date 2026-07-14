@@ -7,60 +7,219 @@ order: 240
 
 # Release Notes
 
-## Unreleased - Atomic Canonical/Projection Review
+## 2.2.0 - 2026-07-14
 
-Cadre now treats every registered human-facing document as one canonical and
-projection pair. The first target-mode review call freezes and writes the
-complete deterministic workflow diff at final repository paths, while the
-approval prompt points only to the current Markdown document. New files use Git
-intent-to-add so their content appears in ordinary `git diff` without staging
-that content.
+Cadre 2.2.0 makes canonical state and its human-facing projection one atomic
+review unit, then completes the token-efficient MCP v1 migration with strict
+protocol, resource, continuation, job, parallel, and process-execution
+boundaries. The result is a more deterministic review loop, a smaller published
+package, first-class Codex workflow discovery, and substantially stronger
+failure behavior at every untrusted input boundary.
 
-Key changes:
+### Compared With 2.1.0
 
-- projection generation is atomic with canonical mutation, and commit and
-  validation paths reject missing or stale pairs;
-- approval sessions live under ignored `cadre/local/approval-sessions/`, can be
-  safely cancelled, and append a compact `approval.completed` event only after
-  successful execution;
-- `cadre-artifacts` repairs marked drift with `execute:true` and no projection
-  approval stage;
-- archive, revert, flag, ship, land, debug repair, and other non-document
-  mutations use execution authorization rather than synthetic human approval;
-- styleguide projections now live beside their canonicals as
-  `cadre/styleguides/README.md` and `cadre/styleguides/<id>.md`;
-- the old `cadre/code_styleguides/` path is diagnostic-only and is never
-  dual-written, moved, or deleted automatically;
-- setup now generates `tech-stack.md`, and polyrepo setup generates `repos.md`.
+| Area | What changed |
+|---|---|
+| Target review | The first target-mode call now freezes and writes the complete deterministic workflow diff instead of materializing only the active stage. |
+| Canonical documents | Registered JSON/JSONL artifacts and their Markdown projections are validated, written, committed, and rolled back as atomic pairs. |
+| Approval state | Ignored, resumable approval sessions bind every stage to reviewed hashes, support cancellation, and emit compact completion evidence. |
+| Styleguides | Human projections move from `cadre/code_styleguides/` to `cadre/styleguides/`, beside their canonical files. |
+| MCP boundary | The three public v1 tools are now enforced internally; retired aliases, flat inputs, reserved control injection, and undocumented continuations are rejected. |
+| Codex discovery | Every registered workflow appears as an explicit-only `$cadre:*` picker entry; the redundant `$cadre:cadre` entry is no longer installed. |
+| Protocol lifecycle | MCP `2025-11-25` and `2025-06-18` negotiate through initialize/initialized, with standard JSON-RPC error and notification behavior. |
+| Resources | One typed registry separates the only fixed resource from parameterized templates and validates every URI/query contract. |
+| Parallel and jobs | Workers receive exact completion or recovery callbacks; merge, cleanup, restart, persistence, and job continuation all fail closed from observed state. |
+| LSP and DAP | Project-owned config namespaces, secure reads/writes, contained breakpoints, and configured adapter selection prevent path and command injection. |
+| Package | The npm publish set drops from 10 to 8 files, removes duplicate worker/daemon executables, and reduces the uncompressed payload by 23,696 bytes. |
+| Verification | Test declarations increase from 114 to 148, with new lifecycle, resource, packet, approval, command-picker, source-capability, job, parallel, and config-security coverage. |
 
-This styleguide path change is intentionally breaking. Regenerate projections
-into `cadre/styleguides/`, review the resulting diff, and remove the legacy
-directory manually.
+### Atomic Canonical And Projection Review
 
-### MCP Contract Cleanup
+Every registered human-facing document is now represented by one canonical and
+projection pair. The registry covers product context, product guidelines,
+technology stack, workflow, polyrepo topology, patterns, styleguide index and
+guides, track spec/plan/learnings/handoff, release artifacts, and project
+skills.
 
-The MCP boundary now enforces the three-tool contract end to end:
+On the first target-mode review call, Cadre freezes the full deterministic
+artifact set and writes it to final repository paths. New files receive Git
+intent-to-add, which makes their complete content visible in ordinary
+`git diff` without staging that content. The approval prompt remains focused on
+the current human-facing Markdown document, but SHA-256 hashes bind its
+approval to the exact canonical/projection pair.
 
-- `cadre_workflow`, `cadre_action`, and `cadre_read` are the only public tool
-  names; retired flat packet names are no longer internal routing aliases;
-- workflow and action calls use nested request objects, and `next` is the sole
-  immediate single-agent continuation (`next.tool` plus `next.arguments`);
-- the only typed callbacks outside `next` are provider
-  `decision.required.write_back` after external evidence collection, each
-  parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact
-  completion or recovery callbacks reissued under
-  `data.worker_callbacks[].record_finish_packet`; later merge and cleanup
-  operations return through `next` after state checks rather than prose recipes;
-- MCP `2025-11-25` and `2025-06-18` are supported through a complete
-  initialize/initialized lifecycle, and server metadata uses the package
-  version;
-- one typed resource registry distinguishes fixed resources from parameterized
-  templates and validates their queries;
-- packaged skill contracts, workflow protocols, and agent references are no
-  longer MCP resources or embedded runtime payloads; setup templates remain
-  packaged;
-- obsolete standalone job/daemon bundles and duplicate MCP compatibility shims
-  are no longer published.
+Final execution regenerates and verifies both sides of every approved pair.
+Missing, stale, or modified content fails closed, and multi-file writes roll
+back if the complete set cannot be committed safely. Setup now produces the
+previously missing `cadre/tech-stack.md` and, for polyrepo control repositories,
+`cadre/repos.md` projections.
+
+### Approval Sessions And Projection Repair
+
+Target-mode approvals now persist under the ignored
+`cadre/local/approval-sessions/` directory. A session records bounded hashes and
+stage state rather than copying full document content. It can resume across
+calls, rejects mismatched or drifted approvals, closes only after successful
+execution, and supports explicit cancellation that restores pre-review
+intent-to-add state.
+
+A successful operation appends one compact `approval.completed` event after the
+canonical mutation, projection mutation, validation, and commit trace have all
+succeeded. Non-document operations such as archive, revert, flag, ship, land,
+debug repair, and skill rename/removal use `execute:true` authorization instead
+of synthetic document approvals.
+
+`cadre-artifacts` now reports missing, stale, unmarked, and legacy projections.
+With `execute:true`, it repairs marked generated projections atomically without
+inventing a projection-only approval stage. User-authored or unmarked Markdown
+is never overwritten automatically.
+
+### Strict MCP V1 Contract
+
+The public catalog remains intentionally small:
+
+- `cadre_workflow` starts or continues one workflow;
+- `cadre_action` invokes the exact namespaced action selected by a packet;
+- `cadre_read` reads one targeted resource URI.
+
+Cadre 2.2.0 removes the internal routing compatibility that still accepted 11
+retired direct tool names. Those identifiers are deliberately omitted from
+production guidance so agents cannot mistake them for live interfaces.
+Workflow data must be nested under `input`, action data must be nested under
+`input`, and only documented outer fields are accepted. Reserved approval,
+provider, worker, merge, async, execution, and source-capability fields cannot
+be smuggled through nested input.
+
+The compact workflow response exposes `ok`, `workflow`, `phase`, `decision`,
+`required`, `next`, `artifacts`, `resources`, bounded `data`, `warnings`, and
+structured `errors`. `next.tool` plus `next.arguments` is the sole immediate
+single-agent continuation. The only typed callbacks outside `next` are provider
+evidence write-back after external collection and exact parallel worker finish
+callbacks returned by Cadre.
+
+Codex now installs a thin, explicit-only skill shim for each registered
+workflow. Typing `$cadre:` exposes entries such as `$cadre:setup`,
+`$cadre:status`, `$cadre:implement`, and `$cadre:review`.
+Each shim fixes one workflow name and enters through `cadre_workflow`; none of
+them expands the three-tool MCP catalog, aliases retired tools, or activates
+implicitly. Claude Code, Copilot, and Antigravity retain the single generic
+Cadre skill.
+
+### Protocol And Resource Correctness
+
+The stdio server now negotiates MCP `2025-11-25` and `2025-06-18`, reports the
+installed package version, waits for `notifications/initialized` before normal
+operations, never replies to notifications, and uses standard parse and
+invalid-request errors. Request-only operations cannot execute through a
+notification.
+
+Resource discovery now has one typed source of truth. `resources/list` contains
+only the fixed `cadre://template-inventory`; project resources appear in
+`resources/templates/list` and validate required groups, duplicates, unknown
+parameters, and value formats before routing. Track-plan reads return the actual
+parsed plan, ship/land resources use stable identifiers, and resource reads do
+not mutate Git state.
+
+Maintainer-only skill contracts, workflow protocols, agent references, and the
+retired release-plan resource are no longer exposed as MCP resources or
+embedded runtime payloads. Setup templates remain packaged.
+
+### Parallel Execution And Async Jobs
+
+Parallel packets now issue a complete, exact chain: wave selection, worker
+setup, per-worker finish callbacks, recovery when needed, merge, cleanup, and
+return to implementation. Completion callbacks remain self-contained when
+reissued. Cadre completes canonical tasks before cleanup, refuses to advance
+unmerged or conflicting work, derives repository identity from Git's common
+directory, and retains `cleaned_*` audit fields after idempotently clearing live
+worktree/ref state.
+
+Async job results remain pollable and return an exact continuation after task
+completion. Persisted jobs are bound to one canonical project root, use atomic
+non-symlink storage, advertise an artifact path only after persistence succeeds,
+and become an explicit interrupted failure after a server restart rather than
+appearing indefinitely live.
+
+### Path And Process Security
+
+Project-skill source reads now require a short-lived opaque capability bound to
+the canonical project root, canonical source path, and SHA-256 content digest.
+Cadre rejects invented, retargeted, expired, or post-authorization-changed
+capabilities; traversal; every symlink component, including in-project links;
+binary or unsupported files; and sources larger than 128 KiB.
+
+Job snapshots reject traversal, symlinked storage, cross-project access, and
+reads larger than 2 MiB. LSP and DAP configs are restricted to
+`cadre/lsp.json|lsp-*.json` and `cadre/dap.json|dap-*.json`, with secure
+no-follow reads, atomic writes, and an outer-owner config for polyrepo reviews.
+DAP callers must select a configured adapter and configuration: inline adapter
+commands are rejected, caller test commands cannot replace executable fields,
+and breakpoint paths must remain inside the project.
+
+### Package And Architecture Cleanup
+
+The runtime build now emits five bundles instead of seven. Private job-runner
+and LSP-daemon modes remain embedded in `cadre-mcp`, while the duplicate
+standalone executables are removed from the package. The npm publish set drops
+from 10 files to 8 and its tracked uncompressed payload decreases from
+1,936,959 to 1,913,263 bytes despite the additional validation and generated
+Codex workflow discovery.
+
+Flat MCP forwarding shims, obsolete source barrels and adapters, dead package
+fallbacks, retired migration/context scripts, and unused agent references have
+been removed. TypeScript now enforces unused-local and unused-parameter checks,
+type-only dependencies no longer create an LSP runtime cycle, and architecture
+tests keep source files below 500 lines and prevent retired boundaries from
+returning.
+
+### Upgrade Notes
+
+Upgrade the package and refresh every detected client:
+
+```bash
+npm install -g cadre-ai@2.2.0
+cadre install
+cadre install --check
+```
+
+Restart clients that cache plugin or MCP configuration. Verify that
+`cadre@cadre` is installed and enabled at 2.2.0 and that its MCP command points
+to the current installed `cadre-mcp` runtime. In a new Codex task, type
+`$cadre:` and confirm the explicit workflow entries are listed without a
+generic `cadre` entry.
+
+Regenerate styleguide projections into `cadre/styleguides/`, review the
+resulting diff, and remove `cadre/code_styleguides/` manually. Cadre reports the
+legacy path but deliberately does not move, dual-write, or delete it.
+
+Custom MCP integrations must use the nested three-tool contract, complete the
+initialize/initialized lifecycle, read project resources through templates,
+and invoke only exact returned continuations or documented typed callbacks.
+The removed runner and daemon files were private implementation paths. Any
+internal tooling that still depended on them must use
+`cadre-mcp --cadre-job-runner` or `cadre-mcp --cadre-lsp-daemon`, respectively.
+Custom LSP/DAP configuration paths outside
+`cadre/lsp.json|lsp-*.json` and `cadre/dap.json|dap-*.json` now fail, as do
+inline DAP adapter commands; move those definitions into the project-owned
+configuration namespaces before upgrading.
+
+### Operating Cautions
+
+- Target-mode review now materializes the full frozen diff on its first call,
+  not only the active approval stage. A written diff is still review output,
+  not approval.
+- Canonical and projection files are one approval unit. Do not approve or edit
+  them independently between review and execution.
+- The styleguide projection path change is intentionally breaking and requires
+  the manual cleanup described above.
+- Removed MCP aliases, flat inputs, resource names, and standalone helper paths
+  are not compatibility surfaces in 2.2.0.
+- Hosted provider evidence still comes from supported provider integrations;
+  this release does not introduce a CLI evidence fallback.
+
+The signed `release-2.2.0` tag is the source of the GitHub release. Publishing
+that release triggers npm Trusted Publishing and the documentation deployment
+pipeline after release validation passes.
 
 ## 2.1.0 - 2026-07-12
 
@@ -178,8 +337,8 @@ diagnostics show a real optional-rule omission.
 - Hosted provider evidence still comes from supported provider integrations;
   the compact envelope does not introduce a CLI evidence fallback.
 - In 2.1.0, target-path staged review behavior from 2.0.0 remained unchanged: a
-  written preview was reviewable worktree output, not approval. The Unreleased
-  flow above supersedes its current-stage-only materialization behavior.
+  written preview was reviewable worktree output, not approval. The 2.2.0 flow
+  above supersedes its current-stage-only materialization behavior.
 
 The signed `release-2.1.0` tag is the source of the GitHub release. Publishing
 that release triggers the repository's Trusted Publishing and documentation

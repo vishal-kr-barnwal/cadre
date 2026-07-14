@@ -1,5 +1,133 @@
 # Changelog
 
+## [2.2.0] - 2026-07-14
+
+Atomic document review and hardened MCP runtime release.
+
+### Added
+
+- Added a registry for canonical JSON/JSONL artifacts and their generated
+  Markdown projections, with atomic pair writes, pair-aware validation, and
+  repair planning for marked projection drift.
+- Added durable, ignored approval sessions under
+  `cadre/local/approval-sessions/`. Sessions freeze the complete deterministic
+  workflow diff, bind approvals to reviewed content hashes, support explicit
+  cancellation, and reject drift before execution.
+- Added compact v1 workflow packet shaping, typed nested MCP request parsing,
+  typed resource URI/query contracts, and dedicated lifecycle, packet-contract,
+  and resource-registry regression suites.
+- Added capability-bound project-skill source reads. Tokens are short-lived and
+  bound to one canonical root, source path, and content digest; unsafe links,
+  binary or oversized files, and changed content are rejected.
+- Added secure project-control config handling for LSP and DAP, including
+  namespace confinement, no-follow reads and atomic writes, polyrepo owner-root
+  handling, and contained breakpoint paths.
+- Added exact parallel worker completion/recovery callbacks, auditable cleanup
+  state, and restart-safe job interruption and recovery coverage.
+- Added generated `cadre/tech-stack.md` and, for polyrepo control repositories,
+  `cadre/repos.md` projections during setup.
+- Added Codex command-picker discovery for every registered workflow through
+  generated, explicit-only `$cadre:*` skill shims. The shims bind one
+  workflow to the existing packet contract and do not add MCP tools or aliases.
+  Codex omits the redundant generic `$cadre:cadre` entry; other clients retain
+  their single Cadre skill.
+
+### Changed
+
+- Changed target-mode review to materialize the complete deterministic workflow
+  diff on the first review call. New files use Git intent-to-add so ordinary
+  `git diff` shows the review without staging file content.
+- Changed approval semantics so a canonical artifact and its human projection
+  are one immutable review pair. The user approves the current human-facing
+  document; execution authorization remains separate.
+- Changed styleguide projections to live beside their canonical files as
+  `cadre/styleguides/README.md` and `cadre/styleguides/<id>.md`.
+- Enforced the three-tool MCP contract end to end: `cadre_workflow`,
+  `cadre_action`, and `cadre_read` are the only public tool names, inputs remain
+  nested, and retired flat packet names are no longer internal aliases.
+- Made `next.tool` plus `next.arguments` the sole immediate single-agent
+  continuation. Provider evidence write-back and explicit parallel worker
+  callbacks are the only typed callbacks outside `next`.
+- Separated fixed resources from parameterized resource templates and made one
+  typed registry authoritative for discovery, validation, and routing.
+- Changed parallel merge and cleanup to advance only from observed canonical
+  task, worktree, branch, and merge state. Successful cleanup retains audit
+  fields and is idempotent across later waves.
+- Embedded job-runner and LSP-daemon modes in the MCP bundle instead of
+  publishing duplicate standalone executables.
+- Enabled TypeScript unused-local and unused-parameter checks, removed split-era
+  import boilerplate, and converted runtime-free contract dependencies to
+  type-only imports.
+
+### Fixed
+
+- Fixed approval completion so projection mutation, canonical mutation, commit
+  tracing, and the compact `approval.completed` event succeed or fail as one
+  operation. Cancellation restores intent-to-add state without approving work.
+- Fixed artifact synchronization to repair generated projection drift with
+  execution authorization instead of inventing a second projection approval.
+- Fixed MCP initialization and JSON-RPC framing: supported protocol revisions
+  negotiate correctly, normal operations wait for `notifications/initialized`,
+  notifications receive no response, and parse/invalid-request errors use
+  standard codes.
+- Fixed resource discovery and reads so parameterized URIs cannot appear as
+  fixed resources, query requirements are validated consistently, track plans
+  return the actual parsed plan, and ship/land resources use stable identifiers.
+- Fixed persisted jobs to fail closed after interrupted restarts, remain bound
+  to their canonical project root, reject unsafe job storage, and advertise an
+  artifact path only after persistence succeeds.
+- Fixed parallel recovery so unmerged or conflicting workers cannot be marked
+  complete or cleaned, canonical tasks complete before cleanup, and worktree
+  identity follows Git common-directory state.
+- Fixed DAP and LSP setup/review paths so absolute, traversing, cross-purpose,
+  or symlink-selected configs are rejected before process creation. DAP callers
+  can no longer inject inline adapter commands or escape project breakpoint
+  paths.
+- Fixed MCP action/workflow parsing so reserved approval, provider, worker,
+  merge, async, and source-capability controls cannot be smuggled through nested
+  input objects.
+
+### Removed
+
+- Removed obsolete standalone `cadre-job-runner.js` and
+  `cadre-lsp-daemon.js` package bundles; their private modes remain available
+  through `cadre-mcp`.
+- Removed flat MCP forwarding shims, unused source barrels and adapters, the
+  retired plan parser, obsolete migration/context shell scripts, and dead
+  package-layout fallbacks.
+- Removed maintainer-only skill protocols and agent references from embedded MCP
+  assets and generated plugin payloads. Runtime setup templates remain packaged.
+
+### Security
+
+- Project-skill source capabilities now reject symlink components, retargeting,
+  post-authorization content changes, path escapes, binary content, and
+  oversized reads.
+- Job persistence rejects traversal, symlinked storage, oversized snapshots,
+  and cross-project job access.
+- LSP/DAP configs are limited to `cadre/lsp.json|lsp-*.json` and
+  `cadre/dap.json|dap-*.json`; secure reads verify the opened inode before JSON
+  parsing, and setup uses atomic no-follow writes.
+- Execution, approval, provider evidence, and parallel worker state remain
+  distinct typed controls rather than caller-injectable JSON fields.
+
+### Migration Notes
+
+- Re-run `cadre install` after upgrading so every native client receives the
+  2.2.0 manifest, skill shim, and MCP configuration. Codex also receives the
+  explicit workflow-picker entries; restart it or open a new task before
+  typing `$cadre:`.
+- Regenerate styleguide projections under `cadre/styleguides/`, review the
+  resulting diff, and remove the legacy `cadre/code_styleguides/` directory
+  manually. Cadre diagnoses that legacy path but does not move or delete it.
+- Target-mode automation must expect the first review call to expose the full
+  deterministic diff rather than only the current stage. Approval is still
+  explicit and applies to the current human-facing document and its canonical
+  pair.
+- Custom MCP callers that depended on accidental retired aliases must migrate
+  fully to the nested three-tool contract and invoke only exact returned
+  continuations or documented typed callbacks.
+
 ## [2.1.0] - 2026-07-12
 
 Project-skill, token-efficiency, and documentation release.

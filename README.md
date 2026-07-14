@@ -16,12 +16,14 @@ hand.
 
 [Read the documentation](https://cadre-docs.pages.dev/) ·
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
-[Review the 2.1.0 notes](https://cadre-docs.pages.dev/release-notes/)
+[Review the 2.2.0 notes](https://cadre-docs.pages.dev/release-notes/)
 
 ## What Cadre Provides
 
 - **Structured delivery:** setup, track planning, implementation, review,
   ship/land, archive, release, handoff, refresh, and recovery workflows.
+- **Codex command discovery:** explicit picker entries expose every workflow as
+  `$cadre:*` without expanding Cadre's three-tool MCP surface.
 - **Durable context:** canonical product, workflow, pattern, technology, track,
   event, message, review, and trace state with generated human projections.
 - **Repository-owned guidance:** workflow- and repository-targeted project
@@ -33,37 +35,44 @@ hand.
 - **Scalable execution:** dependency-aware worker waves, file claims,
   merge-back evidence, and monorepo or polyrepo delivery gates.
 
-## What Is New in 2.1.0
+## What Is New in 2.2.0
 
-Cadre 2.1.0 introduces a smaller, token-efficient public MCP contract centered
-on three tools: `cadre_workflow`, `cadre_action`, and `cadre_read`. Workflow
-packets now return compact decision envelopes and expose longer evidence through
-targeted, lazy-loaded resources.
+Cadre 2.2.0 makes reviewed documents atomic. Canonical JSON or JSONL and its
+human-facing Markdown projection are frozen as one pair, the first target-mode
+review writes the complete deterministic workflow diff, and approval sessions
+detect drift before execution. Setup also generates the missing technology and
+polyrepo topology projections.
 
-Repositories can also own project skills under `cadre/skills/<skill-id>/`.
-Cadre selects those rules by workflow and optional repository target, keeps
-required rules intact, and applies `project_skills.inline_rule_budget` only to
-optional inline content. The new `cadre-skill` workflow manages and validates
-that catalog.
+The MCP runtime now enforces the three-tool v1 contract end to end. Legacy
+aliases are gone, lifecycle and resource discovery follow typed protocol
+contracts, continuations are exact, and parallel workers, persisted jobs, and
+capability-bound project-skill reads fail closed when state is stale or unsafe.
+LSP and DAP configuration paths are also confined to project-owned files before
+any external command can start.
 
-The release also includes a complete responsive documentation system with
-separate user/operator and contributor journeys, exhaustive workflow and
-configuration references, full-body search, accessible navigation, and
-mobile-friendly code and tables.
+The published package is leaner: obsolete standalone worker/daemon bundles,
+flat compatibility shims, embedded maintainer-only contracts, and dead scripts
+have been removed while regression coverage now exercises lifecycle, packet,
+resource, approval, parallel, job, and path-security boundaries.
 
-See the [detailed 2.1.0 release notes](docs/content/release-notes.md) and
+Codex installs also expose explicit workflow entries in the command picker.
+Type `$cadre:` to choose setup, status, implementation, review, release, or any
+other Cadre workflow directly; these entries are thin activation shims, not
+additional MCP tools.
+
+See the [detailed 2.2.0 release notes](docs/content/release-notes.md) and
 [changelog](harness/CHANGELOG.md).
 
 ## Install or Upgrade
 
 ```bash
-npm install -g cadre-ai@2.1.0
+npm install -g cadre-ai@2.2.0
 cadre install
 cadre install --check
 ```
 
 Restart clients that cache plugin or MCP configuration. Confirm that
-`cadre@cadre` is installed and enabled at 2.1.0.
+`cadre@cadre` is installed and enabled at 2.2.0.
 
 To remove generated client wiring:
 
@@ -73,18 +82,20 @@ cadre uninstall --target codex
 
 ## Use Cadre
 
-In a target repository, activate the Cadre skill and follow the normal
-lifecycle:
+In Codex, type `$cadre:` and choose a workflow entry directly:
 
 ```text
-$cadre
-cadre-setup
-cadre-newtrack "Add OAuth login"
-cadre-implement
-cadre-review
-cadre-ship
-cadre-archive
+$cadre:setup
+$cadre:newtrack Add OAuth login
+$cadre:implement
+$cadre:review
+$cadre:ship
+$cadre:archive
 ```
+
+Codex exposes only the workflow entries, avoiding a redundant
+`$cadre:cadre` option. In Claude Code, Copilot, and Antigravity, activate the
+single Cadre skill and ask for the same workflow by its `cadre-*` name.
 
 Use `cadre-land` instead of `cadre-ship` for a polyrepo control repository.
 Cadre packets own the control plane, approvals, provider evidence, worker state,

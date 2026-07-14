@@ -7,7 +7,7 @@ order: 200
 
 # Configuration Reference
 
-This reference matches `harness/templates/config.json` for Cadre 2.1.0. Unless
+This reference matches `harness/templates/config.json` for Cadre 2.2.0. Unless
 noted otherwise, setup generates these values and maintainers may tune them in
 the target project's `cadre/config.json`.
 
@@ -16,10 +16,10 @@ the target project's `cadre/config.json`.
 | Key | Type / default | Accepted values and effect | Caution |
 |---|---|---|---|
 | `sync_mode` | string / `"local"` | `local` keeps the control plane local; `shared` enables shared-sync behavior. Affects workflow start sync, reviews, status, ship, and land. | Configure the control remote and branch before using shared mode. |
-| `auto_open` | boolean / `false` | Setup-generated compatibility preference for opening generated artifacts. The v2.1 packet runtime does not use it as a publication gate. | Do not depend on it for review or approval. |
+| `auto_open` | boolean / `false` | Setup-generated compatibility preference for opening generated artifacts. The current packet runtime does not use it as a publication gate. | Do not depend on it for review or approval. |
 | `control_remote` | string / `"origin"` | Git remote used for shared control-plane operations. | Must identify the control repository remote, not a polyrepo product remote. |
 | `control_branch` | string / `"main"` | Branch used for shared control-plane sync. | Coordinate branch protection and contributor access. |
-| `pull_on_command_start` | boolean / `true` | Setup-generated sync preference. Current v2.1 workflow response logic gates actual sync by `sync_mode` and packet behavior. | Treat packet evidence as authoritative rather than assuming every command pulls. |
+| `pull_on_command_start` | boolean / `true` | Setup-generated sync preference. Current workflow response logic gates actual sync by `sync_mode` and packet behavior. | Treat packet evidence as authoritative rather than assuming every command pulls. |
 
 ## Review And Publication Keys
 
