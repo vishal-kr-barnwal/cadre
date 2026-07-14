@@ -1853,6 +1853,12 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.equal(approvedMinimal.ok, true, approvedMinimal.error || JSON.stringify(approvedMinimal.approval || {}));
     assert.equal(approvedMinimal.approval.current_stage, "product_guidelines");
     assert.deepEqual(approvedMinimal.approval.approved_stages, ["product"]);
+    const persistedSession = readJson(path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`));
+    assert.equal(persistedSession.schema_version, 2);
+    assert.deepEqual(persistedSession.stage_order, ["product", "product_guidelines", "tech_stack", "workflow", "styleguides"]);
+    assert.equal(persistedSession.stage_records.product.status, "approved");
+    assert.equal(persistedSession.stage_records.product_guidelines.status, "previewed");
+    assert.ok(persistedSession.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
 
     const approvedWithAccidentalPayload = core.workflowPacket(root, {
       workflow: "setup",
@@ -3580,6 +3586,16 @@ test("target setup materializes the complete diff with intent-to-add and cancel 
     assert.equal(git(root, ["diff", "--cached"]).stdout, "");
     const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${preview.approval.session_id}.json`);
     assert.equal(fs.existsSync(sessionFile), true);
+    const session = readJson(sessionFile);
+    assert.equal(session.schema_version, 2);
+    assert.deepEqual(session.stage_order, ["product", "product_guidelines", "tech_stack", "workflow", "styleguides"]);
+    assert.deepEqual(session.stage_records.product.snapshot_files.map((file) => file.path), ["cadre/product.json", "cadre/product.md"]);
+    assert.deepEqual(session.stage_records.product_guidelines.snapshot_files.map((file) => file.path), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
+    assert.ok(session.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
+    assert.deepEqual(session.snapshot_files.map((file) => file.path), [
+      ...session.stage_order.flatMap((stageId) => session.stage_records[stageId].snapshot_files.map((file) => file.path)),
+      ...session.final_snapshot_files.map((file) => file.path),
+    ]);
     assert.equal(git(root, ["check-ignore", "-q", "--", path.relative(root, sessionFile)]).status, 0);
 
     const cancelled = core.workflowPacket(root, {

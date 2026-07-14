@@ -6,6 +6,12 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
 import { withLock } from "../../infrastructure/runtime/locking";
 import type { CoreResult, ReviewFile } from "./contracts";
+import {
+  recordCompleteBundlePreview,
+  synchronizeApprovalSession,
+  type ApprovalBeforeFile,
+  type ApprovalSession,
+} from "./approval-session-model";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
 import {
   inspectReviewGitState,
@@ -15,26 +21,7 @@ import {
   type ReviewHeadExpectation,
 } from "./review-output";
 
-export interface ApprovalBeforeFile {
-  path: string;
-  existed: boolean;
-  content: string | null;
-  head_existed?: boolean;
-  head_content?: string | null;
-}
-
-export interface ApprovalSession {
-  session_id: string;
-  workflow: string;
-  payload_hash: string;
-  payload: JsonObject;
-  approved_stages: string[];
-  snapshot_files: ReviewFile[];
-  before_files: ApprovalBeforeFile[];
-  preview_files: JsonObject[];
-  intent_to_add_paths: string[];
-  updated_at: string;
-}
+export type { ApprovalBeforeFile, ApprovalSession } from "./approval-session-model";
 
 export interface UnapprovedSkillTargetApproval {
   sessionId: string;
@@ -65,7 +52,7 @@ export function writeApprovalSession(root: string, session: ApprovalSession): vo
   fs.mkdirSync(sessionDirectory(root), { recursive: true });
   const target = sessionFile(root, session.session_id);
   const temporary = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(session, null, 2)}\n`);
+  fs.writeFileSync(temporary, `${JSON.stringify(synchronizeApprovalSession(session), null, 2)}\n`);
   fs.renameSync(temporary, target);
 }
 
@@ -341,12 +328,7 @@ export function recordApprovalPreview(root: string, sessionId: string, workflow:
     return;
   }
   writeApprovalSession(root, {
-    ...session,
-    preview_files: previewFiles,
-    intent_to_add_paths: Array.from(new Set([
-      ...session.intent_to_add_paths,
-      ...asStringArray(bundle.intent_to_add_paths),
-    ])),
+    ...recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths)),
     updated_at: utcNow(),
   });
 }

@@ -5,6 +5,7 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
 import { reviewArtifactsFromFiles, workflowReviewBundle } from "./review-bundles";
+import { createStageLedger, filesForApprovalStage } from "./approval-session-model";
 
 import {
   cancelApprovalSession,
@@ -61,11 +62,7 @@ export function requestedApprovalSessionId(args: RuntimeArgs = {}): string | nul
 }
 
 function filesForStage(files: ReviewFile[], stage: ApprovalStage): ReviewFile[] {
-  const documentIds = new Set(stage.documentIds);
-  if (documentIds.size > 0) return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId!));
-  const matches = stage.fileMatches || [];
-  if (matches.includes("*")) return files;
-  return files.filter((file) => matches.some((needle) => file.path.includes(needle)));
+  return filesForApprovalStage(files, stage);
 }
 
 function stableJson(value: unknown): string {
@@ -215,10 +212,11 @@ function approvalTransitionError(
   workflow: string,
   sessionId: string,
   payloadHash: string,
-  stageIds: string[],
+  stages: ApprovalStage[],
   approved: string[],
   snapshotFiles: ReviewFile[]
 ): string | null {
+  const stageIds = stages.map((stage) => stage.id);
   if (stageIds.length === 0) return null;
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return orderError;
@@ -237,14 +235,16 @@ function approvalTransitionError(
     if (superseded.ok === false) {
       return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
     }
+    const beforeFiles = captureApprovalBeforeFiles(root, snapshotFiles);
     writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
       payload_hash: payloadHash,
       payload,
       approved_stages: [],
+      ...createStageLedger(stages, snapshotFiles, beforeFiles),
       snapshot_files: snapshotFiles,
-      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
+      before_files: beforeFiles,
       preview_files: [],
       intent_to_add_paths: [],
       updated_at: new Date().toISOString(),
@@ -267,14 +267,16 @@ function approvalTransitionError(
   if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
   const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
+    const beforeFiles = captureApprovalBeforeFiles(root, snapshotFiles);
     writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
       payload_hash: payloadHash,
       payload,
       approved_stages: [],
+      ...createStageLedger(stages, snapshotFiles, beforeFiles),
       snapshot_files: snapshotFiles,
-      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
+      before_files: beforeFiles,
       preview_files: [],
       intent_to_add_paths: [],
       updated_at: new Date().toISOString(),
@@ -300,6 +302,7 @@ function approvalTransitionError(
   const requestedStage = requestedApprovalStage(args);
   if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
   writeApprovalSession(root, {
+    ...session,
     session_id: sessionId,
     workflow,
     payload_hash: payloadHash,
@@ -326,7 +329,6 @@ export function stagedApprovalState(
   reviewFiles: ReviewFile[],
   extras: JsonObject = {}
 ): JsonObject {
-  const stageIds = stages.map((stage) => stage.id);
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
   const sessionId = approvalSessionId(workflow, root, payloadHash);
@@ -366,7 +368,7 @@ export function stagedApprovalState(
   const frozenFiles = requestedSessionId
     ? frozenReviewFiles(root, requestedSessionId, reviewFiles)
     : reviewFiles;
-  let approvalError = approvalTransitionError(root, args, workflow, sessionId, payloadHash, stageIds, approvedIds, frozenFiles);
+  let approvalError = approvalTransitionError(root, args, workflow, sessionId, payloadHash, stages, approvedIds, frozenFiles);
   const effectiveFiles = frozenReviewFiles(root, sessionId, frozenFiles);
   const approved = new Set(approvedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));

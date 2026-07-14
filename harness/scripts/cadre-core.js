@@ -9085,6 +9085,163 @@ var import_node_path39 = __toESM(require("node:path"));
 // src/core/application/runtime/approval-session-store.ts
 var import_node_fs20 = __toESM(require("node:fs"));
 var import_node_path36 = __toESM(require("node:path"));
+
+// src/core/application/runtime/approval-session-model.ts
+function uniqueByPath(values) {
+  const seen = /* @__PURE__ */ new Set();
+  return values.filter((value) => {
+    if (seen.has(value.path)) return false;
+    seen.add(value.path);
+    return true;
+  });
+}
+function previewPath(value) {
+  return asOptionalString(value.path) || null;
+}
+function uniquePreviewFiles(values) {
+  const seen = /* @__PURE__ */ new Set();
+  return values.filter((value) => {
+    const file = previewPath(value);
+    if (!file || seen.has(file)) return false;
+    seen.add(file);
+    return true;
+  });
+}
+function filesForApprovalStage(files, stage) {
+  const documentIds = new Set(stage.documentIds);
+  if (documentIds.size > 0) {
+    return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId));
+  }
+  const matches = stage.fileMatches || [];
+  if (matches.includes("*")) return files;
+  return files.filter((file) => matches.some((needle) => file.path.includes(needle)));
+}
+function beforeFilesForSnapshots(beforeFiles, snapshots) {
+  const paths = new Set(snapshots.map((file) => file.path));
+  return beforeFiles.filter((file) => paths.has(file.path));
+}
+function createStageLedger(stages, snapshots, beforeFiles) {
+  const ownedPaths = /* @__PURE__ */ new Set();
+  const stageRecords = Object.fromEntries(stages.map((stage) => {
+    const stageSnapshots = filesForApprovalStage(snapshots, stage);
+    for (const file of stageSnapshots) ownedPaths.add(file.path);
+    const record = {
+      stage_id: stage.id,
+      status: "pending",
+      revision: 0,
+      snapshot_files: stageSnapshots,
+      before_files: beforeFilesForSnapshots(beforeFiles, stageSnapshots),
+      preview_files: [],
+      intent_to_add_paths: []
+    };
+    return [stage.id, record];
+  }));
+  const finalSnapshots = snapshots.filter((file) => !ownedPaths.has(file.path));
+  return {
+    schema_version: 2,
+    stage_order: stages.map((stage) => stage.id),
+    stage_records: stageRecords,
+    final_snapshot_files: finalSnapshots,
+    final_before_files: beforeFilesForSnapshots(beforeFiles, finalSnapshots)
+  };
+}
+function isStageLedgerSession(session) {
+  return session.schema_version === 2 && Array.isArray(session.stage_order) && Boolean(session.stage_records);
+}
+function synchronizedStageRecord(session, record) {
+  const approved = session.approved_stages.includes(record.stage_id);
+  return {
+    ...record,
+    status: approved ? "approved" : record.preview_files.length > 0 ? "previewed" : "pending",
+    snapshot_files: uniqueByPath(record.snapshot_files),
+    before_files: uniqueByPath(record.before_files),
+    preview_files: uniquePreviewFiles(record.preview_files),
+    intent_to_add_paths: Array.from(new Set(record.intent_to_add_paths))
+  };
+}
+function synchronizeApprovalSession(session) {
+  if (!isStageLedgerSession(session)) return session;
+  const stageOrder = session.stage_order || [];
+  const stageRecords = Object.fromEntries(stageOrder.flatMap((stageId) => {
+    const record = session.stage_records?.[stageId];
+    return record ? [[stageId, synchronizedStageRecord(session, record)]] : [];
+  }));
+  const orderedRecords = stageOrder.map((stageId) => stageRecords[stageId]).filter((record) => Boolean(record));
+  return {
+    ...session,
+    schema_version: 2,
+    stage_order: stageOrder,
+    stage_records: stageRecords,
+    final_snapshot_files: uniqueByPath(session.final_snapshot_files || []),
+    final_before_files: uniqueByPath(session.final_before_files || []),
+    final_preview_files: uniquePreviewFiles(session.final_preview_files || []),
+    final_intent_to_add_paths: Array.from(new Set(session.final_intent_to_add_paths || [])),
+    snapshot_files: uniqueByPath([
+      ...orderedRecords.flatMap((record) => record.snapshot_files),
+      ...session.final_snapshot_files || []
+    ]),
+    before_files: uniqueByPath([
+      ...orderedRecords.flatMap((record) => record.before_files),
+      ...session.final_before_files || []
+    ]),
+    preview_files: uniquePreviewFiles([
+      ...orderedRecords.flatMap((record) => record.preview_files),
+      ...session.final_preview_files || []
+    ]),
+    intent_to_add_paths: Array.from(/* @__PURE__ */ new Set([
+      ...orderedRecords.flatMap((record) => record.intent_to_add_paths),
+      ...session.final_intent_to_add_paths || []
+    ]))
+  };
+}
+function recordCompleteBundlePreview(session, previewFiles, intentToAddPaths) {
+  if (!isStageLedgerSession(session)) {
+    return {
+      ...session,
+      preview_files: uniquePreviewFiles(previewFiles),
+      intent_to_add_paths: Array.from(/* @__PURE__ */ new Set([...session.intent_to_add_paths, ...intentToAddPaths]))
+    };
+  }
+  const byPath = new Map(previewFiles.flatMap((file) => {
+    const filePath = previewPath(file);
+    return filePath ? [[filePath, file]] : [];
+  }));
+  const intent = new Set(intentToAddPaths);
+  const claimedPreviewPaths = /* @__PURE__ */ new Set();
+  const claimedIntentPaths = /* @__PURE__ */ new Set();
+  const stageRecords = { ...session.stage_records };
+  for (const stageId of session.stage_order || []) {
+    const record = stageRecords[stageId];
+    if (!record) continue;
+    const paths = new Set(record.snapshot_files.map((file) => file.path));
+    const recordPreview = Array.from(paths).flatMap((filePath) => {
+      const file = byPath.get(filePath);
+      if (file) claimedPreviewPaths.add(filePath);
+      return file ? [file] : [];
+    });
+    const recordIntent = Array.from(paths).filter((filePath) => {
+      if (!intent.has(filePath)) return false;
+      claimedIntentPaths.add(filePath);
+      return true;
+    });
+    stageRecords[stageId] = {
+      ...record,
+      preview_files: recordPreview,
+      intent_to_add_paths: recordIntent
+    };
+  }
+  return synchronizeApprovalSession({
+    ...session,
+    stage_records: stageRecords,
+    final_preview_files: previewFiles.filter((file) => {
+      const filePath = previewPath(file);
+      return Boolean(filePath) && !claimedPreviewPaths.has(filePath);
+    }),
+    final_intent_to_add_paths: intentToAddPaths.filter((filePath) => !claimedIntentPaths.has(filePath))
+  });
+}
+
+// src/core/application/runtime/approval-session-store.ts
 function sessionDirectory(root) {
   return import_node_path36.default.join(root, "cadre", "local", "approval-sessions");
 }
@@ -9103,7 +9260,7 @@ function writeApprovalSession(root, session) {
   import_node_fs20.default.mkdirSync(sessionDirectory(root), { recursive: true });
   const target2 = sessionFile(root, session.session_id);
   const temporary = `${target2}.${process.pid}.tmp`;
-  import_node_fs20.default.writeFileSync(temporary, `${JSON.stringify(session, null, 2)}
+  import_node_fs20.default.writeFileSync(temporary, `${JSON.stringify(synchronizeApprovalSession(session), null, 2)}
 `);
   import_node_fs20.default.renameSync(temporary, target2);
 }
@@ -9338,12 +9495,7 @@ function recordApprovalPreview(root, sessionId, workflow, payloadHash, bundle) {
     return;
   }
   writeApprovalSession(root, {
-    ...session,
-    preview_files: previewFiles,
-    intent_to_add_paths: Array.from(/* @__PURE__ */ new Set([
-      ...session.intent_to_add_paths,
-      ...asStringArray(bundle.intent_to_add_paths)
-    ])),
+    ...recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths)),
     updated_at: utcNow()
   });
 }
@@ -10708,11 +10860,7 @@ function requestedApprovalSessionId(args = {}) {
   return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
 }
 function filesForStage(files, stage) {
-  const documentIds = new Set(stage.documentIds);
-  if (documentIds.size > 0) return files.filter((file) => Boolean(file.documentId) && documentIds.has(file.documentId));
-  const matches = stage.fileMatches || [];
-  if (matches.includes("*")) return files;
-  return files.filter((file) => matches.some((needle) => file.path.includes(needle)));
+  return filesForApprovalStage(files, stage);
 }
 function stableJson(value) {
   if (value == null || typeof value !== "object") return JSON.stringify(value);
@@ -10841,7 +10989,8 @@ function approvalOrderError(stageIds, approved) {
   }
   return null;
 }
-function approvalTransitionError(root, args, workflow, sessionId, payloadHash, stageIds, approved, snapshotFiles) {
+function approvalTransitionError(root, args, workflow, sessionId, payloadHash, stages, approved, snapshotFiles) {
+  const stageIds = stages.map((stage) => stage.id);
   if (stageIds.length === 0) return null;
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return orderError;
@@ -10855,14 +11004,16 @@ function approvalTransitionError(root, args, workflow, sessionId, payloadHash, s
     if (superseded.ok === false) {
       return asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`;
     }
+    const beforeFiles = captureApprovalBeforeFiles(root, snapshotFiles);
     writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
       payload_hash: payloadHash,
       payload,
       approved_stages: [],
+      ...createStageLedger(stages, snapshotFiles, beforeFiles),
       snapshot_files: snapshotFiles,
-      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
+      before_files: beforeFiles,
       preview_files: [],
       intent_to_add_paths: [],
       updated_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -10879,14 +11030,16 @@ function approvalTransitionError(root, args, workflow, sessionId, payloadHash, s
   if (requestedSession !== sessionId) return "Approval session is stale for the current generated payload; restart staged review from the current stage.";
   const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
+    const beforeFiles = captureApprovalBeforeFiles(root, snapshotFiles);
     writeApprovalSession(root, {
       session_id: sessionId,
       workflow,
       payload_hash: payloadHash,
       payload,
       approved_stages: [],
+      ...createStageLedger(stages, snapshotFiles, beforeFiles),
       snapshot_files: snapshotFiles,
-      before_files: captureApprovalBeforeFiles(root, snapshotFiles),
+      before_files: beforeFiles,
       preview_files: [],
       intent_to_add_paths: [],
       updated_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -10912,6 +11065,7 @@ function approvalTransitionError(root, args, workflow, sessionId, payloadHash, s
   const requestedStage = requestedApprovalStage(args);
   if (requestedStage && requestedStage !== delta[0]) return `approvalStage must match the newly approved stage ${delta[0]}.`;
   writeApprovalSession(root, {
+    ...session,
     session_id: sessionId,
     workflow,
     payload_hash: payloadHash,
@@ -10929,7 +11083,6 @@ function approvedPreviewFiles(session, _approvedIds) {
   return previewFileRecords(session);
 }
 function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras = {}) {
-  const stageIds = stages.map((stage) => stage.id);
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
   const sessionId = approvalSessionId(workflow, root, payloadHash);
@@ -10965,7 +11118,7 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras 
     };
   }
   const frozenFiles = requestedSessionId2 ? frozenReviewFiles(root, requestedSessionId2, reviewFiles2) : reviewFiles2;
-  let approvalError = approvalTransitionError(root, args, workflow, sessionId, payloadHash, stageIds, approvedIds, frozenFiles);
+  let approvalError = approvalTransitionError(root, args, workflow, sessionId, payloadHash, stages, approvedIds, frozenFiles);
   const effectiveFiles = frozenReviewFiles(root, sessionId, frozenFiles);
   const approved = new Set(approvedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));
