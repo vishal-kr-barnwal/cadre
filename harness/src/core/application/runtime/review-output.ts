@@ -294,7 +294,7 @@ export function targetReviewBundle(
   const warnings: string[] = [];
   const errors: string[] = [];
   const files: JsonObject[] = [];
-  const pendingWrites: Array<{ path: string; content: string }> = [];
+  const pendingWrites: Array<{ path: string; content: string | null }> = [];
   const before = new Map<string, { existed: boolean; content: string }>();
   const newPaths: string[] = [];
   const replacementError = previousStage ? stageReviewDriftError(root, previousStage) : null;
@@ -316,6 +316,22 @@ export function targetReviewBundle(
     };
   }
   const replacementPaths = new Set(previousStage?.preview_files.map((file) => asOptionalString(file.path)).filter((file): file is string => Boolean(file)) || []);
+  const nextPaths = new Set(reviewFiles.map((file) => file.path));
+  const previousBefore = new Map(previousStage?.before_files.map((file) => [file.path, file]) || []);
+  const removedPaths = previousStage?.snapshot_files
+    .filter((file) => !nextPaths.has(file.path))
+    .map((file) => file.path) || [];
+  for (const relativePath of removedPaths) {
+    const targetPath = safeTargetPath(root, relativePath);
+    const baseline = previousBefore.get(relativePath);
+    if (!targetPath || !baseline) {
+      errors.push(`Current-stage membership has no safe baseline for ${relativePath}`);
+      continue;
+    }
+    const exists = fileExists(targetPath);
+    before.set(relativePath, { existed: exists, content: exists ? fs.readFileSync(targetPath, "utf8") : "" });
+    pendingWrites.push({ path: relativePath, content: baseline.existed ? baseline.content : null });
+  }
   const continuingLegacySession = Boolean(args.approvalSessionId || args.approval_session_id) && !previousStage;
   for (const file of reviewFiles) {
     const targetPath = safeTargetPath(root, file.path);
@@ -377,24 +393,40 @@ export function targetReviewBundle(
       ...reviewStats(file.content),
     });
   }
+  let filesMutated = false;
   if (errors.length === 0 && pendingWrites.length > 0) {
     const write = writeArtifactFilesAtomic(root, pendingWrites, { lockName: `review-${workflow}` });
     if (write.ok === false) errors.push(asOptionalString(write.error) || "Unable to materialize review files atomically");
+    else filesMutated = true;
   }
+  const rollbackFiles = (): void => {
+    if (!filesMutated) return;
+    writeArtifactFilesAtomic(root, Array.from(before, ([relativePath, original]) => ({
+      path: relativePath,
+      content: original.existed ? original.content : null,
+    })), { lockName: `review-${workflow}-rollback` });
+  };
   let intentPaths: string[] = [];
+  const removedIntentPaths = (previousStage?.intent_to_add_paths || []).filter((relativePath) => removedPaths.includes(relativePath));
+  const removedIntent = errors.length === 0
+    ? removeReviewIntentToAddAtomic(root, removedIntentPaths)
+    : { ok: true, paths: [] as string[] };
+  if (!removedIntent.ok) {
+    errors.push(removedIntent.error || "Unable to remove obsolete review intent-to-add entries");
+    rollbackFiles();
+  }
   if (errors.length === 0) {
     const intent = addIntentToAdd(root, newPaths);
     warnings.push(...intent.warnings);
     if (intent.error) {
       errors.push(intent.error);
-      const restoreWrites: Array<{ path: string; content: string }> = [];
-      for (const [relativePath, original] of before) {
-        if (original.existed) restoreWrites.push({ path: relativePath, content: original.content });
-        else fs.rmSync(path.join(root, relativePath), { force: true });
-      }
-      if (restoreWrites.length > 0) writeArtifactFilesAtomic(root, restoreWrites, { lockName: `review-${workflow}-rollback` });
+      rollbackFiles();
+      restoreReviewIntentToAdd(root, removedIntent.paths);
     } else {
-      intentPaths = Array.from(new Set([...(previousStage?.intent_to_add_paths || []), ...intent.paths]));
+      intentPaths = Array.from(new Set([
+        ...(previousStage?.intent_to_add_paths || []).filter((relativePath) => !removedPaths.includes(relativePath)),
+        ...intent.paths,
+      ]));
     }
   }
   const error = errors[0] || null;

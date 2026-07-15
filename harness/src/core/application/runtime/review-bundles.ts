@@ -8,6 +8,7 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { fileExists, readJson, safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { normalizeClaimPath } from "./collision";
 import type { CoreResult, ReviewFile } from "./contracts";
+import { reconcileExplicitBundleMembership } from "./explicit-review-bundle";
 import { reviewOutputMode, targetReviewBundle } from "./review-output";
 import type { ApprovalStageRecord } from "./approval-session-model";
 import { asArray } from "./status";
@@ -153,6 +154,25 @@ export function workflowReviewBundle(
   if (unsafeExplicitDir) directory = defaultDirectory;
   if (!explicitDir || unsafeExplicitDir) fs.rmSync(directory, { recursive: true, force: true });
   fs.mkdirSync(directory, { recursive: true });
+  if (explicitDir && !unsafeExplicitDir && previousStage) {
+    const cleanup = reconcileExplicitBundleMembership(directory, reviewFiles, previousStage);
+    if (!cleanup.ok) {
+      const error = cleanup.error || "Unable to reconcile the explicit review bundle";
+      return {
+        ok: false,
+        mode: "bundle",
+        workflow,
+        directory,
+        manifest_path: path.join(directory, "manifest.json"),
+        content_in_response: false,
+        mutates_worktree: false,
+        warnings,
+        errors: [error],
+        error,
+        files: [],
+      };
+    }
+  }
   const files: JsonObject[] = reviewFiles.map((file) => {
     const reviewPath = path.join(directory, file.path);
     fs.mkdirSync(path.dirname(reviewPath), { recursive: true });

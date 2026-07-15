@@ -5763,6 +5763,268 @@ test("setup tech-stack amendment replaces stale structured evidence in the same 
   }
 });
 
+test("setup rebases active technical file membership without restarting approved stages", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-technical-membership-rebase-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "Sources", "App.swift"), "struct App { let ready = true }\n");
+    const technical = advanceSetupToTechnical(root, {
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: true,
+      styleGuideIds: ["swift"],
+      integrations: {},
+      product: {
+        title: "Membership rebase product",
+        summary: "Correct technical evidence without discarding approved semantic context.",
+      },
+      techStack: { languages: ["Swift"], frameworks: ["SwiftUI"], platforms: ["iOS"] },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    const sessionId = technical.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const originalStamp = approvalStamp(technical.approval);
+    const originalPaths = technical.review_artifacts.map((file) => file.path);
+    assert.ok(originalPaths.includes("cadre/lsp.json"));
+    assert.ok(originalPaths.includes("cadre/styleguides/swift.json"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "swift.json")), true);
+    const approvedBytes = new Map([
+      "cadre/product.json",
+      "cadre/product.md",
+      "cadre/product_guidelines.json",
+      "cadre/product_guidelines.md",
+    ].map((file) => [file, fs.readFileSync(path.join(root, file), "utf8")]));
+
+    const amended = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      tech_stack: { languages: ["TypeScript"], frameworks: ["React"], runtimes: ["Node.js"] },
+      style_guide_ids: ["typescript"],
+      write_lsp: false,
+    });
+    assert.equal(amended.ok, true, amended.error);
+    assert.equal(amended.approval.session_id, sessionId);
+    assert.deepEqual(amended.approval.approved_stages, ["product", "product_guidelines"]);
+    assert.equal(amended.approval.current_stage_revision, technical.approval.current_stage_revision + 1);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "swift.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "swift.md")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.md")), true);
+    const record = readJson(sessionFile).stage_records.technical;
+    assert.equal(record.snapshot_files.some((file) => file.path === "cadre/lsp.json"), false);
+    assert.equal(record.snapshot_files.some((file) => file.path === "cadre/styleguides/swift.json"), false);
+    assert.equal(record.snapshot_files.some((file) => file.path === "cadre/styleguides/typescript.json"), true);
+    for (const [file, content] of approvedBytes) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+
+    const stale = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...originalStamp,
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(stale.ok, false);
+    assert.match(stale.error, /approvalStageHash.*reviewed technical stage/);
+
+    const technicalApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(amended.approval),
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(technicalApproved.ok, true, technicalApproved.error);
+    const workflowApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "workflow",
+      ...approvalStamp(technicalApproved.approval),
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(workflowApproved.ok, true, workflowApproved.error);
+    const executed = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "swift.json")), false);
+    assert.deepEqual(readJson(path.join(root, "cadre", "styleguides", "index.json")).selected, ["typescript"]);
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit setup review bundle rejects drift before replacing technical file membership", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-explicit-bundle-membership-rebase-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "Sources", "App.swift"), "struct App { let ready = true }\n");
+    const reviewDirectory = path.join(root, ".setup-review");
+    const technical = advanceSetupToTechnical(root, {
+      reviewBundleDir: reviewDirectory,
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: false,
+      styleGuideIds: ["swift"],
+      integrations: {},
+      product: {
+        title: "Explicit bundle membership product",
+        summary: "Keep review bundle membership aligned with the active technical stage.",
+      },
+      techStack: { languages: ["Swift"], frameworks: ["SwiftUI"], platforms: ["iOS"] },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    assert.equal(technical.approval.current_stage, "technical");
+    assert.equal(technical.review_bundle.mode, "bundle");
+    assert.equal(technical.review_bundle.directory, reviewDirectory);
+
+    const sessionId = technical.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const swiftJson = path.join(reviewDirectory, "cadre", "styleguides", "swift.json");
+    const swiftMarkdown = path.join(reviewDirectory, "cadre", "styleguides", "swift.md");
+    const typescriptJson = path.join(reviewDirectory, "cadre", "styleguides", "typescript.json");
+    const typescriptMarkdown = path.join(reviewDirectory, "cadre", "styleguides", "typescript.md");
+    const unrelated = path.join(reviewDirectory, "reviewer-notes.txt");
+    write(unrelated, "Keep this reviewer-owned note.\n");
+    const previousSession = readJson(sessionFile);
+    const swiftSnapshot = previousSession.stage_records.technical.snapshot_files
+      .find((file) => file.path === "cadre/styleguides/swift.json");
+    assert.ok(swiftSnapshot);
+    const sessionBeforeDrift = fs.readFileSync(sessionFile, "utf8");
+    const manifestBeforeDrift = fs.readFileSync(path.join(reviewDirectory, "manifest.json"), "utf8");
+    const driftedSwift = `${swiftSnapshot.content}\nreviewer edit\n`;
+    fs.writeFileSync(swiftJson, driftedSwift);
+
+    const replacement = {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      tech_stack: { languages: ["TypeScript"], frameworks: ["React"], runtimes: ["Node.js"] },
+      style_guide_ids: ["typescript"],
+      write_lsp: false,
+    };
+    const rejected = core.workflowPacket(root, replacement);
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /explicit review bundle drift/i);
+    assert.equal(fs.readFileSync(swiftJson, "utf8"), driftedSwift);
+    assert.equal(fs.existsSync(swiftMarkdown), true);
+    assert.equal(fs.existsSync(typescriptJson), false);
+    assert.equal(fs.existsSync(typescriptMarkdown), false);
+    assert.equal(fs.readFileSync(unrelated, "utf8"), "Keep this reviewer-owned note.\n");
+    assert.equal(fs.readFileSync(path.join(reviewDirectory, "manifest.json"), "utf8"), manifestBeforeDrift);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBeforeDrift);
+
+    fs.writeFileSync(swiftJson, swiftSnapshot.content);
+    const amended = core.workflowPacket(root, replacement);
+    assert.equal(amended.ok, true, amended.error);
+    assert.equal(amended.approval.session_id, sessionId);
+    assert.deepEqual(amended.approval.approved_stages, ["product", "product_guidelines"]);
+    assert.equal(amended.approval.current_stage_revision, technical.approval.current_stage_revision + 1);
+    assert.equal(fs.existsSync(swiftJson), false);
+    assert.equal(fs.existsSync(swiftMarkdown), false);
+    assert.equal(fs.existsSync(typescriptJson), true);
+    assert.equal(fs.existsSync(typescriptMarkdown), true);
+    assert.equal(fs.readFileSync(unrelated, "utf8"), "Keep this reviewer-owned note.\n");
+    assert.equal(fs.existsSync(path.join(reviewDirectory, "cadre", "product.json")), true);
+    assert.equal(fs.existsSync(path.join(reviewDirectory, "cadre", "product_guidelines.json")), true);
+
+    const manifest = readJson(path.join(reviewDirectory, "manifest.json"));
+    const manifestPaths = manifest.files.map((file) => file.path);
+    assert.equal(manifestPaths.includes("cadre/styleguides/swift.json"), false);
+    assert.equal(manifestPaths.includes("cadre/styleguides/swift.md"), false);
+    assert.equal(manifestPaths.includes("cadre/styleguides/typescript.json"), true);
+    assert.equal(manifestPaths.includes("cadre/styleguides/typescript.md"), true);
+    const technicalRecord = readJson(sessionFile).stage_records.technical;
+    assert.equal(technicalRecord.snapshot_files.some((file) => file.path === "cadre/styleguides/swift.json"), false);
+    assert.equal(technicalRecord.snapshot_files.some((file) => file.path === "cadre/styleguides/typescript.json"), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit review bundle rolls membership back when session persistence fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-explicit-bundle-transaction-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "Sources", "App.swift"), "struct App { let ready = true }\n");
+    const reviewDirectory = path.join(root, ".setup-review");
+    const technical = advanceSetupToTechnical(root, {
+      reviewBundleDir: reviewDirectory,
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: false,
+      styleGuideIds: ["swift"],
+      integrations: {},
+      product: {
+        title: "Explicit bundle transaction product",
+        summary: "Keep explicit review material synchronized with its persisted session revision.",
+      },
+      techStack: { languages: ["Swift"], frameworks: ["SwiftUI"], platforms: ["iOS"] },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    const sessionId = technical.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const swiftJson = path.join(reviewDirectory, "cadre", "styleguides", "swift.json");
+    const swiftMarkdown = path.join(reviewDirectory, "cadre", "styleguides", "swift.md");
+    const typescriptJson = path.join(reviewDirectory, "cadre", "styleguides", "typescript.json");
+    const typescriptMarkdown = path.join(reviewDirectory, "cadre", "styleguides", "typescript.md");
+    const manifestPath = path.join(reviewDirectory, "manifest.json");
+    const sessionBefore = fs.readFileSync(sessionFile, "utf8");
+    const swiftJsonBefore = fs.readFileSync(swiftJson, "utf8");
+    const swiftMarkdownBefore = fs.readFileSync(swiftMarkdown, "utf8");
+    const manifestBefore = fs.readFileSync(manifestPath, "utf8");
+    const amendment = {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      tech_stack: { languages: ["TypeScript"], frameworks: ["React"], runtimes: ["Node.js"] },
+      style_guide_ids: ["typescript"],
+      write_lsp: false,
+    };
+
+    const originalRename = fs.renameSync;
+    let injected = false;
+    fs.renameSync = function injectedExplicitBundleSessionRename(source, target) {
+      if (!injected && target === sessionFile && String(source).endsWith(".tmp")) {
+        injected = true;
+        throw new Error("injected explicit bundle session persistence failure");
+      }
+      return originalRename.apply(this, arguments);
+    };
+    let failed;
+    try {
+      failed = core.workflowPacket(root, amendment);
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(injected, true);
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /approval preview transaction failed.*explicit bundle session persistence failure/i);
+    assert.equal(failed.approval.approval_recovery_required, false);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+    assert.equal(fs.readFileSync(swiftJson, "utf8"), swiftJsonBefore);
+    assert.equal(fs.readFileSync(swiftMarkdown, "utf8"), swiftMarkdownBefore);
+    assert.equal(fs.readFileSync(manifestPath, "utf8"), manifestBefore);
+    assert.equal(fs.existsSync(typescriptJson), false);
+    assert.equal(fs.existsSync(typescriptMarkdown), false);
+
+    const retried = core.workflowPacket(root, amendment);
+    assert.equal(retried.ok, true, retried.error);
+    assert.equal(fs.existsSync(swiftJson), false);
+    assert.equal(fs.existsSync(swiftMarkdown), false);
+    assert.equal(fs.existsSync(typescriptJson), true);
+    assert.equal(fs.existsSync(typescriptMarkdown), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("setup rejects malformed approval session ids without escaping session storage", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-approval-session-id-test-"));
   try {

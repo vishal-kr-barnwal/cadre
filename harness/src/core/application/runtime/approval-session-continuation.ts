@@ -33,12 +33,6 @@ function sameStageOrder(session: ApprovalSession, stages: ApprovalStage[]): bool
     && expected.every((stageId, index) => session.stage_order?.[index] === stageId);
 }
 
-function samePaths(left: ReviewFile[], right: ReviewFile[]): boolean {
-  const leftPaths = left.map((file) => file.path).sort();
-  const rightPaths = right.map((file) => file.path).sort();
-  return leftPaths.length === rightPaths.length && leftPaths.every((file, index) => file === rightPaths[index]);
-}
-
 function beforeFilesForReview(
   root: string,
   reviewFiles: ReviewFile[],
@@ -90,17 +84,6 @@ export function prepareApprovalContinuation(
   const generatedActiveFiles = filesForApprovalStage(reviewFiles, activeStage);
   if (generatedActiveFiles.length === 0 && (!options.allowEmptyActiveStage || previousRecord.preview_files.length > 0)) {
     return { ...base, activeStage, previousRecord, ok: false, stage: "approval_stage_files", error: `Current approval stage ${activeStage.id} has no review files.` };
-  }
-  if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, generatedActiveFiles)) {
-    return {
-      ...base,
-      activeStage,
-      activeFiles: generatedActiveFiles,
-      previousRecord,
-      ok: false,
-      stage: "approval_stage_paths",
-      error: `Current stage ${activeStage.id} changed its review paths; cancel and restart before changing stage membership.`,
-    };
   }
   const sameGeneratedReview = sameReviewFiles(previousRecord.snapshot_files, generatedActiveFiles);
   const activeChanged = session.payload_hash !== payloadHash
