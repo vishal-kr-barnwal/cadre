@@ -69,8 +69,7 @@ function planRevisionHasEvidence(value: unknown): boolean {
   if (!Array.isArray(phases)) return false;
   return phases.map(asJsonObject).some((phase) => {
     const tasks = Array.isArray(phase.tasks) ? phase.tasks.map(asJsonObject) : [];
-    return meaningfulArtifactText(phase.title)
-      && tasks.some((task) => [task.title, task.description, task.body].some(meaningfulArtifactText));
+    return tasks.some((task) => [task.title, task.description, task.body].some(meaningfulArtifactText));
   });
 }
 
