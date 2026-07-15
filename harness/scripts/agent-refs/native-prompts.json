@@ -6,12 +6,13 @@
   "markdownUse": "human_projection_only",
   "rules": [
     "Use the client's native selector when available.",
-    "Return answers as structured workflow input; never write prompt-response files."
+    "Return answers as structured workflow input; never write prompt-response files.",
+    "When a session_id is returned, resume that exact session without recording approval."
   ],
   "sections": [
     {
       "heading": "Clarification",
-      "body": "When decision.kind is clarification, ask only the returned prompts. Continue the same workflow with answers under `input`."
+      "body": "When decision.kind is clarification, ask only the returned prompts. Continue with answers under `input` and the exact returned session-only resume. `approval: {session_id}` preserves the session; it does not approve the stage."
     }
   ],
   "platforms": {

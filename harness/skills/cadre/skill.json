@@ -11,10 +11,13 @@
   "invariants": [
     "Cadre packets own control-plane, provider, worker, approval, merge, and generated projection state",
     "next is the sole immediate single-agent Cadre continuation",
-    "Only decision.required.write_back, data.workers[].dispatch.record_finish_packet, and reissued data.worker_callbacks[].record_finish_packet are typed deferred or fan-out callbacks",
+    "Only decision.resume, decision.required.write_back, data.workers[].dispatch.record_finish_packet, and reissued data.worker_callbacks[].record_finish_packet are typed deferred or fan-out callbacks",
     "Merge, cleanup, and all other continuations must come from a later packet next call",
     "Markdown projections are never canonical input",
-    "Only explicit user approval may be mapped into approval fields",
+    "Only the current approval stage is generated and materialized; later stages remain pending",
+    "approval with session_id alone resumes clarification or formatting and is not user approval",
+    "Only explicit user approval may add stage or approved_stages to approval fields",
+    "All files in one stage are approved atomically and complete is sent only after every stage",
     "Required project-skill rules are never truncated"
   ],
   "workflows": [
@@ -40,7 +43,7 @@
   ],
   "references": [
     { "id": "native-prompts", "when": "decision.kind == 'clarification'" },
-    { "id": "approval-and-generation", "when": "decision.kind == 'approval'" },
+    { "id": "approval-and-generation", "when": "decision.kind in ['approval','format_reference']" },
     { "id": "provider-evidence", "when": "decision.required.write_back exists" },
     { "id": "parallel-execution", "when": "next.arguments.action startsWith 'parallel.' or data.workers[].dispatch.record_finish_packet exists or data.worker_callbacks[].record_finish_packet exists" },
     { "id": "ownership-guard", "when": "decision.kind == 'ownership_conflict'" },

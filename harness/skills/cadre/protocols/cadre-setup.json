@@ -10,8 +10,14 @@
     "workflowPolicy"
   ],
   "transitions": [
-    "collect_intent",
-    "review_stages",
+    "collect_product",
+    "review_product",
+    "collect_product_guidelines",
+    "review_product_guidelines",
+    "collect_technical_context",
+    "review_grouped_technical_context",
+    "collect_workflow_policy",
+    "review_workflow_policy",
     "execute"
   ],
   "approval": "document_staged",

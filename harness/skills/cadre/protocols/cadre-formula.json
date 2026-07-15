@@ -10,10 +10,13 @@
   ],
   "transitions": [
     "run_operation",
-    "review_pour_if_needed",
+    "collect_and_review_pour_spec_if_needed",
+    "collect_and_review_pour_plan_if_needed",
     "execute",
     "summarize"
   ],
-  "approval": "execute_for_mutations",
-  "references": []
+  "approval": "document_staged_for_pour_execute_for_other_mutations",
+  "references": [
+    { "id": "approval-and-generation", "when": "operation:pour and decision:approval" }
+  ]
 }

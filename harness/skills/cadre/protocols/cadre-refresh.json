@@ -12,8 +12,8 @@
   "transitions": [
     "analyze",
     "select_levels",
-    "collect_evidence",
-    "review_selected_documents",
+    "collect_and_review_only_active_stage",
+    "repeat_selected_stages_in_order_product_product_guidelines_grouped_technical_workflow_patterns",
     "execute"
   ],
   "approval": "document_staged_for_selected_semantic_levels",

@@ -9,8 +9,10 @@
     "plan"
   ],
   "transitions": [
-    "clarify",
-    "review_spec_plan",
+    "clarify_spec",
+    "review_spec",
+    "collect_plan",
+    "review_plan",
     "execute"
   ],
   "approval": "document_staged",

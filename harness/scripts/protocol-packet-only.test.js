@@ -141,6 +141,80 @@ test("Master skill JSON is a conditional v1 reference contract", () => {
   assert.ok(skill.references.every((reference) => reference.id && reference.when));
 });
 
+test("Staged workflow guidance distinguishes session resume from stage approval", () => {
+  const shim = fs.readFileSync(path.join(masterSkillDir, "SKILL.md"), "utf8");
+  const commandTemplate = fs.readFileSync(path.join(masterSkillDir, "workflow-command-template.md"), "utf8");
+  const approvalReference = readJson(path.join(root, "scripts", "agent-refs", "approval-and-generation.json"));
+  const nativePrompts = readJson(path.join(root, "scripts", "agent-refs", "native-prompts.json"));
+
+  for (const text of [shim, commandTemplate]) {
+    const normalized = text.replace(/\s+/g, " ");
+    assert.match(text, /decision\.resume/);
+    assert.match(text, /session_id/);
+    assert.match(normalized, /is not approval/);
+    assert.match(normalized, /later stages (?:remain|stay) pending/i);
+  }
+  assert.ok(approvalReference.rules.some((rule) => /session_id-only.*resume.*not approval/i.test(rule)));
+  assert.ok(approvalReference.rules.some((rule) => /stage, approved_stages, or complete.*explicit user approval/i.test(rule)));
+  const approvalSections = new Map(approvalReference.sections.map((section) => [section.heading, section.body]));
+  assert.match(approvalSections.get("Stage"), /every returned artifact.*atomic set/i);
+  assert.match(approvalSections.get("Execute"), /exact returned `next` unchanged/i);
+  assert.ok(nativePrompts.rules.some((rule) => /session.*without recording approval/i.test(rule)));
+});
+
+test("Staged workflow protocols preserve active-stage collection order", () => {
+  const protocols = path.join(masterSkillDir, "protocols");
+  const setup = readJson(path.join(protocols, "cadre-setup.json"));
+  const newtrack = readJson(path.join(protocols, "cadre-newtrack.json"));
+  const revise = readJson(path.join(protocols, "cadre-revise.json"));
+  const refresh = readJson(path.join(protocols, "cadre-refresh.json"));
+  const formula = readJson(path.join(protocols, "cadre-formula.json"));
+  const skill = readJson(path.join(protocols, "cadre-skill.json"));
+
+  assert.deepEqual(setup.transitions, [
+    "collect_product",
+    "review_product",
+    "collect_product_guidelines",
+    "review_product_guidelines",
+    "collect_technical_context",
+    "review_grouped_technical_context",
+    "collect_workflow_policy",
+    "review_workflow_policy",
+    "execute",
+  ]);
+  assert.deepEqual(newtrack.transitions, ["clarify_spec", "review_spec", "collect_plan", "review_plan", "execute"]);
+  assert.deepEqual(revise.transitions, [
+    "determine_revision_scope",
+    "collect_and_review_spec_changes_if_selected",
+    "collect_and_review_plan_changes_if_selected",
+    "execute",
+  ]);
+  assert.deepEqual(refresh.transitions, [
+    "analyze",
+    "select_levels",
+    "collect_and_review_only_active_stage",
+    "repeat_selected_stages_in_order_product_product_guidelines_grouped_technical_workflow_patterns",
+    "execute",
+  ]);
+  assert.deepEqual(formula.transitions, [
+    "run_operation",
+    "collect_and_review_pour_spec_if_needed",
+    "collect_and_review_pour_plan_if_needed",
+    "execute",
+    "summarize",
+  ]);
+  assert.deepEqual(skill.transitions, [
+    "inspect",
+    "collect_and_review_skill",
+    "format_reference_sources",
+    "collect_and_review_references",
+    "review_destructive_mutation",
+    "execute",
+    "commit",
+  ]);
+  assert.ok(skill.references.some((reference) => /format_reference/.test(reference.when)));
+});
+
 test("Generated Codex and Claude plugins expose explicit workflow command skills", () => {
   const contract = readJson(path.join(masterSkillDir, "skill.json"));
   const expectedCommands = [...contract.workflows].sort();
@@ -303,7 +377,7 @@ test("Protocol approval matrix distinguishes documents, execution, and read-only
     ["artifacts", "execute"],
     ["debug", "execute"],
     ["flag", "execute"],
-    ["formula", "execute_for_mutations"],
+    ["formula", "document_staged_for_pour_execute_for_other_mutations"],
     ["handoff", "document_staged"],
     ["implement", "execute"],
     ["land", "execute"],
@@ -315,7 +389,7 @@ test("Protocol approval matrix distinguishes documents, execution, and read-only
     ["revise", "document_staged"],
     ["setup", "document_staged"],
     ["ship", "execute"],
-    ["skill", "document_staged_for_create_update_execute_for_rename_remove"],
+    ["skill", "document_staged_for_create_update_mutation_staged_for_rename_remove"],
     ["status", "none"],
     ["validate", "none"],
   ]);

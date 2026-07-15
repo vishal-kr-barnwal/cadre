@@ -10,8 +10,9 @@
     "plan?"
   ],
   "transitions": [
-    "clarify",
-    "review_revision",
+    "determine_revision_scope",
+    "collect_and_review_spec_changes_if_selected",
+    "collect_and_review_plan_changes_if_selected",
     "execute"
   ],
   "approval": "document_staged",

@@ -558,6 +558,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const initialized = await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } });
     assert.match(initialized.instructions, /root/);
     assert.match(initialized.instructions, /packet-led/);
+    assert.match(initialized.instructions, /session_id alone.*not approval/);
     const tools = await request("tools/list", {});
     const names = tools.tools.map((tool) => tool.name);
     assert.deepEqual(names, ["cadre_workflow", "cadre_action", "cadre_read"]);
@@ -566,6 +567,11 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(fieldsFor("cadre_workflow"), ["approval", "execute", "input", "root", "workflow"]);
     assert.deepEqual(fieldsFor("cadre_action"), ["action", "execute", "input", "root"]);
     assert.deepEqual(fieldsFor("cadre_read"), ["uri"]);
+    const approvalSchema = byName.get("cadre_workflow").inputSchema.properties.approval;
+    assert.deepEqual(Object.keys(approvalSchema.properties).sort(), ["approved_stages", "cancel", "complete", "session_id", "stage"]);
+    assert.equal(approvalSchema.additionalProperties, false);
+    assert.match(approvalSchema.description, /session_id alone resumes and is not approval/);
+    assert.match(approvalSchema.description, /exact approved_stages prefix only after explicit user approval/);
     assert.ok(Math.ceil(JSON.stringify(tools.tools).length / 4) <= 1700);
     assert.ok(tools.tools.every((tool) => tool.inputSchema.additionalProperties === false));
     for (const legacyName of [

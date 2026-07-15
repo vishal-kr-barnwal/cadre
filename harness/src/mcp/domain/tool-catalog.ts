@@ -9,6 +9,7 @@ export const SERVER_INSTRUCTIONS = [
   "Cadre is a packet-led runtime. Call cadre_workflow first for workflows, cadre_action for a packet named by a workflow response, and cadre_read only for a relevant resource URI.",
   "Pass a root candidate to project-scoped calls. Cadre resolves it internally; setup accepts an uninitialized directory.",
   "Cadre owns control-plane, provider, worker, approval, merge, and generated projection state.",
+  "In staged workflows, session_id alone resumes the current stage and is not approval; stage and approved_stages require explicit user approval.",
 ].join(" ");
 
 const root: JsonObject = {
@@ -26,8 +27,19 @@ export const TOOLS: JsonObject[] = [
         root,
         workflow: { type: "string" },
         input: { type: "object", description: "Workflow-specific structured input." },
-        execute: { type: "boolean", description: "Apply the workflow after its required approval steps; omit or false for preview." },
-        approval: { type: "object", description: "Explicit document approval supplied only after user confirmation, or cancel:true to abandon a review session." },
+        execute: { type: "boolean", description: "Apply the workflow after every required stage is approved; omit or false for preview." },
+        approval: {
+          type: "object",
+          description: "Resume or control a staged session. session_id alone resumes and is not approval. Add stage and the exact approved_stages prefix only after explicit user approval; complete is valid only after all stages. cancel abandons the session.",
+          properties: {
+            session_id: { type: "string" },
+            stage: { type: "string" },
+            approved_stages: { type: "array", items: { type: "string" } },
+            complete: { type: "boolean" },
+            cancel: { type: "boolean" },
+          },
+          additionalProperties: false,
+        },
       },
       required: ["root", "workflow"],
       additionalProperties: false,

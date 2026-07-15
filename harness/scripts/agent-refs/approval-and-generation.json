@@ -5,18 +5,23 @@
   "title": "Approval and generation",
   "markdownUse": "human_projection_only",
   "rules": [
-    "Ask for explicit user approval of only the current stage.",
-    "Never send approval fields before the user approves.",
+    "Generate, materialize, and ask for explicit user approval of only the current stage.",
+    "A session_id-only continuation is a resume, not approval.",
+    "Never send stage, approved_stages, or complete before explicit user approval of the exact current review set.",
     "Never inline generated artifact bodies when review paths are available."
   ],
   "sections": [
     {
+      "heading": "Resume",
+      "body": "For current-stage clarification or formatting, continue the same workflow with `approval: {session_id}` only. Preserve the approved prefix and do not reopen or pre-generate later stages."
+    },
+    {
       "heading": "Stage",
-      "body": "Review the packet's current decision.stage and artifact review paths. After explicit approval, call the same workflow with `approval: {session_id, stage, approved_stages}`."
+      "body": "Review every returned artifact for decision.stage as one atomic set. After explicit approval, call the same workflow with `approval: {session_id, stage, approved_stages}` using exactly the next cumulative prefix."
     },
     {
       "heading": "Execute",
-      "body": "When no approval stage remains, call the workflow with `execute:true` and `approval: {session_id, approved_stages, complete:true}`."
+      "body": "When no approval stage remains, invoke the exact returned `next` unchanged. It carries `execute:true`, the session, the approved prefix, and completion authorization."
     }
   ]
 }
