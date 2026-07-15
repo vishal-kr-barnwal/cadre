@@ -4727,6 +4727,60 @@ test("a changed unapproved preview safely replaces its overlapping session", () 
   }
 });
 
+test("a sessionless overlapping setup amendment returns the active session without mutation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-sessionless-recovery-test-"));
+  try {
+    git(root, ["init"]);
+    const base = withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Initial setup evidence",
+        summary: "Repository-grounded product evidence awaiting explicit staged approval.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    const preview = core.workflowPacket(root, base);
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.approval.current_stage, "product");
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const sessionBefore = fs.readFileSync(sessionFile, "utf8");
+    const productBefore = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
+    const changed = {
+      ...base,
+      product: {
+        title: "Corrected setup evidence",
+        summary: "The user's authoritative correction must resume the active setup session.",
+      },
+    };
+
+    const blocked = core.workflowPacket(root, changed);
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /active setup approval session.*resume session/i);
+    assert.equal(blocked.approval.session_id, sessionId);
+    assert.equal(blocked.approval.session_resumable, true);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"), productBefore);
+    assert.deepEqual(fs.readdirSync(sessionDirectory).filter((name) => name.endsWith(".json")), [`${sessionId}.json`]);
+
+    const packet = core.workflowPacketV1(root, changed);
+    assert.equal(packet.ok, false);
+    assert.equal(packet.decision.kind, "blocked");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.equal(packet.decision.resume.arguments.approval.session_id, sessionId);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"), productBefore);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a complete refresh replacement does not leak baseline or superseded preview fields", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-preview-baseline-test-"));
   try {

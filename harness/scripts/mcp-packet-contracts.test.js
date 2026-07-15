@@ -641,6 +641,7 @@ test("stale staged approval exposes authoritative recovery while a missing sessi
     assert.equal(missing.ok, false);
     assert.equal(missing.decision.kind, "blocked");
     assert.match(missing.decision.reason, /session was not found/i);
+    assert.equal(missing.decision.session_id, missingSessionId);
     assert.equal(missing.decision.resume, null);
     assert.equal(missing.next, null);
 

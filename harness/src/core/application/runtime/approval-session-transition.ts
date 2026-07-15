@@ -11,6 +11,7 @@ import {
   type ApprovalSession,
 } from "./approval-session-model";
 import {
+  activeApprovalSessionsForTargets,
   captureApprovalBeforeFiles,
   readApprovalSession,
   supersedeUnapprovedApprovalSessions,
@@ -108,6 +109,23 @@ export function transitionApprovalSession(
     const existing = readApprovalSession(root, sessionId);
     if (existing && existing.workflow === workflow && existing.payload_hash === payloadHash && existing.preview_files.length > 0) {
       return { session: existing, error: null };
+    }
+    if (workflow === "setup") {
+      const overlapping = activeApprovalSessionsForTargets(root, workflow, snapshotFiles)
+        .filter((session) => session.session_id !== sessionId);
+      if (overlapping.length === 1) {
+        const active = overlapping[0]!;
+        return {
+          session: active,
+          error: `An active setup approval session already owns overlapping review targets; resume session ${active.session_id} with approvalSessionId before amending it.`,
+        };
+      }
+      if (overlapping.length > 1) {
+        return {
+          session: null,
+          error: `Multiple active setup approval sessions own overlapping review targets (${overlapping.map((session) => session.session_id).join(", ")}); resume or cancel them explicitly before starting another setup payload.`,
+        };
+      }
     }
     const superseded = supersedeUnapprovedApprovalSessions(root, workflow, sessionId, snapshotFiles);
     if (superseded.ok === false) {

@@ -115,7 +115,7 @@ export function stagedApprovalState(
     ? { session: requestedSession, error: null }
     : transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles, extras);
   let approvalError = transition.error;
-  let session = transition.session;
+  let session = transition.session?.workflow === workflow ? transition.session : null;
   let active = session ? stages.find((stage) => !session!.approved_stages.includes(stage.id)) || null : null;
   let activeFiles = active && session ? stageRecord(session, active.id)?.snapshot_files || [] : [];
   let previousRecord = active && session ? stageRecord(session, active.id) : null;
@@ -158,7 +158,9 @@ export function stagedApprovalState(
     ? "Approval preview could not be materialized; review output must remain enabled for staged approval."
     : asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
-  session = readApprovalSession(root, sessionId) || session;
+  const persistedSession = readApprovalSession(root, sessionId);
+  session = persistedSession?.workflow === workflow ? persistedSession : session;
+  const responseSessionId = session?.session_id || (approvalError ? requestedSessionId : sessionId);
   const authoritativeApprovedIds = session?.approved_stages || approvedIds;
   const approved = new Set(authoritativeApprovedIds);
   const pending = stages.filter((stage) => !approved.has(stage.id));
@@ -177,13 +179,15 @@ export function stagedApprovalState(
   ]));
   const currentRecord = active && session ? stageRecord(session, active.id) : null;
   const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
-  const manualPrompt = active && !deferredForClarification ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
+  const manualPrompt = active && responseSessionId && !deferredForClarification
+    ? stageApprovalPrompt(workflow, active, responseSessionId, activeFiles)
+    : null;
   return {
     version: 1,
     kind: "cadre.staged_approval.v1",
     workflow,
     required: true,
-    session_id: sessionId,
+    session_id: responseSessionId,
     session_resumable: Boolean(session && active),
     payload_hash: session?.payload_hash || payloadHash,
     approval_session_argument: "approvalSessionId",

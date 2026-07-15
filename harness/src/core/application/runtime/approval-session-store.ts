@@ -82,6 +82,23 @@ function approvalSessions(root: string): ApprovalSession[] {
     .filter((session): session is ApprovalSession => Boolean(session));
 }
 
+export function activeApprovalSessionsForTargets(
+  root: string,
+  workflow: string,
+  files: ReviewFile[],
+): ApprovalSession[] {
+  const paths = new Set(files.filter((file) => file.missing !== true).map((file) => file.path));
+  if (paths.size === 0) return [];
+  return approvalSessions(root)
+    .filter((session) => session.workflow === workflow && session.preview_files.length > 0)
+    .filter((session) => {
+      const stageOrder = session.stage_order || [];
+      return stageOrder.length === 0 || session.approved_stages.length < stageOrder.length;
+    })
+    .filter((session) => session.snapshot_files.some((file) => file.missing !== true && paths.has(file.path)))
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+}
+
 export function approvalSessionForTarget(root: string, relativePath: string): ApprovalSession | null {
   return approvalSessions(root)
     .filter((session) => session.snapshot_files.some((file) => file.missing !== true && file.path === relativePath))
