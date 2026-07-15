@@ -4909,6 +4909,325 @@ test("a sessionless overlapping setup amendment returns the active session witho
   }
 });
 
+test("approval preview persistence failure rolls target files and session state back atomically", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-preview-session-transaction-test-"));
+  try {
+    git(root, ["init"]);
+    const base = withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Transactional setup baseline",
+        summary: "Keep reviewed targets aligned with their persisted approval session.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    const preview = core.workflowPacket(root, base);
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const productJson = path.join(root, "cadre", "product.json");
+    const productMarkdown = path.join(root, "cadre", "product.md");
+    const sessionBefore = fs.readFileSync(sessionFile, "utf8");
+    const productJsonBefore = fs.readFileSync(productJson, "utf8");
+    const productMarkdownBefore = fs.readFileSync(productMarkdown, "utf8");
+    const amendment = {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      product: {
+        title: "Transactional setup correction",
+        summary: "Apply the authoritative correction only with its matching persisted review revision.",
+      },
+    };
+
+    const originalRename = fs.renameSync;
+    let injected = false;
+    fs.renameSync = function injectedSessionRename(source, target) {
+      if (!injected && target === sessionFile && String(source).endsWith(".tmp")) {
+        injected = true;
+        throw new Error("injected approval session persistence failure");
+      }
+      return originalRename.apply(this, arguments);
+    };
+    let failed;
+    try {
+      failed = core.workflowPacket(root, amendment);
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(injected, true);
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /approval preview transaction failed.*injected approval session persistence failure/i);
+    assert.equal(failed.review_bundle, null);
+    assert.equal(failed.approval.approval_recovery_required, false);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+    assert.equal(fs.readFileSync(productJson, "utf8"), productJsonBefore);
+    assert.equal(fs.readFileSync(productMarkdown, "utf8"), productMarkdownBefore);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".tmp")), false);
+
+    const retried = core.workflowPacket(root, amendment);
+    assert.equal(retried.ok, true, retried.error);
+    assert.equal(retried.approval.session_id, sessionId);
+    assert.equal(retried.approval.current_stage_revision, preview.approval.current_stage_revision + 1);
+    assert.match(fs.readFileSync(productJson, "utf8"), /Transactional setup correction/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approval rollback failure suppresses every automatic continuation until repaired", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-preview-recovery-required-test-"));
+  try {
+    git(root, ["init"]);
+    const setupInput = withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Recovery-required baseline",
+        summary: "Never continue automatically when target and session rollback cannot be reconciled.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    const preview = core.workflowPacket(root, setupInput);
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const productJson = path.join(root, "cadre", "product.json");
+    const amendment = {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      product: {
+        title: "Unreconciled correction",
+        summary: "This candidate remains on disk only to exercise explicit recovery behavior.",
+      },
+    };
+    const originalRename = fs.renameSync;
+    let sessionFailureInjected = false;
+    let rollbackFailureInjected = false;
+    fs.renameSync = function injectedRollbackFailure(source, target) {
+      if (!sessionFailureInjected && target === sessionFile && String(source).endsWith(".tmp")) {
+        sessionFailureInjected = true;
+        throw new Error("injected candidate session failure");
+      }
+      if (sessionFailureInjected && !rollbackFailureInjected && target === productJson && String(source).endsWith(".cadre-tmp")) {
+        rollbackFailureInjected = true;
+        throw new Error("injected target rollback failure");
+      }
+      return originalRename.apply(this, arguments);
+    };
+    let failed;
+    try {
+      failed = core.workflowPacket(root, amendment);
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(sessionFailureInjected, true);
+    assert.equal(rollbackFailureInjected, true);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.phase_state, "recovery_required");
+    assert.equal(failed.approval.approval_recovery_required, true);
+    assert.equal(failed.approval.session_resumable, false);
+    assert.equal(failed.approval.manual_approval_required, false);
+    assert.equal(failed.approval.manual_approval_prompt, null);
+    assert.match(failed.approval.next_actions.join("\n"), /stop automatic continuation/i);
+
+    const publicFailed = core.workflowPacketEnvelopeV1(root, amendment, failed);
+    assert.equal(publicFailed.decision.kind, "recovery_required");
+    assert.equal(publicFailed.decision.resume, null);
+    assert.deepEqual(publicFailed.decision.writable_paths, []);
+    assert.equal(publicFailed.next, null);
+
+    const retried = core.workflowPacketV1(root, amendment);
+    assert.equal(retried.ok, false);
+    assert.equal(retried.phase, "recovery_required");
+    assert.equal(retried.decision.kind, "recovery_required");
+    assert.equal(retried.decision.resume, null);
+    assert.equal(retried.next, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupted cancellation journal restores a resumable live session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-journal-recovery-test-"));
+  try {
+    git(root, ["init"]);
+    const setupInput = withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Cancellation journal recovery",
+        summary: "Recover an interrupted session quarantine before accepting another continuation.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    const preview = core.workflowPacket(root, setupInput);
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const productBefore = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
+    const originalRename = fs.renameSync;
+    let quarantined = false;
+    let rollbackBlocked = false;
+    fs.renameSync = function injectedCancellationInterruption(source, target) {
+      if (!quarantined && source === sessionFile && String(target).endsWith(".canceling")) {
+        originalRename.apply(this, arguments);
+        quarantined = true;
+        throw new Error("injected crash after session quarantine");
+      }
+      if (quarantined && String(source).endsWith(".canceling") && target === sessionFile) {
+        rollbackBlocked = true;
+        throw new Error("injected interrupted rollback");
+      }
+      return originalRename.apply(this, arguments);
+    };
+    let interrupted;
+    try {
+      interrupted = core.workflowPacket(root, {
+        workflow: "setup",
+        approvalSessionId: sessionId,
+        approvalCancel: true,
+      });
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(quarantined, true);
+    assert.equal(rollbackBlocked, true);
+    assert.equal(interrupted.ok, false);
+    assert.equal(interrupted.approval.cancellation.recovery_required, true);
+    assert.equal(fs.existsSync(sessionFile), false);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".cancel-journal.json")), true);
+
+    const persistentRename = fs.renameSync;
+    fs.renameSync = function injectedReconciliationFailure(source, target) {
+      if (String(source).endsWith(".canceling") && target === sessionFile) {
+        throw new Error("injected persistent cancellation reconciliation failure");
+      }
+      return persistentRename.apply(this, arguments);
+    };
+    let recoveryBlocked;
+    let supersessionBlocked;
+    try {
+      recoveryBlocked = core.workflowPacketV1(root, {
+        workflow: "setup",
+        approvalSessionId: sessionId,
+      });
+      supersessionBlocked = core.workflowPacketV1(root, {
+        ...setupInput,
+        product: {
+          title: "Blocked replacement setup",
+          summary: "Do not supersede an approval whose cancellation journal still owns these targets.",
+        },
+      });
+    } finally {
+      fs.renameSync = persistentRename;
+    }
+    assert.equal(recoveryBlocked.ok, false);
+    assert.equal(recoveryBlocked.phase, "recovery_required");
+    assert.equal(recoveryBlocked.decision.kind, "recovery_required");
+    assert.equal(recoveryBlocked.decision.session_id, sessionId);
+    assert.equal(recoveryBlocked.decision.resume, null);
+    assert.deepEqual(recoveryBlocked.decision.writable_paths, []);
+    assert.equal(recoveryBlocked.next, null);
+    assert.match(recoveryBlocked.errors.join("\n"), /persistent cancellation reconciliation failure/i);
+    assert.equal(supersessionBlocked.ok, false);
+    assert.equal(supersessionBlocked.phase, "recovery_required");
+    assert.equal(supersessionBlocked.decision.kind, "recovery_required");
+    assert.equal(supersessionBlocked.next, null);
+    assert.deepEqual(fs.readdirSync(sessionDirectory).filter((name) => /^[a-f0-9]{24}\.json$/.test(name)), []);
+    assert.equal(fs.readdirSync(sessionDirectory).filter((name) => name.endsWith(".cancel-journal.json")).length, 1);
+
+    const recovered = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(recovered.ok, true, recovered.error);
+    assert.equal(recovered.approval.session_id, sessionId);
+    assert.equal(recovered.approval.session_resumable, true);
+    assert.equal(fs.existsSync(sessionFile), true);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"), productBefore);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".cancel-journal.json")), false);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".canceling")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approval cancellation cannot retain a live session after tombstone cleanup fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-session-transaction-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Cancellation transaction",
+        summary: "A failed cleanup must not revive a session after target restoration.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const originalRemove = fs.rmSync;
+    let injected = false;
+    fs.rmSync = function injectedTombstoneCleanup(target) {
+      if (!injected && String(target).includes(`${sessionId}.json.`) && String(target).endsWith(".cancelled")) {
+        injected = true;
+        throw new Error("injected session tombstone cleanup failure");
+      }
+      return originalRemove.apply(this, arguments);
+    };
+    let cancelled;
+    try {
+      cancelled = core.workflowPacket(root, {
+        workflow: "setup",
+        approvalSessionId: sessionId,
+        approvalCancel: true,
+      });
+    } finally {
+      fs.rmSync = originalRemove;
+    }
+    assert.equal(injected, true);
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.phase_state, "cancelled");
+    assert.equal(cancelled.approval.cancellation.cleanup_pending, true);
+    assert.equal(cancelled.approval.cancellation.session_retained, false);
+    assert.equal(fs.existsSync(sessionFile), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".cancelled")), true);
+    const publicCancellation = core.workflowPacketEnvelopeV1(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalCancel: true,
+    }, cancelled);
+    assert.equal(publicCancellation.decision.kind, "cancelled");
+    assert.equal(publicCancellation.decision.cleanup_pending, true);
+    assert.match(publicCancellation.warnings.join("\n"), /tombstone cleanup is pending/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a complete refresh replacement does not leak baseline or superseded preview fields", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-preview-baseline-test-"));
   try {

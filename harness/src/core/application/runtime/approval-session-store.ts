@@ -21,6 +21,11 @@ import {
   reviewHeadFiles,
   type ReviewHeadExpectation,
 } from "./review-output";
+import {
+  approvalCancellationJournalIds,
+  approvalCancellationSessionSnapshot,
+  reconcileApprovalCancellation,
+} from "./approval-cancellation-journal";
 
 export type { ApprovalBeforeFile, ApprovalSession } from "./approval-session-model";
 
@@ -46,11 +51,39 @@ function sessionFile(root: string, sessionId: string): string {
 }
 
 export function readApprovalSession(root: string, sessionId: string): ApprovalSession | null {
-  if (!isApprovalSessionId(sessionId)) return null;
+  return readApprovalSessionResult(root, sessionId).session;
+}
+
+export interface ApprovalSessionReadResult {
+  session: ApprovalSession | null;
+  recovery_required: boolean;
+  error?: string;
+}
+
+export interface ApprovalSessionReadOptions {
+  lifecycleLocked?: boolean;
+}
+
+export function readApprovalSessionResult(
+  root: string,
+  sessionId: string,
+  options: ApprovalSessionReadOptions = {},
+): ApprovalSessionReadResult {
+  if (!isApprovalSessionId(sessionId)) {
+    return { session: null, recovery_required: false, error: "Invalid approval session id" };
+  }
   try {
-    return JSON.parse(fs.readFileSync(sessionFile(root, sessionId), "utf8")) as ApprovalSession;
+    return {
+      session: JSON.parse(fs.readFileSync(sessionFile(root, sessionId), "utf8")) as ApprovalSession,
+      recovery_required: false,
+    };
   } catch {
-    return null;
+    const reconciled = reconcileApprovalCancellation(root, sessionId, options);
+    return {
+      session: reconciled.session || null,
+      recovery_required: !reconciled.ok && reconciled.pending,
+      ...(reconciled.error ? { error: reconciled.error } : {}),
+    };
   }
 }
 
@@ -60,8 +93,13 @@ export function writeApprovalSession(root: string, session: ApprovalSession): vo
   fs.mkdirSync(sessionDirectory(root), { recursive: true });
   const target = sessionFile(root, session.session_id);
   const temporary = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(synchronizeApprovalSession(session), null, 2)}\n`);
-  fs.renameSync(temporary, target);
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(synchronizeApprovalSession(session), null, 2)}\n`);
+    fs.renameSync(temporary, target);
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 export function removeApprovalSession(root: string, sessionId: string): void {
@@ -69,45 +107,39 @@ export function removeApprovalSession(root: string, sessionId: string): void {
   fs.rmSync(sessionFile(root, sessionId), { force: true });
 }
 
-function approvalSessions(root: string): ApprovalSession[] {
+export interface ApprovalSessionListOptions extends ApprovalSessionReadOptions {
+  includeRecoveryPending?: boolean;
+}
+
+export function listApprovalSessions(root: string, options: ApprovalSessionListOptions = {}): ApprovalSession[] {
   let names: string[];
   try {
     names = fs.readdirSync(sessionDirectory(root));
   } catch {
     return [];
   }
-  return names
-    .filter((name) => /^[a-f0-9]{24}\.json$/.test(name))
-    .map((name) => readApprovalSession(root, name.slice(0, -5)))
-    .filter((session): session is ApprovalSession => Boolean(session));
-}
-
-export function activeApprovalSessionsForTargets(
-  root: string,
-  workflow: string,
-  files: ReviewFile[],
-): ApprovalSession[] {
-  const paths = new Set(files.filter((file) => file.missing !== true).map((file) => file.path));
-  if (paths.size === 0) return [];
-  return approvalSessions(root)
-    .filter((session) => session.workflow === workflow && session.preview_files.length > 0)
-    .filter((session) => {
-      const stageOrder = session.stage_order || [];
-      return stageOrder.length === 0 || session.approved_stages.length < stageOrder.length;
-    })
-    .filter((session) => session.snapshot_files.some((file) => file.missing !== true && paths.has(file.path)))
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  const sessionIds = new Set([
+    ...names.filter((name) => /^[a-f0-9]{24}\.json$/.test(name)).map((name) => name.slice(0, -5)),
+    ...approvalCancellationJournalIds(root),
+  ]);
+  return Array.from(sessionIds).flatMap((sessionId) => {
+    const result = readApprovalSessionResult(root, sessionId, options);
+    if (result.session) return [result.session];
+    if (!options.includeRecoveryPending || !result.recovery_required) return [];
+    const pending = approvalCancellationSessionSnapshot(root, sessionId);
+    return pending ? [{ ...pending, cancellation_recovery_required: true }] : [];
+  });
 }
 
 export function approvalSessionForTarget(root: string, relativePath: string): ApprovalSession | null {
-  return approvalSessions(root)
+  return listApprovalSessions(root)
     .filter((session) => session.snapshot_files.some((file) => file.missing !== true && file.path === relativePath))
     .sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0] || null;
 }
 
 export function unapprovedSkillTargetApproval(root: string, skillId: string): UnapprovedSkillTargetApproval | null {
   const prefix = `cadre/skills/${skillId}/`;
-  const session = approvalSessions(root)
+  const session = listApprovalSessions(root)
     .filter((candidate) => candidate.workflow === "skill" && candidate.approved_stages.length === 0)
     .filter((candidate) => candidate.snapshot_files.some((file) => file.missing !== true && file.path.startsWith(prefix)))
     .filter((candidate) => candidate.preview_files.some((file) => file.missing !== true && asOptionalString(file.path)?.startsWith(prefix)))
@@ -124,7 +156,7 @@ export function unapprovedSkillTargetApproval(root: string, skillId: string): Un
 }
 
 export function unapprovedTargetBaselineContent(root: string, relativePath: string): string | null | undefined {
-  const owner = approvalSessions(root)
+  const owner = listApprovalSessions(root)
     .filter((session) => session.approved_stages.length === 0)
     .filter((session) => session.snapshot_files.some((file) => file.missing !== true && file.path === relativePath))
     .filter((session) => session.preview_files.some((file) => file.missing !== true && asOptionalString(file.path) === relativePath))
@@ -214,7 +246,17 @@ export function supersedeUnapprovedApprovalSessions(
   activeFiles: ReviewFile[],
 ): CoreResult {
   return withLock(root, "approval-target-lifecycle", () => {
-    const sessions = approvalSessions(root);
+    const sessions = listApprovalSessions(root, { lifecycleLocked: true, includeRecoveryPending: true });
+    const recoveryPending = sessions.filter((session) => session.cancellation_recovery_required === true);
+    if (recoveryPending.length > 0) {
+      return {
+        ok: false,
+        stage: "approval_cancellation_recovery",
+        recovery_required: true,
+        error: "An interrupted approval cancellation must be reconciled before starting or superseding another review session",
+        session_ids: recoveryPending.map((session) => session.session_id),
+      };
+    }
     const active = sessions.find((session) => session.session_id === activeSessionId);
     if (active && active.preview_files.length > 0) {
       return { ok: true, skipped: true, reason: "active approval preview already exists" };
@@ -360,108 +402,23 @@ export function recordApprovalPreview(
   stageId: string,
   bundle: JsonObject | null,
   candidateSession?: ApprovalSession,
-): void {
+): CoreResult {
   const session = candidateSession || readApprovalSession(root, sessionId);
-  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) return;
+  if (!session || session.workflow !== workflow || session.payload_hash !== payloadHash) {
+    return { ok: false, stage: "approval_preview_session", error: "Approval preview no longer matches its persisted workflow session" };
+  }
   const previewFiles = bundle && Array.isArray(bundle.files) ? bundle.files.map(asJsonObject) : [];
   if (!bundle || bundle.ok === false || previewFiles.length === 0) {
-    if (session.approved_stages.length === 0 && session.preview_files.length === 0) removeApprovalSession(root, sessionId);
-    return;
+    return { ok: false, stage: "approval_preview_bundle", error: "Approval preview bundle is empty or invalid" };
   }
-  writeApprovalSession(root, {
+  const nextSession = {
     ...(session.schema_version === 2
       ? recordStagePreview(session, stageId, previewFiles, asStringArray(bundle.intent_to_add_paths))
       : recordCompleteBundlePreview(session, previewFiles, asStringArray(bundle.intent_to_add_paths))),
     updated_at: utcNow(),
-  });
-}
-
-export function cancelApprovalSession(root: string, sessionId: string, expectedWorkflow?: string): CoreResult {
-  if (!readApprovalSession(root, sessionId)) return { ok: false, cancelled: false, error: "Approval session was not found" };
-  return withLock(root, "approval-target-lifecycle", () => {
-    const session = readApprovalSession(root, sessionId);
-    if (!session) return { ok: false, cancelled: false, error: "Approval session was not found" };
-    if (expectedWorkflow && session.workflow !== expectedWorkflow) {
-      return { ok: false, cancelled: false, session_retained: true, error: `Approval session belongs to ${session.workflow}, not ${expectedWorkflow}` };
-    }
-    const outputMode = asOptionalString(session.payload.reviewOutputMode || session.payload.review_output_mode);
-    const explicitBundleDirectory = asOptionalString(session.payload.reviewBundleDir || session.payload.review_bundle_dir || session.payload.reviewDir || session.payload.review_dir);
-    const targetMode = !explicitBundleDirectory && !["bundle", "temp", "temporary"].includes(outputMode || "");
-    const previewPaths = new Set((targetMode ? session.preview_files : [])
-      .filter((file) => file.missing !== true)
-      .map((file) => asOptionalString(file.path))
-      .filter((file): file is string => Boolean(file)));
-    const restoreSnapshots = approvalRestoreSnapshots(session);
-    const beforeByPath = new Map(approvalRestoreBeforeFiles(session).map((before) => [before.path, before]));
-    const nativeIgnore = restoreSnapshots.find((file) => file.path === "cadre/.gitignore" && file.missing !== true);
-    const nativeIgnoreBefore = beforeByPath.get("cadre/.gitignore");
-    const nativeIgnoreBaseline = nativeIgnoreBefore?.existed ? nativeIgnoreBefore.content : null;
-    const nativeIgnoreCurrent = nativeIgnore ? fileContent(path.join(root, nativeIgnore.path)) : null;
-    if (nativeIgnore && nativeIgnoreBefore && nativeIgnoreCurrent === nativeIgnore.content && nativeIgnoreCurrent !== nativeIgnoreBaseline) {
-      previewPaths.add(nativeIgnore.path);
-    }
-    const restorePlan = new Map<string, { target: string; before: string | null; preview: string }>();
-    const expectations: ReviewHeadExpectation[] = [];
-    for (const snapshot of restoreSnapshots) {
-      if (!previewPaths.has(snapshot.path) || snapshot.missing === true) continue;
-      const before = beforeByPath.get(snapshot.path);
-      const target = safeSessionTarget(root, snapshot.path);
-      if (!before || !target) {
-        return { ok: false, cancelled: false, session_retained: true, stage: "approval_cancel_restore", error: `Approval session has an invalid restore record for ${snapshot.path}` };
-      }
-      const current = fileContent(target);
-      if (current !== snapshot.content) {
-        return { ok: false, cancelled: false, session_retained: true, stage: "approval_cancel_drift", error: `Review target changed after Cadre created it: ${snapshot.path}`, path: snapshot.path };
-      }
-      restorePlan.set(snapshot.path, { target, before: before.existed ? before.content : null, preview: current });
-      expectations.push(approvalHeadExpectation(before));
-    }
-    const gitState = inspectReviewGitState(root, Array.from(restorePlan.keys()), expectations);
-    if (!gitState.ok) {
-      return {
-        ok: false,
-        cancelled: false,
-        session_retained: true,
-        stage: "approval_cancel_git_drift",
-        error: gitState.error || "A review target has staged or committed Git changes",
-        staged_paths: gitState.stagedPaths,
-        baseline_paths: gitState.baselinePaths,
-      };
-    }
-
-    const intentRemoval = removeReviewIntentToAddAtomic(root, session.intent_to_add_paths);
-    if (!intentRemoval.ok) return { ok: false, cancelled: false, session_retained: true, stage: "approval_cancel_index", error: intentRemoval.error };
-    try {
-      for (const { target, before } of restorePlan.values()) restoreFile(target, before);
-      for (const { target, before } of restorePlan.values()) if (before === null) removeEmptyApprovalParents(root, target);
-    } catch (error) {
-      const rollbackErrors: string[] = [];
-      for (const { target, preview } of restorePlan.values()) {
-        try { restoreFile(target, preview); } catch (rollbackError) {
-          rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
-        }
-      }
-      const indexRollback = restoreReviewIntentToAdd(root, intentRemoval.paths);
-      const cause = error instanceof Error ? error.message : String(error);
-      return {
-        ok: false,
-        cancelled: false,
-        session_retained: true,
-        stage: "approval_cancel_restore",
-        error: [cause, ...rollbackErrors, ...(indexRollback.ok ? [] : [indexRollback.error || "Git intent-to-add rollback failed"])]
-          .join("; "),
-      };
-    }
-    removeApprovalSession(root, sessionId);
-    return {
-      ok: true,
-      cancelled: true,
-      session_id: sessionId,
-      restored: Array.from(restorePlan.entries()).filter(([, entry]) => entry.before !== null).map(([relativePath]) => relativePath),
-      removed: Array.from(restorePlan.entries()).filter(([, entry]) => entry.before === null).map(([relativePath]) => relativePath),
-      intent_to_add_removed: intentRemoval.paths,
-    };
-  });
+  };
+  writeApprovalSession(root, nextSession);
+  return { ok: true, session_id: sessionId };
 }
 
 export function recordApprovalCompletion(root: string, sessionId: string): CoreResult {

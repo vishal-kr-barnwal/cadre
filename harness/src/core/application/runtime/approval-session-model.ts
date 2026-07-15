@@ -44,6 +44,7 @@ export interface ApprovalSession {
   preview_files: JsonObject[];
   intent_to_add_paths: string[];
   updated_at: string;
+  cancellation_recovery_required?: boolean;
 }
 
 function uniqueByPath<T extends { path: string }>(values: T[]): T[] {

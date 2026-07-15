@@ -3,7 +3,8 @@ import type { JsonObject, RuntimeArgs } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
 import { approvalStageReviewHash } from "./approval-stage-hash";
-import { reviewArtifactsFromFiles, workflowReviewBundle } from "./review-bundles";
+import { materializeApprovalPreview } from "./approval-preview-transaction";
+import { reviewArtifactsFromFiles } from "./review-bundles";
 import { filesForApprovalStage, previewFilesForStages, stageRecord } from "./approval-session-model";
 import { prepareApprovalContinuation } from "./approval-session-continuation";
 import { sessionTargetDriftError } from "./approval-session-integrity";
@@ -21,12 +22,12 @@ import {
 } from "./approval-request";
 
 import {
-  cancelApprovalSession,
   readApprovalSession,
-  recordApprovalPreview,
+  readApprovalSessionResult,
   writeApprovalSession,
   type ApprovalSession,
 } from "./approval-session-store";
+import { cancelApprovalSession } from "./approval-session-cancellation";
 import type { ApprovalStage } from "./staged-approval-stages";
 export { approvedTargetReviewPaths, validateApprovedTargetReviewFiles } from "./approval-review-validation";
 export {
@@ -42,6 +43,38 @@ export {
 function stageApprovalPrompt(workflow: string, stage: ApprovalStage, sessionId: string, files: ReviewFile[]): string {
   const paths = files.map((file) => file.path).join(", ") || stage.title;
   return `Approve Cadre ${workflow} stage "${stage.id}" as one atomic review set after reviewing: ${paths}? Reply "approve ${stage.id}" to approve this exact ${files.length}-file set for session ${sessionId}.`;
+}
+
+function approvalSessionRecoveryState(
+  workflow: string,
+  sessionId: string,
+  stages: ApprovalStage[],
+  error: string,
+): JsonObject {
+  return {
+    version: 1,
+    kind: "cadre.staged_approval.v1",
+    workflow,
+    required: true,
+    session_id: sessionId,
+    session_resumable: false,
+    explicit_user_approval_required: true,
+    manual_approval_required: false,
+    manual_approval_prompt: null,
+    approval_complete: false,
+    valid_for_execute: false,
+    approval_error: `Interrupted approval cancellation recovery failed: ${error}`,
+    approval_recovery_required: true,
+    approval_instruction: "Do not approve, resume, cancel, or execute this session automatically. Preserve its cancellation journal and repair the reported recovery failure first.",
+    current_stage: null,
+    approved_stages: [],
+    pending_stages: stages.map((stage) => stage.id),
+    current_review_artifacts: [],
+    current_review_bundle: null,
+    review_bundle: null,
+    intent_to_add_paths: [],
+    next_actions: ["Stop automatic continuation and preserve the approval cancellation journal for manual recovery."],
+  };
 }
 
 export { approvalComplete, approvedStageIds, requestedApprovalSessionId, requestedApprovalStage } from "./approval-request";
@@ -74,7 +107,18 @@ export function stagedApprovalState(
   const approvedIds = approvedStageIds(args);
   const payloadHash = approvalPayloadHash(workflow, stages, args, extras);
   const requestedSessionId = requestedApprovalSessionId(args);
-  const requestedSession = requestedSessionId ? readApprovalSession(root, requestedSessionId) : null;
+  const requestedSessionRead = requestedSessionId
+    ? readApprovalSessionResult(root, requestedSessionId)
+    : null;
+  if (requestedSessionId && requestedSessionRead?.recovery_required) {
+    return approvalSessionRecoveryState(
+      workflow,
+      requestedSessionId,
+      stages,
+      requestedSessionRead.error || "Cancellation journal reconciliation failed",
+    );
+  }
+  const requestedSession = requestedSessionRead?.session || null;
   const sessionId = requestedSession?.workflow === workflow
     ? requestedSessionId!
     : derivedApprovalSessionId(workflow, root, payloadHash);
@@ -112,7 +156,7 @@ export function stagedApprovalState(
   }
   const readOnly = approvalReadOnlyRequested(args);
   const transition = readOnly && requestedSession?.workflow === workflow
-    ? { session: requestedSession, error: null }
+    ? { session: requestedSession, error: null, recoveryRequired: false }
     : transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles, extras);
   let approvalError = transition.error;
   let session = transition.session?.workflow === workflow ? transition.session : null;
@@ -120,8 +164,12 @@ export function stagedApprovalState(
   let activeFiles = active && session ? stageRecord(session, active.id)?.snapshot_files || [] : [];
   let previousRecord = active && session ? stageRecord(session, active.id) : null;
   let candidateSession: ApprovalSession | undefined;
+  let recoveryRequired = transition.recoveryRequired === true;
   if (!readOnly && !approvalError && session && active) {
-    const driftError = sessionTargetDriftError(root, args, session, session.approved_stages);
+    const driftError = sessionTargetDriftError(root, args, session, [
+      ...session.approved_stages,
+      active.id,
+    ]);
     const continuation = driftError ? null : prepareApprovalContinuation(
       root,
       session,
@@ -132,6 +180,7 @@ export function stagedApprovalState(
       options,
     );
     approvalError = driftError || continuation?.error || null;
+    recoveryRequired = recoveryRequired || Boolean(driftError);
     if (continuation?.ok) {
       candidateSession = continuation.session;
       active = continuation.activeStage;
@@ -141,18 +190,23 @@ export function stagedApprovalState(
   }
   const approvedBeforeBundle = new Set(session?.approved_stages || approvedIds);
   const pendingBeforeBundle = stages.filter((stage) => !approvedBeforeBundle.has(stage.id));
-  const stageBundle = active && activeFiles.length > 0 && !approvalError && candidateSession
-    ? workflowReviewBundle(root, workflow, args, activeFiles, {
+  let stageBundle: JsonObject | null = null;
+  if (active && activeFiles.length > 0 && !approvalError && candidateSession && session) {
+    const preview = materializeApprovalPreview(root, workflow, args, activeFiles, {
       ...extras,
       approval_stage: active.id,
       approved_stages: Array.from(approvedBeforeBundle),
       pending_stages: pendingBeforeBundle.map((stage) => stage.id),
-    }, previousRecord)
-    : null;
-  if (active && candidateSession && stageBundle) {
-    recordApprovalPreview(root, sessionId, workflow, payloadHash, active.id, asJsonObject(stageBundle), candidateSession);
+    }, previousRecord, session, candidateSession, active.id, payloadHash);
+    stageBundle = preview.bundle;
+    if (!preview.ok) approvalError = preview.error || "Approval preview transaction failed";
+    recoveryRequired = recoveryRequired || preview.recovery_required === true;
   } else if (active && candidateSession && options.allowEmptyActiveStage && activeFiles.length === 0 && !approvalError) {
-    writeApprovalSession(root, { ...candidateSession, updated_at: new Date().toISOString() });
+    try {
+      writeApprovalSession(root, { ...candidateSession, updated_at: new Date().toISOString() });
+    } catch (error) {
+      approvalError = error instanceof Error ? error.message : String(error);
+    }
   }
   const bundleError = active && activeFiles.length > 0 && !readOnly && !approvalError && !stageBundle
     ? "Approval preview could not be materialized; review output must remain enabled for staged approval."
@@ -179,7 +233,7 @@ export function stagedApprovalState(
   ]));
   const currentRecord = active && session ? stageRecord(session, active.id) : null;
   const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
-  const manualPrompt = active && responseSessionId && !deferredForClarification
+  const manualPrompt = active && responseSessionId && !deferredForClarification && !approvalError && !recoveryRequired
     ? stageApprovalPrompt(workflow, active, responseSessionId, activeFiles)
     : null;
   return {
@@ -188,15 +242,17 @@ export function stagedApprovalState(
     workflow,
     required: true,
     session_id: responseSessionId,
-    session_resumable: Boolean(session && active),
+    session_resumable: Boolean(session && active && !recoveryRequired),
     payload_hash: session?.payload_hash || payloadHash,
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
     explicit_user_approval_required: true,
-    manual_approval_required: !deferredForClarification,
+    manual_approval_required: !deferredForClarification && !recoveryRequired,
     manual_approval_prompt: manualPrompt,
     deferred_for_clarification: deferredForClarification,
-    approval_instruction: active
+    approval_instruction: recoveryRequired
+      ? "Do not approve, resume, cancel, or execute this session automatically. Preserve the returned diagnostics and repair the reported target/session rollback failure first."
+      : active
       ? deferredForClarification
         ? `Collect only the missing ${active.id} input, then use the returned public decision.resume without recording approval.`
         : `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.`
@@ -210,6 +266,7 @@ export function stagedApprovalState(
     approval_complete: complete,
     valid_for_execute: validForExecute,
     approval_error: approvalError,
+    approval_recovery_required: recoveryRequired,
     current_stage: active?.id || null,
     current_stage_title: active?.title || null,
     current_stage_hash: active ? stageHashes[active.id] : null,
@@ -251,7 +308,9 @@ export function stagedApprovalState(
     intent_to_add_paths: session?.intent_to_add_paths || [],
     approved_review_files: approvedFiles,
     approved_review_paths: approvedPaths,
-    next_actions: complete
+    next_actions: recoveryRequired
+      ? ["Stop automatic continuation. Inspect and repair the approval target/session rollback diagnostics before any further workflow action."]
+      : complete
       ? approvalError
         ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."]
         : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`]

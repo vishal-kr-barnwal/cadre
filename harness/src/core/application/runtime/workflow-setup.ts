@@ -179,12 +179,15 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       "Provider evidence is direct-MCP only: GitHub/GitLab modes require the matching provider MCP, local mode requires none.",
     ],
   };
+  if (cancelled) return { ...result, phase_state: "cancelled" };
   if (promptCollectionPending && !approvalError) return result;
   if (args.execute !== true && approvalError) {
     return {
       ...result,
       ok: false,
-      phase_state: "awaiting_staged_approval",
+      phase_state: asJsonObject(approval).approval_recovery_required === true
+        ? "recovery_required"
+        : "awaiting_staged_approval",
       stage: "staged_approval",
       error: approvalError,
     };

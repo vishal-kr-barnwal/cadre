@@ -108,13 +108,34 @@ function approvalDecision(root: string, workflow: string, result: JsonObject): J
 }
 
 function workflowDecision(root: string, workflow: string, result: JsonObject, args: RuntimeArgs): JsonObject {
+  const approvalState = asJsonObject(result.approval);
+  const approvalError = asOptionalString(approvalState.approval_error);
+  if (approvalState.approval_recovery_required === true) {
+    return {
+      kind: "recovery_required",
+      reason: approvalError || "Approval target/session rollback requires manual recovery",
+      session_id: asOptionalString(approvalState.session_id) || null,
+      current_stage: asOptionalString(approvalState.current_stage) || null,
+      approved_stages: asStringArray(approvalState.approved_stages),
+      pending_stages: asStringArray(approvalState.pending_stages),
+      resume: null,
+      writable_paths: [],
+    };
+  }
+  if (approvalState.cancelled === true) {
+    const cancellation = asJsonObject(approvalState.cancellation);
+    return {
+      kind: "cancelled",
+      session_id: asOptionalString(approvalState.session_id) || null,
+      cleanup_pending: cancellation.cleanup_pending === true,
+      warning: asOptionalString(cancellation.warning) || null,
+    };
+  }
   const explicit = asJsonObject(result.decision);
   if (Object.keys(explicit).length > 0) return explicit;
   const skills = asJsonObject(result.project_skills);
   const skillDecision = asJsonObject(skills.decision);
   if (Object.keys(skillDecision).length > 0) return skillDecision;
-  const approvalState = asJsonObject(result.approval);
-  const approvalError = asOptionalString(approvalState.approval_error);
   if (approvalError) {
     const sessionId = asOptionalString(approvalState.session_id) || null;
     const currentStage = asOptionalString(approvalState.current_stage) || null;
@@ -301,6 +322,7 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
     return { tool: "cadre_read", arguments: { uri: resources[0] } };
   }
   const approval = asJsonObject(result.approval);
+  if (approval.approval_recovery_required === true) return null;
   if (
     result.ok !== false
     && result.phase_state !== "pending_provider"
@@ -414,6 +436,7 @@ export function workflowPacketEnvelopeV1(root: string, args: RuntimeArgs, value:
   const errors = ok
     ? rawErrors
     : Array.from(new Set([reason || rawErrors[0] || "Cadre workflow failed", ...rawErrors]));
+  const cancellationWarning = asOptionalString(asJsonObject(asJsonObject(result.approval).cancellation).warning);
   return {
     ok,
     workflow,
@@ -424,7 +447,7 @@ export function workflowPacketEnvelopeV1(root: string, args: RuntimeArgs, value:
     artifacts: workflowArtifacts(result),
     resources,
     data: workflowData(workflow, result),
-    warnings: asStringArray(result.warnings),
+    warnings: Array.from(new Set([...asStringArray(result.warnings), ...(cancellationWarning ? [cancellationWarning] : [])])),
     errors,
   };
 }

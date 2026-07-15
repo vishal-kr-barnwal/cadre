@@ -8,7 +8,7 @@ import type { CoreResult } from "./contracts";
 
 export interface AtomicArtifactFile {
   path: string;
-  content: string;
+  content: string | null;
 }
 
 export interface AtomicArtifactWriteOptions {
@@ -55,13 +55,13 @@ function restore(before: BeforeFile[]): string[] {
 
 function writeUnlocked(root: string, files: AtomicArtifactFile[], options: AtomicArtifactWriteOptions): CoreResult {
   const unique = new Set<string>();
-  const prepared: Array<AtomicArtifactFile & { target: string; temporary: string }> = [];
+  const prepared: Array<AtomicArtifactFile & { target: string; temporary: string | null }> = [];
   for (const [index, file] of files.entries()) {
     const target = normalizedPath(root, file.path);
     if (!target) return { ok: false, stage: "artifact_path", error: `Unsafe or empty artifact path: ${file.path}` };
     if (unique.has(target)) return { ok: false, stage: "artifact_path", error: `Duplicate artifact path: ${file.path}` };
     unique.add(target);
-    prepared.push({ ...file, target, temporary: temporaryPath(target, index) });
+    prepared.push({ ...file, target, temporary: file.content === null ? null : temporaryPath(target, index) });
   }
   const before: BeforeFile[] = prepared.map((file) => ({
     path: file.target,
@@ -70,11 +70,13 @@ function writeUnlocked(root: string, files: AtomicArtifactFile[], options: Atomi
   }));
   try {
     for (const file of prepared) {
+      if (file.content === null || !file.temporary) continue;
       fs.mkdirSync(path.dirname(file.target), { recursive: true });
       fs.writeFileSync(file.temporary, file.content);
     }
     for (const [index, file] of prepared.entries()) {
-      fs.renameSync(file.temporary, file.target);
+      if (file.content === null) fs.rmSync(file.target, { force: true });
+      else if (file.temporary) fs.renameSync(file.temporary, file.target);
       if (options.simulateFailureAfter === index + 1) throw new Error(`Simulated failure after ${index + 1} artifact write(s)`);
     }
     return {
@@ -82,7 +84,7 @@ function writeUnlocked(root: string, files: AtomicArtifactFile[], options: Atomi
       files: prepared.map((file) => path.relative(root, file.target).split(path.sep).join("/")),
     };
   } catch (error) {
-    for (const file of prepared) fs.rmSync(file.temporary, { force: true });
+    for (const file of prepared) if (file.temporary) fs.rmSync(file.temporary, { force: true });
     const rollbackErrors = restore(before);
     return {
       ok: false,

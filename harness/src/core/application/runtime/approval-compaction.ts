@@ -25,6 +25,7 @@ export function compactApproval(value: unknown): JsonObject | null {
   const stages = Array.isArray(approval.stages) ? approval.stages.map(asJsonObject) : [];
   const bundle = asJsonObject(approval.current_review_bundle);
   const bundleFiles = Array.isArray(bundle.files) ? bundle.files : [];
+  const cancellation = isRecord(approval.cancellation) ? asJsonObject(approval.cancellation) : null;
   return {
     kind: asOptionalString(approval.kind) || "cadre.staged_approval.v1",
     required: approval.required !== false,
@@ -36,7 +37,18 @@ export function compactApproval(value: unknown): JsonObject | null {
     manual_approval_prompt: asOptionalString(approval.manual_approval_prompt) || null,
     approval_complete: approval.approval_complete === true,
     valid_for_execute: approval.valid_for_execute === true,
+    approval_recovery_required: approval.approval_recovery_required === true,
     ...(asOptionalString(approval.approval_error) ? { approval_error: asOptionalString(approval.approval_error) } : {}),
+    ...(cancellation ? {
+      cancellation: {
+        ok: cancellation.ok !== false,
+        cancelled: cancellation.cancelled === true,
+        session_retained: cancellation.session_retained === true,
+        recovery_required: cancellation.recovery_required === true,
+        cleanup_pending: cancellation.cleanup_pending === true,
+        warning: asOptionalString(cancellation.warning) || null,
+      },
+    } : {}),
     current_stage: asOptionalString(approval.current_stage) || null,
     current_stage_hash: asOptionalString(approval.current_stage_hash) || null,
     current_stage_revision: typeof approval.current_stage_revision === "number"

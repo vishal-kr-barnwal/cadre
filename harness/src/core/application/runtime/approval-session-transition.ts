@@ -11,12 +11,12 @@ import {
   type ApprovalSession,
 } from "./approval-session-model";
 import {
-  activeApprovalSessionsForTargets,
   captureApprovalBeforeFiles,
   readApprovalSession,
   supersedeUnapprovedApprovalSessions,
   writeApprovalSession,
 } from "./approval-session-store";
+import { activeApprovalSessionsForTargets } from "./approval-session-query";
 import { sessionTargetDriftError, stagePreviewError } from "./approval-session-integrity";
 import {
   APPROVAL_INPUT_ERROR,
@@ -33,6 +33,7 @@ import type { ApprovalStage } from "./staged-approval-stages";
 export interface ApprovalTransitionResult {
   session: ApprovalSession | null;
   error: string | null;
+  recoveryRequired?: boolean;
 }
 
 function approvalOrderError(stageIds: string[], approved: string[]): string | null {
@@ -112,6 +113,7 @@ export function transitionApprovalSession(
     }
     if (workflow === "setup") {
       const overlapping = activeApprovalSessionsForTargets(root, workflow, snapshotFiles)
+        .filter(isStageLedgerSession)
         .filter((session) => session.session_id !== sessionId);
       if (overlapping.length === 1) {
         const active = overlapping[0]!;
@@ -132,6 +134,7 @@ export function transitionApprovalSession(
       return {
         session: existing,
         error: asOptionalString(superseded.error) || `Unable to supersede the previous ${workflow} review preview`,
+        recoveryRequired: superseded.recovery_required === true,
       };
     }
     return { session: createSession(root, sessionId, workflow, payloadHash, payload, stages, snapshotFiles), error: null };
