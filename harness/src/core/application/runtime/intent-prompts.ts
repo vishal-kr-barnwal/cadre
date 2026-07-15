@@ -42,6 +42,14 @@ function isGenericSpecText(value: unknown): boolean {
     "the planned work is complete and verified",
     "verify delivered outcome",
     "manually verify that the completed track delivers the intended behavior from the spec",
+    "spec example track",
+    "describe the goal and intended outcome in concrete project terms",
+    "user visible behavior",
+    "state the behavior this track must deliver",
+    "verified outcome",
+    "state how completion will be verified",
+    "excluded work",
+    "state what this track must not change",
   ].includes(text);
 }
 

@@ -105,6 +105,34 @@ test("skill workflow lists and validates valid and malformed catalog entries", (
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("skill workflow rejects placeholder manifest prose before materialization", () => {
+  const root = project();
+  try {
+    const skillId = "placeholder-skill";
+    const result = core.workflowPacket(root, {
+      workflow: "skill",
+      operation: "create",
+      skillId,
+      changes: [
+        { type: "metadata.set", name: "TODO", description: "TODO" },
+        { type: "selectors.set", workflows: ["*"] },
+        { type: "rule.upsert", id: "placeholder-rule", text: "TODO" },
+      ],
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.phase_state, "awaiting_clarification");
+    assert.equal(result.stage, "skill_validation");
+    assert.equal(result.approval.current_stage, "skill");
+    assert.ok(result.errors.some((error) => /name must contain substantive project-skill evidence/.test(error)));
+    assert.ok(result.errors.some((error) => /description must contain substantive project-skill evidence/.test(error)));
+    assert.ok(result.errors.some((error) => /rule placeholder-rule text must contain substantive project-skill evidence/.test(error)));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", skillId, "skill.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", skillId, "SKILL.md")), false);
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${result.approval.session_id}.json`);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, "utf8")).stage_records.skill.snapshot_files, []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill workflow creates, projects, updates, renames, and removes through staged approval", () => {
   const root = project();
   try {

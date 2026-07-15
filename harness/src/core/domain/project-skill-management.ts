@@ -32,6 +32,30 @@ function upsert(items: JsonObject[], item: JsonObject): JsonObject[] {
   return items.map((entry, position) => position === index ? item : entry);
 }
 
+const PLACEHOLDER_PROSE = new Set([
+  "todo",
+  "tbd",
+  "placeholder",
+  "unknown",
+  "n a",
+  "na",
+  "none",
+  "to be determined",
+  "fill me",
+  "fill this in",
+  "replace me",
+  "replace this",
+  "example",
+]);
+
+function placeholderProse(value: unknown): boolean {
+  const text = asOptionalString(value);
+  if (!text) return false;
+  const normalized = text.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return PLACEHOLDER_PROSE.has(normalized)
+    || /^(?:todo|tbd|placeholder)(?:\s|$)/.test(normalized);
+}
+
 export function emptyManagedManifest(id: string): ManagedManifest {
   return { version: 1, schema: "cadre.project-skill.v1", id, name: "", description: "", selectors: { workflows: [], repos: [], file_patterns: [] }, rules: [], references: [] };
 }
@@ -82,8 +106,12 @@ export function validateManagedManifest(manifest: ManagedManifest, knownRepos: S
   const errors: string[] = [];
   if (manifest.schema !== "cadre.project-skill.v1" || manifest.version !== 1) errors.push("skill.json must use cadre.project-skill.v1 version 1");
   if (!PROJECT_SKILL_ID_PATTERN.test(manifest.id)) errors.push(`invalid skill id: ${manifest.id}`);
-  if (!asOptionalString(manifest.name)?.trim()) errors.push("name is required");
-  if (!asOptionalString(manifest.description)?.trim()) errors.push("description is required");
+  const name = asOptionalString(manifest.name)?.trim();
+  const description = asOptionalString(manifest.description)?.trim();
+  if (!name) errors.push("name is required");
+  else if (placeholderProse(name)) errors.push("name must contain substantive project-skill evidence");
+  if (!description) errors.push("description is required");
+  else if (placeholderProse(description)) errors.push("description must contain substantive project-skill evidence");
   const validateSelector = (value: unknown, label: string) => {
     const selected = selector(value);
     for (const workflow of asStringArray(selected.workflows)) if (workflow !== "*" && !PROJECT_SKILL_WORKFLOWS.has(workflow)) errors.push(`${label} has unknown workflow: ${workflow}`);
@@ -112,7 +140,9 @@ export function validateManagedManifest(manifest: ManagedManifest, knownRepos: S
     const id = asOptionalString(rule.id) || "";
     if (!id || !PROJECT_SKILL_ID_PATTERN.test(id)) errors.push(`invalid rule id: ${id || "(missing)"}`);
     if (ruleIds.has(id)) errors.push(`duplicate rule id: ${id}`); else ruleIds.add(id);
-    if (!asOptionalString(rule.text)?.trim()) errors.push(`rule ${id || "(missing)"} text is required`);
+    const text = asOptionalString(rule.text)?.trim();
+    if (!text) errors.push(`rule ${id || "(missing)"} text is required`);
+    else if (placeholderProse(text)) errors.push(`rule ${id || "(missing)"} text must contain substantive project-skill evidence`);
     validateSelector(rule.when, `rule ${id}`);
     for (const reference of asStringArray(rule.references)) if (!referenceIds.has(reference)) errors.push(`rule ${id} references unknown id: ${reference}`);
   }

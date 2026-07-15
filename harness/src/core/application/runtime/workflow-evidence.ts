@@ -22,6 +22,15 @@ const GENERIC_ARTIFACT_TEXT = new Set([
   "implement the requested behavior",
   "the work is complete",
   "works",
+  "describe the goal and intended outcome in concrete project terms",
+  "user visible behavior",
+  "state the behavior this track must deliver",
+  "verified outcome",
+  "state how completion will be verified",
+  "excluded work",
+  "state what this track must not change",
+  "phase 1 implement",
+  "implement the scoped change",
 ]);
 
 function meaningfulArtifactText(value: unknown): boolean {
