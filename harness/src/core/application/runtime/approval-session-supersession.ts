@@ -14,8 +14,10 @@ import {
 } from "./approval-supersession-journal";
 import {
   approvalHeadExpectation,
+  approvalSessionStorageError,
   listApprovalSessions,
 } from "./approval-session-store";
+import { reconcileApprovalCancellations } from "./approval-cancellation-journal";
 import type { CoreResult, ReviewFile } from "./contracts";
 import {
   inspectReviewGitState,
@@ -111,6 +113,24 @@ export function supersedeUnapprovedApprovalSessions(
         stage: "approval_supersession_recovery",
         recovery_required: true,
         error: priorRecovery.error || "An interrupted approval supersession must be reconciled before starting another review session",
+      };
+    }
+    const cancellationRecovery = reconcileApprovalCancellations(root, { lifecycleLocked: true });
+    if (!cancellationRecovery.ok && cancellationRecovery.pending) {
+      return {
+        ok: false,
+        stage: "approval_cancellation_recovery",
+        recovery_required: true,
+        error: cancellationRecovery.error || "An interrupted approval cancellation must be reconciled before starting another review session",
+      };
+    }
+    const storageError = approvalSessionStorageError(root);
+    if (storageError) {
+      return {
+        ok: false,
+        stage: "approval_session_recovery",
+        recovery_required: true,
+        error: storageError,
       };
     }
     const sessions = listApprovalSessions(root, { lifecycleLocked: true, includeRecoveryPending: true });

@@ -63,9 +63,9 @@ function approvalSessionRecoveryState(
     manual_approval_prompt: null,
     approval_complete: false,
     valid_for_execute: false,
-    approval_error: `Interrupted approval cancellation recovery failed: ${error}`,
+    approval_error: `Interrupted approval transaction recovery failed: ${error}`,
     approval_recovery_required: true,
-    approval_instruction: "Do not approve, resume, cancel, or execute this session automatically. Preserve its cancellation journal and repair the reported recovery failure first.",
+    approval_instruction: "Do not approve, resume, cancel, or execute this session automatically. Preserve its approval transaction journal and repair the reported recovery failure first.",
     current_stage: null,
     approved_stages: [],
     pending_stages: stages.map((stage) => stage.id),
@@ -73,7 +73,7 @@ function approvalSessionRecoveryState(
     current_review_bundle: null,
     review_bundle: null,
     intent_to_add_paths: [],
-    next_actions: ["Stop automatic continuation and preserve the approval cancellation journal for manual recovery."],
+    next_actions: ["Stop automatic continuation and preserve the approval transaction journal for manual recovery."],
   };
 }
 
@@ -135,6 +135,7 @@ export function stagedApprovalState(
       };
     }
     const cancellation = cancelApprovalSession(root, requestedSessionId, workflow);
+    const recoveryRequired = cancellation.recovery_required === true;
     return {
       version: 1,
       kind: "cadre.staged_approval.v1",
@@ -143,6 +144,10 @@ export function stagedApprovalState(
       session_id: requestedSessionId,
       cancelled: cancellation.cancelled === true,
       valid_for_execute: false,
+      approval_recovery_required: recoveryRequired,
+      session_resumable: false,
+      manual_approval_required: false,
+      manual_approval_prompt: null,
       approval_error: cancellation.ok === false
         ? asOptionalString(cancellation.error) || "Unable to cancel the staged approval session safely"
         : null,
@@ -152,6 +157,9 @@ export function stagedApprovalState(
       pending_stages: [],
       current_review_artifacts: [],
       current_review_bundle: null,
+      next_actions: recoveryRequired
+        ? ["Stop automatic continuation and preserve the approval transaction journal for manual recovery."]
+        : [],
     };
   }
   const readOnly = approvalReadOnlyRequested(args);

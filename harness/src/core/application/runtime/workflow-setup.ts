@@ -18,7 +18,7 @@ import { appendCadreEvent, ensureNativeState } from "./native-state";
 import { setupShouldWriteLsp } from "./review-bundles";
 import { setupMissingEvidence } from "./setup-evidence";
 import { lspSetup, setupCiTemplates, setupGitattributes, setupSubmodulePlan } from "./setup-infrastructure";
-import { approvedSetupLspAdded, lspPreviewPayload, machineReviewFile, setupFinalReviewPlan } from "./setup-review-plan";
+import { approvedSetupLspAdded, approvedSetupLspRemoved, hasApprovedSetupLspSnapshot, lspPreviewPayload, machineReviewFile, setupFinalReviewPlan } from "./setup-review-plan";
 import { setupStageReviewFiles } from "./setup-review-files";
 import { setupStageCollection } from "./setup-stage-lifecycle";
 import { renderStyleGuideMarkdown } from "./spec-docs";
@@ -396,19 +396,32 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
       })
     );
   }
-  const lspSetupExecution = lspWriteRequested ? lspSetup(root, { ...args, execute: true }) : lspRecommendations;
   const approvedLspAdded = approvedSetupLspAdded(plannedCollection.cursor.session);
-  const lspSetupResult = lspWriteRequested
+  const approvedLspRemoved = approvedSetupLspRemoved(plannedCollection.cursor.session);
+  const approvedLspReviewed = hasApprovedSetupLspSnapshot(plannedCollection.cursor.session);
+  const lspSetupResult = approvedLspReviewed
     ? {
-      ...lspSetupExecution,
-      written: lspSetupExecution.ok !== false,
-      added: Array.from(new Set([
-        ...approvedLspAdded,
-        ...asStringArray(lspSetupExecution.added),
-      ])),
+      ...lspRecommendations,
+      ok: true,
+      written: true,
+      added: approvedLspAdded,
+      removed: approvedLspRemoved,
+      missingFromConfig: [],
+      reviewed_snapshot: true,
+      applied: true,
       preview_materialized: true,
+      execution_source: "approved_snapshot",
     }
-    : lspSetupExecution;
+    : {
+      ...lspRecommendations,
+      written: false,
+      added: [],
+      removed: [],
+      reviewed_snapshot: false,
+      applied: false,
+      preview_materialized: false,
+      execution_source: "no_approved_snapshot",
+    };
   const gitattributes = gitattributesNeeded ? setupGitattributes(root) : null;
   const ciSetup = setupCiTemplates(
     root,

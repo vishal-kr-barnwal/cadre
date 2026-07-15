@@ -5,6 +5,7 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
 import type { CoreResult, ReviewFile } from "./contracts";
 import {
+  isApprovalSession,
   recordCompleteBundlePreview,
   recordStagePreview,
   synchronizeApprovalSession,
@@ -65,6 +66,27 @@ export interface ApprovalSessionReadOptions {
   lifecycleLocked?: boolean;
 }
 
+export function approvalSessionStorageError(root: string): string | null {
+  let names: string[];
+  try {
+    names = fs.readdirSync(sessionDirectory(root));
+  } catch {
+    return null;
+  }
+  for (const name of names.filter((entry) => /^[a-f0-9]{24}\.json$/.test(entry))) {
+    const sessionId = name.slice(0, -5);
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(sessionDirectory(root), name), "utf8"));
+      if (!isApprovalSession(parsed) || parsed.session_id !== sessionId) {
+        return `Approval session file is invalid or has mismatched identity: ${name}`;
+      }
+    } catch {
+      return `Approval session file is invalid or unreadable: ${name}`;
+    }
+  }
+  return null;
+}
+
 export function readApprovalSessionResult(
   root: string,
   sessionId: string,
@@ -81,18 +103,36 @@ export function readApprovalSessionResult(
       error: supersession.error || "Interrupted approval supersession could not be reconciled",
     };
   }
-  try {
+  const cancellation = reconcileApprovalCancellation(root, sessionId, options);
+  if (!cancellation.ok && cancellation.pending) {
     return {
-      session: JSON.parse(fs.readFileSync(sessionFile(root, sessionId), "utf8")) as ApprovalSession,
+      session: null,
+      recovery_required: true,
+      error: cancellation.error || "Interrupted approval cancellation could not be reconciled",
+    };
+  }
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(sessionFile(root, sessionId), "utf8"));
+    if (!isApprovalSession(parsed) || parsed.session_id !== sessionId) {
+      return {
+        session: null,
+        recovery_required: true,
+        error: `Approval session file is invalid or has mismatched identity: ${sessionId}.json`,
+      };
+    }
+    return {
+      session: parsed,
       recovery_required: false,
     };
   } catch {
-    const reconciled = reconcileApprovalCancellation(root, sessionId, options);
-    return {
-      session: reconciled.session || null,
-      recovery_required: !reconciled.ok && reconciled.pending,
-      ...(reconciled.error ? { error: reconciled.error } : {}),
-    };
+    if (fs.existsSync(sessionFile(root, sessionId))) {
+      return {
+        session: null,
+        recovery_required: true,
+        error: `Approval session file is invalid or unreadable: ${sessionId}.json`,
+      };
+    }
+    return { session: cancellation.session || null, recovery_required: false };
   }
 }
 

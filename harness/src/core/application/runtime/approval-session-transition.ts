@@ -3,6 +3,7 @@ import type { JsonObject, RuntimeArgs } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
 import { approvalStageReviewHash } from "./approval-stage-hash";
+import { reconcileApprovalCancellations } from "./approval-cancellation-journal";
 import { initializeApprovalSessionAncillary } from "./approval-session-ancillary";
 import {
   createStageLedger,
@@ -11,11 +12,13 @@ import {
   type ApprovalSession,
 } from "./approval-session-model";
 import {
+  approvalSessionStorageError,
   captureApprovalBeforeFiles,
   readApprovalSession,
   writeApprovalSession,
 } from "./approval-session-store";
 import { supersedeUnapprovedApprovalSessions } from "./approval-session-supersession";
+import { reconcileApprovalSupersessions } from "./approval-supersession-journal";
 import { activeApprovalSessionsForTargets } from "./approval-session-query";
 import { sessionTargetDriftError, stagePreviewError } from "./approval-session-integrity";
 import {
@@ -89,6 +92,24 @@ export function transitionApprovalSession(
   snapshotFiles: ReviewFile[],
   extras: JsonObject = {},
 ): ApprovalTransitionResult {
+  const supersessionRecovery = reconcileApprovalSupersessions(root);
+  if (!supersessionRecovery.ok && supersessionRecovery.pending) {
+    return {
+      session: null,
+      error: supersessionRecovery.error || "Interrupted approval supersession could not be reconciled",
+      recoveryRequired: true,
+    };
+  }
+  const cancellationRecovery = reconcileApprovalCancellations(root);
+  if (!cancellationRecovery.ok && cancellationRecovery.pending) {
+    return {
+      session: null,
+      error: cancellationRecovery.error || "Interrupted approval cancellation could not be reconciled",
+      recoveryRequired: true,
+    };
+  }
+  const storageError = approvalSessionStorageError(root);
+  if (storageError) return { session: null, error: storageError, recoveryRequired: true };
   const stageIds = stages.map((stage) => stage.id);
   if (stageIds.length === 0) return { session: null, error: null };
   const orderError = approvalOrderError(stageIds, approved);

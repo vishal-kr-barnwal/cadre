@@ -55,6 +55,8 @@ export function summarizeLspSetupResult(result: CoreResult): CoreResult {
     removed: Array.isArray(result.removed) ? result.removed.slice(0, 10) : [],
     removed_count: countRecords(result.removed),
     stale_managed_count: countRecords(result.staleManaged || result.stale_managed),
+    reviewed_snapshot: result.reviewed_snapshot === true,
+    execution_source: result.execution_source || null,
     missing_from_config_count: countRecords(result.missingFromConfig),
     missing_commands_count: countRecords(result.missingCommands),
   };

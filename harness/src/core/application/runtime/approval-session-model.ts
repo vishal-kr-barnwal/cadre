@@ -1,5 +1,5 @@
 import type { JsonObject } from "../../../types";
-import { asOptionalString } from "../../../guards";
+import { asOptionalString, isJsonValue, isRecord } from "../../../guards";
 
 import type { ReviewFile } from "./contracts";
 import type { ApprovalStage } from "./staged-approval-stages";
@@ -46,6 +46,105 @@ export interface ApprovalSession {
   updated_at: string;
   cancellation_recovery_required?: boolean;
   supersession_recovery_required?: boolean;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return isRecord(value) && isJsonValue(value);
+}
+
+function isReviewFile(value: unknown): value is ReviewFile {
+  if (!isRecord(value)) return false;
+  return typeof value.path === "string"
+    && typeof value.title === "string"
+    && (value.kind === "markdown" || value.kind === "json" || value.kind === "text")
+    && typeof value.source === "string"
+    && typeof value.content === "string"
+    && (value.missing === undefined || typeof value.missing === "boolean")
+    && (value.documentId === undefined || typeof value.documentId === "string")
+    && (value.reviewRole === undefined
+      || value.reviewRole === "human"
+      || value.reviewRole === "canonical"
+      || value.reviewRole === "generated"
+      || value.reviewRole === "machine")
+    && (value.canonicalPath === undefined || typeof value.canonicalPath === "string")
+    && (value.projectionPath === undefined || typeof value.projectionPath === "string")
+    && (value.approvalGroup === undefined || typeof value.approvalGroup === "string");
+}
+
+function isBeforeFile(value: unknown): value is ApprovalBeforeFile {
+  if (!isRecord(value)) return false;
+  return typeof value.path === "string"
+    && typeof value.existed === "boolean"
+    && (value.content === null || typeof value.content === "string")
+    && (value.head_existed === undefined || typeof value.head_existed === "boolean")
+    && (value.head_content === undefined || value.head_content === null || typeof value.head_content === "string");
+}
+
+function isArrayOf<T>(value: unknown, guard: (entry: unknown) => entry is T): value is T[] {
+  return Array.isArray(value) && value.every(guard);
+}
+
+function isOptionalArrayOf<T>(value: unknown, guard: (entry: unknown) => entry is T): boolean {
+  return value === undefined || isArrayOf(value, guard);
+}
+
+function isStageRecord(value: unknown, stageId: string): value is ApprovalStageRecord {
+  if (!isRecord(value)) return false;
+  return value.stage_id === stageId
+    && (value.status === "pending" || value.status === "previewed" || value.status === "approved")
+    && Number.isSafeInteger(value.revision)
+    && Number(value.revision) >= 0
+    && isArrayOf(value.snapshot_files, isReviewFile)
+    && isArrayOf(value.before_files, isBeforeFile)
+    && isArrayOf(value.preview_files, isJsonObject)
+    && isStringArray(value.intent_to_add_paths);
+}
+
+/** Validate persisted approval state before any recovery path trusts or mutates it. */
+export function isApprovalSession(value: unknown): value is ApprovalSession {
+  if (!isRecord(value)) return false;
+  const schemaVersion = value.schema_version;
+  if (schemaVersion !== undefined && schemaVersion !== 1 && schemaVersion !== 2) return false;
+  if (typeof value.session_id !== "string"
+    || typeof value.workflow !== "string"
+    || typeof value.payload_hash !== "string"
+    || !isJsonObject(value.payload)
+    || !isStringArray(value.approved_stages)
+    || !isArrayOf(value.snapshot_files, isReviewFile)
+    || !isArrayOf(value.before_files, isBeforeFile)
+    || !isArrayOf(value.preview_files, isJsonObject)
+    || !isStringArray(value.intent_to_add_paths)
+    || typeof value.updated_at !== "string"
+    || (value.cancellation_recovery_required !== undefined && typeof value.cancellation_recovery_required !== "boolean")
+    || (value.supersession_recovery_required !== undefined && typeof value.supersession_recovery_required !== "boolean")) {
+    return false;
+  }
+
+  if (!isOptionalArrayOf(value.final_snapshot_files, isReviewFile)
+    || !isOptionalArrayOf(value.final_before_files, isBeforeFile)
+    || !isOptionalArrayOf(value.final_preview_files, isJsonObject)
+    || (value.final_intent_to_add_paths !== undefined && !isStringArray(value.final_intent_to_add_paths))
+    || !isOptionalArrayOf(value.ancillary_snapshot_files, isReviewFile)
+    || !isOptionalArrayOf(value.ancillary_before_files, isBeforeFile)) {
+    return false;
+  }
+
+  if (schemaVersion !== 2) {
+    return (value.stage_order === undefined || isStringArray(value.stage_order))
+      && (value.stage_records === undefined || isRecord(value.stage_records));
+  }
+  if (!isStringArray(value.stage_order) || !isRecord(value.stage_records)) return false;
+  const uniqueStageIds = new Set(value.stage_order);
+  const stageRecords = value.stage_records as Record<string, unknown>;
+  if (uniqueStageIds.size !== value.stage_order.length) return false;
+  if (!value.approved_stages.every((stageId) => uniqueStageIds.has(stageId))) return false;
+  return Object.entries(stageRecords).every(([stageId, record]) => (
+    uniqueStageIds.has(stageId) && isStageRecord(record, stageId)
+  )) && value.stage_order.every((stageId) => isStageRecord(stageRecords[stageId], stageId));
 }
 
 function uniqueByPath<T extends { path: string }>(values: T[]): T[] {

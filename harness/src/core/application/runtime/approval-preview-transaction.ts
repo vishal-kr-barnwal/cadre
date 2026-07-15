@@ -7,7 +7,7 @@ import { withLock } from "../../infrastructure/runtime/locking";
 import { writeArtifactFilesAtomic } from "./artifact-pairs";
 import type { ReviewFile } from "./contracts";
 import type { ApprovalSession, ApprovalStageRecord } from "./approval-session-model";
-import { readApprovalSession, recordApprovalPreview, writeApprovalSession } from "./approval-session-store";
+import { readApprovalSessionResult, recordApprovalPreview, writeApprovalSession } from "./approval-session-store";
 import { workflowReviewBundle } from "./review-bundles";
 import {
   removeReviewIntentToAddAtomic,
@@ -126,7 +126,16 @@ export function materializeApprovalPreview(
   payloadHash: string,
 ): ApprovalPreviewTransactionResult {
   const locked = withLock(root, "approval-target-lifecycle", () => {
-    const currentSession = readApprovalSession(root, persistedSession.session_id);
+    const currentSessionRead = readApprovalSessionResult(root, persistedSession.session_id, { lifecycleLocked: true });
+    if (currentSessionRead.recovery_required) {
+      return {
+        ok: false,
+        bundle: null,
+        recovery_required: true,
+        error: currentSessionRead.error || "Approval transaction recovery failed before preview materialization",
+      };
+    }
+    const currentSession = currentSessionRead.session;
     if (!currentSession || JSON.stringify(currentSession) !== JSON.stringify(persistedSession)) {
       return {
         ok: false,

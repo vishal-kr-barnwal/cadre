@@ -374,6 +374,56 @@ function withSetupTestEvidence(args) {
   return resolved;
 }
 
+function approvalRestoreEntries(session) {
+  const ancillarySnapshots = session.ancillary_snapshot_files || [];
+  const ancillarySnapshotPaths = new Set(ancillarySnapshots.map((file) => file.path));
+  const snapshots = [
+    ...(session.snapshot_files || []).filter((file) => !ancillarySnapshotPaths.has(file.path)),
+    ...ancillarySnapshots,
+  ].filter((file) => file.missing !== true);
+  const ancillaryBefore = session.ancillary_before_files || [];
+  const ancillaryBeforePaths = new Set(ancillaryBefore.map((file) => file.path));
+  const beforeFiles = [
+    ...(session.before_files || []).filter((file) => !ancillaryBeforePaths.has(file.path)),
+    ...ancillaryBefore,
+  ];
+  const beforeByPath = new Map(beforeFiles.map((file) => [file.path, file]));
+  return new Map(snapshots.map((snapshot) => {
+    const before = beforeByPath.get(snapshot.path);
+    assert.ok(before, `missing approval baseline for ${snapshot.path}`);
+    return [snapshot.path, {
+      path: snapshot.path,
+      before: before.existed ? before.content : null,
+      preview: snapshot.content,
+    }];
+  }));
+}
+
+function cancellationJournalTargets(session) {
+  const owned = approvalRestoreEntries(session);
+  const paths = new Set((session.preview_files || [])
+    .filter((file) => file.missing !== true && typeof file.path === "string")
+    .map((file) => file.path));
+  const nativeIgnore = owned.get("cadre/.gitignore");
+  if (nativeIgnore && nativeIgnore.preview !== nativeIgnore.before) paths.add(nativeIgnore.path);
+  return Array.from(paths, (targetPath) => ({ ...owned.get(targetPath) }));
+}
+
+function supersessionJournalTargets(sessions) {
+  const ownedSessions = sessions.map(approvalRestoreEntries);
+  const paths = new Set(ownedSessions.flatMap((owned) => Array.from(owned.keys())));
+  return Array.from(paths, (targetPath) => {
+    const first = ownedSessions.map((owned) => owned.get(targetPath)).find(Boolean);
+    assert.ok(first, `missing supersession target ${targetPath}`);
+    let before = first.preview;
+    for (const owned of ownedSessions) {
+      const entry = owned.get(targetPath);
+      if (entry) before = entry.before;
+    }
+    return { path: targetPath, before, preview: first.preview };
+  });
+}
+
 function applyRecommendedSetupPromptAnswers(target, prompts) {
   for (const prompt of prompts) {
     const recommended = (prompt.choices || []).filter((choice) => choice.recommended).map((choice) => choice.id);
@@ -3397,6 +3447,181 @@ test("workflow setup resolves bundled templates and writes default LSP config", 
   }
 });
 
+test("setup execution does not add an LSP snapshot inferred only after technical review", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-unreviewed-lsp-addition-test-"));
+  try {
+    git(root, ["init"]);
+    const technical = advanceSetupToTechnical(root, {
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      integrations: {},
+      product: {
+        title: "No reviewed LSP snapshot",
+        summary: "A language first observed after technical review must not become an unreviewed setup write.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    assert.equal(technical.approval.current_stage, "technical");
+    assert.equal(technical.review_artifacts.some((artifact) => artifact.path === "cadre/lsp.json"), false);
+    const sessionId = technical.approval.session_id;
+    const workflow = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(technical.approval),
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(workflow.ok, true, workflow.error);
+    const ready = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "workflow",
+      ...approvalStamp(workflow.approval),
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(ready.ok, true, ready.error);
+
+    write(path.join(root, "src", "late.py"), "def added_after_review():\n    return True\n");
+    const executed = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
+    assert.equal(executed.lsp_setup.written, false);
+    assert.equal(executed.lsp_setup.reviewed_snapshot, false);
+    assert.equal(executed.lsp_setup.execution_source, "no_approved_snapshot");
+    assert.deepEqual(executed.lsp_setup.added, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup execution preserves the approved LSP snapshot when new evidence appears after review", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-approved-lsp-snapshot-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "src", "index.ts"), "export const approvedLanguage = 'typescript';\n");
+    const technical = advanceSetupToTechnical(root, {
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: true,
+      styleGuideIds: [],
+      integrations: {},
+      product: {
+        title: "Approved LSP snapshot",
+        summary: "Final setup execution must use the exact language-server configuration reviewed by the user.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    assert.equal(technical.approval.current_stage, "technical");
+    const sessionId = technical.approval.session_id;
+    const lspFile = path.join(root, "cadre", "lsp.json");
+    const reviewedLsp = fs.readFileSync(lspFile, "utf8");
+    assert.ok(readJson(lspFile).servers.some((server) => server.id === "typescript"));
+
+    const workflow = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(technical.approval),
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(workflow.ok, true, workflow.error);
+    assert.equal(workflow.approval.current_stage, "workflow");
+    const ready = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "workflow",
+      ...approvalStamp(workflow.approval),
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(ready.ok, true, ready.error);
+    assert.equal(ready.approval.current_stage, null);
+
+    write(path.join(root, "src", "late.py"), "def added_after_review():\n    return True\n");
+    const executed = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(fs.readFileSync(lspFile, "utf8"), reviewedLsp);
+    assert.equal(readJson(lspFile).servers.some((server) => server.id === "python"), false);
+    assert.equal(executed.lsp_setup.execution_source, "approved_snapshot");
+    assert.equal(executed.lsp_setup.added.includes("typescript"), true);
+    assert.equal(executed.lsp_setup.added.includes("python"), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup execution preserves a reviewed inferred LSP after its source disappears", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-reviewed-lsp-removal-test-"));
+  try {
+    git(root, ["init"]);
+    const sourceFile = path.join(root, "src", "index.ts");
+    write(sourceFile, "export const reviewedLanguage = 'typescript';\n");
+    const technical = advanceSetupToTechnical(root, {
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: true,
+      styleGuideIds: [],
+      integrations: {},
+      product: {
+        title: "Reviewed inferred LSP snapshot",
+        summary: "Final setup execution must retain the exact reviewed language-server configuration.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    assert.equal(technical.approval.current_stage, "technical");
+    const sessionId = technical.approval.session_id;
+    const lspFile = path.join(root, "cadre", "lsp.json");
+    const reviewedLsp = fs.readFileSync(lspFile, "utf8");
+    const workflow = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(technical.approval),
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    const ready = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "workflow",
+      ...approvalStamp(workflow.approval),
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(ready.ok, true, ready.error);
+
+    fs.rmSync(sourceFile);
+    const executed = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(fs.readFileSync(lspFile, "utf8"), reviewedLsp);
+    assert.equal(executed.lsp_setup.written, true);
+    assert.equal(executed.lsp_setup.reviewed_snapshot, true);
+    assert.equal(executed.lsp_setup.execution_source, "approved_snapshot");
+    assert.equal(executed.lsp_setup.added.includes("typescript"), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow setup preserves baseline workflow quality gates with custom notes", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-workflow-template-test-"));
   const oldPath = process.env.PATH;
@@ -5043,7 +5268,7 @@ test("a changed unapproved preview safely replaces its overlapping session", () 
   }
 });
 
-test("supersession finalization failure never leaves a live session over restored targets", () => {
+test("supersession finalization failure is retried before the replacement preview continues", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-finalization-test-"));
   try {
     git(root, ["init"]);
@@ -5096,8 +5321,8 @@ test("supersession finalization failure never leaves a live session over restore
     );
     assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.md"), "utf8"), /Replacement durable preview/);
     const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
-    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".supersede-journal.json")), true);
-    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".superseding")), true);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".supersede-journal.json")), false);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".superseding")), false);
 
     const finalPlan = samplePlan(trackId);
     finalPlan.phases[0].title = "Phase 1: Final durable preview";
@@ -5506,6 +5731,846 @@ test("interrupted cancellation journal restores a resumable live session", () =>
     assert.equal(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"), productBefore);
     assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".cancel-journal.json")), false);
     assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".canceling")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("corrupt cancellation journals block session resume and overlapping previews", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-corrupt-cancel-journal-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    const sessionId = "a".repeat(24);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const journalFile = path.join(sessionDirectory, `${sessionId}.cancel-journal.json`);
+    write(journalFile, "{\"version\":1,\"corrupt\":true}\n");
+
+    const resumed = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(resumed.ok, false);
+    assert.equal(resumed.phase, "recovery_required");
+    assert.equal(resumed.decision.kind, "recovery_required");
+    assert.equal(resumed.decision.resume, null);
+    assert.equal(resumed.next, null);
+    assert.match(resumed.errors.join("\n"), /journal is invalid or unreadable/i);
+
+    const replacement = core.workflowPacketV1(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Blocked corrupt cancellation replacement",
+        summary: "A corrupt cancellation transaction must block every overlapping preview until repaired.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(replacement.ok, false);
+    assert.equal(replacement.phase, "recovery_required");
+    assert.equal(replacement.decision.kind, "recovery_required");
+    assert.equal(replacement.next, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.equal(fs.existsSync(journalFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("corrupt supersession journals block direct resume and cannot target foreign tombstones", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-corrupt-supersession-journal-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    const transactionId = "a".repeat(24);
+    const foreignId = "b".repeat(24);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const journalFile = path.join(sessionDirectory, `${transactionId}.supersede-journal.json`);
+    const foreignTombstone = path.join(sessionDirectory, `${foreignId}.json.0.0.0.superseding`);
+    write(foreignTombstone, "foreign approval state\n");
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: transactionId,
+      state: "prepared",
+      sessions: [null],
+      targets: [],
+      intent_to_add_paths: [],
+    }, null, 2)}\n`);
+
+    const incomplete = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: transactionId,
+    });
+    assert.equal(incomplete.ok, false);
+    assert.equal(incomplete.phase, "recovery_required");
+    assert.equal(incomplete.decision.kind, "recovery_required");
+    assert.equal(incomplete.decision.resume, null);
+    assert.equal(incomplete.next, null);
+    assert.match(incomplete.errors.join("\n"), /journal is invalid or unreadable/i);
+
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: transactionId,
+      state: "prepared",
+      sessions: [{
+        session: { session_id: transactionId },
+        quarantine_name: path.basename(foreignTombstone),
+      }],
+      targets: [],
+      intent_to_add_paths: [],
+    }, null, 2)}\n`);
+    const unsafe = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: transactionId,
+    });
+    assert.equal(unsafe.ok, false);
+    assert.equal(unsafe.phase, "recovery_required");
+    assert.equal(fs.readFileSync(foreignTombstone, "utf8"), "foreign approval state\n");
+    assert.equal(fs.existsSync(journalFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a corrupt foreign supersession journal blocks every session continuation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-corrupt-foreign-supersession-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Foreign supersession ownership",
+        summary: "A corrupt transaction cannot be assumed unrelated to a live approval session.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const transactionId = sessionId === "a".repeat(24) ? "b".repeat(24) : "a".repeat(24);
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const sessionBefore = fs.readFileSync(sessionFile, "utf8");
+    const journalFile = path.join(root, "cadre", "local", "approval-sessions", `${transactionId}.supersede-journal.json`);
+    write(journalFile, "{broken\n");
+
+    const blocked = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product",
+      ...approvalStamp(preview.approval),
+      approvedStages: ["product"],
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.equal(blocked.decision.kind, "recovery_required");
+    assert.equal(blocked.decision.resume, null);
+    assert.equal(blocked.next, null);
+    assert.match(blocked.errors.join("\n"), /supersession journal is invalid or unreadable/i);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+    assert.equal(fs.existsSync(journalFile), true);
+
+    const replacement = core.workflowPacketV1(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Blocked foreign-journal replacement",
+        summary: "Do not start another preview while transaction membership is unknowable.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(replacement.ok, false);
+    assert.equal(replacement.phase, "recovery_required");
+    assert.equal(replacement.next, null);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("invalid live approval sessions fail closed for resume and replacement", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-invalid-live-session-test-"));
+  try {
+    git(root, ["init"]);
+    const base = withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Live session validation",
+        summary: "Invalid persisted approval state must never be trusted or silently ignored.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    });
+    const preview = core.workflowPacket(root, base);
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const original = readJson(sessionFile);
+    write(sessionFile, `${JSON.stringify({ session_id: sessionId, workflow: "setup" }, null, 2)}\n`);
+
+    const malformed = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.phase, "recovery_required");
+    assert.equal(malformed.decision.resume, null);
+    assert.match(malformed.errors.join("\n"), /session file is invalid/i);
+
+    const otherId = sessionId === "f".repeat(24) ? "e".repeat(24) : "f".repeat(24);
+    write(sessionFile, `${JSON.stringify({ ...original, session_id: otherId }, null, 2)}\n`);
+    const mismatched = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(mismatched.ok, false);
+    assert.equal(mismatched.phase, "recovery_required");
+    assert.match(mismatched.errors.join("\n"), /mismatched identity/i);
+
+    const replacement = core.workflowPacketV1(root, {
+      ...base,
+      product: {
+        title: "Blocked replacement",
+        summary: "Do not replace targets while a corrupt live session may own them.",
+      },
+    });
+    assert.equal(replacement.ok, false);
+    assert.equal(replacement.phase, "recovery_required");
+    assert.equal(replacement.next, null);
+    assert.match(replacement.errors.join("\n"), /mismatched identity/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancellation rechecks supersession recovery inside the target lifecycle lock", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-inner-recovery-race-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Cancellation lock recovery",
+        summary: "Recheck transaction recovery after acquiring cancellation's target lifecycle lock.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const sessionBefore = fs.readFileSync(sessionFile, "utf8");
+    const productFile = path.join(root, "cadre", "product.json");
+    const productBefore = fs.readFileSync(productFile, "utf8");
+    const transactionId = sessionId === "9".repeat(24) ? "8".repeat(24) : "9".repeat(24);
+    const journalFile = path.join(sessionDirectory, `${transactionId}.supersede-journal.json`);
+    const originalMkdir = fs.mkdirSync;
+    let cancellationLockAcquisitions = 0;
+    let injected = false;
+    fs.mkdirSync = function injectJournalInsideCancellationLock(target) {
+      const result = originalMkdir.apply(this, arguments);
+      const stack = new Error().stack || "";
+      if (String(target).endsWith(path.join("cadre", ".locks", "approval-target-lifecycle.lock"))
+        && stack.includes("cancelApprovalSession")) {
+        cancellationLockAcquisitions += 1;
+        if (cancellationLockAcquisitions === 2) {
+          fs.writeFileSync(journalFile, "{broken\n");
+          injected = true;
+        }
+      }
+      return result;
+    };
+    let blocked;
+    try {
+      blocked = core.workflowPacketV1(root, {
+        workflow: "setup",
+        approvalSessionId: sessionId,
+        approvalCancel: true,
+      });
+    } finally {
+      fs.mkdirSync = originalMkdir;
+    }
+    assert.equal(injected, true);
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.equal(blocked.decision.resume, null);
+    assert.equal(blocked.next, null);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBefore);
+    assert.equal(fs.readFileSync(productFile, "utf8"), productBefore);
+    assert.equal(fs.existsSync(journalFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preview materialization rechecks recovery inside the target lifecycle lock", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-preview-inner-recovery-race-test-"));
+  try {
+    git(root, ["init"]);
+    const transactionId = "7".repeat(24);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const journalFile = path.join(sessionDirectory, `${transactionId}.supersede-journal.json`);
+    const originalMkdir = fs.mkdirSync;
+    let injected = false;
+    fs.mkdirSync = function injectJournalInsidePreviewLock(target) {
+      const result = originalMkdir.apply(this, arguments);
+      const stack = new Error().stack || "";
+      if (!injected
+        && String(target).endsWith(path.join("cadre", ".locks", "approval-target-lifecycle.lock"))
+        && stack.includes("materializeApprovalPreview")) {
+        fs.writeFileSync(journalFile, "{broken\n");
+        injected = true;
+      }
+      return result;
+    };
+    let blocked;
+    try {
+      blocked = core.workflowPacketV1(root, withSetupTestEvidence({
+        workflow: "setup",
+        providerMode: "local",
+        syncMode: "local",
+        styleGuideIds: [],
+        writeLsp: false,
+        integrations: {},
+        product: {
+          title: "Preview lock recovery",
+          summary: "Recheck transaction recovery after acquiring preview's target lifecycle lock.",
+        },
+        techStack: { languages: ["TypeScript"] },
+      }));
+    } finally {
+      fs.mkdirSync = originalMkdir;
+    }
+    assert.equal(injected, true);
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.equal(blocked.decision.resume, null);
+    assert.equal(blocked.next, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.equal(fs.existsSync(journalFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancellation journals reject unrelated targets and arbitrary Git intent", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-journal-ownership-test-"));
+  try {
+    git(root, ["init"]);
+    const victim = path.join(root, "victim.txt");
+    write(victim, "SAFE\n");
+    git(root, ["add", "victim.txt"]);
+    git(root, ["commit", "-m", "seed unrelated target"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Cancellation journal ownership",
+        summary: "Recovery may only mutate files and Git intent owned by its approval snapshot.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(live);
+    const quarantineName = `${sessionId}.json.0.0.canceling`;
+    fs.renameSync(live, path.join(sessionDirectory, quarantineName));
+    const journalFile = path.join(sessionDirectory, `${sessionId}.cancel-journal.json`);
+    const baseJournal = {
+      version: 1,
+      session_id: sessionId,
+      state: "restoring",
+      session,
+      targets: cancellationJournalTargets(session),
+      intent_to_add_paths: session.intent_to_add_paths,
+      quarantine_name: quarantineName,
+      completed_name: `${sessionId}.json.0.0.cancelled`,
+    };
+    write(journalFile, `${JSON.stringify({
+      ...baseJournal,
+      targets: [...baseJournal.targets, { path: "victim.txt", before: "SAFE\n", preview: "PWNED\n" }],
+    }, null, 2)}\n`);
+
+    const unrelatedTarget = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(unrelatedTarget.ok, false);
+    assert.equal(unrelatedTarget.phase, "recovery_required");
+    assert.equal(fs.readFileSync(victim, "utf8"), "SAFE\n");
+    assert.equal(fs.existsSync(journalFile), true);
+
+    const statusBefore = git(root, ["status", "--short", "--", "victim.txt"]).stdout;
+    write(journalFile, `${JSON.stringify({
+      ...baseJournal,
+      intent_to_add_paths: [...baseJournal.intent_to_add_paths, "victim.txt"],
+    }, null, 2)}\n`);
+    const arbitraryIntent = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(arbitraryIntent.ok, false);
+    assert.equal(arbitraryIntent.phase, "recovery_required");
+    assert.equal(git(root, ["status", "--short", "--", "victim.txt"]).stdout, statusBefore);
+    assert.equal(fs.readFileSync(victim, "utf8"), "SAFE\n");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupted cancellation recovery preserves a user-modified Cadre ignore", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-user-ignore-recovery-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "User-owned ignore recovery",
+        summary: "Interrupted cancellation must preserve a user edit to Cadre's native ignore file.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const ignoreFile = path.join(root, "cadre", ".gitignore");
+    const userIgnore = `${fs.readFileSync(ignoreFile, "utf8")}\n# user-owned rule\n/custom-cache/\n`;
+    write(ignoreFile, userIgnore);
+
+    const originalRename = fs.renameSync;
+    let quarantined = false;
+    fs.renameSync = function interruptCancellationWithUserIgnore(source, target) {
+      if (!quarantined && source === live && String(target).endsWith(".canceling")) {
+        originalRename.apply(this, arguments);
+        quarantined = true;
+        throw new Error("injected cancellation interruption after quarantine");
+      }
+      if (quarantined && String(source).endsWith(".canceling") && target === live) {
+        throw new Error("keep cancellation recovery pending for retry");
+      }
+      return originalRename.apply(this, arguments);
+    };
+    let interrupted;
+    try {
+      interrupted = core.workflowPacket(root, {
+        workflow: "setup",
+        approvalSessionId: sessionId,
+        approvalCancel: true,
+      });
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(quarantined, true);
+    assert.equal(interrupted.ok, false);
+    assert.equal(interrupted.approval.cancellation.recovery_required, true);
+    assert.equal(fs.readFileSync(ignoreFile, "utf8"), userIgnore);
+
+    const recovered = core.workflowPacket(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(recovered.ok, true, recovered.error);
+    assert.equal(recovered.approval.session_id, sessionId);
+    assert.equal(fs.readFileSync(ignoreFile, "utf8"), userIgnore);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".cancel-journal.json")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("supersession journals reject unrelated recovery targets", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-journal-ownership-test-"));
+  try {
+    git(root, ["init"]);
+    const victim = path.join(root, "victim.txt");
+    write(victim, "SAFE\n");
+    git(root, ["add", "victim.txt"]);
+    git(root, ["commit", "-m", "seed unrelated supersession target"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Supersession journal ownership",
+        summary: "Supersession recovery may only mutate files owned by its recorded session chain.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(live);
+    const quarantineName = `${sessionId}.json.0.0.0.superseding`;
+    fs.renameSync(live, path.join(sessionDirectory, quarantineName));
+    const journalFile = path.join(sessionDirectory, `${sessionId}.supersede-journal.json`);
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: sessionId,
+      state: "restoring",
+      sessions: [{ session, quarantine_name: quarantineName }],
+      targets: [
+        ...supersessionJournalTargets([session]),
+        { path: "victim.txt", before: "SAFE\n", preview: "PWNED\n" },
+      ],
+      intent_to_add_paths: session.intent_to_add_paths,
+    }, null, 2)}\n`);
+
+    const blocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.equal(blocked.decision.resume, null);
+    assert.equal(fs.readFileSync(victim, "utf8"), "SAFE\n");
+    assert.equal(fs.existsSync(journalFile), true);
+
+    const statusBefore = git(root, ["status", "--short", "--", "victim.txt"]).stdout;
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: sessionId,
+      state: "restoring",
+      sessions: [{ session, quarantine_name: quarantineName }],
+      targets: supersessionJournalTargets([session]),
+      intent_to_add_paths: [...session.intent_to_add_paths, "victim.txt"],
+    }, null, 2)}\n`);
+    const intentBlocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(intentBlocked.ok, false);
+    assert.equal(intentBlocked.phase, "recovery_required");
+    assert.equal(git(root, ["status", "--short", "--", "victim.txt"]).stdout, statusBefore);
+    assert.equal(fs.readFileSync(victim, "utf8"), "SAFE\n");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancellation recovery preserves target bytes changed after an interrupted restore", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-target-drift-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Cancellation target ownership",
+        summary: "Never overwrite a user edit made after an interrupted cancellation restore.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(live);
+    const quarantineName = `${sessionId}.json.0.0.canceling`;
+    const quarantine = path.join(sessionDirectory, quarantineName);
+    const productFile = path.join(root, "cadre", "product.json");
+    const productPreview = fs.readFileSync(productFile, "utf8");
+    fs.renameSync(live, quarantine);
+    write(path.join(sessionDirectory, `${sessionId}.cancel-journal.json`), `${JSON.stringify({
+      version: 1,
+      session_id: sessionId,
+      state: "restoring",
+      session,
+      targets: cancellationJournalTargets(session),
+      intent_to_add_paths: session.intent_to_add_paths,
+      quarantine_name: quarantineName,
+      completed_name: `${sessionId}.json.0.0.cancelled`,
+    }, null, 2)}\n`);
+    write(productFile, "USER EDIT AFTER CANCELLATION INTERRUPTION\n");
+
+    const blocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.match(blocked.errors.join("\n"), /target changed after the transaction was interrupted/i);
+    assert.equal(fs.readFileSync(productFile, "utf8"), "USER EDIT AFTER CANCELLATION INTERRUPTION\n");
+    assert.equal(fs.existsSync(quarantine), true);
+    assert.equal(fs.existsSync(live), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("supersession recovery validates every session before restoring targets", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-preflight-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Supersession preflight",
+        summary: "Validate all quarantined sessions before restoring any target bytes.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const secondId = sessionId === "d".repeat(24) ? "e".repeat(24) : "d".repeat(24);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(live);
+    const secondSession = { ...session, session_id: secondId };
+    const firstQuarantineName = `${sessionId}.json.0.0.0.superseding`;
+    const secondQuarantineName = `${secondId}.json.0.0.1.superseding`;
+    fs.renameSync(live, path.join(sessionDirectory, firstQuarantineName));
+    write(path.join(sessionDirectory, secondQuarantineName), `${JSON.stringify({
+      ...secondSession,
+      updated_at: "2099-01-01T00:00:00.000Z",
+    }, null, 2)}\n`);
+    const productFile = path.join(root, "cadre", "product.json");
+    fs.rmSync(productFile);
+    const journalFile = path.join(sessionDirectory, `${sessionId}.supersede-journal.json`);
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: sessionId,
+      state: "restoring",
+      sessions: [
+        { session, quarantine_name: firstQuarantineName },
+        { session: secondSession, quarantine_name: secondQuarantineName },
+      ],
+      targets: supersessionJournalTargets([session, secondSession]),
+      intent_to_add_paths: session.intent_to_add_paths,
+    }, null, 2)}\n`);
+
+    const blocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.match(blocked.errors.join("\n"), /session changed during supersession recovery/i);
+    assert.equal(fs.existsSync(productFile), false, "target rollback must wait for every session preflight");
+    assert.equal(fs.existsSync(journalFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("supersession recovery preserves target bytes changed after an interrupted restore", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-target-drift-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Supersession target ownership",
+        summary: "Never overwrite a user edit made after an interrupted supersession restore.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(live);
+    const quarantineName = `${sessionId}.json.0.0.0.superseding`;
+    const quarantine = path.join(sessionDirectory, quarantineName);
+    const productFile = path.join(root, "cadre", "product.json");
+    const productPreview = fs.readFileSync(productFile, "utf8");
+    fs.renameSync(live, quarantine);
+    write(path.join(sessionDirectory, `${sessionId}.supersede-journal.json`), `${JSON.stringify({
+      version: 1,
+      transaction_id: sessionId,
+      state: "restoring",
+      sessions: [{ session, quarantine_name: quarantineName }],
+      targets: supersessionJournalTargets([session]),
+      intent_to_add_paths: session.intent_to_add_paths,
+    }, null, 2)}\n`);
+    write(productFile, "USER EDIT AFTER SUPERSESSION INTERRUPTION\n");
+
+    const blocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.match(blocked.errors.join("\n"), /target changed after the transaction was interrupted/i);
+    assert.equal(fs.readFileSync(productFile, "utf8"), "USER EDIT AFTER SUPERSESSION INTERRUPTION\n");
+    assert.equal(fs.existsSync(quarantine), true);
+    assert.equal(fs.existsSync(live), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("committed supersession cleanup rejects a reappeared superseded live session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-committed-invariant-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Committed supersession invariant",
+        summary: "Keep terminal cleanup pending while superseded live state remains.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const transactionId = sessionId === "c".repeat(24) ? "f".repeat(24) : "c".repeat(24);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const session = readJson(path.join(sessionDirectory, `${sessionId}.json`));
+    const quarantineName = `${sessionId}.json.0.0.0.superseding`;
+    write(path.join(sessionDirectory, quarantineName), `${JSON.stringify(session, null, 2)}\n`);
+    const journalFile = path.join(sessionDirectory, `${transactionId}.supersede-journal.json`);
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: transactionId,
+      state: "committed",
+      sessions: [{ session, quarantine_name: quarantineName }],
+      targets: supersessionJournalTargets([session]),
+      intent_to_add_paths: session.intent_to_add_paths,
+    }, null, 2)}\n`);
+
+    const blocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: transactionId });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.match(blocked.errors.join("\n"), /unexpectedly remains live/i);
+    assert.equal(fs.existsSync(journalFile), true);
+    assert.equal(fs.existsSync(path.join(sessionDirectory, quarantineName)), true);
+    assert.equal(fs.existsSync(path.join(sessionDirectory, `${sessionId}.json`)), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rolled-back supersession cleanup requires every exact live session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-rolled-back-invariant-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Rolled-back supersession invariant",
+        summary: "Keep terminal cleanup pending until every original session is restored.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const live = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(live);
+    const quarantineName = `${sessionId}.json.0.0.0.superseding`;
+    fs.renameSync(live, path.join(sessionDirectory, quarantineName));
+    const journalFile = path.join(sessionDirectory, `${sessionId}.supersede-journal.json`);
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      transaction_id: sessionId,
+      state: "rolled_back",
+      sessions: [{ session, quarantine_name: quarantineName }],
+      targets: supersessionJournalTargets([session]),
+      intent_to_add_paths: session.intent_to_add_paths,
+    }, null, 2)}\n`);
+
+    const blocked = core.workflowPacketV1(root, { workflow: "setup", approvalSessionId: sessionId });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.match(blocked.errors.join("\n"), /is not live/i);
+    assert.equal(fs.existsSync(journalFile), true);
+    assert.equal(fs.existsSync(path.join(sessionDirectory, quarantineName)), true);
+    assert.equal(fs.existsSync(live), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancellation recovery rejects a mismatched live session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-cancel-session-mismatch-test-"));
+  try {
+    git(root, ["init"]);
+    const preview = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+      product: {
+        title: "Cancellation session identity",
+        summary: "Recovery must retain the exact session snapshot recorded before cancellation.",
+      },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(preview.ok, true, preview.error);
+    const sessionId = preview.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const session = readJson(sessionFile);
+    const productFile = path.join(root, "cadre", "product.json");
+    const productPreview = fs.readFileSync(productFile, "utf8");
+    const journalFile = path.join(sessionDirectory, `${sessionId}.cancel-journal.json`);
+    write(journalFile, `${JSON.stringify({
+      version: 1,
+      session_id: sessionId,
+      state: "restoring",
+      session,
+      targets: cancellationJournalTargets(session),
+      intent_to_add_paths: session.intent_to_add_paths,
+      quarantine_name: `${sessionId}.json.0.0.canceling`,
+      completed_name: `${sessionId}.json.0.0.cancelled`,
+    }, null, 2)}\n`);
+    write(sessionFile, `${JSON.stringify({ ...session, updated_at: "2099-01-01T00:00:00.000Z" }, null, 2)}\n`);
+    fs.rmSync(productFile);
+
+    const blocked = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.equal(blocked.decision.kind, "recovery_required");
+    assert.equal(blocked.decision.resume, null);
+    assert.equal(blocked.next, null);
+    assert.match(blocked.errors.join("\n"), /session changed during cancellation recovery/i);
+    assert.equal(fs.existsSync(journalFile), true);
+    assert.equal(fs.existsSync(productFile), false, "session preflight must run before target restoration");
+
+    write(sessionFile, `${JSON.stringify(session, null, 2)}\n`);
+    const recovered = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(recovered.ok, true, recovered.error);
+    assert.equal(recovered.approval.session_id, sessionId);
+    assert.equal(fs.existsSync(journalFile), false);
+    assert.equal(fs.readFileSync(productFile, "utf8"), productPreview);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -7619,7 +8684,7 @@ test("refresh rejects malformed or conflicting level selections before creating 
     const reviewDirectory = path.join(root, ".refresh-review");
     const statusBefore = git(root, ["status", "--porcelain=v1"]).stdout;
 
-    for (const refreshLevels of [null, {}, 42]) {
+    for (const refreshLevels of [null, {}, 42, [null], [""]]) {
       const rejected = core.workflowPacket(root, {
         workflow: "refresh",
         execute: true,
@@ -7637,8 +8702,11 @@ test("refresh rejects malformed or conflicting level selections before creating 
     }
 
     const empty = core.workflowPacket(root, { workflow: "refresh", refreshLevels: [] });
-    assert.equal(empty.stage, "refresh_analysis");
-    assert.deepEqual(empty.intent_prompts.map((prompt) => prompt.id), ["refresh-levels"]);
+    assert.equal(empty.ok, true, empty.error);
+    assert.equal(empty.phase_state, "complete");
+    assert.deepEqual(empty.selected_levels, []);
+    assert.deepEqual(fs.existsSync(sessions) ? fs.readdirSync(sessions) : [], []);
+    assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBefore);
     const conflicting = core.workflowPacket(root, {
       workflow: "refresh",
       refreshLevels: ["diagnostics", "product"],
@@ -8223,6 +9291,15 @@ test("LSP-only refresh freezes the reviewed technical-stage configuration", () =
     assert.equal(preview.approval.current_stage, "technical");
     assert.deepEqual(preview.review_artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
     const approvedLsp = fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8");
+    const ignoredOverride = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: preview.approval.session_id,
+      writeLsp: false,
+    });
+    assert.equal(ignoredOverride.ok, false);
+    assert.match(ignoredOverride.error, /Only current stage technical input may change.*writeLsp/i);
+    assert.equal(ignoredOverride.approval.current_stage_revision, preview.approval.current_stage_revision);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8"), approvedLsp);
     const approved = core.workflowPacket(root, {
       workflow: "refresh",
       approvalSessionId: preview.approval.session_id,

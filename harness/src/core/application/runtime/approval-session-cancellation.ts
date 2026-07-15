@@ -10,7 +10,7 @@ import {
   writeApprovalCancellationJournal,
   type ApprovalCancellationJournal,
 } from "./approval-cancellation-journal";
-import { approvalHeadExpectation, readApprovalSession } from "./approval-session-store";
+import { approvalHeadExpectation, readApprovalSessionResult } from "./approval-session-store";
 import {
   inspectReviewGitState,
   removeReviewIntentToAddAtomic,
@@ -51,9 +51,30 @@ function sessionPath(root: string, sessionId: string): string {
 }
 
 export function cancelApprovalSession(root: string, sessionId: string, expectedWorkflow?: string): CoreResult {
-  if (!readApprovalSession(root, sessionId)) return { ok: false, cancelled: false, error: "Approval session was not found" };
+  const initialRead = readApprovalSessionResult(root, sessionId);
+  if (initialRead.recovery_required) {
+    return {
+      ok: false,
+      cancelled: false,
+      recovery_required: true,
+      stage: "approval_cancel_recovery",
+      error: initialRead.error || "Approval transaction recovery failed before cancellation",
+    };
+  }
+  if (!initialRead.session) return { ok: false, cancelled: false, error: "Approval session was not found" };
   return withLock(root, "approval-target-lifecycle", () => {
-    const session = readApprovalSession(root, sessionId);
+    const sessionRead = readApprovalSessionResult(root, sessionId, { lifecycleLocked: true });
+    if (sessionRead.recovery_required) {
+      return {
+        ok: false,
+        cancelled: false,
+        session_retained: true,
+        recovery_required: true,
+        stage: "approval_cancel_recovery",
+        error: sessionRead.error || "Approval transaction recovery failed before cancellation",
+      };
+    }
+    const session = sessionRead.session;
     if (!session) return { ok: false, cancelled: false, error: "Approval session was not found" };
     if (expectedWorkflow && session.workflow !== expectedWorkflow) {
       return { ok: false, cancelled: false, session_retained: true, error: `Approval session belongs to ${session.workflow}, not ${expectedWorkflow}` };

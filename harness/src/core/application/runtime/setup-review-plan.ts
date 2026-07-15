@@ -69,6 +69,19 @@ export function approvedSetupLspAdded(session: ApprovalSession | null): string[]
   return lspServerIds(parsedSnapshot(snapshot.content)).filter((id) => !previous.has(id));
 }
 
+export function hasApprovedSetupLspSnapshot(session: ApprovalSession | null): boolean {
+  return Boolean(session?.snapshot_files.some((file) => file.path === "cadre/lsp.json" && file.missing !== true));
+}
+
+export function approvedSetupLspRemoved(session: ApprovalSession | null): string[] {
+  if (!session) return [];
+  const snapshot = session.snapshot_files.find((file) => file.path === "cadre/lsp.json");
+  if (!snapshot) return [];
+  const before = session.before_files.find((file) => file.path === "cadre/lsp.json");
+  const approved = new Set(lspServerIds(parsedSnapshot(snapshot.content)));
+  return lspServerIds(parsedSnapshot(before?.content)).filter((id) => !approved.has(id));
+}
+
 export interface SetupFinalReviewPlan {
   generatedAt: string;
   configPayload: JsonObject;
