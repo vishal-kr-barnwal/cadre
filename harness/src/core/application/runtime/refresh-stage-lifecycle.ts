@@ -6,7 +6,7 @@ import type { RefreshLevel } from "./refresh-analysis";
 import { missingRefreshEvidence, refreshReviewFiles, type RefreshDocumentsResult } from "./refresh-documents";
 import type { ApprovalStage } from "./staged-approval-stages";
 
-const TECHNICAL_LEVELS = new Set<RefreshLevel>(["tech-stack", "style-guides", "repository-topology", "lsp"]);
+const TECHNICAL_LEVELS = new Set<RefreshLevel>(["tech-stack", "style-guides", "lsp"]);
 
 export interface RefreshStageCollection extends RefreshDocumentsResult {
   cursor: ApprovalStageCursor;
@@ -35,6 +35,7 @@ export function refreshStageCollection(
     : levels.filter((level) => (
       (cursor.activeStage?.id === "product" && level === "product")
       || (cursor.activeStage?.id === "product_guidelines" && level === "product-guidelines")
+      || (cursor.activeStage?.id === "topology" && level === "repository-topology")
       || (cursor.activeStage?.id === "workflow" && level === "workflow")
       || (cursor.activeStage?.id === "patterns" && level === "patterns")
     ));

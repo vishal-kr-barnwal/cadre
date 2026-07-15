@@ -1466,10 +1466,7 @@ test("public refresh packets execute the exact frozen technical-stage continuati
       workflow: "refresh",
       input: {},
       sessionId,
-      writablePaths: inputPaths(
-        "proposedContext.techStack", "proposedContext.styleGuideIds", "styleGuideIds",
-        "proposedContext.repositoryTopology", "proposedContext.repos", "writeLsp", "setupLsp", "lsp",
-      ),
+      writablePaths: inputPaths("writeLsp", "setupLsp", "lsp"),
     });
     const approvedContent = fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8");
 

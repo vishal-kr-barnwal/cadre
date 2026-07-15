@@ -107,15 +107,33 @@ function rawRequestedLevels(args: RuntimeArgs): string[] {
   return [...direct, ...listed, ...flags].map((entry) => entry.trim().toLowerCase()).filter(Boolean);
 }
 
+function invalidRefreshSelectionKeys(args: RuntimeArgs): string[] {
+  const raw = rawArgs(args);
+  const collectionKeys = ["refreshLevels", "refresh_levels", "refreshScope", "refresh_scope", "scope", "scopes"];
+  const booleanKeys = ["all", "patterns", "styleGuides", "style_guides", "docs", "projections", "diagnostics", "lsp", "writeLsp", "write_lsp", "setupLsp", "setup_lsp"];
+  return [
+    ...collectionKeys.filter((key) => Object.prototype.hasOwnProperty.call(raw, key)
+      && raw[key] !== undefined
+      && typeof raw[key] !== "string"
+      && !Array.isArray(raw[key])),
+    ...booleanKeys.filter((key) => Object.prototype.hasOwnProperty.call(raw, key)
+      && raw[key] !== undefined
+      && typeof raw[key] !== "boolean"),
+  ];
+}
+
 export function unsupportedRefreshLevels(args: RuntimeArgs = {}): string[] {
-  return Array.from(new Set(rawRequestedLevels(args).filter((level) => !LEVEL_ALIASES[level])));
+  return Array.from(new Set([
+    ...rawRequestedLevels(args).filter((level) => !LEVEL_ALIASES[level]),
+    ...invalidRefreshSelectionKeys(args).map((key) => `${key}:invalid`),
+  ]));
 }
 
 export function refreshLevelIds(args: RuntimeArgs = {}, recommended: string[] = []): RefreshLevel[] {
   const selected = new Set<RefreshLevel>();
   for (const raw of rawRequestedLevels(args)) {
     const level = LEVEL_ALIASES[raw];
-    if (level === "all") REFRESH_LEVELS.forEach((entry) => selected.add(entry));
+    if (level === "all") REFRESH_LEVELS.filter((entry) => entry !== "diagnostics").forEach((entry) => selected.add(entry));
     else if (level === "all-recommended") recommended.forEach((entry) => {
       if ((REFRESH_LEVELS as readonly string[]).includes(entry)) selected.add(entry as RefreshLevel);
     });
@@ -125,12 +143,7 @@ export function refreshLevelIds(args: RuntimeArgs = {}, recommended: string[] = 
 }
 
 export function refreshSelectionProvided(args: RuntimeArgs = {}): boolean {
-  const raw = rawArgs(args);
-  return [
-    "refreshLevels", "refresh_levels", "refreshScope", "refresh_scope", "scope", "scopes",
-    "all", "patterns", "styleGuides", "style_guides", "docs", "projections", "diagnostics",
-    "lsp", "writeLsp", "write_lsp", "setupLsp", "setup_lsp",
-  ].some((key) => Object.prototype.hasOwnProperty.call(raw, key) && raw[key] !== undefined);
+  return rawRequestedLevels(args).length > 0 || invalidRefreshSelectionKeys(args).length > 0;
 }
 
 function compactWorkspace(value: JsonObject): JsonObject {
@@ -237,7 +250,7 @@ export function refreshAnalysis(root: string, args: RuntimeArgs = {}): JsonObjec
   const graph = asJsonObject(dependencyGraph(root));
   const lspPreview = asJsonObject(lspSetup(root, { ...args, execute: false }));
   const lspStatus = asJsonObject(lspConfigStatus(root));
-  const projectionValidation = asJsonObject(artifactValidate(root, { scope: "project" }));
+  const projectionValidation = asJsonObject(artifactValidate(root, { scope: "refresh" }));
   const context = currentContext(root);
   const topology = loadTopology(root);
   const metadata = repositoryMetadata(root);
@@ -249,6 +262,7 @@ export function refreshAnalysis(root: string, args: RuntimeArgs = {}): JsonObjec
   const thinPatterns = patternsAreThin(root);
   const lspMissing = asStringArray(lspPreview.missingFromConfig || lspPreview.missing_from_config);
   const lspAdded = asStringArray(lspPreview.added);
+  const lspStaleManaged = asStringArray(lspPreview.staleManaged || lspPreview.stale_managed || lspPreview.removed);
 
   const findings = [
     finding("product", [
@@ -283,7 +297,8 @@ export function refreshAnalysis(root: string, args: RuntimeArgs = {}): JsonObjec
     ], metadata.gitmodules === true && !topology.polyrepo ? "high" : "medium", { configured_polyrepo: topology.polyrepo, gitmodules: metadata.gitmodules }),
     finding("lsp", [
       ...(lspMissing.length > 0 || lspAdded.length > 0 ? ["Detected language-server recommendations are not present in cadre/lsp.json."] : []),
-    ], "high", { configured: lspStatus.configured === true, missing: lspMissing, added: lspAdded }),
+      ...(lspStaleManaged.length > 0 ? [`Cadre-managed language servers no longer match repository evidence: ${lspStaleManaged.join(", ")}.`] : []),
+    ], "high", { configured: lspStatus.configured === true, missing: lspMissing, added: lspAdded, stale_managed: lspStaleManaged }),
     finding("workflow", [
       ...qualityWarnings.filter((warning) => warning.startsWith("workflow context")),
       ...(hasChange(changes, [/test command/, /build command/, /lint/, /ci\b/, /review gate/, /release process/]) ? ["Reported changes may alter project commands or quality gates."] : []),

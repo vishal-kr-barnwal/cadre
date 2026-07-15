@@ -137,6 +137,17 @@ export function workflowRevert(root: string, args: RuntimeArgs = {}): CoreResult
   };
 }
 
+function topologyWorkspaceRoots(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const topology = asJsonObject(value);
+  if (topology.mode !== "polyrepo" || !Array.isArray(topology.repos)) return [];
+  return topology.repos.map(asJsonObject).flatMap((repo) => {
+    if (repo.enabled === false) return [];
+    const declared = asOptionalString(repo.submodule_path || repo.path);
+    return declared ? [declared] : [];
+  });
+}
+
 export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResult {
   args = applyStagedApprovalSessionPayload(root, args, "refresh");
   const summary = workflowSummary(root, "refresh", args);
@@ -170,10 +181,30 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     };
   }
   const levels = refreshLevelIds(args, recommended);
+  if (levels.includes("diagnostics") && levels.length > 1) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "refresh_analysis",
+      selected_levels: levels,
+      refresh_analysis: analysis,
+      intent_prompts: [refreshLevelPrompt(analysis)],
+      selection_conflict: "diagnostics_is_exclusive",
+      error: "Analysis Only cannot be combined with mutating refresh levels; select diagnostics alone or choose the semantic levels to refresh.",
+    };
+  }
   const stages = refreshApprovalStages(levels);
   const lspSelected = levels.includes("lsp");
-  const lspPreview = lspSetup(root, { ...args, execute: false });
-  const topologyCandidate = refreshCandidate(args, "repository-topology");
+  const topologyCandidate = levels.includes("repository-topology")
+    ? refreshCandidate(args, "repository-topology")
+    : null;
+  const lspPreview = lspSetup(root, {
+    ...args,
+    execute: false,
+    ...(lspSelected ? { lspWorkspaceRoots: topologyWorkspaceRoots(topologyCandidate) } : {}),
+  });
   const lspReviewFiles = lspSelected
     ? [{
       ...machineReviewFile(
@@ -303,7 +334,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     ? { ...lspPreview, reviewed_snapshot: true, applied: args.execute === true && reviewValidation.ok !== false }
     : lspPreview;
   const projectionRepair = args.execute === true && projectionsSelected
-    ? artifactSync(root, { scope: "project", execute: true, commitMode: "off" })
+    ? artifactSync(root, { scope: "refresh", execute: true, commitMode: "off" })
     : null;
   const operationsOk = !projectionRepair || projectionRepair.ok !== false;
   const approvalAudit = args.execute === true && reviewFiles.length > 0 && operationsOk

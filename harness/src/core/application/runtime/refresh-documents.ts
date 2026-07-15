@@ -201,6 +201,17 @@ function currentJsonl(root: string, relativePath: string): JsonObject[] {
   });
 }
 
+function currentJson(root: string, relativePath: string): JsonObject {
+  const baseline = unapprovedTargetBaselineContent(root, relativePath);
+  if (baseline === undefined) return readJson<JsonObject>(path.join(root, relativePath), {});
+  if (baseline === null) return {};
+  try {
+    return asJsonObject(JSON.parse(baseline));
+  } catch {
+    return {};
+  }
+}
+
 function matchesTemplateSection(current: JsonObject | undefined, template: JsonObject | undefined): boolean {
   if (!current || !template) return false;
   const keys = new Set([...Object.keys(current), ...Object.keys(template)]);
@@ -320,10 +331,12 @@ function repositoryTopologyFiles(root: string, args: RuntimeArgs, rawValue: unkn
   );
 }
 
-function styleGuideFiles(root: string, args: RuntimeArgs): ReviewFile[] {
+function styleGuideFiles(root: string, args: RuntimeArgs, refreshesTechStack: boolean): ReviewFile[] {
   const rawIds = refreshCandidate(args, "style-guides");
-  const currentIds = asStringArray(readJson<JsonObject>(path.join(root, "cadre", "styleguides", "index.json"), {}).selected);
-  const techStack = refreshCandidate(args, "tech-stack");
+  const currentIds = asStringArray(currentJson(root, "cadre/styleguides/index.json").selected);
+  const techStack = refreshesTechStack
+    ? refreshCandidate(args, "tech-stack")
+    : currentJson(root, "cadre/tech-stack.json");
   const available = new Set(availableStyleGuideIds());
   const requestedIds = rawIds === undefined ? currentIds : requestedStyleGuideIds(rawIds);
   const customIds = requestedIds.filter((id) => (
@@ -409,7 +422,7 @@ export function refreshReviewFiles(root: string, args: RuntimeArgs, levels: Refr
     if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root, args, spec, refreshCandidate(args, spec.level)));
   }
   if (levels.includes("tech-stack")) files.push(...techStackFiles(root, args, refreshCandidate(args, "tech-stack")));
-  if (levels.includes("style-guides")) files.push(...styleGuideFiles(root, args));
+  if (levels.includes("style-guides")) files.push(...styleGuideFiles(root, args, levels.includes("tech-stack")));
   if (levels.includes("patterns")) files.push(...(refreshedPatternsArtifacts(root, args)?.files || []));
   if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root, args, refreshCandidate(args, "repository-topology")));
   return {

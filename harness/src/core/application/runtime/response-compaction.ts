@@ -164,6 +164,11 @@ function compactLspSetup(value: unknown): JsonObject | null {
     written: setup.written === true,
     added: asStringArray(setup.added),
     added_count: Array.isArray(setup.added) ? setup.added.length : Number(setup.added_count || 0),
+    removed: asStringArray(setup.removed),
+    removed_count: Array.isArray(setup.removed) ? setup.removed.length : Number(setup.removed_count || 0),
+    stale_managed_count: Array.isArray(setup.staleManaged)
+      ? setup.staleManaged.length
+      : Number(setup.stale_managed_count || 0),
     missing_from_config_count: Array.isArray(setup.missingFromConfig) ? setup.missingFromConfig.length : Number(setup.missing_from_config_count || 0),
     missing_commands_count: Array.isArray(setup.missingCommands) ? setup.missingCommands.length : Number(setup.missing_commands_count || 0),
     recommended_count: Array.isArray(setup.recommended) ? setup.recommended.length : Number(setup.recommended_count || 0),

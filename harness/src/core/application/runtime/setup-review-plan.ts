@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
-import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
+import { asJsonObject, asOptionalString } from "../../../guards";
 import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
+import { reconcileLspConfig, type LspConfig } from "../../../lsp/config-reconciliation";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { plainReviewFile } from "./review-bundles";
 import { configuredCiProvider } from "./setup-infrastructure";
@@ -28,37 +29,18 @@ function requestedWorkspaceFolders(repos: JsonObject | null): JsonObject[] | nul
     { name: ".", path: "." },
     ...repos.repos.map(asJsonObject).flatMap((repo) => {
       const name = asOptionalString(repo.name);
-      const submodulePath = asOptionalString(repo.submodule_path);
-      return repo.enabled !== false && name && submodulePath ? [{ name, path: submodulePath }] : [];
+      const declaredPath = asOptionalString(repo.submodule_path || repo.path);
+      return repo.enabled !== false && name && declaredPath ? [{ name, path: declaredPath }] : [];
     }),
   ];
 }
 
 export function lspPreviewPayload(root: string, recommendations: CoreResult, repos: JsonObject | null = null): JsonObject {
-  const existing = readJson<JsonObject>(path.join(root, "cadre", "lsp.json"), {});
-  const servers = Array.isArray(existing.servers) ? [...existing.servers] : [];
-  const known = new Set(servers.map((server) => asOptionalString(asJsonObject(server).id || asJsonObject(server).command)).filter(Boolean));
-  for (const value of Array.isArray(recommendations.recommended) ? recommendations.recommended : []) {
-    const recommendation = asJsonObject(value);
-    const id = asOptionalString(recommendation.id);
-    const command = asOptionalString(recommendation.command);
-    if ((!id && !command) || known.has(id || command || "")) continue;
-    servers.push({
-      ...(id ? { id } : {}),
-      ...(command ? { command } : {}),
-      args: asStringArray(recommendation.args),
-      extensions: asStringArray(recommendation.extensions),
-      ...(Array.isArray(recommendation.filenames) ? { filenames: asStringArray(recommendation.filenames) } : {}),
-      ...(Array.isArray(recommendation.languageIds) ? { languageIds: asStringArray(recommendation.languageIds) } : {}),
-    });
-    if (id) known.add(id);
-  }
-  return {
-    ...existing,
-    servers,
-    workspaceFolders: requestedWorkspaceFolders(repos)
-      || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders : []),
-  };
+  const existing = readJson<LspConfig>(path.join(root, "cadre", "lsp.json"), {});
+  const detected = Array.isArray(recommendations.recommended) ? recommendations.recommended : [];
+  const folders = requestedWorkspaceFolders(repos)
+    || (Array.isArray(recommendations.workspaceFolders) ? recommendations.workspaceFolders.map(asJsonObject) : []);
+  return reconcileLspConfig(existing, detected, folders).config;
 }
 
 function lspServerIds(value: JsonObject): string[] {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { asJsonObject, asOptionalString } from "../../../guards";
+import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { CommandResult, JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import { mcpServerPathCandidates } from "../../../runtime-paths";
@@ -132,6 +132,9 @@ export function lspSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   }
   const config = asOptionalString(args.config) || "cadre/lsp.json";
   const commandArgs = [helper, "--cadre-lsp-setup", "--root", root, "--config", config, "--json"];
+  for (const workspaceRoot of asStringArray(args.lspWorkspaceRoots || args.lsp_workspace_roots)) {
+    commandArgs.push("--workspace-root", workspaceRoot);
+  }
   if (args.execute === true) commandArgs.push("--write");
   const result = runCommand("node", commandArgs, { cwd: root, maxBuffer: 20 * 1024 * 1024 });
   if (!result.ok) {

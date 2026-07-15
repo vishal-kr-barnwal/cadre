@@ -306,6 +306,7 @@ export function artifactMatches(def: ArtifactDefinition, args: RuntimeArgs = {})
   const scope = asOptionalString(args.scope || args.view || "all") || "all";
   if (scope === "all") return true;
   if (scope === "project") return def.scope === "project";
+  if (scope === "refresh") return def.scope === "project" || def.scope === "styleguide";
   if (scope === "tracks") return def.scope === "track" || def.id === "tracks-index";
   if (scope === "styleguides" || scope === "styleguide") return def.scope === "styleguide";
   if (scope === "skills" || scope === "skill") return def.scope === "skill";

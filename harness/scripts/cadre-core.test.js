@@ -749,6 +749,102 @@ test("polyrepo workspace intelligence spans TS, Python, and Rust roots", () => {
   }
 });
 
+test("LSP recommendations scan declared nested Git roots from a Git superproject", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-polyrepo-nested-git-lsp-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    write(path.join(root, "cadre", "repos.json"), JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "python",
+      repos: [
+        { name: "python", submodule_path: "services/python", enabled: true },
+        { name: "rust", path: "libs/rust", enabled: true },
+      ],
+    }, null, 2));
+    git(root, ["add", "cadre"]);
+    git(root, ["commit", "-m", "seed declared polyrepo roots"]);
+
+    const pythonRoot = path.join(root, "services", "python");
+    fs.mkdirSync(pythonRoot, { recursive: true });
+    git(pythonRoot, ["init"]);
+    write(path.join(pythonRoot, "app.py"), "def nested_python():\n    return True\n");
+    git(pythonRoot, ["add", "."]);
+    git(pythonRoot, ["commit", "-m", "seed python repo"]);
+    const rustRoot = path.join(root, "libs", "rust");
+    fs.mkdirSync(rustRoot, { recursive: true });
+    git(rustRoot, ["init"]);
+    write(path.join(rustRoot, "src", "lib.rs"), "pub fn nested_rust() -> bool { true }\n");
+    git(rustRoot, ["add", "."]);
+    git(rustRoot, ["commit", "-m", "seed rust repo"]);
+
+    const setup = core.lspSetup(root, { execute: false });
+    assert.equal(setup.ok, true, setup.reason);
+    const python = setup.recommended.find((entry) => entry.id === "python");
+    const rust = setup.recommended.find((entry) => entry.id === "rust");
+    assert.ok(python);
+    assert.ok(rust);
+    assert.ok(python.samples.includes("services/python/app.py"));
+    assert.ok(rust.samples.includes("libs/rust/src/lib.rs"));
+    assert.deepEqual(setup.workspaceFolders, [
+      { name: ".", path: "." },
+      { name: "python", path: "services/python" },
+      { name: "rust", path: "libs/rust" },
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit topology then LSP refresh scans the selected nested roots before target materialization", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-explicit-topology-lsp-refresh-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    git(root, ["add", "cadre"]);
+    git(root, ["commit", "-m", "seed explicit topology refresh"]);
+    const nestedRoot = path.join(root, "services", "python");
+    fs.mkdirSync(nestedRoot, { recursive: true });
+    git(nestedRoot, ["init"]);
+    write(path.join(nestedRoot, "app.py"), "def selected_nested_root():\n    return True\n");
+    git(nestedRoot, ["add", "."]);
+    git(nestedRoot, ["commit", "-m", "seed selected python root"]);
+    const candidate = {
+      mode: "polyrepo",
+      default_repo: "python",
+      repos: [{ name: "python", path: "services/python", enabled: true }],
+    };
+    const topology = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["repository-topology", "lsp"],
+      repositoryTopology: candidate,
+      reviewBundleDir: ".refresh-review",
+      commitMode: "off",
+    });
+    assert.equal(topology.ok, true, topology.error);
+    assert.equal(topology.approval.current_stage, "topology");
+    assert.deepEqual(topology.review_artifacts.map((artifact) => artifact.path).sort(), ["cadre/repos.json", "cadre/repos.md"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "repos.json")), false);
+
+    const technical = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: topology.approval.session_id,
+      approvalStage: "topology",
+      ...approvalStamp(topology.approval),
+      approvedStages: ["topology"],
+    });
+    assert.equal(technical.ok, true, technical.error);
+    assert.equal(technical.approval.current_stage, "technical");
+    assert.deepEqual(technical.review_artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
+    const reviewedLsp = readJson(path.join(technical.review_bundle.directory, "cadre", "lsp.json"));
+    assert.ok(reviewedLsp.servers.some((server) => server.id === "python"));
+    assert.ok(reviewedLsp.workspaceFolders.some((folder) => folder.path === "services/python"));
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("isCadreProjectRoot requires real Cadre state markers", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-root-test-"));
   try {
@@ -7511,6 +7607,113 @@ test("workflow revert, release, and refresh execute packet-owned local changes",
   }
 });
 
+test("refresh rejects malformed or conflicting level selections before creating review state", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-level-shape-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+    write(path.join(root, "src", "index.ts"), "export const ready = true;\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed refresh selection project"]);
+    const sessions = path.join(root, "cadre", "local", "approval-sessions");
+    const reviewDirectory = path.join(root, ".refresh-review");
+    const statusBefore = git(root, ["status", "--porcelain=v1"]).stdout;
+
+    for (const refreshLevels of [null, {}, 42]) {
+      const rejected = core.workflowPacket(root, {
+        workflow: "refresh",
+        execute: true,
+        reviewBundleDir: reviewDirectory,
+        refreshLevels,
+      });
+      assert.equal(rejected.ok, false);
+      assert.equal(rejected.phase_state, "awaiting_clarification");
+      assert.equal(rejected.stage, "intent_clarification");
+      assert.deepEqual(rejected.intent_prompts.map((prompt) => prompt.id), ["refresh-levels"]);
+      assert.ok(rejected.unsupported_levels.some((level) => level.includes("invalid")));
+      assert.equal(fs.existsSync(reviewDirectory), false);
+      assert.deepEqual(fs.existsSync(sessions) ? fs.readdirSync(sessions) : [], []);
+      assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBefore);
+    }
+
+    const empty = core.workflowPacket(root, { workflow: "refresh", refreshLevels: [] });
+    assert.equal(empty.stage, "refresh_analysis");
+    assert.deepEqual(empty.intent_prompts.map((prompt) => prompt.id), ["refresh-levels"]);
+    const conflicting = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["diagnostics", "product"],
+      product: { title: "Ignored product", summary: "Must not open review while diagnostics is selected." },
+    });
+    assert.equal(conflicting.ok, false);
+    assert.equal(conflicting.stage, "refresh_analysis");
+    assert.equal(conflicting.selection_conflict, "diagnostics_is_exclusive");
+    assert.deepEqual(conflicting.selected_levels, ["product", "diagnostics"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
+    assert.deepEqual(fs.existsSync(sessions) ? fs.readdirSync(sessions) : [], []);
+    assert.equal(git(root, ["status", "--porcelain=v1"]).stdout, statusBefore);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("projection-only refresh repairs project and style-guide projections without touching track artifacts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-projection-scope-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), "{}\n");
+    write(path.join(root, "cadre", "product.json"), `${JSON.stringify({
+      version: 1,
+      schema: "cadre.product.v1",
+      kind: "product",
+      title: "Projection scope product",
+      summary: "Repair project context without changing track review documents.",
+      sections: [],
+    }, null, 2)}\n`);
+    write(path.join(root, "cadre", "styleguides", "index.json"), `${JSON.stringify({
+      version: 1,
+      schema: "cadre.styleguide_index.v1",
+      selected: ["typescript"],
+    }, null, 2)}\n`);
+    write(
+      path.join(root, "cadre", "styleguides", "typescript.json"),
+      fs.readFileSync(path.join(__dirname, "..", "templates", "styleguides", "typescript.json"), "utf8"),
+    );
+    const trackId = "projection_scope_20260715";
+    writeTrack(root, trackId, samplePlan(trackId));
+    const generated = core.artifactSync(root, { scope: "refresh", execute: true, commitMode: "off" });
+    assert.equal(generated.ok, true, generated.error || JSON.stringify(generated.errors));
+    const productCanonical = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
+    const styleCanonical = fs.readFileSync(path.join(root, "cadre", "styleguides", "typescript.json"), "utf8");
+    const productProjection = path.join(root, "cadre", "product.md");
+    const styleProjection = path.join(root, "cadre", "styleguides", "typescript.md");
+    const trackProjection = path.join(root, "cadre", "tracks", trackId, "plan.md");
+    fs.appendFileSync(productProjection, "\nSTALE PROJECT PROJECTION\n");
+    fs.appendFileSync(styleProjection, "\nSTALE STYLE PROJECTION\n");
+    fs.appendFileSync(trackProjection, "\nSTALE TRACK PROJECTION\n");
+    const staleTrack = fs.readFileSync(trackProjection, "utf8");
+
+    const refreshed = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["projections"],
+      execute: true,
+      commitMode: "off",
+    });
+    assert.equal(refreshed.ok, true, refreshed.error);
+    assert.equal(refreshed.phase_state, "executed");
+    assert.deepEqual(refreshed.selected_levels, ["projections"]);
+    assert.equal(refreshed.approval.required, false);
+    assert.ok(refreshed.projection_repair.written.includes("cadre/product.md"));
+    assert.ok(refreshed.projection_repair.written.includes("cadre/styleguides/typescript.md"));
+    assert.doesNotMatch(fs.readFileSync(productProjection, "utf8"), /STALE PROJECT PROJECTION/);
+    assert.doesNotMatch(fs.readFileSync(styleProjection, "utf8"), /STALE STYLE PROJECTION/);
+    assert.equal(fs.readFileSync(trackProjection, "utf8"), staleTrack);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8"), productCanonical);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "styleguides", "typescript.json"), "utf8"), styleCanonical);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("multi-level refresh collects and materializes only the active selected stage", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-multi-level-refresh-test-"));
   try {
@@ -7527,7 +7730,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       "workflow",
       "patterns",
     ];
-    const stages = ["product", "product_guidelines", "technical", "workflow", "patterns"];
+    const stages = ["product", "product_guidelines", "topology", "technical", "workflow", "patterns"];
     const missingProduct = core.workflowPacket(root, {
       workflow: "refresh",
       refreshLevels: [...selectedLevels].reverse(),
@@ -7577,24 +7780,22 @@ test("multi-level refresh collects and materializes only the active selected sta
       "cadre/product_guidelines.md",
     ]);
 
-    const missingTechnical = core.workflowPacket(root, {
+    const missingTopology = core.workflowPacket(root, {
       workflow: "refresh",
       approvalSessionId: sessionId,
       approvalStage: "product_guidelines",
       ...approvalStamp(guidelines.approval),
       approvedStages: ["product", "product_guidelines"],
     });
-    assert.equal(missingTechnical.approval.current_stage, "technical");
-    assert.deepEqual(missingTechnical.missing_payload, ["proposedContext.techStack", "proposedContext.repos"]);
+    assert.equal(missingTopology.approval.current_stage, "topology");
+    assert.deepEqual(missingTopology.missing_payload, ["proposedContext.repos"]);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
 
-    const technical = core.workflowPacket(root, {
+    const topology = core.workflowPacket(root, {
       workflow: "refresh",
       approvalSessionId: sessionId,
-      styleGuideIds: ["typescript"],
       proposedContext: {
-        techStack: { languages: ["TypeScript"], runtimes: ["Node.js"] },
         repos: {
           mode: "polyrepo",
           default_repo: "application",
@@ -7602,12 +7803,31 @@ test("multi-level refresh collects and materializes only the active selected sta
         },
       },
     });
+    assert.deepEqual(topology.review_artifacts.map((artifact) => artifact.path).sort(), ["cadre/repos.json", "cadre/repos.md"]);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
+
+    const missingTechnical = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "topology",
+      ...approvalStamp(topology.approval),
+      approvedStages: ["product", "product_guidelines", "topology"],
+    });
+    assert.equal(missingTechnical.approval.current_stage, "technical");
+    assert.deepEqual(missingTechnical.missing_payload, ["proposedContext.techStack"]);
+
+    const technical = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      styleGuideIds: ["typescript"],
+      proposedContext: {
+        techStack: { languages: ["TypeScript"], runtimes: ["Node.js"] },
+      },
+    });
     assert.equal(technical.ok, true, technical.error || JSON.stringify(technical.warnings || {}));
     assert.equal(technical.approval.current_stage, "technical");
     assert.deepEqual(technical.review_artifacts.map((artifact) => artifact.path).sort(), [
       "cadre/lsp.json",
-      "cadre/repos.json",
-      "cadre/repos.md",
       "cadre/styleguides/README.md",
       "cadre/styleguides/index.json",
       "cadre/styleguides/typescript.json",
@@ -7623,7 +7843,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       approvalSessionId: sessionId,
       approvalStage: "technical",
       ...approvalStamp(technical.approval),
-      approvedStages: ["product", "product_guidelines", "technical"],
+      approvedStages: ["product", "product_guidelines", "topology", "technical"],
     });
     assert.equal(missingWorkflow.approval.current_stage, "workflow");
     assert.deepEqual(missingWorkflow.missing_payload, ["proposedContext.workflowPolicy"]);
@@ -7643,7 +7863,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       approvalSessionId: sessionId,
       approvalStage: "workflow",
       ...approvalStamp(workflow.approval),
-      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+      approvedStages: ["product", "product_guidelines", "topology", "technical", "workflow"],
     });
     assert.equal(missingPatterns.approval.current_stage, "patterns");
     assert.deepEqual(missingPatterns.missing_payload, ["proposedContext.patterns"]);
@@ -7819,7 +8039,7 @@ test("refresh repository-topology aliases replace the same session artifact exac
       repositoryTopology: { mode: "monorepo", default_repo: ".", marker: "stale-old" },
     });
     assert.equal(initial.ok, true, initial.error);
-    assert.equal(initial.approval.current_stage, "technical");
+    assert.equal(initial.approval.current_stage, "topology");
     const sessionId = initial.approval.session_id;
     const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
     assert.equal(readJson(path.join(root, "cadre", "repos.json")).marker, "stale-old");
@@ -7854,9 +8074,9 @@ test("refresh repository-topology aliases replace the same session artifact exac
     const approved = core.workflowPacket(root, {
       workflow: "refresh",
       approvalSessionId: sessionId,
-      approvalStage: "technical",
+      approvalStage: "topology",
       ...approvalStamp(amended.approval),
-      approvedStages: ["technical"],
+      approvedStages: ["topology"],
     });
     assert.equal(approved.ok, true, approved.error);
     const executed = core.workflowPacket(root, {
@@ -7864,7 +8084,7 @@ test("refresh repository-topology aliases replace the same session artifact exac
       execute: true,
       approvalComplete: true,
       approvalSessionId: sessionId,
-      approvedStages: ["technical"],
+      approvedStages: ["topology"],
     });
     assert.equal(executed.ok, true, executed.error);
     assert.equal(readJson(path.join(root, "cadre", "repos.json")).marker, "authoritative-new");
@@ -7967,12 +8187,15 @@ test("style-guide refresh analyzes drift and preserves selection unless removal 
       const preview = core.workflowPacket(root, {
         workflow: "refresh",
         refreshLevels: ["style-guides"],
+        proposedContext: { techStack: { languages: ["Swift"], frameworks: ["SwiftUI"] } },
         ...(explicit ? { styleGuideIds: ["typescript"] } : {}),
       });
       assert.equal(preview.ok, true, preview.error);
       assert.equal(preview.approval.current_stage, "technical");
       const paths = preview.review_artifacts.map((artifact) => artifact.path);
       assert.equal(paths.includes("cadre/styleguides/typescript.json"), true);
+      assert.equal(paths.includes("cadre/styleguides/swift.json"), false);
+      assert.equal(paths.includes("cadre/styleguides/swiftui.json"), false);
       assert.equal(paths.includes("cadre/styleguides/python.json"), !explicit);
       assert.equal(paths.includes("cadre/styleguides/custom-team.json"), false);
       const index = readJson(path.join(root, "cadre", "styleguides", "index.json"));
@@ -8021,6 +8244,86 @@ test("LSP-only refresh freezes the reviewed technical-stage configuration", () =
     assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), true);
     assert.equal(fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8"), approvedLsp);
     assert.equal(executed.lsp_setup.reviewed_snapshot, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LSP refresh removes stale Cadre-managed servers and preserves user-owned configuration", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-lsp-refresh-reconcile-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+    write(path.join(root, "src", "index.ts"), "export const activeLanguage = 'typescript';\n");
+    const userServer = {
+      id: "team-swift",
+      command: "sourcekit-lsp",
+      args: ["--background-index"],
+      extensions: [".swift"],
+      owner: "user",
+    };
+    write(path.join(root, "cadre", "lsp.json"), `${JSON.stringify({
+      user_setting: { preserve: true },
+      servers: [
+        { id: "swift", command: "sourcekit-lsp", args: [], extensions: [".swift"] },
+        { id: "go", command: "gopls", args: [], extensions: [".go"], managed_by: "cadre" },
+        userServer,
+      ],
+      workspaceFolders: [{ name: "legacy", path: "legacy" }],
+    }, null, 2)}\n`);
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed stale managed lsp configuration"]);
+
+    const analyzed = core.workflowPacket(root, { workflow: "refresh", responseMode: "detail" });
+    assert.equal(analyzed.stage, "refresh_analysis");
+    const lspFinding = analyzed.refresh_analysis.findings.find((entry) => entry.level === "lsp");
+    assert.equal(lspFinding.recommended, true);
+    assert.deepEqual(lspFinding.evidence.stale_managed.sort(), ["go", "swift"]);
+
+    const preview = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["lsp"],
+      repositoryTopology: {
+        mode: "polyrepo",
+        default_repo: "unselected",
+        repos: [{ name: "unselected", submodule_path: "should-not-leak", enabled: true }],
+      },
+      commitMode: "off",
+      responseMode: "detail",
+    });
+    assert.equal(preview.ok, true, preview.error);
+    assert.deepEqual(preview.selected_levels, ["lsp"]);
+    assert.deepEqual(preview.review_artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
+    const reconciled = readJson(path.join(root, "cadre", "lsp.json"));
+    assert.deepEqual(reconciled.user_setting, { preserve: true });
+    assert.deepEqual(reconciled.servers.find((server) => server.id === "team-swift"), userServer);
+    assert.equal(reconciled.servers.some((server) => server.id === "swift"), false);
+    assert.equal(reconciled.servers.some((server) => server.id === "go"), false);
+    const typescript = reconciled.servers.find((server) => server.id === "typescript");
+    assert.ok(typescript);
+    assert.equal(typescript.managed_by, "cadre");
+    assert.ok(reconciled.workspaceFolders.some((folder) => folder.name === "legacy" && folder.path === "legacy"));
+    assert.ok(reconciled.workspaceFolders.some((folder) => folder.name === "." && folder.path === "."));
+    assert.equal(reconciled.workspaceFolders.some((folder) => folder.path === "should-not-leak"), false);
+    const reviewed = fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8");
+
+    const approved = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "technical",
+      ...approvalStamp(preview.approval),
+      approvedStages: ["technical"],
+    });
+    assert.equal(approved.ok, true, approved.error);
+    const executed = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: preview.approval.session_id,
+      approvedStages: ["technical"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8"), reviewed);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

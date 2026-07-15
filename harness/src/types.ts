@@ -224,6 +224,8 @@ export interface RuntimeArgs extends JsonObject {
   todoLimit?: number;
   lspResult?: JsonObject;
   lsp_result?: JsonObject;
+  lspWorkspaceRoots?: string[];
+  lsp_workspace_roots?: string[];
   dryRun?: boolean;
   product?: JsonObject;
   productGuidelines?: JsonObject;
