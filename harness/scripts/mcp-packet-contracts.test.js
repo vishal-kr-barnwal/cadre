@@ -584,6 +584,123 @@ test("public newtrack packets collect spec then plan and execute the exact conti
   }
 });
 
+test("public formula pour packets retain formula identity through staged continuation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-formula-pour-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  const trackId = "public_formula_pour_20260714";
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    spawnSync("git", ["config", "user.email", "formula@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Formula Test"], { cwd: root });
+    fs.mkdirSync(path.join(root, "cadre", "formulas"), { recursive: true });
+    fs.writeFileSync(path.join(root, "cadre", "formulas", "api.json"), `${JSON.stringify({
+      version: 1,
+      schema: "cadre.formula.v1",
+      id: "api",
+      title: "API formula",
+      description: "Create the reviewed API workflow.",
+      phase_title: "API workflow delivery",
+      defaults: { service: "billing" },
+      acceptance: ["The API workflow follows its approved spec and plan."],
+      steps: [{ id: "build", title: "Build the API workflow", files: ["src/api.ts"] }],
+    }, null, 2)}\n`);
+
+    const invalid = invoke({
+      root,
+      workflow: "formula",
+      input: {},
+      execute: false,
+      approval: { session_id: "missing-formula-session" },
+    });
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.workflow, "formula");
+    assert.equal(invalid.data.action, "pour");
+    assert.equal(invalid.decision.kind, "blocked");
+
+    let packet = invoke({
+      root,
+      workflow: "formula",
+      input: { action: "pour", id: "api", trackId, commitMode: "off" },
+      execute: false,
+    });
+    assert.equal(packet.workflow, "formula");
+    assert.equal(packet.data.action, "pour");
+    assert.equal(packet.data.formula_id, "api");
+    assert.deepEqual(packet.data.variables, { service: "billing" });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "spec");
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+    const sessionId = packet.decision.session_id;
+
+    packet = invoke({
+      root,
+      workflow: "formula",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.workflow, "formula");
+    assert.equal(packet.data.action, "pour");
+    assert.equal(packet.data.formula_id, "api");
+    assert.deepEqual(packet.data.variables, { service: "billing" });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "spec");
+    assert.equal(packet.decision.session_id, sessionId);
+
+    packet = invoke({
+      root,
+      workflow: "formula",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "spec", approved_stages: ["spec"] },
+    });
+    assert.equal(packet.workflow, "formula");
+    assert.equal(packet.data.action, "pour");
+    assert.equal(packet.data.formula_id, "api");
+    assert.deepEqual(packet.data.variables, { service: "billing" });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "plan");
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      `cadre/tracks/${trackId}/plan.json`,
+      `cadre/tracks/${trackId}/plan.md`,
+    ]);
+
+    packet = invoke({
+      root,
+      workflow: "formula",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "plan", approved_stages: ["spec", "plan"] },
+    });
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "formula",
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: ["spec", "plan"], complete: true },
+      },
+    });
+
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.workflow, "formula");
+    assert.equal(packet.decision.kind, "complete");
+    assert.equal(packet.data.formula_id, "api");
+    assert.equal(packet.data.track_id, trackId);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", trackId, "metadata.json")), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public revise packets preserve declared spec then plan staging through the exact continuation", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-revise-staging-"));
   const invoke = (request) => {

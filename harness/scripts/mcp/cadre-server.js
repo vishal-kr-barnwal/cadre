@@ -9134,10 +9134,6 @@ function integrationInventory(root2, args = {}) {
 var import_node_fs25 = __toESM(require("node:fs"));
 var import_node_path41 = __toESM(require("node:path"));
 
-// src/core/application/runtime/workflow-new-track.ts
-var import_node_fs24 = __toESM(require("node:fs"));
-var import_node_path40 = __toESM(require("node:path"));
-
 // src/core/application/runtime/approval-session-store.ts
 var import_node_fs22 = __toESM(require("node:fs"));
 var import_node_path37 = __toESM(require("node:path"));
@@ -9783,6 +9779,10 @@ function closeApprovalSessionFromArgs(root2, args) {
 function previewFileRecords(session) {
   return session?.preview_files?.map(asJsonObject).filter((file) => file.missing !== true) || [];
 }
+
+// src/core/application/runtime/workflow-new-track.ts
+var import_node_fs24 = __toESM(require("node:fs"));
+var import_node_path40 = __toESM(require("node:path"));
 
 // src/core/application/runtime/generation-quality.ts
 function text(value) {
@@ -12716,6 +12716,7 @@ function pourFormula(root2, args) {
     action: "newtrack",
     trackId,
     formulaId: formula_id,
+    variables: asJsonObject(cooked.variables),
     ...sourceWispId ? { wispId: sourceWispId } : {},
     spec: asJsonObject(cooked.spec),
     plan: asJsonObject(cooked.plan),
@@ -12724,8 +12725,45 @@ function pourFormula(root2, args) {
   });
   return {
     ...result,
+    workflow: "formula",
+    action: "pour",
     formula_id,
     wisp_id: sourceWispId,
+    variables: asJsonObject(cooked.variables),
+    metadata: result.metadata || metadata,
+    metadata_state: result.metadata ? "frozen" : "proposed",
+    pour_event: result.formula_event || null,
+    pour_commit: result.control_commit || null
+  };
+}
+function continueFormulaPour(root2, args) {
+  const raw = args;
+  const sessionId = asOptionalString(raw.approvalSessionId || raw.approval_session_id);
+  if (!sessionId) return null;
+  const session = readApprovalSession(root2, sessionId);
+  const payload = asJsonObject(session?.payload);
+  const formula_id = asOptionalString(payload.formulaId || payload.formula_id);
+  if (!session || session.workflow !== "newtrack" || !formula_id) {
+    return {
+      ok: false,
+      workflow: "formula",
+      action: "pour",
+      error: "Formula pour approval session was not found; restart the pour review."
+    };
+  }
+  const result = workflowNewTrack(root2, {
+    ...args,
+    workflow: "newtrack",
+    action: "newtrack"
+  });
+  const metadata = asJsonObject(payload.metadata);
+  return {
+    ...result,
+    workflow: "formula",
+    action: "pour",
+    formula_id,
+    wisp_id: asOptionalString(payload.wispId || payload.wisp_id),
+    variables: asJsonObject(payload.variables),
     metadata: result.metadata || metadata,
     metadata_state: result.metadata ? "frozen" : "proposed",
     pour_event: result.formula_event || null,
@@ -12733,9 +12771,11 @@ function pourFormula(root2, args) {
   };
 }
 function workflowFormula(root2, args = {}) {
-  const action = formulaAction(args);
   const summary = workflowSummary(root2, "formula", args);
   ensureNativeState(root2);
+  const continuation = continueFormulaPour(root2, args);
+  if (continuation) return { ...summary, ...continuation };
+  const action = formulaAction(args);
   if (action === "list") return { ...summary, action, ...listFormulas(root2) };
   if (action === "show") return { ...summary, action, ...loadFormula(root2, formulaId(args)) };
   if (action === "cook") return { ...summary, action, ...cookFormula(root2, args) };
