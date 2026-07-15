@@ -549,6 +549,49 @@ test("repoMap filters generated bundles and local variable noise", () => {
   }
 });
 
+test("workspace and LSP scans exclude installed Cadre runtimes and vendor caches", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-installed-runtime-scan-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "package.json"), JSON.stringify({ name: "product-app", scripts: { test: "node --test" } }, null, 2));
+    write(path.join(root, "src", "app.ts"), "export function productApp() { return true; }\n");
+    const installedSources = [
+      ".codex/plugins/cache/cadre/cadre/2.2.0/skills/setup/runtime.swift",
+      ".claude/plugins/cache/cadre/2.2.0/skills/setup/runtime.swift",
+      ".claude-plugin/plugins/cadre/harness/src/runtime.swift",
+      ".agents/plugins/cadre/harness/src/runtime.swift",
+      "node_modules/cadre-ai/harness/src/runtime.swift",
+      "vendor/cadre-ai/harness/src/runtime.swift",
+      "tools/cadre-ai/harness/src/runtime.swift",
+      "embedded/runtime-harness/src/runtime.swift",
+      "packages/plugin-fixture/plugins/cadre/harness/src/runtime.swift",
+    ];
+    for (const file of installedSources) {
+      write(path.join(root, file), "struct InstalledCadreRuntime { let ignored = true }\n");
+    }
+    write(path.join(root, "tools", "cadre-ai", "package.json"), JSON.stringify({ name: "cadre-ai", version: "2.2.0" }));
+    write(path.join(root, "embedded", "runtime-harness", "package.json"), JSON.stringify({ name: "cadre-ai", version: "2.2.0" }));
+    git(root, ["add", "-f", "."]);
+
+    const lsp = core.lspSetup(root, { execute: false });
+    assert.equal(lsp.ok, true, lsp.reason);
+    assert.ok(lsp.recommended.some((entry) => entry.id === "typescript"));
+    assert.equal(lsp.recommended.some((entry) => entry.id === "swift"), false);
+    assert.equal(lsp.recommended.flatMap((entry) => entry.samples || []).some((file) => /cadre-ai|\.codex|\.claude|\.agents|node_modules|vendor/.test(file)), false);
+
+    const map = core.repoMap(root, { limit: 50 });
+    assert.ok(map.symbols.some((symbol) => symbol.name === "productApp"));
+    assert.equal(map.symbols.some((symbol) => symbol.name === "InstalledCadreRuntime"), false);
+    assert.equal(map.by_language.swift, undefined);
+    assert.deepEqual(core.repoMap(root, { symbol: "InstalledCadreRuntime" }).matches, []);
+
+    const graph = core.dependencyGraph(root);
+    assert.deepEqual(graph.manifests.map((manifest) => manifest.file), ["package.json"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("commit trace records setup, newtrack, and task completion commits", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-trace-task-test-"));
   try {
@@ -2889,6 +2932,55 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.equal(fs.existsSync(path.join(root, "cadre", "prompt-responses.jsonl")), false);
   } finally {
     process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Swift style-guide inference requires affirmative typed evidence and respects explicit selection", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-swift-style-evidence-test-"));
+  try {
+    git(root, ["init"]);
+    const negativeEvidence = {
+      languages: ["TypeScript", "not Swift"],
+      frameworks: ["React", "SwiftUI is not used"],
+      platforms: ["iOS", "macOS"],
+      notes: "This product does not use Swift or SwiftUI.",
+      swift: false,
+      swiftui: false,
+      capabilities: { Swift: false, SwiftUI: false },
+    };
+    const negative = core.techStackSummary(root, { techStack: negativeEvidence });
+    assert.equal(negative.ok, true, negative.error);
+    assert.deepEqual(negative.styleGuideIds, ["typescript"]);
+
+    const swiftLanguage = core.techStackSummary(root, {
+      techStack: { languages: ["Swift 6.0"], frameworks: [], platforms: ["Linux"] },
+    });
+    assert.ok(swiftLanguage.styleGuideIds.includes("swift"));
+    assert.equal(swiftLanguage.styleGuideIds.includes("swiftui"), false);
+
+    const swiftUiFramework = core.techStackSummary(root, {
+      techStack: { languages: [], frameworks: ["SwiftUI"], platforms: ["iOS"] },
+    });
+    assert.ok(swiftUiFramework.styleGuideIds.includes("swift"));
+    assert.ok(swiftUiFramework.styleGuideIds.includes("swiftui"));
+
+    const explicit = core.workflowPacket(root, {
+      workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: false,
+      styleGuideIds: ["swift"],
+      integrations: {},
+      product: { title: "TypeScript Product", summary: "Maintain the existing TypeScript product workflow." },
+      productGuidelines: { title: "Product Guidelines", summary: "Preserve explicit user choices and repository evidence." },
+      workflowPolicy: { title: "Project Workflow", summary: "Review each generated control-plane stage before execution." },
+      techStack: negativeEvidence,
+    });
+    assert.equal(explicit.ok, true, explicit.error);
+    assert.equal(explicit.styleGuides.detected.includes("swift"), false);
+    assert.deepEqual(explicit.styleGuides.selected, ["swift"]);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

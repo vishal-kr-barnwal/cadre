@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
+import { isIgnoredFile } from "../../../lsp/ignore-policy";
 import { languageForFile, listWorkspaceFiles } from "../../../lsp/language-registry";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
@@ -11,21 +12,9 @@ import type { CoreResult, RepoExecutionEntry, RepoSymbol } from "./contracts";
 import { asArray } from "./status";
 import { cachedWorkspaceValue } from "./workspace-cache";
 
-export function isIgnoredRepoMapFile(file: unknown): boolean {
+export function isIgnoredRepoMapFile(file: unknown, root = ""): boolean {
   const normalized = String(file || "").replace(/\\/g, "/");
-  if (!normalized) return true;
-  if (normalized.startsWith(".agents/")) return true;
-  if (normalized.startsWith(".claude/")) return true;
-  if (normalized.startsWith(".claude-plugin/")) return true;
-  if (normalized.startsWith(".copilot/")) return true;
-  if (normalized.startsWith(".gemini/")) return true;
-  if (normalized.startsWith("plugins/cadre/")) return true;
-  if (normalized.startsWith("plugins/cadre-claude/")) return true;
-  if (normalized.startsWith("plugins/cadre-copilot/")) return true;
-  if (normalized.startsWith("plugins/cadre-antigravity/")) return true;
-  return normalized
-    .split("/")
-    .some((part) => [".git", "node_modules", "dist", "build", "coverage"].includes(part));
+  return !normalized || isIgnoredFile(root, normalized);
 }
 
 export function selectedRepoNames(args: RuntimeArgs = {}): Set<string> | null {
@@ -139,7 +128,7 @@ export function repoMap(root: string, args: RuntimeArgs = {}): CoreResult {
       const matches = result.stdout
         .split(/\r?\n/)
         .filter(Boolean)
-        .filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || ""))
+        .filter((line) => !isIgnoredRepoMapFile(line.split(":")[0] || "", entry.root))
         .slice(0, limit)
         .map((line) => {
           const [file, lineNo, ...rest] = line.split(":");
@@ -152,7 +141,7 @@ export function repoMap(root: string, args: RuntimeArgs = {}): CoreResult {
   }
   return cachedWorkspaceValue(root, "repo-map", JSON.stringify({ limit, repos: repos.map((entry) => entry.repo) }), () => {
   const repoResults = repos.map((entry) => {
-    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
+    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file, entry.root));
     const byLanguage: Record<string, number> = {};
     const symbols: RepoSymbol[] = [];
     for (const file of files) {

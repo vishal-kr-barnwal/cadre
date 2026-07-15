@@ -313,7 +313,7 @@ export function scanReviewTodos(root: string, files: string[], limit = 100): Tod
     /throw new Error\(["']not implemented/i,
   ];
   for (const file of files || []) {
-    if (isIgnoredRepoMapFile(file)) continue;
+    if (isIgnoredRepoMapFile(file, root)) continue;
     const abs = path.join(root, file);
     if (!fileExists(abs)) continue;
     let stat;

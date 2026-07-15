@@ -29,7 +29,7 @@ export function lspImpact(root: string, args: RuntimeArgs = {}): CoreResult {
   const repoFileSymbols = repoEntries.map((entry) => {
     const fileSymbols: Record<string, RepoSymbol[]> = {};
     for (const file of files) {
-      if (isIgnoredRepoMapFile(file)) continue;
+      if (isIgnoredRepoMapFile(file, entry.root)) continue;
       fileSymbols[file] = extractRepoSymbols(entry.root, file, limit).map((symbolEntry) => ({
         ...symbolEntry,
         repo: entry.repo,
@@ -231,7 +231,7 @@ export function dependencyGraph(root: string, args: RuntimeArgs = {}): CoreResul
     "nx.json",
   ]);
   const repoGraphs = repoEntries.map((entry) => {
-    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file));
+    const files = listWorkspaceFiles(entry.root).filter((file) => !isIgnoredRepoMapFile(file, entry.root));
     const manifests = files
       .filter((file) => manifestPatterns.has(path.basename(file)))
       .map((file) => ({ repo: entry.repo, file, dir: normalizeClaimPath(path.dirname(file)), kind: path.basename(file) }));

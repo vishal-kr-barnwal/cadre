@@ -45,6 +45,31 @@ export function techStackStyleGuideOverrides(techStack: JsonObject): string[] {
   );
 }
 
+function typedTechnologyValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(typedTechnologyValues);
+}
+
+function affirmativeTechnology(value: string, name: "swift" | "swiftui"): boolean {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return new RegExp(`^${name}(?:\\s+(?:language|framework))?(?:\\s+(?:v|version)?\\s*\\d+(?:\\s+\\d+)*)?$`).test(normalized);
+}
+
+function swiftStyleGuideEvidence(techStack: JsonObject): { swift: boolean; swiftui: boolean } {
+  const typedValues = [
+    techStack.languages,
+    techStack.language,
+    techStack.frameworks,
+    techStack.framework,
+  ].flatMap(typedTechnologyValues);
+  const swiftui = typedValues.some((value) => affirmativeTechnology(value, "swiftui"));
+  return {
+    swift: swiftui || typedValues.some((value) => affirmativeTechnology(value, "swift")),
+    swiftui,
+  };
+}
+
 export function styleGuideIdsForTechStack(techStack: JsonObject): string[] {
   const tokens = collectTechStackTokens(techStack)
     .map((item) => item.toLowerCase().replace(/[^a-z0-9+#.-]+/g, " ").trim())
@@ -71,9 +96,10 @@ export function styleGuideIdsForTechStack(techStack: JsonObject): string[] {
     add("compose-multiplatform");
     add("kotlin");
   }
-  if (has(/\b(?:swift|swiftui|ios|macos)\b/)) {
+  const swiftEvidence = swiftStyleGuideEvidence(techStack);
+  if (swiftEvidence.swift) {
     add("swift");
-    if (has(/\bswiftui\b/)) add("swiftui");
+    if (swiftEvidence.swiftui) add("swiftui");
   }
   return Array.from(new Set([...detected, ...techStackStyleGuideOverrides(techStack)])).sort();
 }
