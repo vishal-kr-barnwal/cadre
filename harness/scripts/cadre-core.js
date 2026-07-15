@@ -10842,6 +10842,9 @@ function reviseIntentPrompts(args = {}, trackId = null) {
 var import_node_crypto5 = __toESM(require("node:crypto"));
 var import_node_path38 = __toESM(require("node:path"));
 var CONTROL_KEYS = /* @__PURE__ */ new Set([
+  "root",
+  "workflow",
+  "action",
   "execute",
   "approvalComplete",
   "approval_complete",

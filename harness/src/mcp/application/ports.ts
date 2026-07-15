@@ -21,6 +21,7 @@ export interface LspDaemonPort {
 
 export interface RootResolverPort {
   rootFromCandidate(candidate: unknown): { root: string; has_cadre: boolean } | null;
+  setupRootFromCandidate(candidate: unknown): { root: string; has_cadre: boolean } | null;
   requireCadreRoot(args?: RuntimeArgs): string;
 }
 

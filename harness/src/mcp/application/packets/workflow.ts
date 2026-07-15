@@ -29,12 +29,18 @@ export async function workflowPacket(deps: RuntimeDependencies, args: RuntimeArg
   const workflow = args.workflow || args.action || "status";
   const setupWorkflows = new Set(["setup", "setup_assist", "setup_scaffold"]);
   if (setupWorkflows.has(workflow)) {
-    const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-    const root = info ? info.root : process.cwd();
+    const info = deps.rootResolver.setupRootFromCandidate(args.root);
+    if (!info) {
+      throw Object.assign(
+        new Error(`Cadre setup requires { root } to be an absolute, existing project directory outside the installed Cadre runtime. Received: ${args.root || "(missing)"}`),
+        { code: -32602 },
+      );
+    }
+    const root = info.root;
     return finalizePacket(
       deps,
       root,
-      deps.core.workflowPacketV1(root, { ...args, workflow }) as RuntimeEnvelope,
+      deps.core.workflowPacketV1(root, { ...args, root, workflow }) as RuntimeEnvelope,
     );
   }
   const root = deps.rootResolver.requireCadreRoot(args);
@@ -53,16 +59,16 @@ export async function workflowPacket(deps: RuntimeDependencies, args: RuntimeArg
     return finalizePacket(
       deps,
       root,
-      deps.core.workflowPacketV1(root, { ...args, workflow }) as RuntimeEnvelope,
+      deps.core.workflowPacketV1(root, { ...args, root, workflow }) as RuntimeEnvelope,
     );
   }
   if ((workflow === "review" || workflow === "revise") && args.includeLsp !== false) {
     const lspResult = await warmLspReview(deps, root, args);
-    return packetEnvelope(deps, root, args, deps.core.workflowPacket(root, { ...args, workflow, lspResult }));
+    return packetEnvelope(deps, root, { ...args, root }, deps.core.workflowPacket(root, { ...args, root, workflow, lspResult }));
   }
   return finalizePacket(
     deps,
     root,
-    deps.core.workflowPacketV1(root, { ...args, workflow }) as RuntimeEnvelope,
+    deps.core.workflowPacketV1(root, { ...args, root, workflow }) as RuntimeEnvelope,
   );
 }

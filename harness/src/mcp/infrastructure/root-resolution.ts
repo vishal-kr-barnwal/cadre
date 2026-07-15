@@ -12,6 +12,48 @@ function isDirectory(file: string): boolean {
   }
 }
 
+function jsonName(file: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      && typeof (parsed as { name?: unknown }).name === "string"
+      ? (parsed as { name: string }).name
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function packageName(dir: string): string | null {
+  return jsonName(path.join(dir, "package.json"));
+}
+
+function hasCadrePluginManifest(dir: string): boolean {
+  return [".codex-plugin", ".claude-plugin"]
+    .some((folder) => jsonName(path.join(dir, folder, "plugin.json")) === "cadre");
+}
+
+function isCadreRuntimeDirectory(dir: string): boolean {
+  if (
+    packageName(dir) === "cadre-ai"
+    && isDirectory(path.join(dir, "scripts", "mcp"))
+    && fs.existsSync(path.join(dir, "scripts", "mcp", "cadre-server.js"))
+  ) return true;
+  return hasCadrePluginManifest(dir)
+    && isDirectory(path.join(dir, "skills"))
+    && [".mcp.json", "mcp-config.json"].some((file) => fs.existsSync(path.join(dir, file)));
+}
+
+function containingCadreRuntime(start: string): string | null {
+  let dir = start;
+  while (true) {
+    if (isCadreRuntimeDirectory(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 function hasCadreDirectory(dir: string): boolean {
   return isDirectory(path.join(dir, "cadre"));
 }
@@ -42,9 +84,10 @@ function normalizePathCandidate(value: unknown): string | null {
       return null;
     }
   }
-  candidate = path.resolve(candidate);
+  if (!path.isAbsolute(candidate)) return null;
   try {
-    if (fs.existsSync(candidate) && !fs.statSync(candidate).isDirectory()) candidate = path.dirname(candidate);
+    if (!fs.statSync(candidate).isDirectory()) return null;
+    candidate = fs.realpathSync(candidate);
   } catch {
     return null;
   }
@@ -66,14 +109,25 @@ export function findCadreRoot(start: unknown): string | null {
 export function rootFromCandidate(candidate: unknown): { root: string; has_cadre: boolean } | null {
   const normalized = normalizePathCandidate(candidate);
   if (!normalized) return null;
+  if (containingCadreRuntime(normalized)) return null;
   const cadreRoot = findCadreRoot(normalized);
-  if (cadreRoot) return { root: cadreRoot, has_cadre: true };
-  return { root: normalized, has_cadre: false };
+  return cadreRoot
+    ? { root: cadreRoot, has_cadre: true }
+    : { root: normalized, has_cadre: false };
+}
+
+export function setupRootFromCandidate(candidate: unknown): { root: string; has_cadre: boolean } | null {
+  const normalized = normalizePathCandidate(candidate);
+  if (!normalized || containingCadreRuntime(normalized)) return null;
+  if (path.basename(normalized) === "cadre" && isCadreStateDirectory(normalized)) {
+    return { root: path.dirname(normalized), has_cadre: true };
+  }
+  return { root: normalized, has_cadre: hasCadreProjectState(normalized) };
 }
 
 export function requireCadreRoot(args: RuntimeArgs = {}): string {
-  const info = rootFromCandidate(args.root);
-  if (info && info.has_cadre) return info.root;
+  const root = findCadreRoot(args.root);
+  if (root && !containingCadreRuntime(root)) return root;
   throw Object.assign(
     new Error(
       `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`

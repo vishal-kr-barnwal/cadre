@@ -670,8 +670,9 @@ test("MCP root resolution rejects harness skill directories without project stat
     const freshRoot = path.join(root, "fresh");
     write(path.join(freshRoot, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }, null, 2));
     write(path.join(freshRoot, "src", "index.ts"), "export const fresh = true;\n");
+    const canonicalFreshRoot = fs.realpathSync(freshRoot);
     const freshProjectRoot = parseTextJson(await callAction(request, "project.root", freshRoot)).data;
-    assert.equal(freshProjectRoot.root, freshRoot);
+    assert.equal(freshProjectRoot.root, canonicalFreshRoot);
     assert.equal(freshProjectRoot.has_cadre, false);
     assert.equal(freshProjectRoot.setup_candidate, true);
     write(path.join(freshRoot, "cadre", "skills", "setup-rules", "skill.json"), JSON.stringify({
@@ -693,32 +694,95 @@ test("MCP root resolution rejects harness skill directories without project stat
       { techStack: { languages: ["TypeScript"] } },
     )).data;
     assert.equal(freshTechStack.ok, true);
-    assert.equal(freshTechStack.root, freshRoot);
+    assert.equal(freshTechStack.root, canonicalFreshRoot);
 
     const freshIntegrations = parseTextJson(await callAction(request, "project.integrations", freshRoot)).data;
     assert.equal(freshIntegrations.ok, true);
-    assert.equal(freshIntegrations.root, freshRoot);
+    assert.equal(freshIntegrations.root, canonicalFreshRoot);
 
     const freshRepoMap = parseTextJson(await callAction(request, "intel.repo_map", freshRoot, { limit: 20 })).data;
     assert.equal(freshRepoMap.ok, true);
-    assert.equal(freshRepoMap.root, freshRoot);
+    assert.equal(freshRepoMap.root, canonicalFreshRoot);
 
     const freshDiagnostics = parseTextJson(await callAction(request, "intel.workspace_diagnostics", freshRoot)).data;
     assert.equal(freshDiagnostics.ok, true);
-    assert.equal(freshDiagnostics.root, freshRoot);
+    assert.equal(freshDiagnostics.root, canonicalFreshRoot);
 
     await assert.rejects(callAction(request, "status.live", freshRoot), /requires \{ root \}/);
     assert.ok(templateInventoryTool.data.templates.templates.some((template) => template.id === "product"));
 
+    write(path.join(root, "harness", "package.json"), JSON.stringify({ name: "cadre-ai" }));
+    write(path.join(root, "harness", "scripts", "mcp", "cadre-server.js"), "// runtime fixture\n");
     write(path.join(root, "harness", "skills", "cadre", "SKILL.md"), "# Harness copy\n");
     await assert.rejects(
       callAction(request, "project.root", path.join(root, "harness", "skills", "cadre")),
       /requires \{ root \}/
     );
 
+    const npmRuntimeRoot = path.join(root, "node_modules", "cadre-ai");
+    write(path.join(npmRuntimeRoot, "package.json"), JSON.stringify({ name: "cadre-ai", version: "2.2.0" }));
+    write(path.join(npmRuntimeRoot, "scripts", "mcp", "cadre-server.js"), "// npm runtime fixture\n");
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_workflow",
+        arguments: { workflow: "setup", root: npmRuntimeRoot, input: {} },
+      }),
+      /outside the installed Cadre runtime/,
+    );
+
+    const runtimeRoot = path.join(root, "codex-cache", "cadre", "2.2.0");
+    write(path.join(runtimeRoot, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "cadre", version: "2.2.0" }));
+    write(path.join(runtimeRoot, ".mcp.json"), "{}\n");
+    write(path.join(runtimeRoot, "skills", "setup", "SKILL.md"), "# Setup\n");
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_workflow",
+        arguments: { workflow: "setup", root: runtimeRoot, input: {} },
+      }),
+      /outside the installed Cadre runtime/,
+    );
+    const claudeRuntimeRoot = path.join(root, "claude-cache", "cadre", "2.2.0");
+    write(path.join(claudeRuntimeRoot, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "cadre", version: "2.2.0" }));
+    write(path.join(claudeRuntimeRoot, "mcp-config.json"), "{}\n");
+    write(path.join(claudeRuntimeRoot, "skills", "setup", "SKILL.md"), "# Setup\n");
+    await assert.rejects(
+      callAction(request, "project.root", claudeRuntimeRoot),
+      /requires \{ root \}/,
+    );
+
+    const rootFile = path.join(root, "not-a-project-directory.txt");
+    write(rootFile, "not a directory\n");
+    for (const invalidRoot of [".", path.join(root, "missing"), rootFile]) {
+      await assert.rejects(
+        request("tools/call", {
+          name: "cadre_workflow",
+          arguments: { workflow: "setup", root: invalidRoot, input: {} },
+        }),
+        /absolute, existing project directory/,
+      );
+    }
+
     write(path.join(root, "project", "cadre", "setup_state.json"), "{}\n");
     const valid = await callAction(request, "project.root", path.join(root, "project", "cadre"));
-    assert.equal(parseTextJson(valid).data.root, path.join(root, "project"));
+    assert.equal(parseTextJson(valid).data.root, fs.realpathSync(path.join(root, "project")));
+    const nestedProjectPath = path.join(root, "project", "packages", "app");
+    fs.mkdirSync(nestedProjectPath, { recursive: true });
+    const nestedExisting = parseTextJson(await callAction(request, "project.root", nestedProjectPath)).data;
+    assert.equal(nestedExisting.root, fs.realpathSync(path.join(root, "project")));
+    assert.equal(nestedExisting.has_cadre, true);
+    const nestedSetup = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: { workflow: "setup", root: nestedProjectPath, input: {} },
+    }));
+    assert.equal(nestedSetup.decision.kind, "clarification");
+    assert.ok(nestedSetup.resources.some((uri) => uri.includes(encodeURIComponent(fs.realpathSync(nestedProjectPath)))));
+
+    const symlinkTargetRoot = path.join(root, "symlink-target-project");
+    fs.mkdirSync(symlinkTargetRoot, { recursive: true });
+    const symlinkCandidateRoot = path.join(root, "symlink-project");
+    fs.symlinkSync(symlinkTargetRoot, symlinkCandidateRoot);
+    const symlinkCandidate = parseTextJson(await callAction(request, "project.root", symlinkCandidateRoot)).data;
+    assert.equal(symlinkCandidate.root, fs.realpathSync(symlinkTargetRoot));
     const injectedJob = parseTextJson(await callAction(
       request,
       "review.anything",
@@ -851,9 +915,12 @@ test("MCP root resolution rejects harness skill directories without project stat
     const integrations = await callAction(request, "project.integrations", path.join(root, "project"));
     assert.equal(parseTextJson(integrations).data.ok, true);
 
-    const doctor = await callAction(request, "project.doctor", path.join(root, "harness", "skills", "cadre"));
-    assert.equal(parseTextJson(doctor).data.checks.project_state.ok, false);
+    await assert.rejects(
+      callAction(request, "project.doctor", path.join(root, "harness", "skills", "cadre")),
+      /requires \{ root \}/,
+    );
 
+    fs.mkdirSync(path.join(root, "uninitialized"), { recursive: true });
     const setupAssist = await request("tools/call", {
       name: "cadre_workflow",
       arguments: { workflow: "setup", root: path.join(root, "uninitialized"), input: {} },
@@ -955,7 +1022,7 @@ test("MCP async jobs survive restarts and persist list/result snapshots", async 
       uri: `cadre://workspace-health?root=${encodeURIComponent(projectRoot)}`,
     })).contents[0].text);
     assert.equal(health.data.ok, true);
-    assert.equal(health.data.root, projectRoot);
+    assert.equal(health.data.root, fs.realpathSync(projectRoot));
     assert.ok(Array.isArray(health.data.languages.detected));
     assert.equal(health.data.workspace.repo_count, 1);
     assert.ok(Array.isArray(health.data.integrations.optional_mcps));
@@ -1186,12 +1253,12 @@ test("MCP warm LSP review qualifies polyrepo findings with repo context", async 
     assert.equal(review.data.polyrepo, true);
     const appResult = review.data.repos.find((repo) => repo.repo === "app");
     assert.equal(appResult.path, "products/app");
-    assert.equal(appResult.cwd, appRoot);
+    assert.equal(appResult.cwd, fs.realpathSync(appRoot));
     assert.ok(review.data.findings.length > 0);
     for (const finding of review.data.findings) {
       assert.equal(finding.repo, "app");
       assert.equal(typeof finding.path, "string");
-      assert.equal(finding.cwd, appRoot);
+      assert.equal(finding.cwd, fs.realpathSync(appRoot));
     }
 
     await callAction(request, "intel.lsp_daemon_shutdown", null, {}, true);
@@ -1438,7 +1505,7 @@ test("MCP typed continuations and execution guards compose end to end", async ()
     assert.deepEqual(sequential.next, {
       tool: "cadre_action",
       arguments: {
-        root,
+        root: fs.realpathSync(root),
         action: "task.complete",
         input: { trackId: "sequential_next", phaseIndex: 1, taskIndex: 1 },
         execute: true,
@@ -1468,7 +1535,7 @@ test("MCP typed continuations and execution guards compose end to end", async ()
     }));
     assert.equal(wave.next.tool, "cadre_action");
     assert.equal(wave.next.arguments.action, "parallel.setup_workers");
-    assert.equal(wave.next.arguments.root, root);
+    assert.equal(wave.next.arguments.root, fs.realpathSync(root));
     assert.equal(wave.next.arguments.input.agentIdentifier, "codex");
     assert.equal(wave.next.arguments.execute, true);
 
@@ -1543,7 +1610,7 @@ test("MCP typed continuations and execution guards compose end to end", async ()
     ));
     assert.deepEqual(started.next, {
       tool: "cadre_action",
-      arguments: { root, action: "job.result", input: { jobId: started.job.id } },
+      arguments: { root: fs.realpathSync(root), action: "job.result", input: { jobId: started.job.id } },
     });
     await waitForJob(request, root, started.job.id);
   } finally {

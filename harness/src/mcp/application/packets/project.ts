@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import type { RuntimeArgs } from "../../../types";
 import type { RuntimeEnvelope } from "../../domain/protocol-types";
 import { envelope, executionGuard } from "../envelope";
@@ -9,19 +6,14 @@ import type { RuntimeDependencies } from "../ports";
 
 function invalidRootError(received: unknown): Error {
   return Object.assign(
-    new Error(`This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${received || "(missing)"}`),
+    new Error(`This Cadre MCP operation requires { root } to be an absolute, existing project directory outside the installed Cadre runtime. Received: ${received || "(missing)"}`),
     { code: -32602 }
   );
 }
 
-function isPackagedCadreSkillDir(root: string): boolean {
-  const normalized = root.split(path.sep).join("/");
-  return normalized.endsWith("/harness/skills/cadre") && fs.existsSync(path.join(root, "SKILL.md"));
-}
-
 function setupSafeRoot(deps: RuntimeDependencies, args: RuntimeArgs): { root: string; has_cadre: boolean } {
-  const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-  if (!info || (!info.has_cadre && isPackagedCadreSkillDir(info.root))) throw invalidRootError(args.root);
+  const info = deps.rootResolver.rootFromCandidate(args.root);
+  if (!info) throw invalidRootError(args.root);
   return info;
 }
 
@@ -36,8 +28,8 @@ export async function projectPacket(deps: RuntimeDependencies, args: RuntimeArgs
     });
   }
   if (action === "doctor") {
-    const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-    return envelope(deps.core.doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
+    const info = setupSafeRoot(deps, args);
+    return envelope(deps.core.doctor(info.root, { hasCadreProject: info.has_cadre }));
   }
   if (action === "root") {
     const info = setupSafeRoot(deps, args);

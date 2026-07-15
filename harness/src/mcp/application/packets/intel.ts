@@ -18,15 +18,20 @@ const SETUP_SAFE_READ_ACTIONS = new Set([
 
 function invalidRootError(received: unknown): Error {
   return Object.assign(
-    new Error(`This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${received || "(missing)"}`),
+    new Error(`This Cadre MCP operation requires { root } to be an absolute, existing project directory outside the installed Cadre runtime. Received: ${received || "(missing)"}`),
     { code: -32602 }
   );
 }
 
 export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs): Promise<RuntimeEnvelope> {
   const action = args.action || "repo_map";
-  const rootInfo = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-  const usesCandidateRoot = action.startsWith("lsp_daemon") || SETUP_SAFE_READ_ACTIONS.has(String(action));
+  if (action === "lsp_daemon_status") return envelope(await deps.lspDaemon.request("status", {}, 5000));
+  if (action === "lsp_daemon_shutdown") {
+    const guard = executionGuard("intel.lsp_daemon_shutdown", args);
+    return guard || envelope(await deps.lspDaemon.shutdown());
+  }
+  const rootInfo = deps.rootResolver.rootFromCandidate(args.root);
+  const usesCandidateRoot = SETUP_SAFE_READ_ACTIONS.has(String(action));
   if (!rootInfo && usesCandidateRoot) throw invalidRootError(args.root);
   if (
     rootInfo
@@ -37,7 +42,7 @@ export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs):
     throw invalidRootError(args.root);
   }
   const root = usesCandidateRoot
-    ? (rootInfo ? rootInfo.root : process.cwd())
+    ? rootInfo!.root
     : deps.rootResolver.requireCadreRoot(args);
   if (args.async === true) {
     const jobType = jobTypeForAction(`intel.${action}`);
@@ -69,11 +74,6 @@ export async function intelPacket(deps: RuntimeDependencies, args: RuntimeArgs):
   if (action === "lsp_review") return envelope(deps.core.lspReview(root, args));
   if (action === "lsp_warm_review") {
     return envelope(await warmLspReview(deps, root, args));
-  }
-  if (action === "lsp_daemon_status") return envelope(await deps.lspDaemon.request("status", {}, 5000));
-  if (action === "lsp_daemon_shutdown") {
-    const guard = executionGuard("intel.lsp_daemon_shutdown", args);
-    return guard || envelope(await deps.lspDaemon.shutdown());
   }
   return envelope({ ok: false, error: `Unknown cadre_action action: intel.${action}` });
 }

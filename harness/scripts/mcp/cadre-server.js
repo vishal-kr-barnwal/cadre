@@ -5413,7 +5413,7 @@ function reviewHeadFiles(root2, relativePaths) {
   const paths = Array.from(new Set(relativePaths));
   const head = git(root2, ["rev-parse", "--verify", "HEAD"]);
   if (head.status === 128) {
-    return { ok: true, available: true, files: paths.map((path75) => ({ path: path75, existed: false, content: null })) };
+    return { ok: true, available: true, files: paths.map((path74) => ({ path: path74, existed: false, content: null })) };
   }
   if (head.status !== 0) {
     return {
@@ -10945,6 +10945,9 @@ function reviseIntentPrompts(args = {}, trackId = null) {
 var import_node_crypto5 = __toESM(require("node:crypto"));
 var import_node_path38 = __toESM(require("node:path"));
 var CONTROL_KEYS = /* @__PURE__ */ new Set([
+  "root",
+  "workflow",
+  "action",
   "execute",
   "approvalComplete",
   "approval_complete",
@@ -18515,8 +18518,8 @@ function workflowArtifacts(result) {
     ...asJsonArray(result.review_artifacts).map((entry) => boundedJsonObject(entry)),
     ...reviewFiles(result.review_bundle)
   ];
-  for (const path75 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) {
-    files.push({ path: path75, kind: "changed" });
+  for (const path74 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) {
+    files.push({ path: path74, kind: "changed" });
   }
   const seen = /* @__PURE__ */ new Set();
   return files.filter((file) => {
@@ -20032,8 +20035,8 @@ if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path68.def
 }
 
 // src/mcp/application/router.ts
-var import_node_fs45 = __toESM(require("node:fs"));
-var import_node_path72 = __toESM(require("node:path"));
+var import_node_fs44 = __toESM(require("node:fs"));
+var import_node_path71 = __toESM(require("node:path"));
 
 // src/mcp/application/envelope.ts
 function asTextJson(value) {
@@ -21041,12 +21044,18 @@ async function workflowPacket2(deps, args) {
   const workflow = args.workflow || args.action || "status";
   const setupWorkflows = /* @__PURE__ */ new Set(["setup", "setup_assist", "setup_scaffold"]);
   if (setupWorkflows.has(workflow)) {
-    const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-    const root3 = info ? info.root : process.cwd();
+    const info = deps.rootResolver.setupRootFromCandidate(args.root);
+    if (!info) {
+      throw Object.assign(
+        new Error(`Cadre setup requires { root } to be an absolute, existing project directory outside the installed Cadre runtime. Received: ${args.root || "(missing)"}`),
+        { code: -32602 }
+      );
+    }
+    const root3 = info.root;
     return finalizePacket(
       deps,
       root3,
-      deps.core.workflowPacketV1(root3, { ...args, workflow })
+      deps.core.workflowPacketV1(root3, { ...args, root: root3, workflow })
     );
   }
   const root2 = deps.rootResolver.requireCadreRoot(args);
@@ -21065,36 +21074,30 @@ async function workflowPacket2(deps, args) {
     return finalizePacket(
       deps,
       root2,
-      deps.core.workflowPacketV1(root2, { ...args, workflow })
+      deps.core.workflowPacketV1(root2, { ...args, root: root2, workflow })
     );
   }
   if ((workflow === "review" || workflow === "revise") && args.includeLsp !== false) {
     const lspResult = await warmLspReview(deps, root2, args);
-    return packetEnvelope(deps, root2, args, deps.core.workflowPacket(root2, { ...args, workflow, lspResult }));
+    return packetEnvelope(deps, root2, { ...args, root: root2 }, deps.core.workflowPacket(root2, { ...args, root: root2, workflow, lspResult }));
   }
   return finalizePacket(
     deps,
     root2,
-    deps.core.workflowPacketV1(root2, { ...args, workflow })
+    deps.core.workflowPacketV1(root2, { ...args, root: root2, workflow })
   );
 }
 
 // src/mcp/application/packets/project.ts
-var import_node_fs44 = __toESM(require("node:fs"));
-var import_node_path70 = __toESM(require("node:path"));
 function invalidRootError(received) {
   return Object.assign(
-    new Error(`This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${received || "(missing)"}`),
+    new Error(`This Cadre MCP operation requires { root } to be an absolute, existing project directory outside the installed Cadre runtime. Received: ${received || "(missing)"}`),
     { code: -32602 }
   );
 }
-function isPackagedCadreSkillDir(root2) {
-  const normalized = root2.split(import_node_path70.default.sep).join("/");
-  return normalized.endsWith("/harness/skills/cadre") && import_node_fs44.default.existsSync(import_node_path70.default.join(root2, "SKILL.md"));
-}
 function setupSafeRoot(deps, args) {
-  const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-  if (!info || !info.has_cadre && isPackagedCadreSkillDir(info.root)) throw invalidRootError(args.root);
+  const info = deps.rootResolver.rootFromCandidate(args.root);
+  if (!info) throw invalidRootError(args.root);
   return info;
 }
 async function projectPacket(deps, args) {
@@ -21108,8 +21111,8 @@ async function projectPacket(deps, args) {
     });
   }
   if (action === "doctor") {
-    const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-    return envelope(deps.core.doctor(info ? info.root : process.cwd(), { hasCadreProject: Boolean(info && info.has_cadre) }));
+    const info = setupSafeRoot(deps, args);
+    return envelope(deps.core.doctor(info.root, { hasCadreProject: info.has_cadre }));
   }
   if (action === "root") {
     const info = setupSafeRoot(deps, args);
@@ -21143,7 +21146,7 @@ function statusPacket(deps, args) {
 }
 
 // src/mcp/application/packets/track.ts
-var import_node_path71 = __toESM(require("node:path"));
+var import_node_path70 = __toESM(require("node:path"));
 function trackPacket(deps, args) {
   const root2 = deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "context";
@@ -21155,7 +21158,7 @@ function trackPacket(deps, args) {
     const context = deps.core.trackContext(root2, trackId);
     const track = context && typeof context === "object" ? context.track : void 0;
     if (!track?.plan_json_path) return envelope({ ok: false, error: `Track not found: ${trackId}` });
-    return envelope(deps.core.parsePlanFile(import_node_path71.default.resolve(root2, track.plan_json_path)));
+    return envelope(deps.core.parsePlanFile(import_node_path70.default.resolve(root2, track.plan_json_path)));
   }
   if (action === "integrity") return envelope(deps.core.planIntegrity(root2, args.trackId || args.track_id || null));
   if (action === "phase_schedule") return envelope(deps.core.phaseSchedule(root2, args));
@@ -21414,19 +21417,24 @@ var SETUP_SAFE_READ_ACTIONS = /* @__PURE__ */ new Set([
 ]);
 function invalidRootError2(received) {
   return Object.assign(
-    new Error(`This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${received || "(missing)"}`),
+    new Error(`This Cadre MCP operation requires { root } to be an absolute, existing project directory outside the installed Cadre runtime. Received: ${received || "(missing)"}`),
     { code: -32602 }
   );
 }
 async function intelPacket(deps, args) {
   const action = args.action || "repo_map";
-  const rootInfo = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
-  const usesCandidateRoot = action.startsWith("lsp_daemon") || SETUP_SAFE_READ_ACTIONS.has(String(action));
+  if (action === "lsp_daemon_status") return envelope(await deps.lspDaemon.request("status", {}, 5e3));
+  if (action === "lsp_daemon_shutdown") {
+    const guard = executionGuard("intel.lsp_daemon_shutdown", args);
+    return guard || envelope(await deps.lspDaemon.shutdown());
+  }
+  const rootInfo = deps.rootResolver.rootFromCandidate(args.root);
+  const usesCandidateRoot = SETUP_SAFE_READ_ACTIONS.has(String(action));
   if (!rootInfo && usesCandidateRoot) throw invalidRootError2(args.root);
   if (rootInfo && !rootInfo.has_cadre && args.execute === true && ["lsp_setup", "dap_setup"].includes(String(action))) {
     throw invalidRootError2(args.root);
   }
-  const root2 = usesCandidateRoot ? rootInfo ? rootInfo.root : process.cwd() : deps.rootResolver.requireCadreRoot(args);
+  const root2 = usesCandidateRoot ? rootInfo.root : deps.rootResolver.requireCadreRoot(args);
   if (args.async === true) {
     const jobType = jobTypeForAction(`intel.${action}`);
     if (!jobType) return envelope({ ok: false, error: `cadre_action intel.${action} does not support input.async:true` });
@@ -21457,11 +21465,6 @@ async function intelPacket(deps, args) {
   if (action === "lsp_review") return envelope(deps.core.lspReview(root2, args));
   if (action === "lsp_warm_review") {
     return envelope(await warmLspReview(deps, root2, args));
-  }
-  if (action === "lsp_daemon_status") return envelope(await deps.lspDaemon.request("status", {}, 5e3));
-  if (action === "lsp_daemon_shutdown") {
-    const guard = executionGuard("intel.lsp_daemon_shutdown", args);
-    return guard || envelope(await deps.lspDaemon.shutdown());
   }
   return envelope({ ok: false, error: `Unknown cadre_action action: intel.${action}` });
 }
@@ -21716,11 +21719,11 @@ function packageVersion() {
   let directory = __dirname;
   for (let depth = 0; depth < 5; depth += 1) {
     try {
-      const manifest = asJsonObject(JSON.parse(import_node_fs45.default.readFileSync(import_node_path72.default.join(directory, "package.json"), "utf8")));
+      const manifest = asJsonObject(JSON.parse(import_node_fs44.default.readFileSync(import_node_path71.default.join(directory, "package.json"), "utf8")));
       if (manifest.name === "cadre-ai") return asOptionalString(manifest.version) || "unknown";
     } catch {
     }
-    const parent = import_node_path72.default.dirname(directory);
+    const parent = import_node_path71.default.dirname(directory);
     if (parent === directory) break;
     directory = parent;
   }
@@ -21841,8 +21844,8 @@ function createMcpRuntime(deps) {
 }
 
 // src/mcp/infrastructure/job-manager.ts
-var import_node_fs46 = __toESM(require("node:fs"));
-var import_node_path73 = __toESM(require("node:path"));
+var import_node_fs45 = __toESM(require("node:fs"));
+var import_node_path72 = __toESM(require("node:path"));
 var import_node_crypto9 = __toESM(require("node:crypto"));
 var import_node_child_process12 = require("node:child_process");
 var JOB_ID_PATTERN = /^job_[a-z0-9-]{1,96}$/i;
@@ -21851,14 +21854,14 @@ function isJobId(value) {
   return typeof value === "string" && JOB_ID_PATTERN.test(value);
 }
 function inside2(root2, candidate) {
-  const relative = import_node_path73.default.relative(root2, candidate);
-  return relative !== "" && relative !== ".." && !relative.startsWith(`..${import_node_path73.default.sep}`) && !import_node_path73.default.isAbsolute(relative);
+  const relative = import_node_path72.default.relative(root2, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${import_node_path72.default.sep}`) && !import_node_path72.default.isAbsolute(relative);
 }
 function sameRoot(left, right) {
   try {
-    return import_node_fs46.default.realpathSync(left) === import_node_fs46.default.realpathSync(right);
+    return import_node_fs45.default.realpathSync(left) === import_node_fs45.default.realpathSync(right);
   } catch {
-    return import_node_path73.default.resolve(left) === import_node_path73.default.resolve(right);
+    return import_node_path72.default.resolve(left) === import_node_path72.default.resolve(right);
   }
 }
 var JobManager = class {
@@ -21869,31 +21872,31 @@ var JobManager = class {
     this.ttlMs = 60 * 60 * 1e3;
   }
   safeJobDirectory(root2, create) {
-    const canonicalRoot = import_node_fs46.default.realpathSync(root2);
-    const cadreDirectory = import_node_path73.default.join(canonicalRoot, "cadre");
-    if (create && !import_node_fs46.default.existsSync(cadreDirectory)) import_node_fs46.default.mkdirSync(cadreDirectory);
-    const cadreStat = import_node_fs46.default.lstatSync(cadreDirectory);
+    const canonicalRoot = import_node_fs45.default.realpathSync(root2);
+    const cadreDirectory = import_node_path72.default.join(canonicalRoot, "cadre");
+    if (create && !import_node_fs45.default.existsSync(cadreDirectory)) import_node_fs45.default.mkdirSync(cadreDirectory);
+    const cadreStat = import_node_fs45.default.lstatSync(cadreDirectory);
     if (!cadreStat.isDirectory() || cadreStat.isSymbolicLink()) throw new Error("Unsafe Cadre job directory");
-    const canonicalCadre = import_node_fs46.default.realpathSync(cadreDirectory);
+    const canonicalCadre = import_node_fs45.default.realpathSync(cadreDirectory);
     if (!inside2(canonicalRoot, canonicalCadre)) throw new Error("Unsafe Cadre job directory");
-    const directory = import_node_path73.default.join(canonicalCadre, "jobs");
-    if (create && !import_node_fs46.default.existsSync(directory)) import_node_fs46.default.mkdirSync(directory);
-    const directoryStat = import_node_fs46.default.lstatSync(directory);
+    const directory = import_node_path72.default.join(canonicalCadre, "jobs");
+    if (create && !import_node_fs45.default.existsSync(directory)) import_node_fs45.default.mkdirSync(directory);
+    const directoryStat = import_node_fs45.default.lstatSync(directory);
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Unsafe Cadre job directory");
-    const canonicalDirectory = import_node_fs46.default.realpathSync(directory);
+    const canonicalDirectory = import_node_fs45.default.realpathSync(directory);
     if (!inside2(canonicalRoot, canonicalDirectory)) throw new Error("Unsafe Cadre job directory");
     return canonicalDirectory;
   }
   jobPath(root2, id, createDirectory = false) {
     if (!isJobId(id)) throw new Error("Invalid Cadre job id");
     const directory = this.safeJobDirectory(root2, createDirectory);
-    const candidate = import_node_path73.default.resolve(directory, `${id}.json`);
-    if (import_node_path73.default.dirname(candidate) !== directory) throw new Error("Invalid Cadre job path");
+    const candidate = import_node_path72.default.resolve(directory, `${id}.json`);
+    if (import_node_path72.default.dirname(candidate) !== directory) throw new Error("Invalid Cadre job path");
     return candidate;
   }
   artifactPath(id) {
     if (!isJobId(id)) throw new Error("Invalid Cadre job id");
-    return import_node_path73.default.join("cadre", "jobs", `${id}.json`);
+    return import_node_path72.default.join("cadre", "jobs", `${id}.json`);
   }
   serialize(job, artifactPath = job.artifact_path || null) {
     return {
@@ -21918,37 +21921,37 @@ var JobManager = class {
     delete job.artifact_path;
     try {
       const artifactPath = this.jobPath(job.root, job.id, true);
-      if (import_node_fs46.default.existsSync(artifactPath)) {
-        const stat = import_node_fs46.default.lstatSync(artifactPath);
+      if (import_node_fs45.default.existsSync(artifactPath)) {
+        const stat = import_node_fs45.default.lstatSync(artifactPath);
         if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Unsafe Cadre job artifact");
       }
       const relativeArtifactPath = this.artifactPath(job.id);
       temporaryPath2 = `${artifactPath}.${import_node_crypto9.default.randomUUID()}.tmp`;
-      const noFollow = typeof import_node_fs46.default.constants.O_NOFOLLOW === "number" ? import_node_fs46.default.constants.O_NOFOLLOW : 0;
-      descriptor = import_node_fs46.default.openSync(
+      const noFollow = typeof import_node_fs45.default.constants.O_NOFOLLOW === "number" ? import_node_fs45.default.constants.O_NOFOLLOW : 0;
+      descriptor = import_node_fs45.default.openSync(
         temporaryPath2,
-        import_node_fs46.default.constants.O_WRONLY | import_node_fs46.default.constants.O_CREAT | import_node_fs46.default.constants.O_EXCL | noFollow,
+        import_node_fs45.default.constants.O_WRONLY | import_node_fs45.default.constants.O_CREAT | import_node_fs45.default.constants.O_EXCL | noFollow,
         384
       );
-      import_node_fs46.default.writeFileSync(descriptor, `${JSON.stringify(this.serialize(job, relativeArtifactPath), null, 2)}
+      import_node_fs45.default.writeFileSync(descriptor, `${JSON.stringify(this.serialize(job, relativeArtifactPath), null, 2)}
 `);
-      import_node_fs46.default.fsyncSync(descriptor);
-      import_node_fs46.default.closeSync(descriptor);
+      import_node_fs45.default.fsyncSync(descriptor);
+      import_node_fs45.default.closeSync(descriptor);
       descriptor = null;
-      import_node_fs46.default.renameSync(temporaryPath2, artifactPath);
+      import_node_fs45.default.renameSync(temporaryPath2, artifactPath);
       temporaryPath2 = null;
       job.artifact_path = relativeArtifactPath;
     } catch {
     } finally {
       if (descriptor !== null) {
         try {
-          import_node_fs46.default.closeSync(descriptor);
+          import_node_fs45.default.closeSync(descriptor);
         } catch {
         }
       }
       if (temporaryPath2) {
         try {
-          import_node_fs46.default.rmSync(temporaryPath2, { force: true });
+          import_node_fs45.default.rmSync(temporaryPath2, { force: true });
         } catch {
         }
       }
@@ -21958,11 +21961,11 @@ var JobManager = class {
     if (!isJobId(id)) return null;
     try {
       const file = this.jobPath(root2, id);
-      const stat = import_node_fs46.default.lstatSync(file);
+      const stat = import_node_fs45.default.lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_JOB_ARTIFACT_BYTES) return null;
-      const canonicalFile = import_node_fs46.default.realpathSync(file);
-      if (canonicalFile !== file || import_node_path73.default.dirname(canonicalFile) !== import_node_path73.default.dirname(file)) return null;
-      const parsed = asJsonObject(JSON.parse(import_node_fs46.default.readFileSync(canonicalFile, "utf8")));
+      const canonicalFile = import_node_fs45.default.realpathSync(file);
+      if (canonicalFile !== file || import_node_path72.default.dirname(canonicalFile) !== import_node_path72.default.dirname(file)) return null;
+      const parsed = asJsonObject(JSON.parse(import_node_fs45.default.readFileSync(canonicalFile, "utf8")));
       if (typeof parsed.root !== "string" || !sameRoot(parsed.root, root2)) return null;
       return {
         ...parsed,
@@ -22003,7 +22006,7 @@ var JobManager = class {
   }
   persistedJobIds(root2) {
     try {
-      return import_node_fs46.default.readdirSync(this.safeJobDirectory(root2, false)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).filter(isJobId);
+      return import_node_fs45.default.readdirSync(this.safeJobDirectory(root2, false)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).filter(isJobId);
     } catch {
       return [];
     }
@@ -22016,7 +22019,7 @@ var JobManager = class {
   }
   start(type, root2, args = {}) {
     this.cleanup();
-    root2 = import_node_fs46.default.realpathSync(root2);
+    root2 = import_node_fs45.default.realpathSync(root2);
     const id = `job_${import_node_crypto9.default.randomUUID()}`;
     const runner = currentMcpServerPath();
     if (!runner) throw new Error("Cadre MCP runtime not found for async job runner");
@@ -22253,18 +22256,45 @@ var NodeProjectSourceReader = class {
 };
 
 // src/mcp/infrastructure/root-resolution.ts
-var import_node_fs47 = __toESM(require("node:fs"));
-var import_node_path74 = __toESM(require("node:path"));
+var import_node_fs46 = __toESM(require("node:fs"));
+var import_node_path73 = __toESM(require("node:path"));
 var import_node_url3 = require("node:url");
 function isDirectory(file) {
   try {
-    return import_node_fs47.default.statSync(file).isDirectory();
+    return import_node_fs46.default.statSync(file).isDirectory();
   } catch {
     return false;
   }
 }
+function jsonName(file) {
+  try {
+    const parsed = JSON.parse(import_node_fs46.default.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.name === "string" ? parsed.name : null;
+  } catch {
+    return null;
+  }
+}
+function packageName(dir) {
+  return jsonName(import_node_path73.default.join(dir, "package.json"));
+}
+function hasCadrePluginManifest(dir) {
+  return [".codex-plugin", ".claude-plugin"].some((folder) => jsonName(import_node_path73.default.join(dir, folder, "plugin.json")) === "cadre");
+}
+function isCadreRuntimeDirectory(dir) {
+  if (packageName(dir) === "cadre-ai" && isDirectory(import_node_path73.default.join(dir, "scripts", "mcp")) && import_node_fs46.default.existsSync(import_node_path73.default.join(dir, "scripts", "mcp", "cadre-server.js"))) return true;
+  return hasCadrePluginManifest(dir) && isDirectory(import_node_path73.default.join(dir, "skills")) && [".mcp.json", "mcp-config.json"].some((file) => import_node_fs46.default.existsSync(import_node_path73.default.join(dir, file)));
+}
+function containingCadreRuntime(start) {
+  let dir = start;
+  while (true) {
+    if (isCadreRuntimeDirectory(dir)) return dir;
+    const parent = import_node_path73.default.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
 function hasCadreDirectory(dir) {
-  return isDirectory(import_node_path74.default.join(dir, "cadre"));
+  return isDirectory(import_node_path73.default.join(dir, "cadre"));
 }
 function isCadreStateDirectory(dir) {
   return [
@@ -22275,10 +22305,10 @@ function isCadreStateDirectory(dir) {
     "workflow.json",
     "config.json",
     "repos.json"
-  ].some((name) => import_node_fs47.default.existsSync(import_node_path74.default.join(dir, name))) || isDirectory(import_node_path74.default.join(dir, "tracks"));
+  ].some((name) => import_node_fs46.default.existsSync(import_node_path73.default.join(dir, name))) || isDirectory(import_node_path73.default.join(dir, "tracks"));
 }
 function hasCadreProjectState(dir) {
-  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path74.default.join(dir, "cadre"));
+  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path73.default.join(dir, "cadre"));
 }
 function normalizePathCandidate(value) {
   if (typeof value !== "string" || value.trim() === "") return null;
@@ -22290,9 +22320,10 @@ function normalizePathCandidate(value) {
       return null;
     }
   }
-  candidate = import_node_path74.default.resolve(candidate);
+  if (!import_node_path73.default.isAbsolute(candidate)) return null;
   try {
-    if (import_node_fs47.default.existsSync(candidate) && !import_node_fs47.default.statSync(candidate).isDirectory()) candidate = import_node_path74.default.dirname(candidate);
+    if (!import_node_fs46.default.statSync(candidate).isDirectory()) return null;
+    candidate = import_node_fs46.default.realpathSync(candidate);
   } catch {
     return null;
   }
@@ -22303,8 +22334,8 @@ function findCadreRoot(start) {
   if (!dir) return null;
   while (true) {
     if (hasCadreProjectState(dir)) return dir;
-    if (import_node_path74.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path74.default.dirname(dir);
-    const parent = import_node_path74.default.dirname(dir);
+    if (import_node_path73.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path73.default.dirname(dir);
+    const parent = import_node_path73.default.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -22312,13 +22343,21 @@ function findCadreRoot(start) {
 function rootFromCandidate(candidate) {
   const normalized = normalizePathCandidate(candidate);
   if (!normalized) return null;
+  if (containingCadreRuntime(normalized)) return null;
   const cadreRoot = findCadreRoot(normalized);
-  if (cadreRoot) return { root: cadreRoot, has_cadre: true };
-  return { root: normalized, has_cadre: false };
+  return cadreRoot ? { root: cadreRoot, has_cadre: true } : { root: normalized, has_cadre: false };
+}
+function setupRootFromCandidate(candidate) {
+  const normalized = normalizePathCandidate(candidate);
+  if (!normalized || containingCadreRuntime(normalized)) return null;
+  if (import_node_path73.default.basename(normalized) === "cadre" && isCadreStateDirectory(normalized)) {
+    return { root: import_node_path73.default.dirname(normalized), has_cadre: true };
+  }
+  return { root: normalized, has_cadre: hasCadreProjectState(normalized) };
 }
 function requireCadreRoot(args = {}) {
-  const info = rootFromCandidate(args.root);
-  if (info && info.has_cadre) return info.root;
+  const root2 = findCadreRoot(args.root);
+  if (root2 && !containingCadreRuntime(root2)) return root2;
   throw Object.assign(
     new Error(
       `This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${args.root || "(missing)"}`
@@ -22333,7 +22372,7 @@ var runtime = createMcpRuntime({
   jobs: new JobManager(),
   lspDaemon: new LspDaemonClient(),
   projectSourceReader: new NodeProjectSourceReader(),
-  rootResolver: { requireCadreRoot, rootFromCandidate }
+  rootResolver: { requireCadreRoot, rootFromCandidate, setupRootFromCandidate }
 });
 var handle = runtime.handle;
 

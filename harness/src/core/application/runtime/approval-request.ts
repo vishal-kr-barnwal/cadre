@@ -8,6 +8,9 @@ import { readApprovalSession } from "./approval-session-store";
 import type { ApprovalStage } from "./staged-approval-stages";
 
 const CONTROL_KEYS = new Set([
+  "root",
+  "workflow",
+  "action",
   "execute",
   "approvalComplete",
   "approval_complete",
