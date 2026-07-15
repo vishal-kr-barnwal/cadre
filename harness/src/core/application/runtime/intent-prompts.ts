@@ -4,7 +4,6 @@ import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 import { choice, nativePrompt } from "./native-prompts";
 import { revisionScope } from "./revision-scope";
 import { setupIntentStrategyAnswered, setupMissingEvidence, setupStageMissingEvidence, type SetupEvidenceStage } from "./setup-evidence";
-import { meaningfulRevisionArtifact } from "./workflow-evidence";
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
   return args as UnknownRecord;
@@ -82,6 +81,15 @@ function hasNamedValue(args: RuntimeArgs, names: string[]): boolean {
     const nested = nestedIntentValue(args, name);
     return textPresent(nested) || arrayPresent(nested) || isRecord(nested);
   });
+}
+
+function hasPromptAnswer(args: RuntimeArgs, names: string[]): boolean {
+  const raw = rawArgs(args);
+  return names.some((name) => [raw[name], nestedIntentValue(args, name)].some((value) => {
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return isRecord(value) && Object.keys(value).length > 0;
+  }));
 }
 
 const SPEC_SCHEMA = "cadre.spec.v1";
@@ -169,19 +177,22 @@ function planPhaseShapeIssues(plan: JsonObject): JsonObject[] {
   });
 }
 
-export function newTrackSchemaIssues(args: RuntimeArgs = {}): JsonObject[] {
+export function newTrackSchemaIssues(
+  args: RuntimeArgs = {},
+  kinds: ReadonlyArray<"spec" | "plan"> = ["spec", "plan"],
+): JsonObject[] {
   const raw = rawArgs(args);
   const spec = isRecord(raw.spec) ? asJsonObject(raw.spec) : null;
   const plan = isRecord(raw.plan) ? asJsonObject(raw.plan) : null;
   const issues: JsonObject[] = [];
-  if (spec) {
+  if (spec && kinds.includes("spec")) {
     issues.push(...checkSchemaLiteral(spec, "spec.schema", SPEC_SCHEMA));
     issues.push(...aliasIssues(spec, "spec", SPEC_FIELD_ALIASES));
     for (const field of ["functional_requirements", "non_functional_requirements", "acceptance_criteria", "out_of_scope"]) {
       issues.push(...specArrayShapeIssues(spec, field));
     }
   }
-  if (plan) {
+  if (plan && kinds.includes("plan")) {
     issues.push(...checkSchemaLiteral(plan, "plan.schema", PLAN_SCHEMA));
     issues.push(...aliasIssues(plan, "plan", PLAN_FIELD_ALIASES));
     issues.push(...planPhaseShapeIssues(plan));
@@ -253,14 +264,16 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
   const prompts: JsonObject[] = [];
   const trackId = asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id);
   const spec = isRecord(rawArgs(args).spec) ? asJsonObject(rawArgs(args).spec) : null;
-  const plan = isRecord(rawArgs(args).plan) ? asJsonObject(rawArgs(args).plan) : null;
   const hasGoal = meaningfulSpecText(spec?.description, trackId || null)
-    || meaningfulSpecText(spec?.title, trackId || null);
-  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null);
-  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null);
+    || meaningfulSpecText(spec?.title, trackId || null)
+    || hasPromptAnswer(args, ["goal", "goalOther"]);
+  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null)
+    || hasPromptAnswer(args, ["outcome", "outcomeOther"]);
+  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null)
+    || hasPromptAnswer(args, ["acceptanceCriteria", "acceptanceCriteriaOther"]);
   const hasScope = meaningfulSpecText(spec?.scope, trackId || null)
-    || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null);
-  const hasPlan = meaningfulRevisionArtifact(plan, "plan", trackId || null);
+    || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null)
+    || hasPromptAnswer(args, ["scope", "scopeOther"]);
 
   if (!trackId) {
     prompts.push(intentPrompt(
@@ -328,7 +341,7 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
       "intent.acceptanceCriteriaOther"
     ));
   }
-  if (!hasScope || !hasPlan) {
+  if (!hasScope) {
     prompts.push(intentPrompt(
       "newtrack",
       "newtrack-scope",

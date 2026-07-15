@@ -67,7 +67,13 @@ export function newTrackApprovalStages(): ApprovalStage[] {
       title: "Track Spec",
       description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
       documentIds: ["spec"],
-      inputKeys: ["spec", "description"],
+      inputKeys: [
+        "spec", "description",
+        "intent.goal", "intent.goalOther", "goal", "goalOther",
+        "intent.outcome", "intent.outcomeOther", "outcome", "outcomeOther",
+        "intent.acceptanceCriteria", "intent.acceptanceCriteriaOther", "acceptanceCriteria", "acceptanceCriteriaOther",
+        "intent.scope", "intent.scopeOther", "scope", "scopeOther",
+      ],
     },
     {
       id: "plan",

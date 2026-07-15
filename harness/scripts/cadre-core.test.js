@@ -265,6 +265,11 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function readJsonLines(file) {
+  const content = fs.readFileSync(file, "utf8").trim();
+  return content ? content.split(/\n/).map((line) => JSON.parse(line)) : [];
+}
+
 function seedLegacySetupPlaceholder(root, { tracked = false } = {}) {
   const originalJson = `${JSON.stringify({
     version: 1,
@@ -1798,6 +1803,33 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-formula-native-test-"));
   try {
     git(root, ["init"]);
+    const executePouredTrack = (preview) => {
+      const sessionId = preview.approval.session_id;
+      const planPreview = core.workflowPacket(root, {
+        workflow: "newtrack",
+        approvalSessionId: sessionId,
+        approvalStage: "spec",
+        approvedStages: ["spec"],
+      });
+      assert.equal(planPreview.ok, true, planPreview.error);
+      assert.equal(planPreview.approval.current_stage, "plan");
+      const ready = core.workflowPacket(root, {
+        workflow: "newtrack",
+        approvalSessionId: sessionId,
+        approvalStage: "plan",
+        approvedStages: ["spec", "plan"],
+      });
+      assert.equal(ready.ok, true, ready.error);
+      const executed = core.workflowPacket(root, {
+        workflow: "newtrack",
+        execute: true,
+        approvalComplete: true,
+        approvalSessionId: sessionId,
+        approvedStages: ["spec", "plan"],
+      });
+      assert.equal(executed.ok, true, executed.error);
+      return executed;
+    };
     write(path.join(root, "cadre", "formulas", "sample.json"), JSON.stringify({
       version: 1,
       schema: "cadre.formula.v1",
@@ -1841,6 +1873,20 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
     const squash = core.workflowPacket(root, { workflow: "formula", action: "wisp_squash", execute: true, wispId: created.wisp_id, summary: "ready" });
     assert.equal(squash.ok, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "operations", "wisp-digests.jsonl")), true);
+
+    const wispPour = core.workflowPacket(root, {
+      workflow: "formula",
+      action: "pour",
+      wispId: created.wisp_id,
+      trackId: "oauth_wisp_track",
+      reviewBundleDir: ".wisp-formula-review",
+      responseMode: "detail",
+    });
+    assert.equal(wispPour.ok, true, wispPour.error);
+    assert.equal(wispPour.wisp_id, created.wisp_id);
+    const wispExecuted = executePouredTrack(wispPour);
+    assert.equal(wispExecuted.formula_event.event.wisp_id, created.wisp_id);
+
     const burn = core.workflowPacket(root, { workflow: "formula", action: "wisp_burn", execute: true, wispId: created.wisp_id });
     assert.equal(burn.ok, true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "local", "wisps", `${created.wisp_id}.json`)), false);
@@ -1857,7 +1903,23 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
     assert.equal(pour.ok, true);
     assert.equal(pour.dry_run, true);
     assert.equal(pour.metadata.tags.includes("formula:sample"), true);
+    assert.equal(pour.metadata_state, "proposed");
+    assert.equal(pour.wisp_id, null);
+    assert.equal(pour.pour_event, null);
+    assert.equal(readJsonLines(path.join(root, "cadre", "events.jsonl")).some((event) => (
+      event.kind === "formula_poured" && event.track_id === "oauth_formula_track"
+    )), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", "oauth_formula_track")), false);
+
+    const sessionId = pour.approval.session_id;
+    const executed = executePouredTrack(pour);
+    assert.equal(executed.formula_event.event.kind, "formula_poured");
+    assert.equal(executed.formula_event.event.approval_session_id, sessionId);
+    assert.equal(executed.formula_event.event.wisp_id, null);
+    assert.equal(readJson(path.join(root, "cadre", "tracks", "oauth_formula_track", "metadata.json")).tags.includes("formula:sample"), true);
+    assert.equal(readJsonLines(path.join(root, "cadre", "events.jsonl")).filter((event) => (
+      event.kind === "formula_poured" && event.track_id === "oauth_formula_track"
+    )).length, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2721,9 +2783,9 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.equal(schemaDrift.phase_state, "awaiting_clarification");
     assert.ok(schemaDrift.schema_errors.some((entry) => entry.field === "spec.functionalRequirements"));
     assert.ok(schemaDrift.schema_errors.some((entry) => entry.field === "spec.acceptanceCriteria"));
-    assert.ok(schemaDrift.schema_errors.some((entry) => entry.field === "plan.tasks"));
+    assert.equal(schemaDrift.schema_errors.some((entry) => entry.field === "plan.tasks"), false);
     assert.ok(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=spec")));
-    assert.ok(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=plan")));
+    assert.equal(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=plan")), false);
     assert.equal(Object.prototype.hasOwnProperty.call(schemaDrift, "review_bundle"), false);
 
     const specSchema = core.artifactPacket(root, { action: "schema", artifact: "spec" });
@@ -3382,6 +3444,457 @@ test("implementationPrep returns packet-selected style guides", () => {
     assert.ok(typeGuide.content.length <= 1200);
   } finally {
     process.env.PATH = oldPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack collects spec then plan in one lazy approval session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-lazy-stages-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "lazy_newtrack_20260714";
+    const spec = sampleSpec(trackId, {
+      description: "Create a track by reviewing requirements before collecting its dependent plan.",
+      acceptance_criteria: [{
+        heading: "Ordered artifact review",
+        body: "Cadre requests and materializes the plan only after explicit spec approval.",
+      }],
+    });
+    const plan = samplePlan(trackId);
+    plan.phases[0].tasks[0].title = "Implement the approved track specification";
+    const base = path.join(root, "cadre", "tracks", trackId);
+
+    const specPreview = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId,
+      spec,
+      commitMode: "off",
+    });
+    assert.equal(specPreview.ok, true, specPreview.error);
+    assert.equal(specPreview.approval.current_stage, "spec");
+    assert.deepEqual(specPreview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+    const sessionId = specPreview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    let session = readJson(sessionFile);
+    assert.deepEqual(session.stage_order, ["spec", "plan"]);
+    assert.equal(session.stage_records.spec.snapshot_files.length, 2);
+    assert.deepEqual(session.stage_records.plan.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.equal(fs.existsSync(path.join(base, "spec.json")), true);
+    for (const name of ["plan.json", "plan.md", "metadata.json", "learnings.jsonl", "learnings.md"]) {
+      assert.equal(fs.existsSync(path.join(base, name)), false, `${name} must stay deferred`);
+    }
+
+    const missingPlan = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalStage: "spec",
+      approvedStages: ["spec"],
+    });
+    assert.equal(missingPlan.ok, false);
+    assert.equal(missingPlan.phase_state, "awaiting_clarification");
+    assert.equal(missingPlan.approval.session_id, sessionId);
+    assert.equal(missingPlan.approval.current_stage, "plan");
+    assert.deepEqual(missingPlan.approval.approved_stages, ["spec"]);
+    assert.deepEqual(missingPlan.missing_payload, ["plan"]);
+    assert.deepEqual(missingPlan.intent_prompts, []);
+    session = readJson(sessionFile);
+    assert.deepEqual(session.stage_records.plan.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.equal(fs.existsSync(path.join(base, "plan.json")), false);
+
+    const planPreview = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      plan,
+    });
+    assert.equal(planPreview.ok, true, planPreview.error);
+    assert.equal(planPreview.approval.current_stage, "plan");
+    assert.deepEqual(planPreview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${trackId}/plan.json`,
+      `cadre/tracks/${trackId}/plan.md`,
+    ]);
+    session = readJson(sessionFile);
+    assert.equal(session.stage_records.plan.snapshot_files.length, 2);
+    assert.deepEqual(session.final_snapshot_files.map((file) => file.path).sort(), [
+      `cadre/tracks/${trackId}/learnings.jsonl`,
+      `cadre/tracks/${trackId}/learnings.md`,
+      `cadre/tracks/${trackId}/metadata.json`,
+    ]);
+    assert.equal(fs.existsSync(path.join(base, "plan.json")), true);
+    for (const name of ["metadata.json", "learnings.jsonl", "learnings.md"]) {
+      assert.equal(fs.existsSync(path.join(base, name)), false, `${name} is final-only`);
+    }
+    const approvedSnapshots = session.snapshot_files
+      .filter((file) => file.missing !== true)
+      .map((file) => ({ path: file.path, content: file.content }));
+
+    const complete = core.workflowPacketV1(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalStage: "plan",
+      approvedStages: ["spec", "plan"],
+    });
+    assert.equal(complete.decision.kind, "ready");
+    assert.deepEqual(complete.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "newtrack",
+        input: {},
+        execute: true,
+        approval: {
+          session_id: sessionId,
+          approved_stages: ["spec", "plan"],
+          complete: true,
+        },
+      },
+    });
+    const executed = core.workflowPacket(root, {
+      workflow: "newtrack",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["spec", "plan"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(executed.phase_state, "executed");
+    for (const snapshot of approvedSnapshots) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack defers malformed future plan validation until plan activation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-future-schema-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "future_plan_20260714";
+    const preview = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId,
+      spec: sampleSpec(trackId),
+      plan: {},
+      commitMode: "off",
+    });
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.approval.current_stage, "spec");
+    assert.deepEqual(preview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+    assert.equal(Object.prototype.hasOwnProperty.call(preview, "schema_errors"), false);
+    const sessionId = preview.approval.session_id;
+
+    const planSchema = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalStage: "spec",
+      approvedStages: ["spec"],
+    });
+    assert.equal(planSchema.ok, false);
+    assert.equal(planSchema.phase_state, "awaiting_clarification");
+    assert.equal(planSchema.stage, "schema_validation");
+    assert.equal(planSchema.approval.session_id, sessionId);
+    assert.equal(planSchema.approval.current_stage, "plan");
+    assert.ok(planSchema.schema_errors.some((entry) => entry.field === "plan.schema"));
+    assert.ok(planSchema.schema_resources.every((uri) => uri.includes("artifact=plan")));
+    const session = readJson(path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`));
+    assert.deepEqual(session.stage_records.plan.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", trackId, "plan.json")), false);
+
+    const cancelled = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.phase_state, "cancelled");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack keeps spec intent clarification inside its approval session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-intent-session-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "intent_session_20260714";
+    const intent = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId,
+      commitMode: "off",
+    });
+    assert.equal(intent.ok, false);
+    assert.equal(intent.phase_state, "awaiting_clarification");
+    assert.equal(intent.approval.current_stage, "spec");
+    assert.deepEqual(intent.missing_payload, ["spec"]);
+    assert.deepEqual(intent.intent_prompts.map((prompt) => prompt.id).sort(), [
+      "newtrack-acceptance",
+      "newtrack-goal",
+      "newtrack-outcome",
+      "newtrack-scope",
+    ]);
+    const sessionId = intent.approval.session_id;
+
+    const answered = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      intent: {
+        goal: "feature",
+        outcome: "developer-experience",
+        acceptanceCriteria: ["automated-tests", "manual-check"],
+        scope: "single-module",
+      },
+    });
+    assert.equal(answered.ok, false);
+    assert.equal(answered.approval.session_id, sessionId);
+    assert.equal(answered.approval.current_stage, "spec");
+    assert.deepEqual(answered.intent_prompts, []);
+    assert.deepEqual(answered.missing_payload, ["spec"]);
+
+    const specPreview = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      spec: sampleSpec(trackId),
+    });
+    assert.equal(specPreview.ok, true, specPreview.error);
+    assert.equal(specPreview.approval.session_id, sessionId);
+    assert.equal(specPreview.approval.current_stage, "spec");
+    assert.deepEqual(specPreview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+
+    const cancelled = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.phase_state, "cancelled");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack rejects an existing track before materializing a preview", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-existing-track-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "existing_track_20260714";
+    writeTrack(root, trackId, samplePlan(trackId));
+    const specPath = path.join(root, "cadre", "tracks", trackId, "spec.json");
+    const baseline = fs.readFileSync(specPath, "utf8");
+    const blocked = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId,
+      spec: sampleSpec(trackId, { description: "This must not replace an existing track." }),
+      plan: samplePlan(trackId),
+    });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /Track target already exists/);
+    assert.equal(fs.readFileSync(specPath, "utf8"), baseline);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack rejects normalized target collisions without changing bytes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-path-collision-test-"));
+  try {
+    git(root, ["init"]);
+    const targetName = "foo_bar";
+    writeTrack(root, targetName, samplePlan("foo/bar"));
+    const metadataPath = path.join(root, "cadre", "tracks", targetName, "metadata.json");
+    write(metadataPath, `${JSON.stringify({ ...readJson(metadataPath), track_id: "foo/bar" }, null, 2)}\n`);
+    const specPath = path.join(root, "cadre", "tracks", targetName, "spec.json");
+    const baseline = fs.readFileSync(specPath, "utf8");
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: targetName,
+      spec: sampleSpec(targetName, { description: "Do not overwrite a normalized path collision." }),
+      plan: samplePlan(targetName),
+    });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /collides after path normalization/);
+    assert.deepEqual(blocked.occupied_targets.sort(), [
+      `cadre/tracks/${targetName}/learnings.md`,
+      `cadre/tracks/${targetName}/metadata.json`,
+      `cadre/tracks/${targetName}/plan.json`,
+      `cadre/tracks/${targetName}/plan.md`,
+      `cadre/tracks/${targetName}/spec.json`,
+      `cadre/tracks/${targetName}/spec.md`,
+    ]);
+    assert.equal(fs.readFileSync(specPath, "utf8"), baseline);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack cannot overwrite a competing normalized approval session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-session-collision-test-"));
+  try {
+    git(root, ["init"]);
+    const firstTrackId = "foo/bar";
+    const targetName = "foo_bar";
+    const first = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: firstTrackId,
+      spec: sampleSpec(firstTrackId, { title: "First normalized session" }),
+      commitMode: "off",
+    });
+    assert.equal(first.ok, true, first.error);
+    const firstSessionId = first.approval.session_id;
+    const specPath = path.join(root, "cadre", "tracks", targetName, "spec.json");
+    const firstBytes = fs.readFileSync(specPath, "utf8");
+
+    const competing = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId: targetName,
+      spec: sampleSpec(targetName, { title: "Competing normalized session" }),
+      commitMode: "off",
+    });
+    assert.equal(competing.ok, false);
+    assert.match(competing.error, /collides after path normalization/);
+    assert.equal(fs.readFileSync(specPath, "utf8"), firstBytes);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    assert.deepEqual(fs.readdirSync(sessionDirectory).filter((file) => file.endsWith(".json")), [`${firstSessionId}.json`]);
+
+    const cancelled = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: firstSessionId,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack restores the Git index and retries exact execution after a hook failure", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-commit-retry-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      sync_mode: "local",
+      traceability: {
+        auto_control_commits: true,
+        git_notes: false,
+      },
+    }, null, 2)}\n`);
+    write(path.join(root, "cadre", ".gitignore"), "/local/\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed traceable project"]);
+    const trackId = "retry_commit_20260714";
+    const preview = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId,
+      spec: sampleSpec(trackId),
+      plan: samplePlan(trackId),
+    });
+    const specApproved = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "spec",
+      approvedStages: ["spec"],
+    });
+    const sessionId = specApproved.approval.session_id;
+    const complete = core.workflowPacketV1(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalStage: "plan",
+      approvedStages: ["spec", "plan"],
+    });
+    assert.equal(complete.next.arguments.approval.session_id, sessionId);
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const hook = path.join(root, ".git", "hooks", "pre-commit");
+    write(hook, "#!/bin/sh\nexit 1\n");
+    fs.chmodSync(hook, 0o755);
+    const indexBeforeExecute = git(root, ["diff", "--cached", "--name-status"]).stdout;
+    const executeArgs = {
+      workflow: "newtrack",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["spec", "plan"],
+    };
+
+    const failed = core.workflowPacket(root, executeArgs);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.phase_state, "recovery_required");
+    assert.equal(failed.control_commit.stage, "git_commit");
+    assert.equal(failed.control_commit.index_restore.ok, true);
+    assert.equal(fs.existsSync(sessionFile), true);
+    assert.equal(git(root, ["diff", "--cached", "--name-status"]).stdout, indexBeforeExecute);
+    const failedEvents = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8")
+      .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.equal(failedEvents.filter((event) => event.kind === "track_created" && event.approval_session_id === sessionId).length, 1);
+    assert.equal(failedEvents.filter((event) => event.kind === "approval.completed" && event.approval_session_id === sessionId).length, 1);
+
+    fs.rmSync(hook, { force: true });
+    const retried = core.workflowPacket(root, executeArgs);
+    assert.equal(retried.ok, true, retried.error || JSON.stringify(retried.control_commit));
+    assert.equal(retried.phase_state, "executed");
+    assert.equal(retried.event.reused, true);
+    assert.equal(retried.approval_audit.reused, true);
+    assert.equal(fs.existsSync(sessionFile), false);
+    const finalEvents = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8")
+      .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.equal(finalEvents.filter((event) => event.kind === "track_created" && event.approval_session_id === sessionId).length, 1);
+    assert.equal(finalEvents.filter((event) => event.kind === "approval.completed" && event.approval_session_id === sessionId).length, 1);
+    const committed = git(root, ["show", "--pretty=", "--name-only", "HEAD"]).stdout.split(/\r?\n/).filter(Boolean);
+    assert.ok(committed.includes("cadre/events.jsonl"));
+    assert.ok(committed.includes("cadre/tracks.json"));
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow newtrack completes after commit when only the trace note fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-note-failure-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      sync_mode: "local",
+      traceability: {
+        auto_control_commits: true,
+        git_notes: true,
+        notes_ref: "invalid trace ref",
+      },
+    }, null, 2)}\n`);
+    write(path.join(root, "cadre", ".gitignore"), "/local/\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed invalid note ref"]);
+    const trackId = "note_failure_20260714";
+    const created = approveWorkflow(root, {
+      workflow: "newtrack",
+      execute: true,
+      approvalComplete: true,
+      trackId,
+      spec: sampleSpec(trackId),
+      plan: samplePlan(trackId),
+    });
+    assert.equal(created.ok, true, created.error);
+    assert.equal(created.phase_state, "executed");
+    assert.equal(created.control_commit.ok, true);
+    assert.equal(created.control_commit.trace_complete, false);
+    assert.equal(created.control_commit.note.ok, false);
+    assert.ok(created.control_commit.warnings.some((warning) => /trace note could not be written/i.test(warning)));
+    assert.equal(created.approval_session_close.ok, true);
+    assert.equal(gitSubject(root), `cadre(newtrack): create ${trackId}`);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

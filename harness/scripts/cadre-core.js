@@ -2531,6 +2531,36 @@ function writeNote(cwd, ref, sha2, note) {
   return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}
 `, sha2], { cwd });
 }
+function captureGitIndex(cwd) {
+  const located = runCommand("git", ["rev-parse", "--git-path", "index"], { cwd });
+  if (!located.ok || !located.stdout.trim()) return null;
+  const indexPath = import_node_path11.default.resolve(cwd, located.stdout.trim());
+  try {
+    return { path: indexPath, existed: true, content: import_node_fs6.default.readFileSync(indexPath) };
+  } catch (error) {
+    const code = asOptionalString(asJsonObject(error).code);
+    return code === "ENOENT" ? { path: indexPath, existed: false, content: null } : null;
+  }
+}
+function restoreGitIndex(snapshot) {
+  const lockPath = `${snapshot.path}.lock`;
+  if (fileExists(lockPath)) {
+    return { ok: false, stage: "git_index_restore_lock", error: `Git index lock still exists: ${lockPath}` };
+  }
+  const temporary = `${snapshot.path}.cadre-restore-${process.pid}`;
+  try {
+    if (!snapshot.existed) {
+      import_node_fs6.default.rmSync(snapshot.path, { force: true });
+      return { ok: true, restored: true, removed_new_index: true };
+    }
+    import_node_fs6.default.writeFileSync(temporary, snapshot.content);
+    import_node_fs6.default.renameSync(temporary, snapshot.path);
+    return { ok: true, restored: true, bytes: snapshot.content.length };
+  } catch (error) {
+    import_node_fs6.default.rmSync(temporary, { force: true });
+    return { ok: false, stage: "git_index_restore", error: error instanceof Error ? error.message : String(error) };
+  }
+}
 function commitTrace(root, args, options) {
   if (!traceEnabled(root, options.kind, args, options.forceEnabled === true)) {
     return { ok: true, skipped: true, reason: "traceability disabled or unconfigured" };
@@ -2560,9 +2590,14 @@ function commitTrace(root, args, options) {
       preexisting_dirty_files: preexisting
     };
   }
+  const indexBefore = captureGitIndex(gitRoot);
+  if (!indexBefore) return { ok: false, stage: "git_index_snapshot", files, error: "Unable to snapshot the Git index before staging Cadre trace files." };
   const add = runCommand("git", ["add", "-A", "--", ...files], { cwd: gitRoot });
-  if (!add.ok) return { ok: false, stage: "git_add", files, add };
-  const staged = runCommand("git", ["diff", "--cached", "--quiet"], { cwd: gitRoot });
+  if (!add.ok) {
+    const indexRestore = restoreGitIndex(indexBefore);
+    return { ok: false, stage: indexRestore.ok === false ? "git_add_index_restore" : "git_add", files, add, index_restore: indexRestore };
+  }
+  const staged = runCommand("git", ["diff", "--cached", "--quiet", "--", ...files], { cwd: gitRoot });
   if (staged.status === 0) return { ok: true, skipped: true, reason: "no staged changes", files };
   const traceId = `trace_${textHash(JSON.stringify({ root, files, now: utcNow(), workflow: options.workflow })).slice(0, 16)}`;
   const type = asOptionalString(args.commitType || args.commit_type) || options.type || (options.kind === "product" ? "feat" : "cadre");
@@ -2587,9 +2622,22 @@ function commitTrace(root, args, options) {
     "-m",
     fullSubject,
     "-m",
-    commitBody
+    commitBody,
+    "--only",
+    "--",
+    ...files
   ], { cwd: gitRoot });
-  if (!commit.ok) return { ok: false, stage: "git_commit", files, commit };
+  if (!commit.ok) {
+    const indexRestore = restoreGitIndex(indexBefore);
+    return {
+      ok: false,
+      stage: indexRestore.ok === false ? "git_commit_index_restore" : "git_commit",
+      files,
+      commit,
+      index_restore: indexRestore,
+      error: indexRestore.ok === false ? "Git commit failed and Cadre could not restore the pre-commit index state." : "Git commit failed; Cadre restored the pre-commit index state for an exact retry."
+    };
+  }
   const sha2 = commitSha(gitRoot);
   const notePayload = {
     version: 1,
@@ -2609,8 +2657,10 @@ function commitTrace(root, args, options) {
   if (options.kind === "control") notePayload.control_commit_sha = sha2;
   const ref = notesRef(root, args);
   const note = sha2 && notesEnabled(root) ? writeNote(gitRoot, ref, sha2, notePayload) : null;
+  const noteOk = !note || commandOk(note);
   return {
-    ok: !note || commandOk(note),
+    ok: true,
+    trace_complete: noteOk,
     trace_id: traceId,
     kind: options.kind,
     workflow: options.workflow,
@@ -2618,7 +2668,8 @@ function commitTrace(root, args, options) {
     subject: fullSubject,
     files,
     notes_ref: ref,
-    note
+    note,
+    warnings: noteOk ? [] : ["The Git commit succeeded, but its Cadre trace note could not be written; the committed workflow result remains authoritative."]
   };
 }
 function notesPushAction(root, repo, cwd, remote = "origin") {
@@ -9264,6 +9315,9 @@ function approvalSessions(root) {
   }
   return names.filter((name) => /^[a-f0-9]{24}\.json$/.test(name)).map((name) => readApprovalSession(root, name.slice(0, -5))).filter((session) => Boolean(session));
 }
+function approvalSessionForTarget(root, relativePath) {
+  return approvalSessions(root).filter((session) => session.snapshot_files.some((file) => file.missing !== true && file.path === relativePath)).sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0] || null;
+}
 function unapprovedSkillTargetApproval(root, skillId) {
   const prefix = `cadre/skills/${skillId}/`;
   const session = approvalSessions(root).filter((candidate) => candidate.workflow === "skill" && candidate.approved_stages.length === 0).filter((candidate) => candidate.snapshot_files.some((file) => file.missing !== true && file.path.startsWith(prefix))).filter((candidate) => candidate.preview_files.some((file) => file.missing !== true && asOptionalString(file.path)?.startsWith(prefix))).sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0];
@@ -9569,6 +9623,10 @@ function cancelApprovalSession(root, sessionId, expectedWorkflow) {
 function recordApprovalCompletion(root, sessionId) {
   const session = readApprovalSession(root, sessionId);
   if (!session) return { ok: false, error: "Approval session was not found for completion audit" };
+  const existing = readCadreEvents(root, 0).find((event) => event.kind === "approval.completed" && event.approval_session_id === sessionId);
+  if (existing) {
+    return { ok: true, reused: true, path: "cadre/events.jsonl", event: existing };
+  }
   return appendCadreEvent(root, {
     kind: "approval.completed",
     workflow: session.workflow,
@@ -10461,6 +10519,14 @@ function hasNamedValue(args, names) {
     return textPresent(nested) || arrayPresent(nested) || isRecord(nested);
   });
 }
+function hasPromptAnswer(args, names) {
+  const raw = rawArgs2(args);
+  return names.some((name) => [raw[name], nestedIntentValue(args, name)].some((value) => {
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return isRecord(value) && Object.keys(value).length > 0;
+  }));
+}
 var SPEC_SCHEMA = "cadre.spec.v1";
 var PLAN_SCHEMA = "cadre.plan.v1";
 var SPEC_FIELD_ALIASES = {
@@ -10536,19 +10602,19 @@ function planPhaseShapeIssues(plan) {
     return issues;
   });
 }
-function newTrackSchemaIssues(args = {}) {
+function newTrackSchemaIssues(args = {}, kinds = ["spec", "plan"]) {
   const raw = rawArgs2(args);
   const spec = isRecord(raw.spec) ? asJsonObject(raw.spec) : null;
   const plan = isRecord(raw.plan) ? asJsonObject(raw.plan) : null;
   const issues = [];
-  if (spec) {
+  if (spec && kinds.includes("spec")) {
     issues.push(...checkSchemaLiteral(spec, "spec.schema", SPEC_SCHEMA));
     issues.push(...aliasIssues(spec, "spec", SPEC_FIELD_ALIASES));
     for (const field of ["functional_requirements", "non_functional_requirements", "acceptance_criteria", "out_of_scope"]) {
       issues.push(...specArrayShapeIssues(spec, field));
     }
   }
-  if (plan) {
+  if (plan && kinds.includes("plan")) {
     issues.push(...checkSchemaLiteral(plan, "plan.schema", PLAN_SCHEMA));
     issues.push(...aliasIssues(plan, "plan", PLAN_FIELD_ALIASES));
     issues.push(...planPhaseShapeIssues(plan));
@@ -10607,12 +10673,10 @@ function newTrackIntentPrompts(args = {}) {
   const prompts = [];
   const trackId = asOptionalString(rawArgs2(args).trackId || rawArgs2(args).track_id);
   const spec = isRecord(rawArgs2(args).spec) ? asJsonObject(rawArgs2(args).spec) : null;
-  const plan = isRecord(rawArgs2(args).plan) ? asJsonObject(rawArgs2(args).plan) : null;
-  const hasGoal = meaningfulSpecText(spec?.description, trackId || null) || meaningfulSpecText(spec?.title, trackId || null);
-  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null);
-  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null);
-  const hasScope = meaningfulSpecText(spec?.scope, trackId || null) || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null);
-  const hasPlan = meaningfulRevisionArtifact(plan, "plan", trackId || null);
+  const hasGoal = meaningfulSpecText(spec?.description, trackId || null) || meaningfulSpecText(spec?.title, trackId || null) || hasPromptAnswer(args, ["goal", "goalOther"]);
+  const hasOutcome = meaningfulSpecItems(spec?.functional_requirements || spec?.functionalRequirements || spec?.outcomes, trackId || null) || hasPromptAnswer(args, ["outcome", "outcomeOther"]);
+  const hasAcceptance = meaningfulSpecItems(spec?.acceptance_criteria || spec?.acceptanceCriteria, trackId || null) || hasPromptAnswer(args, ["acceptanceCriteria", "acceptanceCriteriaOther"]);
+  const hasScope = meaningfulSpecText(spec?.scope, trackId || null) || meaningfulSpecItems(spec?.out_of_scope || spec?.outOfScope, trackId || null) || hasPromptAnswer(args, ["scope", "scopeOther"]);
   if (!trackId) {
     prompts.push(intentPrompt(
       "newtrack",
@@ -10679,7 +10743,7 @@ function newTrackIntentPrompts(args = {}) {
       "intent.acceptanceCriteriaOther"
     ));
   }
-  if (!hasScope || !hasPlan) {
+  if (!hasScope) {
     prompts.push(intentPrompt(
       "newtrack",
       "newtrack-scope",
@@ -10755,8 +10819,45 @@ function reviseIntentPrompts(args = {}, trackId = null) {
   return prompts;
 }
 
-// src/core/application/runtime/approval-session-integrity.ts
+// src/core/application/runtime/approval-request.ts
 var import_node_crypto5 = __toESM(require("node:crypto"));
+var import_node_path38 = __toESM(require("node:path"));
+var CONTROL_KEYS = /* @__PURE__ */ new Set([
+  "execute",
+  "approvalComplete",
+  "approval_complete",
+  "approvalCancel",
+  "approval_cancel",
+  "approvalStage",
+  "approval_stage",
+  "approvedStages",
+  "approved_stages",
+  "approvalSessionId",
+  "approval_session_id",
+  "responseMode",
+  "response_mode",
+  "detail",
+  "compact",
+  "skipSync"
+]);
+var PAYLOAD_ALIAS_GROUPS = [
+  ["productGuidelines", "product_guidelines"],
+  ["techStack", "tech_stack"],
+  ["workflowPolicy", "workflow_policy"],
+  ["styleGuideIds", "style_guide_ids"],
+  ["styleGuides", "style_guides"],
+  ["proposedContext", "proposed_context"]
+];
+var PROPOSED_CONTEXT_ALIAS_GROUPS = [
+  ["productGuidelines", "product_guidelines"],
+  ["techStack", "tech_stack"],
+  ["workflowPolicy", "workflow_policy"],
+  ["repositoryTopology", "repository_topology"]
+];
+var APPROVAL_INPUT_ERROR = "_cadreApprovalInputError";
+function rawArgs3(args) {
+  return args;
+}
 function stableJson(value) {
   if (value === void 0) return "undefined";
   if (value == null || typeof value !== "object") return JSON.stringify(value);
@@ -10764,13 +10865,325 @@ function stableJson(value) {
   const record = value;
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
 }
+function sha(value) {
+  return import_node_crypto5.default.createHash("sha256").update(value).digest("hex");
+}
+function approvalComplete(args = {}) {
+  const raw = rawArgs3(args);
+  return raw.approvalComplete === true || raw.approval_complete === true;
+}
+function approvedStageIds(args = {}) {
+  const raw = rawArgs3(args);
+  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages)));
+}
+function requestedApprovalStage(args = {}) {
+  const raw = rawArgs3(args);
+  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
+}
+function requestedApprovalSessionId(args = {}) {
+  const raw = rawArgs3(args);
+  return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
+}
+function hasApprovalIntent(args) {
+  const raw = rawArgs3(args);
+  return approvedStageIds(args).length > 0 || approvalComplete(args) || raw.approvalStage !== void 0 || raw.approval_stage !== void 0 || raw.approvalCancel === true || raw.approval_cancel === true;
+}
+function approvalCancelRequested(args) {
+  const raw = rawArgs3(args);
+  return raw.approvalCancel === true || raw.approval_cancel === true;
+}
+function controlPayload(args) {
+  const controls = {};
+  for (const [key, value] of Object.entries(rawArgs3(args))) {
+    if (CONTROL_KEYS.has(key)) controls[key] = value;
+  }
+  return controls;
+}
+function canonicalAliases(value, groups) {
+  const canonical = { ...value };
+  for (const aliases of groups) {
+    const canonicalKey = aliases[0];
+    if (!canonicalKey) continue;
+    const selected = aliases.find((key) => canonical[key] !== void 0);
+    if (!selected) continue;
+    const selectedValue = canonical[selected];
+    for (const alias of aliases) delete canonical[alias];
+    canonical[canonicalKey] = selectedValue;
+  }
+  return canonical;
+}
+function canonicalPayload(value) {
+  const canonical = canonicalAliases(value, PAYLOAD_ALIAS_GROUPS);
+  const proposedContext2 = plainObject(canonical.proposedContext);
+  if (proposedContext2) canonical.proposedContext = canonicalAliases(proposedContext2, PROPOSED_CONTEXT_ALIAS_GROUPS);
+  return canonical;
+}
+function approvalPayload(args) {
+  const payload = {};
+  for (const [key, value] of Object.entries(rawArgs3(args))) {
+    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR) payload[key] = value;
+  }
+  return canonicalPayload(payload);
+}
+function changedApprovalInput(sessionPayload, args) {
+  for (const [key, value] of Object.entries(approvalPayload(args))) {
+    if (stableJson(sessionPayload[key]) !== stableJson(value)) return key;
+  }
+  return null;
+}
 function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
+function mergePayload(base, update) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(update)) {
+    const left = plainObject(merged[key]);
+    const right = plainObject(value);
+    merged[key] = left && right ? mergePayload(left, right) : value;
+  }
+  return merged;
+}
+function applyApprovalSessionPayload(root, args = {}, workflow) {
+  const sessionId = requestedApprovalSessionId(args);
+  if (!sessionId) return args;
+  const session = readApprovalSession(root, sessionId);
+  if (!session || session.workflow !== workflow) return args;
+  if (hasApprovalIntent(args)) {
+    const changedInput = changedApprovalInput(session.payload, args);
+    const controls = controlPayload(args);
+    if (approvalComplete(args) && !controls.approvedStages && !controls.approved_stages) {
+      controls.approvedStages = session.approved_stages;
+    }
+    return {
+      ...session.payload,
+      ...controls,
+      ...changedInput ? { [APPROVAL_INPUT_ERROR]: `Approval packets cannot amend staged input (${changedInput}); update the current stage in a separate call before approving it.` } : {}
+    };
+  }
+  return {
+    ...mergePayload(canonicalPayload(session.payload), approvalPayload(args)),
+    ...controlPayload(args)
+  };
+}
+function approvalPayloadHash(workflow, stages, args, extras) {
+  return sha(stableJson({
+    workflow,
+    stages: stages.map((stage) => ({
+      id: stage.id,
+      title: stage.title,
+      description: stage.description,
+      documentIds: stage.documentIds,
+      inputKeys: stage.inputKeys || [],
+      fileMatches: stage.fileMatches || []
+    })),
+    payload: approvalPayload(args),
+    extras
+  }));
+}
+function derivedApprovalSessionId(workflow, root, payloadHash) {
+  return sha(`${workflow}
+${import_node_path38.default.resolve(root)}
+${payloadHash}`).slice(0, 24);
+}
+function approvalStageHash(workflow, stage, files, extras) {
+  return sha(stableJson({ workflow, stage: stage.id, files, extras }));
+}
+
+// src/core/application/runtime/approval-stage-cursor.ts
+function validRequestedPrefix(session, stages, requested, requestedStage) {
+  const order = stages.map((stage) => stage.id);
+  const previous = session.approved_stages;
+  if (requested.length < previous.length || requested.length > previous.length + 1) return false;
+  if (!requested.every((stageId, index) => stageId === order[index])) return false;
+  if (!previous.every((stageId, index) => stageId === requested[index])) return false;
+  return requested.length === previous.length || requestedStage === requested[requested.length - 1];
+}
+function approvalStageCursor(root, args, workflow, stages) {
+  const sessionId = requestedApprovalSessionId(args);
+  const session = sessionId ? readApprovalSession(root, sessionId) : null;
+  const validSession = session?.workflow === workflow ? session : null;
+  let approved = validSession?.approved_stages || [];
+  const requested = approvedStageIds(args);
+  if (validSession && validRequestedPrefix(validSession, stages, requested, requestedApprovalStage(args))) {
+    approved = requested;
+  }
+  return {
+    session: validSession,
+    approvedStageIds: approved,
+    activeStage: stages.find((stage) => !approved.includes(stage.id)) || null
+  };
+}
+function uniqueReviewFiles(files) {
+  const seen = /* @__PURE__ */ new Set();
+  return files.filter((file) => {
+    if (seen.has(file.path)) return false;
+    seen.add(file.path);
+    return true;
+  });
+}
+function scopedApprovalReviewFiles(cursor, currentFiles, newFinalFiles = []) {
+  const approvedSnapshots = cursor.approvedStageIds.flatMap((stageId) => cursor.session ? stageRecord(cursor.session, stageId)?.snapshot_files || [] : []);
+  const frozenFinalFiles = cursor.session?.final_snapshot_files || [];
+  return uniqueReviewFiles([
+    ...approvedSnapshots,
+    ...currentFiles,
+    ...frozenFinalFiles.length > 0 ? frozenFinalFiles : newFinalFiles
+  ]);
+}
+
+// src/core/application/runtime/new-track-stage-lifecycle.ts
+function specPaths(trackId) {
+  const base = `cadre/tracks/${safeName(trackId)}`;
+  return { canonical: `${base}/spec.json`, projection: `${base}/spec.md` };
+}
+function planPaths(trackId) {
+  const base = `cadre/tracks/${safeName(trackId)}`;
+  return { canonical: `${base}/plan.json`, projection: `${base}/plan.md` };
+}
+function specReviewFiles(trackId, spec) {
+  const paths = specPaths(trackId);
+  const canonicalContent = `${JSON.stringify(spec, null, 2)}
+`;
+  return documentReviewPair(
+    "spec",
+    jsonReviewFile(paths.canonical, "Track spec canonical", "spec", spec),
+    textReviewFile(
+      paths.projection,
+      "Track spec",
+      "spec.json",
+      withGeneratedMarker(paths.canonical, "cadre.spec.v1", renderSpecMarkdown(spec, paths.canonical), {
+        canonicalContent,
+        projection: paths.projection
+      })
+    )
+  );
+}
+function planReviewFiles(trackId, plan) {
+  const paths = planPaths(trackId);
+  const canonicalContent = `${JSON.stringify(plan, null, 2)}
+`;
+  return documentReviewPair(
+    "plan",
+    jsonReviewFile(paths.canonical, "Track plan canonical", "plan", plan),
+    textReviewFile(
+      paths.projection,
+      "Track plan",
+      "plan.json",
+      withGeneratedMarker(paths.canonical, "cadre.plan.v1", renderPlanMarkdown(plan, paths.canonical), {
+        canonicalContent,
+        projection: paths.projection
+      })
+    )
+  );
+}
+function finalTrackFiles(trackId, metadata) {
+  const base = `cadre/tracks/${safeName(trackId)}`;
+  const learningsEntry = {
+    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: trackId,
+    recorded_at: utcNow(),
+    text: trackLearningsText(trackId)
+  };
+  const learningsCanonical = `${JSON.stringify(learningsEntry)}
+`;
+  return [
+    {
+      ...jsonReviewFile(`${base}/metadata.json`, "Track metadata", "metadata", metadata),
+      documentId: "metadata",
+      reviewRole: "machine"
+    },
+    ...documentReviewPair(
+      "learnings",
+      plainReviewFile(`${base}/learnings.jsonl`, "Track learnings canonical", "template:learnings_seed.json", learningsCanonical),
+      textReviewFile(
+        `${base}/learnings.md`,
+        "Track learnings",
+        "learnings.jsonl",
+        withGeneratedMarker(`${base}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId), {
+          canonicalContent: learningsCanonical,
+          projection: `${base}/learnings.md`
+        })
+      ),
+      void 0,
+      "generated"
+    )
+  ];
+}
+function parsedJsonFile(files, targetPath) {
+  const file = files.find((candidate) => candidate.path === targetPath && candidate.missing !== true);
+  if (!file) return null;
+  try {
+    const parsed = JSON.parse(file.content);
+    return isRecord(parsed) ? asJsonObject(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+function approvedSpec(cursor, trackId, rawSpec) {
+  const frozen = cursor.session ? stageRecord(cursor.session, "spec")?.snapshot_files.find((file) => file.path === specPaths(trackId).canonical) : null;
+  if (frozen) {
+    try {
+      const parsed = JSON.parse(frozen.content);
+      if (isRecord(parsed)) return asJsonObject(parsed);
+    } catch {
+      return null;
+    }
+  }
+  return isRecord(rawSpec) ? normalizeSpecJson(trackId, rawSpec) : null;
+}
+function newTrackStageCollection(root, args, trackId, stages, metadata) {
+  const cursor = approvalStageCursor(root, args, "newtrack", stages);
+  const activeKind = cursor.activeStage?.id === "spec" ? "spec" : cursor.activeStage?.id === "plan" ? "plan" : null;
+  const raw = args;
+  const activeValue = activeKind ? raw[activeKind] : null;
+  const missingEvidence = activeKind && !meaningfulRevisionArtifact(activeValue, activeKind, trackId) ? [activeKind] : [];
+  const schemaIssues = activeKind && isRecord(activeValue) ? newTrackSchemaIssues(args, [activeKind]) : [];
+  let currentFiles = [];
+  let newFinalFiles = [];
+  if (activeKind && missingEvidence.length === 0 && schemaIssues.length === 0) {
+    if (activeKind === "spec") {
+      currentFiles = specReviewFiles(trackId, normalizeSpecJson(trackId, activeValue));
+    } else {
+      const spec = approvedSpec(cursor, trackId, raw.spec);
+      if (spec) {
+        currentFiles = planReviewFiles(trackId, normalizePlanJson(trackId, activeValue, spec));
+        newFinalFiles = finalTrackFiles(trackId, metadata);
+      }
+    }
+  }
+  const files = scopedApprovalReviewFiles(cursor, currentFiles, newFinalFiles);
+  const base = `cadre/tracks/${safeName(trackId)}`;
+  return {
+    cursor,
+    activeKind,
+    missingEvidence,
+    schemaIssues,
+    files,
+    specJson: parsedJsonFile(files, `${base}/spec.json`),
+    planJson: parsedJsonFile(files, `${base}/plan.json`),
+    metadata: parsedJsonFile(files, `${base}/metadata.json`),
+    learningsEntry: parsedJsonFile(files, `${base}/learnings.jsonl`)
+  };
+}
+
+// src/core/application/runtime/approval-session-integrity.ts
+var import_node_crypto6 = __toESM(require("node:crypto"));
+function stableJson2(value) {
+  if (value === void 0) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson2).join(",")}]`;
+  const record = value;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson2(record[key])}`).join(",")}}`;
+}
+function plainObject2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
 function changedPaths(before, after, prefix = "") {
-  if (stableJson(before) === stableJson(after)) return [];
-  const left = plainObject(before);
-  const right = plainObject(after);
+  if (stableJson2(before) === stableJson2(after)) return [];
+  const left = plainObject2(before);
+  const right = plainObject2(after);
   if (left || right) {
     const keys = Array.from(/* @__PURE__ */ new Set([...Object.keys(left || {}), ...Object.keys(right || {})])).sort();
     return keys.flatMap((key) => changedPaths(left?.[key], right?.[key], prefix ? `${prefix}.${key}` : key));
@@ -10804,7 +11217,7 @@ function reviewFileIdentity(file) {
 }
 function sameReviewFiles(left, right) {
   const normalize = (files) => [...files].sort((first, second) => first.path.localeCompare(second.path)).map(reviewFileIdentity);
-  return stableJson(normalize(left)) === stableJson(normalize(right));
+  return stableJson2(normalize(left)) === stableJson2(normalize(right));
 }
 function stageSnapshotError(session, stages, reviewFiles2, stageIds) {
   for (const stageId of stageIds) {
@@ -10818,7 +11231,7 @@ function stageSnapshotError(session, stages, reviewFiles2, stageIds) {
   return null;
 }
 function normalizedHash(content) {
-  return import_node_crypto5.default.createHash("sha256").update(content.replace(/\n*$/, "\n")).digest("hex");
+  return import_node_crypto6.default.createHash("sha256").update(content.replace(/\n*$/, "\n")).digest("hex");
 }
 function stagePreviewError(record) {
   const previews = new Map(record.preview_files.flatMap((file) => {
@@ -10940,176 +11353,6 @@ function prepareApprovalContinuation(root, session, stages, payload, payloadHash
     activeFiles,
     previousRecord: previousRecord.preview_files.length > 0 ? previousRecord : candidateRecord
   };
-}
-
-// src/core/application/runtime/approval-request.ts
-var import_node_crypto6 = __toESM(require("node:crypto"));
-var import_node_path38 = __toESM(require("node:path"));
-var CONTROL_KEYS = /* @__PURE__ */ new Set([
-  "execute",
-  "approvalComplete",
-  "approval_complete",
-  "approvalCancel",
-  "approval_cancel",
-  "approvalStage",
-  "approval_stage",
-  "approvedStages",
-  "approved_stages",
-  "approvalSessionId",
-  "approval_session_id",
-  "responseMode",
-  "response_mode",
-  "detail",
-  "compact",
-  "skipSync"
-]);
-var PAYLOAD_ALIAS_GROUPS = [
-  ["productGuidelines", "product_guidelines"],
-  ["techStack", "tech_stack"],
-  ["workflowPolicy", "workflow_policy"],
-  ["styleGuideIds", "style_guide_ids"],
-  ["styleGuides", "style_guides"],
-  ["proposedContext", "proposed_context"]
-];
-var PROPOSED_CONTEXT_ALIAS_GROUPS = [
-  ["productGuidelines", "product_guidelines"],
-  ["techStack", "tech_stack"],
-  ["workflowPolicy", "workflow_policy"],
-  ["repositoryTopology", "repository_topology"]
-];
-var APPROVAL_INPUT_ERROR = "_cadreApprovalInputError";
-function rawArgs3(args) {
-  return args;
-}
-function stableJson2(value) {
-  if (value === void 0) return "undefined";
-  if (value == null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson2).join(",")}]`;
-  const record = value;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson2(record[key])}`).join(",")}}`;
-}
-function sha(value) {
-  return import_node_crypto6.default.createHash("sha256").update(value).digest("hex");
-}
-function approvalComplete(args = {}) {
-  const raw = rawArgs3(args);
-  return raw.approvalComplete === true || raw.approval_complete === true;
-}
-function approvedStageIds(args = {}) {
-  const raw = rawArgs3(args);
-  return Array.from(new Set(asStringArray(raw.approvedStages || raw.approved_stages)));
-}
-function requestedApprovalStage(args = {}) {
-  const raw = rawArgs3(args);
-  return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
-}
-function requestedApprovalSessionId(args = {}) {
-  const raw = rawArgs3(args);
-  return asOptionalString(raw.approvalSessionId || raw.approval_session_id) || null;
-}
-function hasApprovalIntent(args) {
-  const raw = rawArgs3(args);
-  return approvedStageIds(args).length > 0 || approvalComplete(args) || raw.approvalStage !== void 0 || raw.approval_stage !== void 0 || raw.approvalCancel === true || raw.approval_cancel === true;
-}
-function approvalCancelRequested(args) {
-  const raw = rawArgs3(args);
-  return raw.approvalCancel === true || raw.approval_cancel === true;
-}
-function controlPayload(args) {
-  const controls = {};
-  for (const [key, value] of Object.entries(rawArgs3(args))) {
-    if (CONTROL_KEYS.has(key)) controls[key] = value;
-  }
-  return controls;
-}
-function canonicalAliases(value, groups) {
-  const canonical = { ...value };
-  for (const aliases of groups) {
-    const canonicalKey = aliases[0];
-    if (!canonicalKey) continue;
-    const selected = aliases.find((key) => canonical[key] !== void 0);
-    if (!selected) continue;
-    const selectedValue = canonical[selected];
-    for (const alias of aliases) delete canonical[alias];
-    canonical[canonicalKey] = selectedValue;
-  }
-  return canonical;
-}
-function canonicalPayload(value) {
-  const canonical = canonicalAliases(value, PAYLOAD_ALIAS_GROUPS);
-  const proposedContext2 = plainObject2(canonical.proposedContext);
-  if (proposedContext2) canonical.proposedContext = canonicalAliases(proposedContext2, PROPOSED_CONTEXT_ALIAS_GROUPS);
-  return canonical;
-}
-function approvalPayload(args) {
-  const payload = {};
-  for (const [key, value] of Object.entries(rawArgs3(args))) {
-    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR) payload[key] = value;
-  }
-  return canonicalPayload(payload);
-}
-function changedApprovalInput(sessionPayload, args) {
-  for (const [key, value] of Object.entries(approvalPayload(args))) {
-    if (stableJson2(sessionPayload[key]) !== stableJson2(value)) return key;
-  }
-  return null;
-}
-function plainObject2(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
-}
-function mergePayload(base, update) {
-  const merged = { ...base };
-  for (const [key, value] of Object.entries(update)) {
-    const left = plainObject2(merged[key]);
-    const right = plainObject2(value);
-    merged[key] = left && right ? mergePayload(left, right) : value;
-  }
-  return merged;
-}
-function applyApprovalSessionPayload(root, args = {}, workflow) {
-  const sessionId = requestedApprovalSessionId(args);
-  if (!sessionId) return args;
-  const session = readApprovalSession(root, sessionId);
-  if (!session || session.workflow !== workflow) return args;
-  if (hasApprovalIntent(args)) {
-    const changedInput = changedApprovalInput(session.payload, args);
-    const controls = controlPayload(args);
-    if (approvalComplete(args) && !controls.approvedStages && !controls.approved_stages) {
-      controls.approvedStages = session.approved_stages;
-    }
-    return {
-      ...session.payload,
-      ...controls,
-      ...changedInput ? { [APPROVAL_INPUT_ERROR]: `Approval packets cannot amend staged input (${changedInput}); update the current stage in a separate call before approving it.` } : {}
-    };
-  }
-  return {
-    ...mergePayload(canonicalPayload(session.payload), approvalPayload(args)),
-    ...controlPayload(args)
-  };
-}
-function approvalPayloadHash(workflow, stages, args, extras) {
-  return sha(stableJson2({
-    workflow,
-    stages: stages.map((stage) => ({
-      id: stage.id,
-      title: stage.title,
-      description: stage.description,
-      documentIds: stage.documentIds,
-      inputKeys: stage.inputKeys || [],
-      fileMatches: stage.fileMatches || []
-    })),
-    payload: approvalPayload(args),
-    extras
-  }));
-}
-function derivedApprovalSessionId(workflow, root, payloadHash) {
-  return sha(`${workflow}
-${import_node_path38.default.resolve(root)}
-${payloadHash}`).slice(0, 24);
-}
-function approvalStageHash(workflow, stage, files, extras) {
-  return sha(stableJson2({ workflow, stage: stage.id, files, extras }));
 }
 
 // src/core/application/runtime/approval-session-transition.ts
@@ -11449,7 +11692,26 @@ function newTrackApprovalStages() {
       title: "Track Spec",
       description: "Goal, requirements, acceptance criteria, and out-of-scope guardrails.",
       documentIds: ["spec"],
-      inputKeys: ["spec", "description"]
+      inputKeys: [
+        "spec",
+        "description",
+        "intent.goal",
+        "intent.goalOther",
+        "goal",
+        "goalOther",
+        "intent.outcome",
+        "intent.outcomeOther",
+        "outcome",
+        "outcomeOther",
+        "intent.acceptanceCriteria",
+        "intent.acceptanceCriteriaOther",
+        "acceptanceCriteria",
+        "acceptanceCriteriaOther",
+        "intent.scope",
+        "intent.scopeOther",
+        "scope",
+        "scopeOther"
+      ]
     },
     {
       id: "plan",
@@ -11759,132 +12021,9 @@ function stagedApprovalError(approval) {
 }
 
 // src/core/application/runtime/workflow-new-track.ts
-function newTrackReviewFiles(trackId, spec, plan, metadata) {
-  const safeTrack = safeName(trackId);
-  const specJson = normalizeSpecJson(trackId, spec);
-  const planJson = normalizePlanJson(trackId, plan, specJson);
-  const learningsEntry = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: trackId,
-    recorded_at: utcNow(),
-    text: trackLearningsText(trackId)
-  };
-  const specCanonical = `cadre/tracks/${safeTrack}/spec.json`;
-  const specProjection = `cadre/tracks/${safeTrack}/spec.md`;
-  const planCanonical = `cadre/tracks/${safeTrack}/plan.json`;
-  const planProjection = `cadre/tracks/${safeTrack}/plan.md`;
-  const learningsCanonical = `${JSON.stringify(learningsEntry)}
-`;
-  return [
-    ...documentReviewPair(
-      "spec",
-      jsonReviewFile(
-        specCanonical,
-        "Track spec canonical",
-        "spec",
-        specJson
-      ),
-      textReviewFile(
-        specProjection,
-        "Track spec",
-        "spec.json",
-        withGeneratedMarker(specCanonical, "cadre.spec.v1", renderSpecMarkdown(specJson, specCanonical), { canonicalContent: `${JSON.stringify(specJson, null, 2)}
-`, projection: specProjection })
-      )
-    ),
-    ...documentReviewPair(
-      "plan",
-      jsonReviewFile(
-        planCanonical,
-        "Track plan canonical",
-        "plan",
-        planJson
-      ),
-      textReviewFile(
-        planProjection,
-        "Track plan",
-        "plan.json",
-        withGeneratedMarker(planCanonical, "cadre.plan.v1", renderPlanMarkdown(planJson, planCanonical), { canonicalContent: `${JSON.stringify(planJson, null, 2)}
-`, projection: planProjection })
-      )
-    ),
-    { ...jsonReviewFile(
-      `cadre/tracks/${safeTrack}/metadata.json`,
-      "Track metadata",
-      "metadata",
-      metadata
-    ), documentId: "metadata", reviewRole: "machine" },
-    ...documentReviewPair(
-      "learnings",
-      plainReviewFile(
-        `cadre/tracks/${safeTrack}/learnings.jsonl`,
-        "Track learnings canonical",
-        "template:learnings_seed.json",
-        learningsCanonical
-      ),
-      textReviewFile(
-        `cadre/tracks/${safeTrack}/learnings.md`,
-        "Track learnings",
-        "learnings.jsonl",
-        withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId), { canonicalContent: learningsCanonical, projection: `cadre/tracks/${safeTrack}/learnings.md` })
-      ),
-      void 0,
-      "generated"
-    )
-  ];
-}
-function workflowNewTrack(root, args = {}) {
-  args = applyStagedApprovalSessionPayload(root, args, "newtrack");
-  const approvalArgs = JSON.parse(JSON.stringify(args));
-  const summary = workflowSummary(root, "newtrack", args);
-  const markdownError = markdownPayloadError(args);
-  if (markdownError) return { ...summary, ...markdownError };
-  const schemaIssues = newTrackSchemaIssues(args);
-  if (schemaIssues.length > 0) {
-    const encodedRoot = encodeURIComponent(root);
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_clarification",
-      stage: "schema_validation",
-      schema_errors: schemaIssues,
-      schema_resources: [
-        `cadre://artifact-schema?root=${encodedRoot}&artifact=spec`,
-        `cadre://artifact-schema?root=${encodedRoot}&artifact=plan`
-      ],
-      next_actions: [
-        "Load the Cadre spec and plan schemas before drafting newtrack payloads.",
-        "Call newtrack again with canonical spec and plan JSON fields, not aliases or Markdown-derived shapes."
-      ],
-      error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped."
-    };
-  }
-  const intentPrompts = newTrackIntentPrompts(args);
-  if (intentPrompts.length > 0) {
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_clarification",
-      stage: "intent_clarification",
-      intent_prompts: intentPrompts,
-      next_actions: [
-        "Answer intent_prompts with the client native selector or concise chat fallback.",
-        "Call newtrack again with trackId plus structured spec and plan JSON before review or mutation."
-      ],
-      error: "New track intent is under-specified; Cadre will not generate spec or plan artifacts until goal, outcome, acceptance, and scope are clear."
-    };
-  }
-  const trackId = args.trackId || args.track_id;
-  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };
-  const specJson = normalizeSpecJson(String(trackId), args.spec || { title: `Spec: ${trackId}`, description: asOptionalString(args.description) || String(trackId) });
-  const planJson = normalizePlanJson(String(trackId), args.plan, specJson);
-  const metadata = {
-    track_id: trackId,
+function trackMetadata(root, trackId, args) {
+  const supplied = asJsonObject(args.metadata);
+  return {
     type: "feature",
     status: "new",
     priority: "medium",
@@ -11894,121 +12033,195 @@ function workflowNewTrack(root, args = {}) {
     reviewer: null,
     git_branch: `track/${trackId}`,
     worktree_path: `.worktrees/cadre/tracks/${safeName(trackId)}/integrate/root`,
-    ...args.metadata && typeof args.metadata === "object" ? args.metadata : {}
+    ...supplied,
+    track_id: trackId
   };
-  const reviewFiles2 = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
-  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles2);
-  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles2, { track_id: String(trackId), final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const approvalError = stagedApprovalError(approval);
-  const warnings = [
-    ...trackGenerationWarnings(specJson, planJson),
-    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
-    ...approvalError ? [approvalError] : []
-  ];
-  const dryRun = args.execute !== true;
-  const assist = planAssist(root, { ...args, plan: planJson, trackId });
-  if (dryRun) {
+}
+function clarificationWithoutTarget(summary, prompts) {
+  return {
+    ...summary,
+    ok: false,
+    dry_run: true,
+    phase_state: "awaiting_clarification",
+    stage: "intent_clarification",
+    intent_prompts: prompts,
+    next_actions: ["Choose a stable track id before Cadre starts the spec-to-plan approval session."],
+    error: "New track intent is under-specified; trackId is required before staged artifact collection can begin."
+  };
+}
+function occupiedTrackTargets(root, trackId, allowedSessionId) {
+  const relativeDirectory = `cadre/tracks/${safeName(trackId)}`;
+  try {
+    return import_node_fs23.default.readdirSync(import_node_path40.default.join(root, relativeDirectory), { withFileTypes: true }).map((entry) => `${relativeDirectory}/${entry.name}`).filter((relativePath) => {
+      const owner = approvalSessionForTarget(root, relativePath);
+      return !owner || owner.workflow !== "newtrack" || owner.session_id !== allowedSessionId;
+    });
+  } catch {
+    return [];
+  }
+}
+function workflowNewTrack(root, args = {}) {
+  args = applyStagedApprovalSessionPayload(root, args, "newtrack");
+  const summary = workflowSummary(root, "newtrack", args);
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return { ...summary, ...markdownError };
+  const intentPrompts = newTrackIntentPrompts(args);
+  const trackId = asOptionalString(args.trackId || args.track_id);
+  if (!trackId) return clarificationWithoutTarget(summary, intentPrompts);
+  const metadata = trackMetadata(root, trackId, args);
+  const stages = newTrackApprovalStages();
+  const collection = newTrackStageCollection(root, args, trackId, stages, metadata);
+  const metadataPath = `cadre/tracks/${safeName(trackId)}/metadata.json`;
+  const occupiedTargets = occupiedTrackTargets(root, trackId, collection.cursor.session?.session_id || null);
+  if (occupiedTargets.length > 0) {
     return {
       ...summary,
-      ok: assist.ok !== false && !approvalError,
+      ok: false,
+      dry_run: true,
+      track_id: trackId,
+      occupied_targets: occupiedTargets,
+      error: `Track target already exists or collides after path normalization: cadre/tracks/${safeName(trackId)}`
+    };
+  }
+  const approval = stagedApprovalState(root, "newtrack", args, stages, collection.files, {
+    track_id: trackId,
+    final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"]
+  }, { allowEmptyActiveStage: true });
+  const approvalState = asJsonObject(approval);
+  const stageReviewBundle = asJsonObject(approvalState.current_review_bundle);
+  const stageReviewArtifacts = Array.isArray(approvalState.current_review_artifacts) ? approvalState.current_review_artifacts.map(asJsonObject) : [];
+  const approvalError = stagedApprovalError(approval);
+  const cancelled = approvalState.cancelled === true;
+  const specJson = collection.specJson;
+  const planJson = collection.planJson;
+  const finalMetadata = collection.metadata || metadata;
+  const assist = planJson ? planAssist(root, { ...args, plan: planJson, trackId }) : null;
+  const warnings = [
+    ...specJson && planJson ? trackGenerationWarnings(specJson, planJson) : [],
+    ...asStringArray(stageReviewBundle.warnings),
+    ...approvalError ? [approvalError] : []
+  ];
+  const base = {
+    ...summary,
+    track_id: trackId,
+    approval,
+    human_review: null,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: Object.keys(stageReviewBundle).length > 0 ? stageReviewBundle : null,
+    warnings,
+    ...collection.metadata ? { metadata: collection.metadata } : {},
+    ...assist ? { plan_assist: assist } : {}
+  };
+  if (cancelled) return { ...base, ok: true, dry_run: true, phase_state: "cancelled" };
+  if (collection.schemaIssues.length > 0 && !approvalError) {
+    const encodedRoot = encodeURIComponent(root);
+    const artifact = collection.activeKind || "spec";
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "schema_validation",
+      track_id: trackId,
+      approval,
+      schema_errors: collection.schemaIssues,
+      schema_resources: [`cadre://artifact-schema?root=${encodedRoot}&artifact=${artifact}`],
+      missing_payload: collection.missingEvidence,
+      required_payload: collection.missingEvidence,
+      warnings,
+      next_actions: [
+        `Load the Cadre ${artifact} schema, correct only the current ${artifact} input, and resume this approval session without recording approval.`
+      ],
+      error: `Current newtrack ${artifact} JSON does not match the Cadre schema.`
+    };
+  }
+  if ((intentPrompts.length > 0 || collection.missingEvidence.length > 0) && !approvalError) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: intentPrompts.length > 0 ? "intent_clarification" : "track_evidence",
+      track_id: trackId,
+      approval,
+      intent_prompts: intentPrompts,
+      missing_payload: collection.missingEvidence,
+      required_payload: collection.missingEvidence,
+      warnings,
+      next_actions: [
+        `Supply only the current ${collection.activeKind || "spec"} evidence and resume with approval.session_id; session resume is not approval.`
+      ],
+      error: intentPrompts.length > 0 ? "New track intent needs clearer goal, outcome, acceptance, or scope evidence before spec review." : `Current newtrack stage requires evidence-backed ${collection.missingEvidence.join(" and ")} JSON.`
+    };
+  }
+  if (args.execute !== true) {
+    return {
+      ...base,
+      ok: !approvalError && (!assist || assist.ok !== false),
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      approval,
-      review_artifacts: stageReviewArtifacts || reviewArtifacts,
-      review_bundle: stageReviewBundle,
-      warnings,
-      error: approvalError || void 0,
-      next_actions: approvalError ? asStringArray(asJsonObject(approval).next_actions) : [
-        "Approve newtrack one stage at a time with approvedStages.",
-        "After spec and plan are approved, call newtrack with execute:true and approvalComplete:true using the same approval session."
+      ...approvalError ? { error: approvalError } : {},
+      next_actions: approvalError ? asStringArray(approvalState.next_actions) : [
+        "Approve only the current newtrack stage after review.",
+        "Use the exact returned continuation after both spec and plan stages are approved."
       ]
     };
   }
   if (!stagedApprovalReady(approval)) {
     return {
-      ...summary,
+      ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      approval,
-      review_artifacts: stageReviewArtifacts || reviewArtifacts,
-      review_bundle: stageReviewBundle,
-      warnings,
-      next_actions: [
-        "Review the current staged approval bundle.",
-        "Call newtrack again with execute:true and approvalComplete:true only after every staged approval is complete."
-      ],
       error: approvalError || "Staged approval is required before creating track artifacts"
+    };
+  }
+  if (!specJson || !planJson || !collection.metadata || !collection.learningsEntry) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "approval_session_integrity",
+      error: "Approved newtrack session is missing frozen spec, plan, metadata, or learnings snapshots."
     };
   }
   const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
-      ...summary,
+      ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_review_drift",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      approval,
-      review_artifacts: stageReviewArtifacts || reviewArtifacts,
-      review_bundle: stageReviewBundle,
       review_validation: reviewValidation,
-      warnings,
       error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval"
     };
   }
-  const existingTrack = findTrack(root, trackId);
-  if (existingTrack && asStringArray(reviewValidation.files).length === 0) {
-    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
-  }
-  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
   const traceBefore = beginTrace(root);
-  const dir = import_node_path40.default.join(root, "cadre", "tracks", safeName(trackId));
-  const learningsEntry = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: String(trackId),
-    recorded_at: utcNow(),
-    text: trackLearningsText(String(trackId))
-  };
-  const writeReviewedJson = (relativePath, value) => {
-    if (reusedReviewFiles.has(relativePath)) return;
-    writeJson(import_node_path40.default.join(root, relativePath), value);
-  };
-  const writeReviewedText = (relativePath, text2) => {
-    if (reusedReviewFiles.has(relativePath)) return;
-    import_node_fs23.default.writeFileSync(import_node_path40.default.join(root, relativePath), text2);
-  };
-  import_node_fs23.default.mkdirSync(dir, { recursive: true });
-  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/metadata.json`, metadata);
-  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/spec.json`, specJson);
-  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/plan.json`, planJson);
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/spec.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/plan.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, `${JSON.stringify(learningsEntry)}
-`);
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);
-  const event = appendCadreEvent(root, {
+  const approvalSessionId = asOptionalString(approvalState.session_id);
+  const formulaId2 = asOptionalString(args.formulaId || args.formula_id);
+  const recordedEvents = approvalSessionId ? readCadreEvents(root, 0) : [];
+  const existingEvent = approvalSessionId ? recordedEvents.find((candidate) => candidate.kind === "track_created" && candidate.approval_session_id === approvalSessionId) : null;
+  const event = existingEvent ? { ok: true, reused: true, path: "cadre/events.jsonl", event: existingEvent } : appendCadreEvent(root, {
     kind: "track_created",
     workflow: "newtrack",
-    track_id: String(trackId),
-    status: metadata.status,
-    tags: metadata.tags || []
+    track_id: trackId,
+    approval_session_id: approvalSessionId || null,
+    status: finalMetadata.status,
+    tags: finalMetadata.tags || []
+  });
+  const existingFormulaEvent = approvalSessionId && formulaId2 ? recordedEvents.find((candidate) => candidate.kind === "formula_poured" && candidate.approval_session_id === approvalSessionId) : null;
+  const formulaEvent = !formulaId2 ? null : existingFormulaEvent ? { ok: true, reused: true, path: "cadre/events.jsonl", event: existingFormulaEvent } : appendCadreEvent(root, {
+    kind: "formula_poured",
+    workflow: "formula",
+    formula_id: formulaId2,
+    wisp_id: asOptionalString(args.wispId || args.wisp_id) || null,
+    track_id: trackId,
+    approval_session_id: approvalSessionId || null
   });
   const approvalAudit = recordApprovalCompletionFromArgs(root, args);
   const controlCommit = commitTrace(root, args, {
@@ -12016,31 +12229,34 @@ function workflowNewTrack(root, args = {}) {
     workflow: "newtrack",
     subject: `create ${trackId}`,
     before: traceBefore,
-    trackId: String(trackId),
+    trackId,
     allowDirty: true,
-    includeDirtyFiles: asStringArray(reviewValidation.files),
+    includeDirtyFiles: [
+      ...asStringArray(reviewValidation.files),
+      "cadre/tracks.json",
+      "cadre/events.jsonl"
+    ],
     note: {
       event_id: asOptionalString(asJsonObject(event.event).id) || null,
       formula_id: asOptionalString(args.formulaId || args.formula_id) || null,
       wisp_id: asOptionalString(args.wispId || args.wisp_id) || null
     }
   });
-  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
+  const approvalSessionClose = regen.ok !== false && controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
   return {
-    ...summary,
+    ...base,
     ok: regen.ok !== false && controlCommit.ok !== false,
     dry_run: false,
-    track_id: trackId,
-    metadata_path: import_node_path40.default.relative(root, import_node_path40.default.join(dir, "metadata.json")),
+    phase_state: regen.ok === false || controlCommit.ok === false ? "recovery_required" : "executed",
+    metadata_path: metadataPath,
     regen,
     event,
+    formula_event: formulaEvent,
     approval_audit: approvalAudit,
     approval_session_close: approvalSessionClose,
     control_commit: controlCommit,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),
-    phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
-    approval,
     worktree_plan: worktreePlan(root, { trackId })
   };
 }
@@ -12343,6 +12559,7 @@ function burnWisp(root, args) {
 function pourFormula(root, args) {
   const id = wispId(args);
   const wisp = id ? readJson(wispPath(root, id), null) : null;
+  const sourceWispId = wisp ? id : null;
   const cooked = wisp ? { ok: true, formula_id: asOptionalString(wisp.formula_id), spec: asJsonObject(wisp.spec), plan: asJsonObject(wisp.plan), variables: asJsonObject(wisp.variables) } : cookFormula(root, args);
   if (cooked.ok === false) return cooked;
   const formula_id = asOptionalString(cooked.formula_id) || formulaId(args) || "formula";
@@ -12351,25 +12568,31 @@ function pourFormula(root, args) {
     `formula:${formula_id}`,
     ...asStringArray(asJsonObject(args.metadata).tags)
   ]));
+  const metadata = {
+    ...asJsonObject(args.metadata),
+    tags
+  };
   const result = workflowNewTrack(root, {
     ...args,
     workflow: "newtrack",
     action: "newtrack",
     trackId,
     formulaId: formula_id,
-    wispId: id || void 0,
+    ...sourceWispId ? { wispId: sourceWispId } : {},
     spec: asJsonObject(cooked.spec),
     plan: asJsonObject(cooked.plan),
     description: asOptionalString(args.description) || `Formula output: ${formula_id}`,
-    metadata: {
-      ...asJsonObject(args.metadata),
-      tags
-    }
+    metadata
   });
-  const pourTraceBefore = result.ok === false ? null : beginTrace(root);
-  const event = result.ok === false ? null : appendCadreEvent(root, { kind: "formula_poured", workflow: "formula", formula_id, wisp_id: id || null, track_id: trackId });
-  const controlCommit = result.ok === false || !event ? null : { ok: true, skipped: true, reason: "formula pour is traced by the newtrack commit", trace_before: pourTraceBefore };
-  return { ...result, ok: result.ok !== false && (!controlCommit || controlCommit.ok !== false), formula_id, wisp_id: id || null, pour_event: event, pour_commit: controlCommit };
+  return {
+    ...result,
+    formula_id,
+    wisp_id: sourceWispId,
+    metadata: result.metadata || metadata,
+    metadata_state: result.metadata ? "frozen" : "proposed",
+    pour_event: result.formula_event || null,
+    pour_commit: result.control_commit || null
+  };
 }
 function workflowFormula(root, args = {}) {
   const action = formulaAction(args);
@@ -15169,48 +15392,6 @@ function refreshReviewFiles(root, args, levels) {
     documentIds: Array.from(new Set(files.map((file) => file.documentId).filter((value) => Boolean(value)))),
     paths: files.map((file) => file.path)
   };
-}
-
-// src/core/application/runtime/approval-stage-cursor.ts
-function validRequestedPrefix(session, stages, requested, requestedStage) {
-  const order = stages.map((stage) => stage.id);
-  const previous = session.approved_stages;
-  if (requested.length < previous.length || requested.length > previous.length + 1) return false;
-  if (!requested.every((stageId, index) => stageId === order[index])) return false;
-  if (!previous.every((stageId, index) => stageId === requested[index])) return false;
-  return requested.length === previous.length || requestedStage === requested[requested.length - 1];
-}
-function approvalStageCursor(root, args, workflow, stages) {
-  const sessionId = requestedApprovalSessionId(args);
-  const session = sessionId ? readApprovalSession(root, sessionId) : null;
-  const validSession = session?.workflow === workflow ? session : null;
-  let approved = validSession?.approved_stages || [];
-  const requested = approvedStageIds(args);
-  if (validSession && validRequestedPrefix(validSession, stages, requested, requestedApprovalStage(args))) {
-    approved = requested;
-  }
-  return {
-    session: validSession,
-    approvedStageIds: approved,
-    activeStage: stages.find((stage) => !approved.includes(stage.id)) || null
-  };
-}
-function uniqueReviewFiles(files) {
-  const seen = /* @__PURE__ */ new Set();
-  return files.filter((file) => {
-    if (seen.has(file.path)) return false;
-    seen.add(file.path);
-    return true;
-  });
-}
-function scopedApprovalReviewFiles(cursor, currentFiles, newFinalFiles = []) {
-  const approvedSnapshots = cursor.approvedStageIds.flatMap((stageId) => cursor.session ? stageRecord(cursor.session, stageId)?.snapshot_files || [] : []);
-  const frozenFinalFiles = cursor.session?.final_snapshot_files || [];
-  return uniqueReviewFiles([
-    ...approvedSnapshots,
-    ...currentFiles,
-    ...frozenFinalFiles.length > 0 ? frozenFinalFiles : newFinalFiles
-  ]);
 }
 
 // src/core/application/runtime/refresh-stage-lifecycle.ts

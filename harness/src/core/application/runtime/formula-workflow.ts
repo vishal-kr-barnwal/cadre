@@ -367,6 +367,7 @@ function burnWisp(root: string, args: RuntimeArgs): CoreResult {
 function pourFormula(root: string, args: RuntimeArgs): CoreResult {
   const id = wispId(args);
   const wisp = id ? readJson<JsonObject | null>(wispPath(root, id), null) : null;
+  const sourceWispId = wisp ? id : null;
   const cooked = wisp
     ? { ok: true, formula_id: asOptionalString(wisp.formula_id), spec: asJsonObject(wisp.spec), plan: asJsonObject(wisp.plan), variables: asJsonObject(wisp.variables) }
     : cookFormula(root, args);
@@ -379,27 +380,31 @@ function pourFormula(root: string, args: RuntimeArgs): CoreResult {
     `formula:${formula_id}`,
     ...asStringArray(asJsonObject((args as UnknownRecord).metadata).tags),
   ]));
+  const metadata = {
+    ...asJsonObject((args as UnknownRecord).metadata),
+    tags,
+  };
   const result = workflowNewTrack(root, {
     ...args,
     workflow: "newtrack",
     action: "newtrack",
     trackId,
     formulaId: formula_id,
-    wispId: id || undefined,
+    ...(sourceWispId ? { wispId: sourceWispId } : {}),
     spec: asJsonObject(cooked.spec),
     plan: asJsonObject(cooked.plan),
     description: asOptionalString(args.description) || `Formula output: ${formula_id}`,
-    metadata: {
-      ...asJsonObject((args as UnknownRecord).metadata),
-      tags,
-    },
+    metadata,
   });
-  const pourTraceBefore = result.ok === false ? null : beginTrace(root);
-  const event = result.ok === false ? null : appendCadreEvent(root, { kind: "formula_poured", workflow: "formula", formula_id, wisp_id: id || null, track_id: trackId });
-  const controlCommit = result.ok === false || !event
-    ? null
-    : { ok: true, skipped: true, reason: "formula pour is traced by the newtrack commit", trace_before: pourTraceBefore };
-  return { ...result, ok: result.ok !== false && (!controlCommit || controlCommit.ok !== false), formula_id, wisp_id: id || null, pour_event: event, pour_commit: controlCommit };
+  return {
+    ...result,
+    formula_id,
+    wisp_id: sourceWispId,
+    metadata: result.metadata || metadata,
+    metadata_state: result.metadata ? "frozen" : "proposed",
+    pour_event: result.formula_event || null,
+    pour_commit: result.control_commit || null,
+  };
 }
 
 export function workflowFormula(root: string, args: RuntimeArgs = {}): CoreResult {

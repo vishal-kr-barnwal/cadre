@@ -188,6 +188,44 @@ function writeNote(cwd: string, ref: string, sha: string, note: JsonObject): Com
   return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}\n`, sha], { cwd });
 }
 
+interface GitIndexSnapshot {
+  path: string;
+  existed: boolean;
+  content: Buffer | null;
+}
+
+function captureGitIndex(cwd: string): GitIndexSnapshot | null {
+  const located = runCommand("git", ["rev-parse", "--git-path", "index"], { cwd });
+  if (!located.ok || !located.stdout.trim()) return null;
+  const indexPath = path.resolve(cwd, located.stdout.trim());
+  try {
+    return { path: indexPath, existed: true, content: fs.readFileSync(indexPath) };
+  } catch (error) {
+    const code = asOptionalString(asJsonObject(error).code);
+    return code === "ENOENT" ? { path: indexPath, existed: false, content: null } : null;
+  }
+}
+
+function restoreGitIndex(snapshot: GitIndexSnapshot): CoreResult {
+  const lockPath = `${snapshot.path}.lock`;
+  if (fileExists(lockPath)) {
+    return { ok: false, stage: "git_index_restore_lock", error: `Git index lock still exists: ${lockPath}` };
+  }
+  const temporary = `${snapshot.path}.cadre-restore-${process.pid}`;
+  try {
+    if (!snapshot.existed) {
+      fs.rmSync(snapshot.path, { force: true });
+      return { ok: true, restored: true, removed_new_index: true };
+    }
+    fs.writeFileSync(temporary, snapshot.content!);
+    fs.renameSync(temporary, snapshot.path);
+    return { ok: true, restored: true, bytes: snapshot.content!.length };
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    return { ok: false, stage: "git_index_restore", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export function commitTrace(root: string, args: RuntimeArgs, options: CommitTraceOptions): CoreResult {
   if (!traceEnabled(root, options.kind, args, options.forceEnabled === true)) {
     return { ok: true, skipped: true, reason: "traceability disabled or unconfigured" };
@@ -221,9 +259,14 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
     };
   }
 
+  const indexBefore = captureGitIndex(gitRoot);
+  if (!indexBefore) return { ok: false, stage: "git_index_snapshot", files, error: "Unable to snapshot the Git index before staging Cadre trace files." };
   const add = runCommand("git", ["add", "-A", "--", ...files], { cwd: gitRoot });
-  if (!add.ok) return { ok: false, stage: "git_add", files, add };
-  const staged = runCommand("git", ["diff", "--cached", "--quiet"], { cwd: gitRoot });
+  if (!add.ok) {
+    const indexRestore = restoreGitIndex(indexBefore);
+    return { ok: false, stage: indexRestore.ok === false ? "git_add_index_restore" : "git_add", files, add, index_restore: indexRestore };
+  }
+  const staged = runCommand("git", ["diff", "--cached", "--quiet", "--", ...files], { cwd: gitRoot });
   if (staged.status === 0) return { ok: true, skipped: true, reason: "no staged changes", files };
 
   const traceId = `trace_${textHash(JSON.stringify({ root, files, now: utcNow(), workflow: options.workflow })).slice(0, 16)}`;
@@ -245,8 +288,22 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
     "commit",
     "-m", fullSubject,
     "-m", commitBody,
+    "--only",
+    "--", ...files,
   ], { cwd: gitRoot });
-  if (!commit.ok) return { ok: false, stage: "git_commit", files, commit };
+  if (!commit.ok) {
+    const indexRestore = restoreGitIndex(indexBefore);
+    return {
+      ok: false,
+      stage: indexRestore.ok === false ? "git_commit_index_restore" : "git_commit",
+      files,
+      commit,
+      index_restore: indexRestore,
+      error: indexRestore.ok === false
+        ? "Git commit failed and Cadre could not restore the pre-commit index state."
+        : "Git commit failed; Cadre restored the pre-commit index state for an exact retry.",
+    };
+  }
 
   const sha = commitSha(gitRoot);
   const notePayload: JsonObject = {
@@ -267,8 +324,10 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
   if (options.kind === "control") notePayload.control_commit_sha = sha;
   const ref = notesRef(root, args);
   const note = sha && notesEnabled(root) ? writeNote(gitRoot, ref, sha, notePayload) : null;
+  const noteOk = !note || commandOk(note);
   return {
-    ok: !note || commandOk(note),
+    ok: true,
+    trace_complete: noteOk,
     trace_id: traceId,
     kind: options.kind,
     workflow: options.workflow,
@@ -277,6 +336,7 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
     files,
     notes_ref: ref,
     note,
+    warnings: noteOk ? [] : ["The Git commit succeeded, but its Cadre trace note could not be written; the committed workflow result remains authoritative."],
   };
 }
 

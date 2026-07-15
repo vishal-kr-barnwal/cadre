@@ -14,7 +14,7 @@ import {
   type ApprovalBeforeFile,
   type ApprovalSession,
 } from "./approval-session-model";
-import { appendCadreEvent, ensureNativeState } from "./native-state";
+import { appendCadreEvent, ensureNativeState, readCadreEvents } from "./native-state";
 import {
   inspectReviewGitState,
   removeReviewIntentToAddAtomic,
@@ -73,6 +73,12 @@ function approvalSessions(root: string): ApprovalSession[] {
     .filter((name) => /^[a-f0-9]{24}\.json$/.test(name))
     .map((name) => readApprovalSession(root, name.slice(0, -5)))
     .filter((session): session is ApprovalSession => Boolean(session));
+}
+
+export function approvalSessionForTarget(root: string, relativePath: string): ApprovalSession | null {
+  return approvalSessions(root)
+    .filter((session) => session.snapshot_files.some((file) => file.missing !== true && file.path === relativePath))
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0] || null;
 }
 
 export function unapprovedSkillTargetApproval(root: string, skillId: string): UnapprovedSkillTargetApproval | null {
@@ -435,6 +441,12 @@ export function cancelApprovalSession(root: string, sessionId: string, expectedW
 export function recordApprovalCompletion(root: string, sessionId: string): CoreResult {
   const session = readApprovalSession(root, sessionId);
   if (!session) return { ok: false, error: "Approval session was not found for completion audit" };
+  const existing = readCadreEvents(root, 0).find((event) => (
+    event.kind === "approval.completed" && event.approval_session_id === sessionId
+  ));
+  if (existing) {
+    return { ok: true, reused: true, path: "cadre/events.jsonl", event: existing };
+  }
   return appendCadreEvent(root, {
     kind: "approval.completed",
     workflow: session.workflow,

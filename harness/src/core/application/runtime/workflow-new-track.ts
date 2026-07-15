@@ -1,139 +1,32 @@
 import fs from "node:fs";
 import path from "node:path";
-import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
-import type { JsonObject, RuntimeArgs, TrackMetadata } from "../../../types";
+import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
+import type { RuntimeArgs, TrackMetadata } from "../../../types";
 
-import { safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
+import { safeName } from "../../infrastructure/runtime/json-store";
 import { gitIdentity } from "../../infrastructure/runtime/system";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { approvalSessionForTarget, closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
-import type { CoreResult, ReviewFile } from "./contracts";
+import type { CoreResult } from "./contracts";
 import { trackGenerationWarnings } from "./generation-quality";
-import { newTrackIntentPrompts, newTrackSchemaIssues } from "./intent-prompts";
-import { withGeneratedMarker } from "./markdown-docs";
-import { appendCadreEvent } from "./native-state";
-import { renderPlanMarkdown } from "./plan-docs";
+import { newTrackIntentPrompts } from "./intent-prompts";
+import { appendCadreEvent, readCadreEvents } from "./native-state";
+import { newTrackStageCollection } from "./new-track-stage-lifecycle";
 import { planAssist, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
-import { documentReviewPair, jsonReviewFile, plainReviewFile, reviewArtifactsFromFiles, textReviewFile, trackLearningsText } from "./review-bundles";
-import { renderSpecMarkdown } from "./spec-docs";
-import { applyStagedApprovalSessionPayload, newTrackApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { findTrack } from "./track-context";
-import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, templateJson, workflowSummary } from "./workflow-response";
+import {
+  applyStagedApprovalSessionPayload,
+  newTrackApprovalStages,
+  stagedApprovalError,
+  stagedApprovalReady,
+  stagedApprovalState,
+  validateApprovedTargetReviewFiles,
+} from "./staged-approval";
+import { markdownPayloadError, workflowSummary } from "./workflow-response";
 
-export function newTrackReviewFiles(trackId: string, spec: JsonObject, plan: JsonObject, metadata: TrackMetadata): ReviewFile[] {
-  const safeTrack = safeName(trackId);
-  const specJson = normalizeSpecJson(trackId, spec);
-  const planJson = normalizePlanJson(trackId, plan, specJson);
-  const learningsEntry: JsonObject = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: trackId,
-    recorded_at: utcNow(),
-    text: trackLearningsText(trackId),
-  };
-  const specCanonical = `cadre/tracks/${safeTrack}/spec.json`;
-  const specProjection = `cadre/tracks/${safeTrack}/spec.md`;
-  const planCanonical = `cadre/tracks/${safeTrack}/plan.json`;
-  const planProjection = `cadre/tracks/${safeTrack}/plan.md`;
-  const learningsCanonical = `${JSON.stringify(learningsEntry)}\n`;
-  return [
-    ...documentReviewPair("spec", jsonReviewFile(
-      specCanonical,
-      "Track spec canonical",
-      "spec",
-      specJson
-    ),
-    textReviewFile(
-      specProjection,
-      "Track spec",
-      "spec.json",
-      withGeneratedMarker(specCanonical, "cadre.spec.v1", renderSpecMarkdown(specJson, specCanonical), { canonicalContent: `${JSON.stringify(specJson, null, 2)}\n`, projection: specProjection })
-    )),
-    ...documentReviewPair("plan", jsonReviewFile(
-      planCanonical,
-      "Track plan canonical",
-      "plan",
-      planJson
-    ),
-    textReviewFile(
-      planProjection,
-      "Track plan",
-      "plan.json",
-      withGeneratedMarker(planCanonical, "cadre.plan.v1", renderPlanMarkdown(planJson, planCanonical), { canonicalContent: `${JSON.stringify(planJson, null, 2)}\n`, projection: planProjection })
-    )),
-    { ...jsonReviewFile(
-      `cadre/tracks/${safeTrack}/metadata.json`,
-      "Track metadata",
-      "metadata",
-      metadata
-    ), documentId: "metadata", reviewRole: "machine" },
-    ...documentReviewPair("learnings", plainReviewFile(
-      `cadre/tracks/${safeTrack}/learnings.jsonl`,
-      "Track learnings canonical",
-      "template:learnings_seed.json",
-      learningsCanonical
-    ),
-    textReviewFile(
-      `cadre/tracks/${safeTrack}/learnings.md`,
-      "Track learnings",
-      "learnings.jsonl",
-      withGeneratedMarker(`cadre/tracks/${safeTrack}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(trackId), { canonicalContent: learningsCanonical, projection: `cadre/tracks/${safeTrack}/learnings.md` })
-    ), undefined, "generated"),
-  ];
-}
-
-export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(root, args, "newtrack");
-  const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
-  const summary = workflowSummary(root, "newtrack", args);
-  const markdownError = markdownPayloadError(args);
-  if (markdownError) return { ...summary, ...markdownError };
-  const schemaIssues = newTrackSchemaIssues(args);
-  if (schemaIssues.length > 0) {
-    const encodedRoot = encodeURIComponent(root);
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_clarification",
-      stage: "schema_validation",
-      schema_errors: schemaIssues,
-      schema_resources: [
-        `cadre://artifact-schema?root=${encodedRoot}&artifact=spec`,
-        `cadre://artifact-schema?root=${encodedRoot}&artifact=plan`,
-      ],
-      next_actions: [
-        "Load the Cadre spec and plan schemas before drafting newtrack payloads.",
-        "Call newtrack again with canonical spec and plan JSON fields, not aliases or Markdown-derived shapes.",
-      ],
-      error: "New track spec or plan JSON does not match Cadre schema; Cadre will not generate review artifacts until the payload is schema-shaped.",
-    };
-  }
-  const intentPrompts = newTrackIntentPrompts(args);
-  if (intentPrompts.length > 0) {
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_clarification",
-      stage: "intent_clarification",
-      intent_prompts: intentPrompts,
-      next_actions: [
-        "Answer intent_prompts with the client native selector or concise chat fallback.",
-        "Call newtrack again with trackId plus structured spec and plan JSON before review or mutation.",
-      ],
-      error: "New track intent is under-specified; Cadre will not generate spec or plan artifacts until goal, outcome, acceptance, and scope are clear.",
-    };
-  }
-  const trackId = args.trackId || args.track_id;
-  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  if (!isRecord(args.plan)) return { ...summary, ok: false, error: "plan is required" };
-  const specJson = normalizeSpecJson(String(trackId), args.spec || { title: `Spec: ${trackId}`, description: asOptionalString(args.description) || String(trackId) });
-  const planJson = normalizePlanJson(String(trackId), args.plan, specJson);
-  const metadata: TrackMetadata = {
-    track_id: trackId,
+function trackMetadata(root: string, trackId: string, args: RuntimeArgs): TrackMetadata {
+  const supplied = asJsonObject(args.metadata);
+  return {
     type: "feature",
     status: "new",
     priority: "medium",
@@ -143,152 +36,257 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     reviewer: null,
     git_branch: `track/${trackId}`,
     worktree_path: `.worktrees/cadre/tracks/${safeName(trackId)}/integrate/root`,
-    ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
+    ...supplied,
+    track_id: trackId,
   };
-  const reviewFiles = newTrackReviewFiles(String(trackId), specJson, planJson, metadata);
-  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const approval = stagedApprovalState(root, "newtrack", approvalArgs, newTrackApprovalStages(), reviewFiles, { track_id: String(trackId), final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts;
-  const approvalError = stagedApprovalError(approval);
-  const warnings = [
-    ...trackGenerationWarnings(specJson, planJson),
-    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
-    ...(approvalError ? [approvalError] : []),
-  ];
-  const dryRun = args.execute !== true;
-  const assist = planAssist(root, { ...args, plan: planJson, trackId });
-  if (dryRun) {
+}
+
+function clarificationWithoutTarget(summary: CoreResult, prompts: ReturnType<typeof newTrackIntentPrompts>): CoreResult {
+  return {
+    ...summary,
+    ok: false,
+    dry_run: true,
+    phase_state: "awaiting_clarification",
+    stage: "intent_clarification",
+    intent_prompts: prompts,
+    next_actions: ["Choose a stable track id before Cadre starts the spec-to-plan approval session."],
+    error: "New track intent is under-specified; trackId is required before staged artifact collection can begin.",
+  };
+}
+
+function occupiedTrackTargets(root: string, trackId: string, allowedSessionId: string | null): string[] {
+  const relativeDirectory = `cadre/tracks/${safeName(trackId)}`;
+  try {
+    return fs.readdirSync(path.join(root, relativeDirectory), { withFileTypes: true })
+      .map((entry) => `${relativeDirectory}/${entry.name}`)
+      .filter((relativePath) => {
+        const owner = approvalSessionForTarget(root, relativePath);
+        return !owner || owner.workflow !== "newtrack" || owner.session_id !== allowedSessionId;
+      });
+  } catch {
+    return [];
+  }
+}
+
+export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+  args = applyStagedApprovalSessionPayload(root, args, "newtrack");
+  const summary = workflowSummary(root, "newtrack", args);
+  const markdownError = markdownPayloadError(args);
+  if (markdownError) return { ...summary, ...markdownError };
+  const intentPrompts = newTrackIntentPrompts(args);
+  const trackId = asOptionalString(args.trackId || args.track_id);
+  if (!trackId) return clarificationWithoutTarget(summary, intentPrompts);
+
+  const metadata = trackMetadata(root, trackId, args);
+  const stages = newTrackApprovalStages();
+  const collection = newTrackStageCollection(root, args, trackId, stages, metadata);
+  const metadataPath = `cadre/tracks/${safeName(trackId)}/metadata.json`;
+  const occupiedTargets = occupiedTrackTargets(root, trackId, collection.cursor.session?.session_id || null);
+  if (occupiedTargets.length > 0) {
     return {
       ...summary,
-      ok: assist.ok !== false && !approvalError,
+      ok: false,
+      dry_run: true,
+      track_id: trackId,
+      occupied_targets: occupiedTargets,
+      error: `Track target already exists or collides after path normalization: cadre/tracks/${safeName(trackId)}`,
+    };
+  }
+  const approval = stagedApprovalState(root, "newtrack", args, stages, collection.files, {
+    track_id: trackId,
+    final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"],
+  }, { allowEmptyActiveStage: true });
+  const approvalState = asJsonObject(approval);
+  const stageReviewBundle = asJsonObject(approvalState.current_review_bundle);
+  const stageReviewArtifacts = Array.isArray(approvalState.current_review_artifacts)
+    ? approvalState.current_review_artifacts.map(asJsonObject)
+    : [];
+  const approvalError = stagedApprovalError(approval);
+  const cancelled = approvalState.cancelled === true;
+  const specJson = collection.specJson;
+  const planJson = collection.planJson;
+  const finalMetadata = collection.metadata || metadata;
+  const assist = planJson ? planAssist(root, { ...args, plan: planJson, trackId }) : null;
+  const warnings = [
+    ...(specJson && planJson ? trackGenerationWarnings(specJson, planJson) : []),
+    ...asStringArray(stageReviewBundle.warnings),
+    ...(approvalError ? [approvalError] : []),
+  ];
+  const base = {
+    ...summary,
+    track_id: trackId,
+    approval,
+    human_review: null,
+    review_artifacts: stageReviewArtifacts,
+    review_bundle: Object.keys(stageReviewBundle).length > 0 ? stageReviewBundle : null,
+    warnings,
+    ...(collection.metadata ? { metadata: collection.metadata } : {}),
+    ...(assist ? { plan_assist: assist } : {}),
+  };
+  if (cancelled) return { ...base, ok: true, dry_run: true, phase_state: "cancelled" };
+  if (collection.schemaIssues.length > 0 && !approvalError) {
+    const encodedRoot = encodeURIComponent(root);
+    const artifact = collection.activeKind || "spec";
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "schema_validation",
+      track_id: trackId,
+      approval,
+      schema_errors: collection.schemaIssues,
+      schema_resources: [`cadre://artifact-schema?root=${encodedRoot}&artifact=${artifact}`],
+      missing_payload: collection.missingEvidence,
+      required_payload: collection.missingEvidence,
+      warnings,
+      next_actions: [
+        `Load the Cadre ${artifact} schema, correct only the current ${artifact} input, and resume this approval session without recording approval.`,
+      ],
+      error: `Current newtrack ${artifact} JSON does not match the Cadre schema.`,
+    };
+  }
+  if ((intentPrompts.length > 0 || collection.missingEvidence.length > 0) && !approvalError) {
+    return {
+      ...summary,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: intentPrompts.length > 0 ? "intent_clarification" : "track_evidence",
+      track_id: trackId,
+      approval,
+      intent_prompts: intentPrompts,
+      missing_payload: collection.missingEvidence,
+      required_payload: collection.missingEvidence,
+      warnings,
+      next_actions: [
+        `Supply only the current ${collection.activeKind || "spec"} evidence and resume with approval.session_id; session resume is not approval.`,
+      ],
+      error: intentPrompts.length > 0
+        ? "New track intent needs clearer goal, outcome, acceptance, or scope evidence before spec review."
+        : `Current newtrack stage requires evidence-backed ${collection.missingEvidence.join(" and ")} JSON.`,
+    };
+  }
+  if (args.execute !== true) {
+    return {
+      ...base,
+      ok: !approvalError && (!assist || assist.ok !== false),
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      approval,
-      review_artifacts: stageReviewArtifacts || reviewArtifacts,
-      review_bundle: stageReviewBundle,
-      warnings,
-      error: approvalError || undefined,
-      next_actions: approvalError ? asStringArray(asJsonObject(approval).next_actions) : [
-        "Approve newtrack one stage at a time with approvedStages.",
-        "After spec and plan are approved, call newtrack with execute:true and approvalComplete:true using the same approval session.",
+      ...(approvalError ? { error: approvalError } : {}),
+      next_actions: approvalError ? asStringArray(approvalState.next_actions) : [
+        "Approve only the current newtrack stage after review.",
+        "Use the exact returned continuation after both spec and plan stages are approved.",
       ],
     };
   }
   if (!stagedApprovalReady(approval)) {
     return {
-      ...summary,
+      ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_approval",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      approval,
-      review_artifacts: stageReviewArtifacts || reviewArtifacts,
-      review_bundle: stageReviewBundle,
-      warnings,
-      next_actions: [
-        "Review the current staged approval bundle.",
-        "Call newtrack again with execute:true and approvalComplete:true only after every staged approval is complete.",
-      ],
       error: approvalError || "Staged approval is required before creating track artifacts",
+    };
+  }
+  if (!specJson || !planJson || !collection.metadata || !collection.learningsEntry) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_staged_approval",
+      stage: "approval_session_integrity",
+      error: "Approved newtrack session is missing frozen spec, plan, metadata, or learnings snapshots.",
     };
   }
   const reviewValidation = validateApprovedTargetReviewFiles(root, args);
   if (reviewValidation.ok === false) {
     return {
-      ...summary,
+      ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_staged_approval",
       stage: "staged_review_drift",
-      track_id: trackId,
-      metadata,
-      plan_assist: assist,
-      approval,
-      review_artifacts: stageReviewArtifacts || reviewArtifacts,
-      review_bundle: stageReviewBundle,
       review_validation: reviewValidation,
-      warnings,
       error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
     };
   }
-  const existingTrack = findTrack(root, trackId);
-  if (existingTrack && asStringArray(reviewValidation.files).length === 0) {
-    return { ...summary, ok: false, track_id: trackId, error: "Track already exists" };
-  }
-  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
+
   const traceBefore = beginTrace(root);
-  const dir = path.join(root, "cadre", "tracks", safeName(trackId));
-  const learningsEntry: JsonObject = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: String(trackId),
-    recorded_at: utcNow(),
-    text: trackLearningsText(String(trackId)),
-  };
-  const writeReviewedJson = (relativePath: string, value: JsonObject): void => {
-    if (reusedReviewFiles.has(relativePath)) return;
-    writeJson(path.join(root, relativePath), value);
-  };
-  const writeReviewedText = (relativePath: string, text: string): void => {
-    if (reusedReviewFiles.has(relativePath)) return;
-    fs.writeFileSync(path.join(root, relativePath), text);
-  };
-  fs.mkdirSync(dir, { recursive: true });
-  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/metadata.json`, metadata);
-  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/spec.json`, specJson);
-  writeReviewedJson(`cadre/tracks/${safeName(trackId)}/plan.json`, planJson);
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/spec.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/spec.json`, "cadre.spec.v1", renderSpecMarkdown(specJson, `cadre/tracks/${safeName(trackId)}/spec.json`)));
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/plan.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/plan.json`, "cadre.plan.v1", renderPlanMarkdown(planJson, `cadre/tracks/${safeName(trackId)}/plan.json`)));
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, `${JSON.stringify(learningsEntry)}\n`);
-  writeReviewedText(`cadre/tracks/${safeName(trackId)}/learnings.md`, withGeneratedMarker(`cadre/tracks/${safeName(trackId)}/learnings.jsonl`, "cadre.learnings.v1", trackLearningsText(String(trackId))));
   const regen = regenIndex(root);
-  const event = appendCadreEvent(root, {
-    kind: "track_created",
-    workflow: "newtrack",
-    track_id: String(trackId),
-    status: metadata.status,
-    tags: metadata.tags || [],
-  });
+  const approvalSessionId = asOptionalString(approvalState.session_id);
+  const formulaId = asOptionalString(args.formulaId || args.formula_id);
+  const recordedEvents = approvalSessionId ? readCadreEvents(root, 0) : [];
+  const existingEvent = approvalSessionId
+    ? recordedEvents.find((candidate) => (
+      candidate.kind === "track_created" && candidate.approval_session_id === approvalSessionId
+    ))
+    : null;
+  const event = existingEvent
+    ? { ok: true, reused: true, path: "cadre/events.jsonl", event: existingEvent }
+    : appendCadreEvent(root, {
+      kind: "track_created",
+      workflow: "newtrack",
+      track_id: trackId,
+      approval_session_id: approvalSessionId || null,
+      status: finalMetadata.status,
+      tags: finalMetadata.tags || [],
+    });
+  const existingFormulaEvent = approvalSessionId && formulaId
+    ? recordedEvents.find((candidate) => (
+      candidate.kind === "formula_poured" && candidate.approval_session_id === approvalSessionId
+    ))
+    : null;
+  const formulaEvent = !formulaId
+    ? null
+    : existingFormulaEvent
+      ? { ok: true, reused: true, path: "cadre/events.jsonl", event: existingFormulaEvent }
+      : appendCadreEvent(root, {
+        kind: "formula_poured",
+        workflow: "formula",
+        formula_id: formulaId,
+        wisp_id: asOptionalString(args.wispId || args.wisp_id) || null,
+        track_id: trackId,
+        approval_session_id: approvalSessionId || null,
+      });
   const approvalAudit = recordApprovalCompletionFromArgs(root, args);
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "newtrack",
-      subject: `create ${trackId}`,
-      before: traceBefore,
-      trackId: String(trackId),
-      allowDirty: true,
-      includeDirtyFiles: asStringArray(reviewValidation.files),
-      note: {
-        event_id: asOptionalString(asJsonObject(event.event).id) || null,
-        formula_id: asOptionalString(args.formulaId || args.formula_id) || null,
+    subject: `create ${trackId}`,
+    before: traceBefore,
+    trackId,
+    allowDirty: true,
+    includeDirtyFiles: [
+      ...asStringArray(reviewValidation.files),
+      "cadre/tracks.json",
+      "cadre/events.jsonl",
+    ],
+    note: {
+      event_id: asOptionalString(asJsonObject(event.event).id) || null,
+      formula_id: asOptionalString(args.formulaId || args.formula_id) || null,
       wisp_id: asOptionalString(args.wispId || args.wisp_id) || null,
     },
   });
-  const approvalSessionClose = controlCommit.ok !== false ? closeApprovalSessionFromArgs(root, args) : null;
+  const approvalSessionClose = regen.ok !== false && controlCommit.ok !== false
+    ? closeApprovalSessionFromArgs(root, args)
+    : null;
   return {
-    ...summary,
+    ...base,
     ok: regen.ok !== false && controlCommit.ok !== false,
     dry_run: false,
-    track_id: trackId,
-    metadata_path: path.relative(root, path.join(dir, "metadata.json")),
+    phase_state: regen.ok === false || controlCommit.ok === false ? "recovery_required" : "executed",
+    metadata_path: metadataPath,
     regen,
     event,
+    formula_event: formulaEvent,
     approval_audit: approvalAudit,
     approval_session_close: approvalSessionClose,
     control_commit: controlCommit,
     review_validation: reviewValidation,
     reused_review_files: asStringArray(reviewValidation.files),
-    phase_state: controlCommit.ok === false ? "recovery_required" : "executed",
-    approval,
     worktree_plan: worktreePlan(root, { trackId }),
   };
 }

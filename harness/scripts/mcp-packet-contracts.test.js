@@ -448,6 +448,132 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
   }
 });
 
+test("public newtrack packets collect spec then plan and execute the exact continuation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-newtrack-staging-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  const trackId = "public_newtrack_20260714";
+  const spec = {
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: trackId,
+    title: "Public newtrack lifecycle",
+    description: "Create one track through an ordered spec then plan review session.",
+    functional_requirements: [{ heading: "Spec first", body: "Review requirements before Cadre requests the plan." }],
+    non_functional_requirements: [],
+    acceptance_criteria: [{ heading: "Exact continuation", body: "The returned continuation writes only approved snapshot bytes." }],
+    out_of_scope: [{ heading: "No eager plan", body: "Do not generate plan or final files during spec review." }],
+  };
+  const plan = {
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: trackId,
+    title: "Plan: public newtrack lifecycle",
+    phases: [{
+      phase_index: 1,
+      title: "Phase 1: Implement",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_task1",
+        title: "Implement the approved spec",
+        status: "pending",
+        files: ["src/newtrack.ts"],
+        depends_on: [],
+        commit_shas: [],
+        repo_shas: {},
+      }],
+    }],
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    spawnSync("git", ["config", "user.email", "newtrack@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Newtrack Test"], { cwd: root });
+
+    let packet = invoke({
+      root,
+      workflow: "newtrack",
+      input: { trackId, spec, commitMode: "off" },
+      execute: false,
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "spec");
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+    const sessionId = packet.decision.session_id;
+
+    packet = invoke({
+      root,
+      workflow: "newtrack",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "spec", approved_stages: ["spec"] },
+    });
+    assert.equal(packet.decision.kind, "clarification");
+    assert.equal(packet.decision.current_stage, "plan");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.decision.resume, { approval: { session_id: sessionId } });
+    assert.deepEqual(packet.required, ["plan"]);
+    assert.deepEqual(packet.artifacts, []);
+
+    packet = invoke({
+      root,
+      workflow: "newtrack",
+      input: { plan },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "plan");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      `cadre/tracks/${trackId}/plan.json`,
+      `cadre/tracks/${trackId}/plan.md`,
+    ]);
+    for (const name of ["metadata.json", "learnings.jsonl", "learnings.md"]) {
+      assert.equal(fs.existsSync(path.join(root, "cadre", "tracks", trackId, name)), false, `${name} is final-only`);
+    }
+
+    packet = invoke({
+      root,
+      workflow: "newtrack",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "plan", approved_stages: ["spec", "plan"] },
+    });
+    assert.equal(packet.decision.kind, "ready");
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "newtrack",
+        input: {},
+        execute: true,
+        approval: { session_id: sessionId, approved_stages: ["spec", "plan"], complete: true },
+      },
+    });
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const approvedSnapshots = JSON.parse(fs.readFileSync(sessionFile, "utf8")).snapshot_files
+      .filter((file) => file.missing !== true)
+      .map((file) => ({ path: file.path, content: file.content }));
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+    for (const snapshot of approvedSnapshots) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public revise packets preserve declared spec then plan staging through the exact continuation", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-revise-staging-"));
   const invoke = (request) => {
