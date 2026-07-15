@@ -1,10 +1,10 @@
 import path from "node:path";
 import { asJsonArray, asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
-import type { JsonObject, JsonValue, RuntimeArgs, UnknownRecord } from "../../../types";
+import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import { fileExists, readJson, utcNow } from "../../infrastructure/runtime/json-store";
 import { readJsonl, renderJsonCodeblock, renderJsonlMarkdown } from "./artifact-actions";
-import { unapprovedTargetBaselineContent } from "./approval-session-store";
+import { readApprovalSession, unapprovedTargetBaselineContent } from "./approval-session-store";
 import type { ReviewFile } from "./contracts";
 import type { RefreshLevel } from "./refresh-analysis";
 import { withGeneratedMarker, renderMarkdownDoc } from "./markdown-docs";
@@ -12,7 +12,7 @@ import { documentReviewPair, jsonReviewFile, plainReviewFile, textReviewFile } f
 import { styleGuideReviewFiles } from "./setup-review-files";
 import { asArray } from "./status";
 import { availableStyleGuideIds, requestedStyleGuideIds, setupStyleGuides } from "./tech-stack";
-import { normalizeProjectDoc, templateJson } from "./workflow-response";
+import { templateJson } from "./workflow-response";
 
 interface ProjectDocumentSpec {
   level: RefreshLevel;
@@ -20,9 +20,7 @@ interface ProjectDocumentSpec {
   kind: string;
   canonical: string;
   projection: string;
-  template: string;
   title: string;
-  notesHeading: string;
   schema: string;
   source: string;
 }
@@ -40,9 +38,7 @@ const PROJECT_DOCUMENTS: ProjectDocumentSpec[] = [
     kind: "product",
     canonical: "cadre/product.json",
     projection: "cadre/product.md",
-    template: "product.json",
     title: "Product Context",
-    notesHeading: "Project-Specific Product Notes",
     schema: "cadre.product.v1",
     source: "proposedContext.product",
   },
@@ -52,9 +48,7 @@ const PROJECT_DOCUMENTS: ProjectDocumentSpec[] = [
     kind: "product_guidelines",
     canonical: "cadre/product_guidelines.json",
     projection: "cadre/product_guidelines.md",
-    template: "product_guidelines.json",
     title: "Product Guidelines",
-    notesHeading: "Project-Specific Product Guideline Notes",
     schema: "cadre.product_guidelines.v1",
     source: "proposedContext.productGuidelines",
   },
@@ -64,9 +58,7 @@ const PROJECT_DOCUMENTS: ProjectDocumentSpec[] = [
     kind: "workflow",
     canonical: "cadre/workflow.json",
     projection: "cadre/workflow.md",
-    template: "workflow.json",
     title: "Project Workflow",
-    notesHeading: "Project-Specific Workflow Notes",
     schema: "cadre.workflow.v1",
     source: "proposedContext.workflowPolicy",
   },
@@ -195,18 +187,6 @@ function sectionKey(value: JsonObject): string {
   return asOptionalString(value.id) || asOptionalString(value.heading)?.toLowerCase() || "";
 }
 
-function currentJson(root: string, relativePath: string): JsonObject {
-  const baseline = unapprovedTargetBaselineContent(root, relativePath);
-  if (baseline === undefined) return readJson<JsonObject>(path.join(root, relativePath), {});
-  if (baseline === null) return {};
-  try {
-    const parsed: unknown = JSON.parse(baseline);
-    return isRecord(parsed) ? asJsonObject(parsed) : {};
-  } catch {
-    return {};
-  }
-}
-
 function currentJsonl(root: string, relativePath: string): JsonObject[] {
   const baseline = unapprovedTargetBaselineContent(root, relativePath);
   if (baseline === undefined) return readJsonl(path.join(root, relativePath));
@@ -228,53 +208,55 @@ function matchesTemplateSection(current: JsonObject | undefined, template: JsonO
   return Array.from(keys).every((key) => JSON.stringify(current[key]) === JSON.stringify(template[key]));
 }
 
-function mergeRefreshSections(current: JsonObject, normalized: JsonObject, spec: ProjectDocumentSpec, raw: JsonObject): JsonValue[] {
-  if (Array.isArray(raw.sections) && raw.sections.length > 0) return raw.sections;
-  const currentSections = asArray(current.sections).map(asJsonObject);
-  const currentByKey = new Map(currentSections.map((section) => [sectionKey(section), section]));
-  const template = templateJson(spec.template, { sections: [] });
-  const templateByKey = new Map(asArray(template.sections).map(asJsonObject).map((section) => [sectionKey(section), section]));
-  const normalizedSections = asArray(normalized.sections).map(asJsonObject);
-  const normalizedKeys = new Set(normalizedSections.map(sectionKey).filter(Boolean));
-  const merged = normalizedSections.flatMap((section) => {
-    const key = sectionKey(section);
-    const templateSection = templateByKey.get(key);
-    const currentSection = currentByKey.get(key);
-    const generatedBody = asOptionalString(section.body) || "";
-    const templateBody = asOptionalString(templateSection?.body) || "";
-    if (generatedBody !== templateBody) return [section];
-    return currentSection && !matchesTemplateSection(currentSection, templateSection) ? [currentSection] : [];
-  });
-  const preservedCustom = currentSections.filter((section) => {
-    const key = sectionKey(section);
-    return Boolean(key) && !normalizedKeys.has(key) && !matchesTemplateSection(section, templateByKey.get(key));
-  });
-  return [...merged, ...preservedCustom];
+function stableJson(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
 }
 
-function normalizedRefreshProjectDocument(root: string, spec: ProjectDocumentSpec, rawValue: unknown): JsonObject {
+function withoutUpdatedAt(value: JsonObject): JsonObject {
+  const normalized = { ...value };
+  delete normalized.updated_at;
+  return normalized;
+}
+
+function stableReviewUpdatedAt(root: string, args: RuntimeArgs, relativePath: string, candidate: JsonObject): string {
+  const raw = rawArgs(args);
+  const sessionId = asOptionalString(raw.approvalSessionId || raw.approval_session_id);
+  const session = sessionId ? readApprovalSession(root, sessionId) : null;
+  const snapshot = session?.snapshot_files.find((file) => file.path === relativePath);
+  if (snapshot?.content) {
+    try {
+      const parsed: unknown = JSON.parse(snapshot.content);
+      const previous = asJsonObject(parsed);
+      const updatedAt = asOptionalString(previous.updated_at);
+      if (updatedAt && stableJson(withoutUpdatedAt(previous)) === stableJson(withoutUpdatedAt(candidate))) return updatedAt;
+    } catch {
+      // A malformed prior preview is replaced by the current canonical renderer.
+    }
+  }
+  return utcNow();
+}
+
+function normalizedRefreshProjectDocument(spec: ProjectDocumentSpec, rawValue: unknown, updatedAt: string): JsonObject {
   const raw = asJsonObject(rawValue);
-  const current = currentJson(root, spec.canonical);
-  const template = templateJson(spec.template, {});
-  const normalized = normalizeProjectDoc(spec.kind, raw, spec.template, spec.title, spec.notesHeading);
-  const currentSummary = asOptionalString(current.summary) || "";
-  const templateSummary = asOptionalString(template.summary) || "";
   return {
-    ...current,
-    ...normalized,
     ...raw,
     version: 1,
     schema: spec.schema,
     kind: spec.kind,
-    title: normalized.title || current.title || spec.title,
-    summary: asOptionalString(raw.summary || raw.description) || (currentSummary !== templateSummary ? currentSummary : ""),
-    sections: mergeRefreshSections(current, normalized, spec, raw),
-    updated_at: utcNow(),
+    title: asOptionalString(raw.title || raw.name || raw.productName || raw.product_name) || spec.title,
+    summary: asOptionalString(raw.summary || raw.description) || "",
+    sections: Array.isArray(raw.sections) ? raw.sections : [],
+    updated_at: updatedAt,
   };
 }
 
-function projectDocumentFiles(root: string, spec: ProjectDocumentSpec, rawValue: unknown): ReviewFile[] {
-  const canonical = normalizedRefreshProjectDocument(root, spec, rawValue);
+function projectDocumentFiles(root: string, args: RuntimeArgs, spec: ProjectDocumentSpec, rawValue: unknown): ReviewFile[] {
+  const unstamped = normalizedRefreshProjectDocument(spec, rawValue, "");
+  const canonical = { ...unstamped, updated_at: stableReviewUpdatedAt(root, args, spec.canonical, unstamped) };
   const canonicalContent = `${JSON.stringify(canonical, null, 2)}\n`;
   const projection = withGeneratedMarker(
     spec.canonical,
@@ -289,17 +271,16 @@ function projectDocumentFiles(root: string, spec: ProjectDocumentSpec, rawValue:
   );
 }
 
-function techStackFiles(root: string, rawValue: unknown): ReviewFile[] {
+function techStackFiles(root: string, args: RuntimeArgs, rawValue: unknown): ReviewFile[] {
   const canonicalPath = "cadre/tech-stack.json";
   const projectionPath = "cadre/tech-stack.md";
-  const current = currentJson(root, canonicalPath);
-  const candidate = {
-    ...current,
+  const unstamped: JsonObject = {
     ...asJsonObject(rawValue),
     version: 1,
     schema: "cadre.tech_stack.v1",
-    updated_at: utcNow(),
   };
+  delete unstamped.updated_at;
+  const candidate = { ...unstamped, updated_at: stableReviewUpdatedAt(root, args, canonicalPath, unstamped) };
   const canonicalContent = `${JSON.stringify(candidate, null, 2)}\n`;
   const projection = withGeneratedMarker(
     canonicalPath,
@@ -314,19 +295,17 @@ function techStackFiles(root: string, rawValue: unknown): ReviewFile[] {
   );
 }
 
-function repositoryTopologyFiles(root: string, rawValue: unknown): ReviewFile[] {
+function repositoryTopologyFiles(root: string, args: RuntimeArgs, rawValue: unknown): ReviewFile[] {
   const canonicalPath = "cadre/repos.json";
   const projectionPath = "cadre/repos.md";
-  const current = currentJson(root, canonicalPath);
   const raw = asJsonObject(rawValue);
-  const preserveCurrent = !raw.mode || !current.mode || raw.mode === current.mode;
-  const candidate = {
-    ...(preserveCurrent ? current : {}),
+  const unstamped: JsonObject = {
     ...raw,
     version: 1,
     schema: "cadre.repos.v1",
-    updated_at: utcNow(),
   };
+  delete unstamped.updated_at;
+  const candidate = { ...unstamped, updated_at: stableReviewUpdatedAt(root, args, canonicalPath, unstamped) };
   const canonicalContent = `${JSON.stringify(candidate, null, 2)}\n`;
   const projection = withGeneratedMarker(
     canonicalPath,
@@ -427,12 +406,12 @@ export function refreshedPatternsArtifacts(root: string, args: RuntimeArgs): { f
 export function refreshReviewFiles(root: string, args: RuntimeArgs, levels: RefreshLevel[]): RefreshDocumentsResult {
   const files: ReviewFile[] = [];
   for (const spec of PROJECT_DOCUMENTS) {
-    if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root, spec, refreshCandidate(args, spec.level)));
+    if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root, args, spec, refreshCandidate(args, spec.level)));
   }
-  if (levels.includes("tech-stack")) files.push(...techStackFiles(root, refreshCandidate(args, "tech-stack")));
+  if (levels.includes("tech-stack")) files.push(...techStackFiles(root, args, refreshCandidate(args, "tech-stack")));
   if (levels.includes("style-guides")) files.push(...styleGuideFiles(root, args));
   if (levels.includes("patterns")) files.push(...(refreshedPatternsArtifacts(root, args)?.files || []));
-  if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root, refreshCandidate(args, "repository-topology")));
+  if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root, args, refreshCandidate(args, "repository-topology")));
   return {
     files,
     documentIds: Array.from(new Set(files.map((file) => file.documentId).filter((value): value is string => Boolean(value)))),

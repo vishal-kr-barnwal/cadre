@@ -5,17 +5,16 @@ description: "Use when the user invokes {{command}} or asks to start or continue
 
 # {{command}}
 
-Start or continue Cadre's `{{workflow}}` workflow through the packet-owned MCP
-contract.
+Run Cadre's `{{workflow}}` workflow through its MCP packet.
 
-1. Call `cadre_workflow` with resolved project `root`,
-   `workflow:"{{workflow}}"`, workflow `input`, and `execute:false`. Keep fields
-   inside `input`; omit `approval` initially.
+1. Call `cadre_workflow` with project `root`, `workflow:"{{workflow}}"`, workflow
+   `input`, and `execute:false`. Keep fields in `input`; omit `approval` initially.
 2. Follow `decision`. If `next` is non-null, invoke exactly `next.tool` with `next.arguments`
    once. For clarification or formatting, fill only
    `decision.writable_paths` in `decision.resume`. For an explicit current-stage
    edit, do the same with `decision.amend`. Invoke the returned full call; its
    approval object contains only `session_id` and is not approval.
+   A structured value replaces its path; send the complete object.
    Apply prompt `value_map` patches or `selected_id(s)` exactly, preserving
    `false` and `[]`; use custom text only when `allowCustom` is true.
 3. Use `cadre_action`, `cadre_read`, provider write-back, worker completion,

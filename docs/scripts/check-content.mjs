@@ -150,6 +150,7 @@ function checkStagedWorkflowContract(docsBySlug) {
   requireContract(workflowReference, /decision\.amend/, "workflow-reference.md: missing active-stage amendment")
   requireContract(workflowReference, /writable_paths/, "workflow-reference.md: missing bounded continuation writes")
   requireContract(workflowReference, /session-only approval state.*not approval/s, "workflow-reference.md: missing non-approval continuation rule")
+  requireContract(workflowReference, /structured value.*replaces.*complete artifact object/s, "workflow-reference.md: missing authoritative replacement rule")
   requireContract(workflowReference, /approved_stages/, "workflow-reference.md: missing cumulative approval prefix")
   requireContract(workflowReference, /product.*product_guidelines.*technical.*workflow/s, "workflow-reference.md: missing setup stage order")
 

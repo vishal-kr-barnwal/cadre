@@ -92,7 +92,7 @@ export function transitionApprovalSession(
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return { session: readApprovalSession(root, sessionId), error: orderError };
   const requestedSession = requestedApprovalSessionId(args);
-  const payload = approvalPayload(args);
+  const payload = approvalPayload(args, workflow);
   const approvalIntent = hasApprovalIntent(args);
   const inputError = asOptionalString((args as JsonObject)[APPROVAL_INPUT_ERROR]);
   if (inputError) return { session: requestedSession ? readApprovalSession(root, requestedSession) : null, error: inputError };

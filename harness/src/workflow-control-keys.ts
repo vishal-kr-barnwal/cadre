@@ -5,7 +5,7 @@ export const WORKFLOW_INPUT_RESERVED_KEYS: ReadonlySet<string> = new Set([
   "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
   "approvalStageHash", "approval_stage_hash", "approvalStageRevision", "approval_stage_revision",
   "approvedStages", "approved_stages", "approvalComplete", "approval_complete",
-  "approvalCancel", "approval_cancel", "_cadreApprovalInputError",
+  "approvalCancel", "approval_cancel", "_cadreApprovalInputError", "_cadreApprovalPersistedPayload",
 ]);
 
 export function isWorkflowInputReservedKey(value: string): boolean {

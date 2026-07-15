@@ -108,6 +108,10 @@ single ID at `argument`, and `selected_ids` sets the ID array, including `[]`.
 Preserve mapped `false` and empty values. Apply custom text only when
 `allowCustom:true`, at `customArgument` using `customMode` (`replace` or
 `append_unique`). Every write must remain inside `decision.writable_paths`.
+A structured value written at one of those paths replaces the previous value,
+so an artifact amendment must include the complete artifact object. Namespace
+members such as `proposedContext.techStack` or one `formattedReferences` entry
+replace only that named member and preserve their siblings.
 
 These callbacks are not permission to derive other actions from response data
 or prose. Merge, cleanup, polling, and every other immediate continuation must

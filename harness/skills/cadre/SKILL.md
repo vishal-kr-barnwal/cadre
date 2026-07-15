@@ -39,7 +39,8 @@ formatting. Later stages remain pending and unmaterialized. Treat every file in
 the current stage as one atomic review set, including canonical/projection pairs
 and grouped technical or reference files. Invoke the returned `decision.resume`
 for clarification and `decision.amend` for an explicit active-stage revision;
-edit only their `writable_paths`. Their session-only approval state is not
+edit only their `writable_paths`. A structured value replaces that path, so
+send the complete artifact object. Their session-only approval state is not
 approval and contains only `session_id`. Only after explicit user approval send the
 exact returned `stage`, `stage_hash`, `stage_revision`, and cumulative
 `approved_stages` prefix. These values bind approval to the reviewed revision;

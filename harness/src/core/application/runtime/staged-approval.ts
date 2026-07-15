@@ -13,6 +13,7 @@ import {
   approvalComplete,
   approvalPayload,
   approvalPayloadHash,
+  approvalReadOnlyRequested,
   applyApprovalSessionPayload,
   approvedStageIds,
   derivedApprovalSessionId,
@@ -109,20 +110,23 @@ export function stagedApprovalState(
       current_review_bundle: null,
     };
   }
-  const transition = transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles, extras);
+  const readOnly = approvalReadOnlyRequested(args);
+  const transition = readOnly && requestedSession?.workflow === workflow
+    ? { session: requestedSession, error: null }
+    : transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles, extras);
   let approvalError = transition.error;
   let session = transition.session;
   let active = session ? stages.find((stage) => !session!.approved_stages.includes(stage.id)) || null : null;
   let activeFiles = active && session ? stageRecord(session, active.id)?.snapshot_files || [] : [];
   let previousRecord = active && session ? stageRecord(session, active.id) : null;
   let candidateSession: ApprovalSession | undefined;
-  if (!approvalError && session && active) {
+  if (!readOnly && !approvalError && session && active) {
     const driftError = sessionTargetDriftError(root, args, session, session.approved_stages);
     const continuation = driftError ? null : prepareApprovalContinuation(
       root,
       session,
       stages,
-      approvalPayload(args),
+      approvalPayload(args, workflow),
       payloadHash,
       reviewFiles,
       options,
@@ -150,7 +154,7 @@ export function stagedApprovalState(
   } else if (active && candidateSession && options.allowEmptyActiveStage && activeFiles.length === 0 && !approvalError) {
     writeApprovalSession(root, { ...candidateSession, updated_at: new Date().toISOString() });
   }
-  const bundleError = active && activeFiles.length > 0 && !approvalError && !stageBundle
+  const bundleError = active && activeFiles.length > 0 && !readOnly && !approvalError && !stageBundle
     ? "Approval preview could not be materialized; review output must remain enabled for staged approval."
     : asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;

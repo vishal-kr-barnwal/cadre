@@ -5,6 +5,7 @@ import { setupIntentPrompts } from "./intent-prompts";
 import { setupNativePrompts } from "./native-prompts";
 import { setupStageMissingEvidence, type SetupEvidenceStage } from "./setup-evidence";
 import type { ApprovalStage } from "./staged-approval-stages";
+import { approvalReadOnlyRequested } from "./approval-request";
 
 export interface SetupApprovalCursor extends Omit<ApprovalStageCursor, "activeStage"> {
   activeStage: SetupEvidenceStage | null;
@@ -56,7 +57,10 @@ export function setupStageCollection(
   const cursor = setupApprovalCursor(root, args, stages);
   const missingEvidence = setupStageMissingEvidence(args, cursor.activeStage, polyrepoRequested);
   const intentPrompts = setupIntentPrompts(args, cursor.activeStage);
-  const nativePrompts = cursor.activeStage === "technical" && missingEvidence.length === 0 && intentPrompts.length === 0
+  const invalidChoiceCorrection = approvalReadOnlyRequested(args);
+  const nativePrompts = invalidChoiceCorrection
+    ? setupNativePrompts({ ...context, runtimeArgs: args })
+    : cursor.activeStage === "technical" && missingEvidence.length === 0 && intentPrompts.length === 0
     ? setupNativePrompts({ ...context, runtimeArgs: args })
     : [];
   const pending = Boolean(cursor.activeStage)

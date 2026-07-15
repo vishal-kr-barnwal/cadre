@@ -157,11 +157,13 @@ test("Staged workflow guidance distinguishes session resume from stage approval"
     assert.match(text, /writable_paths/);
     assert.match(text, /value_map/);
     assert.match(text, /false/);
+    assert.match(normalized, /structured value replaces.*complete/i);
     assert.match(text, /session_id/);
     assert.match(normalized, /is not approval/);
     assert.match(normalized, /later stages (?:remain|stay) pending/i);
   }
   assert.ok(approvalReference.rules.some((rule) => /decision\.resume.*decision\.amend.*session_id-only.*not approval/i.test(rule)));
+  assert.ok(approvalReference.rules.some((rule) => /structured value.*authoritative.*replaces.*complete artifact/i.test(rule)));
   assert.ok(approvalReference.rules.some((rule) => /stage, stage_hash, stage_revision, approved_stages, or complete.*explicit user approval/i.test(rule)));
   const approvalSections = new Map(approvalReference.sections.map((section) => [section.heading, section.body]));
   assert.match(approvalSections.get("Stage"), /every returned artifact.*atomic set/i);

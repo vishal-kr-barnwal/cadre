@@ -2177,6 +2177,18 @@ test("review-heavy workflows expose staged approval bundles", () => {
     });
     assert.equal(handoff.ok, true);
     assert.equal(handoff.approval.current_stage, "handoff");
+    const amendedHandoff = core.workflowPacket(root, {
+      workflow: "handoff",
+      approvalSessionId: handoff.approval.session_id,
+      handoff_text: "# Corrected handoff\n\nResume by validating the authoritative replacement and then run focused workflow tests.",
+    });
+    assert.equal(amendedHandoff.ok, true, amendedHandoff.error);
+    assert.equal(amendedHandoff.approval.session_id, handoff.approval.session_id);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "HANDOFF.md"), "utf8"), /authoritative replacement/);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "HANDOFF.md"), "utf8"), /revised spec and plan are ready/);
+    const handoffPayload = readJson(path.join(root, "cadre", "local", "approval-sessions", `${handoff.approval.session_id}.json`)).payload;
+    assert.equal(handoffPayload.handoffText, "# Corrected handoff\n\nResume by validating the authoritative replacement and then run focused workflow tests.");
+    assert.equal(Object.prototype.hasOwnProperty.call(handoffPayload, "handoff_text"), false);
 
     const refresh = core.workflowPacket(root, {
       workflow: "refresh",
@@ -2200,6 +2212,16 @@ test("review-heavy workflows expose staged approval bundles", () => {
     assert.equal(release.ok, true);
     assert.equal(release.approval.current_stage, "release_notes");
     assert.deepEqual(release.resource_uris, [], "release previews are not recomputed through read resources");
+    const amendedRelease = core.workflowPacket(root, {
+      workflow: "release",
+      approvalSessionId: release.approval.session_id,
+      release_notes: "Corrected release notes: authoritative staged evidence replaces the earlier generated summary.",
+    });
+    assert.equal(amendedRelease.ok, true, amendedRelease.error);
+    assert.equal(amendedRelease.approval.session_id, release.approval.session_id);
+    const releasePayload = readJson(path.join(root, "cadre", "local", "approval-sessions", `${release.approval.session_id}.json`)).payload;
+    assert.match(releasePayload.releaseNotes, /authoritative staged evidence/);
+    assert.equal(Object.prototype.hasOwnProperty.call(releasePayload, "release_notes"), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2301,6 +2323,43 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     assert.equal(optionalMcps.responseTarget.customArgument, "integrations.other");
     assert.ok(optionalMcps.choices.some((choice) => choice.id === "code_search"));
 
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${productPreview.approval.session_id}.json`);
+    const sessionBeforeInvalid = fs.readFileSync(sessionFile, "utf8");
+    const invalidOverrides = core.workflowPacket(root, {
+      workflow: "setup",
+      responseMode: "detail",
+      approvalSessionId: productPreview.approval.session_id,
+      providerMode: "bitbucket",
+      syncMode: "remote",
+      styleGuideIds: ["unknown-guide"],
+      writeLsp: "skip-lsp",
+    });
+    assert.equal(invalidOverrides.phase_state, "awaiting_clarification");
+    assert.equal(invalidOverrides.approval.session_id, productPreview.approval.session_id);
+    assert.deepEqual(invalidOverrides.native_prompts.map((prompt) => prompt.id), [
+      "setup-provider-mode",
+      "setup-sync-mode",
+      "setup-style-guides",
+      "setup-lsp",
+      "setup-optional-mcps",
+    ]);
+    assert.equal(invalidOverrides.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBeforeInvalid);
+
+    const sessionAfterInvalid = fs.readFileSync(sessionFile, "utf8");
+    const repeatedInvalid = core.workflowPacket(root, {
+      workflow: "setup",
+      responseMode: "detail",
+      approvalSessionId: productPreview.approval.session_id,
+      provider_mode: ["github"],
+      tech_stack: { languages: ["Swift"], notes: "This valid-looking edit is rejected atomically with the invalid provider." },
+    });
+    assert.equal(repeatedInvalid.phase_state, "awaiting_clarification");
+    assert.ok(repeatedInvalid.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionAfterInvalid);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "tech-stack.json")), false);
+
     const compact = core.workflowPacket(root, {
       workflow: "setup",
       approvalSessionId: productPreview.approval.session_id,
@@ -2329,6 +2388,51 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     assert.deepEqual(compactOptionalMcps.responseTarget.selectedIds, []);
     assert.equal(compactOptionalMcps.responseTarget.valueMode, "selected_ids");
     assert.equal(compactOptionalMcps.responseTarget.customMode, "replace");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("invalid initial setup choices create no approval session or preview artifacts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-invalid-initial-choice-test-"));
+  try {
+    git(root, ["init"]);
+    const result = core.workflowPacket(root, withSetupTestEvidence({
+      workflow: "setup",
+      providerMode: "bitbucket",
+      syncMode: "local",
+      writeLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Atomic setup", summary: "Reject invalid choices before creating staged state." },
+      techStack: { languages: ["TypeScript"] },
+    }));
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.phase_state, "awaiting_clarification");
+    assert.deepEqual(result.native_prompts.map((prompt) => prompt.id), ["setup-provider-mode"]);
+    assert.equal(result.approval.session_id, null);
+    assert.equal(result.review_bundle, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions")), false);
+    for (const file of ["product.json", "product.md", "product_guidelines.json", "tech-stack.json", "workflow.json"]) {
+      assert.equal(fs.existsSync(path.join(root, "cadre", file)), false, file);
+    }
+
+    for (const invalidStyleGuides of [42, ""]) {
+      const malformedStyle = core.workflowPacket(root, withSetupTestEvidence({
+        workflow: "setup",
+        providerMode: "local",
+        syncMode: "local",
+        writeLsp: false,
+        styleGuideIds: invalidStyleGuides,
+        integrations: {},
+        product: { title: "Atomic setup", summary: "Reject malformed style selections before staged state." },
+        techStack: { languages: ["TypeScript"] },
+      }));
+      assert.equal(malformedStyle.phase_state, "awaiting_clarification");
+      assert.deepEqual(malformedStyle.native_prompts.map((prompt) => prompt.id), ["setup-style-guides"]);
+      assert.equal(malformedStyle.approval.session_id, null);
+      assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions")), false);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -3495,21 +3599,34 @@ test("workflow setup asks for provider mode when hosted remote is unknown", () =
   }
 });
 
-test("workflow setup warns on unknown explicit style guide ids without dropping valid guides", () => {
+test("workflow setup rejects unknown style guide ids before accepting a corrected selection", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-style-missing-test-"));
   try {
     git(root, ["init"]);
-    const setup = core.workflowPacket(root, resolveSetupPrompts(root, {
+    const base = withSetupTestEvidence({
       workflow: "setup",
+      providerMode: "local",
+      syncMode: "local",
+      writeLsp: false,
+      integrations: {},
       product: { title: "Product", summary: "Test product" },
       techStack: { languages: ["TypeScript"] },
+    });
+    const rejected = core.workflowPacket(root, {
+      ...base,
       styleGuideIds: "typescript not-a-guide",
-    }).args);
+    });
+    assert.equal(rejected.ok, true, rejected.error);
+    assert.equal(rejected.phase_state, "awaiting_clarification");
+    assert.deepEqual(rejected.native_prompts.map((prompt) => prompt.id), ["setup-style-guides"]);
+    assert.ok(rejected.native_prompts[0].choices.some((choice) => choice.id === "typescript" && choice.recommended === true));
+    assert.equal(rejected.approval.session_id, null);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
 
+    const setup = core.workflowPacket(root, { ...base, styleGuideIds: ["typescript"] });
     assert.equal(setup.ok, true);
-    assert.deepEqual(setup.styleGuides.missing, ["not-a-guide"]);
-    assert.ok(setup.styleGuides.selected.includes("typescript"));
-    assert.match(setup.warnings[0], /Unknown setup style guide id/);
+    assert.deepEqual(setup.styleGuides.missing, []);
+    assert.deepEqual(setup.styleGuides.selected, ["typescript"]);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -4610,7 +4727,7 @@ test("a changed unapproved preview safely replaces its overlapping session", () 
   }
 });
 
-test("a partial refresh replacement derives from the pre-preview canonical baseline", () => {
+test("a complete refresh replacement does not leak baseline or superseded preview fields", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-preview-baseline-test-"));
   try {
     git(root, ["init"]);
@@ -4651,9 +4768,9 @@ test("a partial refresh replacement derives from the pre-preview canonical basel
     assert.equal(replacement.ok, true, replacement.error);
     assert.notEqual(replacement.approval.session_id, first.approval.session_id);
     const canonical = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
-    assert.match(canonical, /Baseline operators/);
-    assert.match(canonical, /Custom baseline evidence/);
     assert.match(canonical, /Corrected repository evidence/);
+    assert.doesNotMatch(canonical, /Baseline operators/);
+    assert.doesNotMatch(canonical, /Custom baseline evidence/);
     assert.doesNotMatch(canonical, /First preview users/);
     assert.equal(fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${first.approval.session_id}.json`)), false);
   } finally {
@@ -4683,7 +4800,7 @@ test("product refresh replaces a committed legacy template with evidence instead
     assert.equal(refresh.ok, true, refresh.error);
     const canonical = fs.readFileSync(path.join(root, "cadre", "product.json"), "utf8");
     assert.match(canonical, /repository-specific orchestration harness/);
-    assert.match(canonical, /Project-Specific Product Notes/);
+    assert.doesNotMatch(canonical, /Project-Specific Product Notes/);
     assert.doesNotMatch(canonical, /What the product is/);
     assert.doesNotMatch(canonical, /Fill sections from repo evidence/);
   } finally {
@@ -4954,6 +5071,192 @@ test("setup amends only its current unapproved stage without resetting the appro
       "cadre/product_guidelines.json",
       "cadre/product_guidelines.md",
     ].sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup tech-stack amendment replaces stale structured evidence in the same session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-tech-stack-replacement-test-"));
+  try {
+    git(root, ["init"]);
+    const technical = advanceSetupToTechnical(root, {
+      providerMode: "github",
+      syncMode: "shared",
+      remoteHost: "stale.github.example",
+      writeLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      config: {
+        auto_open: true,
+        custom_setting: "preserve",
+        packet_only: false,
+        sync_mode: "shared",
+        provider_mode: "github",
+        provider_mcp_required: true,
+        remote_host: "stale.config.example",
+        integrations: { stale: { selected: true } },
+      },
+      product: {
+        title: "Brownfield mobile product",
+        summary: "Replace stale mobile stack evidence without restarting approved setup stages.",
+      },
+      techStack: {
+        languages: ["Swift"],
+        frameworks: ["SwiftUI"],
+        platforms: ["iOS"],
+        packageManagers: ["SwiftPM"],
+        testing: { command: "swift test", framework: "XCTest" },
+      },
+    });
+    assert.equal(technical.ok, true, technical.error);
+    assert.equal(technical.approval.current_stage, "technical");
+    assert.ok(technical.styleGuides.detected.includes("swift"));
+    const sessionId = technical.approval.session_id;
+    const originalRevision = technical.approval.current_stage_revision;
+    const originalStamp = approvalStamp(technical.approval);
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const approvedBytes = new Map([
+      "cadre/product.json",
+      "cadre/product.md",
+      "cadre/product_guidelines.json",
+      "cadre/product_guidelines.md",
+    ].map((file) => [file, fs.readFileSync(path.join(root, file), "utf8")]));
+
+    const technicalFileBeforeInvalid = fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8");
+    const sessionBeforeInvalid = fs.readFileSync(sessionFile, "utf8");
+    const invalidAmendment = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      providerMode: "bitbucket",
+      techStack: { languages: ["TypeScript"] },
+    });
+    assert.equal(invalidAmendment.ok, true, invalidAmendment.error);
+    assert.equal(invalidAmendment.phase_state, "awaiting_clarification");
+    assert.ok(invalidAmendment.native_prompts.some((prompt) => prompt.id === "setup-provider-mode"));
+    assert.equal(invalidAmendment.review_bundle, null);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBeforeInvalid);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"), technicalFileBeforeInvalid);
+
+    const equivalentAliases = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      providerMode: " GITHUB ",
+      provider_mode: "github",
+      syncMode: "SHARED",
+      sync_mode: "shared",
+    });
+    assert.equal(equivalentAliases.ok, true, equivalentAliases.error);
+    assert.equal(equivalentAliases.approval.current_stage_revision, originalRevision);
+    const sessionBeforeConflict = fs.readFileSync(sessionFile, "utf8");
+    const conflictingAliases = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      providerMode: "github",
+      provider_mode: "local",
+      tech_stack: { languages: ["TypeScript"] },
+    });
+    assert.equal(conflictingAliases.ok, false);
+    assert.match(conflictingAliases.error, /Conflicting aliases.*providerMode\/provider_mode/i);
+    assert.equal(fs.readFileSync(sessionFile, "utf8"), sessionBeforeConflict);
+
+    const replacement = {
+      languages: ["TypeScript"],
+      frameworks: ["React"],
+      runtimes: ["Node.js"],
+    };
+    const amended = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      techStack: replacement,
+      provider_mode: "local",
+      sync_mode: "local",
+      write_lsp: false,
+    });
+    assert.equal(amended.ok, true, amended.error);
+    assert.equal(amended.approval.session_id, sessionId);
+    assert.equal(amended.approval.current_stage, "technical");
+    assert.deepEqual(amended.approval.approved_stages, ["product", "product_guidelines"]);
+    assert.equal(amended.approval.current_stage_revision, originalRevision + 1);
+    assert.ok(amended.styleGuides.detected.includes("typescript"));
+    assert.equal(amended.styleGuides.detected.includes("swift"), false);
+    const amendedPayload = readJson(sessionFile).payload;
+    assert.deepEqual(amendedPayload.techStack, replacement);
+    assert.equal(amendedPayload.providerMode, "local");
+    assert.equal(amendedPayload.syncMode, "local");
+    assert.equal(amendedPayload.writeLsp, false);
+    for (const alias of ["provider_mode", "provider", "sync_mode", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(amendedPayload, alias), false, alias);
+    }
+    const reviewedTechStack = fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8");
+    assert.doesNotMatch(reviewedTechStack, /Swift|SwiftUI|iOS|SwiftPM|swift test|XCTest/);
+    assert.match(reviewedTechStack, /TypeScript/);
+    for (const [file, content] of approvedBytes) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+    assert.deepEqual(
+      fs.readdirSync(path.dirname(sessionFile)).filter((name) => name.endsWith(".json")),
+      [`${sessionId}.json`],
+    );
+
+    const noOpResume = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(noOpResume.ok, true, noOpResume.error);
+    assert.equal(noOpResume.approval.current_stage_hash, amended.approval.current_stage_hash);
+    assert.equal(noOpResume.approval.current_stage_revision, amended.approval.current_stage_revision);
+
+    const staleApproval = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...originalStamp,
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(staleApproval.ok, false);
+    assert.match(staleApproval.error, /approvalStageHash.*reviewed technical stage/);
+    assert.deepEqual(staleApproval.approval.approved_stages, ["product", "product_guidelines"]);
+
+    const technicalApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(amended.approval),
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(technicalApproved.ok, true, technicalApproved.error);
+    assert.equal(technicalApproved.approval.current_stage, "workflow");
+    const workflowApproved = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "workflow",
+      ...approvalStamp(technicalApproved.approval),
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(workflowApproved.ok, true, workflowApproved.error);
+    const executed = core.workflowPacket(root, {
+      workflow: "setup",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["product", "product_guidelines", "technical", "workflow"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    for (const file of ["cadre/tech-stack.json", "cadre/tech-stack.md"]) {
+      const content = fs.readFileSync(path.join(root, file), "utf8");
+      assert.doesNotMatch(content, /Swift|SwiftUI|iOS|SwiftPM|swift test|XCTest/);
+      assert.match(content, /TypeScript/);
+    }
+    const config = readJson(path.join(root, "cadre", "config.json"));
+    assert.equal(config.auto_open, true);
+    assert.equal(config.custom_setting, "preserve");
+    assert.equal(config.packet_only, true);
+    assert.equal(config.provider_mode, "local");
+    assert.equal(config.provider_mcp_required, false);
+    assert.equal(config.sync_mode, "local");
+    assert.equal(Object.prototype.hasOwnProperty.call(config, "remote_host"), false);
+    assert.deepEqual(config.integrations, {});
+    for (const [file, content] of approvedBytes) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
+    assert.equal(fs.existsSync(sessionFile), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -6378,6 +6681,255 @@ test("multi-level refresh collects and materializes only the active selected sta
     assert.equal(fs.existsSync(sessionFile), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refresh tech-stack amendment preserves sibling context and replaces stale fields exactly", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-tech-stack-replacement-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+    const preview = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["product", "product-guidelines", "tech-stack"],
+      commitMode: "off",
+      proposedContext: {
+        product: { title: "Refresh product", summary: "Preserve approved product context." },
+        productGuidelines: { title: "Refresh guidelines", summary: "Preserve approved guideline context." },
+      },
+      techStack: {
+        languages: ["Swift"],
+        frameworks: ["SwiftUI"],
+        platforms: ["iOS"],
+        styleGuideIds: ["swift"],
+        notes: "Legacy mobile implementation",
+      },
+    });
+    assert.equal(preview.approval.current_stage, "product");
+    const sessionId = preview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const guidelines = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "product",
+      ...approvalStamp(preview.approval),
+      approvedStages: ["product"],
+    });
+    assert.equal(guidelines.approval.current_stage, "product_guidelines");
+    const technical = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      ...approvalStamp(guidelines.approval),
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(technical.approval.current_stage, "technical");
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"), /SwiftUI/);
+    const originalRevision = technical.approval.current_stage_revision;
+    const originalHash = technical.approval.current_stage_hash;
+    const originalPreview = fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8");
+    const originalUpdatedAt = readJson(path.join(root, "cadre", "tech-stack.json")).updated_at;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1100);
+    const noOp = core.workflowPacket(root, { workflow: "refresh", approvalSessionId: sessionId });
+    assert.equal(noOp.ok, true, noOp.error);
+    assert.equal(noOp.approval.current_stage_revision, originalRevision);
+    assert.equal(noOp.approval.current_stage_hash, originalHash);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"), originalPreview);
+
+    const replacement = { languages: ["TypeScript"], frameworks: ["React"], runtimes: ["Node.js"] };
+    const amended = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      proposed_context: { tech_stack: replacement },
+    });
+    assert.equal(amended.ok, true, amended.error);
+    assert.equal(amended.approval.session_id, sessionId);
+    assert.equal(amended.approval.current_stage_revision, originalRevision + 1);
+    assert.deepEqual(amended.approval.approved_stages, ["product", "product_guidelines"]);
+    const payload = readJson(sessionFile).payload.proposedContext;
+    assert.equal(payload.product.title, "Refresh product");
+    assert.equal(payload.productGuidelines.title, "Refresh guidelines");
+    assert.deepEqual(payload.techStack, replacement);
+    assert.equal(Object.prototype.hasOwnProperty.call(readJson(sessionFile).payload, "proposed_context"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(readJson(sessionFile).payload, "techStack"), false);
+    const canonical = readJson(path.join(root, "cadre", "tech-stack.json"));
+    assert.deepEqual(canonical.languages, ["TypeScript"]);
+    assert.deepEqual(canonical.frameworks, ["React"]);
+    assert.deepEqual(canonical.runtimes, ["Node.js"]);
+    assert.equal(canonical.version, 1);
+    assert.equal(canonical.schema, "cadre.tech_stack.v1");
+    assert.notEqual(canonical.updated_at, originalUpdatedAt);
+    for (const stale of ["platforms", "styleGuideIds", "notes"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(canonical, stale), false, stale);
+    }
+    for (const file of ["cadre/tech-stack.json", "cadre/tech-stack.md"]) {
+      assert.doesNotMatch(fs.readFileSync(path.join(root, file), "utf8"), /Swift|SwiftUI|iOS|mobile/);
+    }
+    const amendedPreview = fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1100);
+    const amendedNoOp = core.workflowPacket(root, { workflow: "refresh", approvalSessionId: sessionId });
+    assert.equal(amendedNoOp.ok, true, amendedNoOp.error);
+    assert.equal(amendedNoOp.approval.current_stage_revision, amended.approval.current_stage_revision);
+    assert.equal(amendedNoOp.approval.current_stage_hash, amended.approval.current_stage_hash);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"), amendedPreview);
+
+    const approved = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(amended.approval),
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(approved.ok, true, approved.error);
+    const executed = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["product", "product_guidelines", "technical"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "tech-stack.json"), "utf8"), /Swift|SwiftUI|iOS|mobile/);
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refresh repository-topology aliases replace the same session artifact exactly", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-refresh-topology-replacement-test-"));
+  try {
+    git(root, ["init"]);
+    write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+    const initial = core.workflowPacket(root, {
+      workflow: "refresh",
+      refreshLevels: ["repository-topology"],
+      commitMode: "off",
+      repositoryTopology: { mode: "monorepo", default_repo: ".", marker: "stale-old" },
+    });
+    assert.equal(initial.ok, true, initial.error);
+    assert.equal(initial.approval.current_stage, "technical");
+    const sessionId = initial.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    assert.equal(readJson(path.join(root, "cadre", "repos.json")).marker, "stale-old");
+
+    const replacement = {
+      mode: "polyrepo",
+      default_repo: "backend",
+      repos: [{ name: "backend", submodule_path: "repos/backend", enabled: true }],
+      marker: "authoritative-new",
+    };
+    const amended = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      proposed_context: { repos: replacement },
+    });
+    assert.equal(amended.ok, true, amended.error);
+    assert.equal(amended.approval.session_id, sessionId);
+    assert.equal(amended.approval.current_stage_revision, initial.approval.current_stage_revision + 1);
+    const proposed = readJson(sessionFile).payload.proposedContext;
+    assert.deepEqual(proposed.repositoryTopology, replacement);
+    assert.equal(Object.prototype.hasOwnProperty.call(proposed, "repos"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(proposed, "repository_topology"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(readJson(sessionFile).payload, "repositoryTopology"), false);
+    const canonical = readJson(path.join(root, "cadre", "repos.json"));
+    assert.equal(canonical.mode, "polyrepo");
+    assert.equal(canonical.default_repo, "backend");
+    assert.equal(canonical.marker, "authoritative-new");
+    assert.equal(canonical.version, 1);
+    assert.equal(canonical.schema, "cadre.repos.v1");
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", "repos.md"), "utf8"), /stale-old/);
+
+    const approved = core.workflowPacket(root, {
+      workflow: "refresh",
+      approvalSessionId: sessionId,
+      approvalStage: "technical",
+      ...approvalStamp(amended.approval),
+      approvedStages: ["technical"],
+    });
+    assert.equal(approved.ok, true, approved.error);
+    const executed = core.workflowPacket(root, {
+      workflow: "refresh",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["technical"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(readJson(path.join(root, "cadre", "repos.json")).marker, "authoritative-new");
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refresh project documents replace stale fields for every semantic document", () => {
+  const cases = [
+    { level: "product", inputKey: "product", amendKey: "product", stage: "product", file: "product.json" },
+    { level: "product-guidelines", inputKey: "productGuidelines", amendKey: "product_guidelines", stage: "product_guidelines", file: "product_guidelines.json" },
+    { level: "workflow", inputKey: "workflowPolicy", amendKey: "workflow_policy", stage: "workflow", file: "workflow.json" },
+  ];
+  for (const testCase of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `cadre-refresh-${testCase.level}-replacement-test-`));
+    try {
+      git(root, ["init"]);
+      write(path.join(root, "cadre", "setup_state.json"), `${JSON.stringify({ version: 1 }, null, 2)}\n`);
+      const initial = core.workflowPacket(root, {
+        workflow: "refresh",
+        refreshLevels: [testCase.level],
+        commitMode: "off",
+        [testCase.inputKey]: {
+          title: `Legacy ${testCase.level}`,
+          summary: "Legacy Swift-specific semantic evidence.",
+          staleSwift: true,
+          staleNested: { platform: "iOS" },
+          sections: [{ heading: "Legacy", body: "SwiftUI only" }],
+        },
+      });
+      assert.equal(initial.ok, true, initial.error);
+      assert.equal(initial.approval.current_stage, testCase.stage);
+      const sessionId = initial.approval.session_id;
+      assert.equal(readJson(path.join(root, "cadre", testCase.file)).staleSwift, true);
+      const replacement = {
+        title: `Current ${testCase.level}`,
+        summary: "Authoritative replacement grounded in current repository evidence.",
+      };
+      const amended = core.workflowPacket(root, {
+        workflow: "refresh",
+        approvalSessionId: sessionId,
+        proposed_context: { [testCase.amendKey]: replacement },
+      });
+      assert.equal(amended.ok, true, amended.error);
+      assert.equal(amended.approval.current_stage_revision, initial.approval.current_stage_revision + 1);
+      const canonical = readJson(path.join(root, "cadre", testCase.file));
+      assert.equal(canonical.title, replacement.title);
+      assert.equal(canonical.summary, replacement.summary);
+      assert.deepEqual(canonical.sections, []);
+      assert.equal(Object.prototype.hasOwnProperty.call(canonical, "staleSwift"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(canonical, "staleNested"), false);
+      assert.doesNotMatch(JSON.stringify(canonical), /Swift|SwiftUI|iOS|Legacy/);
+      const sessionPayload = readJson(path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`)).payload;
+      assert.equal(Object.prototype.hasOwnProperty.call(sessionPayload, testCase.inputKey), false);
+      const approved = core.workflowPacket(root, {
+        workflow: "refresh",
+        approvalSessionId: sessionId,
+        approvalStage: testCase.stage,
+        ...approvalStamp(amended.approval),
+        approvedStages: [testCase.stage],
+      });
+      assert.equal(approved.ok, true, approved.error);
+      const executed = core.workflowPacket(root, {
+        workflow: "refresh",
+        execute: true,
+        approvalComplete: true,
+        approvalSessionId: sessionId,
+        approvedStages: [testCase.stage],
+      });
+      assert.equal(executed.ok, true, executed.error);
+      assert.doesNotMatch(fs.readFileSync(path.join(root, "cadre", testCase.file), "utf8"), /Swift|SwiftUI|iOS|Legacy/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

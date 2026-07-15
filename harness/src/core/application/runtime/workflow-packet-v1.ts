@@ -333,7 +333,7 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
     && approval.required === false
     && asStringArray(result.selected_levels).some((level) => level === "projections")
   ) {
-    const input = approvalPayload(args);
+    const input = approvalPayload(args, workflow);
     delete input.workflow;
     delete input.root;
     return {

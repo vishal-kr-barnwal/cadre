@@ -107,20 +107,38 @@ interface SetupFinalReviewPlanArgs {
   syncMode: string;
 }
 
+const MANAGED_SETUP_CONFIG_KEYS = new Set([
+  "packet_only",
+  "sync_mode",
+  "provider_mode",
+  "provider_mcp_required",
+  "remote_host",
+  "integrations",
+]);
+
+function unmanagedSetupConfig(value: JsonObject): JsonObject {
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !MANAGED_SETUP_CONFIG_KEYS.has(key)),
+  );
+}
+
 export function setupFinalReviewPlan(input: SetupFinalReviewPlanArgs): SetupFinalReviewPlan {
   const { root, args, polyrepoRequested, providerMode, providerRemoteHost, integrationsPayload, syncMode } = input;
   const rawArgs = args as UnknownRecord;
-  const configOverrides = asJsonObject(rawArgs.config);
-  const generatedAt = utcNow();
-  const configPayload: JsonObject = {
+  const configBase = unmanagedSetupConfig({
     ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
+    ...asJsonObject(rawArgs.config),
+  });
+  const generatedAt = utcNow();
+  const hostedProvider = providerMode === "github" || providerMode === "gitlab";
+  const configPayload: JsonObject = {
+    ...configBase,
     packet_only: true,
     sync_mode: syncMode,
     provider_mode: providerMode || "local",
-    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
-    ...(providerRemoteHost ? { remote_host: providerRemoteHost } : {}),
+    provider_mcp_required: hostedProvider,
+    ...(hostedProvider && providerRemoteHost ? { remote_host: providerRemoteHost } : {}),
     ...(integrationsPayload ? { integrations: integrationsPayload } : {}),
-    ...configOverrides,
   };
   const setupStatePayload: JsonObject = {
     version: 1,

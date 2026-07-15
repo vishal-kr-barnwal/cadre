@@ -90,7 +90,9 @@ Fix:
 1. Keep the original session for clarification and formatting pauses. Add only
    the requested content at `decision.writable_paths` in the complete returned
    `decision.resume`, then invoke it. For an explicit edit to the active review
-   stage, use the returned `decision.amend` the same way.
+   stage, use the returned `decision.amend` the same way. A structured artifact
+   value replaces its path, so include the complete corrected object; omitted
+   stale fields are removed.
 2. A resume or amendment carries only `approval: {session_id}`. Never add
    `stage`, `stage_hash`, `stage_revision`, `approved_stages`, or `complete`
    until the user explicitly approves the active atomic file set.

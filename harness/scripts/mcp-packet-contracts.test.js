@@ -101,7 +101,7 @@ const setupProductPaths = inputPaths(
 const setupGuidelinePaths = inputPaths("productGuidelines");
 const setupTechnicalPaths = inputPaths(
   "techStack", "intent.techStack", "intent.techStackOther", "intent.techStackIntent", "intent.techStackSummary",
-  "techStackOther", "techStackIntent", "techStackSummary", "styleGuideIds", "styleGuides",
+  "techStackOther", "techStackIntent", "techStackSummary", "styleGuideIds",
   "writeLsp", "setupLsp", "lsp", "providerMode", "provider", "syncMode", "teamSize", "integrations",
   "config", "topology", "polyrepo", "repos", "ciProvider", "writeCi", "writeGitattributes",
   "addSubmodules", "executeSubmodules",
@@ -115,7 +115,7 @@ const newTrackSpecPaths = inputPaths(
 );
 
 test("public workflow packets reject injected runtime controls and skill integrity metadata", () => {
-  for (const field of ["root", "approval", "source_files", "source_file_hashes", "_cadreApprovalInputError"]) {
+  for (const field of ["root", "approval", "source_files", "source_file_hashes", "_cadreApprovalInputError", "_cadreApprovalPersistedPayload"]) {
     assert.throws(() => parseWorkflowToolRequest({
       root: "/project",
       workflow: "skill",

@@ -625,7 +625,8 @@ function loadPackageJson(root2) {
   return readJson(import_node_path4.default.join(root2, "package.json"), null);
 }
 function normalizeProviderMode(value) {
-  const raw = String(value || "").trim().toLowerCase();
+  if (typeof value !== "string") return null;
+  const raw = value.trim().toLowerCase();
   if (!raw) return null;
   if (["none", "no", "off", "local-only", "local_only"].includes(raw)) return "local";
   return PROVIDER_MODES.has(raw) ? raw : null;
@@ -9963,6 +9964,30 @@ function hasAnyArg(args, names) {
   const raw = args;
   return names.some((name) => raw[name] !== void 0 && raw[name] !== null && raw[name] !== "");
 }
+function firstProvidedArg(args, names) {
+  const raw = args;
+  const name = names.find((candidate) => Object.prototype.hasOwnProperty.call(raw, candidate));
+  return name ? raw[name] : void 0;
+}
+function hasValidProviderArg(args) {
+  return normalizeProviderMode(firstProvidedArg(args, ["providerMode", "provider_mode", "provider"])) !== null;
+}
+function hasValidSyncArg(args) {
+  return ["local", "shared"].includes(asOptionalString(firstProvidedArg(args, ["syncMode", "sync_mode"])) || "");
+}
+function hasValidStyleGuideArg(args) {
+  const value = firstProvidedArg(args, ["styleGuideIds", "style_guide_ids"]);
+  if (value === void 0) return false;
+  if (Array.isArray(value) && !value.every((entry) => typeof entry === "string")) return false;
+  if (typeof value !== "string" && !Array.isArray(value)) return false;
+  if (typeof value === "string" && value.trim().length === 0) return false;
+  const available = new Set(availableStyleGuideIds());
+  const requested = typeof value === "string" ? value.split(/[,\s]+/).filter(Boolean) : value;
+  return requested.every((entry) => available.has(normalizeStyleGuideId(String(entry))));
+}
+function hasBooleanLspArg(args) {
+  return typeof firstProvidedArg(args, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) === "boolean";
+}
 function syncPrompt(syncMode) {
   const recommended = syncMode === "shared" ? "shared" : "local";
   return nativePrompt(
@@ -9995,7 +10020,7 @@ function styleGuidePrompt(styleGuides) {
   const detected = new Set(asStringArray(styleGuides.detected));
   const selected = new Set(asStringArray(styleGuides.selected));
   const choices = availableStyleGuideIds().map(
-    (id) => choice(id, id, styleGuideDescription(id, detected, selected), selected.has(id))
+    (id) => choice(id, id, styleGuideDescription(id, detected, selected), selected.has(id) || detected.has(id))
   );
   return nativePrompt(
     "setup-style-guides",
@@ -10016,9 +10041,9 @@ function lspRecommendationIds(lspSetup2) {
   const recommended = Array.isArray(lspSetup2.recommended) ? lspSetup2.recommended.map(asJsonObject).map((rec) => asOptionalString(rec.id)).filter((id) => Boolean(id)) : [];
   return recommended.length > 0 ? recommended : asStringArray(lspSetup2.missingFromConfig || lspSetup2.missing_from_config);
 }
-function lspPrompt(lspSetup2) {
+function lspPrompt(lspSetup2, force = false) {
   const ids = lspRecommendationIds(lspSetup2);
-  if (ids.length === 0) return null;
+  if (ids.length === 0 && !force) return null;
   const label = ids.slice(0, 4).join(", ");
   const suffix = ids.length > 4 ? `, +${ids.length - 4} more` : "";
   return nativePrompt(
@@ -10027,7 +10052,7 @@ function lspPrompt(lspSetup2) {
     "Should Cadre write detected language-server recommendations during setup?",
     "single",
     [
-      choice("write-lsp", "Write LSP", `Write cadre/lsp.json entries for ${label}${suffix}.`, true),
+      choice("write-lsp", "Write LSP", ids.length > 0 ? `Write cadre/lsp.json entries for ${label}${suffix}.` : "Write cadre/lsp.json when language-server recommendations are available.", true),
       choice("skip-lsp", "Skip LSP", "Do not write cadre/lsp.json during setup.", false)
     ],
     {
@@ -10075,17 +10100,12 @@ function optionalMcpPrompt(integrations) {
   );
 }
 function setupNativePrompts(args) {
+  const lspProvided = hasAnyArg(args.runtimeArgs, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]);
   return [
-    hasAnyArg(args.runtimeArgs, ["providerMode", "provider_mode", "provider"]) ? null : providerPrompt(args.provider),
-    hasAnyArg(args.runtimeArgs, ["syncMode", "sync_mode"]) ? null : syncPrompt(args.syncMode),
-    hasAnyArg(args.runtimeArgs, ["styleGuideIds", "style_guide_ids"]) ? null : styleGuidePrompt(args.styleGuides),
-    hasAnyArg(args.runtimeArgs, [
-      "writeLsp",
-      "write_lsp",
-      "setupLsp",
-      "setup_lsp",
-      "lsp"
-    ]) ? null : lspPrompt(args.lspSetup),
+    hasValidProviderArg(args.runtimeArgs) ? null : providerPrompt(args.provider),
+    hasValidSyncArg(args.runtimeArgs) ? null : syncPrompt(args.syncMode),
+    hasValidStyleGuideArg(args.runtimeArgs) ? null : styleGuidePrompt(args.styleGuides),
+    hasBooleanLspArg(args.runtimeArgs) ? null : lspPrompt(args.lspSetup, lspProvided),
     hasAnyArg(args.runtimeArgs, ["integrations"]) ? null : optionalMcpPrompt(args.integrations)
   ].filter((prompt) => prompt !== null);
 }
@@ -10993,21 +11013,47 @@ var CONTROL_KEYS = /* @__PURE__ */ new Set([
   "compact",
   "skipSync"
 ]);
-var PAYLOAD_ALIAS_GROUPS = [
+var COMMON_PAYLOAD_ALIAS_GROUPS = [
   ["productGuidelines", "product_guidelines"],
   ["techStack", "tech_stack"],
   ["workflowPolicy", "workflow_policy"],
   ["styleGuideIds", "style_guide_ids"],
-  ["styleGuides", "style_guides"],
-  ["proposedContext", "proposed_context"]
+  ["proposedContext", "proposed_context"],
+  ["releaseNotes", "release_notes"],
+  ["handoffText", "handoff_text"]
+];
+var SETUP_PAYLOAD_ALIAS_GROUPS = [
+  ["providerMode", "provider_mode", "provider"],
+  ["syncMode", "sync_mode"],
+  ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"],
+  ["teamSize", "team_size"],
+  ["remoteHost", "remote_host"],
+  ["ciProvider", "ci_provider"],
+  ["writeCi", "write_ci"],
+  ["writeGitattributes", "write_gitattributes"],
+  ["addSubmodules", "add_submodules"],
+  ["executeSubmodules", "execute_submodules"]
+];
+var REFRESH_PAYLOAD_ALIAS_GROUPS = [
+  ["repositoryTopology", "repository_topology", "repos"]
 ];
 var PROPOSED_CONTEXT_ALIAS_GROUPS = [
   ["productGuidelines", "product_guidelines"],
   ["techStack", "tech_stack"],
-  ["workflowPolicy", "workflow_policy"],
-  ["repositoryTopology", "repository_topology"]
+  ["workflowPolicy", "workflow_policy", "workflow"],
+  ["repositoryTopology", "repository_topology", "repos"],
+  ["styleGuideIds", "style_guide_ids"]
+];
+var REFRESH_SEMANTIC_KEYS = [
+  "product",
+  "productGuidelines",
+  "techStack",
+  "workflowPolicy",
+  "repositoryTopology",
+  "styleGuideIds"
 ];
 var APPROVAL_INPUT_ERROR = "_cadreApprovalInputError";
+var APPROVAL_PERSISTED_PAYLOAD = "_cadreApprovalPersistedPayload";
 function rawArgs3(args) {
   return args;
 }
@@ -11061,6 +11107,32 @@ function controlPayload(args) {
   }
   return controls;
 }
+function payloadAliasGroups(workflow) {
+  if (workflow === "setup") return [...COMMON_PAYLOAD_ALIAS_GROUPS, ...SETUP_PAYLOAD_ALIAS_GROUPS];
+  if (workflow === "refresh") return [...COMMON_PAYLOAD_ALIAS_GROUPS, ...REFRESH_PAYLOAD_ALIAS_GROUPS];
+  return COMMON_PAYLOAD_ALIAS_GROUPS;
+}
+function normalizedAliasValue(canonicalKey, value, workflow) {
+  if (workflow !== "setup") return value;
+  if (canonicalKey === "providerMode") return normalizeProviderMode(value) ?? value;
+  if (canonicalKey === "syncMode" && typeof value === "string") return value.trim().toLowerCase();
+  if (canonicalKey === "styleGuideIds") {
+    const validShape = typeof value === "string" || Array.isArray(value) && value.every((entry) => typeof entry === "string");
+    return validShape ? requestedStyleGuideIds(value) : value;
+  }
+  return value;
+}
+function aliasConflict(value, groups, prefix = "", workflow) {
+  for (const aliases of groups) {
+    const supplied = aliases.filter((key) => value[key] !== void 0);
+    if (supplied.length < 2) continue;
+    const canonicalKey = aliases[0] || "";
+    const expected = stableJson(normalizedAliasValue(canonicalKey, value[supplied[0]], workflow));
+    const conflict = supplied.find((key) => stableJson(normalizedAliasValue(canonicalKey, value[key], workflow)) !== expected);
+    if (conflict) return `${prefix}${supplied.join("/")}`;
+  }
+  return null;
+}
 function canonicalAliases(value, groups) {
   const canonical = { ...value };
   for (const aliases of groups) {
@@ -11074,21 +11146,88 @@ function canonicalAliases(value, groups) {
   }
   return canonical;
 }
-function canonicalPayload(value) {
-  const canonical = canonicalAliases(value, PAYLOAD_ALIAS_GROUPS);
+function canonicalPayload(value, workflow) {
+  const canonical = canonicalAliases(value, payloadAliasGroups(workflow));
   const proposedContext2 = plainObject(canonical.proposedContext);
   if (proposedContext2) canonical.proposedContext = canonicalAliases(proposedContext2, PROPOSED_CONTEXT_ALIAS_GROUPS);
+  if (workflow === "refresh") {
+    const proposed = plainObject(canonical.proposedContext) || {};
+    for (const key of REFRESH_SEMANTIC_KEYS) {
+      if (proposed[key] === void 0 && canonical[key] !== void 0) proposed[key] = canonical[key];
+      delete canonical[key];
+    }
+    if (canonical.patterns !== void 0 && typeof canonical.patterns !== "boolean") {
+      if (proposed.patterns === void 0) proposed.patterns = canonical.patterns;
+      delete canonical.patterns;
+    }
+    if (Object.keys(proposed).length > 0) canonical.proposedContext = proposed;
+  }
+  if (workflow === "setup") {
+    if (canonical.providerMode !== void 0) canonical.providerMode = normalizeProviderMode(canonical.providerMode);
+    if (typeof canonical.syncMode === "string") canonical.syncMode = canonical.syncMode.trim().toLowerCase();
+    const styleGuideValue = canonical.styleGuideIds;
+    const validStyleGuideShape = typeof styleGuideValue === "string" && styleGuideValue.trim().length > 0 || Array.isArray(styleGuideValue) && styleGuideValue.every((entry) => typeof entry === "string");
+    if (validStyleGuideShape) canonical.styleGuideIds = requestedStyleGuideIds(styleGuideValue);
+  }
   return canonical;
 }
-function approvalPayload(args) {
+function rawApprovalPayload(args) {
   const payload = {};
   for (const [key, value] of Object.entries(rawArgs3(args))) {
-    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR) payload[key] = value;
+    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR && key !== APPROVAL_PERSISTED_PAYLOAD) {
+      payload[key] = value;
+    }
   }
-  return canonicalPayload(payload);
+  return payload;
 }
-function changedApprovalInput(sessionPayload, args) {
-  for (const [key, value] of Object.entries(approvalPayload(args))) {
+function approvalAliasConflict(payload, workflow) {
+  const topLevel = aliasConflict(payload, payloadAliasGroups(workflow), "", workflow);
+  if (topLevel) return topLevel;
+  const proposed = plainObject(payload.proposedContext) || plainObject(payload.proposed_context);
+  const proposedConflict = proposed ? aliasConflict(proposed, PROPOSED_CONTEXT_ALIAS_GROUPS, "proposedContext.") : null;
+  if (proposedConflict) return proposedConflict;
+  if (workflow !== "refresh" || !proposed) return null;
+  const canonicalTop = canonicalAliases(payload, payloadAliasGroups(workflow));
+  const canonicalProposed = canonicalAliases(proposed, PROPOSED_CONTEXT_ALIAS_GROUPS);
+  for (const key of REFRESH_SEMANTIC_KEYS) {
+    if (canonicalTop[key] !== void 0 && canonicalProposed[key] !== void 0 && stableJson(canonicalTop[key]) !== stableJson(canonicalProposed[key])) {
+      return `${key}/proposedContext.${key}`;
+    }
+  }
+  if (canonicalTop.patterns !== void 0 && typeof canonicalTop.patterns !== "boolean" && canonicalProposed.patterns !== void 0 && stableJson(canonicalTop.patterns) !== stableJson(canonicalProposed.patterns)) {
+    return "patterns/proposedContext.patterns";
+  }
+  return null;
+}
+function invalidSetupChoice(payload) {
+  if (payload.providerMode !== void 0 && normalizeProviderMode(payload.providerMode) === null) return "providerMode";
+  if (payload.syncMode !== void 0 && (typeof payload.syncMode !== "string" || !["local", "shared"].includes(payload.syncMode.trim().toLowerCase()))) {
+    return "syncMode";
+  }
+  if (payload.writeLsp !== void 0 && typeof payload.writeLsp !== "boolean") return "writeLsp";
+  if (payload.styleGuideIds !== void 0) {
+    const value = payload.styleGuideIds;
+    if (typeof value !== "string" && !Array.isArray(value)) return "styleGuideIds";
+    if (typeof value === "string" && value.trim().length === 0) return "styleGuideIds";
+    if (Array.isArray(value) && !value.every((entry) => typeof entry === "string")) return "styleGuideIds";
+    const available = new Set(availableStyleGuideIds());
+    const requested = typeof value === "string" ? value.split(/[,\s]+/).filter(Boolean) : value;
+    if (requested.some((entry) => !available.has(normalizeStyleGuideId(String(entry))))) return "styleGuideIds";
+  }
+  return null;
+}
+function approvalPayload(args, workflow) {
+  const raw = rawArgs3(args);
+  if (Object.prototype.hasOwnProperty.call(raw, APPROVAL_PERSISTED_PAYLOAD)) {
+    return canonicalPayload(plainObject(raw[APPROVAL_PERSISTED_PAYLOAD]) || {}, workflow);
+  }
+  return canonicalPayload(rawApprovalPayload(args), workflow);
+}
+function approvalReadOnlyRequested(args) {
+  return Object.prototype.hasOwnProperty.call(rawArgs3(args), APPROVAL_PERSISTED_PAYLOAD);
+}
+function changedApprovalInput(sessionPayload, args, workflow) {
+  for (const [key, value] of Object.entries(approvalPayload(args, workflow))) {
     if (stableJson(sessionPayload[key]) !== stableJson(value)) return key;
   }
   return null;
@@ -11096,23 +11235,69 @@ function changedApprovalInput(sessionPayload, args) {
 function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
-function mergePayload(base, update) {
+function sparsePatchKeys(workflow) {
+  if (["setup", "newtrack", "revise"].includes(workflow)) return /* @__PURE__ */ new Set(["intent"]);
+  if (workflow === "refresh") return /* @__PURE__ */ new Set(["proposedContext"]);
+  if (workflow === "skill") return /* @__PURE__ */ new Set(["formattedReferences"]);
+  return /* @__PURE__ */ new Set();
+}
+function mergePayload(base, update, workflow) {
+  const patchKeys = sparsePatchKeys(workflow);
   const merged = { ...base };
   for (const [key, value] of Object.entries(update)) {
     const left = plainObject(merged[key]);
     const right = plainObject(value);
-    merged[key] = left && right ? mergePayload(left, right) : value;
+    merged[key] = patchKeys.has(key) && left && right ? { ...left, ...right } : value;
   }
   return merged;
 }
 function applyApprovalSessionPayload(root2, args = {}, workflow) {
+  const controls = controlPayload(args);
+  if (approvalCancelRequested(args)) {
+    const sessionId2 = requestedApprovalSessionId(args);
+    const existing = sessionId2 ? readApprovalSession(root2, sessionId2) : null;
+    return { ...existing?.workflow === workflow ? existing.payload : {}, ...controls };
+  }
+  const rawPayload = rawApprovalPayload(args);
+  const aliasError = approvalAliasConflict(rawPayload, workflow);
+  if (aliasError) {
+    const sessionId2 = requestedApprovalSessionId(args);
+    const existing = sessionId2 ? readApprovalSession(root2, sessionId2) : null;
+    return {
+      ...existing?.workflow === workflow ? existing.payload : canonicalPayload(rawPayload, workflow),
+      ...controls,
+      [APPROVAL_INPUT_ERROR]: `Conflicting aliases were supplied for ${aliasError}; send one authoritative value.`
+    };
+  }
+  const canonicalInput = canonicalPayload(rawPayload, workflow);
+  const aliasedInput = canonicalAliases(rawPayload, payloadAliasGroups(workflow));
+  const invalidChoice = workflow === "setup" ? invalidSetupChoice(aliasedInput) : null;
   const sessionId = requestedApprovalSessionId(args);
-  if (!sessionId) return args;
+  if (!sessionId) {
+    return {
+      ...canonicalInput,
+      ...controls,
+      ...invalidChoice ? { [APPROVAL_PERSISTED_PAYLOAD]: {} } : {}
+    };
+  }
   const session = readApprovalSession(root2, sessionId);
-  if (!session || session.workflow !== workflow) return args;
+  if (!session || session.workflow !== workflow) return { ...canonicalInput, ...controls };
+  if (invalidChoice) {
+    if (hasApprovalIntent(args)) {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: `Cannot approve while ${invalidChoice} has an invalid value; answer the returned setup prompt first.`
+      };
+    }
+    return {
+      ...mergePayload(canonicalPayload(session.payload, workflow), canonicalInput, workflow),
+      ...controls,
+      [APPROVAL_PERSISTED_PAYLOAD]: canonicalPayload(session.payload, workflow)
+    };
+  }
   if (hasApprovalIntent(args)) {
-    const changedInput = changedApprovalInput(session.payload, args);
-    const controls = controlPayload(args);
+    const changedInput = changedApprovalInput(session.payload, args, workflow);
     if (approvalComplete(args) && !controls.approvedStages && !controls.approved_stages) {
       controls.approvedStages = session.approved_stages;
     }
@@ -11123,8 +11308,8 @@ function applyApprovalSessionPayload(root2, args = {}, workflow) {
     };
   }
   return {
-    ...mergePayload(canonicalPayload(session.payload), approvalPayload(args)),
-    ...controlPayload(args)
+    ...mergePayload(canonicalPayload(session.payload, workflow), canonicalInput, workflow),
+    ...controls
   };
 }
 function approvalPayloadHash(workflow, stages, args, extras) {
@@ -11138,7 +11323,7 @@ function approvalPayloadHash(workflow, stages, args, extras) {
       inputKeys: stage.inputKeys || [],
       fileMatches: stage.fileMatches || []
     })),
-    payload: approvalPayload(args),
+    payload: approvalPayload(args, workflow),
     extras
   }));
 }
@@ -11572,7 +11757,7 @@ function transitionApprovalSession(root2, args, workflow, sessionId, payloadHash
   const orderError = approvalOrderError(stageIds, approved);
   if (orderError) return { session: readApprovalSession(root2, sessionId), error: orderError };
   const requestedSession = requestedApprovalSessionId(args);
-  const payload = approvalPayload(args);
+  const payload = approvalPayload(args, workflow);
   const approvalIntent = hasApprovalIntent(args);
   const inputError = asOptionalString(args[APPROVAL_INPUT_ERROR]);
   if (inputError) return { session: requestedSession ? readApprovalSession(root2, requestedSession) : null, error: inputError };
@@ -11843,8 +12028,6 @@ function setupApprovalStages(polyrepoRequested) {
         "techStackSummary",
         "styleGuideIds",
         "style_guide_ids",
-        "styleGuides",
-        "style_guides",
         "writeLsp",
         "write_lsp",
         "setupLsp",
@@ -12080,20 +12263,21 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
       current_review_bundle: null
     };
   }
-  const transition = transitionApprovalSession(root2, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles2, extras);
+  const readOnly = approvalReadOnlyRequested(args);
+  const transition = readOnly && requestedSession?.workflow === workflow ? { session: requestedSession, error: null } : transitionApprovalSession(root2, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles2, extras);
   let approvalError = transition.error;
   let session = transition.session;
   let active = session ? stages.find((stage) => !session.approved_stages.includes(stage.id)) || null : null;
   let activeFiles = active && session ? stageRecord(session, active.id)?.snapshot_files || [] : [];
   let previousRecord = active && session ? stageRecord(session, active.id) : null;
   let candidateSession;
-  if (!approvalError && session && active) {
+  if (!readOnly && !approvalError && session && active) {
     const driftError = sessionTargetDriftError(root2, args, session, session.approved_stages);
     const continuation = driftError ? null : prepareApprovalContinuation(
       root2,
       session,
       stages,
-      approvalPayload(args),
+      approvalPayload(args, workflow),
       payloadHash,
       reviewFiles2,
       options
@@ -12119,7 +12303,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
   } else if (active && candidateSession && options.allowEmptyActiveStage && activeFiles.length === 0 && !approvalError) {
     writeApprovalSession(root2, { ...candidateSession, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
   }
-  const bundleError = active && activeFiles.length > 0 && !approvalError && !stageBundle ? "Approval preview could not be materialized; review output must remain enabled for staged approval." : asOptionalString(asJsonObject(stageBundle).error);
+  const bundleError = active && activeFiles.length > 0 && !readOnly && !approvalError && !stageBundle ? "Approval preview could not be materialized; review output must remain enabled for staged approval." : asOptionalString(asJsonObject(stageBundle).error);
   if (!approvalError && bundleError) approvalError = bundleError;
   session = readApprovalSession(root2, sessionId) || session;
   const authoritativeApprovedIds = session?.approved_stages || approvedIds;
@@ -15289,9 +15473,7 @@ var PROJECT_DOCUMENTS = [
     kind: "product",
     canonical: "cadre/product.json",
     projection: "cadre/product.md",
-    template: "product.json",
     title: "Product Context",
-    notesHeading: "Project-Specific Product Notes",
     schema: "cadre.product.v1",
     source: "proposedContext.product"
   },
@@ -15301,9 +15483,7 @@ var PROJECT_DOCUMENTS = [
     kind: "product_guidelines",
     canonical: "cadre/product_guidelines.json",
     projection: "cadre/product_guidelines.md",
-    template: "product_guidelines.json",
     title: "Product Guidelines",
-    notesHeading: "Project-Specific Product Guideline Notes",
     schema: "cadre.product_guidelines.v1",
     source: "proposedContext.productGuidelines"
   },
@@ -15313,9 +15493,7 @@ var PROJECT_DOCUMENTS = [
     kind: "workflow",
     canonical: "cadre/workflow.json",
     projection: "cadre/workflow.md",
-    template: "workflow.json",
     title: "Project Workflow",
-    notesHeading: "Project-Specific Workflow Notes",
     schema: "cadre.workflow.v1",
     source: "proposedContext.workflowPolicy"
   }
@@ -15425,17 +15603,6 @@ function missingRefreshEvidence(args, levels) {
 function sectionKey(value) {
   return asOptionalString(value.id) || asOptionalString(value.heading)?.toLowerCase() || "";
 }
-function currentJson(root2, relativePath) {
-  const baseline = unapprovedTargetBaselineContent(root2, relativePath);
-  if (baseline === void 0) return readJson(import_node_path50.default.join(root2, relativePath), {});
-  if (baseline === null) return {};
-  try {
-    const parsed = JSON.parse(baseline);
-    return isRecord(parsed) ? asJsonObject(parsed) : {};
-  } catch {
-    return {};
-  }
-}
 function currentJsonl(root2, relativePath) {
   const baseline = unapprovedTargetBaselineContent(root2, relativePath);
   if (baseline === void 0) return readJsonl(import_node_path50.default.join(root2, relativePath));
@@ -15455,51 +15622,50 @@ function matchesTemplateSection(current, template) {
   keys.delete("updated_at");
   return Array.from(keys).every((key) => JSON.stringify(current[key]) === JSON.stringify(template[key]));
 }
-function mergeRefreshSections(current, normalized, spec, raw) {
-  if (Array.isArray(raw.sections) && raw.sections.length > 0) return raw.sections;
-  const currentSections = asArray(current.sections).map(asJsonObject);
-  const currentByKey = new Map(currentSections.map((section) => [sectionKey(section), section]));
-  const template = templateJson(spec.template, { sections: [] });
-  const templateByKey = new Map(asArray(template.sections).map(asJsonObject).map((section) => [sectionKey(section), section]));
-  const normalizedSections = asArray(normalized.sections).map(asJsonObject);
-  const normalizedKeys = new Set(normalizedSections.map(sectionKey).filter(Boolean));
-  const merged = normalizedSections.flatMap((section) => {
-    const key = sectionKey(section);
-    const templateSection = templateByKey.get(key);
-    const currentSection = currentByKey.get(key);
-    const generatedBody = asOptionalString(section.body) || "";
-    const templateBody = asOptionalString(templateSection?.body) || "";
-    if (generatedBody !== templateBody) return [section];
-    return currentSection && !matchesTemplateSection(currentSection, templateSection) ? [currentSection] : [];
-  });
-  const preservedCustom = currentSections.filter((section) => {
-    const key = sectionKey(section);
-    return Boolean(key) && !normalizedKeys.has(key) && !matchesTemplateSection(section, templateByKey.get(key));
-  });
-  return [...merged, ...preservedCustom];
+function stableJson3(value) {
+  if (value === void 0) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson3).join(",")}]`;
+  const record = value;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson3(record[key])}`).join(",")}}`;
 }
-function normalizedRefreshProjectDocument(root2, spec, rawValue) {
+function withoutUpdatedAt(value) {
+  const normalized = { ...value };
+  delete normalized.updated_at;
+  return normalized;
+}
+function stableReviewUpdatedAt(root2, args, relativePath, candidate) {
+  const raw = rawArgs5(args);
+  const sessionId = asOptionalString(raw.approvalSessionId || raw.approval_session_id);
+  const session = sessionId ? readApprovalSession(root2, sessionId) : null;
+  const snapshot = session?.snapshot_files.find((file) => file.path === relativePath);
+  if (snapshot?.content) {
+    try {
+      const parsed = JSON.parse(snapshot.content);
+      const previous = asJsonObject(parsed);
+      const updatedAt = asOptionalString(previous.updated_at);
+      if (updatedAt && stableJson3(withoutUpdatedAt(previous)) === stableJson3(withoutUpdatedAt(candidate))) return updatedAt;
+    } catch {
+    }
+  }
+  return utcNow();
+}
+function normalizedRefreshProjectDocument(spec, rawValue, updatedAt) {
   const raw = asJsonObject(rawValue);
-  const current = currentJson(root2, spec.canonical);
-  const template = templateJson(spec.template, {});
-  const normalized = normalizeProjectDoc(spec.kind, raw, spec.template, spec.title, spec.notesHeading);
-  const currentSummary = asOptionalString(current.summary) || "";
-  const templateSummary = asOptionalString(template.summary) || "";
   return {
-    ...current,
-    ...normalized,
     ...raw,
     version: 1,
     schema: spec.schema,
     kind: spec.kind,
-    title: normalized.title || current.title || spec.title,
-    summary: asOptionalString(raw.summary || raw.description) || (currentSummary !== templateSummary ? currentSummary : ""),
-    sections: mergeRefreshSections(current, normalized, spec, raw),
-    updated_at: utcNow()
+    title: asOptionalString(raw.title || raw.name || raw.productName || raw.product_name) || spec.title,
+    summary: asOptionalString(raw.summary || raw.description) || "",
+    sections: Array.isArray(raw.sections) ? raw.sections : [],
+    updated_at: updatedAt
   };
 }
-function projectDocumentFiles(root2, spec, rawValue) {
-  const canonical = normalizedRefreshProjectDocument(root2, spec, rawValue);
+function projectDocumentFiles(root2, args, spec, rawValue) {
+  const unstamped = normalizedRefreshProjectDocument(spec, rawValue, "");
+  const canonical = { ...unstamped, updated_at: stableReviewUpdatedAt(root2, args, spec.canonical, unstamped) };
   const canonicalContent = `${JSON.stringify(canonical, null, 2)}
 `;
   const projection = withGeneratedMarker(
@@ -15514,17 +15680,16 @@ function projectDocumentFiles(root2, spec, rawValue) {
     textReviewFile(spec.projection, spec.title, spec.canonical, projection)
   );
 }
-function techStackFiles(root2, rawValue) {
+function techStackFiles(root2, args, rawValue) {
   const canonicalPath = "cadre/tech-stack.json";
   const projectionPath = "cadre/tech-stack.md";
-  const current = currentJson(root2, canonicalPath);
-  const candidate = {
-    ...current,
+  const unstamped = {
     ...asJsonObject(rawValue),
     version: 1,
-    schema: "cadre.tech_stack.v1",
-    updated_at: utcNow()
+    schema: "cadre.tech_stack.v1"
   };
+  delete unstamped.updated_at;
+  const candidate = { ...unstamped, updated_at: stableReviewUpdatedAt(root2, args, canonicalPath, unstamped) };
   const canonicalContent = `${JSON.stringify(candidate, null, 2)}
 `;
   const projection = withGeneratedMarker(
@@ -15539,19 +15704,17 @@ function techStackFiles(root2, rawValue) {
     textReviewFile(projectionPath, "Tech stack", canonicalPath, projection)
   );
 }
-function repositoryTopologyFiles(root2, rawValue) {
+function repositoryTopologyFiles(root2, args, rawValue) {
   const canonicalPath = "cadre/repos.json";
   const projectionPath = "cadre/repos.md";
-  const current = currentJson(root2, canonicalPath);
   const raw = asJsonObject(rawValue);
-  const preserveCurrent = !raw.mode || !current.mode || raw.mode === current.mode;
-  const candidate = {
-    ...preserveCurrent ? current : {},
+  const unstamped = {
     ...raw,
     version: 1,
-    schema: "cadre.repos.v1",
-    updated_at: utcNow()
+    schema: "cadre.repos.v1"
   };
+  delete unstamped.updated_at;
+  const candidate = { ...unstamped, updated_at: stableReviewUpdatedAt(root2, args, canonicalPath, unstamped) };
   const canonicalContent = `${JSON.stringify(candidate, null, 2)}
 `;
   const projection = withGeneratedMarker(
@@ -15644,12 +15807,12 @@ function refreshedPatternsArtifacts(root2, args) {
 function refreshReviewFiles(root2, args, levels) {
   const files = [];
   for (const spec of PROJECT_DOCUMENTS) {
-    if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root2, spec, refreshCandidate(args, spec.level)));
+    if (levels.includes(spec.level)) files.push(...projectDocumentFiles(root2, args, spec, refreshCandidate(args, spec.level)));
   }
-  if (levels.includes("tech-stack")) files.push(...techStackFiles(root2, refreshCandidate(args, "tech-stack")));
+  if (levels.includes("tech-stack")) files.push(...techStackFiles(root2, args, refreshCandidate(args, "tech-stack")));
   if (levels.includes("style-guides")) files.push(...styleGuideFiles(root2, args));
   if (levels.includes("patterns")) files.push(...refreshedPatternsArtifacts(root2, args)?.files || []);
-  if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root2, refreshCandidate(args, "repository-topology")));
+  if (levels.includes("repository-topology")) files.push(...repositoryTopologyFiles(root2, args, refreshCandidate(args, "repository-topology")));
   return {
     files,
     documentIds: Array.from(new Set(files.map((file) => file.documentId).filter((value) => Boolean(value)))),
@@ -15747,20 +15910,36 @@ function approvedSetupLspAdded(session) {
   const previous = new Set(lspServerIds(parsedSnapshot(before?.content)));
   return lspServerIds(parsedSnapshot(snapshot.content)).filter((id) => !previous.has(id));
 }
+var MANAGED_SETUP_CONFIG_KEYS = /* @__PURE__ */ new Set([
+  "packet_only",
+  "sync_mode",
+  "provider_mode",
+  "provider_mcp_required",
+  "remote_host",
+  "integrations"
+]);
+function unmanagedSetupConfig(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !MANAGED_SETUP_CONFIG_KEYS.has(key))
+  );
+}
 function setupFinalReviewPlan(input) {
   const { root: root2, args, polyrepoRequested, providerMode, providerRemoteHost, integrationsPayload, syncMode } = input;
   const rawArgs6 = args;
-  const configOverrides = asJsonObject(rawArgs6.config);
-  const generatedAt = utcNow();
-  const configPayload = {
+  const configBase = unmanagedSetupConfig({
     ...templateJson("config.json", { sync_mode: "local", auto_open: false }),
+    ...asJsonObject(rawArgs6.config)
+  });
+  const generatedAt = utcNow();
+  const hostedProvider = providerMode === "github" || providerMode === "gitlab";
+  const configPayload = {
+    ...configBase,
     packet_only: true,
     sync_mode: syncMode,
     provider_mode: providerMode || "local",
-    provider_mcp_required: providerMode === "github" || providerMode === "gitlab",
-    ...providerRemoteHost ? { remote_host: providerRemoteHost } : {},
-    ...integrationsPayload ? { integrations: integrationsPayload } : {},
-    ...configOverrides
+    provider_mcp_required: hostedProvider,
+    ...hostedProvider && providerRemoteHost ? { remote_host: providerRemoteHost } : {},
+    ...integrationsPayload ? { integrations: integrationsPayload } : {}
   };
   const setupStatePayload = {
     version: 1,
@@ -16595,7 +16774,8 @@ function setupStageCollection(root2, args, stages, polyrepoRequested, context) {
   const cursor = setupApprovalCursor(root2, args, stages);
   const missingEvidence = setupStageMissingEvidence(args, cursor.activeStage, polyrepoRequested);
   const intentPrompts = setupIntentPrompts(args, cursor.activeStage);
-  const nativePrompts = cursor.activeStage === "technical" && missingEvidence.length === 0 && intentPrompts.length === 0 ? setupNativePrompts({ ...context, runtimeArgs: args }) : [];
+  const invalidChoiceCorrection = approvalReadOnlyRequested(args);
+  const nativePrompts = invalidChoiceCorrection ? setupNativePrompts({ ...context, runtimeArgs: args }) : cursor.activeStage === "technical" && missingEvidence.length === 0 && intentPrompts.length === 0 ? setupNativePrompts({ ...context, runtimeArgs: args }) : [];
   const pending = Boolean(cursor.activeStage) && (missingEvidence.length > 0 || intentPrompts.length > 0 || nativePrompts.length > 0);
   return {
     cursor,
@@ -17536,7 +17716,8 @@ var WORKFLOW_INPUT_RESERVED_KEYS = /* @__PURE__ */ new Set([
   "approval_complete",
   "approvalCancel",
   "approval_cancel",
-  "_cadreApprovalInputError"
+  "_cadreApprovalInputError",
+  "_cadreApprovalPersistedPayload"
 ]);
 function isWorkflowInputReservedKey(value) {
   return WORKFLOW_INPUT_RESERVED_KEYS.has(value);
@@ -18879,7 +19060,7 @@ function nextCall(root2, workflow, result, resources, args) {
     };
   }
   if (workflow === "refresh" && result.ok !== false && args.execute !== true && approval.required === false && asStringArray(result.selected_levels).some((level) => level === "projections")) {
-    const input = approvalPayload(args);
+    const input = approvalPayload(args, workflow);
     delete input.workflow;
     delete input.root;
     return {

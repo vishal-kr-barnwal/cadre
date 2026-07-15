@@ -7,13 +7,14 @@
   "rules": [
     "Generate, materialize, and ask for explicit user approval of only the current stage.",
     "A returned decision.resume or decision.amend with session_id-only approval state is not approval.",
+    "A structured value written at decision.writable_paths is authoritative and replaces that value; send the complete artifact object. Namespace containers such as proposedContext and formattedReferences retain untouched named members.",
     "Never send stage, stage_hash, stage_revision, approved_stages, or complete before explicit user approval of the exact current review set.",
     "Never inline generated artifact bodies when review paths are available."
   ],
   "sections": [
     {
       "heading": "Resume",
-      "body": "For current-stage clarification or formatting, fill only decision.writable_paths in the returned decision.resume and invoke that full call. For an explicit current-stage revision, use decision.amend the same way. Both preserve the approved prefix and never approve, reopen, or pre-generate later stages."
+      "body": "For current-stage clarification or formatting, fill only decision.writable_paths in the returned decision.resume and invoke that full call. For an explicit current-stage revision, use decision.amend the same way. A structured value at a writable path replaces the prior value, so include the complete artifact object; per-member namespace paths replace only that named member. Both calls preserve the approved prefix and never approve, reopen, or pre-generate later stages."
     },
     {
       "heading": "Stage",

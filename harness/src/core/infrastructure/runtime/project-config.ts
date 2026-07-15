@@ -26,7 +26,8 @@ export function loadPackageJson(root: string): JsonObject | null {
 }
 
 export function normalizeProviderMode(value: unknown): "local" | "github" | "gitlab" | null {
-  const raw = String(value || "").trim().toLowerCase();
+  if (typeof value !== "string") return null;
+  const raw = value.trim().toLowerCase();
   if (!raw) return null;
   if (["none", "no", "off", "local-only", "local_only"].includes(raw)) return "local";
   return PROVIDER_MODES.has(raw as "local" | "github" | "gitlab") ? raw as "local" | "github" | "gitlab" : null;

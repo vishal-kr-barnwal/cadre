@@ -16,6 +16,7 @@
     "Markdown projections are never canonical input",
     "Only the current approval stage is generated and materialized; later stages remain pending",
     "Returned decision.resume and decision.amend calls carry session_id-only approval state and are not user approval; change only decision.writable_paths",
+    "A structured value written at decision.writable_paths is an authoritative replacement; namespace member paths replace only that member",
     "Native prompt answers follow responseTarget valueMode and customMode exactly, preserving false and empty selections",
     "Only explicit user approval may add stage, stage_hash, stage_revision, or approved_stages to approval fields",
     "All files in one stage are approved atomically and complete is sent only after every stage",

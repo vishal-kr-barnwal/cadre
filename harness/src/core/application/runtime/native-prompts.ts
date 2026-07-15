@@ -1,7 +1,8 @@
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 
-import { availableStyleGuideIds } from "./tech-stack";
+import { normalizeProviderMode } from "../../infrastructure/runtime/project-config";
+import { availableStyleGuideIds, normalizeStyleGuideId } from "./tech-stack";
 
 type PromptArgs = {
   provider: JsonObject;
@@ -85,6 +86,35 @@ export function hasAnyArg(args: RuntimeArgs, names: string[]): boolean {
   return names.some((name) => raw[name] !== undefined && raw[name] !== null && raw[name] !== "");
 }
 
+function firstProvidedArg(args: RuntimeArgs, names: string[]): unknown {
+  const raw = args as UnknownRecord;
+  const name = names.find((candidate) => Object.prototype.hasOwnProperty.call(raw, candidate));
+  return name ? raw[name] : undefined;
+}
+
+function hasValidProviderArg(args: RuntimeArgs): boolean {
+  return normalizeProviderMode(firstProvidedArg(args, ["providerMode", "provider_mode", "provider"])) !== null;
+}
+
+function hasValidSyncArg(args: RuntimeArgs): boolean {
+  return ["local", "shared"].includes(asOptionalString(firstProvidedArg(args, ["syncMode", "sync_mode"])) || "");
+}
+
+function hasValidStyleGuideArg(args: RuntimeArgs): boolean {
+  const value = firstProvidedArg(args, ["styleGuideIds", "style_guide_ids"]);
+  if (value === undefined) return false;
+  if (Array.isArray(value) && !value.every((entry) => typeof entry === "string")) return false;
+  if (typeof value !== "string" && !Array.isArray(value)) return false;
+  if (typeof value === "string" && value.trim().length === 0) return false;
+  const available = new Set(availableStyleGuideIds());
+  const requested = typeof value === "string" ? value.split(/[,\s]+/).filter(Boolean) : value;
+  return requested.every((entry) => available.has(normalizeStyleGuideId(String(entry))));
+}
+
+function hasBooleanLspArg(args: RuntimeArgs): boolean {
+  return typeof firstProvidedArg(args, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]) === "boolean";
+}
+
 function syncPrompt(syncMode: string): JsonObject {
   const recommended = syncMode === "shared" ? "shared" : "local";
   return nativePrompt(
@@ -119,7 +149,7 @@ function styleGuidePrompt(styleGuides: JsonObject): JsonObject {
   const detected = new Set(asStringArray(styleGuides.detected));
   const selected = new Set(asStringArray(styleGuides.selected));
   const choices = availableStyleGuideIds().map((id) =>
-    choice(id, id, styleGuideDescription(id, detected, selected), selected.has(id))
+    choice(id, id, styleGuideDescription(id, detected, selected), selected.has(id) || detected.has(id))
   );
   return nativePrompt(
     "setup-style-guides",
@@ -144,9 +174,9 @@ function lspRecommendationIds(lspSetup: JsonObject): string[] {
   return recommended.length > 0 ? recommended : asStringArray(lspSetup.missingFromConfig || lspSetup.missing_from_config);
 }
 
-function lspPrompt(lspSetup: JsonObject): JsonObject | null {
+function lspPrompt(lspSetup: JsonObject, force = false): JsonObject | null {
   const ids = lspRecommendationIds(lspSetup);
-  if (ids.length === 0) return null;
+  if (ids.length === 0 && !force) return null;
   const label = ids.slice(0, 4).join(", ");
   const suffix = ids.length > 4 ? `, +${ids.length - 4} more` : "";
   return nativePrompt(
@@ -155,7 +185,9 @@ function lspPrompt(lspSetup: JsonObject): JsonObject | null {
     "Should Cadre write detected language-server recommendations during setup?",
     "single",
     [
-      choice("write-lsp", "Write LSP", `Write cadre/lsp.json entries for ${label}${suffix}.`, true),
+      choice("write-lsp", "Write LSP", ids.length > 0
+        ? `Write cadre/lsp.json entries for ${label}${suffix}.`
+        : "Write cadre/lsp.json when language-server recommendations are available.", true),
       choice("skip-lsp", "Skip LSP", "Do not write cadre/lsp.json during setup.", false),
     ],
     {
@@ -206,17 +238,12 @@ function optionalMcpPrompt(integrations: unknown): JsonObject | null {
 }
 
 export function setupNativePrompts(args: PromptArgs): JsonObject[] {
+  const lspProvided = hasAnyArg(args.runtimeArgs, ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"]);
   return [
-    hasAnyArg(args.runtimeArgs, ["providerMode", "provider_mode", "provider"]) ? null : providerPrompt(args.provider),
-    hasAnyArg(args.runtimeArgs, ["syncMode", "sync_mode"]) ? null : syncPrompt(args.syncMode),
-    hasAnyArg(args.runtimeArgs, ["styleGuideIds", "style_guide_ids"]) ? null : styleGuidePrompt(args.styleGuides),
-    hasAnyArg(args.runtimeArgs, [
-      "writeLsp",
-      "write_lsp",
-      "setupLsp",
-      "setup_lsp",
-      "lsp",
-    ]) ? null : lspPrompt(args.lspSetup),
+    hasValidProviderArg(args.runtimeArgs) ? null : providerPrompt(args.provider),
+    hasValidSyncArg(args.runtimeArgs) ? null : syncPrompt(args.syncMode),
+    hasValidStyleGuideArg(args.runtimeArgs) ? null : styleGuidePrompt(args.styleGuides),
+    hasBooleanLspArg(args.runtimeArgs) ? null : lspPrompt(args.lspSetup, lspProvided),
     hasAnyArg(args.runtimeArgs, ["integrations"]) ? null : optionalMcpPrompt(args.integrations),
   ].filter((prompt): prompt is JsonObject => prompt !== null);
 }

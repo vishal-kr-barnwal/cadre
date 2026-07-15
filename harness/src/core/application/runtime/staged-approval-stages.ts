@@ -38,7 +38,7 @@ export function setupApprovalStages(polyrepoRequested: boolean): ApprovalStage[]
         "techStack", "tech_stack",
         "intent.techStack", "intent.techStackOther", "intent.techStackIntent", "intent.techStackSummary",
         "techStackOther", "techStackIntent", "techStackSummary",
-        "styleGuideIds", "style_guide_ids", "styleGuides", "style_guides",
+        "styleGuideIds", "style_guide_ids",
         "writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp",
         "providerMode", "provider_mode", "provider",
         "syncMode", "sync_mode", "teamSize", "team_size",
