@@ -43,7 +43,19 @@ changes staged workflows to generate and materialize review files only for the
 active stage while later stages remain pending. Approval sessions preserve the
 exact approved prefix and detect drift before execution. Setup reviews product,
 product guidelines, grouped technical context, and workflow policy in that
-order. These corrections remain unreleased until a later release/tag step.
+order. Refresh now analyzes first, asks for explicit levels, and runs only the
+selected stages in product, product guidelines, optional repository topology,
+grouped tech stack/style guides/LSP, workflow, and patterns order. Diagnostics
+is exclusive and read-only; projection repair covers project and style-guide
+projections. Explicit user corrections remain authoritative and can safely
+rebase the active review membership without resetting the session or its
+approved prefix. These corrections remain unreleased until a later
+release/tag step.
+
+Workspace and LSP evidence excludes installed Cadre runtimes, plugin/cache
+trees, dependencies, and vendor copies. Swift inference requires affirmative
+typed language or framework evidence, and LSP refresh removes stale
+Cadre-managed entries while preserving user-owned configuration.
 
 The MCP runtime now enforces the three-tool v1 contract end to end. Legacy
 aliases are gone, lifecycle and resource discovery follow typed protocol

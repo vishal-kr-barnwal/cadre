@@ -17,11 +17,12 @@
 
 - Changed refresh from a patterns-focused operation into an evidence-backed,
   level-specific workflow. Cadre analyzes first, asks which levels to refresh,
-  then processes the selected stages in filtered order: product, product
-  guidelines, grouped technical context, workflow, and patterns. Tech stack,
-  style guides, repository topology, and LSP are one atomic technical stage;
-  projection maintenance remains execution-authorized and diagnostics remain
-  read-only.
+  then processes only the selected stages in filtered order: product, product
+  guidelines, repository topology when selected, grouped technical context,
+  workflow, and patterns. Tech stack, style guides, and LSP are one atomic
+  technical stage. Diagnostics is an exclusive read-only level, while
+  projection maintenance remains execution-authorized and is limited to
+  project and style-guide projections.
 - Changed every staged workflow to materialize and review only its active
   stage. Setup now follows product, product guidelines, grouped technical
   context, then workflow; new-track and revision collect spec before plan;
@@ -57,9 +58,33 @@
   creating empty default documents.
 - Fixed failed target-preview materialization so it does not leave an orphaned
   approval session that blocks the next evidence-backed attempt.
+- Fixed interrupted preview supersession with a durable transaction journal.
+  Cadre quarantines superseded sessions before changing targets, restores the
+  exact target bytes and Git intent on failure, retries tombstone cleanup, and
+  returns a typed recovery response instead of leaving a live session bound to
+  restored baseline files.
+- Fixed plan evidence validation so a concrete task remains authoritative even
+  when its phase uses a conventional heading, while the bundled generic task
+  template still cannot open a review session.
 - Fixed refresh retries so partial candidates derive from the recorded
   pre-preview canonical baseline, and template-equal candidates are rejected as
   missing evidence instead of preserving or reintroducing placeholder content.
+- Fixed refresh amendments so an explicit user replacement or selection is
+  authoritative over inferred defaults and stale canonical fields. If that
+  correction changes the active stage's file membership, Cadre safely rebases
+  the same review session, preserves its approved prefix, removes only
+  unchanged obsolete previews, and issues a new revision and hash.
+- Fixed LSP refresh so repository evidence reconciles Cadre-managed server
+  entries, removing stale managed servers and adding current recommendations
+  without overwriting user-owned servers, settings, or workspace folders.
+- Fixed workspace evidence collection so installed Cadre runtimes, native
+  plugin/cache directories, dependencies, and vendor copies do not influence
+  repository maps, dependency graphs, LSP recommendations, or refresh
+  findings.
+- Fixed Swift and SwiftUI inference so only affirmative values in typed
+  language and framework fields can select their style guides. Platform names,
+  prose, object keys, false flags, and negated values no longer create a Swift
+  signal; an explicit style-guide selection remains final.
 - Fixed setup, track, refresh, and project-skill review loops caused by eager
   future-stage generation, placeholder previews, reconstructed continuations,
   or resetting a session during later clarification and source formatting.

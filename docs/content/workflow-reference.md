@@ -217,17 +217,34 @@ changes.
   `refreshLevels`, and evidence-backed semantic candidates under
   `proposedContext`.
 - Analysis: the first call is read-only and returns `refresh_analysis` plus a
-  recommended native multi-select. Available levels are `product`,
+  recommended native multi-select; it does not create previews or an approval
+  session. Available levels are `product`,
   `product-guidelines`, `tech-stack`, `style-guides`, `workflow`, `patterns`,
   `repository-topology`, `lsp`, `projections`, and `diagnostics`.
-- Approval: selected levels are filtered into `product` →
-  `product_guidelines` → grouped `technical` → `workflow` → `patterns`.
-  The technical stage atomically groups any selected tech-stack, style-guide,
-  repository-topology, and LSP files. `projections` requires execution
-  authorization without content approval; `diagnostics` is read-only.
+- Selection: the user explicitly chooses the refresh levels after analysis;
+  recommendations do not execute automatically. `diagnostics` is an exclusive,
+  read-only selection and cannot be combined with mutating levels.
+- Approval: selected semantic levels are filtered into `product` →
+  `product_guidelines` → `topology` when repository topology is selected →
+  grouped `technical` → `workflow` → `patterns`. The technical stage
+  atomically groups any selected tech-stack, style-guide, and LSP files.
+  `projections` requires execution authorization without content approval and
+  repairs only project and style-guide scoped generated projections.
 - Evidence: semantic selections require complete structured candidates and
   never fall back to setup templates. Missing evidence returns
   `stage:"refresh_evidence"` before previews or sessions are created.
+- Authority: an explicit user candidate or style-guide selection replaces
+  inference and stale fields. If an active-stage correction adds or removes
+  files, Cadre rebases that stage in the existing session, preserves prior
+  approved stages, removes only unchanged obsolete previews, and returns a new
+  revision/hash for review. Drift blocks the rebase instead of overwriting
+  user work.
+- Discovery: workspace evidence excludes installed Cadre runtimes, native
+  plugin/cache directories, dependencies, and vendor copies. Swift/SwiftUI
+  inference requires affirmative values in typed language/framework fields.
+- LSP: refresh reconciles Cadre-managed server entries with current repository
+  evidence, removes stale managed entries, and preserves user-owned servers,
+  settings, and workspace folders.
 - Output: analysis, selected-level results, updated semantic documents, LSP
   configuration, projection repair, and refresh trace evidence as applicable.
 - Common failures: unsupported levels, missing semantic evidence, stale

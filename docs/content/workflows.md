@@ -454,9 +454,9 @@ drift. The workflow always follows this order:
    `intent_prompts` question. The user chooses the levels; recommendations do
    not execute automatically.
 3. Cadre filters the selection into the fixed stage order: `product`,
-   `product_guidelines`, grouped `technical`, `workflow`, then `patterns`.
-   The technical stage contains whichever of tech stack, style guides,
-   repository topology, and LSP were selected.
+   `product_guidelines`, `topology` when selected, grouped `technical`,
+   `workflow`, then `patterns`. The technical stage contains whichever of tech
+   stack, style guides, and LSP were selected.
 4. For only the semantic documents in the active stage, the agent gathers
    repository evidence and supplies complete structured candidates under
    `proposedContext`. An LSP-only technical stage uses Cadre's analyzed
@@ -476,18 +476,18 @@ Available levels are:
 | `tech-stack` | Refreshes detected languages, frameworks, dependencies, platforms, and commands. |
 | `style-guides` | Refreshes the selected style-guide catalog and generated guide projections. |
 | `repository-topology` | Refreshes configured repositories, enabled state, default repository, and polyrepo routing. |
-| `lsp` | Reviews detected language-server configuration inside the grouped technical stage. |
+| `lsp` | Reconciles Cadre-managed language servers inside the grouped technical stage while preserving user-owned configuration. |
 | `workflow` | Refreshes development, verification, review, commit, and coordination policy. |
 | `patterns` | Refreshes evidence-backed architecture, implementation, testing, and data patterns. |
-| `projections` | Repairs missing or stale generated project projections from canonical state. |
+| `projections` | Repairs missing or stale generated project and style-guide projections from canonical state. |
 | `diagnostics` | Returns analysis only and does not mutate the project. |
 
 Evidence-backed document levels do not fall back to templates. Selecting one
 without meaningful corresponding evidence in `proposedContext` returns
 `stage:"refresh_evidence"` and does not create its review files. A selected LSP
 configuration joins the atomic `technical` review stage. Projection maintenance
-is execution-only, while diagnostics is read-only and never opens an approval
-stage.
+is execution-only, while diagnostics is exclusive, read-only, and never opens
+an approval stage.
 
 ## `cadre-revise`
 

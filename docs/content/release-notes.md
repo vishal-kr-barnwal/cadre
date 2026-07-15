@@ -16,10 +16,25 @@ target-preview recovery across staged workflows.
 - `cadre-refresh` now analyzes repository and control-plane drift before asking
   the user to choose one or more recommended levels: product, product
   guidelines, tech stack, style guides, workflow, patterns, repository
-  topology, LSP, projections, or diagnostics. It then reviews selected stages
-  in filtered order. Tech stack, style guides, repository topology, and LSP are
-  one grouped technical stage; projections remain execution-authorized and
-  diagnostics remain read-only.
+  topology, LSP, projections, or diagnostics. It then reviews only those
+  selected stages in this order: product, product guidelines, repository
+  topology when selected, grouped technical context, workflow, and patterns.
+  Tech stack, style guides, and LSP form the grouped technical stage.
+  Diagnostics is exclusive and read-only; projections remain
+  execution-authorized and repair only project and style-guide projections.
+- LSP refresh now reconciles repository evidence with `cadre/lsp.json`. It adds
+  current Cadre-managed recommendations and removes stale Cadre-managed
+  entries while preserving user-owned servers, settings, and workspace
+  folders.
+- Workspace analysis excludes installed Cadre code, native plugin and cache
+  directories, dependencies, and vendor copies. Swift and SwiftUI style-guide
+  inference now requires affirmative typed language or framework evidence;
+  platform labels, prose, object keys, false flags, and negated values do not
+  count.
+- Explicit user replacements and selections are authoritative. When a
+  correction changes the active stage's artifact membership, Cadre rebases the
+  same review session, preserves the approved prefix, safely removes unchanged
+  obsolete previews, and returns a new stage revision and hash.
 - New-track, revise, handoff, and release wait for meaningful workflow evidence
   instead of materializing empty or generic default artifacts.
 - Setup reviews product, product guidelines, grouped technical context, and
@@ -30,14 +45,17 @@ target-preview recovery across staged workflows.
 - Only the active stage's review files are generated and materialized.
   Clarification returns a complete `decision.resume`, active-stage edits return
   `decision.amend`, and only their declared `writable_paths` may change. Their
-  session-only approval state is never approval; stage approval requires the exact returned stage, hash,
-  revision, and cumulative prefix, and final execution invokes the exact
-  returned `next`.
+  session-only approval state is never approval; stage approval requires the
+  exact returned stage, hash, revision, and cumulative prefix, and final
+  execution invokes the exact returned `next`.
 - Formula pour now retains its formula identity, resolved variables, and
   metadata through session-only resume, spec approval, plan approval, and the
   exact final execution continuation.
 - Corrected staged payloads can safely supersede untouched, wholly unapproved
-  overlapping previews. Cancellation validates the worktree, Git index, and
+  overlapping previews. Supersession now quarantines old sessions before
+  restoring targets and journals the exact target, Git-index, and session
+  rollback; interruption either reconciles safely or returns a typed recovery
+  decision. Cancellation likewise validates the worktree, Git index, and
   recorded HEAD baseline atomically, preserving both user work and the session
   whenever safe restoration is not possible.
 

@@ -53,6 +53,14 @@ The setup ledger is `product` → `product_guidelines` → grouped `technical`
 selected infrastructure choices) → `workflow`. New-track and revision ledgers
 are spec → plan when both stages are in scope.
 
+Refresh has a separate analysis-first ledger. Its first call is read-only; the
+user then explicitly selects levels, and Cadre materializes only the selected
+semantic stages in `product` → `product_guidelines` → `topology` when selected
+→ grouped `technical` (tech stack, style guides, and LSP) → `workflow` →
+`patterns` order. Diagnostics is exclusive and read-only. Projection repair is
+execution-authorized rather than content-approved and is scoped to project and
+style-guide generated projections.
+
 For clarification, the client fills only `decision.writable_paths` in the full
 returned `decision.resume`. For an explicit active-stage edit it uses
 `decision.amend` the same way. Their session-only approval state does not
@@ -67,6 +75,11 @@ invoke only that exact `next` call.
 
 Final execution validates the frozen snapshot against the on-disk target.
 Canonical/projection drift fails closed and never opens a projection-only stage.
+An explicit user amendment is authoritative over inference and stale candidate
+fields. If it changes the current stage's file membership, Cadre rebases that
+stage in the same session, retains the cumulative approved prefix, removes only
+unchanged obsolete previews, and returns a new revision and hash. A changed
+review file blocks the rebase instead of being overwritten.
 
 ## Project-Skill Loading
 

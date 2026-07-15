@@ -42,20 +42,21 @@ Fix:
 
 1. Present the returned multi-select prompt and pass the chosen ids as
    `refreshLevels`.
-2. Cadre filters the selected levels into product, product guidelines, grouped
-   technical, workflow, and patterns. For only the semantic documents in the
-   active stage, inspect the repository and supply substantive
-   `proposedContext`; an LSP-only technical stage can use Cadre's analyzed
-   configuration. The technical stage groups selected tech stack, style
-   guides, repository topology, and LSP files as one atomic set.
+2. Cadre filters the selected levels into product, product guidelines,
+   topology when selected, grouped technical, workflow, and patterns. For only
+   the semantic documents in the active stage, inspect the repository and
+   supply substantive `proposedContext`; an LSP-only technical stage can use
+   Cadre's analyzed configuration. The technical stage groups selected tech
+   stack, style guides, and LSP files as one atomic set.
 3. Review and approve that active file set. Later selected stages remain
    pending and unmaterialized; continue the same session until Cadre returns
    the final execution call.
 
-Choose `diagnostics` for an analysis-only run. `projections` is explicit
-execution-only maintenance. A selected LSP configuration participates in the
-grouped technical review. Do not copy setup templates or pass empty objects to
-satisfy a semantic evidence request.
+Choose `diagnostics` alone for an analysis-only run. `projections` is explicit
+execution-only maintenance for project and style-guide projections. A selected
+LSP configuration participates in the grouped technical review and reconciles
+only Cadre-managed servers. Do not copy setup templates or pass empty objects
+to satisfy a semantic evidence request.
 
 ## A Workflow Refuses To Create A Placeholder
 
