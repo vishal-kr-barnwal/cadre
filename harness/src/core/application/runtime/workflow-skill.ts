@@ -15,7 +15,8 @@ import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { appendCadreEvent } from "./native-state";
 import { renderProjectSkillProjection } from "./project-skill-projection";
-import { applyStagedApprovalSessionPayload, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
+import { applySkillApprovalPayload, approvedSkillExecutionFiles, collectSkillStage, skillFormattingDecision, skillReferencePlan } from "./skill-stage-lifecycle";
+import { stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import type { ApprovalStage } from "./staged-approval-stages";
 
 function knownRepos(root: string): Set<string> {
@@ -90,7 +91,7 @@ function validateCatalog(root: string, id: string | null): CoreResult {
   return { ...result, operation: "validate", ok: invalid.length === 0 };
 }
 
-function sourcePause(root: string, skillId: string, requests: JsonObject[]): CoreResult {
+function sourcePause(root: string, skillId: string, requests: JsonObject[], approval: JsonObject): CoreResult {
   const resources: string[] = [];
   const errors: string[] = [];
   for (const request of requests) {
@@ -106,9 +107,24 @@ function sourcePause(root: string, skillId: string, requests: JsonObject[]): Cor
     else if (path.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
     else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root)}&path=${encodeURIComponent(source)}`);
   }
-  return errors.length ? { ok: false, phase_state: "blocked", errors, error: errors[0] } : {
-    ok: true, phase_state: "awaiting_formatting", decision: { kind: "format_reference", required: ["formatted inline content"] },
-    detail_resources: resources, source_requests: requests,
+  const decision = skillFormattingDecision(root, approval);
+  return errors.length ? {
+    ok: false,
+    phase_state: "awaiting_clarification",
+    approval,
+    decision,
+    errors,
+    error: errors[0],
+    missing_payload: ["formattedReferences"],
+    source_requests: requests,
+  } : {
+    ok: true,
+    phase_state: "awaiting_formatting",
+    approval,
+    decision,
+    missing_payload: ["formattedReferences"],
+    detail_resources: resources,
+    source_requests: requests,
   };
 }
 
@@ -189,6 +205,15 @@ function skillDirectoryFiles(root: string, skillId: string): string[] {
   return visit(directory).sort();
 }
 
+function skillDirectorySymlinks(root: string, skillId: string): string[] {
+  const chain = [path.join(root, "cadre"), path.join(root, "cadre", "skills"), path.join(root, "cadre", "skills", skillId)];
+  const linkedParent = chain.find((entry) => {
+    try { return fs.lstatSync(entry).isSymbolicLink(); } catch { return false; }
+  });
+  if (linkedParent) return [path.relative(root, linkedParent).split(path.sep).join("/")];
+  return skillDirectoryFiles(root, skillId).filter((file) => fs.lstatSync(path.join(root, file)).isSymbolicLink());
+}
+
 function removalReviewFiles(root: string, skillId: string): ReviewFile[] {
   const files = skillDirectoryFiles(root, skillId);
   const targets = files.length > 0 ? files : [`cadre/skills/${skillId}/.remove`];
@@ -216,8 +241,8 @@ function approvalStages(operation: SkillOperation, referenceReviewPaths: string[
     inputKeys: [],
   }];
   return [
-    ...(["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"] }] : []),
-    ...(["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"] }] : []),
+    ...(["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"], inputKeys: ["changes"] }] : []),
+    ...(["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"], inputKeys: ["formattedReferences", "formatted_references"] }] : []),
   ];
 }
 
@@ -264,7 +289,8 @@ function destructiveSessionIntegrity(
 }
 
 export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
-  args = applyStagedApprovalSessionPayload(root, args, "skill");
+  const appliedApprovalPayload = applySkillApprovalPayload(root, args);
+  args = appliedApprovalPayload.args;
   const operation = (asOptionalString(args.operation) || "list") as SkillOperation;
   const id = asOptionalString(args.skillId || args.skill_id || args.id)?.trim() || "";
   if (operation === "list") return catalog(root);
@@ -275,6 +301,9 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   const continuingApproval = Boolean(args.approvalSessionId || args.approval_session_id);
   const newId = operation === "rename" ? asOptionalString(args.newSkillId || args.new_skill_id)?.trim() || "" : id;
   const targetId = operation === "rename" ? newId : id;
+  if (operation === "rename" && !PROJECT_SKILL_ID_PATTERN.test(newId)) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  const symlinks = Array.from(new Set([id, targetId])).flatMap((skillId) => skillDirectorySymlinks(root, skillId));
+  if (symlinks.length > 0) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: `Project skill directories must not contain symbolic links: ${symlinks.join(", ")}`, errors: symlinks };
   const targetOwner = PROJECT_SKILL_ID_PATTERN.test(targetId) ? unapprovedSkillTargetApproval(root, targetId) : null;
   const previewOwner = targetOwner
     && asOptionalString(targetOwner.payload.operation) === operation
@@ -285,7 +314,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   if (operation === "create" && fs.existsSync(path.join(root, "cadre", "skills", id)) && !continuingApproval && !previewOwner) return { ok: false, error: `skill already exists: ${id}` };
   if (operation !== "create" && !existing.manifest && !previewOwner?.sourceManifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
   if (operation === "remove" && !fs.existsSync(path.join(root, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
-  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || (fs.existsSync(path.join(root, "cadre", "skills", newId)) && !continuingApproval && !previewOwner))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  if (operation === "rename" && fs.existsSync(path.join(root, "cadre", "skills", newId)) && !continuingApproval && !previewOwner) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
   const sessionSource = (args as JsonObject).source_manifest;
   const previewSource = previewOwner?.sourceManifest as unknown as ManagedManifest | null | undefined;
   const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource)
@@ -293,56 +322,101 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     : previewSource || existing.manifest;
   const base = operation === "create" ? emptyManagedManifest(id) : sourceManifest || emptyManagedManifest(id);
   const changed = applySkillChanges(base, args.changes);
-  if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root, id, changed.sourceRequests) };
   const manifest = changed.manifest;
   manifest.id = newId;
-  const errors = [...changed.errors, ...(operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root)))];
+  const reviewedOperation = operation === "create" || operation === "update";
+  const skillErrors = [...changed.errors, ...(operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root)))];
   const baselinePrefix = `cadre/skills/${id}/`;
   const baselineContents = previewOwner && operation === "update"
     ? new Map(previewOwner.baselineFiles
       .filter((file) => file.path.startsWith(baselinePrefix))
       .map((file): [string, string | null] => [file.path.slice(baselinePrefix.length), file.existed ? file.content : null]))
     : null;
-  const desired = operation === "remove" ? { files: new Map<string, string>(), errors: [] } : desiredFiles(root, id, manifest, changed.referenceContent, baselineContents);
-  errors.push(...desired.errors);
-  if (errors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: errors[0], errors };
+  const referencePlan = skillReferencePlan(sourceManifest, manifest, changed);
+  const desired = operation === "remove" || reviewedOperation
+    ? { files: new Map<string, string>(), errors: [] }
+    : desiredFiles(root, id, manifest, changed.referenceContent, baselineContents);
+  const destructiveErrors = reviewedOperation ? [] : [...skillErrors, ...desired.errors];
+  if (!reviewedOperation && changed.sourceRequests.length > 0) destructiveErrors.push("Destructive skill changes require formatted inline reference content before review.");
+  if (destructiveErrors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: destructiveErrors[0], errors: destructiveErrors };
   const existingReferences = (Array.isArray(sourceManifest?.references) ? sourceManifest!.references : []).map(asJsonObject);
   const existingReferencePaths = existingReferences.map((value) => asOptionalString(value.path)).filter((value): value is string => Boolean(value));
   const targetReferencePaths = manifest.references.map((value) => asOptionalString(asJsonObject(value).path)).filter((value): value is string => Boolean(value));
-  const upsertedPaths = Array.from(changed.referenceContent.keys()).flatMap((referenceId) => manifest.references
-    .filter((value) => asOptionalString(asJsonObject(value).id) === referenceId)
-    .map((value) => asOptionalString(asJsonObject(value).path) || ""));
-  const replacedPaths = existingReferences
-    .filter((reference) => changed.referenceContent.has(asOptionalString(reference.id) || ""))
-    .map((reference) => asOptionalString(reference.path) || "");
-  const removedPaths = existingReferences
-    .filter((reference) => changed.removedReferences.has(asOptionalString(reference.id) || ""))
-    .map((reference) => asOptionalString(reference.path) || "");
-  const changedReferencePaths = Array.from(new Set(operation === "rename" || operation === "remove"
-    ? [...existingReferencePaths, ...targetReferencePaths]
-    : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
-  const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
-  const desiredReviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
-  const reviews = operation === "remove"
+  const changedReferencePaths = reviewedOperation
+    ? referencePlan.changedPaths
+    : Array.from(new Set([...existingReferencePaths, ...targetReferencePaths])).filter(Boolean);
+  const deletedReferencePaths = reviewedOperation
+    ? referencePlan.deletedPaths
+    : operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
+  const stages = approvalStages(operation, changedReferencePaths);
+  const collection = reviewedOperation
+    ? collectSkillStage(root, args, id, newId, sourceManifest, changed, referencePlan, stages, skillErrors, baselineContents)
+    : null;
+  const desiredReviews = reviewedOperation ? [] : reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const reviews = collection?.files || (operation === "remove"
     ? removalReviewFiles(root, id)
     : operation === "rename"
       ? [...desiredReviews, ...removalReviewFiles(root, id)]
-      : desiredReviews;
-  const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
-    const base = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
-    return deletedReferencePaths.includes(relative) ? [`${base}.delete`] : [base];
-  });
-  const stages = approvalStages(operation, referenceReviewPaths);
+      : desiredReviews);
   const snapshot = asOptionalString((args as JsonObject).source_snapshot) || previewOwner?.sourceSnapshot || hashDirectory(path.join(root, "cadre", "skills", id));
+  const rawSourceFiles = (args as JsonObject).source_files;
+  const sourceFiles: string[] = Array.isArray(rawSourceFiles)
+    ? rawSourceFiles.filter((file): file is string => typeof file === "string")
+    : skillDirectoryFiles(root, id);
+  const storedSourceHashes = asJsonObject((args as JsonObject).source_file_hashes);
+  const sourceFileHashes = Object.keys(storedSourceHashes).length > 0 ? storedSourceHashes : Object.fromEntries(sourceFiles.map((file) => [
+    file,
+    crypto.createHash("sha256").update(fs.readFileSync(path.join(root, file))).digest("hex"),
+  ]));
   const reviewArgs = {
     ...args,
     source_snapshot: snapshot,
+    source_files: sourceFiles,
+    source_file_hashes: sourceFileHashes,
     source_manifest: (sourceManifest || emptyManagedManifest(id)) as unknown as JsonObject,
   } as RuntimeArgs;
+  if (collection?.errors.length && appliedApprovalPayload.acceptedFormattedAmendment) {
+    delete (reviewArgs as JsonObject).formattedReferences;
+    delete (reviewArgs as JsonObject).formatted_references;
+    const declaredReferenceIds = new Set(manifest.references.map((reference) => asOptionalString(asJsonObject(reference).id)).filter(Boolean));
+    const retainedFormatting = Object.fromEntries(Object.entries(appliedApprovalPayload.formattedReferences).filter(([referenceId]) => declaredReferenceIds.has(referenceId)));
+    if (Object.keys(retainedFormatting).length > 0) {
+      (reviewArgs as JsonObject).formattedReferences = retainedFormatting;
+    }
+  }
   const approval = stages.length > 0
-    ? stagedApprovalState(root, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] })
+    ? stagedApprovalState(root, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] }, { allowEmptyActiveStage: reviewedOperation })
     : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const approvalError = stages.length > 0 ? stagedApprovalError(approval) : null;
+  if (collection && !approvalError && collection.errors.length > 0) return {
+    ok: false,
+    operation,
+    skill_id: id,
+    new_skill_id: newId,
+    dry_run: true,
+    phase_state: "awaiting_clarification",
+    stage: `${collection.activeKind || "skill"}_validation`,
+    approval,
+    review_bundle: asJsonObject(approval).current_review_bundle,
+    errors: collection.errors,
+    error: collection.errors[0],
+  };
+  if (collection && !approvalError && collection.sourceRequests.length > 0) {
+    return { operation, skill_id: id, new_skill_id: newId, dry_run: true, ...sourcePause(root, id, collection.sourceRequests, asJsonObject(approval)) };
+  }
+  if (collection && !approvalError && collection.missingReferenceIds.length > 0) return {
+    ok: false,
+    operation,
+    skill_id: id,
+    new_skill_id: newId,
+    dry_run: true,
+    phase_state: "awaiting_clarification",
+    stage: "reference_evidence",
+    approval,
+    missing_payload: ["formattedReferences"],
+    missing_reference_ids: collection.missingReferenceIds,
+    error: `Reference content is required for: ${collection.missingReferenceIds.join(", ")}`,
+  };
   if (args.execute !== true || (stages.length > 0 && !stagedApprovalReady(approval))) {
     const blockedExecution = args.execute === true && stages.length > 0 && !stagedApprovalReady(approval);
     return {
@@ -360,6 +434,8 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   }
   const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root, reviewArgs) : { ok: true, skipped: true };
   if (reviewValidation.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, error: asOptionalString(reviewValidation.error) || "Approved review files changed" };
+  const approvedExecution = reviewedOperation ? approvedSkillExecutionFiles(root, reviewArgs, id, newId) : null;
+  if (approvedExecution?.error) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "approval_session_integrity", approval, review_validation: reviewValidation, error: approvedExecution.error };
   const destructiveIntegrity = destructiveSessionIntegrity(root, operation, id, newId, reviewArgs);
   if (destructiveIntegrity.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, destructive_integrity: destructiveIntegrity, error: asOptionalString(destructiveIntegrity.error) || "Approved skill directory membership changed" };
   const traceBefore = beginTrace(root);
@@ -367,7 +443,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   try {
     const eventsPath = path.join(root, "cadre", "events.jsonl");
     const eventsBaseline = captureFileBaseline(eventsPath);
-    const mutation = atomicSkillMutation(root, id, operation === "remove" ? null : newId, desired.files);
+    const mutation = atomicSkillMutation(root, id, operation === "remove" ? null : newId, approvedExecution?.files || desired.files);
     let mutationSettled = false;
     const rollback = () => {
       if (mutationSettled) return;
@@ -382,11 +458,20 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
       const final = loadProjectSkill(root, newId, knownRepos(root));
       if (!final.ok) { rollback(); return { ok: false, phase_state: "recovery_required", stage: "final_validation", errors: final.errors }; }
     }
-    const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
     const approvalSessionId = asOptionalString(asJsonObject(approval).session_id);
+    const approvedSession = approvalSessionId ? readApprovalSession(root, approvalSessionId) : null;
+    const written = Array.from(new Set([
+      ...mutation.written,
+      ...(approvedSession?.snapshot_files || []).filter((file) => file.missing !== true).map((file) => file.path),
+    ])).sort();
+    const removed = Array.from(new Set([
+      ...mutation.removed,
+      ...(approvedSession?.snapshot_files || []).filter((file) => file.missing === true).map((file) => file.path),
+    ])).sort();
+    const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
     const event = appendCadreEvent(root, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null, approval_session_id: approvalSessionId || null });
     const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root, reviewArgs) : null;
-    const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
+    const files = [...written, ...removed, "cadre/events.jsonl"];
     const controlCommit = commitTrace(root, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
     if (controlCommit.ok === false) {
       rollback();
@@ -396,7 +481,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     mutationSettled = true;
     recoverMutation = null;
     const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root, reviewArgs) : null;
-    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
+    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written, removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
   } catch (error) {
     const recoveryErrors: string[] = [];
     try { recoverMutation?.(); } catch (recoveryError) { recoveryErrors.push(errorMessage(recoveryError)); }

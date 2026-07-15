@@ -84,9 +84,11 @@ function statusEntries(cwd: string): JsonObject {
     if (!line.trim()) continue;
     const status = line.slice(0, 2);
     const rawPath = line.slice(3).trim();
-    const file = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() || "" : rawPath;
-    const normalized = file.replace(/^"|"$/g, "");
-    if (normalized) entries[normalized] = status;
+    const files = rawPath.includes(" -> ") ? rawPath.split(" -> ") : [rawPath];
+    for (const file of files) {
+      const normalized = file.replace(/^"|"$/g, "");
+      if (normalized) entries[normalized] = status;
+    }
   }
   return entries;
 }

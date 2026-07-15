@@ -101,6 +101,8 @@ test("skill workflow creates, projects, updates, renames, and removes through st
     assert.match(projection, /Reference inventory/);
     assert.doesNotMatch(projection, /Use buttons/);
     assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md"), "utf8"), "# Guide\n\nUse buttons.\n");
+    git(root, ["add", "cadre/.gitignore"]);
+    git(root, ["commit", "-m", "track cadre ignore rules"]);
 
     result = approveAndExecute(root, {
       operation: "update", skillId: "web-ui", changes: [
@@ -111,6 +113,10 @@ test("skill workflow creates, projects, updates, renames, and removes through st
     });
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md")), false);
+    assert.ok(result.removed.includes("cadre/skills/web-ui/references/guide.md"));
+    assert.ok(result.control_commit.files.includes("cadre/skills/web-ui/references/guide.md"));
+    assert.equal(spawnSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).stdout.trim(), "");
+    assert.notEqual(spawnSync("git", ["cat-file", "-e", "HEAD:cadre/skills/web-ui/references/guide.md"], { cwd: root }).status, 0);
 
     const renamePreview = core.workflowPacket(root, { workflow: "skill", operation: "rename", skillId: "web-ui", newSkillId: "browser-ui", changes: [] });
     assert.equal(renamePreview.ok, true, renamePreview.error);
@@ -122,6 +128,11 @@ test("skill workflow creates, projects, updates, renames, and removes through st
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "browser-ui", "skill.json"))).id, "browser-ui");
+    assert.ok(result.control_commit.files.includes("cadre/skills/web-ui/skill.json"));
+    assert.ok(result.control_commit.files.includes("cadre/skills/browser-ui/skill.json"));
+    assert.equal(spawnSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).stdout.trim(), "");
+    assert.notEqual(spawnSync("git", ["cat-file", "-e", "HEAD:cadre/skills/web-ui/skill.json"], { cwd: root }).status, 0);
+    assert.equal(spawnSync("git", ["cat-file", "-e", "HEAD:cadre/skills/browser-ui/skill.json"], { cwd: root }).status, 0);
 
     const removePreview = core.workflowPacket(root, { workflow: "skill", operation: "remove", skillId: "browser-ui", changes: [] });
     assert.equal(removePreview.ok, true, removePreview.error);
@@ -131,6 +142,30 @@ test("skill workflow creates, projects, updates, renames, and removes through st
     result = approvePreviewAndExecute(root, { operation: "remove", skillId: "browser-ui", changes: [] }, removePreview);
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "browser-ui")), false);
+    assert.equal(spawnSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).stdout.trim(), "");
+    assert.notEqual(spawnSync("git", ["cat-file", "-e", "HEAD:cadre/skills/browser-ui/skill.json"], { cwd: root }).status, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill reference moves commit both the approved source deletion and destination", () => {
+  const root = project();
+  try {
+    const created = approveAndExecute(root, createInput());
+    assert.equal(created.ok, true, created.error);
+    git(root, ["add", "cadre/.gitignore"]);
+    git(root, ["commit", "-m", "track cadre ignore rules"]);
+
+    const moved = approveAndExecute(root, {
+      operation: "update",
+      skillId: "web-ui",
+      changes: [{ type: "reference.upsert", id: "guide", path: "references/moved.md", content: "# Guide\n\nUse buttons." }],
+    });
+    assert.equal(moved.ok, true, moved.error);
+    assert.ok(moved.control_commit.files.includes("cadre/skills/web-ui/references/guide.md"));
+    assert.ok(moved.control_commit.files.includes("cadre/skills/web-ui/references/moved.md"));
+    assert.equal(spawnSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).stdout.trim(), "");
+    assert.notEqual(spawnSync("git", ["cat-file", "-e", "HEAD:cadre/skills/web-ui/references/guide.md"], { cwd: root }).status, 0);
+    assert.equal(spawnSync("git", ["cat-file", "-e", "HEAD:cadre/skills/web-ui/references/moved.md"], { cwd: root }).status, 0);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -363,23 +398,207 @@ test("changed skill create and update retries replace previews from their origin
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("skill workflow pauses source discovery for model formatting without writing review artifacts", () => {
+test("skill update preserves unrelated binary files byte for byte", () => {
+  const root = project();
+  try {
+    const created = approveAndExecute(root, createInput());
+    assert.equal(created.ok, true, created.error);
+    const opaque = Buffer.from([0x00, 0x01, 0x02, 0x7f, 0x80, 0xff]);
+    const opaquePath = path.join(root, "cadre", "skills", "web-ui", "opaque.bin");
+    const executablePath = path.join(root, "cadre", "skills", "web-ui", "tool.sh");
+    write(opaquePath, opaque);
+    write(executablePath, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(executablePath, 0o755);
+    git(root, ["add", "cadre/.gitignore", "cadre/skills/web-ui/opaque.bin", "cadre/skills/web-ui/tool.sh"]);
+    git(root, ["commit", "-m", "add opaque skill assets"]);
+    const dirtyOpaque = Buffer.from([0xff, 0x80, 0x7f, 0x02, 0x01, 0x00]);
+    write(opaquePath, dirtyOpaque);
+
+    const updated = approveAndExecute(root, {
+      operation: "update",
+      skillId: "web-ui",
+      changes: [{ type: "metadata.set", name: "Web UI", description: "Updated UI guidance" }],
+    });
+    assert.equal(updated.ok, true, updated.error);
+    assert.deepEqual(fs.readFileSync(opaquePath), dirtyOpaque);
+    assert.equal(fs.statSync(executablePath).mode & 0o777, 0o755);
+    assert.equal(updated.control_commit.files.includes("cadre/skills/web-ui/tool.sh"), false);
+    assert.equal(updated.control_commit.files.includes("cadre/skills/web-ui/opaque.bin"), false);
+    assert.equal(spawnSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).stdout.trim(), "M cadre/skills/web-ui/opaque.bin");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill execution rejects concurrent changes to an unchanged reference", () => {
+  const root = project();
+  try {
+    const created = approveAndExecute(root, {
+      operation: "create",
+      skillId: "review-rules",
+      changes: [
+        { type: "metadata.set", name: "Review Rules", description: "Rules with independently reviewed references" },
+        { type: "selectors.set", workflows: ["review"] },
+        { type: "rule.upsert", id: "review", text: "Review both references.", references: ["one", "two"] },
+        { type: "reference.upsert", id: "one", path: "references/one.md", content: "# One" },
+        { type: "reference.upsert", id: "two", path: "references/two.md", content: "# Two" },
+      ],
+    });
+    assert.equal(created.ok, true, created.error);
+
+    let result = core.workflowPacket(root, {
+      workflow: "skill",
+      operation: "update",
+      skillId: "review-rules",
+      changes: [{ type: "reference.upsert", id: "one", path: "references/one.md", content: "# One Updated" }],
+    });
+    const sessionId = result.approval.session_id;
+    while (result.approval.current_stage) {
+      const stage = result.approval.current_stage;
+      result = core.workflowPacket(root, {
+        workflow: "skill",
+        approvalSessionId: sessionId,
+        approvalStage: stage,
+        approvedStages: [...result.approval.approved_stages, stage],
+      });
+      assert.equal(result.ok, true, result.error);
+    }
+    const unchangedPath = path.join(root, "cadre", "skills", "review-rules", "references", "two.md");
+    write(unchangedPath, "# Concurrent Two\n");
+    const headBefore = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
+    const execution = core.workflowPacket(root, {
+      workflow: "skill",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: result.approval.approved_stages,
+    });
+    assert.equal(execution.ok, false);
+    assert.equal(execution.stage, "approval_session_integrity");
+    assert.match(execution.error, /changed outside its approved stage.*references\/two\.md/);
+    assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim(), headBefore);
+    assert.equal(fs.readFileSync(unchangedPath, "utf8"), "# Concurrent Two\n");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill mutations reject symlinks without dereferencing their targets", () => {
+  const root = project();
+  try {
+    const created = approveAndExecute(root, createInput());
+    assert.equal(created.ok, true, created.error);
+    const secretPath = path.join(root, ".env");
+    const linkPath = path.join(root, "cadre", "skills", "web-ui", "opaque-link");
+    write(secretPath, "SECRET=must-not-be-copied\n");
+    fs.symlinkSync(secretPath, linkPath);
+
+    const update = core.workflowPacket(root, {
+      workflow: "skill",
+      operation: "update",
+      skillId: "web-ui",
+      changes: [{ type: "metadata.set", name: "Web UI", description: "Updated UI guidance" }],
+    });
+    assert.equal(update.ok, false);
+    assert.equal(update.phase_state, "blocked");
+    assert.match(update.error, /must not contain symbolic links/);
+    assert.equal(fs.lstatSync(linkPath).isSymbolicLink(), true);
+    assert.equal(fs.readFileSync(secretPath, "utf8"), "SECRET=must-not-be-copied\n");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill mutations reject symlinked skill and catalog directory boundaries", () => {
+  for (const boundary of ["skill", "catalog"]) {
+    const root = project();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), `cadre-skill-${boundary}-link-`));
+    try {
+      const created = approveAndExecute(root, createInput());
+      assert.equal(created.ok, true, created.error);
+      const source = boundary === "skill"
+        ? path.join(root, "cadre", "skills", "web-ui")
+        : path.join(root, "cadre", "skills");
+      const externalTarget = path.join(outside, path.basename(source));
+      fs.renameSync(source, externalTarget);
+      fs.symlinkSync(externalTarget, source, "dir");
+      const externalManifest = path.join(externalTarget, ...(boundary === "skill" ? [] : ["web-ui"]), "skill.json");
+      const before = fs.readFileSync(externalManifest);
+
+      const update = core.workflowPacket(root, {
+        workflow: "skill",
+        operation: "update",
+        skillId: "web-ui",
+        changes: [{ type: "metadata.set", name: "Escaped Update", description: "Must stay inside the project" }],
+      });
+      assert.equal(update.ok, false);
+      assert.equal(update.phase_state, "blocked");
+      assert.match(update.error, /must not contain symbolic links/);
+      assert.equal(fs.lstatSync(source).isSymbolicLink(), true);
+      assert.deepEqual(fs.readFileSync(externalManifest), before);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  }
+});
+
+test("skill workflow keeps source formatting inside the lazy skill approval session", () => {
   const root = project();
   try {
     write(path.join(root, "notes", "raw.md"), "rough notes\n");
-    const result = core.workflowPacket(root, {
+    write(path.join(root, "notes", "secondary.md"), "secondary notes\n");
+    const preview = core.workflowPacket(root, {
       workflow: "skill", operation: "create", skillId: "docs", changes: [
         { type: "metadata.set", name: "Docs", description: "Documentation rules" },
         { type: "selectors.set", workflows: ["review"] },
-        { type: "rule.upsert", id: "docs", text: "Keep docs current.", references: ["raw"] },
+        { type: "rule.upsert", id: "docs", text: "Keep docs current.", references: ["raw", "secondary"] },
         { type: "reference.upsert", id: "raw", path: "references/raw.md", source_path: "notes/raw.md" },
+        { type: "reference.upsert", id: "secondary", path: "references/secondary.md", source_path: "notes/secondary.md" },
       ],
     });
-    assert.equal(result.ok, true);
-    assert.equal(result.phase_state, "awaiting_formatting");
-    assert.match(result.detail_resources[0], /^cadre:\/\/project-skill-source/);
-    assert.equal(result.approval, null);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "docs")), false);
+    assert.equal(preview.ok, true, preview.error);
+    assert.equal(preview.phase_state, "awaiting_staged_approval");
+    assert.equal(preview.approval.current_stage, "skill");
+    const sessionId = preview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, "utf8")).stage_records.references.snapshot_files, []);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "docs", "skill.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "docs", "references", "raw.md")), false);
+
+    const formatting = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      approvalStage: "skill",
+      approvedStages: ["skill"],
+    });
+    assert.equal(formatting.ok, true, formatting.error);
+    assert.equal(formatting.phase_state, "awaiting_formatting");
+    assert.equal(formatting.approval.session_id, sessionId);
+    assert.equal(formatting.approval.current_stage, "references");
+    assert.deepEqual(formatting.approval.approved_stages, ["skill"]);
+    assert.match(formatting.detail_resources[0], /^cadre:\/\/project-skill-source/);
+    assert.equal(formatting.detail_resources.length, 2);
+    assert.equal(formatting.decision.resume.arguments.approval.session_id, sessionId);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, "utf8")).stage_records.references.snapshot_files, []);
+
+    const partialFormatting = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      formattedReferences: { raw: "# Formatted Guide\n\nUse reviewed documentation." },
+    });
+    assert.equal(partialFormatting.ok, true, partialFormatting.error);
+    assert.equal(partialFormatting.phase_state, "awaiting_formatting");
+    assert.deepEqual(partialFormatting.source_requests.map((request) => request.id), ["secondary"]);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, "utf8")).payload.formattedReferences.raw, "# Formatted Guide\n\nUse reviewed documentation.");
+
+    const references = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      formatted_references: { secondary: "# Secondary Guide\n\nKeep secondary evidence." },
+    });
+    assert.equal(references.ok, true, references.error);
+    assert.equal(references.approval.session_id, sessionId);
+    assert.equal(references.approval.current_stage, "references");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "docs", "references", "raw.md"), "utf8"), "# Formatted Guide\n\nUse reviewed documentation.\n");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "docs", "references", "secondary.md"), "utf8"), "# Secondary Guide\n\nKeep secondary evidence.\n");
+    const completed = approvePreviewAndExecute(root, {}, references);
+    assert.equal(completed.ok, true, completed.error);
+    assert.equal(fs.existsSync(sessionFile), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -389,7 +608,7 @@ test("skill workflow rejects symlinked formatting sources even when the link sta
     write(path.join(root, ".env"), "SECRET=do-not-format\n");
     fs.mkdirSync(path.join(root, "notes"), { recursive: true });
     fs.symlinkSync(path.join(root, ".env"), path.join(root, "notes", "raw.md"));
-    const result = core.workflowPacket(root, {
+    const preview = core.workflowPacket(root, {
       workflow: "skill", operation: "create", skillId: "docs", changes: [
         { type: "metadata.set", name: "Docs", description: "Documentation rules" },
         { type: "selectors.set", workflows: ["review"] },
@@ -397,9 +616,124 @@ test("skill workflow rejects symlinked formatting sources even when the link sta
         { type: "reference.upsert", id: "raw", path: "references/raw.md", source_path: "notes/raw.md" },
       ],
     });
+    assert.equal(preview.ok, true, preview.error);
+    const result = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: preview.approval.session_id,
+      approvalStage: "skill",
+      approvedStages: ["skill"],
+    });
     assert.equal(result.ok, false);
+    assert.equal(result.approval.session_id, preview.approval.session_id);
+    assert.equal(result.approval.current_stage, "references");
     assert.match(result.errors.join(" "), /link-free project file/);
     assert.deepEqual(result.detail_resources || [], []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill workflow defers malformed future references and reviews only changed reference files", () => {
+  const root = project();
+  try {
+    const create = core.workflowPacket(root, {
+      workflow: "skill",
+      operation: "create",
+      skillId: "data-guidance",
+      changes: [
+        { type: "metadata.set", name: "Data Guidance", description: "Data review rules" },
+        { type: "selectors.set", workflows: ["review"] },
+        { type: "rule.upsert", id: "data", text: "Review data changes.", references: ["schema", "notes"] },
+        { type: "reference.upsert", id: "schema", path: "references/schema.json", content: "not json" },
+        { type: "reference.upsert", id: "notes", path: "references/notes.json", content: "also not json" },
+      ],
+      formattedReferences: { schema: 42, unknown: "future-stage input" },
+    });
+    assert.equal(create.ok, true, create.error);
+    assert.equal(create.approval.current_stage, "skill");
+    const sessionId = create.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const initialSession = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
+    assert.deepEqual(initialSession.stage_records.references.snapshot_files, []);
+    assert.equal(initialSession.payload.formattedReferences, undefined);
+    const malformed = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      approvalStage: "skill",
+      approvedStages: ["skill"],
+    });
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.phase_state, "awaiting_clarification");
+    assert.equal(malformed.approval.session_id, sessionId);
+    assert.match(malformed.errors.join(" "), /invalid JSON reference/);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "data-guidance", "references", "schema.json")), false);
+
+    const crossStageAmendment = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      changes: [
+        { type: "metadata.set", name: "Unapproved Replacement", description: "Must not replace the approved skill stage" },
+        { type: "selectors.set", workflows: ["review"] },
+        { type: "rule.upsert", id: "data", text: "Review data changes.", references: ["schema", "notes"] },
+        { type: "reference.upsert", id: "schema", path: "references/schema.json", content: "{\"type\":\"object\"}" },
+        { type: "reference.upsert", id: "notes", path: "references/notes.json", content: "{\"title\":\"Notes\"}" },
+      ],
+    });
+    assert.equal(crossStageAmendment.ok, false);
+    assert.match(crossStageAmendment.approval.approval_error, /Only current stage references input may change; changes belongs to another stage/);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, "utf8")).payload.changes[0].name, "Data Guidance");
+
+    const invalidFormatting = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      formattedReferences: { schema: 42, unknown: "not declared" },
+    });
+    assert.equal(invalidFormatting.ok, false);
+    assert.equal(invalidFormatting.approval.session_id, sessionId);
+    assert.match(invalidFormatting.errors.join(" "), /formatted reference content must be text: schema/);
+    assert.match(invalidFormatting.errors.join(" "), /formatted reference id is not declared: unknown/);
+
+    const firstCorrection = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      formattedReferences: { schema: "{\"type\":\"object\"}" },
+    });
+    assert.equal(firstCorrection.ok, false);
+    assert.match(firstCorrection.errors.join(" "), /invalid JSON reference: references\/notes\.json/);
+    const correctedSession = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
+    assert.equal(correctedSession.payload.formattedReferences.schema, "{\"type\":\"object\"}");
+    assert.equal(correctedSession.payload.formattedReferences.unknown, undefined);
+
+    const fixed = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      formatted_references: { notes: "{\"title\":\"Notes\"}" },
+    });
+    assert.equal(fixed.ok, true, fixed.error);
+    assert.deepEqual(fixed.review_bundle.files.map((file) => file.path).sort(), [
+      "cadre/skills/data-guidance/references/notes.json",
+      "cadre/skills/data-guidance/references/schema.json",
+    ]);
+    const created = approvePreviewAndExecute(root, {}, fixed);
+    assert.equal(created.ok, true, created.error);
+
+    const update = core.workflowPacket(root, {
+      workflow: "skill",
+      operation: "update",
+      skillId: "data-guidance",
+      changes: [{ type: "reference.upsert", id: "notes", path: "references/notes.json", content: "{\"title\":\"Updated Notes\"}" }],
+    });
+    assert.equal(update.ok, true, update.error);
+    assert.equal(update.approval.current_stage, "skill");
+    const updateSessionId = update.approval.session_id;
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, "cadre", "local", "approval-sessions", `${updateSessionId}.json`), "utf8")).stage_records.references.snapshot_files, []);
+    const changedReference = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: updateSessionId,
+      approvalStage: "skill",
+      approvedStages: ["skill"],
+    });
+    assert.equal(changedReference.ok, true, changedReference.error);
+    assert.deepEqual(changedReference.review_bundle.files.map((file) => file.path), ["cadre/skills/data-guidance/references/notes.json"]);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "data-guidance", "references", "schema.json"), "utf8"), "{\n  \"type\": \"object\"\n}\n");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -747,7 +747,7 @@ test("MCP root resolution rejects harness skill directories without project stat
 
     write(path.join(root, "project", "notes", "raw.md"), "Workflow-authorized source.\n");
     write(path.join(root, "project", ".env"), "SECRET=not-authorized\n");
-    const sourcePacket = parseTextJson(await request("tools/call", {
+    let sourcePacket = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: {
         root: path.join(root, "project"),
@@ -762,6 +762,20 @@ test("MCP root resolution rejects harness skill directories without project stat
             { type: "reference.upsert", id: "raw", path: "references/raw.md", source_path: "notes/raw.md" },
           ],
         },
+      },
+    }));
+    assert.equal(sourcePacket.ok, true);
+    assert.equal(sourcePacket.decision.kind, "approval");
+    assert.equal(sourcePacket.decision.stage, "skill");
+    const sourceSessionId = sourcePacket.decision.session_id;
+    sourcePacket = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root: path.join(root, "project"),
+        workflow: "skill",
+        input: {},
+        execute: false,
+        approval: { session_id: sourceSessionId, stage: "skill", approved_stages: ["skill"] },
       },
     }));
     assert.equal(sourcePacket.ok, true);
@@ -790,7 +804,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     retargetedUrl.searchParams.set("path", ".env");
     const retargeted = JSON.parse((await request("resources/read", { uri: retargetedUrl.toString() })).contents[0].text);
     assert.equal(retargeted.ok, false);
-    const secretSource = parseTextJson(await request("tools/call", {
+    let secretSource = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: {
         root: path.join(root, "project"),
@@ -804,6 +818,23 @@ test("MCP root resolution rejects harness skill directories without project stat
             { type: "rule.upsert", id: "secret", text: "Use a source.", references: ["secret"] },
             { type: "reference.upsert", id: "secret", path: "references/secret.md", source_path: ".env" },
           ],
+        },
+      },
+    }));
+    assert.equal(secretSource.ok, true);
+    assert.equal(secretSource.decision.kind, "approval");
+    assert.equal(secretSource.decision.stage, "skill");
+    secretSource = parseTextJson(await request("tools/call", {
+      name: "cadre_workflow",
+      arguments: {
+        root: path.join(root, "project"),
+        workflow: "skill",
+        input: {},
+        execute: false,
+        approval: {
+          session_id: secretSource.decision.session_id,
+          stage: "skill",
+          approved_stages: ["skill"],
         },
       },
     }));

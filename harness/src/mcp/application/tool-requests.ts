@@ -30,14 +30,14 @@ export interface ReadToolRequest {
 
 const WORKFLOW_CONTROL_KEYS = new Set([
   "root", "workflow", "execute", "approval", "skipSync", "source_manifest", "lspResult", "lsp_result",
-  "source_snapshot", "configOwnerRoot", "config_owner_root",
+  "source_snapshot", "source_files", "source_file_hashes", "configOwnerRoot", "config_owner_root",
   "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
   "approvedStages", "approved_stages", "approvalComplete", "approval_complete",
   "approvalCancel", "approval_cancel",
 ]);
 
 const ACTION_INTERNAL_KEYS = new Set([
-  "root", "action", "execute", "skipSync", "source_manifest", "source_snapshot", "lspResult", "lsp_result",
+  "root", "action", "execute", "skipSync", "source_manifest", "source_snapshot", "source_files", "source_file_hashes", "lspResult", "lsp_result",
   "configOwnerRoot", "config_owner_root",
   "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
   "approvedStages", "approved_stages", "approvalComplete", "approval_complete", "approvalCancel", "approval_cancel",

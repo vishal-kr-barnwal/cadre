@@ -441,6 +441,7 @@ function compactSkillResponse(result: CoreResult): CoreResult {
     manifest: result.manifest,
     diagnostics: result.diagnostics,
     projection_path: result.projection_path, references: result.references, source_requests: result.source_requests,
+    missing_payload: result.missing_payload, missing_reference_ids: result.missing_reference_ids,
     decision: result.decision,
     approval: compactApproval(result.approval),
     review_bundle: reviewBundle,

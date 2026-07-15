@@ -2468,6 +2468,8 @@ function compactSkillResponse(result) {
     projection_path: result.projection_path,
     references: result.references,
     source_requests: result.source_requests,
+    missing_payload: result.missing_payload,
+    missing_reference_ids: result.missing_reference_ids,
     decision: result.decision,
     approval: compactApproval(result.approval),
     review_bundle: reviewBundle,
@@ -2531,9 +2533,11 @@ function statusEntries(cwd) {
     if (!line.trim()) continue;
     const status = line.slice(0, 2);
     const rawPath = line.slice(3).trim();
-    const file = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() || "" : rawPath;
-    const normalized = file.replace(/^"|"$/g, "");
-    if (normalized) entries[normalized] = status;
+    const files = rawPath.includes(" -> ") ? rawPath.split(" -> ") : [rawPath];
+    for (const file of files) {
+      const normalized = file.replace(/^"|"$/g, "");
+      if (normalized) entries[normalized] = status;
+    }
   }
   return entries;
 }
@@ -5409,7 +5413,7 @@ function reviewHeadFiles(root2, relativePaths) {
   const paths = Array.from(new Set(relativePaths));
   const head = git(root2, ["rev-parse", "--verify", "HEAD"]);
   if (head.status === 128) {
-    return { ok: true, available: true, files: paths.map((path74) => ({ path: path74, existed: false, content: null })) };
+    return { ok: true, available: true, files: paths.map((path75) => ({ path: path75, existed: false, content: null })) };
   }
   if (head.status !== 0) {
     return {
@@ -17115,9 +17119,9 @@ function workflowLand(root2, args = {}) {
 }
 
 // src/core/application/runtime/workflow-skill.ts
-var import_node_crypto7 = __toESM(require("node:crypto"));
-var import_node_fs36 = __toESM(require("node:fs"));
-var import_node_path59 = __toESM(require("node:path"));
+var import_node_crypto8 = __toESM(require("node:crypto"));
+var import_node_fs37 = __toESM(require("node:fs"));
+var import_node_path60 = __toESM(require("node:path"));
 
 // src/core/domain/project-skill-management.ts
 function absolutePath(value) {
@@ -17179,11 +17183,11 @@ function applySkillChanges(base, changes) {
     } else if (type === "reference.upsert") {
       const reference = asJsonObject(change.reference || change);
       const referenceId = asOptionalString(reference.id)?.trim() || id;
-      const referencePath = asOptionalString(reference.path)?.trim() || "";
+      const referencePath2 = asOptionalString(reference.path)?.trim() || "";
       const content = asOptionalString(reference.content);
       const sourcePath2 = asOptionalString(reference.source_path || change.source_path);
-      if (sourcePath2 && content === void 0) sourceRequests.push({ change_index: index, id: referenceId, source_path: sourcePath2, target_path: referencePath });
-      manifest.references = upsert(manifest.references, { id: referenceId, path: referencePath, when: selector(reference.when) });
+      if (sourcePath2 && content === void 0) sourceRequests.push({ change_index: index, id: referenceId, source_path: sourcePath2, target_path: referencePath2 });
+      manifest.references = upsert(manifest.references, { id: referenceId, path: referencePath2, when: selector(reference.when) });
       if (content !== void 0) referenceContent.set(referenceId, content);
       removedReferences.delete(referenceId);
     } else if (type === "reference.remove") {
@@ -17263,6 +17267,8 @@ function atomicSkillMutation(root2, sourceId, targetId, files) {
   const source = import_node_path57.default.join(catalog2, sourceId);
   const target2 = targetId ? import_node_path57.default.join(catalog2, targetId) : null;
   const backup = import_node_fs34.default.mkdtempSync(import_node_path57.default.join(import_node_os3.default.tmpdir(), "cadre-skill-backup-"));
+  const writtenFiles = [];
+  const removedFiles = [];
   copyIfExists(source, import_node_path57.default.join(backup, "source"));
   if (target2 && target2 !== source) copyIfExists(target2, import_node_path57.default.join(backup, "target"));
   const rollback = () => {
@@ -17280,14 +17286,20 @@ function atomicSkillMutation(root2, sourceId, targetId, files) {
       const desired = new Set(files.keys());
       for (const [relative, content] of files) {
         const destination = import_node_path57.default.join(target2, relative);
+        const intended = Buffer.isBuffer(content) ? content : Buffer.from(content);
+        if (import_node_fs34.default.existsSync(destination) && import_node_fs34.default.lstatSync(destination).isFile() && import_node_fs34.default.readFileSync(destination).equals(intended)) continue;
         import_node_fs34.default.mkdirSync(import_node_path57.default.dirname(destination), { recursive: true });
         const temporary = `${destination}.tmp-${process.pid}`;
         import_node_fs34.default.writeFileSync(temporary, content);
         import_node_fs34.default.renameSync(temporary, destination);
+        writtenFiles.push(relative);
       }
       for (const existing of walkFiles(target2)) {
         const relative = import_node_path57.default.relative(target2, existing).split(import_node_path57.default.sep).join("/");
-        if (!desired.has(relative)) import_node_fs34.default.rmSync(existing, { force: true });
+        if (!desired.has(relative)) {
+          import_node_fs34.default.rmSync(existing, { force: true });
+          removedFiles.push(relative);
+        }
       }
       if (source !== target2) import_node_fs34.default.rmSync(source, { recursive: true, force: true });
     }
@@ -17297,8 +17309,8 @@ function atomicSkillMutation(root2, sourceId, targetId, files) {
     throw error;
   }
   return {
-    written: target2 ? Array.from(files.keys()).map((file) => `cadre/skills/${targetId}/${file}`).sort() : [],
-    removed: !target2 ? [`cadre/skills/${sourceId}`] : sourceId !== targetId ? [`cadre/skills/${sourceId}`] : [],
+    written: target2 ? writtenFiles.map((file) => `cadre/skills/${targetId}/${file}`).sort() : [],
+    removed: !target2 ? [`cadre/skills/${sourceId}`] : sourceId !== targetId ? [`cadre/skills/${sourceId}`] : removedFiles.map((file) => `cadre/skills/${targetId}/${file}`).sort(),
     rollback,
     finish: () => import_node_fs34.default.rmSync(backup, { recursive: true, force: true })
   };
@@ -17365,6 +17377,313 @@ function readProjectSourceFile(root2, requestedPath) {
   }
 }
 
+// src/core/application/runtime/skill-stage-lifecycle.ts
+var import_node_crypto7 = __toESM(require("node:crypto"));
+var import_node_fs36 = __toESM(require("node:fs"));
+var import_node_path59 = __toESM(require("node:path"));
+function referenceRecords(manifest) {
+  return (Array.isArray(manifest?.references) ? manifest.references : []).map(asJsonObject);
+}
+function referenceById(manifest) {
+  return new Map(referenceRecords(manifest).flatMap((reference) => {
+    const id = asOptionalString(reference.id);
+    return id ? [[id, reference]] : [];
+  }));
+}
+function referencePath(reference) {
+  return asOptionalString(reference?.path) || null;
+}
+function skillReferencePlan(sourceManifest, targetManifest, changes) {
+  const existing = referenceById(sourceManifest);
+  const target2 = referenceById(targetManifest);
+  const sourceRequestIds = changes.sourceRequests.map((request) => asOptionalString(request.id)).filter((id) => Boolean(id));
+  const ids = /* @__PURE__ */ new Set([
+    ...changes.referenceContent.keys(),
+    ...changes.removedReferences,
+    ...sourceRequestIds,
+    ...Array.from(target2.keys()).filter((id) => referencePath(existing.get(id)) !== referencePath(target2.get(id)))
+  ]);
+  const changed = /* @__PURE__ */ new Set();
+  const deleted = /* @__PURE__ */ new Set();
+  for (const id of ids) {
+    const previousPath = referencePath(existing.get(id));
+    const nextPath = referencePath(target2.get(id));
+    if (previousPath && previousPath !== nextPath) deleted.add(previousPath);
+    if (nextPath && (!previousPath || previousPath !== nextPath || changes.referenceContent.has(id) || sourceRequestIds.includes(id))) changed.add(nextPath);
+  }
+  for (const removedId of changes.removedReferences) {
+    const previousPath = referencePath(existing.get(removedId));
+    if (previousPath) deleted.add(previousPath);
+  }
+  return {
+    changedPaths: Array.from(/* @__PURE__ */ new Set([...changed, ...deleted])).sort(),
+    deletedPaths: Array.from(deleted).sort()
+  };
+}
+function skillReviewFiles(targetId, manifest) {
+  const canonical = `cadre/skills/${targetId}/skill.json`;
+  const projection = `cadre/skills/${targetId}/SKILL.md`;
+  return [
+    {
+      path: canonical,
+      title: "skill.json",
+      kind: "json",
+      source: "skill.desired_state",
+      content: `${JSON.stringify(manifest, null, 2)}
+`,
+      documentId: "skill",
+      reviewRole: "canonical",
+      canonicalPath: canonical,
+      projectionPath: projection
+    },
+    {
+      path: projection,
+      title: "SKILL.md",
+      kind: "markdown",
+      source: "skill.desired_state",
+      content: renderProjectSkillProjection(manifest),
+      documentId: "skill",
+      reviewRole: "human",
+      canonicalPath: canonical,
+      projectionPath: projection
+    }
+  ];
+}
+function frozenManifest(cursor, targetId, fallback) {
+  const canonical = `cadre/skills/${targetId}/skill.json`;
+  const snapshot = cursor.session ? stageRecord(cursor.session, "skill")?.snapshot_files.find((file) => file.path === canonical) : null;
+  if (!snapshot) return fallback;
+  try {
+    return asJsonObject(JSON.parse(snapshot.content));
+  } catch {
+    return null;
+  }
+}
+function formattedReferenceContent(args) {
+  const rawArgs6 = args;
+  const raw = asJsonObject(rawArgs6.formattedReferences || rawArgs6.formatted_references);
+  const content = /* @__PURE__ */ new Map();
+  const errors = [];
+  for (const [id, value] of Object.entries(raw)) {
+    if (typeof value === "string") content.set(id, value);
+    else errors.push(`formatted reference content must be text: ${id}`);
+  }
+  return { content, errors };
+}
+function formattingMap(value) {
+  return { ...asJsonObject(value) };
+}
+function applySkillApprovalPayload(root2, args) {
+  const raw = args;
+  const sessionId = asOptionalString(raw.approvalSessionId || raw.approval_session_id);
+  const session = sessionId ? readApprovalSession(root2, sessionId) : null;
+  const activeStage = session?.stage_order?.find((stageId) => !session.approved_stages.includes(stageId)) || null;
+  const hasAmendment = raw.formattedReferences !== void 0 || raw.formatted_references !== void 0;
+  const prior = {
+    ...formattingMap(session?.payload.formatted_references),
+    ...formattingMap(session?.payload.formattedReferences)
+  };
+  const amendment = {
+    ...formattingMap(raw.formatted_references),
+    ...formattingMap(raw.formattedReferences)
+  };
+  const normalized = { ...applyApprovalSessionPayload(root2, args, "skill") };
+  delete normalized.formattedReferences;
+  delete normalized.formatted_references;
+  if (session && activeStage === "references" && (hasAmendment || Object.keys(prior).length > 0)) {
+    normalized.formattedReferences = hasAmendment ? { ...prior, ...amendment } : prior;
+  } else if (session && hasAmendment) normalized.formattedReferences = amendment;
+  else if (session && Object.keys(prior).length > 0) normalized.formattedReferences = prior;
+  return {
+    args: normalized,
+    acceptedFormattedAmendment: Boolean(session && activeStage === "references" && hasAmendment),
+    formattedReferences: formattingMap(normalized.formattedReferences)
+  };
+}
+function existingReferenceContent(root2, sourceId, targetPath, referenceId, sourceManifest, baselineContents) {
+  const previousPath = referencePath(referenceById(sourceManifest).get(referenceId));
+  for (const relative of Array.from(new Set([targetPath, previousPath].filter((value) => Boolean(value))))) {
+    if (baselineContents?.has(relative)) {
+      const baseline = baselineContents.get(relative);
+      if (baseline !== null && baseline !== void 0) return baseline;
+    }
+    const file = import_node_path59.default.join(root2, "cadre", "skills", sourceId, relative);
+    if (import_node_fs36.default.existsSync(file)) return import_node_fs36.default.readFileSync(file, "utf8");
+  }
+  return void 0;
+}
+function referenceReviewFiles(root2, sourceId, targetId, sourceManifest, manifest, plan, referenceContent, baselineContents) {
+  const targetByPath = new Map(referenceRecords(manifest).flatMap((reference) => {
+    const relative = referencePath(reference);
+    return relative ? [[relative, reference]] : [];
+  }));
+  const files = [];
+  const missing = [];
+  const errors = [];
+  for (const relative of plan.changedPaths) {
+    const targetReference = targetByPath.get(relative);
+    const target2 = `cadre/skills/${targetId}/${relative}`;
+    if (!targetReference) {
+      files.push({
+        path: `cadre/skills/${sourceId}/${relative}`,
+        title: `Remove reference ${relative}`,
+        kind: "text",
+        source: "skill.reference.remove",
+        content: `Delete cadre/skills/${sourceId}/${relative}
+`,
+        missing: true,
+        documentId: "references",
+        reviewRole: "human",
+        projectionPath: `cadre/skills/${sourceId}/${relative}`,
+        approvalGroup: "references"
+      });
+      continue;
+    }
+    const id = asOptionalString(targetReference.id) || relative;
+    const rawContent = referenceContent.get(id) ?? existingReferenceContent(root2, sourceId, relative, id, sourceManifest, baselineContents);
+    if (rawContent === void 0) {
+      missing.push(id);
+      continue;
+    }
+    try {
+      const content = normalizeReferenceContent(relative, rawContent);
+      files.push({
+        path: target2,
+        title: relative,
+        kind: relative.endsWith(".json") ? "json" : relative.endsWith(".md") ? "markdown" : "text",
+        source: "skill.reference",
+        content,
+        documentId: "references",
+        reviewRole: "human",
+        projectionPath: target2,
+        approvalGroup: "references"
+      });
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return { files, missing: Array.from(new Set(missing)), errors };
+}
+function collectSkillStage(root2, args, sourceId, targetId, sourceManifest, changes, plan, stages, skillErrors, baselineContents) {
+  const cursor = approvalStageCursor(root2, args, "skill", stages);
+  const activeKind = cursor.activeStage?.id === "skill" ? "skill" : cursor.activeStage?.id === "references" ? "references" : null;
+  const formatted = activeKind === "references" ? formattedReferenceContent(args) : { content: /* @__PURE__ */ new Map(), errors: [] };
+  const combinedContent = new Map([...changes.referenceContent, ...formatted.content]);
+  const sourceRequests = activeKind === "references" ? changes.sourceRequests.filter((request) => !combinedContent.has(asOptionalString(request.id) || "")) : [];
+  let currentFiles = [];
+  let missingReferenceIds = [];
+  const knownReferenceIds = new Set(referenceById(changes.manifest).keys());
+  const errors = [
+    ...formatted.errors,
+    ...Array.from(formatted.content.keys()).filter((id) => !knownReferenceIds.has(id)).map((id) => `formatted reference id is not declared: ${id}`)
+  ];
+  if (activeKind === "skill" && skillErrors.length === 0) currentFiles = skillReviewFiles(targetId, changes.manifest);
+  if (activeKind === "references" && sourceRequests.length === 0) {
+    const manifest = frozenManifest(cursor, targetId, changes.manifest);
+    if (!manifest) errors.push("Approved project skill manifest snapshot cannot be read");
+    else {
+      const references = referenceReviewFiles(root2, sourceId, targetId, sourceManifest, manifest, plan, combinedContent, baselineContents);
+      currentFiles = references.files;
+      missingReferenceIds = references.missing;
+      errors.push(...references.errors);
+    }
+  }
+  if (activeKind === "references" && (errors.length > 0 || missingReferenceIds.length > 0)) currentFiles = [];
+  return {
+    cursor,
+    activeKind,
+    files: scopedApprovalReviewFiles(cursor, currentFiles),
+    sourceRequests,
+    missingReferenceIds,
+    errors: [...skillErrors, ...errors]
+  };
+}
+function approvedSkillExecutionFiles(root2, args, sourceId, targetId) {
+  const sessionId = asOptionalString(args.approvalSessionId || args.approval_session_id);
+  const session = sessionId ? readApprovalSession(root2, sessionId) : null;
+  if (!session) return { files: /* @__PURE__ */ new Map(), manifest: null, error: "Approved skill session was not found" };
+  const prefix = `cadre/skills/${targetId}/`;
+  const snapshots = new Map(session.snapshot_files.filter((file) => file.missing !== true && file.path.startsWith(prefix)).map((file) => [file.path.slice(prefix.length), file.content]));
+  const manifestContent = snapshots.get("skill.json");
+  let manifest = null;
+  try {
+    if (manifestContent) manifest = asJsonObject(JSON.parse(manifestContent));
+  } catch {
+  }
+  if (!manifest) return { files: /* @__PURE__ */ new Map(), manifest: null, error: "Approved skill manifest snapshot cannot be read" };
+  const sourcePrefix = `cadre/skills/${sourceId}/`;
+  const initialFiles = asStringArray(session.payload.source_files).filter((file) => file.startsWith(sourcePrefix));
+  const initialHashes = asJsonObject(session.payload.source_file_hashes);
+  const actualFiles = (() => {
+    const directory = import_node_path59.default.join(root2, "cadre", "skills", sourceId);
+    const visit = (current) => {
+      if (!import_node_fs36.default.existsSync(current)) return [];
+      return import_node_fs36.default.readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
+        const target2 = import_node_path59.default.join(current, entry.name);
+        return entry.isDirectory() ? visit(target2) : [import_node_path59.default.relative(root2, target2).split(import_node_path59.default.sep).join("/")];
+      });
+    };
+    return visit(directory).sort();
+  })();
+  const expectedCurrent = Array.from(/* @__PURE__ */ new Set([
+    ...initialFiles,
+    ...session.snapshot_files.filter((file) => file.missing !== true && file.path.startsWith(prefix)).map((file) => file.path)
+  ])).sort();
+  if (expectedCurrent.length !== actualFiles.length || expectedCurrent.some((file, index) => file !== actualFiles[index])) {
+    return { files: /* @__PURE__ */ new Map(), manifest, error: "Project skill directory membership changed after review began" };
+  }
+  const reviewedSourcePaths = new Set(session.snapshot_files.filter((file) => file.path.startsWith(sourcePrefix)).map((file) => file.path));
+  for (const file of initialFiles.filter((candidate) => !reviewedSourcePaths.has(candidate))) {
+    const expectedHash = asOptionalString(initialHashes[file]);
+    const actualHash = import_node_crypto7.default.createHash("sha256").update(import_node_fs36.default.readFileSync(import_node_path59.default.join(root2, file))).digest("hex");
+    if (!expectedHash || actualHash !== expectedHash) {
+      return { files: /* @__PURE__ */ new Map(), manifest, error: `Project skill file changed outside its approved stage: ${file}` };
+    }
+  }
+  const expected = ["skill.json", "SKILL.md", ...referenceRecords(manifest).map((reference) => referencePath(reference)).filter((value) => Boolean(value))];
+  const files = /* @__PURE__ */ new Map();
+  const removed = new Set(session.snapshot_files.filter((file) => file.missing === true && file.path.startsWith(sourcePrefix)).map((file) => file.path));
+  for (const file of initialFiles) {
+    if (removed.has(file)) continue;
+    const relative = file.slice(sourcePrefix.length);
+    if (expected.includes(relative)) continue;
+    const existing = import_node_path59.default.join(root2, file);
+    if (import_node_fs36.default.existsSync(existing)) files.set(relative, import_node_fs36.default.readFileSync(existing));
+  }
+  for (const relative of expected) {
+    const frozen = snapshots.get(relative);
+    if (frozen !== void 0) {
+      files.set(relative, frozen);
+      continue;
+    }
+    const existing = import_node_path59.default.join(root2, "cadre", "skills", sourceId, relative);
+    if (!import_node_fs36.default.existsSync(existing)) return { files: /* @__PURE__ */ new Map(), manifest, error: `Approved skill execution is missing ${relative}` };
+    files.set(relative, import_node_fs36.default.readFileSync(existing));
+  }
+  return { files, manifest };
+}
+function skillFormattingDecision(root2, approval) {
+  const sessionId = asOptionalString(approval.session_id) || null;
+  return {
+    kind: "format_reference",
+    required: ["formattedReferences"],
+    session_id: sessionId,
+    current_stage: asOptionalString(approval.current_stage) || null,
+    approved_stages: approval.approved_stages || [],
+    pending_stages: approval.pending_stages || [],
+    resume: sessionId ? {
+      tool: "cadre_workflow",
+      arguments: {
+        root: root2,
+        workflow: "skill",
+        input: { formattedReferences: "<reference-id to formatted text>" },
+        execute: false,
+        approval: { session_id: sessionId }
+      }
+    } : null
+  };
+}
+
 // src/core/application/runtime/workflow-skill.ts
 function knownRepos(root2) {
   const known = /* @__PURE__ */ new Set([".", "root"]);
@@ -17375,26 +17694,26 @@ function knownRepos(root2) {
   return known;
 }
 function readManifest(root2, id) {
-  const file = import_node_path59.default.join(root2, "cadre", "skills", id, "skill.json");
+  const file = import_node_path60.default.join(root2, "cadre", "skills", id, "skill.json");
   try {
-    const raw = asJsonObject(JSON.parse(import_node_fs36.default.readFileSync(file, "utf8")));
+    const raw = asJsonObject(JSON.parse(import_node_fs37.default.readFileSync(file, "utf8")));
     return { manifest: raw };
   } catch (error) {
     return { error: `skill manifest cannot be read: ${errorMessage(error)}` };
   }
 }
 function hashDirectory(directory) {
-  const hash = import_node_crypto7.default.createHash("sha256");
+  const hash = import_node_crypto8.default.createHash("sha256");
   const visit = (current) => {
-    if (!import_node_fs36.default.existsSync(current)) {
+    if (!import_node_fs37.default.existsSync(current)) {
       hash.update("missing");
       return;
     }
-    for (const entry of import_node_fs36.default.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const file = import_node_path59.default.join(current, entry.name);
-      hash.update(import_node_path59.default.relative(directory, file));
+    for (const entry of import_node_fs37.default.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const file = import_node_path60.default.join(current, entry.name);
+      hash.update(import_node_path60.default.relative(directory, file));
       if (entry.isDirectory()) visit(file);
-      else hash.update(import_node_fs36.default.readFileSync(file));
+      else hash.update(import_node_fs37.default.readFileSync(file));
     }
   };
   visit(directory);
@@ -17424,8 +17743,8 @@ function show(root2, id) {
     references: (Array.isArray(raw.manifest.references) ? raw.manifest.references : []).map((value) => {
       const reference = asJsonObject(value);
       const relative = asOptionalString(reference.path) || "";
-      const file = import_node_path59.default.join(root2, "cadre", "skills", id, relative);
-      return { id: reference.id, path: relative, bytes: import_node_fs36.default.existsSync(file) ? import_node_fs36.default.statSync(file).size : null, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root2)}&id=${encodeURIComponent(id)}&reference=${encodeURIComponent(String(reference.id || ""))}` };
+      const file = import_node_path60.default.join(root2, "cadre", "skills", id, relative);
+      return { id: reference.id, path: relative, bytes: import_node_fs37.default.existsSync(file) ? import_node_fs37.default.statSync(file).size : null, resource_uri: `cadre://project-skill?root=${encodeURIComponent(root2)}&id=${encodeURIComponent(id)}&reference=${encodeURIComponent(String(reference.id || ""))}` };
     })
   };
 }
@@ -17438,26 +17757,38 @@ function validateCatalog(root2, id) {
   const invalid2 = Array.isArray(result.invalid) ? result.invalid : [];
   return { ...result, operation: "validate", ok: invalid2.length === 0 };
 }
-function sourcePause(root2, skillId, requests) {
+function sourcePause(root2, skillId, requests, approval) {
   const resources = [];
   const errors = [];
   for (const request of requests) {
     const source = asOptionalString(request.source_path) || "";
-    const lexicalRoot = import_node_path59.default.resolve(root2);
-    const lexicalPath = import_node_path59.default.resolve(lexicalRoot, source);
-    const relative = import_node_path59.default.relative(lexicalRoot, lexicalPath);
+    const lexicalRoot = import_node_path60.default.resolve(root2);
+    const lexicalPath = import_node_path60.default.resolve(lexicalRoot, source);
+    const relative = import_node_path60.default.relative(lexicalRoot, lexicalPath);
     const validated = readProjectSourceFile(root2, source);
-    if (!source || relative.startsWith("..") || import_node_path59.default.isAbsolute(relative)) errors.push(`source_path must stay inside the project: ${source}`);
-    else if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path59.default.extname(source).toLowerCase())) errors.push(`source_path has an unsupported extension: ${source}`);
+    if (!source || relative.startsWith("..") || import_node_path60.default.isAbsolute(relative)) errors.push(`source_path must stay inside the project: ${source}`);
+    else if (!PROJECT_SKILL_REFERENCE_EXTENSIONS.has(import_node_path60.default.extname(source).toLowerCase())) errors.push(`source_path has an unsupported extension: ${source}`);
     else if (!validated.ok && validated.kind === "path") errors.push(`source_path must identify an existing, link-free project file: ${source}`);
     else if (!validated.ok) errors.push(`source_path must be a text file no larger than 128 KiB: ${source}`);
-    else if (import_node_path59.default.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
+    else if (import_node_path60.default.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
     else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root2)}&path=${encodeURIComponent(source)}`);
   }
-  return errors.length ? { ok: false, phase_state: "blocked", errors, error: errors[0] } : {
+  const decision = skillFormattingDecision(root2, approval);
+  return errors.length ? {
+    ok: false,
+    phase_state: "awaiting_clarification",
+    approval,
+    decision,
+    errors,
+    error: errors[0],
+    missing_payload: ["formattedReferences"],
+    source_requests: requests
+  } : {
     ok: true,
     phase_state: "awaiting_formatting",
-    decision: { kind: "format_reference", required: ["formatted inline content"] },
+    approval,
+    decision,
+    missing_payload: ["formattedReferences"],
     detail_resources: resources,
     source_requests: requests
   };
@@ -17476,8 +17807,8 @@ function desiredFiles(root2, sourceId, manifest, contents, baselineContents = nu
     if (content === void 0) {
       if (baselineContents?.has(relative)) content = baselineContents.get(relative) ?? void 0;
       else {
-        const existing = import_node_path59.default.join(root2, "cadre", "skills", sourceId, relative);
-        if (import_node_fs36.default.existsSync(existing)) content = import_node_fs36.default.readFileSync(existing, "utf8");
+        const existing = import_node_path60.default.join(root2, "cadre", "skills", sourceId, relative);
+        if (import_node_fs37.default.existsSync(existing)) content = import_node_fs37.default.readFileSync(existing, "utf8");
       }
       if (content === void 0) {
         errors.push(`reference content is required: ${id}`);
@@ -17531,15 +17862,27 @@ function reviewFilesFor(sourceId, targetId, files, removedReferencePaths) {
   return output;
 }
 function skillDirectoryFiles(root2, skillId) {
-  const directory = import_node_path59.default.join(root2, "cadre", "skills", skillId);
+  const directory = import_node_path60.default.join(root2, "cadre", "skills", skillId);
   const visit = (current) => {
-    if (!import_node_fs36.default.existsSync(current)) return [];
-    return import_node_fs36.default.readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
-      const target2 = import_node_path59.default.join(current, entry.name);
-      return entry.isDirectory() ? visit(target2) : [import_node_path59.default.relative(root2, target2).split(import_node_path59.default.sep).join("/")];
+    if (!import_node_fs37.default.existsSync(current)) return [];
+    return import_node_fs37.default.readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
+      const target2 = import_node_path60.default.join(current, entry.name);
+      return entry.isDirectory() ? visit(target2) : [import_node_path60.default.relative(root2, target2).split(import_node_path60.default.sep).join("/")];
     });
   };
   return visit(directory).sort();
+}
+function skillDirectorySymlinks(root2, skillId) {
+  const chain = [import_node_path60.default.join(root2, "cadre"), import_node_path60.default.join(root2, "cadre", "skills"), import_node_path60.default.join(root2, "cadre", "skills", skillId)];
+  const linkedParent = chain.find((entry) => {
+    try {
+      return import_node_fs37.default.lstatSync(entry).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  });
+  if (linkedParent) return [import_node_path60.default.relative(root2, linkedParent).split(import_node_path60.default.sep).join("/")];
+  return skillDirectoryFiles(root2, skillId).filter((file) => import_node_fs37.default.lstatSync(import_node_path60.default.join(root2, file)).isSymbolicLink());
 }
 function removalReviewFiles(root2, skillId) {
   const files = skillDirectoryFiles(root2, skillId);
@@ -17566,26 +17909,26 @@ function approvalStages(operation, referenceReviewPaths) {
     inputKeys: []
   }];
   return [
-    ...["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"] }] : [],
-    ...["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"] }] : []
+    ...["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"], inputKeys: ["changes"] }] : [],
+    ...["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"], inputKeys: ["formattedReferences", "formatted_references"] }] : []
   ];
 }
 function captureFileBaseline(file) {
-  const existed = import_node_fs36.default.existsSync(file);
-  return { existed, content: existed ? import_node_fs36.default.readFileSync(file, "utf8") : null };
+  const existed = import_node_fs37.default.existsSync(file);
+  return { existed, content: existed ? import_node_fs37.default.readFileSync(file, "utf8") : null };
 }
 function restoreFileBaseline(file, baseline) {
   if (!baseline.existed) {
-    import_node_fs36.default.rmSync(file, { force: true });
+    import_node_fs37.default.rmSync(file, { force: true });
     return;
   }
-  import_node_fs36.default.mkdirSync(import_node_path59.default.dirname(file), { recursive: true });
-  import_node_fs36.default.writeFileSync(file, baseline.content || "");
+  import_node_fs37.default.mkdirSync(import_node_path60.default.dirname(file), { recursive: true });
+  import_node_fs37.default.writeFileSync(file, baseline.content || "");
 }
 function destructiveSessionIntegrity(root2, operation, sourceId, targetId, args) {
   if (operation !== "rename" && operation !== "remove") return { ok: true, skipped: true };
   const expectedSourceHash = asOptionalString(args.source_snapshot);
-  const actualSourceHash = hashDirectory(import_node_path59.default.join(root2, "cadre", "skills", sourceId));
+  const actualSourceHash = hashDirectory(import_node_path60.default.join(root2, "cadre", "skills", sourceId));
   if (!expectedSourceHash || actualSourceHash !== expectedSourceHash) {
     return { ok: false, error: `Project skill source changed after ${operation} review began: ${sourceId}` };
   }
@@ -17602,7 +17945,8 @@ function destructiveSessionIntegrity(root2, operation, sourceId, targetId, args)
   return { ok: true, source_snapshot: actualSourceHash, target_files: actual };
 }
 function workflowSkill(root2, args) {
-  args = applyStagedApprovalSessionPayload(root2, args, "skill");
+  const appliedApprovalPayload = applySkillApprovalPayload(root2, args);
+  args = appliedApprovalPayload.args;
   const operation = asOptionalString(args.operation) || "list";
   const id = asOptionalString(args.skillId || args.skill_id || args.id)?.trim() || "";
   if (operation === "list") return catalog(root2);
@@ -17613,50 +17957,96 @@ function workflowSkill(root2, args) {
   const continuingApproval = Boolean(args.approvalSessionId || args.approval_session_id);
   const newId = operation === "rename" ? asOptionalString(args.newSkillId || args.new_skill_id)?.trim() || "" : id;
   const targetId = operation === "rename" ? newId : id;
+  if (operation === "rename" && !PROJECT_SKILL_ID_PATTERN.test(newId)) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  const symlinks = Array.from(/* @__PURE__ */ new Set([id, targetId])).flatMap((skillId) => skillDirectorySymlinks(root2, skillId));
+  if (symlinks.length > 0) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: `Project skill directories must not contain symbolic links: ${symlinks.join(", ")}`, errors: symlinks };
   const targetOwner = PROJECT_SKILL_ID_PATTERN.test(targetId) ? unapprovedSkillTargetApproval(root2, targetId) : null;
   const previewOwner = targetOwner && asOptionalString(targetOwner.payload.operation) === operation && asOptionalString(targetOwner.payload.skillId || targetOwner.payload.skill_id || targetOwner.payload.id) === id ? targetOwner : null;
   const existing = readManifest(root2, id);
-  if (operation === "create" && import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", id)) && !continuingApproval && !previewOwner) return { ok: false, error: `skill already exists: ${id}` };
+  if (operation === "create" && import_node_fs37.default.existsSync(import_node_path60.default.join(root2, "cadre", "skills", id)) && !continuingApproval && !previewOwner) return { ok: false, error: `skill already exists: ${id}` };
   if (operation !== "create" && !existing.manifest && !previewOwner?.sourceManifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
-  if (operation === "remove" && !import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
-  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", newId)) && !continuingApproval && !previewOwner)) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  if (operation === "remove" && !import_node_fs37.default.existsSync(import_node_path60.default.join(root2, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
+  if (operation === "rename" && import_node_fs37.default.existsSync(import_node_path60.default.join(root2, "cadre", "skills", newId)) && !continuingApproval && !previewOwner) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
   const sessionSource = args.source_manifest;
   const previewSource = previewOwner?.sourceManifest;
   const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource) ? asJsonObject(sessionSource) : previewSource || existing.manifest;
   const base = operation === "create" ? emptyManagedManifest(id) : sourceManifest || emptyManagedManifest(id);
   const changed = applySkillChanges(base, args.changes);
-  if (changed.sourceRequests.length) return { operation, skill_id: id, ...sourcePause(root2, id, changed.sourceRequests) };
   const manifest = changed.manifest;
   manifest.id = newId;
-  const errors = [...changed.errors, ...operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root2))];
+  const reviewedOperation = operation === "create" || operation === "update";
+  const skillErrors = [...changed.errors, ...operation === "remove" ? [] : validateManagedManifest(manifest, knownRepos(root2))];
   const baselinePrefix = `cadre/skills/${id}/`;
   const baselineContents = previewOwner && operation === "update" ? new Map(previewOwner.baselineFiles.filter((file) => file.path.startsWith(baselinePrefix)).map((file) => [file.path.slice(baselinePrefix.length), file.existed ? file.content : null])) : null;
-  const desired = operation === "remove" ? { files: /* @__PURE__ */ new Map(), errors: [] } : desiredFiles(root2, id, manifest, changed.referenceContent, baselineContents);
-  errors.push(...desired.errors);
-  if (errors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: errors[0], errors };
+  const referencePlan = skillReferencePlan(sourceManifest, manifest, changed);
+  const desired = operation === "remove" || reviewedOperation ? { files: /* @__PURE__ */ new Map(), errors: [] } : desiredFiles(root2, id, manifest, changed.referenceContent, baselineContents);
+  const destructiveErrors = reviewedOperation ? [] : [...skillErrors, ...desired.errors];
+  if (!reviewedOperation && changed.sourceRequests.length > 0) destructiveErrors.push("Destructive skill changes require formatted inline reference content before review.");
+  if (destructiveErrors.length) return { ok: false, operation, skill_id: id, phase_state: "blocked", error: destructiveErrors[0], errors: destructiveErrors };
   const existingReferences = (Array.isArray(sourceManifest?.references) ? sourceManifest.references : []).map(asJsonObject);
   const existingReferencePaths = existingReferences.map((value) => asOptionalString(value.path)).filter((value) => Boolean(value));
   const targetReferencePaths = manifest.references.map((value) => asOptionalString(asJsonObject(value).path)).filter((value) => Boolean(value));
-  const upsertedPaths = Array.from(changed.referenceContent.keys()).flatMap((referenceId) => manifest.references.filter((value) => asOptionalString(asJsonObject(value).id) === referenceId).map((value) => asOptionalString(asJsonObject(value).path) || ""));
-  const replacedPaths = existingReferences.filter((reference) => changed.referenceContent.has(asOptionalString(reference.id) || "")).map((reference) => asOptionalString(reference.path) || "");
-  const removedPaths = existingReferences.filter((reference) => changed.removedReferences.has(asOptionalString(reference.id) || "")).map((reference) => asOptionalString(reference.path) || "");
-  const changedReferencePaths = Array.from(new Set(operation === "rename" || operation === "remove" ? [...existingReferencePaths, ...targetReferencePaths] : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
-  const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
-  const desiredReviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
-  const reviews = operation === "remove" ? removalReviewFiles(root2, id) : operation === "rename" ? [...desiredReviews, ...removalReviewFiles(root2, id)] : desiredReviews;
-  const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
-    const base2 = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
-    return deletedReferencePaths.includes(relative) ? [`${base2}.delete`] : [base2];
-  });
-  const stages = approvalStages(operation, referenceReviewPaths);
-  const snapshot = asOptionalString(args.source_snapshot) || previewOwner?.sourceSnapshot || hashDirectory(import_node_path59.default.join(root2, "cadre", "skills", id));
+  const changedReferencePaths = reviewedOperation ? referencePlan.changedPaths : Array.from(/* @__PURE__ */ new Set([...existingReferencePaths, ...targetReferencePaths])).filter(Boolean);
+  const deletedReferencePaths = reviewedOperation ? referencePlan.deletedPaths : operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
+  const stages = approvalStages(operation, changedReferencePaths);
+  const collection = reviewedOperation ? collectSkillStage(root2, args, id, newId, sourceManifest, changed, referencePlan, stages, skillErrors, baselineContents) : null;
+  const desiredReviews = reviewedOperation ? [] : reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const reviews = collection?.files || (operation === "remove" ? removalReviewFiles(root2, id) : operation === "rename" ? [...desiredReviews, ...removalReviewFiles(root2, id)] : desiredReviews);
+  const snapshot = asOptionalString(args.source_snapshot) || previewOwner?.sourceSnapshot || hashDirectory(import_node_path60.default.join(root2, "cadre", "skills", id));
+  const rawSourceFiles = args.source_files;
+  const sourceFiles = Array.isArray(rawSourceFiles) ? rawSourceFiles.filter((file) => typeof file === "string") : skillDirectoryFiles(root2, id);
+  const storedSourceHashes = asJsonObject(args.source_file_hashes);
+  const sourceFileHashes = Object.keys(storedSourceHashes).length > 0 ? storedSourceHashes : Object.fromEntries(sourceFiles.map((file) => [
+    file,
+    import_node_crypto8.default.createHash("sha256").update(import_node_fs37.default.readFileSync(import_node_path60.default.join(root2, file))).digest("hex")
+  ]));
   const reviewArgs = {
     ...args,
     source_snapshot: snapshot,
+    source_files: sourceFiles,
+    source_file_hashes: sourceFileHashes,
     source_manifest: sourceManifest || emptyManagedManifest(id)
   };
-  const approval = stages.length > 0 ? stagedApprovalState(root2, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
+  if (collection?.errors.length && appliedApprovalPayload.acceptedFormattedAmendment) {
+    delete reviewArgs.formattedReferences;
+    delete reviewArgs.formatted_references;
+    const declaredReferenceIds = new Set(manifest.references.map((reference) => asOptionalString(asJsonObject(reference).id)).filter(Boolean));
+    const retainedFormatting = Object.fromEntries(Object.entries(appliedApprovalPayload.formattedReferences).filter(([referenceId]) => declaredReferenceIds.has(referenceId)));
+    if (Object.keys(retainedFormatting).length > 0) {
+      reviewArgs.formattedReferences = retainedFormatting;
+    }
+  }
+  const approval = stages.length > 0 ? stagedApprovalState(root2, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] }, { allowEmptyActiveStage: reviewedOperation }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const approvalError = stages.length > 0 ? stagedApprovalError(approval) : null;
+  if (collection && !approvalError && collection.errors.length > 0) return {
+    ok: false,
+    operation,
+    skill_id: id,
+    new_skill_id: newId,
+    dry_run: true,
+    phase_state: "awaiting_clarification",
+    stage: `${collection.activeKind || "skill"}_validation`,
+    approval,
+    review_bundle: asJsonObject(approval).current_review_bundle,
+    errors: collection.errors,
+    error: collection.errors[0]
+  };
+  if (collection && !approvalError && collection.sourceRequests.length > 0) {
+    return { operation, skill_id: id, new_skill_id: newId, dry_run: true, ...sourcePause(root2, id, collection.sourceRequests, asJsonObject(approval)) };
+  }
+  if (collection && !approvalError && collection.missingReferenceIds.length > 0) return {
+    ok: false,
+    operation,
+    skill_id: id,
+    new_skill_id: newId,
+    dry_run: true,
+    phase_state: "awaiting_clarification",
+    stage: "reference_evidence",
+    approval,
+    missing_payload: ["formattedReferences"],
+    missing_reference_ids: collection.missingReferenceIds,
+    error: `Reference content is required for: ${collection.missingReferenceIds.join(", ")}`
+  };
   if (args.execute !== true || stages.length > 0 && !stagedApprovalReady(approval)) {
     const blockedExecution = args.execute === true && stages.length > 0 && !stagedApprovalReady(approval);
     return {
@@ -17674,14 +18064,16 @@ function workflowSkill(root2, args) {
   }
   const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root2, reviewArgs) : { ok: true, skipped: true };
   if (reviewValidation.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, error: asOptionalString(reviewValidation.error) || "Approved review files changed" };
+  const approvedExecution = reviewedOperation ? approvedSkillExecutionFiles(root2, reviewArgs, id, newId) : null;
+  if (approvedExecution?.error) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "approval_session_integrity", approval, review_validation: reviewValidation, error: approvedExecution.error };
   const destructiveIntegrity = destructiveSessionIntegrity(root2, operation, id, newId, reviewArgs);
   if (destructiveIntegrity.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, destructive_integrity: destructiveIntegrity, error: asOptionalString(destructiveIntegrity.error) || "Approved skill directory membership changed" };
   const traceBefore = beginTrace(root2);
   let recoverMutation = null;
   try {
-    const eventsPath = import_node_path59.default.join(root2, "cadre", "events.jsonl");
+    const eventsPath = import_node_path60.default.join(root2, "cadre", "events.jsonl");
     const eventsBaseline = captureFileBaseline(eventsPath);
-    const mutation = atomicSkillMutation(root2, id, operation === "remove" ? null : newId, desired.files);
+    const mutation = atomicSkillMutation(root2, id, operation === "remove" ? null : newId, approvedExecution?.files || desired.files);
     let mutationSettled = false;
     const rollback = () => {
       if (mutationSettled) return;
@@ -17699,11 +18091,20 @@ function workflowSkill(root2, args) {
         return { ok: false, phase_state: "recovery_required", stage: "final_validation", errors: final.errors };
       }
     }
-    const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
     const approvalSessionId = asOptionalString(asJsonObject(approval).session_id);
+    const approvedSession = approvalSessionId ? readApprovalSession(root2, approvalSessionId) : null;
+    const written = Array.from(/* @__PURE__ */ new Set([
+      ...mutation.written,
+      ...(approvedSession?.snapshot_files || []).filter((file) => file.missing !== true).map((file) => file.path)
+    ])).sort();
+    const removed = Array.from(/* @__PURE__ */ new Set([
+      ...mutation.removed,
+      ...(approvedSession?.snapshot_files || []).filter((file) => file.missing === true).map((file) => file.path)
+    ])).sort();
+    const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
     const event = appendCadreEvent(root2, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null, approval_session_id: approvalSessionId || null });
     const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root2, reviewArgs) : null;
-    const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
+    const files = [...written, ...removed, "cadre/events.jsonl"];
     const controlCommit = commitTrace(root2, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
     if (controlCommit.ok === false) {
       rollback();
@@ -17713,7 +18114,7 @@ function workflowSkill(root2, args) {
     mutationSettled = true;
     recoverMutation = null;
     const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root2, reviewArgs) : null;
-    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
+    return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written, removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
   } catch (error) {
     const recoveryErrors = [];
     try {
@@ -18074,8 +18475,8 @@ function workflowArtifacts(result) {
     ...asJsonArray(result.review_artifacts).map((entry) => boundedJsonObject(entry)),
     ...reviewFiles(result.review_bundle)
   ];
-  for (const path74 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) {
-    files.push({ path: path74, kind: "changed" });
+  for (const path75 of [...asStringArray(result.written), ...asStringArray(result.release_artifacts)]) {
+    files.push({ path: path75, kind: "changed" });
   }
   const seen = /* @__PURE__ */ new Set();
   return files.filter((file) => {
@@ -18287,11 +18688,11 @@ async function runJobRunner() {
 var import_node_readline = __toESM(require("node:readline"));
 
 // src/cadre-lsp-review.ts
-var import_node_path65 = __toESM(require("node:path"));
+var import_node_path66 = __toESM(require("node:path"));
 
 // src/lsp/review/client.ts
-var import_node_fs37 = __toESM(require("node:fs"));
-var import_node_path61 = __toESM(require("node:path"));
+var import_node_fs38 = __toESM(require("node:fs"));
+var import_node_path62 = __toESM(require("node:path"));
 var import_node_child_process8 = require("node:child_process");
 var import_node_url = require("node:url");
 
@@ -18303,7 +18704,7 @@ var MAX_TEXT_REFERENCE_RESULTS = 50;
 var MAX_SCAN_FILE_BYTES = 1024 * 1024;
 
 // src/lsp/review/language-ids.ts
-var import_node_path60 = __toESM(require("node:path"));
+var import_node_path61 = __toESM(require("node:path"));
 var DEFAULT_LANGUAGE_IDS = {
   ".bash": "shellscript",
   ".c": "c",
@@ -18378,8 +18779,8 @@ var DEFAULT_LANGUAGE_IDS = {
   "dockerfile": "dockerfile"
 };
 function languageId(file, server) {
-  const ext = import_node_path60.default.extname(file);
-  const basename = import_node_path60.default.basename(file).toLowerCase();
+  const ext = import_node_path61.default.extname(file);
+  const basename = import_node_path61.default.basename(file).toLowerCase();
   const overrides = server ? asJsonObject(server.languageIds) : {};
   return asOptionalString(overrides[ext]) || asOptionalString(overrides[basename]) || DEFAULT_LANGUAGE_IDS[ext] || DEFAULT_LANGUAGE_IDS[basename] || "plaintext";
 }
@@ -18535,14 +18936,14 @@ ${body}`);
         },
         workspace: { workspaceFolders: true }
       },
-      workspaceFolders: [{ uri: (0, import_node_url.pathToFileURL)(this.root).href, name: import_node_path61.default.basename(this.root) }]
+      workspaceFolders: [{ uri: (0, import_node_url.pathToFileURL)(this.root).href, name: import_node_path62.default.basename(this.root) }]
     });
     this.notify("initialized", {});
   }
   open(file) {
-    const abs = import_node_path61.default.join(this.root, file);
+    const abs = import_node_path62.default.join(this.root, file);
     const uri = (0, import_node_url.pathToFileURL)(abs).href;
-    const text2 = import_node_fs37.default.readFileSync(abs, "utf8");
+    const text2 = import_node_fs38.default.readFileSync(abs, "utf8");
     const version = (this.opened.get(file) || 0) + 1;
     const alreadyOpen = this.opened.has(file);
     this.opened.set(file, version);
@@ -18564,36 +18965,36 @@ ${body}`);
   }
   async documentSymbols(file) {
     return this.request("textDocument/documentSymbol", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path61.default.join(this.root, file)).href }
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path62.default.join(this.root, file)).href }
     });
   }
   async references(file, position) {
     return this.request("textDocument/references", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path61.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path62.default.join(this.root, file)).href },
       position,
       context: { includeDeclaration: false }
     });
   }
   async definition(file, position) {
     return this.request("textDocument/definition", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path61.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path62.default.join(this.root, file)).href },
       position
     });
   }
   async typeDefinition(file, position) {
     return this.request("textDocument/typeDefinition", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path61.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path62.default.join(this.root, file)).href },
       position
     });
   }
   async implementation(file, position) {
     return this.request("textDocument/implementation", {
-      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path61.default.join(this.root, file)).href },
+      textDocument: { uri: (0, import_node_url.pathToFileURL)(import_node_path62.default.join(this.root, file)).href },
       position
     });
   }
   diagnostics(file) {
-    return this.publishedDiagnostics.get((0, import_node_url.pathToFileURL)(import_node_path61.default.join(this.root, file)).href) || [];
+    return this.publishedDiagnostics.get((0, import_node_url.pathToFileURL)(import_node_path62.default.join(this.root, file)).href) || [];
   }
   async shutdown() {
     try {
@@ -18640,12 +19041,12 @@ function commandAvailability(command) {
 }
 
 // src/lsp/review/run-review.ts
-var import_node_fs40 = __toESM(require("node:fs"));
-var import_node_path64 = __toESM(require("node:path"));
+var import_node_fs41 = __toESM(require("node:fs"));
+var import_node_path65 = __toESM(require("node:path"));
 
 // src/lsp/review/git-diff.ts
-var import_node_fs38 = __toESM(require("node:fs"));
-var import_node_path62 = __toESM(require("node:path"));
+var import_node_fs39 = __toESM(require("node:fs"));
+var import_node_path63 = __toESM(require("node:path"));
 var import_node_child_process10 = require("node:child_process");
 function runGit(root2, args) {
   const result = (0, import_node_child_process10.spawnSync)("git", args, { cwd: root2, encoding: "utf8" });
@@ -18676,7 +19077,7 @@ function changedEntries(root2, base, head) {
       kind,
       path: file || "",
       oldPath,
-      exists: file ? import_node_fs38.default.existsSync(import_node_path62.default.join(root2, file)) : false
+      exists: file ? import_node_fs39.default.existsSync(import_node_path63.default.join(root2, file)) : false
     };
   }).filter((entry) => Boolean(entry.path) && !isIgnoredFile(root2, entry.path));
 }
@@ -18743,8 +19144,8 @@ function changedSymbolCandidates(root2, base, head, entry) {
 }
 
 // src/lsp/review/scanners.ts
-var import_node_fs39 = __toESM(require("node:fs"));
-var import_node_path63 = __toESM(require("node:path"));
+var import_node_fs40 = __toESM(require("node:fs"));
+var import_node_path64 = __toESM(require("node:path"));
 var import_node_url2 = require("node:url");
 function flattenSymbols(symbols, out = []) {
   if (!Array.isArray(symbols)) return out;
@@ -18761,8 +19162,8 @@ function escapeRegExp(value) {
 function serverFileMatch(file, server) {
   const extensionSet = new Set(server.extensions || []);
   const filenameSet = new Set((server.filenames || []).map((name) => name.toLowerCase()));
-  const ext = import_node_path63.default.extname(file);
-  const basename = import_node_path63.default.basename(file).toLowerCase();
+  const ext = import_node_path64.default.extname(file);
+  const basename = import_node_path64.default.basename(file).toLowerCase();
   return extensionSet.has(ext) || filenameSet.has(basename);
 }
 function scanTextReferences(root2, symbol, changedPathSet, server) {
@@ -18773,12 +19174,12 @@ function scanTextReferences(root2, symbol, changedPathSet, server) {
   function visit(dir) {
     let entries;
     try {
-      entries = import_node_fs39.default.readdirSync(dir, { withFileTypes: true });
+      entries = import_node_fs40.default.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
-      const full = import_node_path63.default.join(dir, entry.name);
+      const full = import_node_path64.default.join(dir, entry.name);
       if (shouldIgnore(root2, full, entry.name)) continue;
       if (entry.isDirectory()) {
         visit(full);
@@ -18787,17 +19188,17 @@ function scanTextReferences(root2, symbol, changedPathSet, server) {
       }
       if (!entry.isFile()) continue;
       if (!serverFileMatch(full, server)) continue;
-      if (changedPathSet.has(import_node_path63.default.resolve(full))) continue;
+      if (changedPathSet.has(import_node_path64.default.resolve(full))) continue;
       let stat;
       try {
-        stat = import_node_fs39.default.statSync(full);
+        stat = import_node_fs40.default.statSync(full);
       } catch {
         continue;
       }
       if (stat.size > MAX_SCAN_FILE_BYTES) continue;
       let text2;
       try {
-        text2 = import_node_fs39.default.readFileSync(full, "utf8");
+        text2 = import_node_fs40.default.readFileSync(full, "utf8");
       } catch {
         continue;
       }
@@ -18807,7 +19208,7 @@ function scanTextReferences(root2, symbol, changedPathSet, server) {
         if (!pattern.test(line)) continue;
         results.push({
           file: full,
-          relativeFile: normalizeRel(import_node_path63.default.relative(root2, full)),
+          relativeFile: normalizeRel(import_node_path64.default.relative(root2, full)),
           line: i + 1,
           snippet: line.trim().slice(0, 160)
         });
@@ -18857,7 +19258,7 @@ function lspRefToLocation(root2, ref) {
     const range = location.range || location.targetSelectionRange || location.targetRange;
     return {
       file,
-      relativeFile: normalizeRel(import_node_path63.default.relative(root2, file)),
+      relativeFile: normalizeRel(import_node_path64.default.relative(root2, file)),
       line: (range?.start ? range.start.line : 0) + 1
     };
   } catch {
@@ -18907,25 +19308,25 @@ function nearbyFileHints(root2, files) {
     "build.gradle.kts"
   ]);
   for (const file of files || []) {
-    let dir = import_node_path63.default.dirname(import_node_path63.default.join(root2, file));
+    let dir = import_node_path64.default.dirname(import_node_path64.default.join(root2, file));
     while (dir.startsWith(root2)) {
       for (const name of manifestNames) {
-        const candidate = import_node_path63.default.join(dir, name);
-        if (import_node_fs39.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path63.default.relative(root2, candidate)));
+        const candidate = import_node_path64.default.join(dir, name);
+        if (import_node_fs40.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path64.default.relative(root2, candidate)));
       }
       if (dir === root2) break;
-      dir = import_node_path63.default.dirname(dir);
+      dir = import_node_path64.default.dirname(dir);
     }
-    const parsed = import_node_path63.default.parse(file);
+    const parsed = import_node_path64.default.parse(file);
     const candidates = [
-      import_node_path63.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
-      import_node_path63.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
-      import_node_path63.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
-      import_node_path63.default.join("test", file),
-      import_node_path63.default.join("tests", file)
+      import_node_path64.default.join(parsed.dir, `${parsed.name}.test${parsed.ext}`),
+      import_node_path64.default.join(parsed.dir, `${parsed.name}.spec${parsed.ext}`),
+      import_node_path64.default.join(parsed.dir, `${parsed.name}_test${parsed.ext}`),
+      import_node_path64.default.join("test", file),
+      import_node_path64.default.join("tests", file)
     ];
     for (const candidate of candidates) {
-      if (import_node_fs39.default.existsSync(import_node_path63.default.join(root2, candidate))) tests.add(normalizeRel(candidate));
+      if (import_node_fs40.default.existsSync(import_node_path64.default.join(root2, candidate))) tests.add(normalizeRel(candidate));
     }
   }
   return {
@@ -18961,7 +19362,7 @@ async function runReview(options = {}) {
     DEFAULT_LSP_CONFIG
   );
   if (!configPath.ok) return unavailable(configPath.error);
-  if (!import_node_fs40.default.existsSync(configPath.file)) return unavailable(`No LSP config found at ${configPath.relative}`);
+  if (!import_node_fs41.default.existsSync(configPath.file)) return unavailable(`No LSP config found at ${configPath.relative}`);
   const entries = changedEntries(root2, args.base, args.head);
   const files = entries.map((entry) => entry.path);
   const configRead = readProjectControlJson(configPath);
@@ -18983,8 +19384,8 @@ async function runReview(options = {}) {
   const serverReports = [];
   const changedSet = /* @__PURE__ */ new Set();
   for (const entry of entries) {
-    if (entry.path) changedSet.add(import_node_path64.default.resolve(root2, entry.path));
-    if (entry.oldPath) changedSet.add(import_node_path64.default.resolve(root2, entry.oldPath));
+    if (entry.path) changedSet.add(import_node_path65.default.resolve(root2, entry.path));
+    if (entry.oldPath) changedSet.add(import_node_path65.default.resolve(root2, entry.oldPath));
   }
   for (const server of servers) {
     const serverEntries = entries.filter((entry) => {
@@ -19106,7 +19507,7 @@ async function runReview(options = {}) {
             typeDefinitions,
             implementations
           });
-          const externalRefs = refs.map((ref) => lspRefToLocation(root2, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path64.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root2, ref.relativeFile));
+          const externalRefs = refs.map((ref) => lspRefToLocation(root2, ref)).filter((ref) => ref !== null).filter((ref) => !changedSet.has(import_node_path65.default.resolve(ref.file))).filter((ref) => !isIgnoredFile(root2, ref.relativeFile));
           if (externalRefs.length > 0) {
             findings.push(externalReferenceFinding(server, candidate, externalRefs, "lsp"));
           }
@@ -19114,7 +19515,7 @@ async function runReview(options = {}) {
       }
       for (const candidate of allCandidates.values()) {
         if (candidate.changeType !== "removed") continue;
-        if (candidate.changedFile && import_node_fs40.default.existsSync(import_node_path64.default.join(root2, candidate.changedFile))) continue;
+        if (candidate.changedFile && import_node_fs41.default.existsSync(import_node_path65.default.join(root2, candidate.changedFile))) continue;
         const refs = scanTextReferences(root2, candidate.name, changedSet, server);
         if (refs.length > 0) {
           findings.push(externalReferenceFinding(server, candidate, refs, "text"));
@@ -19221,7 +19622,7 @@ async function runCli() {
 }
 
 // src/cadre-lsp-review.ts
-if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path65.default.basename(process.argv[1] || ""))) {
+if (["cadre-lsp-review.js", "cadre-lsp-review.ts"].includes(import_node_path66.default.basename(process.argv[1] || ""))) {
   runCli().catch((error) => {
     console.error(errorMessage(error));
     process.exit(1);
@@ -19369,11 +19770,11 @@ function runLspDaemon() {
 }
 
 // src/cadre-lsp-setup.ts
-var import_node_path67 = __toESM(require("node:path"));
+var import_node_path68 = __toESM(require("node:path"));
 
 // src/lsp/setup-recommender.ts
-var import_node_fs41 = __toESM(require("node:fs"));
-var import_node_path66 = __toESM(require("node:path"));
+var import_node_fs42 = __toESM(require("node:fs"));
+var import_node_path67 = __toESM(require("node:path"));
 var import_node_child_process11 = require("node:child_process");
 var DEFAULT_LSP_CONFIG2 = "cadre/lsp.json";
 function usage2() {
@@ -19407,7 +19808,7 @@ function parseArgs2(argv) {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
-  const root2 = import_node_path66.default.resolve(args.root);
+  const root2 = import_node_path67.default.resolve(args.root);
   const configPath = resolveProjectControlJsonPath(root2, args.config, DEFAULT_LSP_CONFIG2);
   if (!configPath.ok) throw new Error(configPath.error);
   return { ...args, root: root2, config: configPath.relative, configPath: configPath.file };
@@ -19441,7 +19842,7 @@ function normalizeServer(value) {
 }
 function loadConfig(configPath) {
   try {
-    const parsed = JSON.parse(import_node_fs41.default.readFileSync(configPath, "utf8"));
+    const parsed = JSON.parse(import_node_fs42.default.readFileSync(configPath, "utf8"));
     const config = asJsonObject(parsed);
     const servers = Array.isArray(config.servers) ? config.servers.map(normalizeServer).filter((server) => server !== null) : [];
     return { ...config, servers };
@@ -19487,10 +19888,10 @@ function serverKey(server) {
 }
 function workspaceFolders(root2) {
   const folders = [{ name: ".", path: "." }];
-  const reposPath = import_node_path66.default.join(root2, "cadre", "repos.json");
+  const reposPath = import_node_path67.default.join(root2, "cadre", "repos.json");
   let repos = {};
   try {
-    repos = asJsonObject(JSON.parse(import_node_fs41.default.readFileSync(reposPath, "utf8")));
+    repos = asJsonObject(JSON.parse(import_node_fs42.default.readFileSync(reposPath, "utf8")));
   } catch {
     return folders;
   }
@@ -19581,7 +19982,7 @@ function runCli2() {
 }
 
 // src/cadre-lsp-setup.ts
-if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path67.default.basename(process.argv[1] || ""))) {
+if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path68.default.basename(process.argv[1] || ""))) {
   try {
     runCli2();
   } catch (error) {
@@ -19591,8 +19992,8 @@ if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path67.def
 }
 
 // src/mcp/application/router.ts
-var import_node_fs44 = __toESM(require("node:fs"));
-var import_node_path71 = __toESM(require("node:path"));
+var import_node_fs45 = __toESM(require("node:fs"));
+var import_node_path72 = __toESM(require("node:path"));
 
 // src/mcp/application/envelope.ts
 function asTextJson(value) {
@@ -20439,8 +20840,8 @@ function authorizeProjectSourceResources(reader, root2, packet) {
 }
 
 // src/mcp/application/review-support.ts
-var import_node_fs42 = __toESM(require("node:fs"));
-var import_node_path68 = __toESM(require("node:path"));
+var import_node_fs43 = __toESM(require("node:fs"));
+var import_node_path69 = __toESM(require("node:path"));
 var DEFAULT_LSP_CONFIG3 = "cadre/lsp.json";
 function selectedRepos(args) {
   const values = [
@@ -20475,7 +20876,7 @@ function repoReviewTargets(deps, root2, args) {
     return {
       repo,
       path: rel,
-      cwd: import_node_path68.default.isAbsolute(rel) ? rel : import_node_path68.default.resolve(root2, rel),
+      cwd: import_node_path69.default.isAbsolute(rel) ? rel : import_node_path69.default.resolve(root2, rel),
       base: args.base || asOptionalString(entry.base_branch) || asOptionalString(entry.default_branch) || "main",
       head: args.head || asOptionalString(entry.git_branch) || asOptionalString(track.git_branch) || `track/${trackId}`,
       source: asOptionalString(entry.source) || (entry.worktree_path ? "metadata.repos.worktree_path" : "repos.json")
@@ -20532,7 +20933,7 @@ async function warmLspReview(deps, root2, args) {
   const repos = await mapWithConcurrency(targets, maxWorkers, async (target2) => {
     const cwd = asOptionalString(target2.cwd) || root2;
     const repo = asOptionalString(target2.repo) || ".";
-    if (!import_node_fs42.default.existsSync(cwd)) {
+    if (!import_node_fs43.default.existsSync(cwd)) {
       const result2 = {
         available: false,
         reason: `Repo working root is missing: ${cwd}`,
@@ -20627,8 +21028,8 @@ async function workflowPacket2(deps, args) {
 }
 
 // src/mcp/application/packets/project.ts
-var import_node_fs43 = __toESM(require("node:fs"));
-var import_node_path69 = __toESM(require("node:path"));
+var import_node_fs44 = __toESM(require("node:fs"));
+var import_node_path70 = __toESM(require("node:path"));
 function invalidRootError(received) {
   return Object.assign(
     new Error(`This Cadre MCP tool requires { root } pointing at, or inside, a project containing cadre/. Received: ${received || "(missing)"}`),
@@ -20636,8 +21037,8 @@ function invalidRootError(received) {
   );
 }
 function isPackagedCadreSkillDir(root2) {
-  const normalized = root2.split(import_node_path69.default.sep).join("/");
-  return normalized.endsWith("/harness/skills/cadre") && import_node_fs43.default.existsSync(import_node_path69.default.join(root2, "SKILL.md"));
+  const normalized = root2.split(import_node_path70.default.sep).join("/");
+  return normalized.endsWith("/harness/skills/cadre") && import_node_fs44.default.existsSync(import_node_path70.default.join(root2, "SKILL.md"));
 }
 function setupSafeRoot(deps, args) {
   const info = deps.rootResolver.rootFromCandidate(args.root || process.cwd());
@@ -20690,7 +21091,7 @@ function statusPacket(deps, args) {
 }
 
 // src/mcp/application/packets/track.ts
-var import_node_path70 = __toESM(require("node:path"));
+var import_node_path71 = __toESM(require("node:path"));
 function trackPacket(deps, args) {
   const root2 = deps.rootResolver.requireCadreRoot(args);
   const action = args.action || "context";
@@ -20702,7 +21103,7 @@ function trackPacket(deps, args) {
     const context = deps.core.trackContext(root2, trackId);
     const track = context && typeof context === "object" ? context.track : void 0;
     if (!track?.plan_json_path) return envelope({ ok: false, error: `Track not found: ${trackId}` });
-    return envelope(deps.core.parsePlanFile(import_node_path70.default.resolve(root2, track.plan_json_path)));
+    return envelope(deps.core.parsePlanFile(import_node_path71.default.resolve(root2, track.plan_json_path)));
   }
   if (action === "integrity") return envelope(deps.core.planIntegrity(root2, args.trackId || args.track_id || null));
   if (action === "phase_schedule") return envelope(deps.core.phaseSchedule(root2, args));
@@ -21108,6 +21509,8 @@ var WORKFLOW_CONTROL_KEYS = /* @__PURE__ */ new Set([
   "lspResult",
   "lsp_result",
   "source_snapshot",
+  "source_files",
+  "source_file_hashes",
   "configOwnerRoot",
   "config_owner_root",
   "approvalStage",
@@ -21128,6 +21531,8 @@ var ACTION_INTERNAL_KEYS = /* @__PURE__ */ new Set([
   "skipSync",
   "source_manifest",
   "source_snapshot",
+  "source_files",
+  "source_file_hashes",
   "lspResult",
   "lsp_result",
   "configOwnerRoot",
@@ -21259,11 +21664,11 @@ function packageVersion() {
   let directory = __dirname;
   for (let depth = 0; depth < 5; depth += 1) {
     try {
-      const manifest = asJsonObject(JSON.parse(import_node_fs44.default.readFileSync(import_node_path71.default.join(directory, "package.json"), "utf8")));
+      const manifest = asJsonObject(JSON.parse(import_node_fs45.default.readFileSync(import_node_path72.default.join(directory, "package.json"), "utf8")));
       if (manifest.name === "cadre-ai") return asOptionalString(manifest.version) || "unknown";
     } catch {
     }
-    const parent = import_node_path71.default.dirname(directory);
+    const parent = import_node_path72.default.dirname(directory);
     if (parent === directory) break;
     directory = parent;
   }
@@ -21384,9 +21789,9 @@ function createMcpRuntime(deps) {
 }
 
 // src/mcp/infrastructure/job-manager.ts
-var import_node_fs45 = __toESM(require("node:fs"));
-var import_node_path72 = __toESM(require("node:path"));
-var import_node_crypto8 = __toESM(require("node:crypto"));
+var import_node_fs46 = __toESM(require("node:fs"));
+var import_node_path73 = __toESM(require("node:path"));
+var import_node_crypto9 = __toESM(require("node:crypto"));
 var import_node_child_process12 = require("node:child_process");
 var JOB_ID_PATTERN = /^job_[a-z0-9-]{1,96}$/i;
 var MAX_JOB_ARTIFACT_BYTES = 2 * 1024 * 1024;
@@ -21394,14 +21799,14 @@ function isJobId(value) {
   return typeof value === "string" && JOB_ID_PATTERN.test(value);
 }
 function inside2(root2, candidate) {
-  const relative = import_node_path72.default.relative(root2, candidate);
-  return relative !== "" && relative !== ".." && !relative.startsWith(`..${import_node_path72.default.sep}`) && !import_node_path72.default.isAbsolute(relative);
+  const relative = import_node_path73.default.relative(root2, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${import_node_path73.default.sep}`) && !import_node_path73.default.isAbsolute(relative);
 }
 function sameRoot(left, right) {
   try {
-    return import_node_fs45.default.realpathSync(left) === import_node_fs45.default.realpathSync(right);
+    return import_node_fs46.default.realpathSync(left) === import_node_fs46.default.realpathSync(right);
   } catch {
-    return import_node_path72.default.resolve(left) === import_node_path72.default.resolve(right);
+    return import_node_path73.default.resolve(left) === import_node_path73.default.resolve(right);
   }
 }
 var JobManager = class {
@@ -21412,31 +21817,31 @@ var JobManager = class {
     this.ttlMs = 60 * 60 * 1e3;
   }
   safeJobDirectory(root2, create) {
-    const canonicalRoot = import_node_fs45.default.realpathSync(root2);
-    const cadreDirectory = import_node_path72.default.join(canonicalRoot, "cadre");
-    if (create && !import_node_fs45.default.existsSync(cadreDirectory)) import_node_fs45.default.mkdirSync(cadreDirectory);
-    const cadreStat = import_node_fs45.default.lstatSync(cadreDirectory);
+    const canonicalRoot = import_node_fs46.default.realpathSync(root2);
+    const cadreDirectory = import_node_path73.default.join(canonicalRoot, "cadre");
+    if (create && !import_node_fs46.default.existsSync(cadreDirectory)) import_node_fs46.default.mkdirSync(cadreDirectory);
+    const cadreStat = import_node_fs46.default.lstatSync(cadreDirectory);
     if (!cadreStat.isDirectory() || cadreStat.isSymbolicLink()) throw new Error("Unsafe Cadre job directory");
-    const canonicalCadre = import_node_fs45.default.realpathSync(cadreDirectory);
+    const canonicalCadre = import_node_fs46.default.realpathSync(cadreDirectory);
     if (!inside2(canonicalRoot, canonicalCadre)) throw new Error("Unsafe Cadre job directory");
-    const directory = import_node_path72.default.join(canonicalCadre, "jobs");
-    if (create && !import_node_fs45.default.existsSync(directory)) import_node_fs45.default.mkdirSync(directory);
-    const directoryStat = import_node_fs45.default.lstatSync(directory);
+    const directory = import_node_path73.default.join(canonicalCadre, "jobs");
+    if (create && !import_node_fs46.default.existsSync(directory)) import_node_fs46.default.mkdirSync(directory);
+    const directoryStat = import_node_fs46.default.lstatSync(directory);
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Unsafe Cadre job directory");
-    const canonicalDirectory = import_node_fs45.default.realpathSync(directory);
+    const canonicalDirectory = import_node_fs46.default.realpathSync(directory);
     if (!inside2(canonicalRoot, canonicalDirectory)) throw new Error("Unsafe Cadre job directory");
     return canonicalDirectory;
   }
   jobPath(root2, id, createDirectory = false) {
     if (!isJobId(id)) throw new Error("Invalid Cadre job id");
     const directory = this.safeJobDirectory(root2, createDirectory);
-    const candidate = import_node_path72.default.resolve(directory, `${id}.json`);
-    if (import_node_path72.default.dirname(candidate) !== directory) throw new Error("Invalid Cadre job path");
+    const candidate = import_node_path73.default.resolve(directory, `${id}.json`);
+    if (import_node_path73.default.dirname(candidate) !== directory) throw new Error("Invalid Cadre job path");
     return candidate;
   }
   artifactPath(id) {
     if (!isJobId(id)) throw new Error("Invalid Cadre job id");
-    return import_node_path72.default.join("cadre", "jobs", `${id}.json`);
+    return import_node_path73.default.join("cadre", "jobs", `${id}.json`);
   }
   serialize(job, artifactPath = job.artifact_path || null) {
     return {
@@ -21461,37 +21866,37 @@ var JobManager = class {
     delete job.artifact_path;
     try {
       const artifactPath = this.jobPath(job.root, job.id, true);
-      if (import_node_fs45.default.existsSync(artifactPath)) {
-        const stat = import_node_fs45.default.lstatSync(artifactPath);
+      if (import_node_fs46.default.existsSync(artifactPath)) {
+        const stat = import_node_fs46.default.lstatSync(artifactPath);
         if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Unsafe Cadre job artifact");
       }
       const relativeArtifactPath = this.artifactPath(job.id);
-      temporaryPath2 = `${artifactPath}.${import_node_crypto8.default.randomUUID()}.tmp`;
-      const noFollow = typeof import_node_fs45.default.constants.O_NOFOLLOW === "number" ? import_node_fs45.default.constants.O_NOFOLLOW : 0;
-      descriptor = import_node_fs45.default.openSync(
+      temporaryPath2 = `${artifactPath}.${import_node_crypto9.default.randomUUID()}.tmp`;
+      const noFollow = typeof import_node_fs46.default.constants.O_NOFOLLOW === "number" ? import_node_fs46.default.constants.O_NOFOLLOW : 0;
+      descriptor = import_node_fs46.default.openSync(
         temporaryPath2,
-        import_node_fs45.default.constants.O_WRONLY | import_node_fs45.default.constants.O_CREAT | import_node_fs45.default.constants.O_EXCL | noFollow,
+        import_node_fs46.default.constants.O_WRONLY | import_node_fs46.default.constants.O_CREAT | import_node_fs46.default.constants.O_EXCL | noFollow,
         384
       );
-      import_node_fs45.default.writeFileSync(descriptor, `${JSON.stringify(this.serialize(job, relativeArtifactPath), null, 2)}
+      import_node_fs46.default.writeFileSync(descriptor, `${JSON.stringify(this.serialize(job, relativeArtifactPath), null, 2)}
 `);
-      import_node_fs45.default.fsyncSync(descriptor);
-      import_node_fs45.default.closeSync(descriptor);
+      import_node_fs46.default.fsyncSync(descriptor);
+      import_node_fs46.default.closeSync(descriptor);
       descriptor = null;
-      import_node_fs45.default.renameSync(temporaryPath2, artifactPath);
+      import_node_fs46.default.renameSync(temporaryPath2, artifactPath);
       temporaryPath2 = null;
       job.artifact_path = relativeArtifactPath;
     } catch {
     } finally {
       if (descriptor !== null) {
         try {
-          import_node_fs45.default.closeSync(descriptor);
+          import_node_fs46.default.closeSync(descriptor);
         } catch {
         }
       }
       if (temporaryPath2) {
         try {
-          import_node_fs45.default.rmSync(temporaryPath2, { force: true });
+          import_node_fs46.default.rmSync(temporaryPath2, { force: true });
         } catch {
         }
       }
@@ -21501,11 +21906,11 @@ var JobManager = class {
     if (!isJobId(id)) return null;
     try {
       const file = this.jobPath(root2, id);
-      const stat = import_node_fs45.default.lstatSync(file);
+      const stat = import_node_fs46.default.lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_JOB_ARTIFACT_BYTES) return null;
-      const canonicalFile = import_node_fs45.default.realpathSync(file);
-      if (canonicalFile !== file || import_node_path72.default.dirname(canonicalFile) !== import_node_path72.default.dirname(file)) return null;
-      const parsed = asJsonObject(JSON.parse(import_node_fs45.default.readFileSync(canonicalFile, "utf8")));
+      const canonicalFile = import_node_fs46.default.realpathSync(file);
+      if (canonicalFile !== file || import_node_path73.default.dirname(canonicalFile) !== import_node_path73.default.dirname(file)) return null;
+      const parsed = asJsonObject(JSON.parse(import_node_fs46.default.readFileSync(canonicalFile, "utf8")));
       if (typeof parsed.root !== "string" || !sameRoot(parsed.root, root2)) return null;
       return {
         ...parsed,
@@ -21546,7 +21951,7 @@ var JobManager = class {
   }
   persistedJobIds(root2) {
     try {
-      return import_node_fs45.default.readdirSync(this.safeJobDirectory(root2, false)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).filter(isJobId);
+      return import_node_fs46.default.readdirSync(this.safeJobDirectory(root2, false)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).filter(isJobId);
     } catch {
       return [];
     }
@@ -21559,8 +21964,8 @@ var JobManager = class {
   }
   start(type, root2, args = {}) {
     this.cleanup();
-    root2 = import_node_fs45.default.realpathSync(root2);
-    const id = `job_${import_node_crypto8.default.randomUUID()}`;
+    root2 = import_node_fs46.default.realpathSync(root2);
+    const id = `job_${import_node_crypto9.default.randomUUID()}`;
     const runner = currentMcpServerPath();
     if (!runner) throw new Error("Cadre MCP runtime not found for async job runner");
     const proc = (0, import_node_child_process12.spawn)(process.execPath, [runner, "--cadre-job-runner"], {
@@ -21734,14 +22139,14 @@ var LspDaemonClient = class {
 };
 
 // src/mcp/infrastructure/project-source-reader.ts
-var import_node_crypto9 = require("node:crypto");
+var import_node_crypto10 = require("node:crypto");
 var DEFAULT_CAPABILITY_TTL_MS = 5 * 60 * 1e3;
 var MAX_ACTIVE_CAPABILITIES = 1024;
 var PATH_ERROR = "path must identify an existing project-local file";
 var SOURCE_ERROR = "source must be a text file no larger than 128 KiB";
 var CAPABILITY_ERROR = "a valid project-source capability is required";
 function digest(bytes) {
-  return (0, import_node_crypto9.createHash)("sha256").update(bytes).digest("hex");
+  return (0, import_node_crypto10.createHash)("sha256").update(bytes).digest("hex");
 }
 var NodeProjectSourceReader = class {
   constructor(capabilityTtlMs = DEFAULT_CAPABILITY_TTL_MS, now = Date.now) {
@@ -21758,7 +22163,7 @@ var NodeProjectSourceReader = class {
       if (typeof oldest !== "string") break;
       this.capabilities.delete(oldest);
     }
-    const token = (0, import_node_crypto9.randomBytes)(32).toString("base64url");
+    const token = (0, import_node_crypto10.randomBytes)(32).toString("base64url");
     const expiresAt = this.now() + this.capabilityTtlMs;
     this.capabilities.set(token, {
       canonicalRoot: source.canonicalRoot,
@@ -21796,18 +22201,18 @@ var NodeProjectSourceReader = class {
 };
 
 // src/mcp/infrastructure/root-resolution.ts
-var import_node_fs46 = __toESM(require("node:fs"));
-var import_node_path73 = __toESM(require("node:path"));
+var import_node_fs47 = __toESM(require("node:fs"));
+var import_node_path74 = __toESM(require("node:path"));
 var import_node_url3 = require("node:url");
 function isDirectory(file) {
   try {
-    return import_node_fs46.default.statSync(file).isDirectory();
+    return import_node_fs47.default.statSync(file).isDirectory();
   } catch {
     return false;
   }
 }
 function hasCadreDirectory(dir) {
-  return isDirectory(import_node_path73.default.join(dir, "cadre"));
+  return isDirectory(import_node_path74.default.join(dir, "cadre"));
 }
 function isCadreStateDirectory(dir) {
   return [
@@ -21818,10 +22223,10 @@ function isCadreStateDirectory(dir) {
     "workflow.json",
     "config.json",
     "repos.json"
-  ].some((name) => import_node_fs46.default.existsSync(import_node_path73.default.join(dir, name))) || isDirectory(import_node_path73.default.join(dir, "tracks"));
+  ].some((name) => import_node_fs47.default.existsSync(import_node_path74.default.join(dir, name))) || isDirectory(import_node_path74.default.join(dir, "tracks"));
 }
 function hasCadreProjectState(dir) {
-  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path73.default.join(dir, "cadre"));
+  return hasCadreDirectory(dir) && isCadreStateDirectory(import_node_path74.default.join(dir, "cadre"));
 }
 function normalizePathCandidate(value) {
   if (typeof value !== "string" || value.trim() === "") return null;
@@ -21833,9 +22238,9 @@ function normalizePathCandidate(value) {
       return null;
     }
   }
-  candidate = import_node_path73.default.resolve(candidate);
+  candidate = import_node_path74.default.resolve(candidate);
   try {
-    if (import_node_fs46.default.existsSync(candidate) && !import_node_fs46.default.statSync(candidate).isDirectory()) candidate = import_node_path73.default.dirname(candidate);
+    if (import_node_fs47.default.existsSync(candidate) && !import_node_fs47.default.statSync(candidate).isDirectory()) candidate = import_node_path74.default.dirname(candidate);
   } catch {
     return null;
   }
@@ -21846,8 +22251,8 @@ function findCadreRoot(start) {
   if (!dir) return null;
   while (true) {
     if (hasCadreProjectState(dir)) return dir;
-    if (import_node_path73.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path73.default.dirname(dir);
-    const parent = import_node_path73.default.dirname(dir);
+    if (import_node_path74.default.basename(dir) === "cadre" && isCadreStateDirectory(dir)) return import_node_path74.default.dirname(dir);
+    const parent = import_node_path74.default.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }

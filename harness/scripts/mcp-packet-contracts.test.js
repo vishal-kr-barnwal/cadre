@@ -46,6 +46,16 @@ const { parseWorkflowToolRequest, workflowRuntimeArgs } = loadSource("workflow-t
 
 test.after(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
 
+test("public workflow packets reject injected skill integrity metadata", () => {
+  for (const field of ["source_files", "source_file_hashes"]) {
+    assert.throws(() => parseWorkflowToolRequest({
+      root: "/project",
+      workflow: "skill",
+      input: { [field]: field === "source_files" ? [] : {} },
+    }), new RegExp(`reserved control fields: ${field}`));
+  }
+});
+
 function dependencies(stateWorkers = []) {
   return {
     rootResolver: { requireCadreRoot: ({ root }) => root },
@@ -796,6 +806,108 @@ test("public skill packets execute the exact session-only continuation after laz
     assert.equal(packet.decision.kind, "complete");
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "api-guidance", "skill.json")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "api-guidance", "references", "guide.md")), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("public skill packets read and resume formatted references in the same session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-skill-formatting-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    spawnSync("git", ["config", "user.email", "skill@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Skill Test"], { cwd: root });
+    fs.mkdirSync(path.join(root, "cadre"), { recursive: true });
+    fs.writeFileSync(path.join(root, "cadre", "config.json"), "{}\n");
+    fs.mkdirSync(path.join(root, "notes"), { recursive: true });
+    fs.writeFileSync(path.join(root, "notes", "raw.md"), "raw API notes\n");
+    fs.writeFileSync(path.join(root, "notes", "secondary.md"), "secondary API notes\n");
+    spawnSync("git", ["add", "."], { cwd: root });
+    spawnSync("git", ["commit", "-m", "initial"], { cwd: root });
+    const input = {
+      operation: "create",
+      skillId: "api-formatting",
+      changes: [
+        { type: "metadata.set", name: "API Formatting", description: "Formatted API references" },
+        { type: "selectors.set", workflows: ["review"] },
+        { type: "rule.upsert", id: "compatibility", text: "Review API compatibility.", references: ["guide", "secondary"] },
+        { type: "reference.upsert", id: "guide", path: "references/guide.md", source_path: "notes/raw.md" },
+        { type: "reference.upsert", id: "secondary", path: "references/secondary.md", source_path: "notes/secondary.md" },
+      ],
+    };
+    let packet = invoke({ root, workflow: "skill", input, execute: false });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "skill");
+    const sessionId = packet.decision.session_id;
+
+    packet = invoke({
+      root,
+      workflow: "skill",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "skill", approved_stages: ["skill"] },
+    });
+    assert.equal(packet.decision.kind, "format_reference");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.decision.approved_stages, ["skill"]);
+    assert.equal(packet.decision.current_stage, "references");
+    assert.deepEqual(packet.next, { tool: "cadre_read", arguments: { uri: packet.resources[0] } });
+    assert.deepEqual(packet.decision.resume, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "skill",
+        input: { formattedReferences: "<reference-id to formatted text>" },
+        execute: false,
+        approval: { session_id: sessionId },
+      },
+    });
+
+    packet = invoke({
+      root,
+      workflow: "skill",
+      input: { formattedReferences: { guide: "# API Guide\n\nReview compatibility." } },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.decision.kind, "format_reference");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.equal(packet.resources.length, 1);
+    assert.deepEqual(packet.next, { tool: "cadre_read", arguments: { uri: packet.resources[0] } });
+
+    packet = invoke({
+      root,
+      workflow: "skill",
+      input: { formatted_references: { secondary: "# Secondary API Guide\n\nKeep secondary evidence." } },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "references");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      "cadre/skills/api-formatting/references/guide.md",
+      "cadre/skills/api-formatting/references/secondary.md",
+    ]);
+
+    packet = invoke({
+      root,
+      workflow: "skill",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "references", approved_stages: ["skill", "references"] },
+    });
+    const next = packet.next;
+    assert.equal(next.arguments.approval.session_id, sessionId);
+    packet = invoke(next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "api-formatting", "references", "guide.md"), "utf8"), "# API Guide\n\nReview compatibility.\n");
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "skills", "api-formatting", "references", "secondary.md"), "utf8"), "# Secondary API Guide\n\nKeep secondary evidence.\n");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
