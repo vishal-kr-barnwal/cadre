@@ -7,7 +7,7 @@
   "rules": [
     "Generate, materialize, and ask for explicit user approval of only the current stage.",
     "A session_id-only continuation is a resume, not approval.",
-    "Never send stage, approved_stages, or complete before explicit user approval of the exact current review set.",
+    "Never send stage, stage_hash, stage_revision, approved_stages, or complete before explicit user approval of the exact current review set.",
     "Never inline generated artifact bodies when review paths are available."
   ],
   "sections": [
@@ -17,7 +17,7 @@
     },
     {
       "heading": "Stage",
-      "body": "Review every returned artifact for decision.stage as one atomic set. After explicit approval, call the same workflow with `approval: {session_id, stage, approved_stages}` using exactly the next cumulative prefix."
+      "body": "Review every returned artifact for decision.stage as one atomic set. After explicit approval, call the same workflow with `approval: {session_id, stage, stage_hash, stage_revision, approved_stages}` using the exact values from that decision and exactly the next cumulative prefix."
     },
     {
       "heading": "Execute",

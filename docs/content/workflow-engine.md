@@ -55,8 +55,9 @@ are spec → plan when both stages are in scope.
 
 An `approval` object containing only `session_id` resumes the current stage; it
 does not approve it. After explicit user approval, the client sends the exact
-`decision.stage` plus the next cumulative `approved_stages` prefix. Do not
-substitute a clarification's `decision.current_stage`. Once a session exists,
+`decision.stage`, `decision.stage_hash`, and `decision.stage_revision` plus the
+next cumulative `approved_stages` prefix. Do not substitute a clarification's
+`decision.current_stage` or reuse a stamp after the stage changes. Once a session exists,
 clarification and reference-formatting continuations use the exact returned
 `decision.resume`, keeping one session alive across the stage. Cadre returns an
 execution continuation only after the full stage order is approved, and clients

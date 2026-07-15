@@ -57,9 +57,9 @@ all context automatically:
    use Cadre's analyzed configuration directly. Do not submit empty objects or
    template text merely to pass an evidence gate. Review every file in that
    stage as one set; later stages stay pending and unmaterialized.
-5. After explicit approval, pass the exact returned stage and cumulative
-   approved-stage prefix. After all selected stages are approved, invoke the
-   exact returned final `next` call.
+5. After explicit approval, pass the exact returned stage, stage hash, stage
+   revision, and cumulative approved-stage prefix. After all selected stages
+   are approved, invoke the exact returned final `next` call.
 
 `diagnostics` is read-only. `projections` needs execution authorization but no
 document approval. A selected LSP configuration is reviewed as part of the

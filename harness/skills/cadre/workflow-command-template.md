@@ -25,8 +25,9 @@ contract.
    `decision.current_stage` for clarification and formatting. Later stages stay
    pending. `approval:{session_id}` alone resumes that session and is not
    approval. After explicit user approval of the complete current stage, send
-   its exact `stage` and cumulative `approved_stages`. When no stage remains,
-   invoke the exact returned `next` unchanged.
+   its exact `stage`, `stage_hash`, `stage_revision`, and cumulative
+   `approved_stages`. When no stage remains, invoke the exact returned `next`
+   unchanged.
 
 Do not infer later actions from prose, edit Cadre-owned state manually, or treat
 Markdown projections as canonical input. If required project-skill rules do not

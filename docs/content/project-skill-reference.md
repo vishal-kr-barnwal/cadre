@@ -111,8 +111,9 @@ Future reference targets remain unmaterialized during formatting.
 Rename and remove use one staged `mutation` review over the exact source,
 destination, and deletion set. For every workflow, `approval: {session_id}`
 alone resumes without approval. Only explicit approval may add the exact
-returned `stage` and cumulative `approved_stages` prefix, and only the exact
-returned final `next` call executes after all stages are approved.
+returned `stage`, `stage_hash`, `stage_revision`, and cumulative
+`approved_stages` prefix, and only the exact returned final `next` call executes
+after all stages are approved.
 
 ## Resources
 

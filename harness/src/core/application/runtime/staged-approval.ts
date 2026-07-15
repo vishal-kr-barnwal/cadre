@@ -2,6 +2,7 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
+import { approvalStageReviewHash } from "./approval-stage-hash";
 import { reviewArtifactsFromFiles, workflowReviewBundle } from "./review-bundles";
 import { filesForApprovalStage, previewFilesForStages, stageRecord } from "./approval-session-model";
 import { prepareApprovalContinuation } from "./approval-session-continuation";
@@ -12,7 +13,6 @@ import {
   approvalComplete,
   approvalPayload,
   approvalPayloadHash,
-  approvalStageHash,
   applyApprovalSessionPayload,
   approvedStageIds,
   derivedApprovalSessionId,
@@ -55,16 +55,6 @@ function filesForStage(files: ReviewFile[], stage: ApprovalStage): ReviewFile[] 
 
 export function applyStagedApprovalSessionPayload(root: string, args: RuntimeArgs = {}, workflow: string): RuntimeArgs {
   return applyApprovalSessionPayload(root, args, workflow);
-}
-
-function stageHash(workflow: string, stage: ApprovalStage, files: ReviewFile[], extras: JsonObject): string {
-  return approvalStageHash(workflow, stage, filesForStage(files, stage).map((file) => ({
-      path: file.path,
-      source: file.source,
-      kind: file.kind,
-      missing: file.missing === true,
-      content: file.content,
-    })), extras);
 }
 
 function approvedPreviewFiles(session: ApprovalSession | null, approvedIds: string[]): JsonObject[] {
@@ -119,7 +109,7 @@ export function stagedApprovalState(
       current_review_bundle: null,
     };
   }
-  const transition = transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles);
+  const transition = transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles, extras);
   let approvalError = transition.error;
   let session = transition.session;
   let active = session ? stages.find((stage) => !session!.approved_stages.includes(stage.id)) || null : null;
@@ -177,7 +167,11 @@ export function stagedApprovalState(
   const approvedPaths = Array.from(new Set(approvedFiles.map((file) => asOptionalString(file.path)).filter((file): file is string => Boolean(file)))).sort();
   const complete = approvalComplete(args);
   const deferredForClarification = Boolean(active && activeFiles.length === 0 && options.allowEmptyActiveStage && !approvalError);
-  const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, effectiveFiles, extras)]));
+  const stageHashes = Object.fromEntries(stages.map((stage) => [
+    stage.id,
+    approvalStageReviewHash(workflow, stage, filesForStage(effectiveFiles, stage), extras),
+  ]));
+  const currentRecord = active && session ? stageRecord(session, active.id) : null;
   const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
   const manualPrompt = active && !deferredForClarification ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
   return {
@@ -211,6 +205,7 @@ export function stagedApprovalState(
     current_stage: active?.id || null,
     current_stage_title: active?.title || null,
     current_stage_hash: active ? stageHashes[active.id] : null,
+    current_stage_revision: currentRecord?.revision ?? null,
     stage_hashes: stageHashes,
     approved_stages: Array.from(approved),
     pending_stages: pending.map((stage) => stage.id),
@@ -221,6 +216,8 @@ export function stagedApprovalState(
         title: stage.title,
         description: stage.description,
         approved: approved.has(stage.id),
+        revision: session ? stageRecord(session, stage.id)?.revision ?? 0 : 0,
+        hash: stageHashes[stage.id],
         file_count: stageFiles.length,
         canonical_paths: Array.from(new Set(stageFiles.map((file) => file.canonicalPath).filter((value): value is string => Boolean(value)))),
         projection_paths: Array.from(new Set(stageFiles.map((file) => file.projectionPath).filter((value): value is string => Boolean(value)))),
@@ -254,7 +251,7 @@ export function stagedApprovalState(
         : active
         ? [
           `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,
-          `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
+          `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, the returned current_stage_hash/current_stage_revision, and approvedStages including exactly the next stage.`,
           "After all stages are approved in dry-run calls, call the mutating packet with execute:true, approvalComplete:true, and the same approvalSessionId.",
         ]
         : [],

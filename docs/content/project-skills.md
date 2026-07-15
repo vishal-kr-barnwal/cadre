@@ -570,9 +570,10 @@ Mutation review stages are dynamic:
 Only the active stage is written at final repository paths; later stages stay
 pending and unmaterialized. `approval: {session_id}` alone resumes and never
 approves. After explicit user approval, send the exact returned `stage` and
-cumulative `approved_stages` prefix. After every stage is approved, invoke the
-exact returned `next` call for completion and execution. If reviewed files or
-the source skill change during approval, Cadre rejects the stale session.
+its `stage_hash` and `stage_revision` with the cumulative `approved_stages`
+prefix. After every stage is approved, invoke the exact returned `next` call
+for completion and execution. If reviewed files or the source skill change
+during approval, Cadre rejects the stale session.
 
 `SKILL.md` is regenerated deterministically after every successful create,
 update, or rename. It is a human projection of metadata, selectors, rules, and

@@ -1966,13 +1966,19 @@ function compactApproval(value) {
     valid_for_execute: approval.valid_for_execute === true,
     ...asOptionalString(approval.approval_error) ? { approval_error: asOptionalString(approval.approval_error) } : {},
     current_stage: asOptionalString(approval.current_stage) || null,
+    current_stage_hash: asOptionalString(approval.current_stage_hash) || null,
+    current_stage_revision: typeof approval.current_stage_revision === "number" ? approval.current_stage_revision : null,
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     intent_to_add_paths: asStringArray(approval.intent_to_add_paths),
     approved_review_paths: asStringArray(approval.approved_review_paths),
     final_only_files: asStringArray(approval.final_only_files),
     current_document: compactCurrentDocument(approval.current_document),
-    stages: stages.map((stage) => ({ id: asOptionalString(stage.id) || null })),
+    stages: stages.map((stage) => ({
+      id: asOptionalString(stage.id) || null,
+      hash: asOptionalString(stage.hash) || null,
+      revision: typeof stage.revision === "number" ? stage.revision : 0
+    })),
     current_review_bundle_path: asOptionalString(bundle.manifest_path) || null,
     current_review_bundle_file_count: bundleFiles.length,
     next_actions: Array.isArray(approval.next_actions) ? approval.next_actions.slice(0, 1) : []
@@ -10859,6 +10865,10 @@ var CONTROL_KEYS = /* @__PURE__ */ new Set([
   "approval_cancel",
   "approvalStage",
   "approval_stage",
+  "approvalStageHash",
+  "approval_stage_hash",
+  "approvalStageRevision",
+  "approval_stage_revision",
   "approvedStages",
   "approved_stages",
   "approvalSessionId",
@@ -10908,6 +10918,15 @@ function approvedStageIds(args = {}) {
 function requestedApprovalStage(args = {}) {
   const raw = rawArgs3(args);
   return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
+}
+function requestedApprovalStageHash(args = {}) {
+  const raw = rawArgs3(args);
+  return asOptionalString(raw.approvalStageHash || raw.approval_stage_hash) || null;
+}
+function requestedApprovalStageRevision(args = {}) {
+  const raw = rawArgs3(args);
+  const value = raw.approvalStageRevision ?? raw.approval_stage_revision;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 function requestedApprovalSessionId(args = {}) {
   const raw = rawArgs3(args);
@@ -11197,6 +11216,17 @@ function newTrackStageCollection(root, args, trackId, stages, metadata) {
   };
 }
 
+// src/core/application/runtime/approval-stage-hash.ts
+function approvalStageReviewHash(workflow, stage, files, extras) {
+  return approvalStageHash(workflow, stage, files.map((file) => ({
+    path: file.path,
+    source: file.source,
+    kind: file.kind,
+    missing: file.missing === true,
+    content: file.content
+  })), extras);
+}
+
 // src/core/application/runtime/approval-session-integrity.ts
 var import_node_crypto6 = __toESM(require("node:crypto"));
 function stableJson2(value) {
@@ -11330,33 +11360,38 @@ function prepareApprovalContinuation(root, session, stages, payload, payloadHash
   if (!previousRecord) {
     return { ...base, ok: false, stage: "approval_stage_record", error: `Approval session is missing stage record: ${activeStage.id}` };
   }
-  const activeFiles = filesForApprovalStage(reviewFiles2, activeStage);
-  if (activeFiles.length === 0 && (!options.allowEmptyActiveStage || previousRecord.preview_files.length > 0)) {
+  const generatedActiveFiles = filesForApprovalStage(reviewFiles2, activeStage);
+  if (generatedActiveFiles.length === 0 && (!options.allowEmptyActiveStage || previousRecord.preview_files.length > 0)) {
     return { ...base, activeStage, previousRecord, ok: false, stage: "approval_stage_files", error: `Current approval stage ${activeStage.id} has no review files.` };
   }
-  if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, activeFiles)) {
+  if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, generatedActiveFiles)) {
     return {
       ...base,
       activeStage,
-      activeFiles,
+      activeFiles: generatedActiveFiles,
       previousRecord,
       ok: false,
       stage: "approval_stage_paths",
       error: `Current stage ${activeStage.id} changed its review paths; cancel and restart before changing stage membership.`
     };
   }
+  const sameGeneratedReview = sameReviewFiles(previousRecord.snapshot_files, generatedActiveFiles);
+  const activeChanged = session.payload_hash !== payloadHash || !sameGeneratedReview;
+  const activeFiles = activeChanged || previousRecord.snapshot_files.length === 0 ? generatedActiveFiles : previousRecord.snapshot_files;
   const beforeFiles = beforeFilesForReview(root, activeFiles, previousRecord.before_files);
+  const nextRevision = activeFiles.length > 0 && (previousRecord.preview_files.length === 0 || activeChanged) ? Math.max(1, previousRecord.revision + 1) : previousRecord.revision;
   const stageRecords = { ...session.stage_records };
   const ownedPaths = /* @__PURE__ */ new Set();
   for (const stage of stages) {
     const record = stageRecords[stage.id];
     if (!record) continue;
-    const stageFiles = filesForApprovalStage(reviewFiles2, stage);
+    const generatedStageFiles = filesForApprovalStage(reviewFiles2, stage);
+    const stageFiles = sameReviewFiles(record.snapshot_files, generatedStageFiles) ? record.snapshot_files : generatedStageFiles;
     for (const file of stageFiles) ownedPaths.add(file.path);
     if (session.approved_stages.includes(stage.id)) continue;
     stageRecords[stage.id] = stage.id === activeStage.id ? {
       ...record,
-      revision: record.revision + 1,
+      revision: nextRevision,
       snapshot_files: activeFiles,
       before_files: beforeFiles
     } : {
@@ -11417,7 +11452,7 @@ function createSession(root, sessionId, workflow, payloadHash, payload, stages, 
   writeApprovalSession(root, session);
   return readApprovalSession(root, sessionId) || session;
 }
-function transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approved, snapshotFiles) {
+function transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approved, snapshotFiles, extras = {}) {
   const stageIds = stages.map((stage) => stage.id);
   if (stageIds.length === 0) return { session: null, error: null };
   const orderError = approvalOrderError(stageIds, approved);
@@ -11489,6 +11524,13 @@ function transitionApprovalSession(root, args, workflow, sessionId, payloadHash,
   }
   const record = stageRecord(session, nextExpected);
   if (!record) return { session, error: `Approval session is missing stage record: ${nextExpected}` };
+  const expectedStageHash = approvalStageReviewHash(workflow, stages[previous.length], record.snapshot_files, extras);
+  if (requestedApprovalStageHash(args) !== expectedStageHash) {
+    return { session, error: `approvalStageHash is required and must match the reviewed ${nextExpected} stage.` };
+  }
+  if (requestedApprovalStageRevision(args) !== record.revision) {
+    return { session, error: `approvalStageRevision is required and must match reviewed revision ${record.revision} for ${nextExpected}.` };
+  }
   const previewError = stagePreviewError(record);
   if (previewError) return { session, error: previewError };
   const driftError = sessionTargetDriftError(root, args, session, [...previous, nextExpected]);
@@ -11886,15 +11928,6 @@ function filesForStage(files, stage) {
 function applyStagedApprovalSessionPayload(root, args = {}, workflow) {
   return applyApprovalSessionPayload(root, args, workflow);
 }
-function stageHash(workflow, stage, files, extras) {
-  return approvalStageHash(workflow, stage, filesForStage(files, stage).map((file) => ({
-    path: file.path,
-    source: file.source,
-    kind: file.kind,
-    missing: file.missing === true,
-    content: file.content
-  })), extras);
-}
 function approvedPreviewFiles(session, approvedIds) {
   return previewFilesForStages(session, approvedIds).filter((file) => file.missing !== true);
 }
@@ -11934,7 +11967,7 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras 
       current_review_bundle: null
     };
   }
-  const transition = transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles2);
+  const transition = transitionApprovalSession(root, args, workflow, sessionId, payloadHash, stages, approvedIds, reviewFiles2, extras);
   let approvalError = transition.error;
   let session = transition.session;
   let active = session ? stages.find((stage) => !session.approved_stages.includes(stage.id)) || null : null;
@@ -11986,7 +12019,11 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras 
   const approvedPaths = Array.from(new Set(approvedFiles.map((file) => asOptionalString(file.path)).filter((file) => Boolean(file)))).sort();
   const complete = approvalComplete(args);
   const deferredForClarification = Boolean(active && activeFiles.length === 0 && options.allowEmptyActiveStage && !approvalError);
-  const stageHashes = Object.fromEntries(stages.map((stage) => [stage.id, stageHash(workflow, stage, effectiveFiles, extras)]));
+  const stageHashes = Object.fromEntries(stages.map((stage) => [
+    stage.id,
+    approvalStageReviewHash(workflow, stage, filesForStage(effectiveFiles, stage), extras)
+  ]));
+  const currentRecord = active && session ? stageRecord(session, active.id) : null;
   const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
   const manualPrompt = active && !deferredForClarification ? stageApprovalPrompt(workflow, active, sessionId, activeFiles) : null;
   return {
@@ -12016,6 +12053,7 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras 
     current_stage: active?.id || null,
     current_stage_title: active?.title || null,
     current_stage_hash: active ? stageHashes[active.id] : null,
+    current_stage_revision: currentRecord?.revision ?? null,
     stage_hashes: stageHashes,
     approved_stages: Array.from(approved),
     pending_stages: pending.map((stage) => stage.id),
@@ -12026,6 +12064,8 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras 
         title: stage.title,
         description: stage.description,
         approved: approved.has(stage.id),
+        revision: session ? stageRecord(session, stage.id)?.revision ?? 0 : 0,
+        hash: stageHashes[stage.id],
         file_count: stageFiles.length,
         canonical_paths: Array.from(new Set(stageFiles.map((file) => file.canonicalPath).filter((value) => Boolean(value)))),
         projection_paths: Array.from(new Set(stageFiles.map((file) => file.projectionPath).filter((value) => Boolean(value))))
@@ -12052,7 +12092,7 @@ function stagedApprovalState(root, workflow, args, stages, reviewFiles2, extras 
     approved_review_paths: approvedPaths,
     next_actions: complete ? approvalError ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."] : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`] : active && deferredForClarification ? [`Resume ${workflow} with approval.session_id:${sessionId} after collecting only the missing ${active.id} input; this continuation is not approval.`] : active ? [
       `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,
-      `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, and approvedStages including exactly the next stage.`,
+      `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, the returned current_stage_hash/current_stage_revision, and approvedStages including exactly the next stage.`,
       "After all stages are approved in dry-run calls, call the mutating packet with execute:true, approvalComplete:true, and the same approvalSessionId."
     ] : []
   };
@@ -18342,6 +18382,8 @@ function approvalDecision(result) {
     stage: currentStage,
     title: asOptionalString(approval.current_stage_title) || null,
     session_id: asOptionalString(approval.session_id) || null,
+    stage_hash: asOptionalString(approval.current_stage_hash) || null,
+    stage_revision: typeof approval.current_stage_revision === "number" ? approval.current_stage_revision : null,
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     prompt: asOptionalString(approval.manual_approval_prompt) || "Review the current stage and ask for explicit user approval."
@@ -18353,8 +18395,18 @@ function workflowDecision(result) {
   const skills = asJsonObject(result.project_skills);
   const skillDecision = asJsonObject(skills.decision);
   if (Object.keys(skillDecision).length > 0) return skillDecision;
-  const approvalError = asOptionalString(asJsonObject(result.approval).approval_error);
-  if (approvalError) return { kind: "blocked", reason: approvalError };
+  const approvalState = asJsonObject(result.approval);
+  const approvalError = asOptionalString(approvalState.approval_error);
+  if (approvalError) return {
+    kind: "blocked",
+    reason: approvalError,
+    session_id: asOptionalString(approvalState.session_id) || null,
+    current_stage: asOptionalString(approvalState.current_stage) || null,
+    stage_hash: asOptionalString(approvalState.current_stage_hash) || null,
+    stage_revision: typeof approvalState.current_stage_revision === "number" ? approvalState.current_stage_revision : null,
+    approved_stages: asStringArray(approvalState.approved_stages),
+    pending_stages: asStringArray(approvalState.pending_stages)
+  };
   const intentPrompts = asJsonArray(result.intent_prompts);
   const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
   if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {

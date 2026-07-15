@@ -75,7 +75,7 @@ function reviewFileIdentity(file: ReviewFile): JsonObject {
   };
 }
 
-function sameReviewFiles(left: ReviewFile[], right: ReviewFile[]): boolean {
+export function sameReviewFiles(left: ReviewFile[], right: ReviewFile[]): boolean {
   const normalize = (files: ReviewFile[]): JsonObject[] => [...files]
     .sort((first, second) => first.path.localeCompare(second.path))
     .map(reviewFileIdentity);

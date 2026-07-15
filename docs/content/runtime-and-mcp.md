@@ -56,8 +56,9 @@ Clients do not recover any other action from prose or internal fields.
 
 For staged workflows, `approval:{session_id}` alone resumes the active stage
 and is not approval. Only explicit user approval permits the exact current
-`decision.stage` and next cumulative `approved_stages` prefix; a clarification's
-`decision.current_stage` is not an approval stage token. The runtime generates
+`decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and next
+cumulative `approved_stages` prefix; a clarification's `decision.current_stage`
+is not an approval stage token. The runtime generates
 and materializes only that active stage's atomic file set, leaves later stages
 pending, and returns an execution `next` only after the full stage order is
 approved.

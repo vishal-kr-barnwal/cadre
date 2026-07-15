@@ -46,6 +46,15 @@ const { parseWorkflowToolRequest, workflowRuntimeArgs } = loadSource("workflow-t
 
 test.after(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
 
+function approvalStamp(packet) {
+  assert.match(packet.decision.stage_hash, /^[a-f0-9]{64}$/);
+  assert.equal(Number.isSafeInteger(packet.decision.stage_revision), true);
+  return {
+    stage_hash: packet.decision.stage_hash,
+    stage_revision: packet.decision.stage_revision,
+  };
+}
+
 test("public workflow packets reject injected skill integrity metadata", () => {
   for (const field of ["source_files", "source_file_hashes"]) {
     assert.throws(() => parseWorkflowToolRequest({
@@ -340,7 +349,7 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
       workflow: "setup",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "product", approved_stages: ["product"] },
+      approval: { session_id: sessionId, stage: "product", ...approvalStamp(packet), approved_stages: ["product"] },
     });
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "product_guidelines");
@@ -353,7 +362,7 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
       workflow: "setup",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "product_guidelines", approved_stages: ["product", "product_guidelines"] },
+      approval: { session_id: sessionId, stage: "product_guidelines", ...approvalStamp(packet), approved_stages: ["product", "product_guidelines"] },
     });
     assert.equal(packet.decision.kind, "clarification");
     assert.equal(packet.decision.current_stage, "technical");
@@ -407,7 +416,7 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
       workflow: "setup",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "technical", approved_stages: ["product", "product_guidelines", "technical"] },
+      approval: { session_id: sessionId, stage: "technical", ...approvalStamp(packet), approved_stages: ["product", "product_guidelines", "technical"] },
     });
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "workflow");
@@ -430,6 +439,7 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
       approval: {
         session_id: sessionId,
         stage: "workflow",
+        ...approvalStamp(packet),
         approved_stages: ["product", "product_guidelines", "technical", "workflow"],
       },
     });
@@ -523,7 +533,7 @@ test("public newtrack packets collect spec then plan and execute the exact conti
       workflow: "newtrack",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "spec", approved_stages: ["spec"] },
+      approval: { session_id: sessionId, stage: "spec", ...approvalStamp(packet), approved_stages: ["spec"] },
     });
     assert.equal(packet.decision.kind, "clarification");
     assert.equal(packet.decision.current_stage, "plan");
@@ -555,7 +565,7 @@ test("public newtrack packets collect spec then plan and execute the exact conti
       workflow: "newtrack",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "plan", approved_stages: ["spec", "plan"] },
+      approval: { session_id: sessionId, stage: "plan", ...approvalStamp(packet), approved_stages: ["spec", "plan"] },
     });
     assert.equal(packet.decision.kind, "ready");
     assert.deepEqual(packet.next, {
@@ -613,7 +623,7 @@ test("public formula pour packets retain formula identity through staged continu
       workflow: "formula",
       input: {},
       execute: false,
-      approval: { session_id: "missing-formula-session" },
+      approval: { session_id: "000000000000000000000001" },
     });
     assert.equal(invalid.ok, false);
     assert.equal(invalid.workflow, "formula");
@@ -658,7 +668,7 @@ test("public formula pour packets retain formula identity through staged continu
       workflow: "formula",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "spec", approved_stages: ["spec"] },
+      approval: { session_id: sessionId, stage: "spec", ...approvalStamp(packet), approved_stages: ["spec"] },
     });
     assert.equal(packet.workflow, "formula");
     assert.equal(packet.data.action, "pour");
@@ -676,7 +686,7 @@ test("public formula pour packets retain formula identity through staged continu
       workflow: "formula",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "plan", approved_stages: ["spec", "plan"] },
+      approval: { session_id: sessionId, stage: "plan", ...approvalStamp(packet), approved_stages: ["spec", "plan"] },
     });
     assert.deepEqual(packet.next, {
       tool: "cadre_workflow",
@@ -793,7 +803,7 @@ test("public revise packets preserve declared spec then plan staging through the
       workflow: "revise",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "spec_changes", approved_stages: ["spec_changes"] },
+      approval: { session_id: sessionId, stage: "spec_changes", ...approvalStamp(packet), approved_stages: ["spec_changes"] },
     });
     assert.equal(packet.decision.kind, "clarification");
     assert.equal(packet.decision.current_stage, "plan_changes");
@@ -825,6 +835,7 @@ test("public revise packets preserve declared spec then plan staging through the
       approval: {
         session_id: sessionId,
         stage: "plan_changes",
+        ...approvalStamp(packet),
         approved_stages: ["spec_changes", "plan_changes"],
       },
     });
@@ -894,7 +905,7 @@ test("public skill packets execute the exact session-only continuation after laz
       workflow: "skill",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "skill", approved_stages: ["skill"] },
+      approval: { session_id: sessionId, stage: "skill", ...approvalStamp(packet), approved_stages: ["skill"] },
     });
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "references");
@@ -906,7 +917,7 @@ test("public skill packets execute the exact session-only continuation after laz
       workflow: "skill",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "references", approved_stages: ["skill", "references"] },
+      approval: { session_id: sessionId, stage: "references", ...approvalStamp(packet), approved_stages: ["skill", "references"] },
     });
     assert.deepEqual(packet.next, {
       tool: "cadre_workflow",
@@ -966,7 +977,7 @@ test("public skill packets read and resume formatted references in the same sess
       workflow: "skill",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "skill", approved_stages: ["skill"] },
+      approval: { session_id: sessionId, stage: "skill", ...approvalStamp(packet), approved_stages: ["skill"] },
     });
     assert.equal(packet.decision.kind, "format_reference");
     assert.equal(packet.decision.session_id, sessionId);
@@ -1016,7 +1027,7 @@ test("public skill packets read and resume formatted references in the same sess
       workflow: "skill",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "references", approved_stages: ["skill", "references"] },
+      approval: { session_id: sessionId, stage: "references", ...approvalStamp(packet), approved_stages: ["skill", "references"] },
     });
     const next = packet.next;
     assert.equal(next.arguments.approval.session_id, sessionId);
@@ -1060,7 +1071,7 @@ test("public refresh packets execute the exact frozen technical-stage continuati
       workflow: "refresh",
       input: {},
       execute: false,
-      approval: { session_id: sessionId, stage: "technical", approved_stages: ["technical"] },
+      approval: { session_id: sessionId, stage: "technical", ...approvalStamp(packet), approved_stages: ["technical"] },
     });
     assert.deepEqual(packet.next, {
       tool: "cadre_workflow",

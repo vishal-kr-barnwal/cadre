@@ -32,8 +32,10 @@ formatting. Later stages remain pending and unmaterialized. Treat every file in
 the current stage as one atomic review set, including canonical/projection pairs
 and grouped technical or reference files. `approval:{session_id}` alone resumes
 the same session and is not approval. Only after explicit user approval send the
-exact returned `stage` and cumulative `approved_stages` prefix. When no stage
-remains, invoke the exact returned `next` unchanged; it carries execution and
-completion authorization. Execution never substitutes for stage approval. If a
+exact returned `stage`, `stage_hash`, `stage_revision`, and cumulative
+`approved_stages` prefix. These values bind approval to the reviewed revision;
+never reuse them after the stage changes. When no stage remains, invoke the
+exact returned `next` unchanged; it carries execution and completion
+authorization. Execution never substitutes for stage approval. If a
 packet is blocked, report its error or requested narrowing; do not truncate or
 invent required project-skill rules.

@@ -2,6 +2,7 @@ import { asOptionalString } from "../../../guards";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 
 import type { ReviewFile } from "./contracts";
+import { approvalStageReviewHash } from "./approval-stage-hash";
 import { initializeApprovalSessionAncillary } from "./approval-session-ancillary";
 import {
   createStageLedger,
@@ -23,6 +24,8 @@ import {
   hasApprovalIntent,
   requestedApprovalSessionId,
   requestedApprovalStage,
+  requestedApprovalStageHash,
+  requestedApprovalStageRevision,
 } from "./approval-request";
 import type { ApprovalStage } from "./staged-approval-stages";
 
@@ -82,6 +85,7 @@ export function transitionApprovalSession(
   stages: ApprovalStage[],
   approved: string[],
   snapshotFiles: ReviewFile[],
+  extras: JsonObject = {},
 ): ApprovalTransitionResult {
   const stageIds = stages.map((stage) => stage.id);
   if (stageIds.length === 0) return { session: null, error: null };
@@ -156,6 +160,13 @@ export function transitionApprovalSession(
   }
   const record = stageRecord(session, nextExpected);
   if (!record) return { session, error: `Approval session is missing stage record: ${nextExpected}` };
+  const expectedStageHash = approvalStageReviewHash(workflow, stages[previous.length]!, record.snapshot_files, extras);
+  if (requestedApprovalStageHash(args) !== expectedStageHash) {
+    return { session, error: `approvalStageHash is required and must match the reviewed ${nextExpected} stage.` };
+  }
+  if (requestedApprovalStageRevision(args) !== record.revision) {
+    return { session, error: `approvalStageRevision is required and must match reviewed revision ${record.revision} for ${nextExpected}.` };
+  }
   const previewError = stagePreviewError(record);
   if (previewError) return { session, error: previewError };
   const driftError = sessionTargetDriftError(root, args, session, [...previous, nextExpected]);

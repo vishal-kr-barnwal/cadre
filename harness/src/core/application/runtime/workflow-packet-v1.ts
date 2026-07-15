@@ -87,6 +87,8 @@ function approvalDecision(result: JsonObject): JsonObject | null {
     stage: currentStage,
     title: asOptionalString(approval.current_stage_title) || null,
     session_id: asOptionalString(approval.session_id) || null,
+    stage_hash: asOptionalString(approval.current_stage_hash) || null,
+    stage_revision: typeof approval.current_stage_revision === "number" ? approval.current_stage_revision : null,
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     prompt: asOptionalString(approval.manual_approval_prompt) || "Review the current stage and ask for explicit user approval.",
@@ -99,8 +101,20 @@ function workflowDecision(result: JsonObject): JsonObject {
   const skills = asJsonObject(result.project_skills);
   const skillDecision = asJsonObject(skills.decision);
   if (Object.keys(skillDecision).length > 0) return skillDecision;
-  const approvalError = asOptionalString(asJsonObject(result.approval).approval_error);
-  if (approvalError) return { kind: "blocked", reason: approvalError };
+  const approvalState = asJsonObject(result.approval);
+  const approvalError = asOptionalString(approvalState.approval_error);
+  if (approvalError) return {
+    kind: "blocked",
+    reason: approvalError,
+    session_id: asOptionalString(approvalState.session_id) || null,
+    current_stage: asOptionalString(approvalState.current_stage) || null,
+    stage_hash: asOptionalString(approvalState.current_stage_hash) || null,
+    stage_revision: typeof approvalState.current_stage_revision === "number"
+      ? approvalState.current_stage_revision
+      : null,
+    approved_stages: asStringArray(approvalState.approved_stages),
+    pending_stages: asStringArray(approvalState.pending_stages),
+  };
   const intentPrompts = asJsonArray(result.intent_prompts);
   const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
   if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {

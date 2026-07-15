@@ -132,9 +132,10 @@ Active review-set materialization is the only class of pre-execution write.
 Durable state transitions, trace records, indexes, events, and non-review
 effects require `execute:true`. `approval:{session_id}` alone resumes the
 existing stage and is not approval. Only after explicit user approval should a
-continuation include the exact returned `decision.stage` and cumulative
-`approved_stages` prefix. Execution is offered only after every stage is
-approved; invoke only the exact returned `next` call.
+continuation include the exact returned `decision.stage`, `decision.stage_hash`,
+`decision.stage_revision`, and cumulative `approved_stages` prefix. Execution
+is offered only after every stage is approved; invoke only the exact returned
+`next` call.
 
 Pass `reviewOutputMode:"bundle"` when you need the older non-mutating
 temp-bundle review.

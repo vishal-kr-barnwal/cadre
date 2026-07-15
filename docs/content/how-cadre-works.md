@@ -54,8 +54,10 @@ both are in scope.
 `approval:{session_id}` alone resumes the active stage and never records
 approval. After the user explicitly approves the exact active review set, the
 client sends the returned `decision.stage` and the next cumulative
-`approved_stages` prefix. A clarification's `decision.current_stage` names the
-work still being collected; it is not approval. Once a session exists,
+`approved_stages` prefix together with that decision's `stage_hash` and
+`stage_revision`. The stamp binds approval to the reviewed bytes and becomes
+stale when the stage changes. A clarification's `decision.current_stage` names
+the work still being collected; it is not approval. Once a session exists,
 clarification and reference-formatting responses use the exact returned
 `decision.resume` so the same session and approved prefix are preserved.
 

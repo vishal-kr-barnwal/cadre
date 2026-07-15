@@ -11,7 +11,7 @@ import {
   type ApprovalStageRecord,
 } from "./approval-session-model";
 import type { ApprovalStage } from "./staged-approval-stages";
-import { currentStagePayloadError, stageSnapshotError } from "./approval-session-integrity";
+import { currentStagePayloadError, sameReviewFiles, stageSnapshotError } from "./approval-session-integrity";
 
 export interface ApprovalContinuationPlan {
   ok: boolean;
@@ -87,34 +87,46 @@ export function prepareApprovalContinuation(
   if (!previousRecord) {
     return { ...base, ok: false, stage: "approval_stage_record", error: `Approval session is missing stage record: ${activeStage.id}` };
   }
-  const activeFiles = filesForApprovalStage(reviewFiles, activeStage);
-  if (activeFiles.length === 0 && (!options.allowEmptyActiveStage || previousRecord.preview_files.length > 0)) {
+  const generatedActiveFiles = filesForApprovalStage(reviewFiles, activeStage);
+  if (generatedActiveFiles.length === 0 && (!options.allowEmptyActiveStage || previousRecord.preview_files.length > 0)) {
     return { ...base, activeStage, previousRecord, ok: false, stage: "approval_stage_files", error: `Current approval stage ${activeStage.id} has no review files.` };
   }
-  if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, activeFiles)) {
+  if (previousRecord.preview_files.length > 0 && !samePaths(previousRecord.snapshot_files, generatedActiveFiles)) {
     return {
       ...base,
       activeStage,
-      activeFiles,
+      activeFiles: generatedActiveFiles,
       previousRecord,
       ok: false,
       stage: "approval_stage_paths",
       error: `Current stage ${activeStage.id} changed its review paths; cancel and restart before changing stage membership.`,
     };
   }
+  const sameGeneratedReview = sameReviewFiles(previousRecord.snapshot_files, generatedActiveFiles);
+  const activeChanged = session.payload_hash !== payloadHash
+    || !sameGeneratedReview;
+  const activeFiles = activeChanged || previousRecord.snapshot_files.length === 0
+    ? generatedActiveFiles
+    : previousRecord.snapshot_files;
   const beforeFiles = beforeFilesForReview(root, activeFiles, previousRecord.before_files);
+  const nextRevision = activeFiles.length > 0 && (previousRecord.preview_files.length === 0 || activeChanged)
+    ? Math.max(1, previousRecord.revision + 1)
+    : previousRecord.revision;
   const stageRecords = { ...session.stage_records };
   const ownedPaths = new Set<string>();
   for (const stage of stages) {
     const record = stageRecords[stage.id];
     if (!record) continue;
-    const stageFiles = filesForApprovalStage(reviewFiles, stage);
+    const generatedStageFiles = filesForApprovalStage(reviewFiles, stage);
+    const stageFiles = sameReviewFiles(record.snapshot_files, generatedStageFiles)
+      ? record.snapshot_files
+      : generatedStageFiles;
     for (const file of stageFiles) ownedPaths.add(file.path);
     if (session.approved_stages.includes(stage.id)) continue;
     stageRecords[stage.id] = stage.id === activeStage.id
       ? {
         ...record,
-        revision: record.revision + 1,
+        revision: nextRevision,
         snapshot_files: activeFiles,
         before_files: beforeFiles,
       }

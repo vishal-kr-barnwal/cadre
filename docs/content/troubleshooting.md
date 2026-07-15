@@ -90,10 +90,11 @@ Fix:
    only the requested content. A clarification may return an approval fragment;
    reference formatting may return full tool arguments.
 2. To resume without approval, send only `approval: {session_id}`. Never add
-   `stage`, `approved_stages`, or `complete` until the user explicitly approves
-   the active atomic file set.
-3. After approval, send the exact returned `stage` and cumulative
-   `approved_stages` prefix. Do not construct a future prefix.
+   `stage`, `stage_hash`, `stage_revision`, `approved_stages`, or `complete`
+   until the user explicitly approves the active atomic file set.
+3. After approval, send the exact returned `stage`, `stage_hash`,
+   `stage_revision`, and cumulative `approved_stages` prefix. Do not construct a
+   future prefix or reuse a stamp after the current stage changes.
 4. Review only the stage returned by the current decision: `decision.stage`
    for approval, or `decision.current_stage` while clarifying or formatting.
    Later stages must remain pending and unmaterialized. After the last

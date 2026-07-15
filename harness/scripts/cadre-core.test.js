@@ -398,6 +398,15 @@ function resolveSetupPrompts(root, args) {
   assert.fail("setup native prompts did not resolve after explicit test answers");
 }
 
+function approvalStamp(approval) {
+  assert.match(approval.current_stage_hash, /^[a-f0-9]{64}$/);
+  assert.equal(Number.isSafeInteger(approval.current_stage_revision), true);
+  return {
+    approvalStageHash: approval.current_stage_hash,
+    approvalStageRevision: approval.current_stage_revision,
+  };
+}
+
 function advanceSetupToTechnical(root, args) {
   const base = withSetupTestEvidence({ ...args, workflow: "setup", execute: false });
   delete base.approvalComplete;
@@ -410,6 +419,7 @@ function advanceSetupToTechnical(root, args) {
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: stage,
+      ...approvalStamp(preview.approval),
       approvedStages: [...(preview.approval.approved_stages || []), stage],
     });
   }
@@ -463,6 +473,7 @@ function approveWorkflow(root, args) {
         ...responseControls,
         approvalSessionId: sessionId,
         approvalStage: approval.current_stage,
+        ...approvalStamp(approval),
         approvedStages: approved,
       });
       continue;
@@ -1809,6 +1820,7 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
         workflow: "newtrack",
         approvalSessionId: sessionId,
         approvalStage: "spec",
+        ...approvalStamp(preview.approval),
         approvedStages: ["spec"],
       });
       assert.equal(planPreview.ok, true, planPreview.error);
@@ -1817,6 +1829,7 @@ test("workflow formula supports native formulas, wisps, squash, burn, and pour",
         workflow: "newtrack",
         approvalSessionId: sessionId,
         approvalStage: "plan",
+        ...approvalStamp(planPreview.approval),
         approvedStages: ["spec", "plan"],
       });
       assert.equal(ready.ok, true, ready.error);
@@ -1978,6 +1991,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "product",
+      ...approvalStamp(preview.approval),
       approvedStages: ["product"],
     });
     assert.equal(approvedMinimal.ok, true, approvedMinimal.error || JSON.stringify(approvedMinimal.approval || {}));
@@ -1999,6 +2013,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "product_guidelines",
+      ...approvalStamp(approvedMinimal.approval),
       approvedStages: ["product", "product_guidelines"],
       product: { name: "Accidental payload drift should not replace reviewed session payload" },
       providerMode: "github",
@@ -2011,6 +2026,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "product_guidelines",
+      ...approvalStamp(approvedMinimal.approval),
       approvedStages: ["product", "product_guidelines"],
     });
     assert.equal(guidelinesApproved.ok, true, guidelinesApproved.error);
@@ -2034,6 +2050,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "technical",
+      ...approvalStamp(guidelinesApproved.approval),
       approvedStages: ["product", "product_guidelines", "technical"],
     });
     assert.equal(technicalApproved.ok, true, technicalApproved.error);
@@ -2048,6 +2065,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "workflow",
+      ...approvalStamp(technicalApproved.approval),
       approvedStages: ["product", "product_guidelines", "technical", "workflow"],
     });
     assert.equal(workflowApproved.ok, true, workflowApproved.error);
@@ -2156,6 +2174,7 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
       responseMode: "detail",
       approvalSessionId: productPreview.approval.session_id,
       approvalStage: "product",
+      ...approvalStamp(productPreview.approval),
       approvedStages: ["product"],
     });
     assert.equal(guidelinePreview.approval.current_stage, "product_guidelines");
@@ -2165,6 +2184,7 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
       responseMode: "detail",
       approvalSessionId: productPreview.approval.session_id,
       approvalStage: "product_guidelines",
+      ...approvalStamp(guidelinePreview.approval),
       approvedStages: ["product", "product_guidelines"],
     });
 
@@ -2375,6 +2395,7 @@ test("setup rejects bundled guideline and workflow scaffolds until same-session 
       workflow: "setup",
       approvalSessionId: sessionId,
       approvalStage: "product",
+      ...approvalStamp(productPreview.approval),
       approvedStages: ["product"],
     });
     assert.equal(guidelineClarification.ok, true, guidelineClarification.error);
@@ -2404,6 +2425,7 @@ test("setup rejects bundled guideline and workflow scaffolds until same-session 
       workflow: "setup",
       approvalSessionId: sessionId,
       approvalStage: "product_guidelines",
+      ...approvalStamp(guidelinePreview.approval),
       approvedStages: ["product", "product_guidelines"],
     });
     assert.equal(technicalPreview.approval.current_stage, "technical");
@@ -2411,6 +2433,7 @@ test("setup rejects bundled guideline and workflow scaffolds until same-session 
       workflow: "setup",
       approvalSessionId: sessionId,
       approvalStage: "technical",
+      ...approvalStamp(technicalPreview.approval),
       approvedStages: ["product", "product_guidelines", "technical"],
     });
     assert.equal(workflowClarification.approval.current_stage, "workflow");
@@ -2518,6 +2541,7 @@ test("setup approval drift is blocked instead of masquerading as next-stage clar
       workflow: "setup",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "product",
+      ...approvalStamp(preview.approval),
       approvedStages: ["product"],
     });
     assert.equal(packet.ok, false);
@@ -3492,6 +3516,7 @@ test("workflow newtrack collects spec then plan in one lazy approval session", (
       workflow: "newtrack",
       approvalSessionId: sessionId,
       approvalStage: "spec",
+      ...approvalStamp(specPreview.approval),
       approvedStages: ["spec"],
     });
     assert.equal(missingPlan.ok, false);
@@ -3536,6 +3561,7 @@ test("workflow newtrack collects spec then plan in one lazy approval session", (
       workflow: "newtrack",
       approvalSessionId: sessionId,
       approvalStage: "plan",
+      ...approvalStamp(planPreview.approval),
       approvedStages: ["spec", "plan"],
     });
     assert.equal(complete.decision.kind, "ready");
@@ -3596,6 +3622,7 @@ test("workflow newtrack defers malformed future plan validation until plan activ
       workflow: "newtrack",
       approvalSessionId: sessionId,
       approvalStage: "spec",
+      ...approvalStamp(preview.approval),
       approvedStages: ["spec"],
     });
     assert.equal(planSchema.ok, false);
@@ -3807,6 +3834,7 @@ test("workflow newtrack restores the Git index and retries exact execution after
       workflow: "newtrack",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "spec",
+      ...approvalStamp(preview.approval),
       approvedStages: ["spec"],
     });
     const sessionId = specApproved.approval.session_id;
@@ -3814,6 +3842,7 @@ test("workflow newtrack restores the Git index and retries exact execution after
       workflow: "newtrack",
       approvalSessionId: sessionId,
       approvalStage: "plan",
+      ...approvalStamp(specApproved.approval),
       approvedStages: ["spec", "plan"],
     });
     assert.equal(complete.next.arguments.approval.session_id, sessionId);
@@ -3930,6 +3959,7 @@ test("workflow newtrack writes template-backed track learnings", () => {
       workflow: "newtrack",
       approvalSessionId: specPreview.approval.session_id,
       approvalStage: "spec",
+      ...approvalStamp(specPreview.approval),
       approvedStages: ["spec"],
     });
     assert.equal(blocked.ok, true, blocked.error);
@@ -4255,6 +4285,7 @@ test("workflow revise collects declared spec and plan changes one active stage a
       workflow: "revise",
       approvalSessionId: sessionId,
       approvalStage: "spec_changes",
+      ...approvalStamp(specPreview.approval),
       approvedStages: ["spec_changes"],
     });
     assert.equal(missingPlan.ok, false);
@@ -4290,6 +4321,7 @@ test("workflow revise collects declared spec and plan changes one active stage a
       workflow: "revise",
       approvalSessionId: sessionId,
       approvalStage: "plan_changes",
+      ...approvalStamp(planPreview.approval),
       approvedStages: ["spec_changes", "plan_changes"],
     });
     assert.equal(complete.decision.kind, "ready");
@@ -4359,6 +4391,7 @@ test("workflow revise freezes an implicitly selected track across staged continu
       workflow: "revise",
       approvalSessionId: sessionId,
       approvalStage: "spec_changes",
+      ...approvalStamp(specPreview.approval),
       approvedStages: ["spec_changes"],
     });
     assert.equal(missingPlan.approval.current_stage, "plan_changes");
@@ -4416,6 +4449,7 @@ test("target staged review previews appear in git diff and reject drift", () => 
       ...args,
       approvalSessionId: preview.approval.session_id,
       approvalStage: "plan_changes",
+      ...approvalStamp(preview.approval),
       approvedStages: ["plan_changes"],
     });
     assert.equal(approved.ok, true);
@@ -4583,6 +4617,7 @@ test("approved target execution rejects staged and committed HEAD drift while re
       ...args,
       approvalSessionId: preview.approval.session_id,
       approvalStage: "plan_changes",
+      ...approvalStamp(preview.approval),
       approvedStages: ["plan_changes"],
     });
     assert.equal(approved.ok, true, approved.error);
@@ -4723,9 +4758,18 @@ test("setup amends only its current unapproved stage without resetting the appro
       workflow: "setup",
       approvalSessionId: sessionId,
       approvalStage: "product",
+      ...approvalStamp(initial.approval),
       approvedStages: ["product"],
     });
     assert.equal(productApproved.ok, true, productApproved.error);
+    const originalGuidelineStamp = approvalStamp(productApproved.approval);
+    const noOpResume = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(noOpResume.ok, true, noOpResume.error);
+    assert.equal(noOpResume.approval.current_stage_hash, originalGuidelineStamp.approvalStageHash);
+    assert.equal(noOpResume.approval.current_stage_revision, originalGuidelineStamp.approvalStageRevision);
     const guidelinesBefore = fs.readFileSync(path.join(root, "cadre", "product_guidelines.md"), "utf8");
     const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
     const sessionBeforeRejectedChange = fs.readFileSync(sessionFile, "utf8");
@@ -4751,6 +4795,8 @@ test("setup amends only its current unapproved stage without resetting the appro
     assert.equal(amended.ok, true, amended.error);
     assert.equal(amended.approval.session_id, sessionId);
     assert.equal(amended.approval.current_stage, "product_guidelines");
+    assert.equal(amended.approval.current_stage_revision, originalGuidelineStamp.approvalStageRevision + 1);
+    assert.notEqual(amended.approval.current_stage_hash, originalGuidelineStamp.approvalStageHash);
     assert.deepEqual(amended.approval.approved_stages, ["product"]);
     assert.deepEqual(amended.approval.approved_review_paths.sort(), ["cadre/product.json", "cadre/product.md"]);
     for (const [file, content] of productBefore) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), content, file);
@@ -4761,10 +4807,47 @@ test("setup amends only its current unapproved stage without resetting the appro
     assert.equal(amendedSession.payload.productGuidelines.summary, "Corrected evidence-backed guideline draft.");
     assert.equal(Object.prototype.hasOwnProperty.call(amendedSession.payload, "product_guidelines"), false);
 
+    const staleApproval = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      ...originalGuidelineStamp,
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(staleApproval.ok, false);
+    assert.match(staleApproval.error, /approvalStageHash.*reviewed product_guidelines stage/);
+    assert.deepEqual(staleApproval.approval.approved_stages, ["product"]);
+    const stalePacket = core.workflowPacketV1(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      ...originalGuidelineStamp,
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(stalePacket.decision.kind, "blocked");
+    assert.equal(stalePacket.decision.session_id, sessionId);
+    assert.equal(stalePacket.decision.current_stage, "product_guidelines");
+    assert.equal(stalePacket.decision.stage_hash, amended.approval.current_stage_hash);
+    assert.equal(stalePacket.decision.stage_revision, amended.approval.current_stage_revision);
+    assert.deepEqual(stalePacket.decision.approved_stages, ["product"]);
+
+    const wrongRevisionApproval = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: sessionId,
+      approvalStage: "product_guidelines",
+      approvalStageHash: amended.approval.current_stage_hash,
+      approvalStageRevision: amended.approval.current_stage_revision - 1,
+      approvedStages: ["product", "product_guidelines"],
+    });
+    assert.equal(wrongRevisionApproval.ok, false);
+    assert.match(wrongRevisionApproval.error, /approvalStageRevision.*reviewed revision/);
+    assert.deepEqual(wrongRevisionApproval.approval.approved_stages, ["product"]);
+
     const guidelinesApproved = core.workflowPacket(root, {
       workflow: "setup",
       approvalSessionId: sessionId,
       approvalStage: "product_guidelines",
+      ...approvalStamp(amended.approval),
       approvedStages: ["product", "product_guidelines"],
     });
     assert.equal(guidelinesApproved.ok, true, guidelinesApproved.error);
@@ -4872,6 +4955,7 @@ test("setup rejects current-stage amendment after target drift and succeeds afte
       workflow: "setup",
       approvalSessionId: sessionId,
       approvalStage: "product",
+      ...approvalStamp(initial.approval),
       approvedStages: ["product"],
     });
     assert.equal(productApproved.ok, true, productApproved.error);
@@ -6062,6 +6146,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       workflow: "refresh",
       approvalSessionId: sessionId,
       approvalStage: "product",
+      ...approvalStamp(product.approval),
       approvedStages: ["product"],
     });
     assert.equal(missingGuidelines.approval.session_id, sessionId);
@@ -6085,6 +6170,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       workflow: "refresh",
       approvalSessionId: sessionId,
       approvalStage: "product_guidelines",
+      ...approvalStamp(guidelines.approval),
       approvedStages: ["product", "product_guidelines"],
     });
     assert.equal(missingTechnical.approval.current_stage, "technical");
@@ -6127,6 +6213,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       workflow: "refresh",
       approvalSessionId: sessionId,
       approvalStage: "technical",
+      ...approvalStamp(technical.approval),
       approvedStages: ["product", "product_guidelines", "technical"],
     });
     assert.equal(missingWorkflow.approval.current_stage, "workflow");
@@ -6146,6 +6233,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       workflow: "refresh",
       approvalSessionId: sessionId,
       approvalStage: "workflow",
+      ...approvalStamp(workflow.approval),
       approvedStages: ["product", "product_guidelines", "technical", "workflow"],
     });
     assert.equal(missingPatterns.approval.current_stage, "patterns");
@@ -6168,6 +6256,7 @@ test("multi-level refresh collects and materializes only the active selected sta
       workflow: "refresh",
       approvalSessionId: sessionId,
       approvalStage: "patterns",
+      ...approvalStamp(patterns.approval),
       approvedStages: stages,
     });
     assert.deepEqual(complete.next, {
@@ -6257,6 +6346,7 @@ test("LSP-only refresh freezes the reviewed technical-stage configuration", () =
       workflow: "refresh",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "technical",
+      ...approvalStamp(preview.approval),
       approvedStages: ["technical"],
     });
     assert.equal(approved.ok, true, approved.error);

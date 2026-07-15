@@ -18,6 +18,10 @@ const CONTROL_KEYS = new Set([
   "approval_cancel",
   "approvalStage",
   "approval_stage",
+  "approvalStageHash",
+  "approval_stage_hash",
+  "approvalStageRevision",
+  "approval_stage_revision",
   "approvedStages",
   "approved_stages",
   "approvalSessionId",
@@ -76,6 +80,17 @@ export function approvedStageIds(args: RuntimeArgs = {}): string[] {
 export function requestedApprovalStage(args: RuntimeArgs = {}): string | null {
   const raw = rawArgs(args);
   return asOptionalString(raw.approvalStage || raw.approval_stage) || null;
+}
+
+export function requestedApprovalStageHash(args: RuntimeArgs = {}): string | null {
+  const raw = rawArgs(args);
+  return asOptionalString(raw.approvalStageHash || raw.approval_stage_hash) || null;
+}
+
+export function requestedApprovalStageRevision(args: RuntimeArgs = {}): number | null {
+  const raw = rawArgs(args);
+  const value = raw.approvalStageRevision ?? raw.approval_stage_revision;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 export function requestedApprovalSessionId(args: RuntimeArgs = {}): string | null {

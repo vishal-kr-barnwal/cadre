@@ -29,8 +29,9 @@ target-preview recovery across staged workflows.
   exact mutation set.
 - Only the active stage's review files are generated and materialized. A
   session-only `approval: {session_id}` resumes clarification or formatting and
-  is never approval; stage approval requires the exact returned stage and
-  cumulative prefix, and final execution invokes the exact returned `next`.
+  is never approval; stage approval requires the exact returned stage, hash,
+  revision, and cumulative prefix, and final execution invokes the exact
+  returned `next`.
 - Formula pour now retains its formula identity, resolved variables, and
   metadata through session-only resume, spec approval, plan approval, and the
   exact final execution continuation.

@@ -252,6 +252,10 @@ export interface RuntimeArgs extends JsonObject {
   techStack?: JsonObject;
   approvalStage?: string;
   approval_stage?: string;
+  approvalStageHash?: string;
+  approval_stage_hash?: string;
+  approvalStageRevision?: number;
+  approval_stage_revision?: number;
   approvalSessionId?: string;
   approval_session_id?: string;
   approvedStages?: string[] | string;

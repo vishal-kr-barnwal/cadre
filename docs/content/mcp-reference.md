@@ -31,7 +31,7 @@ Starts or continues a workflow.
 | `workflow` | yes | A supported Cadre workflow ID such as `setup`, `implement`, or `review`. |
 | `input` | no | Workflow-specific structured input. |
 | `execute` | no | `false` previews/decides; `true` requests the confirmed mutation path. |
-| `approval` | no | Nested staged-session control. `{session_id}` alone resumes and is not approval; after explicit approval, add the exact `decision.stage` and cumulative `approved_stages` prefix. |
+| `approval` | no | Nested staged-session control. `{session_id}` alone resumes and is not approval; after explicit approval, add the exact `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and cumulative `approved_stages` prefix. |
 
 For example, this fragment resumes the current stage without approving it:
 
@@ -51,6 +51,8 @@ fragment records exactly that next prefix:
   "approval": {
     "session_id": "returned-session-id",
     "stage": "product",
+    "stage_hash": "returned-stage-hash",
+    "stage_revision": 1,
     "approved_stages": ["product"]
   }
 }

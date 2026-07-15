@@ -3,6 +3,8 @@ import { isRecord } from "../../guards";
 
 interface WorkflowApproval {
   stage?: string;
+  stage_hash?: string;
+  stage_revision?: number;
   session_id?: string;
   approved_stages?: string[];
   complete?: boolean;
@@ -32,6 +34,7 @@ const WORKFLOW_CONTROL_KEYS = new Set([
   "root", "workflow", "execute", "approval", "skipSync", "source_manifest", "lspResult", "lsp_result",
   "source_snapshot", "source_files", "source_file_hashes", "configOwnerRoot", "config_owner_root",
   "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
+  "approvalStageHash", "approval_stage_hash", "approvalStageRevision", "approval_stage_revision",
   "approvedStages", "approved_stages", "approvalComplete", "approval_complete",
   "approvalCancel", "approval_cancel",
 ]);
@@ -40,6 +43,7 @@ const ACTION_INTERNAL_KEYS = new Set([
   "root", "action", "execute", "skipSync", "source_manifest", "source_snapshot", "source_files", "source_file_hashes", "lspResult", "lsp_result",
   "configOwnerRoot", "config_owner_root",
   "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
+  "approvalStageHash", "approval_stage_hash", "approvalStageRevision", "approval_stage_revision",
   "approvedStages", "approved_stages", "approvalComplete", "approval_complete", "approvalCancel", "approval_cancel",
 ]);
 
@@ -72,6 +76,14 @@ function optionalBoolean(value: unknown, field: string): boolean {
   return value;
 }
 
+function optionalNonNegativeInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    invalid(`${field} must be a non-negative integer`);
+  }
+  return value;
+}
+
 function onlyKeys(value: JsonObject, allowed: readonly string[], field: string): void {
   const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) invalid(`${field} contains unsupported fields: ${unknown.join(", ")}`);
@@ -85,8 +97,13 @@ function rejectControlKeys(value: JsonObject, reserved: ReadonlySet<string>, fie
 function workflowApproval(value: unknown): WorkflowApproval | undefined {
   if (value === undefined) return undefined;
   const approval = object(value, "cadre_workflow.approval");
-  onlyKeys(approval, ["stage", "session_id", "approved_stages", "complete", "cancel"], "cadre_workflow.approval");
+  onlyKeys(approval, ["stage", "stage_hash", "stage_revision", "session_id", "approved_stages", "complete", "cancel"], "cadre_workflow.approval");
   const stage = optionalString(approval.stage, "approval.stage");
+  const stageHash = optionalString(approval.stage_hash, "approval.stage_hash");
+  if (stageHash && !/^[a-f0-9]{64}$/.test(stageHash)) {
+    invalid("approval.stage_hash must be a 64-character lowercase hexadecimal stage hash");
+  }
+  const stageRevision = optionalNonNegativeInteger(approval.stage_revision, "approval.stage_revision");
   const sessionId = optionalString(approval.session_id, "approval.session_id");
   if (sessionId && !/^[a-f0-9]{24}$/.test(sessionId)) {
     invalid("approval.session_id must be a 24-character lowercase hexadecimal Cadre session id");
@@ -98,6 +115,8 @@ function workflowApproval(value: unknown): WorkflowApproval | undefined {
   const cancel = optionalBoolean(approval.cancel, "approval.cancel");
   return {
     ...(stage ? { stage } : {}),
+    ...(stageHash ? { stage_hash: stageHash } : {}),
+    ...(stageRevision !== undefined ? { stage_revision: stageRevision } : {}),
     ...(sessionId ? { session_id: sessionId } : {}),
     ...(approval.approved_stages ? { approved_stages: approval.approved_stages as string[] } : {}),
     ...(approval.complete !== undefined ? { complete } : {}),
@@ -128,6 +147,8 @@ export function workflowRuntimeArgs(request: WorkflowToolRequest): RuntimeArgs {
     execute: request.execute,
     ...(request.approval ? {
       approvalStage: request.approval.stage,
+      approvalStageHash: request.approval.stage_hash,
+      approvalStageRevision: request.approval.stage_revision,
       approvalSessionId: request.approval.session_id,
       approvedStages: request.approval.approved_stages,
       approvalComplete: request.approval.complete === true,

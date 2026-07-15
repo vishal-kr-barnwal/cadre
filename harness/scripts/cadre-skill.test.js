@@ -36,6 +36,15 @@ function project() {
   return root;
 }
 
+function approvalStamp(result) {
+  assert.match(result.approval.current_stage_hash, /^[a-f0-9]{64}$/);
+  assert.equal(Number.isSafeInteger(result.approval.current_stage_revision), true);
+  return {
+    approvalStageHash: result.approval.current_stage_hash,
+    approvalStageRevision: result.approval.current_stage_revision,
+  };
+}
+
 function approvePreviewAndExecute(root, input, preview) {
   if (preview.approval?.required !== true) {
     return core.workflowPacket(root, { workflow: "skill", ...input, execute: true });
@@ -45,7 +54,13 @@ function approvePreviewAndExecute(root, input, preview) {
   for (let attempt = 0; result.approval.current_stage && attempt < 10; attempt += 1) {
     const stage = result.approval.current_stage;
     const approved = [...(result.approval.approved_stages || []), stage];
-    result = core.workflowPacket(root, { workflow: "skill", approvalSessionId: session, approvalStage: stage, approvedStages: approved });
+    result = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: session,
+      approvalStage: stage,
+      ...approvalStamp(result),
+      approvedStages: approved,
+    });
     assert.equal(result.ok, true, result.error);
   }
   return core.workflowPacket(root, {
@@ -199,6 +214,7 @@ test("skill rename and remove require approval over destination and actual sourc
       workflow: "skill",
       approvalSessionId: renameSessionId,
       approvalStage: "mutation",
+      ...approvalStamp(renamePreview),
       approvedStages: ["mutation"],
     });
     assert.equal(approvedRename.ok, true, approvedRename.error);
@@ -228,6 +244,7 @@ test("skill rename and remove require approval over destination and actual sourc
       workflow: "skill",
       approvalSessionId: removeSessionId,
       approvalStage: "mutation",
+      ...approvalStamp(removePreview),
       approvedStages: ["mutation"],
     });
     assert.equal(approvedRemove.ok, true, approvedRemove.error);
@@ -256,6 +273,7 @@ test("skill removal rolls back after a commit hook failure and retries the appro
       workflow: "skill",
       approvalSessionId: sessionId,
       approvalStage: "mutation",
+      ...approvalStamp(preview),
       approvedStages: ["mutation"],
     });
     assert.equal(ready.ok, true, ready.error);
@@ -313,6 +331,7 @@ test("skill review defaults to target mode while explicit bundle mode stays non-
       workflow: "skill",
       approvalSessionId: target.approval.session_id,
       approvalStage: "skill",
+      ...approvalStamp(target),
       approvedStages: ["skill"],
     });
     assert.equal(references.ok, true, references.error);
@@ -354,6 +373,7 @@ test("changed skill create and update retries replace previews from their origin
       workflow: "skill",
       approvalSessionId: replacementCreate.approval.session_id,
       approvalStage: "skill",
+      ...approvalStamp(replacementCreate),
       approvedStages: ["skill"],
     });
     assert.equal(replacementReferences.ok, true, replacementReferences.error);
@@ -457,6 +477,7 @@ test("skill execution rejects concurrent changes to an unchanged reference", () 
         workflow: "skill",
         approvalSessionId: sessionId,
         approvalStage: stage,
+        ...approvalStamp(result),
         approvedStages: [...result.approval.approved_stages, stage],
       });
       assert.equal(result.ok, true, result.error);
@@ -564,6 +585,7 @@ test("skill workflow keeps source formatting inside the lazy skill approval sess
       workflow: "skill",
       approvalSessionId: sessionId,
       approvalStage: "skill",
+      ...approvalStamp(preview),
       approvedStages: ["skill"],
     });
     assert.equal(formatting.ok, true, formatting.error);
@@ -621,6 +643,7 @@ test("skill workflow rejects symlinked formatting sources even when the link sta
       workflow: "skill",
       approvalSessionId: preview.approval.session_id,
       approvalStage: "skill",
+      ...approvalStamp(preview),
       approvedStages: ["skill"],
     });
     assert.equal(result.ok, false);
@@ -658,6 +681,7 @@ test("skill workflow defers malformed future references and reviews only changed
       workflow: "skill",
       approvalSessionId: sessionId,
       approvalStage: "skill",
+      ...approvalStamp(create),
       approvedStages: ["skill"],
     });
     assert.equal(malformed.ok, false);
@@ -729,6 +753,7 @@ test("skill workflow defers malformed future references and reviews only changed
       workflow: "skill",
       approvalSessionId: updateSessionId,
       approvalStage: "skill",
+      ...approvalStamp(update),
       approvedStages: ["skill"],
     });
     assert.equal(changedReference.ok, true, changedReference.error);

@@ -37,13 +37,21 @@ export function compactApproval(value: unknown): JsonObject | null {
     valid_for_execute: approval.valid_for_execute === true,
     ...(asOptionalString(approval.approval_error) ? { approval_error: asOptionalString(approval.approval_error) } : {}),
     current_stage: asOptionalString(approval.current_stage) || null,
+    current_stage_hash: asOptionalString(approval.current_stage_hash) || null,
+    current_stage_revision: typeof approval.current_stage_revision === "number"
+      ? approval.current_stage_revision
+      : null,
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     intent_to_add_paths: asStringArray(approval.intent_to_add_paths),
     approved_review_paths: asStringArray(approval.approved_review_paths),
     final_only_files: asStringArray(approval.final_only_files),
     current_document: compactCurrentDocument(approval.current_document),
-    stages: stages.map((stage) => ({ id: asOptionalString(stage.id) || null })),
+    stages: stages.map((stage) => ({
+      id: asOptionalString(stage.id) || null,
+      hash: asOptionalString(stage.hash) || null,
+      revision: typeof stage.revision === "number" ? stage.revision : 0,
+    })),
     current_review_bundle_path: asOptionalString(bundle.manifest_path) || null,
     current_review_bundle_file_count: bundleFiles.length,
     next_actions: Array.isArray(approval.next_actions) ? approval.next_actions.slice(0, 1) : [],

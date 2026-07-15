@@ -38,10 +38,10 @@ stages remain pending and unmaterialized until the current stage is approved.
 Every file in the active stage is one atomic review set. A canonical
 JSON/JSONL file and its projection therefore share one approval and hash
 snapshot, as do grouped technical files or a collective reference change.
-After explicit user approval, send `approval: {session_id, stage,
-approved_stages}` with the exact returned stage and cumulative approved-stage
-prefix. `approval: {session_id}` alone only resumes the session; it does not
-approve a stage. If the workflow pauses for clarification or source formatting
+After explicit user approval, send `approval: {session_id, stage, stage_hash,
+stage_revision, approved_stages}` with the exact returned stage, hash, revision,
+and cumulative approved-stage prefix. `approval: {session_id}` alone only
+resumes the session; it does not approve a stage. If the workflow pauses for clarification or source formatting
 after a session exists, keep that session and invoke the exact returned
 continuation using the returned `decision.resume` data after collecting the
 requested input.
