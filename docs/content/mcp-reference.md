@@ -31,7 +31,37 @@ Starts or continues a workflow.
 | `workflow` | yes | A supported Cadre workflow ID such as `setup`, `implement`, or `review`. |
 | `input` | no | Workflow-specific structured input. |
 | `execute` | no | `false` previews/decides; `true` requests the confirmed mutation path. |
-| `approval` | no | Explicit approval of the current human-facing document; canonical JSON and its projection are one pair. |
+| `approval` | no | Nested staged-session control. `{session_id}` alone resumes and is not approval; after explicit approval, add the exact `decision.stage` and cumulative `approved_stages` prefix. |
+
+For example, this fragment resumes the current stage without approving it:
+
+```json
+{
+  "approval": {
+    "session_id": "returned-session-id"
+  }
+}
+```
+
+After the user explicitly approves the active `product` stage, the approval
+fragment records exactly that next prefix:
+
+```json
+{
+  "approval": {
+    "session_id": "returned-session-id",
+    "stage": "product",
+    "approved_stages": ["product"]
+  }
+}
+```
+
+Do not add `stage`, `approved_stages`, or `complete` to a session-only resume.
+`complete:true` is valid only when every stage is included in the exact
+cumulative prefix. Canonical/projection pairs and grouped stage files are
+approved atomically. `decision.current_stage` identifies work during
+clarification or formatting; never substitute it for `decision.stage` in an
+approval.
 
 The response contains the current decision, compact evidence, and at most one
 deterministic next call. `next` is the sole immediate single-agent Cadre
@@ -40,6 +70,8 @@ continuation. When it is non-null, invoke exactly `next.tool` with
 
 The typed callbacks outside `next` are limited to:
 
+- After collecting requested clarification or formatted reference content,
+  continue with the exact returned `decision.resume` data.
 - After collecting requested evidence from an external provider integration,
   invoke `decision.required.write_back` with that evidence.
 - For parallel fan-out, invoke each
@@ -53,7 +85,8 @@ arrive in a subsequent packet's `next` field.
 
 `execute:true` is execution authorization for mutations and external side
 effects. It does not stand in for document approval, and read-only workflows do
-not require either field.
+not require either field. In a staged workflow, Cadre returns an execution
+continuation only after every stage is approved; invoke only that exact `next`.
 
 ## cadre_action
 

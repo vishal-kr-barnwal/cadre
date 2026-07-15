@@ -121,14 +121,24 @@ quality gate, optional CI templates, and LSP setup. Setup dry-runs can return
 native recommendation prompts for Codex, Claude, Copilot, and Antigravity so
 you can select one or more recommended options, or type a custom "Other" value.
 Discovery packets can inspect the fresh repository before `cadre/` exists.
-Cadre staged dry-runs may materialize the complete frozen review diff at its
-intended target paths so you can inspect `git diff`; that review output is the
-only pre-execution write. Durable state transitions, trace records, indexes,
-events, and non-review effects require `execute:true`. Explicit document
-approval applies to the current human-facing projection together with its
-corresponding canonical JSON or JSONL.
+Cadre staged dry-runs generate and materialize only the active stage at its
+intended target paths so you can inspect `git diff`; later stages remain pending
+and unmaterialized. Setup advances through `product`, `product_guidelines`, a
+grouped `technical` stage, and `workflow`. The technical stage reviews its tech
+stack, style-guide, repository-topology, LSP, and infrastructure choices as one
+stage, with every file it owns treated atomically.
+
+Active review-set materialization is the only class of pre-execution write.
+Durable state transitions, trace records, indexes, events, and non-review
+effects require `execute:true`. `approval:{session_id}` alone resumes the
+existing stage and is not approval. Only after explicit user approval should a
+continuation include the exact returned `decision.stage` and cumulative
+`approved_stages` prefix. Execution is offered only after every stage is
+approved; invoke only the exact returned `next` call.
+
 Pass `reviewOutputMode:"bundle"` when you need the older non-mutating
 temp-bundle review.
+
 When language-server recommendations are detected, setup writes `cadre/lsp.json`
 by default unless you opt out. The workflow is packet-owned: the agent should
 call Cadre MCP, and Cadre MCP writes the control plane.

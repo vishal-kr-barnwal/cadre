@@ -16,13 +16,13 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 | Concern | Contract |
 |---|---|
 | Root | Required on every project-scoped call and resolved internally. |
-| Clarification | Calls that lack meaningful workflow evidence return prompts without creating approval sessions or template artifacts. |
-| Preview | `execute:false` returns the current decision and materializes the complete deterministic artifact diff for document workflows. |
-| Approval | Only explicit approval of a human-facing document belongs in the `approval` field; its canonical/projection pair is one unit. |
+| Clarification | Before review begins, calls that lack meaningful evidence return prompts without creating approval sessions or template artifacts. After a session begins, clarification and reference-formatting responses preserve that same session through the exact returned `decision.resume`. |
+| Preview | `execute:false` generates and materializes only the active stage's deterministic files. Later stages remain pending and unmaterialized. |
+| Approval | `approval:{session_id}` alone resumes and is not approval. Only after explicit user approval may the object include the exact `decision.stage` and next cumulative `approved_stages` prefix; never substitute clarification-only `decision.current_stage`. All files owned by that stage are one atomic review set. |
 | Supersession | A new payload can replace untouched, wholly unapproved overlapping previews. Approved, edited, staged, or committed targets are preserved and reported. |
-| Cancellation | `approvalCancel:true` with the returned `approvalSessionId` restores a target preview only after workflow, content, Git-index, and HEAD-baseline validation; failure retains the session. |
-| Execution | `execute:true` is valid only after prerequisites and current approvals are satisfied. |
-| Continuation | `next` is the sole immediate single-agent Cadre continuation. The only callbacks outside it are provider `decision.required.write_back` after external evidence collection, each parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact completion or recovery callbacks reissued under `data.worker_callbacks[].record_finish_packet`. |
+| Cancellation | `approval:{session_id, cancel:true}` restores a target preview only after workflow, content, Git-index, and HEAD-baseline validation; failure retains the session. |
+| Execution | `execute:true` is valid only after prerequisites and every staged approval are satisfied. A staged workflow returns an execution continuation only then; invoke exactly the returned `next`. |
+| Continuation | `next` is the sole immediate single-agent Cadre continuation. The only callbacks outside it are exact `decision.resume` data after clarification or reference formatting, provider `decision.required.write_back` after external evidence collection, each parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact completion or recovery callbacks reissued under `data.worker_callbacks[].record_finish_packet`. |
 | Skills | Applicable repository skills are selected by workflow, repo target, and optional explicit IDs. |
 | Evidence | Large context is exposed through targeted `cadre://` resources. |
 
@@ -32,9 +32,11 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 
 - Inputs: topology, provider/sync choices, project identity, style-guide choices,
   infrastructure options, and approved setup artifacts.
-- Approval: product context, guidelines, tech stack, workflow, optional repo
-  topology, and one collective styleguide document set. Patterns and machine
-  configuration are generated without separate approval.
+- Approval: `product` → `product_guidelines` → grouped `technical` →
+  `workflow`. The technical stage covers tech stack, style guides, optional
+  repository topology, LSP, and infrastructure choices as one atomic stage.
+  Only the active stage is materialized; patterns and other generated state do
+  not add separate approval stages.
 - Output: canonical `cadre/` context, projections, native state defaults,
   optional shared-sync attributes, and hosted CI scaffolding.
 - Common failures: ambiguous provider remotes, weak project intent, dirty target
@@ -44,11 +46,12 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 
 **Purpose:** Create a spec-first unit of work.
 
-- Inputs: desired outcome, constraints, optional ID/skill selectors, spec, and
-  plan payloads.
-- Approval: clarification until the structured spec and plan contain
-  substantive project-specific evidence, then spec and plan stages. Empty or
-  generic objects do not materialize previews.
+- Inputs: desired outcome, constraints, optional ID/skill selectors, the active
+  spec payload, and then the plan payload after spec approval.
+- Approval: clarification until the active document contains substantive
+  project-specific evidence, then `spec` → `plan`. The plan remains pending
+  and unmaterialized until the spec is explicitly approved. Empty or generic
+  objects do not materialize previews.
 - Output: canonical track spec/plan, task graph, projections, events, and an
   exact `next` call when implementation can proceed.
 - Common failures: untestable acceptance criteria, missing task dependencies,
@@ -116,9 +119,10 @@ integrations, and generated state.
 **Purpose:** Change an accepted track spec or plan deliberately.
 
 - Inputs: reason, changed scope/criteria/tasks, and affected track.
-- Approval: clarification until the reason and changed spec/plan are
-  meaningful, then staged spec changes followed by plan changes. There is no
-  template revision fallback.
+- Approval: clarification until the reason and active change are meaningful,
+  then `spec_changes` → `plan_changes` when both are in scope. The plan stage
+  remains pending and unmaterialized until the spec stage is explicitly
+  approved. There is no template revision fallback.
 - Output: updated canonical artifacts, projections, task graph, and revision
   events.
 - Common failures: missing rationale, incompatible completed work, invalid
@@ -214,11 +218,13 @@ changes.
   `proposedContext`.
 - Analysis: the first call is read-only and returns `refresh_analysis` plus a
   recommended native multi-select. Available levels are `product`,
-  `product-guidelines`, `tech-stack`, `workflow`, `patterns`,
+  `product-guidelines`, `tech-stack`, `style-guides`, `workflow`, `patterns`,
   `repository-topology`, `lsp`, `projections`, and `diagnostics`.
-- Approval: selected semantic levels each receive staged review of their
-  canonical/projection pair. `lsp` and `projections` require execution
-  authorization but no document approval; `diagnostics` is read-only.
+- Approval: selected levels are filtered into `product` →
+  `product_guidelines` → grouped `technical` → `workflow` → `patterns`.
+  The technical stage atomically groups any selected tech-stack, style-guide,
+  repository-topology, and LSP files. `projections` requires execution
+  authorization without content approval; `diagnostics` is read-only.
 - Evidence: semantic selections require complete structured candidates and
   never fall back to setup templates. Missing evidence returns
   `stage:"refresh_evidence"` before previews or sessions are created.
@@ -243,8 +249,9 @@ changes.
 **Purpose:** Define or run reusable Cadre workflow formulas and local wisps.
 
 - Inputs: formula ID/definition, run parameters, and optional target context.
-- Approval: no document approval for current operations; mutations require
-  `execute:true`.
+- Approval: pouring a formula into a durable track uses the new-track `spec` →
+  `plan` ledger, materializing only the active stage. Other catalog and wisp
+  mutations require `execute:true` without document approval.
 - Output: formula catalog state and an ignored local wisp run unless configured
   for trace commits.
 - Common failures: invalid formula schema, unsafe step, missing dependency, or
@@ -268,8 +275,10 @@ their projections.
 
 - Inputs: management action, skill ID, source/manifest changes, selectors,
   references, formatting request, and optional workflow/repo context.
-- Approval: create/update reviews `SKILL.md` and one collective changed-reference
-  set. Rename/remove require `execute:true` without a content approval.
+- Approval: create/update uses `skill` → `references`, with all changed
+  references in one atomic second stage. Requested source formatting resumes
+  the same session through the exact `decision.resume`. Rename/remove uses one
+  atomic `mutation` stage covering every actual destination, deletion, or move.
 - Output: catalog/selection diagnostics, validated manifest, projection,
   enablement state, or an exact `next` call.
 - Common failures: schema/version mismatch, unsafe path, duplicate ID, invalid

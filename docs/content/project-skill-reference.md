@@ -21,8 +21,11 @@ cadre/skills/<skill-id>/
     └── <reference files>
 ```
 
-`skill.json` is canonical. `SKILL.md` is an optional human-readable projection.
-References are loaded lazily through Cadre resources.
+`skill.json` is canonical and is the source used for discovery and selection.
+`SKILL.md` is a deterministic human-readable projection for Cadre-managed
+create, update, and rename operations. A pre-existing hand-authored skill may
+omit the projection, but Cadre never treats `SKILL.md` as canonical. References
+are loaded lazily through Cadre resources.
 
 ## Manifest Identity
 
@@ -95,6 +98,21 @@ operations. Supported behavior includes inspecting catalog/selection, creating
 or updating skill sources, formatting projections, enabling/disabling skills,
 and validating manifests. The workflow returns exact actions and review output;
 do not mutate management state through ad hoc JSON edits.
+
+Create and update always review `skill` before `references`. The `skill` stage
+atomically contains `skill.json` and generated `SKILL.md`; only after its
+approval can the collective references stage be formatted and materialized.
+For a `source_path`, Cadre returns one capability-bound source read at a time
+while the references stage is active. Supply incremental
+`formattedReferences` or `formatted_references` values keyed by reference ID
+through the exact `decision.resume` call, preserving the same approval session.
+Future reference targets remain unmaterialized during formatting.
+
+Rename and remove use one staged `mutation` review over the exact source,
+destination, and deletion set. For every workflow, `approval: {session_id}`
+alone resumes without approval. Only explicit approval may add the exact
+returned `stage` and cumulative `approved_stages` prefix, and only the exact
+returned final `next` call executes after all stages are approved.
 
 ## Resources
 

@@ -9,17 +9,31 @@ order: 240
 
 ## Unreleased
 
-The next Cadre update makes refresh analysis-first and extends placeholder-safe
-clarification and target-preview recovery across staged workflows.
+The next Cadre update makes every approval workflow lazy by stage, makes
+refresh analysis-first, and extends placeholder-safe clarification and
+target-preview recovery across staged workflows.
 
 - `cadre-refresh` now analyzes repository and control-plane drift before asking
   the user to choose one or more recommended levels: product, product
-  guidelines, tech stack, workflow, patterns, repository topology, LSP,
-  projections, or diagnostics. Semantic levels require evidence-backed
-  `proposedContext`, use staged canonical/projection approval, and never fall
-  back to setup templates.
+  guidelines, tech stack, style guides, workflow, patterns, repository
+  topology, LSP, projections, or diagnostics. It then reviews selected stages
+  in filtered order. Tech stack, style guides, repository topology, and LSP are
+  one grouped technical stage; projections remain execution-authorized and
+  diagnostics remain read-only.
 - New-track, revise, handoff, and release wait for meaningful workflow evidence
   instead of materializing empty or generic default artifacts.
+- Setup reviews product, product guidelines, grouped technical context, and
+  workflow in that order. New-track, revisions that touch both documents, and
+  formula pour review spec before plan. Project-skill create/update reviews the
+  skill before formatting and reviewing references; rename/remove reviews one
+  exact mutation set.
+- Only the active stage's review files are generated and materialized. A
+  session-only `approval: {session_id}` resumes clarification or formatting and
+  is never approval; stage approval requires the exact returned stage and
+  cumulative prefix, and final execution invokes the exact returned `next`.
+- Formula pour now retains its formula identity, resolved variables, and
+  metadata through session-only resume, spec approval, plan approval, and the
+  exact final execution continuation.
 - Corrected staged payloads can safely supersede untouched, wholly unapproved
   overlapping previews. Cancellation validates the worktree, Git index, and
   recorded HEAD baseline atomically, preserving both user work and the session

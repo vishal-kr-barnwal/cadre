@@ -34,24 +34,40 @@ or provider evidence by hand.
 ## Staged Review Previews
 
 For workflows that require staged approval, Cadre separates review output from
-final execution. Once prerequisite clarification is complete, the first
-review-producing dry-run freezes the complete deterministic artifact set and
-writes it to the intended target paths, such as `cadre/product.md` or
-`cadre/tracks/<id>/plan.json`. The response marks this with
-`review_bundle.mode:"target"` and `mutates_worktree:true`, and each file reports
-its `target_path` or `review_path`.
+final execution. Once prerequisite clarification is complete, a review-producing
+dry-run freezes and writes only the active stage's deterministic artifact set to
+its intended target paths, such as `cadre/product.md` or
+`cadre/tracks/<id>/spec.json`. Later stages remain pending and unmaterialized.
+The compact response returns the active review files under `artifacts`, where
+each entry reports its path and, when applicable, `target_path` or
+`review_path`.
 
 That target preview is intentionally worktree-mutating so humans and agents can
 use ordinary `git diff`. New files are marked intent-to-add so their content is
 included without being staged. Materialization is not approval: Cadre asks for
-one human-facing document at a time, while its canonical and generated
-projection remain one hash-pinned artifact pair.
+one stage at a time, and every canonical/projection pair or grouped file set
+owned by that stage remains one hash-pinned atomic review set. Setup therefore
+advances through product, product guidelines, grouped technical context, and
+workflow policy; new-track and revision reviews advance from spec to plan when
+both are in scope.
+
+`approval:{session_id}` alone resumes the active stage and never records
+approval. After the user explicitly approves the exact active review set, the
+client sends the returned `decision.stage` and the next cumulative
+`approved_stages` prefix. A clarification's `decision.current_stage` names the
+work still being collected; it is not approval. Once a session exists,
+clarification and reference-formatting responses use the exact returned
+`decision.resume` so the same session and approved prefix are preserved.
 
 Final `execute:true` verifies the frozen target files still match the reviewed
-content and fails closed when either side of a pair drifted after approval.
-Projection repair itself never creates a projection-only approval. Callers that need non-mutating review can pass
-`reviewOutputMode:"bundle"` or `reviewBundleDir`; bundle responses keep the
-legacy manifest and temp file paths.
+content and fails closed when either side of a pair drifted after approval. An
+execution continuation is returned only after all stages are approved, and the
+client invokes only that exact `next` call.
+
+Projection repair itself never creates a projection-only approval. Callers
+that need non-mutating review can pass `reviewOutputMode:"bundle"` or
+`reviewBundleDir`; bundle responses keep the legacy manifest and temp file
+paths.
 
 ## MCP Runtime
 
@@ -78,8 +94,9 @@ Workflow packets use a compact common envelope with `phase`, `decision`,
 `required`, at most one deterministic `next` call, artifact descriptors, and
 relevant resource URIs. `next` is the sole immediate single-agent Cadre
 continuation, and a client invokes exactly `next.tool` with `next.arguments`
-once for that packet. The only deferred or fan-out callbacks are provider
-`decision.required.write_back` after external evidence collection, each
+once for that packet. The only deferred or fan-out callbacks are
+`decision.resume` after requested clarification or reference formatting,
+provider `decision.required.write_back` after external evidence collection, each
 parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact
 completion or recovery callbacks reissued under
 `data.worker_callbacks[].record_finish_packet`. There is no

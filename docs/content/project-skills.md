@@ -17,12 +17,15 @@ and detailed references:
 ```text
 cadre/skills/<skill-id>/
 ├── skill.json        # canonical cadre.project-skill.v1 manifest
-├── SKILL.md          # optional human-readable documentation
+├── SKILL.md          # generated human-readable projection when Cadre-managed
 └── references/       # optional Markdown, JSON, YAML, or text references
 ```
 
 The manifest `id` must match `<skill-id>`. Its `name` is only a display label
-and may be more descriptive.
+and may be more descriptive. Runtime discovery and selection use canonical
+`skill.json`. A pre-existing hand-authored skill can be discovered without a
+projection, but every successful Cadre create, update, or rename generates
+`SKILL.md` deterministically; that file is never the canonical rule source.
 
 ## Monorepo Example
 
@@ -460,9 +463,10 @@ from a skill directory and does not search a global project-skill catalog.
 
 The MCP-first `cadre-skill` workflow manages repository-owned skills without a
 separate local editor. Its wire workflow name is `skill`. Read operations run
-immediately; every mutation produces review artifacts, waits for explicit
-stage-by-stage approval, writes the approved desired state, records a Cadre
-event, and creates one traced local commit. It never pushes.
+immediately. Create and update review `skill` and then `references`; rename and
+remove review one `mutation` stage. Every mutation waits for explicit approval,
+writes the approved desired state, records a Cadre event, and creates one traced
+local commit. It never pushes.
 
 List, inspect, or validate the catalog:
 
@@ -528,15 +532,24 @@ unsupported extensions, path escapes, and files over 128 KiB:
 ```
 
 For an unformatted project-local source, send `source_path` without `content`.
-Cadre returns `phase: "awaiting_formatting"` and exactly the targeted,
-short-lived `cadre://project-skill-source` read. The opaque token is bound to
-that canonical root and unchanged file content, so use the URI exactly as
-returned. Source files and their parent path must be regular, link-free project
-entries; Cadre rejects symlinked sources even when their target remains inside
-the project. The agent
-reads it, formats the material, and resubmits the same `reference.upsert` with
-inline `content`; no review files or target files are created during the
-formatting pause.
+Cadre first materializes and reviews only the `skill` stage. After that stage is
+approved, the same session advances to the active `references` stage and
+returns `phase: "awaiting_formatting"`, an exact `decision.resume`, and only the
+currently targeted short-lived `cadre://project-skill-source` read. It does not
+pre-read, format, or materialize future reference files while the skill stage
+is under review.
+
+The opaque source token is bound to that canonical root and unchanged file
+content, so use the URI exactly as returned. Source files and their parent path
+must be regular, link-free project entries; Cadre rejects symlinked sources
+even when their target remains inside the project. Read the returned resource,
+format it, and use the exact `decision.resume` call shape with
+`formattedReferences` or `formatted_references` mapping each reference ID to
+its formatted text. Partial mappings are accepted and accumulated in the same
+session, so Cadre can request the next source one by one. During this pause,
+`approval: {session_id}` is resume state only and no reference target is
+materialized. When all requested content is ready, Cadre materializes the
+collective references stage for review.
 
 Rename with `operation: "rename"`, `skillId`, and `newSkillId`. Remove with
 `operation: "remove"` and `skillId`. Rename collisions are rejected. A malformed
@@ -546,18 +559,20 @@ must be removed and recreated rather than silently repaired or renamed.
 Mutation review stages are dynamic:
 
 - `skill` reviews canonical `skill.json` and generated `SKILL.md` as one pair
-  for create or update.
-- `references` is one collective approval when reference files are added,
-  changed, moved, or removed.
-- rename and remove use execution authorization and do not invent a document
-  approval stage.
+  for create or update. It is always first.
+- `references` is one collective atomic approval when reference files are
+  added, changed, moved, or removed. It is materialized only after `skill`
+  approval and any active-stage formatting.
+- rename and remove use one `mutation` stage that snapshots the exact source,
+  destination, and deletion set. Rename includes complete destination contents
+  and source deletion in the same atomic review.
 
-The first target-mode call writes the complete skill diff at final repository
-paths. Approve only the current human-facing document using its session ID and
-returned approval arguments. After every document is recorded, call the same
-semantic request with `execute: true` and `approvalComplete: true`. If reviewed
-files or the source skill change during approval, Cadre rejects the stale
-session.
+Only the active stage is written at final repository paths; later stages stay
+pending and unmaterialized. `approval: {session_id}` alone resumes and never
+approves. After explicit user approval, send the exact returned `stage` and
+cumulative `approved_stages` prefix. After every stage is approved, invoke the
+exact returned `next` call for completion and execution. If reviewed files or
+the source skill change during approval, Cadre rejects the stale session.
 
 `SKILL.md` is regenerated deterministically after every successful create,
 update, or rename. It is a human projection of metadata, selectors, rules, and

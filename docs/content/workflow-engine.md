@@ -17,13 +17,15 @@ manually reproduce Cadre mutations.
 flowchart TD
   A["cadre_workflow dry run"] --> B{"Current decision"}
   B -->|"clarification"| C["Return bounded question"]
-  B -->|"approval"| D["Write current review preview"]
+  B -->|"approval"| D["Write active stage's atomic review set"]
   B -->|"action"| E["Return one namespaced action"]
   B -->|"blocked"| F["Return evidence and recovery"]
   D --> G["Explicit human approval"]
-  G --> H["Next stage or execute=true"]
-  H --> I["Validate approved content and drift"]
-  I --> J["Packet-owned mutation"]
+  G --> H{"Stages remain?"}
+  H -->|"yes"| D
+  H -->|"no"| I["Return exact execution next"]
+  I --> J["execute=true validates content and drift"]
+  J --> K["Packet-owned mutation"]
 ```
 
 The same workflow entry point supports preview, staged review, and execution.
@@ -38,12 +40,27 @@ decision and stage rather than parsing prose.
 
 ## Staged Approval
 
-Review-heavy workflows freeze and materialize their complete deterministic
-artifact diff on the first call. In default target mode, canonical files and
-their projections are written to intended repository paths; new files use Git
-intent-to-add so ordinary `git diff` includes their content. The current stage
-identifies only the human-facing document awaiting approval. Bundle mode remains
-available for a non-mutating temporary review directory.
+Review-heavy workflows freeze and materialize only the active stage's
+deterministic files. Later stages remain pending and unmaterialized until the
+active stage is explicitly approved. In default target mode, each canonical
+file and projection, or every file in a grouped stage, is written atomically to
+its intended repository path; new files use Git intent-to-add so ordinary
+`git diff` includes their content. Bundle mode remains available for a
+non-mutating temporary review directory.
+
+The setup ledger is `product` → `product_guidelines` → grouped `technical`
+(tech stack, style guides, repository topology, and LSP, informed by the
+selected infrastructure choices) → `workflow`. New-track and revision ledgers
+are spec → plan when both stages are in scope.
+
+An `approval` object containing only `session_id` resumes the current stage; it
+does not approve it. After explicit user approval, the client sends the exact
+`decision.stage` plus the next cumulative `approved_stages` prefix. Do not
+substitute a clarification's `decision.current_stage`. Once a session exists,
+clarification and reference-formatting continuations use the exact returned
+`decision.resume`, keeping one session alive across the stage. Cadre returns an
+execution continuation only after the full stage order is approved, and clients
+invoke only that exact `next` call.
 
 Final execution validates the frozen snapshot against the on-disk target.
 Canonical/projection drift fails closed and never opens a projection-only stage.

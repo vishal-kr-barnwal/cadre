@@ -7,16 +7,32 @@
 - Added an analysis-first refresh lifecycle. Cadre now inspects repository and
   control-plane drift before asking for a multi-select refresh level, with
   recommendations across product context, product guidelines, tech stack,
-  workflow policy, patterns, repository topology, LSP, generated projections,
-  and read-only diagnostics.
+  style guides, workflow policy, patterns, repository topology, LSP, generated
+  projections, and read-only diagnostics.
+- Added versioned per-stage approval records. Each record freezes only its
+  active artifact set, before-state, hashes, and approval state while later
+  stages remain pending and unmaterialized.
 
 ### Changed
 
 - Changed refresh from a patterns-focused operation into an evidence-backed,
-  level-specific workflow. Selected semantic documents require structured
-  candidates, receive staged canonical/projection review, and execute only
-  after their approvals; LSP and projection maintenance remain explicit
-  non-document operations.
+  level-specific workflow. Cadre analyzes first, asks which levels to refresh,
+  then processes the selected stages in filtered order: product, product
+  guidelines, grouped technical context, workflow, and patterns. Tech stack,
+  style guides, repository topology, and LSP are one atomic technical stage;
+  projection maintenance remains execution-authorized and diagnostics remain
+  read-only.
+- Changed every staged workflow to materialize and review only its active
+  stage. Setup now follows product, product guidelines, grouped technical
+  context, then workflow; new-track and revision collect spec before plan;
+  formula pour materializes and reviews spec before plan; project-skill
+  create/update uses skill before references.
+- Changed staged continuation guidance so `approval: {session_id}` alone
+  resumes clarification or reference formatting without approving anything.
+  Actual approval requires the returned stage and exact cumulative approved
+  prefix; final execution uses the exact returned `next` only after all stages.
+- Changed project-skill rename and remove into one staged mutation review over
+  the exact source, destination, move, and deletion set.
 - Generalized safe preview supersession across staged workflows. A new payload
   may replace untouched, wholly unapproved overlapping previews, while Cadre
   refuses to replace reviewed, edited, staged, or committed targets.
@@ -44,6 +60,13 @@
 - Fixed refresh retries so partial candidates derive from the recorded
   pre-preview canonical baseline, and template-equal candidates are rejected as
   missing evidence instead of preserving or reintroducing placeholder content.
+- Fixed setup, track, refresh, and project-skill review loops caused by eager
+  future-stage generation, placeholder previews, reconstructed continuations,
+  or resetting a session during later clarification and source formatting.
+- Fixed formula pour continuation so session-only resume, stage approvals, and
+  final execution retain the `formula`/`pour` identity, resolved variables, and
+  metadata instead of falling through to the new-track or formula-list entry
+  points.
 
 ## [2.2.0] - 2026-07-14
 

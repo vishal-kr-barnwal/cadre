@@ -42,15 +42,20 @@ Fix:
 
 1. Present the returned multi-select prompt and pass the chosen ids as
    `refreshLevels`.
-2. For product, product guidelines, tech stack, workflow, patterns, or
-   repository topology, inspect the repository and supply the corresponding
-   substantive `proposedContext` candidate.
-3. Review the generated canonical/projection pairs and continue their staged
-   approvals before final execution.
+2. Cadre filters the selected levels into product, product guidelines, grouped
+   technical, workflow, and patterns. For only the semantic documents in the
+   active stage, inspect the repository and supply substantive
+   `proposedContext`; an LSP-only technical stage can use Cadre's analyzed
+   configuration. The technical stage groups selected tech stack, style
+   guides, repository topology, and LSP files as one atomic set.
+3. Review and approve that active file set. Later selected stages remain
+   pending and unmaterialized; continue the same session until Cadre returns
+   the final execution call.
 
-Choose `diagnostics` for an analysis-only run. Choose `lsp` or `projections`
-for their explicit non-document maintenance operations. Do not copy setup
-templates or pass empty objects to satisfy a semantic evidence request.
+Choose `diagnostics` for an analysis-only run. `projections` is explicit
+execution-only maintenance. A selected LSP configuration participates in the
+grouped technical review. Do not copy setup templates or pass empty objects to
+satisfy a semantic evidence request.
 
 ## A Workflow Refuses To Create A Placeholder
 
@@ -63,8 +68,36 @@ Symptoms:
 
 Cadre no longer writes default artifacts before it has workflow-specific
 evidence. Supply meaningful project content requested by `intent_prompts`, then
-rerun the same workflow. Clarification calls do not create target previews or
-approval sessions.
+continue the same workflow using the exact returned `decision.resume` data.
+Clarification before the first review stage does not create target previews or
+an approval session. If a session already exists, clarification keeps that same
+session; resume it with `approval: {session_id}` and the requested input, which
+does not approve the current stage.
+
+## A Staged Workflow Repeats Or Generates Future Files
+
+Symptoms:
+
+- Setup returns to product after asking for guidelines or technical evidence.
+- New-track or revise alternates between spec and plan approval.
+- Files for later stages appear before the active stage is approved.
+- A session-only resume appears to approve a stage.
+
+Fix:
+
+1. Keep the original session for clarification and formatting pauses. Continue
+   with the exact returned `decision.resume` data or call shape after adding
+   only the requested content. A clarification may return an approval fragment;
+   reference formatting may return full tool arguments.
+2. To resume without approval, send only `approval: {session_id}`. Never add
+   `stage`, `approved_stages`, or `complete` until the user explicitly approves
+   the active atomic file set.
+3. After approval, send the exact returned `stage` and cumulative
+   `approved_stages` prefix. Do not construct a future prefix.
+4. Review only the stage returned by the current decision: `decision.stage`
+   for approval, or `decision.current_stage` while clarifying or formatting.
+   Later stages must remain pending and unmaterialized. After the last
+   approval, execute only the exact returned `next` call.
 
 ## A Corrected Payload Overlaps An Existing Preview
 
@@ -81,7 +114,8 @@ Fix:
   corrected payload; Cadre supersedes it and restores its baseline
   automatically.
 - If any stage was approved, resume that session or cancel it through the same
-  workflow with its returned `approvalSessionId` and `approvalCancel:true`.
+  workflow with `approval: {session_id}` or cancel it with
+  `approval: {session_id, cancel:true}`.
 - If a file was edited, staged, or committed, preserve that work and reconcile
   it deliberately. Cadre will not overwrite it or silently roll Git state
   backward.

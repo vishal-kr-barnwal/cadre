@@ -46,16 +46,24 @@ all context automatically:
    workspace and dependency evidence, topology, LSP recommendations, and
    projection health without mutating files.
 2. Present its recommended multi-select levels to the user. The available
-   levels are product, product guidelines, tech stack, workflow, patterns,
-   repository topology, LSP, projections, and diagnostics.
-3. Inspect the repository for every selected semantic level and pass complete
-   candidates under `proposedContext`. Do not submit empty objects or template
-   text merely to pass the gate.
-4. Review and approve the selected semantic canonical/projection pairs in
-   order, then use the returned final execution call.
+   levels are product, product guidelines, tech stack, style guides, repository
+   topology, LSP, workflow, patterns, projections, and diagnostics.
+3. Cadre filters selected review levels into `product`, `product_guidelines`,
+   grouped `technical`, `workflow`, then `patterns`. The grouped technical
+   stage atomically contains whichever of tech stack, style guides, repository
+   topology, and LSP were selected.
+4. Inspect the repository and pass complete `proposedContext` evidence for only
+   the semantic documents in the active stage. An LSP-only technical stage can
+   use Cadre's analyzed configuration directly. Do not submit empty objects or
+   template text merely to pass an evidence gate. Review every file in that
+   stage as one set; later stages stay pending and unmaterialized.
+5. After explicit approval, pass the exact returned stage and cumulative
+   approved-stage prefix. After all selected stages are approved, invoke the
+   exact returned final `next` call.
 
-`diagnostics` is read-only. `lsp` and `projections` need explicit execution
-authorization but no document approval. The remaining levels require
+`diagnostics` is read-only. `projections` needs execution authorization but no
+document approval. A selected LSP configuration is reviewed as part of the
+grouped technical stage; the other document levels also require
 evidence-backed content and staged approval.
 
 ## Upgrade The Installed Runtime
@@ -126,8 +134,9 @@ restores the recorded baseline and removes review-only Git intent-to-add state
 before producing the new preview.
 
 If any overlapping stage was approved, resume or explicitly cancel that
-approval instead of starting a competing payload. Cancellation uses the same
-workflow and returned `approvalSessionId` with `approvalCancel:true`. It succeeds only
+approval instead of starting a competing payload. `approval: {session_id}`
+resumes that session without approving a stage. Cancellation uses the same
+workflow with `approval: {session_id, cancel:true}`. It succeeds only
 when preview content, the Git index, and the recorded HEAD baseline are
 unchanged. If validation or restoration fails, Cadre keeps the session and
 reports the paths that need deliberate recovery; never delete the session or

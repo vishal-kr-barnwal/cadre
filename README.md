@@ -36,13 +36,14 @@ hand.
 - **Scalable execution:** dependency-aware worker waves, file claims,
   merge-back evidence, and monorepo or polyrepo delivery gates.
 
-## What Is New in 2.2.0
+## Current Development
 
-Cadre 2.2.0 makes reviewed documents atomic. Canonical JSON or JSONL and its
-human-facing Markdown projection are frozen as one pair, the first target-mode
-review writes the complete deterministic workflow diff, and approval sessions
-detect drift before execution. Setup also generates the missing technology and
-polyrepo topology projections.
+Current development builds on 2.2.0's atomic canonical/projection review and
+changes staged workflows to generate and materialize review files only for the
+active stage while later stages remain pending. Approval sessions preserve the
+exact approved prefix and detect drift before execution. Setup reviews product,
+product guidelines, grouped technical context, and workflow policy in that
+order. These corrections remain unreleased until a later release/tag step.
 
 The MCP runtime now enforces the three-tool v1 contract end to end. Legacy
 aliases are gone, lifecycle and resource discovery follow typed protocol

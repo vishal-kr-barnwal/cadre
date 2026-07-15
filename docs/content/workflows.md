@@ -30,15 +30,26 @@ status, debug, validate, handoff, refresh, revise, revert, flag, formula, artifa
 ## Staged Review Output
 
 Reviewable staged workflows write target-path previews by default. A dry-run
-returns `approval.current_stage` plus a `review_bundle` whose
-`mode:"target"` and `mutates_worktree:true` fields mean the complete frozen
-artifact set has been written to intended root-relative paths. Review the returned
-`target_path` or `review_path` with normal `git diff`.
+returns an approval `decision.stage` plus `artifacts` for only that stage's
+frozen file set at intended root-relative paths. Review every returned path,
+`target_path`, or `review_path` with normal `git diff`. Files owned by later
+stages remain pending and unmaterialized until the current stage is approved.
 
-Only the active human-facing document is awaiting approval; all deterministic
-files are already visible. Its canonical JSON/JSONL and projection share one
-approval and hash snapshot. Final `execute:true` verifies the frozen files and
-fails if either side drifted after approval.
+Every file in the active stage is one atomic review set. A canonical
+JSON/JSONL file and its projection therefore share one approval and hash
+snapshot, as do grouped technical files or a collective reference change.
+After explicit user approval, send `approval: {session_id, stage,
+approved_stages}` with the exact returned stage and cumulative approved-stage
+prefix. `approval: {session_id}` alone only resumes the session; it does not
+approve a stage. If the workflow pauses for clarification or source formatting
+after a session exists, keep that session and invoke the exact returned
+continuation using the returned `decision.resume` data after collecting the
+requested input.
+
+Only after every stage is approved does Cadre return the final `next` call.
+Invoke that call unchanged; it carries completion and execution authorization.
+Final execution verifies all approved frozen files and fails if any file has
+drifted after approval.
 
 Starting a different payload that targets the same files safely supersedes an
 untouched preview only when every overlapping stage is still unapproved. Cadre
@@ -74,15 +85,30 @@ text back as structured setup arguments such as `providerMode`, `syncMode`,
 as standalone Cadre state. Answer setup prompts before asking the user to
 approve the current setup review stage.
 
-Clarification-only setup calls do not create approval sessions or materialize
-setup review files. Target-path review begins only after product intent and
-native prompt answers are supplied as structured setup arguments. An
+Clarification before the first setup review stage does not create an approval
+session or materialize review files. Once review has begun, any later
+clarification remains in that same session and is resumed through the returned
+`decision.resume`; it does not reset setup to product. Target-path review begins
+only after product intent and native prompt answers are supplied as structured
+setup arguments. An
 evidence-backed retry uses the shared staged-preview supersession rules, so an
 untouched, unapproved preview can be replaced while changed review targets
 remain protected.
 Choosing a collection strategy such as `use-readme` or `detect` does not count
 as evidence by itself: the agent must still inspect the repository and return
 meaningful `product` and `techStack` objects before review begins.
+
+Setup collects and reviews stages in this fixed order:
+
+1. `product`
+2. `product_guidelines`
+3. `technical`, which atomically groups the tech stack, selected style guides,
+   repository topology, and LSP configuration while retaining the selected
+   infrastructure choices
+4. `workflow`
+
+Cadre materializes only the active stage. It does not prewrite guidelines,
+technical files, or workflow policy while product is under review.
 
 What setup writes:
 
@@ -131,6 +157,9 @@ The new-track packet previews or creates:
 Dry runs write the active stage to the intended track path by default, so agents
 can point at the returned target files and normal `git diff` without pasting
 generated specs or plans into chat.
+New-track always collects and reviews `spec` first. Only after spec approval
+does it collect and materialize `plan`; both stages stay in one approval
+session, and execution follows only after plan approval.
 Generated Markdown projections include readable review sections plus the
 canonical JSON detail block, so human review can inspect the same structured
 fields Cadre agents use.
@@ -419,12 +448,19 @@ drift. The workflow always follows this order:
 2. It returns `refresh_analysis`, recommended levels, and a native multi-select
    `intent_prompts` question. The user chooses the levels; recommendations do
    not execute automatically.
-3. For every selected semantic level, the agent gathers repository evidence
-   and supplies a complete structured candidate under `proposedContext`.
-4. Cadre materializes canonical/projection pairs for the selected semantic
-   documents and obtains staged approval for each one.
-5. A confirmed `execute:true` call validates the approved files, applies the
-   selected LSP or projection operations, and records the refresh.
+3. Cadre filters the selection into the fixed stage order: `product`,
+   `product_guidelines`, grouped `technical`, `workflow`, then `patterns`.
+   The technical stage contains whichever of tech stack, style guides,
+   repository topology, and LSP were selected.
+4. For only the semantic documents in the active stage, the agent gathers
+   repository evidence and supplies complete structured candidates under
+   `proposedContext`. An LSP-only technical stage uses Cadre's analyzed
+   configuration directly. Cadre materializes and obtains approval for the
+   active stage's atomic file set; later selected stages stay pending and
+   unmaterialized.
+5. After every selected review stage is approved, invoke the exact returned
+   final `next` call. It validates the approved files, applies selected
+   projection maintenance, and records the refresh.
 
 Available levels are:
 
@@ -433,18 +469,20 @@ Available levels are:
 | `product` | Refreshes `cadre/product.json` and `cadre/product.md`. |
 | `product-guidelines` | Refreshes the product-guidelines canonical/projection pair. |
 | `tech-stack` | Refreshes detected languages, frameworks, dependencies, platforms, and commands. |
+| `style-guides` | Refreshes the selected style-guide catalog and generated guide projections. |
+| `repository-topology` | Refreshes configured repositories, enabled state, default repository, and polyrepo routing. |
+| `lsp` | Reviews detected language-server configuration inside the grouped technical stage. |
 | `workflow` | Refreshes development, verification, review, commit, and coordination policy. |
 | `patterns` | Refreshes evidence-backed architecture, implementation, testing, and data patterns. |
-| `repository-topology` | Refreshes configured repositories, enabled state, default repository, and polyrepo routing. |
-| `lsp` | Writes detected language-server recommendations after execution authorization. |
 | `projections` | Repairs missing or stale generated project projections from canonical state. |
 | `diagnostics` | Returns analysis only and does not mutate the project. |
 
-The six semantic levels (`product` through `repository-topology`) do not fall
-back to templates. Selecting one without meaningful corresponding evidence in
-`proposedContext` returns `stage:"refresh_evidence"` and does not create review
-files. LSP and projection maintenance do not need document approval; semantic
-documents use staged target previews and the shared supersession/drift rules.
+Evidence-backed document levels do not fall back to templates. Selecting one
+without meaningful corresponding evidence in `proposedContext` returns
+`stage:"refresh_evidence"` and does not create its review files. A selected LSP
+configuration joins the atomic `technical` review stage. Projection maintenance
+is execution-only, while diagnostics is read-only and never opens an approval
+stage.
 
 ## `cadre-revise`
 
@@ -460,7 +498,10 @@ Revise should preserve track history and reason about:
 - Review or implementation state that may be invalidated.
 
 Revised specs and plans are reviewed from packet-generated target previews
-before the confirmed write.
+before the confirmed write. When both are selected, revise always collects and
+reviews the scoped spec stage first, then the plan stage in the same session.
+It materializes only the active stage and returns execution only after the last
+selected stage is approved.
 
 When the revision reason or target is unclear, `cadre-revise` returns
 `intent_prompts` instead of generating changes. Agents should ask what changed
@@ -570,3 +611,8 @@ Handles Cadre formula or template operations.
 Formula workflows are packet-owned. Call the formula workflow and follow its
 returned decision and `next`; do not copy packaged plugin files or assume a
 template-locator MCP resource exists.
+
+Formula `pour` is staged as `spec` then `plan`: review and approve the spec
+before Cadre materializes the plan. Other formula mutations use the packet's
+execution authorization and do not invent document stages. In either case,
+invoke only the exact continuation Cadre returns.

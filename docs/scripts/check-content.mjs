@@ -57,6 +57,7 @@ for (const doc of docs.values()) checkLinks(doc, docs)
 checkWorkflowCoverage(docs)
 checkConfigurationCoverage(docs)
 checkReleaseVersion(docs)
+checkStagedWorkflowContract(docs)
 
 console.log(`Content check passed: ${docs.size} pages, ${orders.size} unique orders.`)
 
@@ -115,6 +116,52 @@ function checkReleaseVersion(docsBySlug) {
   if (!notes.includes(`## ${packageVersion} -`)) {
     fail(`release-notes.md: missing current version ${packageVersion}`)
   }
+}
+
+function checkStagedWorkflowContract(docsBySlug) {
+  const forbidden = [
+    { pattern: /(?:(?:complete|full) (?:frozen |deterministic )?(?:artifact|workflow|review) (?:set|diff)|full frozen diff)/i, name: "eager full-diff review" },
+    { pattern: /\b(?:approval(?:SessionId|Stage|Complete|Cancel)|approvedStages|approval_(?:session_id|stage|complete|cancel))\b/, name: "legacy flat approval control" },
+  ]
+  const currentContractSlugs = [
+    "getting-started",
+    "how-cadre-works",
+    "mcp-reference",
+    "operations",
+    "project-skill-reference",
+    "project-skills",
+    "quickstart",
+    "runtime-and-mcp",
+    "troubleshooting",
+    "workflow-engine",
+    "workflow-reference",
+    "workflows",
+  ]
+  const contractSources = currentContractSlugs.map((slug) => docsBySlug.get(slug))
+    .filter((doc) => doc !== undefined)
+  for (const doc of contractSources) {
+    for (const rule of forbidden) {
+      if (rule.pattern.test(doc.content)) fail(`${doc.file}: contains ${rule.name}`)
+    }
+  }
+
+  const workflowReference = docsBySlug.get("workflow-reference")?.content ?? ""
+  requireContract(workflowReference, /approval\s*:\s*\{session_id\}/, "workflow-reference.md: missing session-only resume")
+  requireContract(workflowReference, /decision\.resume/, "workflow-reference.md: missing deferred resume")
+  requireContract(workflowReference, /approved_stages/, "workflow-reference.md: missing cumulative approval prefix")
+  requireContract(workflowReference, /product.*product_guidelines.*technical.*workflow/s, "workflow-reference.md: missing setup stage order")
+
+  const workflows = docsBySlug.get("workflows")?.content ?? ""
+  requireContract(workflows, /style-guides/, "workflows.md: missing style-guide refresh level")
+  requireContract(workflows, /Formula `pour` is staged as `spec` then `plan`/, "workflows.md: missing formula pour stage order")
+
+  const projectSkills = docsBySlug.get("project-skills")?.content ?? ""
+  requireContract(projectSkills, /formattedReferences/, "project-skills.md: missing incremental formatting input")
+  requireContract(projectSkills, /one `mutation` stage/, "project-skills.md: missing destructive mutation stage")
+}
+
+function requireContract(content, pattern, message) {
+  if (!pattern.test(content)) fail(message)
 }
 
 function leafPaths(value, prefix = "") {
