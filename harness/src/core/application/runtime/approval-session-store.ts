@@ -3,9 +3,7 @@ import path from "node:path";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
-import { withLock } from "../../infrastructure/runtime/locking";
 import type { CoreResult, ReviewFile } from "./contracts";
-import { approvalRestoreBeforeFiles, approvalRestoreSnapshots, removeEmptyApprovalParents } from "./approval-session-ancillary";
 import {
   recordCompleteBundlePreview,
   recordStagePreview,
@@ -15,9 +13,7 @@ import {
 } from "./approval-session-model";
 import { appendCadreEvent, ensureNativeState, readCadreEvents } from "./native-state";
 import {
-  inspectReviewGitState,
   removeReviewIntentToAddAtomic,
-  restoreReviewIntentToAdd,
   reviewHeadFiles,
   type ReviewHeadExpectation,
 } from "./review-output";
@@ -26,6 +22,11 @@ import {
   approvalCancellationSessionSnapshot,
   reconcileApprovalCancellation,
 } from "./approval-cancellation-journal";
+import {
+  approvalSupersessionSessionSnapshots,
+  reconcileApprovalSupersessionForSession,
+  reconcileApprovalSupersessions,
+} from "./approval-supersession-journal";
 
 export type { ApprovalBeforeFile, ApprovalSession } from "./approval-session-model";
 
@@ -72,6 +73,14 @@ export function readApprovalSessionResult(
   if (!isApprovalSessionId(sessionId)) {
     return { session: null, recovery_required: false, error: "Invalid approval session id" };
   }
+  const supersession = reconcileApprovalSupersessionForSession(root, sessionId, options);
+  if (!supersession.ok && supersession.pending) {
+    return {
+      session: null,
+      recovery_required: true,
+      error: supersession.error || "Interrupted approval supersession could not be reconciled",
+    };
+  }
   try {
     return {
       session: JSON.parse(fs.readFileSync(sessionFile(root, sessionId), "utf8")) as ApprovalSession,
@@ -112,6 +121,7 @@ export interface ApprovalSessionListOptions extends ApprovalSessionReadOptions {
 }
 
 export function listApprovalSessions(root: string, options: ApprovalSessionListOptions = {}): ApprovalSession[] {
+  const supersession = reconcileApprovalSupersessions(root, options);
   let names: string[];
   try {
     names = fs.readdirSync(sessionDirectory(root));
@@ -122,13 +132,21 @@ export function listApprovalSessions(root: string, options: ApprovalSessionListO
     ...names.filter((name) => /^[a-f0-9]{24}\.json$/.test(name)).map((name) => name.slice(0, -5)),
     ...approvalCancellationJournalIds(root),
   ]);
-  return Array.from(sessionIds).flatMap((sessionId) => {
+  const sessions = Array.from(sessionIds).flatMap((sessionId) => {
     const result = readApprovalSessionResult(root, sessionId, options);
     if (result.session) return [result.session];
     if (!options.includeRecoveryPending || !result.recovery_required) return [];
     const pending = approvalCancellationSessionSnapshot(root, sessionId);
     return pending ? [{ ...pending, cancellation_recovery_required: true }] : [];
   });
+  if (!options.includeRecoveryPending || supersession.ok) return sessions;
+  const known = new Set(sessions.map((session) => session.session_id));
+  return [
+    ...sessions,
+    ...approvalSupersessionSessionSnapshots(root)
+      .filter((session) => !known.has(session.session_id))
+      .map((session) => ({ ...session, supersession_recovery_required: true })),
+  ];
 }
 
 export function approvalSessionForTarget(root: string, relativePath: string): ApprovalSession | null {
@@ -167,67 +185,6 @@ export function unapprovedTargetBaselineContent(root: string, relativePath: stri
   return baseline.existed ? baseline.content : null;
 }
 
-function safeSessionTarget(root: string, relativePath: string): string | null {
-  const resolvedRoot = path.resolve(root);
-  const target = path.resolve(resolvedRoot, relativePath);
-  const relative = path.relative(resolvedRoot, target);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
-  return target;
-}
-
-function fileContent(file: string): string | null {
-  return fileExists(file) ? fs.readFileSync(file, "utf8") : null;
-}
-
-function restoreFile(file: string, content: string | null): void {
-  if (content === null) {
-    fs.rmSync(file, { force: true });
-    return;
-  }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.supersede-tmp`;
-  fs.writeFileSync(temporary, content);
-  fs.renameSync(temporary, file);
-}
-
-function supersessionOrder(sessions: ApprovalSession[], activeSessionId: string): ApprovalSession[] {
-  return [...sessions].sort((left, right) => {
-    if (left.session_id === activeSessionId) return -1;
-    if (right.session_id === activeSessionId) return 1;
-    const leftHasPreview = left.preview_files.length > 0 ? 1 : 0;
-    const rightHasPreview = right.preview_files.length > 0 ? 1 : 0;
-    if (leftHasPreview !== rightHasPreview) return leftHasPreview - rightHasPreview;
-    return Date.parse(right.updated_at) - Date.parse(left.updated_at);
-  });
-}
-
-function materializedSessionPaths(session: ApprovalSession): Set<string> {
-  return new Set(session.snapshot_files.filter((file) => file.missing !== true).map((file) => file.path));
-}
-
-function overlappingApprovalSessions(
-  sessions: ApprovalSession[],
-  activeSessionId: string,
-  activeFiles: ReviewFile[],
-): ApprovalSession[] {
-  const paths = new Set(activeFiles.filter((file) => file.missing !== true).map((file) => file.path));
-  const remaining = new Map(sessions.map((session) => [session.session_id, session]));
-  const selected: ApprovalSession[] = [];
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [sessionId, session] of remaining) {
-      const sessionPaths = materializedSessionPaths(session);
-      if (sessionId !== activeSessionId && !Array.from(sessionPaths).some((entry) => paths.has(entry))) continue;
-      selected.push(session);
-      remaining.delete(sessionId);
-      for (const entry of sessionPaths) paths.add(entry);
-      changed = true;
-    }
-  }
-  return selected;
-}
-
 export function approvalHeadExpectation(before: ApprovalBeforeFile): ReviewHeadExpectation {
   const beforeContent = before.existed ? before.content : null;
   const hasHeadSnapshot = typeof before.head_existed === "boolean";
@@ -237,140 +194,6 @@ export function approvalHeadExpectation(before: ApprovalBeforeFile): ReviewHeadE
     content: hasHeadSnapshot ? (before.head_content ?? null) : beforeContent,
     ...(!hasHeadSnapshot && before.existed ? { allowMissing: true } : {}),
   };
-}
-
-export function supersedeUnapprovedApprovalSessions(
-  root: string,
-  workflow: string,
-  activeSessionId: string,
-  activeFiles: ReviewFile[],
-): CoreResult {
-  return withLock(root, "approval-target-lifecycle", () => {
-    const sessions = listApprovalSessions(root, { lifecycleLocked: true, includeRecoveryPending: true });
-    const recoveryPending = sessions.filter((session) => session.cancellation_recovery_required === true);
-    if (recoveryPending.length > 0) {
-      return {
-        ok: false,
-        stage: "approval_cancellation_recovery",
-        recovery_required: true,
-        error: "An interrupted approval cancellation must be reconciled before starting or superseding another review session",
-        session_ids: recoveryPending.map((session) => session.session_id),
-      };
-    }
-    const active = sessions.find((session) => session.session_id === activeSessionId);
-    if (active && active.preview_files.length > 0) {
-      return { ok: true, skipped: true, reason: "active approval preview already exists" };
-    }
-    const candidates = overlappingApprovalSessions(sessions, activeSessionId, activeFiles)
-      .filter((session) => session.session_id !== activeSessionId || session.preview_files.length === 0);
-    if (candidates.length === 0) return { ok: true, skipped: true, reason: "no superseded approval previews" };
-    const approved = candidates.filter((session) => session.approved_stages.length > 0);
-    if (approved.length > 0) {
-      return {
-        ok: false,
-        stage: "superseded_approval",
-        error: "An approval for one or more overlapping review targets has reviewed stages and must be resumed or cancelled through Cadre before starting a new payload",
-        session_ids: approved.map((session) => session.session_id),
-        workflows: Array.from(new Set(approved.map((session) => session.workflow))),
-      };
-    }
-
-    const ordered = supersessionOrder(candidates, activeSessionId);
-    const virtual = new Map<string, string | null>();
-    const targets = new Map<string, string>();
-    const headExpectations = new Map<string, ReviewHeadExpectation>();
-    for (const session of ordered) {
-      const beforeByPath = new Map(approvalRestoreBeforeFiles(session).map((entry) => [entry.path, entry]));
-      for (const snapshot of approvalRestoreSnapshots(session)) {
-        if (snapshot.missing === true) continue;
-        const before = beforeByPath.get(snapshot.path);
-        const target = safeSessionTarget(root, snapshot.path);
-        if (!before || !target) {
-          return {
-            ok: false,
-            stage: "superseded_approval",
-            error: `Superseded ${workflow} approval has an invalid restore record for ${snapshot.path}`,
-            session_id: session.session_id,
-          };
-        }
-        const beforeContent = before.existed ? before.content : null;
-        headExpectations.set(snapshot.path, approvalHeadExpectation(before));
-        const current = virtual.has(snapshot.path) ? virtual.get(snapshot.path)! : fileContent(target);
-        if (current !== snapshot.content && current !== beforeContent) {
-          return {
-            ok: false,
-            stage: "superseded_approval_drift",
-            error: `Superseded ${session.workflow} review target changed after Cadre created it: ${snapshot.path}`,
-            session_id: session.session_id,
-            path: snapshot.path,
-          };
-        }
-        targets.set(snapshot.path, target);
-        virtual.set(snapshot.path, beforeContent);
-      }
-    }
-
-    const gitState = inspectReviewGitState(root, Array.from(virtual.keys()), Array.from(headExpectations.values()));
-    if (!gitState.ok) {
-      const changed = [...gitState.stagedPaths, ...gitState.baselinePaths];
-      const reason = gitState.error
-        || (gitState.stagedPaths.length > 0
-          ? `Superseded ${workflow} review target has staged Git content: ${gitState.stagedPaths.join(", ")}`
-          : `Superseded ${workflow} review target was committed or changed in Git after Cadre created it: ${gitState.baselinePaths.join(", ")}`);
-      return {
-        ok: false,
-        stage: "superseded_approval_git_drift",
-        error: reason,
-        paths: changed,
-        staged_paths: gitState.stagedPaths,
-        baseline_paths: gitState.baselinePaths,
-      };
-    }
-
-    const diskBefore = new Map<string, string | null>();
-    for (const [relativePath] of virtual) diskBefore.set(relativePath, fileContent(targets.get(relativePath)!));
-    const intentToAddPaths = Array.from(new Set(ordered.flatMap((session) => session.intent_to_add_paths)));
-    const intentRemoval = removeReviewIntentToAddAtomic(root, intentToAddPaths);
-    if (!intentRemoval.ok) {
-      return {
-        ok: false,
-        stage: "superseded_approval_index_restore",
-        error: intentRemoval.error || "Unable to remove review intent-to-add entries",
-      };
-    }
-    try {
-      for (const [relativePath, content] of virtual) {
-        const target = targets.get(relativePath)!;
-        restoreFile(target, content);
-      }
-      for (const [relativePath, content] of virtual) if (content === null) removeEmptyApprovalParents(root, targets.get(relativePath)!);
-    } catch (error) {
-      const rollbackErrors: string[] = [];
-      for (const [relativePath, content] of diskBefore) {
-        const target = targets.get(relativePath);
-        try { if (target) restoreFile(target, content); } catch (rollbackError) {
-          rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
-        }
-      }
-      const indexRollback = restoreReviewIntentToAdd(root, intentRemoval.paths);
-      const cause = error instanceof Error ? error.message : String(error);
-      return {
-        ok: false,
-        stage: "superseded_approval_restore",
-        error: [cause, ...rollbackErrors, ...(indexRollback.ok ? [] : [indexRollback.error || "Git intent-to-add rollback failed"])]
-          .join("; "),
-      };
-    }
-
-    for (const session of ordered) removeApprovalSession(root, session.session_id);
-    return {
-      ok: true,
-      superseded: ordered.map((session) => session.session_id),
-      restored: Array.from(virtual.entries()).filter(([, content]) => content !== null).map(([relativePath]) => relativePath),
-      removed: Array.from(virtual.entries()).filter(([, content]) => content === null).map(([relativePath]) => relativePath),
-      intent_to_add_removed: intentRemoval.paths,
-    };
-  });
 }
 
 export function captureApprovalBeforeFiles(root: string, files: ReviewFile[]): ApprovalBeforeFile[] {

@@ -13,9 +13,9 @@ import {
 import {
   captureApprovalBeforeFiles,
   readApprovalSession,
-  supersedeUnapprovedApprovalSessions,
   writeApprovalSession,
 } from "./approval-session-store";
+import { supersedeUnapprovedApprovalSessions } from "./approval-session-supersession";
 import { activeApprovalSessionsForTargets } from "./approval-session-query";
 import { sessionTargetDriftError, stagePreviewError } from "./approval-session-integrity";
 import {

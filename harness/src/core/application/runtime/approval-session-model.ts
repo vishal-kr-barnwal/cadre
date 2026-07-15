@@ -45,6 +45,7 @@ export interface ApprovalSession {
   intent_to_add_paths: string[];
   updated_at: string;
   cancellation_recovery_required?: boolean;
+  supersession_recovery_required?: boolean;
 }
 
 function uniqueByPath<T extends { path: string }>(values: T[]): T[] {

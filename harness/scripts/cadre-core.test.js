@@ -4947,6 +4947,162 @@ test("a changed unapproved preview safely replaces its overlapping session", () 
   }
 });
 
+test("supersession finalization failure never leaves a live session over restored targets", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-finalization-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "supersession_finalization_20260715";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed supersession finalization track"]);
+
+    const firstPlan = samplePlan(trackId);
+    firstPlan.phases[0].title = "Phase 1: First durable preview";
+    firstPlan.phases[0].tasks[0].title = "Materialize the first durable approval preview";
+    const first = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Create an unapproved preview whose supersession cleanup will be interrupted.",
+      plan: firstPlan,
+    });
+    assert.equal(first.ok, true, first.error);
+    const firstSessionFile = path.join(root, "cadre", "local", "approval-sessions", `${first.approval.session_id}.json`);
+
+    const replacementPlan = samplePlan(trackId);
+    replacementPlan.phases[0].title = "Phase 1: Replacement durable preview";
+    replacementPlan.phases[0].tasks[0].title = "Materialize the replacement durable approval preview";
+    const originalRemove = fs.rmSync;
+    let cleanupInjected = false;
+    fs.rmSync = function injectedSupersessionCleanup(target) {
+      if (!cleanupInjected && String(target).endsWith(".superseding")) {
+        cleanupInjected = true;
+        throw new Error("injected supersession tombstone cleanup failure");
+      }
+      return originalRemove.apply(this, arguments);
+    };
+    let replacement;
+    try {
+      replacement = core.workflowPacket(root, {
+        workflow: "revise",
+        trackId,
+        reason: "Replace the earlier preview while retaining durable supersession ownership.",
+        plan: replacementPlan,
+      });
+    } finally {
+      fs.rmSync = originalRemove;
+    }
+    assert.equal(cleanupInjected, true);
+    assert.equal(replacement.ok, true, replacement.error);
+    assert.equal(fs.existsSync(firstSessionFile), false);
+    assert.equal(
+      fs.existsSync(path.join(root, "cadre", "local", "approval-sessions", `${replacement.approval.session_id}.json`)),
+      true,
+    );
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.md"), "utf8"), /Replacement durable preview/);
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".supersede-journal.json")), true);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".superseding")), true);
+
+    const finalPlan = samplePlan(trackId);
+    finalPlan.phases[0].title = "Phase 1: Final durable preview";
+    finalPlan.phases[0].tasks[0].title = "Materialize the final durable approval preview";
+    const final = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Retry after supersession tombstone cleanup and create the final reviewed preview.",
+      plan: finalPlan,
+    });
+    assert.equal(final.ok, true, final.error);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".supersede-journal.json")), false);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".superseding")), false);
+    assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.md"), "utf8"), /Final durable preview/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("supersession rollback failure returns typed recovery and later restores the exact live session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-supersession-recovery-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "supersession_recovery_20260715";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed supersession recovery track"]);
+
+    const firstPlan = samplePlan(trackId);
+    firstPlan.phases[0].title = "Phase 1: Recoverable preview";
+    firstPlan.phases[0].tasks[0].title = "Preserve the exact recoverable approval preview";
+    const first = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Create an unapproved preview for supersession rollback recovery.",
+      plan: firstPlan,
+    });
+    assert.equal(first.ok, true, first.error);
+    const sessionId = first.approval.session_id;
+    const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
+    const sessionFile = path.join(sessionDirectory, `${sessionId}.json`);
+    const previewBefore = fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.json"), "utf8");
+    const originalRename = fs.renameSync;
+    let quarantineInjected = false;
+    let rollbackBlocked = false;
+    fs.renameSync = function injectedSupersessionInterruption(source, target) {
+      if (!quarantineInjected && source === sessionFile && String(target).endsWith(".superseding")) {
+        originalRename.apply(this, arguments);
+        quarantineInjected = true;
+        throw new Error("injected crash after supersession quarantine");
+      }
+      if (quarantineInjected && String(source).endsWith(".superseding") && target === sessionFile) {
+        rollbackBlocked = true;
+        throw new Error("injected supersession session rollback failure");
+      }
+      return originalRename.apply(this, arguments);
+    };
+    const replacementPlan = samplePlan(trackId);
+    replacementPlan.phases[0].title = "Phase 1: Blocked replacement preview";
+    replacementPlan.phases[0].tasks[0].title = "Do not materialize this replacement until recovery succeeds";
+    let blocked;
+    try {
+      blocked = core.workflowPacketV1(root, {
+        workflow: "revise",
+        trackId,
+        reason: "Replace the preview only through a recoverable supersession transaction.",
+        plan: replacementPlan,
+      });
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(quarantineInjected, true);
+    assert.equal(rollbackBlocked, true);
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase, "recovery_required");
+    assert.equal(blocked.decision.kind, "recovery_required");
+    assert.equal(blocked.decision.resume, null);
+    assert.deepEqual(blocked.decision.writable_paths, []);
+    assert.equal(blocked.next, null);
+    assert.equal(fs.existsSync(sessionFile), false);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.json"), "utf8"), previewBefore);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".supersede-journal.json")), true);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".superseding")), true);
+    assert.deepEqual(fs.readdirSync(sessionDirectory).filter((name) => /^[a-f0-9]{24}\.json$/.test(name)), []);
+
+    const recovered = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+    });
+    assert.equal(recovered.ok, true, recovered.error);
+    assert.equal(recovered.approval.session_id, sessionId);
+    assert.equal(recovered.approval.session_resumable, true);
+    assert.equal(fs.existsSync(sessionFile), true);
+    assert.equal(fs.readFileSync(path.join(root, "cadre", "tracks", trackId, "plan.json"), "utf8"), previewBefore);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".supersede-journal.json")), false);
+    assert.equal(fs.readdirSync(sessionDirectory).some((name) => name.endsWith(".superseding")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a sessionless overlapping setup amendment returns the active session without mutation", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-sessionless-recovery-test-"));
   try {

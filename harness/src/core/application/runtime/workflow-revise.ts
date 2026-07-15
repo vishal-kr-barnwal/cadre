@@ -70,7 +70,9 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   const currentArtifacts = asJsonObject(approval).current_review_artifacts;
   const stageReviewArtifacts = Array.isArray(currentArtifacts) ? currentArtifacts.map(asJsonObject) : [];
   const approvalError = stagedApprovalError(approval);
-  const cancelled = asJsonObject(approval).cancelled === true;
+  const approvalState = asJsonObject(approval);
+  const cancelled = approvalState.cancelled === true;
+  const approvalRecoveryRequired = approvalState.approval_recovery_required === true;
   const raw = args as UnknownRecord;
   const existingSpec = readJson<JsonObject | null>(trackSpecJsonPath(track), null);
   const collectSpec = args.execute === true || (collection.activeKind === "spec" && collection.missingEvidence.length === 0);
@@ -135,7 +137,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       ...base,
       ok: !approvalError,
       dry_run: true,
-      phase_state: "awaiting_staged_approval",
+      phase_state: approvalRecoveryRequired ? "recovery_required" : "awaiting_staged_approval",
       ...(approvalError ? { error: approvalError, stage: "staged_approval" } : {}),
     };
   }
@@ -144,7 +146,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       ...base,
       ok: false,
       dry_run: true,
-      phase_state: "awaiting_staged_approval",
+      phase_state: approvalRecoveryRequired ? "recovery_required" : "awaiting_staged_approval",
       stage: "staged_approval",
       error: approvalError || "Staged approval is required before revising track artifacts",
     };
