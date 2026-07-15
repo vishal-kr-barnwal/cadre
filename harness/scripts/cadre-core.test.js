@@ -3686,6 +3686,87 @@ test("implementationPrep returns packet-selected style guides", () => {
   }
 });
 
+test("workflow newtrack rejects bundled artifact-schema examples before materializing previews", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-schema-placeholder-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "schema_placeholder_20260715";
+    const base = path.join(root, "cadre", "tracks", trackId);
+    const specExample = structuredClone(core.artifactSchema("spec").example);
+
+    const blockedSpec = core.workflowPacket(root, {
+      workflow: "newtrack",
+      trackId,
+      spec: specExample,
+      commitMode: "off",
+    });
+    assert.equal(blockedSpec.ok, false);
+    assert.equal(blockedSpec.phase_state, "awaiting_clarification");
+    assert.equal(blockedSpec.stage, "intent_clarification");
+    assert.equal(blockedSpec.approval.current_stage, "spec");
+    assert.deepEqual(blockedSpec.missing_payload, ["spec"]);
+    assert.deepEqual(blockedSpec.intent_prompts.map((prompt) => prompt.id).sort(), [
+      "newtrack-acceptance",
+      "newtrack-goal",
+      "newtrack-outcome",
+      "newtrack-scope",
+    ]);
+    const sessionId = blockedSpec.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    let session = readJson(sessionFile);
+    assert.deepEqual(session.stage_records.spec.snapshot_files, []);
+    assert.deepEqual(session.stage_records.plan.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.equal(fs.existsSync(path.join(base, "spec.json")), false);
+    assert.equal(fs.existsSync(path.join(base, "spec.md")), false);
+
+    const specPreview = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      spec: sampleSpec(trackId),
+    });
+    assert.equal(specPreview.ok, true, specPreview.error);
+    assert.equal(specPreview.approval.current_stage, "spec");
+
+    const missingPlan = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalStage: "spec",
+      ...approvalStamp(specPreview.approval),
+      approvedStages: ["spec"],
+    });
+    assert.equal(missingPlan.ok, false);
+    assert.equal(missingPlan.approval.current_stage, "plan");
+    assert.deepEqual(missingPlan.missing_payload, ["plan"]);
+
+    const blockedPlan = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      plan: structuredClone(core.artifactSchema("plan").example),
+    });
+    assert.equal(blockedPlan.ok, false);
+    assert.equal(blockedPlan.phase_state, "awaiting_clarification");
+    assert.equal(blockedPlan.stage, "track_evidence");
+    assert.equal(blockedPlan.approval.current_stage, "plan");
+    assert.deepEqual(blockedPlan.missing_payload, ["plan"]);
+    session = readJson(sessionFile);
+    assert.deepEqual(session.stage_records.plan.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.equal(fs.existsSync(path.join(base, "plan.json")), false);
+    assert.equal(fs.existsSync(path.join(base, "plan.md")), false);
+
+    const cancelled = core.workflowPacket(root, {
+      workflow: "newtrack",
+      approvalSessionId: sessionId,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.phase_state, "cancelled");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow newtrack collects spec then plan in one lazy approval session", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-newtrack-lazy-stages-test-"));
   try {
@@ -4425,6 +4506,53 @@ test("workflow revise reviews proposed track files before writing", () => {
     assert.equal(written.ok, true);
     assert.equal(written.phase_state, "executed");
     assert.match(fs.readFileSync(path.join(root, "cadre", "tracks", "revise_20260618", "plan.md"), "utf8"), /Follow-up/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow revise rejects bundled schema examples without changing track artifacts", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-revise-schema-placeholder-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "revise_schema_placeholder_20260715";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed revision placeholder track"]);
+    const specPath = path.join(root, "cadre", "tracks", trackId, "spec.json");
+    const planPath = path.join(root, "cadre", "tracks", trackId, "plan.json");
+    const baselineSpec = fs.readFileSync(specPath, "utf8");
+    const baselinePlan = fs.readFileSync(planPath, "utf8");
+
+    const blocked = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Repository evidence requires updated requirements and an adjusted implementation plan.",
+      intent: { revisionScope: "both" },
+      spec: structuredClone(core.artifactSchema("spec").example),
+      plan: structuredClone(core.artifactSchema("plan").example),
+      commitMode: "off",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.phase_state, "awaiting_clarification");
+    assert.equal(blocked.stage, "revision_evidence");
+    assert.equal(blocked.approval.current_stage, "spec_changes");
+    assert.deepEqual(blocked.missing_payload, ["spec"]);
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${blocked.approval.session_id}.json`);
+    const session = readJson(sessionFile);
+    assert.deepEqual(session.stage_records.spec_changes.snapshot_files, []);
+    assert.deepEqual(session.stage_records.plan_changes.snapshot_files, []);
+    assert.deepEqual(session.final_snapshot_files, []);
+    assert.equal(fs.readFileSync(specPath, "utf8"), baselineSpec);
+    assert.equal(fs.readFileSync(planPath, "utf8"), baselinePlan);
+
+    const cancelled = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: blocked.approval.session_id,
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, true, cancelled.error);
+    assert.equal(cancelled.phase_state, "cancelled");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
