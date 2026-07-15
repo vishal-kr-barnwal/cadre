@@ -28,12 +28,11 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
   if (!sessionId) return { ok: false, stage: "staged_review_drift", error: "approvalSessionId is required to validate target review files" };
   const session = readApprovalSession(root, sessionId);
   if (!session) return { ok: false, stage: "staged_review_drift", error: "Approval session was not found for target review validation" };
-  const materializedPaths = session.snapshot_files.filter((file) => file.missing !== true).map((file) => file.path);
-  const materializedPathSet = new Set(materializedPaths);
+  const snapshotPaths = session.snapshot_files.map((file) => file.path);
   const gitState = inspectReviewGitState(
     root,
-    materializedPaths,
-    session.before_files.filter((before) => materializedPathSet.has(before.path)).map(approvalHeadExpectation),
+    snapshotPaths,
+    session.before_files.map(approvalHeadExpectation),
   );
   if (!gitState.ok) {
     const changed = Array.from(new Set([...gitState.stagedPaths, ...gitState.baselinePaths]));
@@ -75,6 +74,23 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
       files: materializedFiles.map((file) => file.path),
       materialized_bundle: mutation.ok !== false,
       mutation: asJsonObject(mutation),
+    };
+  }
+  const beforeByPath = new Map(session.before_files.map((before) => [before.path, before]));
+  const missingDrift = session.snapshot_files.filter((file) => file.missing === true).find((file) => {
+    const before = beforeByPath.get(file.path);
+    if (!before) return true;
+    const target = path.join(root, file.path);
+    const current = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
+    return current !== (before.existed ? before.content : null);
+  });
+  if (missingDrift) {
+    return {
+      ok: false,
+      stage: "staged_review_drift",
+      error: `Approved removal target changed after review: ${missingDrift.path}`,
+      errors: [`Approved removal target changed after review: ${missingDrift.path}`],
+      files: [missingDrift.path],
     };
   }
   const files = previewFileRecords(session);

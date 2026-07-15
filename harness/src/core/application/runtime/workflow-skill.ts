@@ -10,7 +10,7 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { atomicSkillMutation, normalizeReferenceContent } from "../../infrastructure/runtime/project-skill-mutations";
 import { loadProjectSkill, projectSkillIds } from "../../infrastructure/runtime/project-skills-store";
 import { readProjectSourceFile } from "../../infrastructure/runtime/project-source-files";
-import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs, unapprovedSkillTargetApproval } from "./approval-session-store";
+import { closeApprovalSessionFromArgs, readApprovalSession, recordApprovalCompletionFromArgs, unapprovedSkillTargetApproval } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { appendCadreEvent } from "./native-state";
@@ -177,11 +177,90 @@ function reviewFilesFor(sourceId: string, targetId: string | null, files: Map<st
   return output;
 }
 
+function skillDirectoryFiles(root: string, skillId: string): string[] {
+  const directory = path.join(root, "cadre", "skills", skillId);
+  const visit = (current: string): string[] => {
+    if (!fs.existsSync(current)) return [];
+    return fs.readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
+      const target = path.join(current, entry.name);
+      return entry.isDirectory() ? visit(target) : [path.relative(root, target).split(path.sep).join("/")];
+    });
+  };
+  return visit(directory).sort();
+}
+
+function removalReviewFiles(root: string, skillId: string): ReviewFile[] {
+  const files = skillDirectoryFiles(root, skillId);
+  const targets = files.length > 0 ? files : [`cadre/skills/${skillId}/.remove`];
+  return targets.map((target) => ({
+    path: target,
+    title: `Remove ${target}`,
+    kind: "text",
+    source: "skill.remove",
+    content: `Delete ${target}\n`,
+    missing: true,
+    documentId: "mutation",
+    reviewRole: "human",
+  }));
+}
+
 function approvalStages(operation: SkillOperation, referenceReviewPaths: string[]): ApprovalStage[] {
+  if (operation === "rename" || operation === "remove") return [{
+    id: "mutation",
+    title: operation === "rename" ? "Rename Project Skill" : "Remove Project Skill",
+    description: operation === "rename"
+      ? "Complete source deletion and target skill contents as one atomic rename."
+      : "Every managed file that will be removed as one atomic deletion.",
+    documentIds: ["mutation"],
+    fileMatches: ["*"],
+    inputKeys: [],
+  }];
   return [
     ...(["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"] }] : []),
     ...(["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"] }] : []),
   ];
+}
+
+interface FileBaseline { existed: boolean; content: string | null }
+
+function captureFileBaseline(file: string): FileBaseline {
+  const existed = fs.existsSync(file);
+  return { existed, content: existed ? fs.readFileSync(file, "utf8") : null };
+}
+
+function restoreFileBaseline(file: string, baseline: FileBaseline): void {
+  if (!baseline.existed) { fs.rmSync(file, { force: true }); return; }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, baseline.content || "");
+}
+
+function destructiveSessionIntegrity(
+  root: string,
+  operation: SkillOperation,
+  sourceId: string,
+  targetId: string,
+  args: RuntimeArgs,
+): CoreResult {
+  if (operation !== "rename" && operation !== "remove") return { ok: true, skipped: true };
+  const expectedSourceHash = asOptionalString((args as JsonObject).source_snapshot);
+  const actualSourceHash = hashDirectory(path.join(root, "cadre", "skills", sourceId));
+  if (!expectedSourceHash || actualSourceHash !== expectedSourceHash) {
+    return { ok: false, error: `Project skill source changed after ${operation} review began: ${sourceId}` };
+  }
+  if (operation !== "rename") return { ok: true, source_snapshot: actualSourceHash };
+  const sessionId = asOptionalString(args.approvalSessionId || args.approval_session_id);
+  const session = sessionId ? readApprovalSession(root, sessionId) : null;
+  if (!session) return { ok: false, error: "Approved rename session was not found" };
+  const prefix = `cadre/skills/${targetId}/`;
+  const expected = session.snapshot_files
+    .filter((file) => file.missing !== true && file.path.startsWith(prefix))
+    .map((file) => file.path)
+    .sort();
+  const actual = skillDirectoryFiles(root, targetId);
+  if (expected.length !== actual.length || expected.some((file, index) => file !== actual[index])) {
+    return { ok: false, error: `Project skill rename destination changed after review: ${targetId}`, expected, actual };
+  }
+  return { ok: true, source_snapshot: actualSourceHash, target_files: actual };
 }
 
 export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
@@ -206,7 +285,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   if (operation === "create" && fs.existsSync(path.join(root, "cadre", "skills", id)) && !continuingApproval && !previewOwner) return { ok: false, error: `skill already exists: ${id}` };
   if (operation !== "create" && !existing.manifest && !previewOwner?.sourceManifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
   if (operation === "remove" && !fs.existsSync(path.join(root, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
-  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || (fs.existsSync(path.join(root, "cadre", "skills", newId)) && !previewOwner))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || (fs.existsSync(path.join(root, "cadre", "skills", newId)) && !continuingApproval && !previewOwner))) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
   const sessionSource = (args as JsonObject).source_manifest;
   const previewSource = previewOwner?.sourceManifest as unknown as ManagedManifest | null | undefined;
   const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource)
@@ -243,7 +322,12 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     ? [...existingReferencePaths, ...targetReferencePaths]
     : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
   const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
-  const reviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const desiredReviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const reviews = operation === "remove"
+    ? removalReviewFiles(root, id)
+    : operation === "rename"
+      ? [...desiredReviews, ...removalReviewFiles(root, id)]
+      : desiredReviews;
   const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
     const base = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
     return deletedReferencePaths.includes(relative) ? [`${base}.delete`] : [base];
@@ -259,35 +343,71 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     ? stagedApprovalState(root, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] })
     : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const approvalError = stages.length > 0 ? stagedApprovalError(approval) : null;
-  if (args.execute !== true || (stages.length > 0 && !stagedApprovalReady(approval))) return {
-    ok: !approvalError,
-    operation,
-    skill_id: id,
-    new_skill_id: newId,
-    dry_run: true,
-    phase_state: stages.length > 0 ? "awaiting_staged_approval" : "ready",
-    approval,
-    review_bundle: asJsonObject(approval).current_review_bundle,
-    mutation_plan: stages.length === 0 ? { operation, source: id, target: operation === "remove" ? null : newId } : null,
-    ...(approvalError ? { error: approvalError } : {}),
-  };
+  if (args.execute !== true || (stages.length > 0 && !stagedApprovalReady(approval))) {
+    const blockedExecution = args.execute === true && stages.length > 0 && !stagedApprovalReady(approval);
+    return {
+      ok: !approvalError && !blockedExecution,
+      operation,
+      skill_id: id,
+      new_skill_id: newId,
+      dry_run: true,
+      phase_state: stages.length > 0 ? "awaiting_staged_approval" : "ready",
+      approval,
+      review_bundle: asJsonObject(approval).current_review_bundle,
+      mutation_plan: stages.length === 0 ? { operation, source: id, target: operation === "remove" ? null : newId } : null,
+      ...(approvalError || blockedExecution ? { error: approvalError || "Staged approval is required before changing project skill files" } : {}),
+    };
+  }
   const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root, reviewArgs) : { ok: true, skipped: true };
   if (reviewValidation.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, error: asOptionalString(reviewValidation.error) || "Approved review files changed" };
+  const destructiveIntegrity = destructiveSessionIntegrity(root, operation, id, newId, reviewArgs);
+  if (destructiveIntegrity.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, destructive_integrity: destructiveIntegrity, error: asOptionalString(destructiveIntegrity.error) || "Approved skill directory membership changed" };
   const traceBefore = beginTrace(root);
+  let recoverMutation: (() => void) | null = null;
   try {
+    const eventsPath = path.join(root, "cadre", "events.jsonl");
+    const eventsBaseline = captureFileBaseline(eventsPath);
     const mutation = atomicSkillMutation(root, id, operation === "remove" ? null : newId, desired.files);
+    let mutationSettled = false;
+    const rollback = () => {
+      if (mutationSettled) return;
+      mutation.rollback();
+      restoreFileBaseline(eventsPath, eventsBaseline);
+      mutation.finish();
+      mutationSettled = true;
+      recoverMutation = null;
+    };
+    recoverMutation = rollback;
     if (operation !== "remove") {
       const final = loadProjectSkill(root, newId, knownRepos(root));
-      if (!final.ok) { mutation.rollback(); mutation.finish(); return { ok: false, phase_state: "recovery_required", stage: "final_validation", errors: final.errors }; }
+      if (!final.ok) { rollback(); return { ok: false, phase_state: "recovery_required", stage: "final_validation", errors: final.errors }; }
     }
-    mutation.finish();
     const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
-    const event = appendCadreEvent(root, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null });
+    const approvalSessionId = asOptionalString(asJsonObject(approval).session_id);
+    const event = appendCadreEvent(root, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null, approval_session_id: approvalSessionId || null });
     const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root, reviewArgs) : null;
     const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
     const controlCommit = commitTrace(root, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
-    if (controlCommit.ok === false) return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit };
+    if (controlCommit.ok === false) {
+      rollback();
+      return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", rolled_back: true, written: [], removed: [], event, control_commit: controlCommit };
+    }
+    mutation.finish();
+    mutationSettled = true;
+    recoverMutation = null;
     const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root, reviewArgs) : null;
     return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
-  } catch (error) { return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "filesystem", error: errorMessage(error) }; }
+  } catch (error) {
+    const recoveryErrors: string[] = [];
+    try { recoverMutation?.(); } catch (recoveryError) { recoveryErrors.push(errorMessage(recoveryError)); }
+    return {
+      ok: false,
+      operation,
+      skill_id: id,
+      phase_state: "recovery_required",
+      stage: "filesystem",
+      error: [errorMessage(error), ...recoveryErrors].join("; "),
+      rolled_back: recoveryErrors.length === 0,
+    };
+  }
 }

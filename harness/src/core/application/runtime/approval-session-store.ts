@@ -6,7 +6,7 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
 import { withLock } from "../../infrastructure/runtime/locking";
 import type { CoreResult, ReviewFile } from "./contracts";
-import { approvalRestoreBeforeFiles, approvalRestoreSnapshots } from "./approval-session-ancillary";
+import { approvalRestoreBeforeFiles, approvalRestoreSnapshots, removeEmptyApprovalParents } from "./approval-session-ancillary";
 import {
   recordCompleteBundlePreview,
   recordStagePreview,
@@ -277,6 +277,7 @@ export function supersedeUnapprovedApprovalSessions(
         const target = targets.get(relativePath)!;
         restoreFile(target, content);
       }
+      for (const [relativePath, content] of virtual) if (content === null) removeEmptyApprovalParents(root, targets.get(relativePath)!);
     } catch (error) {
       const rollbackErrors: string[] = [];
       for (const [relativePath, content] of diskBefore) {
@@ -408,6 +409,7 @@ export function cancelApprovalSession(root: string, sessionId: string, expectedW
     if (!intentRemoval.ok) return { ok: false, cancelled: false, session_retained: true, stage: "approval_cancel_index", error: intentRemoval.error };
     try {
       for (const { target, before } of restorePlan.values()) restoreFile(target, before);
+      for (const { target, before } of restorePlan.values()) if (before === null) removeEmptyApprovalParents(root, target);
     } catch (error) {
       const rollbackErrors: string[] = [];
       for (const { target, preview } of restorePlan.values()) {

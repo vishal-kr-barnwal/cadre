@@ -35,7 +35,7 @@ export function atomicSkillMutation(root: string, sourceId: string, targetId: st
     fs.mkdirSync(catalog, { recursive: true });
     if (!target) fs.rmSync(source, { recursive: true, force: true });
     else {
-      if (source !== target && fs.existsSync(source)) fs.renameSync(source, target);
+      if (source !== target && fs.existsSync(source) && !fs.existsSync(target)) fs.renameSync(source, target);
       fs.mkdirSync(target, { recursive: true });
       const desired = new Set(files.keys());
       for (const [relative, content] of files) {
@@ -49,6 +49,7 @@ export function atomicSkillMutation(root: string, sourceId: string, targetId: st
         const relative = path.relative(target, existing).split(path.sep).join("/");
         if (!desired.has(relative)) fs.rmSync(existing, { force: true });
       }
+      if (source !== target) fs.rmSync(source, { recursive: true, force: true });
     }
   } catch (error) { rollback(); fs.rmSync(backup, { recursive: true, force: true }); throw error; }
   return {

@@ -444,7 +444,7 @@ function compactSkillResponse(result: CoreResult): CoreResult {
     decision: result.decision,
     approval: compactApproval(result.approval),
     review_bundle: reviewBundle,
-    written: result.written, removed: result.removed,
+    written: result.written, removed: result.removed, rolled_back: result.rolled_back,
     control_commit: result.control_commit,
     detail_resources: asStringArray(result.detail_resources).slice(0, 6),
     resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : [],

@@ -2473,6 +2473,7 @@ function compactSkillResponse(result) {
     review_bundle: reviewBundle,
     written: result.written,
     removed: result.removed,
+    rolled_back: result.rolled_back,
     control_commit: result.control_commit,
     detail_resources: asStringArray(result.detail_resources).slice(0, 6),
     resource_uris: Array.isArray(result.resource_uris) ? result.resource_uris : [],
@@ -9188,6 +9189,18 @@ function approvalRestoreBeforeFiles(session) {
     ...ancillary
   ];
 }
+function removeEmptyApprovalParents(root2, target2) {
+  const boundary = import_node_path36.default.resolve(root2);
+  let current = import_node_path36.default.dirname(import_node_path36.default.resolve(target2));
+  while (current !== boundary && current.startsWith(`${boundary}${import_node_path36.default.sep}`)) {
+    try {
+      import_node_fs21.default.rmdirSync(current);
+    } catch {
+      break;
+    }
+    current = import_node_path36.default.dirname(current);
+  }
+}
 
 // src/core/application/runtime/approval-session-model.ts
 function uniqueByPath(values) {
@@ -9584,6 +9597,7 @@ function supersedeUnapprovedApprovalSessions(root2, workflow, activeSessionId, a
         const target2 = targets.get(relativePath);
         restoreFile(target2, content);
       }
+      for (const [relativePath, content] of virtual) if (content === null) removeEmptyApprovalParents(root2, targets.get(relativePath));
     } catch (error) {
       const rollbackErrors = [];
       for (const [relativePath, content] of diskBefore) {
@@ -9693,6 +9707,7 @@ function cancelApprovalSession(root2, sessionId, expectedWorkflow) {
     if (!intentRemoval.ok) return { ok: false, cancelled: false, session_retained: true, stage: "approval_cancel_index", error: intentRemoval.error };
     try {
       for (const { target: target2, before } of restorePlan.values()) restoreFile(target2, before);
+      for (const { target: target2, before } of restorePlan.values()) if (before === null) removeEmptyApprovalParents(root2, target2);
     } catch (error) {
       const rollbackErrors = [];
       for (const { target: target2, preview } of restorePlan.values()) {
@@ -11593,12 +11608,11 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
   if (!sessionId) return { ok: false, stage: "staged_review_drift", error: "approvalSessionId is required to validate target review files" };
   const session = readApprovalSession(root2, sessionId);
   if (!session) return { ok: false, stage: "staged_review_drift", error: "Approval session was not found for target review validation" };
-  const materializedPaths = session.snapshot_files.filter((file) => file.missing !== true).map((file) => file.path);
-  const materializedPathSet = new Set(materializedPaths);
+  const snapshotPaths = session.snapshot_files.map((file) => file.path);
   const gitState = inspectReviewGitState(
     root2,
-    materializedPaths,
-    session.before_files.filter((before) => materializedPathSet.has(before.path)).map(approvalHeadExpectation)
+    snapshotPaths,
+    session.before_files.map(approvalHeadExpectation)
   );
   if (!gitState.ok) {
     const changed = Array.from(/* @__PURE__ */ new Set([...gitState.stagedPaths, ...gitState.baselinePaths]));
@@ -11637,6 +11651,23 @@ function validateApprovedTargetReviewFiles(root2, args = {}) {
       files: materializedFiles.map((file) => file.path),
       materialized_bundle: mutation.ok !== false,
       mutation: asJsonObject(mutation)
+    };
+  }
+  const beforeByPath = new Map(session.before_files.map((before) => [before.path, before]));
+  const missingDrift = session.snapshot_files.filter((file) => file.missing === true).find((file) => {
+    const before = beforeByPath.get(file.path);
+    if (!before) return true;
+    const target2 = import_node_path39.default.join(root2, file.path);
+    const current = import_node_fs23.default.existsSync(target2) ? import_node_fs23.default.readFileSync(target2, "utf8") : null;
+    return current !== (before.existed ? before.content : null);
+  });
+  if (missingDrift) {
+    return {
+      ok: false,
+      stage: "staged_review_drift",
+      error: `Approved removal target changed after review: ${missingDrift.path}`,
+      errors: [`Approved removal target changed after review: ${missingDrift.path}`],
+      files: [missingDrift.path]
     };
   }
   const files = previewFileRecords(session);
@@ -17244,7 +17275,7 @@ function atomicSkillMutation(root2, sourceId, targetId, files) {
     import_node_fs34.default.mkdirSync(catalog2, { recursive: true });
     if (!target2) import_node_fs34.default.rmSync(source, { recursive: true, force: true });
     else {
-      if (source !== target2 && import_node_fs34.default.existsSync(source)) import_node_fs34.default.renameSync(source, target2);
+      if (source !== target2 && import_node_fs34.default.existsSync(source) && !import_node_fs34.default.existsSync(target2)) import_node_fs34.default.renameSync(source, target2);
       import_node_fs34.default.mkdirSync(target2, { recursive: true });
       const desired = new Set(files.keys());
       for (const [relative, content] of files) {
@@ -17258,6 +17289,7 @@ function atomicSkillMutation(root2, sourceId, targetId, files) {
         const relative = import_node_path57.default.relative(target2, existing).split(import_node_path57.default.sep).join("/");
         if (!desired.has(relative)) import_node_fs34.default.rmSync(existing, { force: true });
       }
+      if (source !== target2) import_node_fs34.default.rmSync(source, { recursive: true, force: true });
     }
   } catch (error) {
     rollback();
@@ -17498,11 +17530,76 @@ function reviewFilesFor(sourceId, targetId, files, removedReferencePaths) {
   });
   return output;
 }
+function skillDirectoryFiles(root2, skillId) {
+  const directory = import_node_path59.default.join(root2, "cadre", "skills", skillId);
+  const visit = (current) => {
+    if (!import_node_fs36.default.existsSync(current)) return [];
+    return import_node_fs36.default.readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
+      const target2 = import_node_path59.default.join(current, entry.name);
+      return entry.isDirectory() ? visit(target2) : [import_node_path59.default.relative(root2, target2).split(import_node_path59.default.sep).join("/")];
+    });
+  };
+  return visit(directory).sort();
+}
+function removalReviewFiles(root2, skillId) {
+  const files = skillDirectoryFiles(root2, skillId);
+  const targets = files.length > 0 ? files : [`cadre/skills/${skillId}/.remove`];
+  return targets.map((target2) => ({
+    path: target2,
+    title: `Remove ${target2}`,
+    kind: "text",
+    source: "skill.remove",
+    content: `Delete ${target2}
+`,
+    missing: true,
+    documentId: "mutation",
+    reviewRole: "human"
+  }));
+}
 function approvalStages(operation, referenceReviewPaths) {
+  if (operation === "rename" || operation === "remove") return [{
+    id: "mutation",
+    title: operation === "rename" ? "Rename Project Skill" : "Remove Project Skill",
+    description: operation === "rename" ? "Complete source deletion and target skill contents as one atomic rename." : "Every managed file that will be removed as one atomic deletion.",
+    documentIds: ["mutation"],
+    fileMatches: ["*"],
+    inputKeys: []
+  }];
   return [
     ...["create", "update"].includes(operation) ? [{ id: "skill", title: "Project Skill", description: "Canonical skill manifest and generated SKILL.md.", documentIds: ["skill"] }] : [],
     ...["create", "update"].includes(operation) && referenceReviewPaths.length ? [{ id: "references", title: "Skill References", description: "Reference files added, changed, moved, or removed.", documentIds: ["references"] }] : []
   ];
+}
+function captureFileBaseline(file) {
+  const existed = import_node_fs36.default.existsSync(file);
+  return { existed, content: existed ? import_node_fs36.default.readFileSync(file, "utf8") : null };
+}
+function restoreFileBaseline(file, baseline) {
+  if (!baseline.existed) {
+    import_node_fs36.default.rmSync(file, { force: true });
+    return;
+  }
+  import_node_fs36.default.mkdirSync(import_node_path59.default.dirname(file), { recursive: true });
+  import_node_fs36.default.writeFileSync(file, baseline.content || "");
+}
+function destructiveSessionIntegrity(root2, operation, sourceId, targetId, args) {
+  if (operation !== "rename" && operation !== "remove") return { ok: true, skipped: true };
+  const expectedSourceHash = asOptionalString(args.source_snapshot);
+  const actualSourceHash = hashDirectory(import_node_path59.default.join(root2, "cadre", "skills", sourceId));
+  if (!expectedSourceHash || actualSourceHash !== expectedSourceHash) {
+    return { ok: false, error: `Project skill source changed after ${operation} review began: ${sourceId}` };
+  }
+  if (operation !== "rename") return { ok: true, source_snapshot: actualSourceHash };
+  const sessionId = asOptionalString(args.approvalSessionId || args.approval_session_id);
+  const session = sessionId ? readApprovalSession(root2, sessionId) : null;
+  if (!session) return { ok: false, error: "Approved rename session was not found" };
+  const prefix = `cadre/skills/${targetId}/`;
+  const expected = session.snapshot_files.filter((file) => file.missing !== true && file.path.startsWith(prefix)).map((file) => file.path).sort();
+  const actual = skillDirectoryFiles(root2, targetId);
+  if (expected.length !== actual.length || expected.some((file, index) => file !== actual[index])) {
+    return { ok: false, error: `Project skill rename destination changed after review: ${targetId}`, expected, actual };
+  }
+  return { ok: true, source_snapshot: actualSourceHash, target_files: actual };
 }
 function workflowSkill(root2, args) {
   args = applyStagedApprovalSessionPayload(root2, args, "skill");
@@ -17522,7 +17619,7 @@ function workflowSkill(root2, args) {
   if (operation === "create" && import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", id)) && !continuingApproval && !previewOwner) return { ok: false, error: `skill already exists: ${id}` };
   if (operation !== "create" && !existing.manifest && !previewOwner?.sourceManifest && operation !== "remove") return { ok: false, error: existing.error || `skill not found: ${id}` };
   if (operation === "remove" && !import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", id))) return { ok: false, error: `skill not found: ${id}` };
-  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", newId)) && !previewOwner)) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
+  if (operation === "rename" && (!PROJECT_SKILL_ID_PATTERN.test(newId) || import_node_fs36.default.existsSync(import_node_path59.default.join(root2, "cadre", "skills", newId)) && !continuingApproval && !previewOwner)) return { ok: false, error: `invalid or existing rename target: ${newId || "(missing)"}` };
   const sessionSource = args.source_manifest;
   const previewSource = previewOwner?.sourceManifest;
   const sourceManifest = sessionSource && typeof sessionSource === "object" && !Array.isArray(sessionSource) ? asJsonObject(sessionSource) : previewSource || existing.manifest;
@@ -17545,7 +17642,8 @@ function workflowSkill(root2, args) {
   const removedPaths = existingReferences.filter((reference) => changed.removedReferences.has(asOptionalString(reference.id) || "")).map((reference) => asOptionalString(reference.path) || "");
   const changedReferencePaths = Array.from(new Set(operation === "rename" || operation === "remove" ? [...existingReferencePaths, ...targetReferencePaths] : [...upsertedPaths, ...replacedPaths, ...removedPaths])).filter(Boolean);
   const deletedReferencePaths = operation === "remove" ? changedReferencePaths : existingReferencePaths.filter((relative) => !targetReferencePaths.includes(relative));
-  const reviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const desiredReviews = reviewFilesFor(id, operation === "remove" ? null : newId, desired.files, deletedReferencePaths);
+  const reviews = operation === "remove" ? removalReviewFiles(root2, id) : operation === "rename" ? [...desiredReviews, ...removalReviewFiles(root2, id)] : desiredReviews;
   const referenceReviewPaths = changedReferencePaths.flatMap((relative) => {
     const base2 = `cadre/skills/${operation === "remove" ? id : newId}/${relative}`;
     return deletedReferencePaths.includes(relative) ? [`${base2}.delete`] : [base2];
@@ -17559,42 +17657,79 @@ function workflowSkill(root2, args) {
   };
   const approval = stages.length > 0 ? stagedApprovalState(root2, "skill", reviewArgs, stages, reviews, { operation, skill_id: id, new_skill_id: newId, source_snapshot: snapshot, final_only_files: ["cadre/events.jsonl"] }) : { required: false, valid_for_execute: true, current_stage: null, pending_stages: [] };
   const approvalError = stages.length > 0 ? stagedApprovalError(approval) : null;
-  if (args.execute !== true || stages.length > 0 && !stagedApprovalReady(approval)) return {
-    ok: !approvalError,
-    operation,
-    skill_id: id,
-    new_skill_id: newId,
-    dry_run: true,
-    phase_state: stages.length > 0 ? "awaiting_staged_approval" : "ready",
-    approval,
-    review_bundle: asJsonObject(approval).current_review_bundle,
-    mutation_plan: stages.length === 0 ? { operation, source: id, target: operation === "remove" ? null : newId } : null,
-    ...approvalError ? { error: approvalError } : {}
-  };
+  if (args.execute !== true || stages.length > 0 && !stagedApprovalReady(approval)) {
+    const blockedExecution = args.execute === true && stages.length > 0 && !stagedApprovalReady(approval);
+    return {
+      ok: !approvalError && !blockedExecution,
+      operation,
+      skill_id: id,
+      new_skill_id: newId,
+      dry_run: true,
+      phase_state: stages.length > 0 ? "awaiting_staged_approval" : "ready",
+      approval,
+      review_bundle: asJsonObject(approval).current_review_bundle,
+      mutation_plan: stages.length === 0 ? { operation, source: id, target: operation === "remove" ? null : newId } : null,
+      ...approvalError || blockedExecution ? { error: approvalError || "Staged approval is required before changing project skill files" } : {}
+    };
+  }
   const reviewValidation = stages.length > 0 ? validateApprovedTargetReviewFiles(root2, reviewArgs) : { ok: true, skipped: true };
   if (reviewValidation.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, error: asOptionalString(reviewValidation.error) || "Approved review files changed" };
+  const destructiveIntegrity = destructiveSessionIntegrity(root2, operation, id, newId, reviewArgs);
+  if (destructiveIntegrity.ok === false) return { ok: false, operation, skill_id: id, phase_state: "awaiting_staged_approval", stage: "staged_review_drift", approval, review_validation: reviewValidation, destructive_integrity: destructiveIntegrity, error: asOptionalString(destructiveIntegrity.error) || "Approved skill directory membership changed" };
   const traceBefore = beginTrace(root2);
+  let recoverMutation = null;
   try {
+    const eventsPath = import_node_path59.default.join(root2, "cadre", "events.jsonl");
+    const eventsBaseline = captureFileBaseline(eventsPath);
     const mutation = atomicSkillMutation(root2, id, operation === "remove" ? null : newId, desired.files);
+    let mutationSettled = false;
+    const rollback = () => {
+      if (mutationSettled) return;
+      mutation.rollback();
+      restoreFileBaseline(eventsPath, eventsBaseline);
+      mutation.finish();
+      mutationSettled = true;
+      recoverMutation = null;
+    };
+    recoverMutation = rollback;
     if (operation !== "remove") {
       const final = loadProjectSkill(root2, newId, knownRepos(root2));
       if (!final.ok) {
-        mutation.rollback();
-        mutation.finish();
+        rollback();
         return { ok: false, phase_state: "recovery_required", stage: "final_validation", errors: final.errors };
       }
     }
-    mutation.finish();
     const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
-    const event = appendCadreEvent(root2, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null });
+    const approvalSessionId = asOptionalString(asJsonObject(approval).session_id);
+    const event = appendCadreEvent(root2, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null, approval_session_id: approvalSessionId || null });
     const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root2, reviewArgs) : null;
     const files = [...mutation.written, ...mutation.removed, "cadre/events.jsonl"];
     const controlCommit = commitTrace(root2, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
-    if (controlCommit.ok === false) return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit };
+    if (controlCommit.ok === false) {
+      rollback();
+      return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "commit", rolled_back: true, written: [], removed: [], event, control_commit: controlCommit };
+    }
+    mutation.finish();
+    mutationSettled = true;
+    recoverMutation = null;
     const approvalSessionClose = stages.length > 0 ? closeApprovalSessionFromArgs(root2, reviewArgs) : null;
     return { ok: true, operation, skill_id: id, new_skill_id: operation === "rename" ? newId : null, phase_state: "executed", dry_run: false, written: mutation.written, removed: mutation.removed, event, control_commit: controlCommit, approval, approval_audit: approvalAudit, approval_session_close: approvalSessionClose, review_validation: reviewValidation };
   } catch (error) {
-    return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "filesystem", error: errorMessage(error) };
+    const recoveryErrors = [];
+    try {
+      recoverMutation?.();
+    } catch (recoveryError) {
+      recoveryErrors.push(errorMessage(recoveryError));
+    }
+    return {
+      ok: false,
+      operation,
+      skill_id: id,
+      phase_state: "recovery_required",
+      stage: "filesystem",
+      error: [errorMessage(error), ...recoveryErrors].join("; "),
+      rolled_back: recoveryErrors.length === 0
+    };
   }
 }
 

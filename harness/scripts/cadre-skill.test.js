@@ -15,6 +15,11 @@ function write(file, content) {
   fs.writeFileSync(file, content);
 }
 
+function readJsonLines(file) {
+  const content = fs.readFileSync(file, "utf8").trim();
+  return content ? content.split(/\n/).map((line) => JSON.parse(line)) : [];
+}
+
 function git(root, args) {
   const result = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -107,14 +112,146 @@ test("skill workflow creates, projects, updates, renames, and removes through st
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "references", "guide.md")), false);
 
-    result = approveAndExecute(root, { operation: "rename", skillId: "web-ui", newSkillId: "browser-ui", changes: [] });
+    const renamePreview = core.workflowPacket(root, { workflow: "skill", operation: "rename", skillId: "web-ui", newSkillId: "browser-ui", changes: [] });
+    assert.equal(renamePreview.ok, true, renamePreview.error);
+    assert.equal(renamePreview.approval.required, true);
+    assert.equal(renamePreview.approval.current_stage, "mutation");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "browser-ui", "skill.json")), true);
+    result = approvePreviewAndExecute(root, { operation: "rename", skillId: "web-ui", newSkillId: "browser-ui", changes: [] }, renamePreview);
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cadre", "skills", "browser-ui", "skill.json"))).id, "browser-ui");
 
-    result = approveAndExecute(root, { operation: "remove", skillId: "browser-ui", changes: [] });
+    const removePreview = core.workflowPacket(root, { workflow: "skill", operation: "remove", skillId: "browser-ui", changes: [] });
+    assert.equal(removePreview.ok, true, removePreview.error);
+    assert.equal(removePreview.approval.required, true);
+    assert.equal(removePreview.approval.current_stage, "mutation");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "browser-ui")), true);
+    result = approvePreviewAndExecute(root, { operation: "remove", skillId: "browser-ui", changes: [] }, removePreview);
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "browser-ui")), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill rename and remove require approval over destination and actual source files", () => {
+  const root = project();
+  try {
+    const created = approveAndExecute(root, createInput());
+    assert.equal(created.ok, true, created.error);
+
+    const directRename = core.workflowPacket(root, {
+      workflow: "skill",
+      operation: "rename",
+      skillId: "web-ui",
+      newSkillId: "browser-ui",
+      changes: [],
+      execute: true,
+    });
+    assert.equal(directRename.ok, false);
+    assert.equal(directRename.phase_state, "awaiting_staged_approval");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), true);
+    const renameSession = JSON.parse(fs.readFileSync(path.join(root, "cadre", "local", "approval-sessions", `${directRename.approval.session_id}.json`), "utf8"));
+    assert.ok(renameSession.stage_records.mutation.snapshot_files.some((file) => file.path === "cadre/skills/web-ui/skill.json" && file.missing === true));
+    assert.ok(renameSession.stage_records.mutation.snapshot_files.some((file) => file.path === "cadre/skills/browser-ui/skill.json" && file.missing !== true));
+    const renameCancel = core.workflowPacket(root, { workflow: "skill", approvalSessionId: directRename.approval.session_id, approvalCancel: true });
+    assert.equal(renameCancel.approval.cancelled, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "browser-ui")), false);
+
+    const renamePreview = core.workflowPacket(root, { workflow: "skill", operation: "rename", skillId: "web-ui", newSkillId: "browser-ui", changes: [] });
+    const renameSessionId = renamePreview.approval.session_id;
+    const approvedRename = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: renameSessionId,
+      approvalStage: "mutation",
+      approvedStages: ["mutation"],
+    });
+    assert.equal(approvedRename.ok, true, approvedRename.error);
+    write(path.join(root, "cadre", "skills", "browser-ui", "late.txt"), "not reviewed\n");
+    const changedDestination = core.workflowPacket(root, {
+      workflow: "skill",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: renameSessionId,
+      approvedStages: ["mutation"],
+    });
+    assert.equal(changedDestination.ok, false);
+    assert.equal(changedDestination.stage, "staged_review_drift");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), true);
+    fs.rmSync(path.join(root, "cadre", "skills", "browser-ui", "late.txt"), { force: true });
+    const renamed = core.workflowPacket(root, {
+      workflow: "skill",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: renameSessionId,
+      approvedStages: ["mutation"],
+    });
+    assert.equal(renamed.ok, true, renamed.error);
+    const removePreview = core.workflowPacket(root, { workflow: "skill", operation: "remove", skillId: "browser-ui", changes: [] });
+    const removeSessionId = removePreview.approval.session_id;
+    const approvedRemove = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: removeSessionId,
+      approvalStage: "mutation",
+      approvedStages: ["mutation"],
+    });
+    assert.equal(approvedRemove.ok, true, approvedRemove.error);
+    write(path.join(root, "cadre", "skills", "browser-ui", "late.txt"), "not reviewed\n");
+    const drifted = core.workflowPacket(root, {
+      workflow: "skill",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: removeSessionId,
+      approvedStages: ["mutation"],
+    });
+    assert.equal(drifted.ok, false);
+    assert.equal(drifted.stage, "staged_review_drift");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "browser-ui")), true);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill removal rolls back after a commit hook failure and retries the approved session", () => {
+  const root = project();
+  try {
+    const created = approveAndExecute(root, createInput());
+    assert.equal(created.ok, true, created.error);
+    const preview = core.workflowPacket(root, { workflow: "skill", operation: "remove", skillId: "web-ui", changes: [] });
+    const sessionId = preview.approval.session_id;
+    const ready = core.workflowPacket(root, {
+      workflow: "skill",
+      approvalSessionId: sessionId,
+      approvalStage: "mutation",
+      approvedStages: ["mutation"],
+    });
+    assert.equal(ready.ok, true, ready.error);
+
+    const hook = path.join(root, ".git", "hooks", "pre-commit");
+    write(hook, "#!/bin/sh\nexit 1\n");
+    fs.chmodSync(hook, 0o755);
+    const failed = core.workflowPacket(root, {
+      workflow: "skill",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["mutation"],
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(failed.stage, "commit");
+    assert.equal(failed.rolled_back, true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui", "skill.json")), true);
+    assert.equal(readJsonLines(path.join(root, "cadre", "events.jsonl")).filter((event) => event.kind === "project_skill_removed").length, 0);
+
+    fs.rmSync(hook, { force: true });
+    const retried = core.workflowPacket(root, {
+      workflow: "skill",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["mutation"],
+    });
+    assert.equal(retried.ok, true, retried.error);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "skills", "web-ui")), false);
+    assert.equal(readJsonLines(path.join(root, "cadre", "events.jsonl")).filter((event) => event.kind === "project_skill_removed").length, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -67,3 +67,12 @@ export function approvalRestoreBeforeFiles(session: ApprovalSession): ApprovalBe
     ...ancillary,
   ];
 }
+
+export function removeEmptyApprovalParents(root: string, target: string): void {
+  const boundary = path.resolve(root);
+  let current = path.dirname(path.resolve(target));
+  while (current !== boundary && current.startsWith(`${boundary}${path.sep}`)) {
+    try { fs.rmdirSync(current); } catch { break; }
+    current = path.dirname(current);
+  }
+}
