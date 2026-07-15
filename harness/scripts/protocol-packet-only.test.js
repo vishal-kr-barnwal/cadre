@@ -204,7 +204,7 @@ test("Staged workflow protocols preserve active-stage collection order", () => {
     "analyze",
     "select_levels",
     "collect_and_review_only_active_stage",
-    "repeat_selected_stages_in_order_product_product_guidelines_grouped_technical_workflow_patterns",
+    "repeat_selected_stages_in_order_product_product_guidelines_topology_grouped_technical_workflow_patterns",
     "execute",
   ]);
   assert.deepEqual(formula.transitions, [

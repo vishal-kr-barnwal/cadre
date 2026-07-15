@@ -153,7 +153,6 @@ export function refreshApprovalStages(levels: string[]): ApprovalStage[] {
           "proposedContext.styleGuideIds", "proposedContext.style_guide_ids", "proposed_context.styleGuideIds", "proposed_context.style_guide_ids",
           "styleGuideIds", "style_guide_ids",
         ] : []),
-        ...(selected.has("lsp") ? ["writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp"] : []),
       ],
       fileMatches: selected.has("lsp") ? ["cadre/lsp.json"] : [],
     }] : []),

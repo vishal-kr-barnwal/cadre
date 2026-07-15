@@ -111,11 +111,15 @@ function invalidRefreshSelectionKeys(args: RuntimeArgs): string[] {
   const raw = rawArgs(args);
   const collectionKeys = ["refreshLevels", "refresh_levels", "refreshScope", "refresh_scope", "scope", "scopes"];
   const booleanKeys = ["all", "patterns", "styleGuides", "style_guides", "docs", "projections", "diagnostics", "lsp", "writeLsp", "write_lsp", "setupLsp", "setup_lsp"];
+  const validCollection = (value: unknown): boolean => (
+    typeof value === "string"
+      ? value.trim().length > 0
+      : Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.trim().length > 0)
+  );
   return [
     ...collectionKeys.filter((key) => Object.prototype.hasOwnProperty.call(raw, key)
       && raw[key] !== undefined
-      && typeof raw[key] !== "string"
-      && !Array.isArray(raw[key])),
+      && !validCollection(raw[key])),
     ...booleanKeys.filter((key) => Object.prototype.hasOwnProperty.call(raw, key)
       && raw[key] !== undefined
       && typeof raw[key] !== "boolean"),
@@ -143,7 +147,10 @@ export function refreshLevelIds(args: RuntimeArgs = {}, recommended: string[] = 
 }
 
 export function refreshSelectionProvided(args: RuntimeArgs = {}): boolean {
-  return rawRequestedLevels(args).length > 0 || invalidRefreshSelectionKeys(args).length > 0;
+  const raw = rawArgs(args);
+  const explicitEmptySelection = ["refreshLevels", "refresh_levels", "refreshScope", "refresh_scope", "scope", "scopes"]
+    .some((key) => Object.prototype.hasOwnProperty.call(raw, key) && Array.isArray(raw[key]) && raw[key].length === 0);
+  return explicitEmptySelection || rawRequestedLevels(args).length > 0 || invalidRefreshSelectionKeys(args).length > 0;
 }
 
 function compactWorkspace(value: JsonObject): JsonObject {

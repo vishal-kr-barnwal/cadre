@@ -232,7 +232,9 @@ changes.
   repairs only project and style-guide scoped generated projections.
 - Evidence: semantic selections require complete structured candidates and
   never fall back to setup templates. Missing evidence returns
-  `stage:"refresh_evidence"` before previews or sessions are created.
+  `stage:"refresh_evidence"` without creating review files. Once levels have
+  been selected, Cadre retains the empty active-stage session so the supplied
+  evidence resumes the same ledger instead of restarting refresh.
 - Authority: an explicit user candidate or style-guide selection replaces
   inference and stale fields. If an active-stage correction adds or removes
   files, Cadre rebases that stage in the existing session, preserves prior

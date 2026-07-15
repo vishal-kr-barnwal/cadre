@@ -49,9 +49,9 @@ all context automatically:
    levels are product, product guidelines, tech stack, style guides, repository
    topology, LSP, workflow, patterns, projections, and diagnostics.
 3. Cadre filters selected review levels into `product`, `product_guidelines`,
-   grouped `technical`, `workflow`, then `patterns`. The grouped technical
-   stage atomically contains whichever of tech stack, style guides, repository
-   topology, and LSP were selected.
+   `topology` when selected, grouped `technical`, `workflow`, then `patterns`.
+   The grouped technical stage atomically contains whichever of tech stack,
+   style guides, and LSP were selected.
 4. Inspect the repository and pass complete `proposedContext` evidence for only
    the semantic documents in the active stage. An LSP-only technical stage can
    use Cadre's analyzed configuration directly. Do not submit empty objects or
