@@ -3673,6 +3673,205 @@ test("workflow revise reviews proposed track files before writing", () => {
   }
 });
 
+test("workflow revise collects declared spec and plan changes one active stage at a time", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-revise-lazy-stages-test-"));
+  try {
+    git(root, ["init"]);
+    const trackId = "revise_lazy_20260714";
+    writeTrack(root, trackId, samplePlan(trackId));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed revision track"]);
+    const specPath = path.join(root, "cadre", "tracks", trackId, "spec.json");
+    const planPath = path.join(root, "cadre", "tracks", trackId, "plan.json");
+    const baselineSpec = fs.readFileSync(specPath, "utf8");
+    const baselinePlan = fs.readFileSync(planPath, "utf8");
+    const revisedSpec = sampleSpec(trackId, {
+      description: "Revise requirements before collecting the dependent execution plan.",
+      acceptance_criteria: [{
+        heading: "Lazy revision stages",
+        body: "Spec review completes before Cadre requests or generates the revised plan.",
+      }],
+    });
+    const revisedPlan = samplePlan(trackId);
+    revisedPlan.phases[0].title = "Phase 1: Implement revised requirements";
+    revisedPlan.phases[0].tasks[0].title = "Implement the approved revised spec";
+
+    const missingSpec = core.workflowPacket(root, {
+      workflow: "revise",
+      trackId,
+      reason: "Repository evidence changed both requirements and their execution plan.",
+      intent: { revisionScope: "both" },
+      plan: {},
+      commitMode: "off",
+    });
+    assert.equal(missingSpec.ok, false);
+    assert.equal(missingSpec.phase_state, "awaiting_clarification");
+    assert.equal(missingSpec.approval.current_stage, "spec_changes");
+    assert.deepEqual(missingSpec.missing_payload, ["spec"]);
+    assert.deepEqual(missingSpec.warnings, []);
+    const sessionId = missingSpec.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    let session = readJson(sessionFile);
+    assert.deepEqual(session.stage_order, ["spec_changes", "plan_changes"]);
+    assert.deepEqual(session.stage_records.spec_changes.snapshot_files, []);
+    assert.deepEqual(session.stage_records.plan_changes.snapshot_files, []);
+    assert.equal(fs.readFileSync(specPath, "utf8"), baselineSpec);
+    assert.equal(fs.readFileSync(planPath, "utf8"), baselinePlan);
+
+    const specPreview = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+      spec: revisedSpec,
+    });
+    assert.equal(specPreview.ok, true, specPreview.error);
+    assert.equal(specPreview.approval.session_id, sessionId);
+    assert.equal(specPreview.approval.current_stage, "spec_changes");
+    assert.ok(!specPreview.warnings.some((warning) => /plan/i.test(warning)), "future plan warnings must stay deferred");
+    assert.deepEqual(specPreview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+    session = readJson(sessionFile);
+    assert.equal(session.stage_records.spec_changes.snapshot_files.length, 2);
+    assert.deepEqual(session.stage_records.plan_changes.snapshot_files, []);
+    const frozenSpec = JSON.stringify(session.stage_records.spec_changes.snapshot_files);
+    assert.notEqual(fs.readFileSync(specPath, "utf8"), baselineSpec);
+    assert.equal(fs.readFileSync(planPath, "utf8"), baselinePlan);
+
+    const missingPlan = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+      approvalStage: "spec_changes",
+      approvedStages: ["spec_changes"],
+    });
+    assert.equal(missingPlan.ok, false);
+    assert.equal(missingPlan.phase_state, "awaiting_clarification");
+    assert.equal(missingPlan.approval.session_id, sessionId);
+    assert.equal(missingPlan.approval.current_stage, "plan_changes");
+    assert.deepEqual(missingPlan.approval.approved_stages, ["spec_changes"]);
+    assert.deepEqual(missingPlan.missing_payload, ["plan"]);
+    session = readJson(sessionFile);
+    assert.equal(JSON.stringify(session.stage_records.spec_changes.snapshot_files), frozenSpec);
+    assert.deepEqual(session.stage_records.plan_changes.snapshot_files, []);
+    assert.equal(fs.readFileSync(planPath, "utf8"), baselinePlan);
+
+    const planPreview = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+      plan: revisedPlan,
+    });
+    assert.equal(planPreview.ok, true, planPreview.error);
+    assert.equal(planPreview.approval.current_stage, "plan_changes");
+    assert.deepEqual(planPreview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${trackId}/plan.json`,
+      `cadre/tracks/${trackId}/plan.md`,
+    ]);
+    session = readJson(sessionFile);
+    assert.equal(JSON.stringify(session.stage_records.spec_changes.snapshot_files), frozenSpec);
+    assert.equal(session.stage_records.plan_changes.snapshot_files.length, 2);
+    const approvedSnapshots = Object.values(session.stage_records)
+      .flatMap((record) => record.snapshot_files)
+      .map((file) => ({ path: file.path, content: file.content }));
+
+    const complete = core.workflowPacketV1(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+      approvalStage: "plan_changes",
+      approvedStages: ["spec_changes", "plan_changes"],
+    });
+    assert.equal(complete.decision.kind, "ready");
+    assert.deepEqual(complete.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "revise",
+        input: {},
+        execute: true,
+        approval: {
+          session_id: sessionId,
+          approved_stages: ["spec_changes", "plan_changes"],
+          complete: true,
+        },
+      },
+    });
+    const executed = core.workflowPacket(root, {
+      workflow: "revise",
+      execute: true,
+      approvalComplete: true,
+      approvalSessionId: sessionId,
+      approvedStages: ["spec_changes", "plan_changes"],
+    });
+    assert.equal(executed.ok, true, executed.error);
+    assert.equal(executed.phase_state, "executed");
+    for (const snapshot of approvedSnapshots) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow revise freezes an implicitly selected track across staged continuation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-revise-frozen-track-test-"));
+  try {
+    git(root, ["init"]);
+    const originalTrack = "active_a_20260714";
+    const replacementTrack = "active_b_20260714";
+    writeTrack(root, originalTrack, samplePlan(originalTrack), { status: "in_progress" });
+    writeTrack(root, replacementTrack, samplePlan(replacementTrack), { status: "new" });
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed active revision tracks"]);
+    const revisedSpec = sampleSpec(originalTrack, {
+      description: "Freeze the implicitly selected track for every revision stage.",
+    });
+    const revisedPlan = samplePlan(originalTrack);
+    revisedPlan.phases[0].tasks[0].title = "Continue revising the originally selected track";
+
+    const specPreview = core.workflowPacket(root, {
+      workflow: "revise",
+      reason: "Both artifacts must remain attached to the initially active track.",
+      intent: { revisionScope: "both" },
+      spec: revisedSpec,
+      plan: {},
+      commitMode: "off",
+    });
+    assert.equal(specPreview.ok, true, specPreview.error);
+    assert.equal(specPreview.track_id, originalTrack);
+    const sessionId = specPreview.approval.session_id;
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    assert.equal(readJson(sessionFile).payload.trackId, originalTrack);
+
+    const missingPlan = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+      approvalStage: "spec_changes",
+      approvedStages: ["spec_changes"],
+    });
+    assert.equal(missingPlan.approval.current_stage, "plan_changes");
+    const originalMetadataPath = path.join(root, "cadre", "tracks", originalTrack, "metadata.json");
+    const replacementMetadataPath = path.join(root, "cadre", "tracks", replacementTrack, "metadata.json");
+    write(originalMetadataPath, `${JSON.stringify({ ...readJson(originalMetadataPath), status: "new" }, null, 2)}\n`);
+    write(replacementMetadataPath, `${JSON.stringify({ ...readJson(replacementMetadataPath), status: "in_progress" }, null, 2)}\n`);
+
+    const planPreview = core.workflowPacket(root, {
+      workflow: "revise",
+      approvalSessionId: sessionId,
+      plan: revisedPlan,
+    });
+    assert.equal(planPreview.ok, true, planPreview.error);
+    assert.equal(planPreview.track_id, originalTrack);
+    assert.deepEqual(planPreview.review_artifacts.map((artifact) => artifact.path).sort(), [
+      `cadre/tracks/${originalTrack}/plan.json`,
+      `cadre/tracks/${originalTrack}/plan.md`,
+    ]);
+    assert.ok(readJson(sessionFile).stage_records.plan_changes.snapshot_files
+      .every((file) => file.path.includes(`/tracks/${originalTrack}/`)));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("target staged review previews appear in git diff and reject drift", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-target-review-drift-test-"));
   try {

@@ -448,6 +448,164 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
   }
 });
 
+test("public revise packets preserve declared spec then plan staging through the exact continuation", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-revise-staging-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  const writeJson = (relativePath, value) => {
+    const file = path.join(root, relativePath);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+  };
+  const trackId = "public_revise_20260714";
+  const spec = (description) => ({
+    version: 1,
+    schema: "cadre.spec.v1",
+    kind: "spec",
+    track_id: trackId,
+    title: "Public revise lifecycle",
+    description,
+    functional_requirements: [{ heading: "Ordered review", body: "Review the spec before requesting the dependent plan." }],
+    non_functional_requirements: [],
+    acceptance_criteria: [{ heading: "Exact execution", body: "Execute only the bytes approved in both stages." }],
+    out_of_scope: [],
+  });
+  const plan = (taskTitle) => ({
+    version: 1,
+    schema: "cadre.plan.v1",
+    track_id: trackId,
+    title: "Plan: public revise lifecycle",
+    phases: [{
+      phase_index: 1,
+      title: "Phase 1: Revise",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_task1",
+        title: taskTitle,
+        status: "pending",
+        files: ["src/revise.ts"],
+        depends_on: [],
+        commit_shas: [],
+        repo_shas: {},
+      }],
+    }],
+  });
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    spawnSync("git", ["config", "user.email", "revise@example.com"], { cwd: root });
+    spawnSync("git", ["config", "user.name", "Revise Test"], { cwd: root });
+    writeJson(`cadre/tracks/${trackId}/metadata.json`, {
+      track_id: trackId,
+      type: "feature",
+      status: "new",
+      priority: "medium",
+      depends_on: [],
+      description: "Public revise contract fixture",
+    });
+    writeJson(`cadre/tracks/${trackId}/spec.json`, spec("Baseline requirements before revision."));
+    writeJson(`cadre/tracks/${trackId}/plan.json`, plan("Implement the baseline requirements"));
+    fs.writeFileSync(path.join(root, "cadre", "tracks", trackId, "spec.md"), "# Baseline spec\n");
+    fs.writeFileSync(path.join(root, "cadre", "tracks", trackId, "plan.md"), "# Baseline plan\n");
+    fs.writeFileSync(path.join(root, "cadre", "tracks", trackId, "learnings.md"), "# Learnings\n");
+    spawnSync("git", ["add", "."], { cwd: root });
+    assert.equal(spawnSync("git", ["commit", "-m", "seed revise fixture"], { cwd: root, encoding: "utf8" }).status, 0);
+
+    let packet = invoke({
+      root,
+      workflow: "revise",
+      input: {
+        trackId,
+        reason: "Repository evidence changed requirements and their execution sequence.",
+        intent: { revisionScope: "both" },
+        spec: spec("Revised requirements are reviewed before plan generation."),
+        plan: {},
+        commitMode: "off",
+      },
+      execute: false,
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "spec_changes");
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      `cadre/tracks/${trackId}/spec.json`,
+      `cadre/tracks/${trackId}/spec.md`,
+    ]);
+    const sessionId = packet.decision.session_id;
+
+    packet = invoke({
+      root,
+      workflow: "revise",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "spec_changes", approved_stages: ["spec_changes"] },
+    });
+    assert.equal(packet.decision.kind, "clarification");
+    assert.equal(packet.decision.current_stage, "plan_changes");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.decision.resume, { approval: { session_id: sessionId } });
+    assert.deepEqual(packet.required, ["plan"]);
+    assert.deepEqual(packet.artifacts, []);
+
+    packet = invoke({
+      root,
+      workflow: "revise",
+      input: { plan: plan("Implement the approved revised requirements") },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "plan_changes");
+    assert.equal(packet.decision.session_id, sessionId);
+    assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
+      `cadre/tracks/${trackId}/plan.json`,
+      `cadre/tracks/${trackId}/plan.md`,
+    ]);
+
+    packet = invoke({
+      root,
+      workflow: "revise",
+      input: {},
+      execute: false,
+      approval: {
+        session_id: sessionId,
+        stage: "plan_changes",
+        approved_stages: ["spec_changes", "plan_changes"],
+      },
+    });
+    assert.equal(packet.decision.kind, "ready");
+    assert.deepEqual(packet.next, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "revise",
+        input: {},
+        execute: true,
+        approval: {
+          session_id: sessionId,
+          approved_stages: ["spec_changes", "plan_changes"],
+          complete: true,
+        },
+      },
+    });
+    const sessionFile = path.join(root, "cadre", "local", "approval-sessions", `${sessionId}.json`);
+    const approvedSnapshots = Object.values(JSON.parse(fs.readFileSync(sessionFile, "utf8")).stage_records)
+      .flatMap((record) => record.snapshot_files)
+      .map((file) => ({ path: file.path, content: file.content }));
+    packet = invoke(packet.next.arguments);
+    assert.equal(packet.ok, true, packet.errors.join(" "));
+    assert.equal(packet.decision.kind, "complete");
+    for (const snapshot of approvedSnapshots) {
+      assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
+    }
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public skill packets execute the exact session-only continuation after lazy stage approval", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-skill-staging-"));
   const invoke = (request) => {

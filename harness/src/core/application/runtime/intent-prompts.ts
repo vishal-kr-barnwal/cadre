@@ -2,8 +2,9 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 
 import { choice, nativePrompt } from "./native-prompts";
+import { revisionScope } from "./revision-scope";
 import { setupIntentStrategyAnswered, setupMissingEvidence, setupStageMissingEvidence, type SetupEvidenceStage } from "./setup-evidence";
-import { meaningfulRevisionArtifact, meaningfulRevisionPayload } from "./workflow-evidence";
+import { meaningfulRevisionArtifact } from "./workflow-evidence";
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
   return args as UnknownRecord;
@@ -350,9 +351,8 @@ export function newTrackIntentPrompts(args: RuntimeArgs = {}): JsonObject[] {
 export function reviseIntentPrompts(args: RuntimeArgs = {}, trackId: string | null = null): JsonObject[] {
   const prompts: JsonObject[] = [];
   const hasTrack = Boolean(trackId || asOptionalString(rawArgs(args).trackId || rawArgs(args).track_id));
-  const hasRevisionPayload = meaningfulRevisionPayload(args, trackId);
   const hasReason = hasNamedValue(args, ["reason", "revisionReason", "revision_reason", "changeSummary", "change_summary"]);
-  const hasScope = hasRevisionPayload;
+  const hasScope = revisionScope(args, trackId) !== null;
 
   if (!hasTrack) {
     prompts.push(intentPrompt(

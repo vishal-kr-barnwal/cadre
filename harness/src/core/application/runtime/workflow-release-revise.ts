@@ -1,28 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
+import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
-import { patchJsonFile, readJson, safeName, utcNow, writeJson, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
-import { withTrackLock } from "../../infrastructure/runtime/locking";
+import { patchJsonFile, safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { actionResultsOk, plannedGitAction, runPlannedGitActions } from "../../infrastructure/runtime/system";
 import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, ReleaseArtifactPlan, ReviewFile } from "./contracts";
-import { trackGenerationWarnings } from "./generation-quality";
-import { reviseIntentPrompts } from "./intent-prompts";
 import { withGeneratedMarker } from "./markdown-docs";
-import { renderPlanMarkdown, trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
-import { regenIndex } from "./project-maintenance";
 import { documentReviewPair, humanReviewState, jsonReviewFile, packetReviewArtifact, reviewArtifactsFromFiles, textReviewFile, workflowReviewBundle } from "./review-bundles";
-import { renderSpecMarkdown } from "./spec-docs";
-import { applyStagedApprovalSessionPayload, releaseApprovalStages, reviseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
-import { metadataTrackSummary, selectedTrackId } from "./status";
-import { findTrack, trackContext } from "./track-context";
+import { applyStagedApprovalSessionPayload, releaseApprovalStages, stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
+import { metadataTrackSummary } from "./status";
 import { listTracks } from "./track-schedule";
 import { meaningfulReleaseNotes, releaseIntentPrompts } from "./workflow-evidence";
-import { markdownPayloadError, normalizePlanJson, normalizeSpecJson, workflowSummary } from "./workflow-response";
-import { lspImpact } from "./workspace-intel";
+import { workflowSummary } from "./workflow-response";
 
 export function releaseArtifactPlan(root: string, args: RuntimeArgs = {}): ReleaseArtifactPlan {
   const completed = listTracks(root)
@@ -220,203 +212,6 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     setup_state: indexPatch,
     control_commit: controlCommit,
     git_results: gitResults,
-    approval_audit: approvalAudit,
-    approval_session_close: approvalSessionClose,
-    review_validation: reviewValidation,
-    reused_review_files: asStringArray(reviewValidation.files),
-  };
-}
-
-export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult {
-  args = applyStagedApprovalSessionPayload(root, args, "revise");
-  const approvalArgs = JSON.parse(JSON.stringify(args)) as RuntimeArgs;
-  const trackId = selectedTrackId(root, args);
-  const summary = workflowSummary(root, "revise", args);
-  const markdownError = markdownPayloadError(args);
-  if (markdownError) return { ...summary, ...markdownError };
-  const initialPrompts = reviseIntentPrompts(args, trackId || null);
-  if (initialPrompts.length > 0) {
-    return {
-      ...summary,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_clarification",
-      stage: "intent_clarification",
-      ...(trackId ? { track_id: trackId, track_context: trackContext(root, trackId) } : {}),
-      intent_prompts: initialPrompts,
-      next_actions: [
-        "Answer revise intent_prompts before producing revised artifacts.",
-        "Call revise again with reason plus structured spec and/or plan JSON.",
-      ],
-      error: "Revision intent is under-specified; Cadre needs a target, reason, and spec/plan scope before generating revision artifacts.",
-    };
-  }
-  if (!trackId) return { ...summary, ok: false, error: "trackId is required" };
-  const track = findTrack(root, trackId);
-  const context = trackContext(root, trackId);
-  const impact = lspImpact(root, args);
-  const reviewFiles: ReviewFile[] = [];
-  const existingSpec = track ? readJson<JsonObject | null>(trackSpecJsonPath(track), null) : null;
-  const revisedSpec = isRecord(args.spec) ? normalizeSpecJson(trackId, args.spec) : null;
-  const revisedPlan = isRecord(args.plan) ? normalizePlanJson(trackId, args.plan, revisedSpec || existingSpec) : null;
-  const revisionRequested = Boolean(revisedSpec || revisedPlan);
-  if (revisionRequested && !track) {
-    return {
-      ...summary,
-      ok: false,
-      track_context: context,
-      impact,
-      error: `Track not found: ${trackId}`,
-    };
-  }
-  if (track && revisedSpec) {
-    reviewFiles.push(...documentReviewPair("spec",
-      jsonReviewFile(path.relative(root, trackSpecJsonPath(track)), "Revised track spec canonical", "spec", revisedSpec),
-      textReviewFile(
-      path.relative(root, track.spec_path),
-      "Revised track spec",
-      "spec.json",
-      withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedSpec, null, 2)}\n`, projection: path.relative(root, track.spec_path) })
-    )));
-  }
-  if (track && revisedPlan) {
-    reviewFiles.push(...documentReviewPair("plan",
-      jsonReviewFile(path.relative(root, trackPlanJsonPath(track)), "Revised track plan canonical", "plan", revisedPlan),
-      textReviewFile(
-      path.relative(root, track.plan_path),
-      "Revised track plan",
-      "plan.json",
-      withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track))), { canonicalContent: `${JSON.stringify(revisedPlan, null, 2)}\n`, projection: path.relative(root, track.plan_path) })
-    )));
-  }
-  const reviewArtifacts = reviewArtifactsFromFiles(reviewFiles);
-  const reviewBundle = workflowReviewBundle(root, "revise", args, reviewFiles, { track_id: trackId });
-  const approval = stagedApprovalState(root, "revise", approvalArgs, reviseApprovalStages(Boolean(revisedSpec), Boolean(revisedPlan)), reviewFiles, { track_id: trackId, final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"] });
-  const stageReviewBundle = asJsonObject(approval).current_review_bundle || reviewBundle;
-  const stageReviewArtifacts = asJsonObject(approval).current_review_artifacts || reviewArtifacts;
-  const humanReview = reviewFiles.length > 0 ? humanReviewState("revise", args, reviewArtifacts, reviewBundle) : null;
-  const approvalError = stagedApprovalError(approval);
-  const qualityWarnings = revisedPlan
-    ? trackGenerationWarnings(revisedSpec || existingSpec || {}, revisedPlan || {})
-    : revisedSpec
-      ? trackGenerationWarnings(revisedSpec, { phases: [{ tasks: [{ title: "context-only", files: ["context"], manual_verification: { scope: "revision" } }] }] })
-      : [];
-  const warnings = [
-    ...qualityWarnings,
-    ...asStringArray(asJsonObject(stageReviewBundle).warnings),
-    ...(approvalError ? [approvalError] : []),
-  ];
-  if (reviewFiles.length === 0) {
-    return {
-      ...summary,
-      ok: true,
-      track_context: context,
-      impact,
-    };
-  }
-  if (!track) {
-    return {
-      ...summary,
-      ok: false,
-      track_context: context,
-      impact,
-      error: `Track not found: ${trackId}`,
-    };
-  }
-  const base = {
-    ...summary,
-    track_id: trackId,
-    track_context: context,
-    impact,
-    approval,
-    human_review: humanReview,
-    review_artifacts: stageReviewArtifacts,
-    review_bundle: stageReviewBundle,
-    warnings,
-  };
-  if (args.execute !== true) {
-    return {
-      ...base,
-      ok: !approvalError,
-      dry_run: true,
-      phase_state: "dry_run",
-      ...(approvalError ? { error: approvalError, stage: "staged_approval" } : {}),
-    };
-  }
-  if (!stagedApprovalReady(approval)) {
-    return {
-      ...base,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_staged_approval",
-      stage: "staged_approval",
-      error: approvalError || "Staged approval is required before revising track artifacts",
-    };
-  }
-  const reviewValidation = validateApprovedTargetReviewFiles(root, args);
-  if (reviewValidation.ok === false) {
-    return {
-      ...base,
-      ok: false,
-      dry_run: true,
-      phase_state: "awaiting_staged_approval",
-      stage: "staged_review_drift",
-      review_validation: reviewValidation,
-      error: asOptionalString(reviewValidation.error) || "Approved review files changed after staged approval",
-    };
-  }
-  const reusedReviewFiles = new Set(asStringArray(reviewValidation.files));
-  const traceBefore = beginTrace(root);
-  const writeResult = withTrackLock(root, track.track_id, () => {
-    const written: string[] = [];
-    if (revisedSpec) {
-      if (!reusedReviewFiles.has(path.relative(root, trackSpecJsonPath(track)))) writeJsonEnsured(trackSpecJsonPath(track), revisedSpec);
-      if (!reusedReviewFiles.has(path.relative(root, track.spec_path))) {
-        fs.writeFileSync(track.spec_path, withGeneratedMarker(path.relative(root, trackSpecJsonPath(track)), "cadre.spec.v1", renderSpecMarkdown(revisedSpec, path.relative(root, trackSpecJsonPath(track)))));
-      }
-      written.push(path.relative(root, trackSpecJsonPath(track)));
-      written.push(path.relative(root, track.spec_path));
-    }
-    if (revisedPlan) {
-      if (!reusedReviewFiles.has(path.relative(root, trackPlanJsonPath(track)))) writeJsonEnsured(trackPlanJsonPath(track), revisedPlan);
-      if (!reusedReviewFiles.has(path.relative(root, track.plan_path))) {
-        fs.writeFileSync(track.plan_path, withGeneratedMarker(path.relative(root, trackPlanJsonPath(track)), "cadre.plan.v1", renderPlanMarkdown(revisedPlan, path.relative(root, trackPlanJsonPath(track)))));
-      }
-      written.push(path.relative(root, trackPlanJsonPath(track)));
-      written.push(path.relative(root, track.plan_path));
-    }
-    return { ok: true, written, revised_at: utcNow() };
-  });
-  const regen = writeResult.ok !== false ? regenIndex(root) : null;
-  const approvalAudit = writeResult.ok !== false && (!regen || regen.ok !== false)
-    ? recordApprovalCompletionFromArgs(root, args)
-    : null;
-  const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false)
-    ? commitTrace(root, args, {
-      kind: "control",
-      workflow: "revise",
-      subject: `update ${trackId}`,
-      before: traceBefore,
-      trackId,
-      allowDirty: true,
-      includeDirtyFiles: asStringArray(reviewValidation.files),
-      note: {
-        revised_spec: Boolean(revisedSpec),
-        revised_plan: Boolean(revisedPlan),
-      },
-    })
-    : null;
-  const approvalSessionClose = writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false)
-    ? closeApprovalSessionFromArgs(root, args)
-    : null;
-  return {
-    ...base,
-    ok: writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false),
-    dry_run: false,
-    phase_state: writeResult.ok === false || (regen && regen.ok === false) || (controlCommit && controlCommit.ok === false) ? "recovery_required" : "executed",
-    write: writeResult,
-    regen,
-    control_commit: controlCommit,
     approval_audit: approvalAudit,
     approval_session_close: approvalSessionClose,
     review_validation: reviewValidation,

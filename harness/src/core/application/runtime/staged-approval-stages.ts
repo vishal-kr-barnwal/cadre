@@ -1,3 +1,5 @@
+import type { RevisionScope } from "./revision-scope";
+
 export interface ApprovalStage {
   id: string;
   title: string;
@@ -77,9 +79,9 @@ export function newTrackApprovalStages(): ApprovalStage[] {
   ];
 }
 
-export function reviseApprovalStages(hasSpec: boolean, hasPlan: boolean): ApprovalStage[] {
+export function reviseApprovalStages(scope: RevisionScope): ApprovalStage[] {
   return [
-    ...(hasSpec
+    ...(scope === "spec" || scope === "both"
       ? [{
         id: "spec_changes",
         title: "Spec Changes",
@@ -88,7 +90,7 @@ export function reviseApprovalStages(hasSpec: boolean, hasPlan: boolean): Approv
         inputKeys: ["spec"],
       }]
       : []),
-    ...(hasPlan
+    ...(scope === "plan" || scope === "both"
       ? [{
         id: "plan_changes",
         title: "Plan Changes",
