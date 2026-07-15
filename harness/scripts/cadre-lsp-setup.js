@@ -42,11 +42,11 @@ __export(cadre_lsp_setup_exports, {
   scanFiles: () => scanFiles
 });
 module.exports = __toCommonJS(cadre_lsp_setup_exports);
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_path6 = __toESM(require("node:path"));
 
 // src/lsp/setup-recommender.ts
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
 var import_node_child_process2 = require("node:child_process");
 
 // src/guards.ts
@@ -55,6 +55,12 @@ function isRecord(value) {
 }
 function asJsonObject(value) {
   return isRecord(value) ? value : {};
+}
+function asOptionalString(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 }
 
 // src/infrastructure/project-control-file.ts
@@ -185,11 +191,12 @@ function writeProjectControlJson(root, requested, defaultRelative, value) {
 }
 
 // src/lsp/language-registry.ts
-var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
 
 // src/lsp/ignore-policy.ts
+var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path2 = __toESM(require("node:path"));
 var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
@@ -198,8 +205,10 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".worktrees",
   ".agents",
   ".claude",
+  ".claude-plugin",
   ".cache",
   ".codex",
+  ".codex-plugin",
   ".copilot",
   ".dart_tool",
   ".gemini",
@@ -210,6 +219,7 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".serverless",
   "node_modules",
   "vendor",
+  "cadre-ai",
   "dist",
   "build",
   "coverage",
@@ -244,12 +254,63 @@ var DEFAULT_IGNORE_PATHS = [
 function normalizeRel(file) {
   return file.split(import_node_path2.default.sep).join("/");
 }
+function matchesIgnoredPath(rel, ignored) {
+  return rel === ignored || rel.startsWith(`${ignored}/`) || rel.endsWith(`/${ignored}`) || rel.includes(`/${ignored}/`);
+}
+var packageMarkerCache = /* @__PURE__ */ new Map();
+function cadrePackageDirectory(directory) {
+  const manifest = import_node_path2.default.join(directory, "package.json");
+  let signature;
+  try {
+    const stat = import_node_fs2.default.statSync(manifest);
+    signature = `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    try {
+      signature = `missing:${import_node_fs2.default.statSync(directory).mtimeMs}`;
+    } catch {
+      return false;
+    }
+  }
+  const cached = packageMarkerCache.get(directory);
+  if (cached?.signature === signature) return cached.isCadre;
+  let isCadre = false;
+  if (!signature.startsWith("missing:")) {
+    try {
+      const parsed = JSON.parse(import_node_fs2.default.readFileSync(manifest, "utf8"));
+      isCadre = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && parsed.name === "cadre-ai";
+    } catch {
+    }
+  }
+  packageMarkerCache.set(directory, { signature, isCadre });
+  return isCadre;
+}
+function nestedCadrePackagePath(root, file) {
+  if (!root) return false;
+  const resolvedRoot = import_node_path2.default.resolve(root);
+  const candidate = import_node_path2.default.resolve(root, file);
+  if (candidate !== resolvedRoot && !candidate.startsWith(`${resolvedRoot}${import_node_path2.default.sep}`)) return false;
+  let directory;
+  try {
+    directory = import_node_fs2.default.statSync(candidate).isDirectory() ? candidate : import_node_path2.default.dirname(candidate);
+  } catch {
+    directory = import_node_path2.default.dirname(candidate);
+  }
+  while (directory !== resolvedRoot && directory.startsWith(`${resolvedRoot}${import_node_path2.default.sep}`)) {
+    if (cadrePackageDirectory(directory)) return true;
+    directory = import_node_path2.default.dirname(directory);
+  }
+  return false;
+}
 function shouldIgnore(root, fullPath, name) {
   if (DEFAULT_IGNORES.has(name)) return true;
   const rel = normalizeRel(import_node_path2.default.relative(root, fullPath));
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
+  return isIgnoredFile(root, rel);
+}
+function isIgnoredFile(root, file) {
+  const rel = normalizeRel(file);
+  if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
+  if (DEFAULT_IGNORE_PATHS.some((ignored) => matchesIgnoredPath(rel, ignored))) return true;
+  return nestedCadrePackagePath(root, file);
 }
 
 // src/lsp/language-registry.ts
@@ -326,7 +387,7 @@ function walkWorkspaceFiles(root) {
   const visit = (dir) => {
     let entries;
     try {
-      entries = import_node_fs2.default.readdirSync(dir, { withFileTypes: true });
+      entries = import_node_fs3.default.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -347,27 +408,159 @@ function listWorkspaceFiles(root) {
   const gitFiles = gitWorkspaceFiles(root);
   return gitFiles.length > 0 ? gitFiles : walkWorkspaceFiles(root);
 }
-function scanWorkspaceFiles(root) {
+
+// src/lsp/config-reconciliation.ts
+function serverKeys(server) {
+  return [asOptionalString(server.id), asOptionalString(server.command)].filter((value) => Boolean(value));
+}
+function sameStringArray(value, expected) {
+  const actual = asStringArray(value);
+  return actual.length === expected.length && actual.every((entry, index) => entry === expected[index]);
+}
+function sameLanguageIds(value, expected) {
+  if (value === void 0) return true;
+  if (!expected || !isRecord(value)) return false;
+  const actual = asJsonObject(value);
+  const keys = Object.keys(actual);
+  const expectedKeys = Object.keys(expected);
+  return keys.length === expectedKeys.length && keys.every((key) => actual[key] === expected[key]);
+}
+function legacyCadreManagedServer(server) {
+  const id = asOptionalString(server.id);
+  const command = asOptionalString(server.command);
+  const rule = LANGUAGE_RULES.find((entry) => entry.id === id && entry.command === command);
+  if (!rule) return false;
+  const managedKeys = /* @__PURE__ */ new Set(["id", "command", "args", "extensions", "filenames", "languageIds"]);
+  if (Object.keys(server).some((key) => !managedKeys.has(key))) return false;
+  return sameStringArray(server.args, rule.args) && sameStringArray(server.extensions, rule.extensions) && (server.filenames === void 0 || sameStringArray(server.filenames, rule.filenames || [])) && sameLanguageIds(server.languageIds, rule.languageIds);
+}
+function cadreManagedLspServer(server) {
+  const owner = asOptionalString(server.managed_by || server.managedBy)?.toLowerCase();
+  return owner === "cadre" || legacyCadreManagedServer(server);
+}
+function managedServer(recommendation) {
+  const id = asOptionalString(recommendation.id);
+  const command = asOptionalString(recommendation.command);
+  return {
+    ...id ? { id } : {},
+    ...command ? { command } : {},
+    args: asStringArray(recommendation.args),
+    extensions: asStringArray(recommendation.extensions),
+    ...recommendation.filenames !== void 0 ? { filenames: asStringArray(recommendation.filenames) } : {},
+    ...isRecord(recommendation.languageIds) ? { languageIds: asJsonObject(recommendation.languageIds) } : {},
+    managed_by: "cadre"
+  };
+}
+function serverLabel(server) {
+  return asOptionalString(server.id || server.command) || "unidentified-server";
+}
+function reconciledWorkspaceFolders(current, requested) {
+  const existing = Array.isArray(current.workspaceFolders) ? current.workspaceFolders.map(asJsonObject) : [];
+  const paths = new Set(existing.map((folder) => asOptionalString(folder.path)).filter(Boolean));
+  return [
+    ...existing,
+    ...requested.filter((folder) => {
+      const folderPath = asOptionalString(folder.path);
+      if (!folderPath || paths.has(folderPath)) return false;
+      paths.add(folderPath);
+      return true;
+    })
+  ];
+}
+function reconcileLspConfig(current, rawRecommendations, folders) {
+  const recommendations = rawRecommendations.map(asJsonObject).filter((entry) => serverKeys(entry).length > 0);
+  const recommendationByKey = /* @__PURE__ */ new Map();
+  for (const recommendation of recommendations) {
+    for (const key of serverKeys(recommendation)) recommendationByKey.set(key, recommendation);
+  }
+  const existing = Array.isArray(current.servers) ? current.servers.map(asJsonObject) : [];
+  const userCoverage = /* @__PURE__ */ new Set();
+  for (const server of existing.filter((entry) => !cadreManagedLspServer(entry))) {
+    const recommendation = serverKeys(server).map((key) => recommendationByKey.get(key)).find(Boolean);
+    if (recommendation) userCoverage.add(recommendation);
+  }
+  const covered = new Set(userCoverage);
+  const servers = [];
+  const removed = [];
+  for (const server of existing) {
+    if (!cadreManagedLspServer(server)) {
+      servers.push(server);
+      continue;
+    }
+    const recommendation = serverKeys(server).map((key) => recommendationByKey.get(key)).find(Boolean);
+    if (!recommendation || userCoverage.has(recommendation) || covered.has(recommendation)) {
+      removed.push(serverLabel(server));
+      continue;
+    }
+    servers.push(managedServer(recommendation));
+    covered.add(recommendation);
+  }
+  const added = [];
+  for (const recommendation of recommendations) {
+    if (covered.has(recommendation)) continue;
+    servers.push(managedServer(recommendation));
+    covered.add(recommendation);
+    added.push(serverLabel(recommendation));
+  }
+  return {
+    config: { ...current, servers, workspaceFolders: reconciledWorkspaceFolders(current, folders) },
+    added: Array.from(new Set(added)),
+    removed: Array.from(new Set(removed))
+  };
+}
+
+// src/lsp/workspace-root-scanner.ts
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
+function normalizedRelativePath(value) {
+  return value.split(import_node_path4.default.sep).join("/").replace(/^\.\//, "");
+}
+function safeNestedRoot(root, relativePath) {
+  const resolvedRoot = import_node_path4.default.resolve(root);
+  const target = import_node_path4.default.resolve(resolvedRoot, relativePath);
+  const relative = import_node_path4.default.relative(resolvedRoot, target);
+  if (!relative || relative.startsWith("..") || import_node_path4.default.isAbsolute(relative)) return null;
+  try {
+    if (!import_node_fs4.default.statSync(target).isDirectory()) return null;
+    const realRoot = import_node_fs4.default.realpathSync(resolvedRoot);
+    const realTarget = import_node_fs4.default.realpathSync(target);
+    const realRelative = import_node_path4.default.relative(realRoot, realTarget);
+    if (!realRelative || realRelative.startsWith("..") || import_node_path4.default.isAbsolute(realRelative)) return null;
+  } catch {
+    return null;
+  }
+  return target;
+}
+function scanWorkspaceRoots(root, nestedRoots) {
+  const files = new Set(listWorkspaceFiles(root).map(normalizedRelativePath));
+  for (const declared of Array.from(new Set(nestedRoots))) {
+    const nestedRoot = safeNestedRoot(root, declared);
+    if (!nestedRoot) continue;
+    const prefix = normalizedRelativePath(import_node_path4.default.relative(root, nestedRoot));
+    for (const nestedFile of listWorkspaceFiles(nestedRoot)) {
+      files.add(`${prefix}/${normalizedRelativePath(nestedFile)}`);
+    }
+  }
   const counts = /* @__PURE__ */ new Map();
   const samples = /* @__PURE__ */ new Map();
   const filenameCounts = /* @__PURE__ */ new Map();
   const filenameSamples = /* @__PURE__ */ new Map();
-  for (const rel of listWorkspaceFiles(root)) {
-    const full = import_node_path3.default.join(root, rel);
-    const name = import_node_path3.default.basename(rel);
+  for (const relative of Array.from(files).sort()) {
+    const full = import_node_path4.default.join(root, relative);
+    const name = import_node_path4.default.basename(relative);
     if (shouldIgnore(root, full, name)) continue;
-    const ext = import_node_path3.default.extname(name).toLowerCase();
-    if (ext) {
-      counts.set(ext, (counts.get(ext) ?? 0) + 1);
-      const extSamples = samples.get(ext) ?? [];
-      if (extSamples.length < 5) extSamples.push(rel);
-      samples.set(ext, extSamples);
+    const extension = import_node_path4.default.extname(name).toLowerCase();
+    if (extension) {
+      counts.set(extension, (counts.get(extension) || 0) + 1);
+      const extensionSamples = samples.get(extension) || [];
+      if (extensionSamples.length < 5) extensionSamples.push(relative);
+      samples.set(extension, extensionSamples);
     }
-    const lower = name.toLowerCase();
-    filenameCounts.set(lower, (filenameCounts.get(lower) ?? 0) + 1);
-    const nameSamples = filenameSamples.get(lower) ?? [];
-    if (nameSamples.length < 5) nameSamples.push(rel);
-    filenameSamples.set(lower, nameSamples);
+    const lowerName = name.toLowerCase();
+    filenameCounts.set(lowerName, (filenameCounts.get(lowerName) || 0) + 1);
+    const nameSamples = filenameSamples.get(lowerName) || [];
+    if (nameSamples.length < 5) nameSamples.push(relative);
+    filenameSamples.set(lowerName, nameSamples);
   }
   return { counts, samples, filenameCounts, filenameSamples };
 }
@@ -378,15 +571,16 @@ function usage() {
   console.log(`Usage: node <cadre-lsp-setup.js> [--root DIR] [--config cadre/lsp.json] [--write] [--json]
 
 Scans the codebase, recommends language servers, detects whether the server
-commands are installed, and optionally appends missing server entries to
-cadre/lsp.json.`);
+commands are installed, and optionally reconciles Cadre-managed server entries
+in cadre/lsp.json while preserving user-owned configuration.`);
 }
 function parseArgs(argv) {
   const args = {
     root: process.cwd(),
     config: "cadre/lsp.json",
     write: false,
-    json: false
+    json: false,
+    workspaceRoots: []
   };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i] ?? "";
@@ -401,11 +595,13 @@ function parseArgs(argv) {
       args.root = argv[++i] ?? args.root;
     } else if (arg === "--config") {
       args.config = argv[++i] ?? args.config;
+    } else if (arg === "--workspace-root") {
+      args.workspaceRoots.push(argv[++i] ?? "");
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
-  const root = import_node_path4.default.resolve(args.root);
+  const root = import_node_path5.default.resolve(args.root);
   const configPath = resolveProjectControlJsonPath(root, args.config, DEFAULT_LSP_CONFIG);
   if (!configPath.ok) throw new Error(configPath.error);
   return { ...args, root, config: configPath.relative, configPath: configPath.file };
@@ -430,8 +626,11 @@ function commandAvailability(command) {
     message: (result.stderr || result.stdout || "Command not found on PATH").trim()
   };
 }
-function scanFiles(root) {
-  return scanWorkspaceFiles(root);
+function scanFiles(root, additionalRoots = []) {
+  return scanWorkspaceRoots(root, [
+    ...workspaceFolders(root).map((folder) => String(folder.path || "")).filter((folder) => folder !== "."),
+    ...additionalRoots
+  ]);
 }
 function normalizeServer(value) {
   if (!isRecord(value)) return null;
@@ -439,7 +638,7 @@ function normalizeServer(value) {
 }
 function loadConfig(configPath) {
   try {
-    const parsed = JSON.parse(import_node_fs3.default.readFileSync(configPath, "utf8"));
+    const parsed = JSON.parse(import_node_fs5.default.readFileSync(configPath, "utf8"));
     const config = asJsonObject(parsed);
     const servers = Array.isArray(config.servers) ? config.servers.map(normalizeServer).filter((server) => server !== null) : [];
     return { ...config, servers };
@@ -451,8 +650,8 @@ function saveConfig(root, requested, config) {
   const written = writeProjectControlJson(root, requested, DEFAULT_LSP_CONFIG, config);
   if (!written.ok) throw new Error(written.error);
 }
-function recommend(root) {
-  const scan = scanFiles(root);
+function recommend(root, additionalRoots = []) {
+  const scan = scanFiles(root, additionalRoots);
   return LANGUAGE_RULES.flatMap((rule) => {
     const extensionFiles = rule.extensions.reduce(
       (sum, ext) => sum + (scan.counts.get(ext) ?? 0),
@@ -485,61 +684,46 @@ function serverKey(server) {
 }
 function workspaceFolders(root) {
   const folders = [{ name: ".", path: "." }];
-  const reposPath = import_node_path4.default.join(root, "cadre", "repos.json");
+  const reposPath = import_node_path5.default.join(root, "cadre", "repos.json");
   let repos = {};
   try {
-    repos = asJsonObject(JSON.parse(import_node_fs3.default.readFileSync(reposPath, "utf8")));
+    repos = asJsonObject(JSON.parse(import_node_fs5.default.readFileSync(reposPath, "utf8")));
   } catch {
     return folders;
   }
   if (repos.mode !== "polyrepo" || !Array.isArray(repos.repos)) return folders;
   for (const raw of repos.repos) {
     const repo = asJsonObject(raw);
-    if (repo.enabled === false || typeof repo.name !== "string" || typeof repo.submodule_path !== "string") continue;
-    folders.push({ name: repo.name, path: repo.submodule_path });
+    const declaredPath = typeof repo.submodule_path === "string" ? repo.submodule_path : typeof repo.path === "string" ? repo.path : null;
+    if (repo.enabled === false || typeof repo.name !== "string" || !declaredPath) continue;
+    const resolved = import_node_path5.default.resolve(root, declaredPath);
+    const relative = import_node_path5.default.relative(import_node_path5.default.resolve(root), resolved);
+    if (!relative || relative.startsWith("..") || import_node_path5.default.isAbsolute(relative)) continue;
+    folders.push({ name: repo.name, path: relative.split(import_node_path5.default.sep).join("/") });
   }
   return folders;
 }
 function mergeConfig(config, recommendations, root) {
-  const servers = Array.isArray(config.servers) ? [...config.servers] : [];
-  const next = {
-    ...config,
-    servers,
-    workspaceFolders: workspaceFolders(root)
-  };
-  const existing = new Set(servers.map(serverKey).filter(Boolean));
-  const added = [];
-  for (const rec of recommendations) {
-    if (existing.has(rec.id) || existing.has(rec.command)) continue;
-    servers.push({
-      id: rec.id,
-      command: rec.command,
-      args: rec.args,
-      extensions: rec.extensions,
-      ...rec.filenames ? { filenames: rec.filenames } : {},
-      ...rec.languageIds ? { languageIds: rec.languageIds } : {}
-    });
-    existing.add(rec.id);
-    added.push(rec.id);
-  }
-  return { config: next, added };
+  return reconcileLspConfig(config, recommendations, workspaceFolders(root));
 }
 function runCli() {
   const args = parseArgs(process.argv);
   const config = loadConfig(args.configPath);
-  const recommendations = recommend(args.root);
+  const recommendations = recommend(args.root, args.workspaceRoots);
   const existingIds = new Set((config.servers ?? []).map(serverKey).filter(Boolean));
   const missingFromConfig = recommendations.filter(
     (rec) => !existingIds.has(rec.id) && !existingIds.has(rec.command)
   );
   const missingCommands = recommendations.filter((rec) => !rec.available);
+  const reconciliation = mergeConfig(config, recommendations, args.root);
   let written = false;
   let added = [];
+  let removed = [];
   if (args.write) {
-    const merged = mergeConfig(config, recommendations, args.root);
-    saveConfig(args.root, args.config, merged.config);
+    saveConfig(args.root, args.config, reconciliation.config);
     written = true;
-    added = merged.added;
+    added = reconciliation.added;
+    removed = reconciliation.removed;
   }
   const result = {
     root: args.root,
@@ -554,7 +738,9 @@ function runCli() {
     })),
     workspaceFolders: workspaceFolders(args.root),
     written,
-    added
+    added,
+    removed,
+    staleManaged: reconciliation.removed
   };
   if (args.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -572,14 +758,14 @@ function runCli() {
     if (!rec.available) console.log(`  install: ${rec.install}`);
   }
   if (written) {
-    console.log(`Updated ${args.config}; added: ${added.join(", ") || "none"}.`);
+    console.log(`Updated ${args.config}; added: ${added.join(", ") || "none"}; removed stale managed: ${removed.join(", ") || "none"}.`);
   } else if (missingFromConfig.length > 0) {
-    console.log("Run with --write to append missing server entries to cadre/lsp.json.");
+    console.log("Run with --write to reconcile Cadre-managed server entries in cadre/lsp.json.");
   }
 }
 
 // src/cadre-lsp-setup.ts
-if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path5.default.basename(process.argv[1] || ""))) {
+if (["cadre-lsp-setup.js", "cadre-lsp-setup.ts"].includes(import_node_path6.default.basename(process.argv[1] || ""))) {
   try {
     runCli();
   } catch (error) {

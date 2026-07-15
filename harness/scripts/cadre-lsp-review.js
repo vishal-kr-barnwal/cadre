@@ -412,7 +412,7 @@ function commandAvailability(command) {
 }
 
 // src/lsp/review/run-review.ts
-var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_fs6 = __toESM(require("node:fs"));
 var import_node_path7 = __toESM(require("node:path"));
 
 // src/infrastructure/project-control-file.ts
@@ -532,6 +532,7 @@ function readProjectControlJson(resolved) {
 }
 
 // src/lsp/ignore-policy.ts
+var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
 var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".git",
@@ -540,8 +541,10 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".worktrees",
   ".agents",
   ".claude",
+  ".claude-plugin",
   ".cache",
   ".codex",
+  ".codex-plugin",
   ".copilot",
   ".dart_tool",
   ".gemini",
@@ -552,6 +555,7 @@ var DEFAULT_IGNORES = /* @__PURE__ */ new Set([
   ".serverless",
   "node_modules",
   "vendor",
+  "cadre-ai",
   "dist",
   "build",
   "coverage",
@@ -586,23 +590,67 @@ var DEFAULT_IGNORE_PATHS = [
 function normalizeRel(file) {
   return file.split(import_node_path4.default.sep).join("/");
 }
+function matchesIgnoredPath(rel, ignored) {
+  return rel === ignored || rel.startsWith(`${ignored}/`) || rel.endsWith(`/${ignored}`) || rel.includes(`/${ignored}/`);
+}
+var packageMarkerCache = /* @__PURE__ */ new Map();
+function cadrePackageDirectory(directory) {
+  const manifest = import_node_path4.default.join(directory, "package.json");
+  let signature;
+  try {
+    const stat = import_node_fs3.default.statSync(manifest);
+    signature = `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    try {
+      signature = `missing:${import_node_fs3.default.statSync(directory).mtimeMs}`;
+    } catch {
+      return false;
+    }
+  }
+  const cached = packageMarkerCache.get(directory);
+  if (cached?.signature === signature) return cached.isCadre;
+  let isCadre = false;
+  if (!signature.startsWith("missing:")) {
+    try {
+      const parsed = JSON.parse(import_node_fs3.default.readFileSync(manifest, "utf8"));
+      isCadre = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && parsed.name === "cadre-ai";
+    } catch {
+    }
+  }
+  packageMarkerCache.set(directory, { signature, isCadre });
+  return isCadre;
+}
+function nestedCadrePackagePath(root, file) {
+  if (!root) return false;
+  const resolvedRoot = import_node_path4.default.resolve(root);
+  const candidate = import_node_path4.default.resolve(root, file);
+  if (candidate !== resolvedRoot && !candidate.startsWith(`${resolvedRoot}${import_node_path4.default.sep}`)) return false;
+  let directory;
+  try {
+    directory = import_node_fs3.default.statSync(candidate).isDirectory() ? candidate : import_node_path4.default.dirname(candidate);
+  } catch {
+    directory = import_node_path4.default.dirname(candidate);
+  }
+  while (directory !== resolvedRoot && directory.startsWith(`${resolvedRoot}${import_node_path4.default.sep}`)) {
+    if (cadrePackageDirectory(directory)) return true;
+    directory = import_node_path4.default.dirname(directory);
+  }
+  return false;
+}
 function shouldIgnore(root, fullPath, name) {
   if (DEFAULT_IGNORES.has(name)) return true;
   const rel = normalizeRel(import_node_path4.default.relative(root, fullPath));
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
+  return isIgnoredFile(root, rel);
 }
-function isIgnoredFile(_root, file) {
+function isIgnoredFile(root, file) {
   const rel = normalizeRel(file);
   if (rel.split("/").some((part) => DEFAULT_IGNORES.has(part))) return true;
-  return DEFAULT_IGNORE_PATHS.some(
-    (ignored) => rel === ignored || rel.startsWith(`${ignored}/`)
-  );
+  if (DEFAULT_IGNORE_PATHS.some((ignored) => matchesIgnoredPath(rel, ignored))) return true;
+  return nestedCadrePackagePath(root, file);
 }
 
 // src/lsp/review/git-diff.ts
-var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_fs4 = __toESM(require("node:fs"));
 var import_node_path5 = __toESM(require("node:path"));
 var import_node_child_process3 = require("node:child_process");
 function runGit(root, args) {
@@ -634,7 +682,7 @@ function changedEntries(root, base, head) {
       kind,
       path: file || "",
       oldPath,
-      exists: file ? import_node_fs3.default.existsSync(import_node_path5.default.join(root, file)) : false
+      exists: file ? import_node_fs4.default.existsSync(import_node_path5.default.join(root, file)) : false
     };
   }).filter((entry) => Boolean(entry.path) && !isIgnoredFile(root, entry.path));
 }
@@ -701,7 +749,7 @@ function changedSymbolCandidates(root, base, head, entry) {
 }
 
 // src/lsp/review/scanners.ts
-var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_fs5 = __toESM(require("node:fs"));
 var import_node_path6 = __toESM(require("node:path"));
 var import_node_url2 = require("node:url");
 function flattenSymbols(symbols, out = []) {
@@ -731,7 +779,7 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
   function visit(dir) {
     let entries;
     try {
-      entries = import_node_fs4.default.readdirSync(dir, { withFileTypes: true });
+      entries = import_node_fs5.default.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -748,14 +796,14 @@ function scanTextReferences(root, symbol, changedPathSet, server) {
       if (changedPathSet.has(import_node_path6.default.resolve(full))) continue;
       let stat;
       try {
-        stat = import_node_fs4.default.statSync(full);
+        stat = import_node_fs5.default.statSync(full);
       } catch {
         continue;
       }
       if (stat.size > MAX_SCAN_FILE_BYTES) continue;
       let text;
       try {
-        text = import_node_fs4.default.readFileSync(full, "utf8");
+        text = import_node_fs5.default.readFileSync(full, "utf8");
       } catch {
         continue;
       }
@@ -869,7 +917,7 @@ function nearbyFileHints(root, files) {
     while (dir.startsWith(root)) {
       for (const name of manifestNames) {
         const candidate = import_node_path6.default.join(dir, name);
-        if (import_node_fs4.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path6.default.relative(root, candidate)));
+        if (import_node_fs5.default.existsSync(candidate)) manifests.add(normalizeRel(import_node_path6.default.relative(root, candidate)));
       }
       if (dir === root) break;
       dir = import_node_path6.default.dirname(dir);
@@ -883,7 +931,7 @@ function nearbyFileHints(root, files) {
       import_node_path6.default.join("tests", file)
     ];
     for (const candidate of candidates) {
-      if (import_node_fs4.default.existsSync(import_node_path6.default.join(root, candidate))) tests.add(normalizeRel(candidate));
+      if (import_node_fs5.default.existsSync(import_node_path6.default.join(root, candidate))) tests.add(normalizeRel(candidate));
     }
   }
   return {
@@ -919,7 +967,7 @@ async function runReview(options = {}) {
     DEFAULT_LSP_CONFIG
   );
   if (!configPath.ok) return unavailable(configPath.error);
-  if (!import_node_fs5.default.existsSync(configPath.file)) return unavailable(`No LSP config found at ${configPath.relative}`);
+  if (!import_node_fs6.default.existsSync(configPath.file)) return unavailable(`No LSP config found at ${configPath.relative}`);
   const entries = changedEntries(root, args.base, args.head);
   const files = entries.map((entry) => entry.path);
   const configRead = readProjectControlJson(configPath);
@@ -1072,7 +1120,7 @@ async function runReview(options = {}) {
       }
       for (const candidate of allCandidates.values()) {
         if (candidate.changeType !== "removed") continue;
-        if (candidate.changedFile && import_node_fs5.default.existsSync(import_node_path7.default.join(root, candidate.changedFile))) continue;
+        if (candidate.changedFile && import_node_fs6.default.existsSync(import_node_path7.default.join(root, candidate.changedFile))) continue;
         const refs = scanTextReferences(root, candidate.name, changedSet, server);
         if (refs.length > 0) {
           findings.push(externalReferenceFinding(server, candidate, refs, "text"));
