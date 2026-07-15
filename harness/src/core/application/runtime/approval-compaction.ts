@@ -30,6 +30,7 @@ export function compactApproval(value: unknown): JsonObject | null {
     required: approval.required !== false,
     ...(approval.cancelled === true ? { cancelled: true } : {}),
     session_id: asOptionalString(approval.session_id) || null,
+    session_resumable: approval.session_resumable === true,
     explicit_user_approval_required: approval.explicit_user_approval_required === true,
     manual_approval_required: approval.manual_approval_required === true,
     manual_approval_prompt: asOptionalString(approval.manual_approval_prompt) || null,
@@ -49,6 +50,7 @@ export function compactApproval(value: unknown): JsonObject | null {
     current_document: compactCurrentDocument(approval.current_document),
     stages: stages.map((stage) => ({
       id: asOptionalString(stage.id) || null,
+      input_keys: asStringArray(stage.input_keys),
       hash: asOptionalString(stage.hash) || null,
       revision: typeof stage.revision === "number" ? stage.revision : 0,
     })),

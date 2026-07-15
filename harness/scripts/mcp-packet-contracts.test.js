@@ -55,8 +55,67 @@ function approvalStamp(packet) {
   };
 }
 
-test("public workflow packets reject injected skill integrity metadata", () => {
-  for (const field of ["source_files", "source_file_hashes"]) {
+function assertWritableInputPaths(decision, expected) {
+  assert.equal(Array.isArray(decision.writable_paths), true);
+  for (const pointer of decision.writable_paths) {
+    assert.equal(
+      typeof pointer === "string" && pointer.startsWith("/arguments/input/"),
+      true,
+      `Unsafe workflow continuation path: ${String(pointer)}`,
+    );
+  }
+  if (expected) assert.deepEqual(decision.writable_paths, expected);
+}
+
+function assertWorkflowDecisionContinuation(packet, field, {
+  root,
+  workflow,
+  input,
+  sessionId = null,
+  writablePaths,
+}) {
+  const approval = sessionId ? { session_id: sessionId } : undefined;
+  const expectedArguments = {
+    root,
+    workflow,
+    input,
+    execute: false,
+    ...(approval ? { approval } : {}),
+  };
+  assert.deepEqual(packet.decision[field], {
+    tool: "cadre_workflow",
+    arguments: expectedArguments,
+  });
+  assert.deepEqual(parseWorkflowToolRequest(packet.decision[field].arguments), expectedArguments);
+  if (sessionId) {
+    assert.deepEqual(packet.decision[field].arguments.approval, { session_id: sessionId });
+  }
+  assertWritableInputPaths(packet.decision, writablePaths);
+}
+
+const inputPaths = (...arguments_) => arguments_.map((argument) => `/arguments/input/${argument.replaceAll(".", "/")}`);
+const setupProductPaths = inputPaths(
+  "product", "intent.product", "intent.productOther", "intent.productIntent", "intent.productSummary",
+  "productOther", "productIntent", "productSummary",
+);
+const setupGuidelinePaths = inputPaths("productGuidelines");
+const setupTechnicalPaths = inputPaths(
+  "techStack", "intent.techStack", "intent.techStackOther", "intent.techStackIntent", "intent.techStackSummary",
+  "techStackOther", "techStackIntent", "techStackSummary", "styleGuideIds", "styleGuides",
+  "writeLsp", "setupLsp", "lsp", "providerMode", "provider", "syncMode", "teamSize", "integrations",
+  "config", "topology", "polyrepo", "repos", "ciProvider", "writeCi", "writeGitattributes",
+  "addSubmodules", "executeSubmodules",
+);
+const setupWorkflowPaths = inputPaths("workflowPolicy");
+const newTrackSpecPaths = inputPaths(
+  "spec", "description", "intent.goal", "intent.goalOther", "goal", "goalOther",
+  "intent.outcome", "intent.outcomeOther", "outcome", "outcomeOther",
+  "intent.acceptanceCriteria", "intent.acceptanceCriteriaOther", "acceptanceCriteria", "acceptanceCriteriaOther",
+  "intent.scope", "intent.scopeOther", "scope", "scopeOther",
+);
+
+test("public workflow packets reject injected runtime controls and skill integrity metadata", () => {
+  for (const field of ["root", "approval", "source_files", "source_file_hashes", "_cadreApprovalInputError"]) {
     assert.throws(() => parseWorkflowToolRequest({
       root: "/project",
       workflow: "skill",
@@ -293,6 +352,44 @@ test("persisted running jobs fail closed after a server restart", () => {
   assert.match(response.errors.join(" "), /interrupted.*restart/i);
 });
 
+test("pre-session clarifications preserve partial false and empty input values", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-partial-setup-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    fs.writeFileSync(path.join(root, "package.json"), "{}\n");
+    fs.writeFileSync(path.join(root, "src", "app.ts"), "export const app = true;\n");
+    const partialInput = {
+      providerMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+    };
+    const packet = invoke({ root, workflow: "setup", input: partialInput, execute: false });
+    assert.equal(packet.decision.kind, "clarification");
+    assert.equal(packet.decision.session_id, null);
+    assert.deepEqual(packet.required, ["product"]);
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "setup",
+      input: partialInput,
+      writablePaths: [
+        "/arguments/input/intent/product",
+        "/arguments/input/intent/productOther",
+        "/arguments/input/product",
+      ],
+    });
+    assert.deepEqual(packet.decision.prompts[0].responseTarget.valueMap, {});
+    assert.deepEqual(packet.decision.resume.arguments.input.styleGuideIds, []);
+    assert.equal(packet.decision.resume.arguments.input.writeLsp, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public setup packets preserve one lazy session across evidence, prompts, approvals, and execution", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-setup-staging-"));
   const invoke = (request) => {
@@ -336,6 +433,13 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
     assert.equal(packet.decision.stage, "product");
     assert.deepEqual(artifactPaths(packet), ["cadre/product.json", "cadre/product.md"]);
     const sessionId = packet.decision.session_id;
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: setupProductPaths,
+    });
     let session = onlySession(sessionId);
     assert.deepEqual(session.stage_order, ["product", "product_guidelines", "technical", "workflow"]);
     assert.deepEqual(session.stage_records.product.snapshot_files.map((file) => file.path), ["cadre/product.json", "cadre/product.md"]);
@@ -355,6 +459,13 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
     assert.equal(packet.decision.stage, "product_guidelines");
     assert.equal(packet.decision.session_id, sessionId);
     assert.deepEqual(artifactPaths(packet), ["cadre/product_guidelines.json", "cadre/product_guidelines.md"]);
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: setupGuidelinePaths,
+    });
     onlySession(sessionId);
 
     packet = invoke({
@@ -368,8 +479,28 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
     assert.equal(packet.decision.current_stage, "technical");
     assert.equal(packet.decision.session_id, sessionId);
     assert.deepEqual(packet.decision.approved_stages, ["product", "product_guidelines"]);
-    assert.deepEqual(packet.decision.resume, { approval: { session_id: sessionId } });
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("styleGuideIds", "writeLsp"),
+    });
     assert.deepEqual(packet.decision.prompts.map((prompt) => prompt.id).sort(), ["setup-lsp", "setup-style-guides"]);
+    const lspPrompt = packet.decision.prompts.find((prompt) => prompt.id === "setup-lsp");
+    assert.deepEqual(lspPrompt.responseTarget.valueMap, {
+      "write-lsp": { writeLsp: true },
+      "skip-lsp": { writeLsp: false },
+    });
+    for (const choice of lspPrompt.choices) {
+      const mappedInput = lspPrompt.responseTarget.valueMap[choice.id];
+      const mappedCall = structuredClone(packet.decision.resume);
+      Object.assign(mappedCall.arguments.input, mappedInput);
+      assert.deepEqual(parseWorkflowToolRequest(mappedCall.arguments), mappedCall.arguments);
+      for (const key of Object.keys(mappedInput)) {
+        assert.ok(packet.decision.writable_paths.includes(`/arguments/input/${key}`));
+      }
+    }
     assert.deepEqual(artifactPaths(packet), []);
 
     packet = invoke({
@@ -381,22 +512,26 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
     });
     assert.equal(packet.decision.kind, "clarification");
     assert.deepEqual(packet.decision.prompts.map((prompt) => prompt.id), ["setup-lsp"]);
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("writeLsp"),
+    });
     session = onlySession(sessionId);
     assert.deepEqual(session.payload.styleGuideIds, ["general", "typescript"]);
     assert.deepEqual(session.stage_records.technical.snapshot_files, []);
 
-    packet = invoke({
-      root,
-      workflow: "setup",
-      input: { writeLsp: true },
-      execute: false,
-      approval: { session_id: sessionId },
-    });
+    const skipLspPrompt = packet.decision.prompts.find((prompt) => prompt.id === "setup-lsp");
+    assert.deepEqual(skipLspPrompt.responseTarget.valueMap["skip-lsp"], { writeLsp: false });
+    const skipLspResume = structuredClone(packet.decision.resume);
+    Object.assign(skipLspResume.arguments.input, skipLspPrompt.responseTarget.valueMap["skip-lsp"]);
+    packet = invoke(skipLspResume.arguments);
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "technical");
     assert.equal(packet.decision.session_id, sessionId);
     assert.deepEqual(artifactPaths(packet), [
-      "cadre/lsp.json",
       "cadre/repos.json",
       "cadre/repos.md",
       "cadre/styleguides/README.md",
@@ -408,6 +543,13 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
       "cadre/tech-stack.json",
       "cadre/tech-stack.md",
     ]);
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: setupTechnicalPaths,
+    });
     session = onlySession(sessionId);
     assert.deepEqual(session.final_snapshot_files, []);
 
@@ -422,6 +564,13 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
     assert.equal(packet.decision.stage, "workflow");
     assert.equal(packet.decision.session_id, sessionId);
     assert.deepEqual(artifactPaths(packet), ["cadre/workflow.json", "cadre/workflow.md"]);
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: setupWorkflowPaths,
+    });
     session = onlySession(sessionId);
     assert.ok(session.final_snapshot_files.some((file) => file.path === "cadre/config.json"));
     const firstFinalSnapshot = JSON.stringify(session.final_snapshot_files);
@@ -458,11 +607,150 @@ test("public setup packets preserve one lazy session across evidence, prompts, a
     packet = invoke(packet.next.arguments);
     assert.equal(packet.ok, true, packet.errors.join(" "));
     assert.equal(packet.decision.kind, "complete");
+    assert.equal(fs.existsSync(path.join(root, "cadre", "lsp.json")), false);
     assert.equal(packet.data.control_commit.ok, true);
     for (const snapshot of approvedSession.snapshot_files.filter((file) => file.missing !== true)) {
       assert.equal(fs.readFileSync(path.join(root, snapshot.path), "utf8"), snapshot.content, snapshot.path);
     }
     assert.equal(fs.existsSync(path.join(sessionDirectory, `${sessionId}.json`)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stale staged approval exposes authoritative recovery while a missing session does not", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-stale-approval-"));
+  const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-missing-approval-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    for (const candidate of [root, missingRoot]) {
+      assert.equal(spawnSync("git", ["init"], { cwd: candidate, encoding: "utf8" }).status, 0);
+    }
+
+    const missingSessionId = "000000000000000000000001";
+    const missing = invoke({
+      root: missingRoot,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: { session_id: missingSessionId },
+    });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.decision.kind, "blocked");
+    assert.match(missing.decision.reason, /session was not found/i);
+    assert.equal(missing.decision.resume, null);
+    assert.equal(missing.next, null);
+
+    const baseInput = {
+      product: { title: "Stale Approval Product", summary: "Review exact staged setup revisions." },
+      productGuidelines: { title: "Product Guidelines", summary: "Preserve each reviewed stage revision." },
+      techStack: { languages: ["TypeScript"] },
+      workflowPolicy: { title: "Project Workflow", summary: "Approve only the currently reviewed bytes." },
+      providerMode: "local",
+      syncMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+    };
+    let packet = invoke({ root, workflow: "setup", input: baseInput, execute: false });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "product");
+    const sessionId = packet.decision.session_id;
+
+    packet = invoke({
+      root,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: { session_id: sessionId, stage: "product", ...approvalStamp(packet), approved_stages: ["product"] },
+    });
+    assert.equal(packet.decision.kind, "approval");
+    assert.equal(packet.decision.stage, "product_guidelines");
+    const staleStamp = approvalStamp(packet);
+
+    const amended = invoke({
+      root,
+      workflow: "setup",
+      input: {
+        productGuidelines: {
+          title: "Product Guidelines",
+          summary: "The user's corrected guideline evidence is authoritative.",
+        },
+      },
+      execute: false,
+      approval: { session_id: sessionId },
+    });
+    assert.equal(amended.decision.kind, "approval");
+    assert.equal(amended.decision.stage, "product_guidelines");
+    assert.notEqual(amended.decision.stage_hash, staleStamp.stage_hash);
+    assert.ok(amended.decision.stage_revision > staleStamp.stage_revision);
+
+    const stale = invoke({
+      root,
+      workflow: "setup",
+      input: {},
+      execute: false,
+      approval: {
+        session_id: sessionId,
+        stage: "product_guidelines",
+        ...staleStamp,
+        approved_stages: ["product", "product_guidelines"],
+      },
+    });
+    assert.equal(stale.ok, false);
+    assert.equal(stale.decision.kind, "blocked");
+    assert.equal(stale.decision.current_stage, "product_guidelines");
+    assert.equal(stale.decision.stage_hash, amended.decision.stage_hash);
+    assert.equal(stale.decision.stage_revision, amended.decision.stage_revision);
+    assert.deepEqual(stale.decision.approved_stages, ["product"]);
+    assertWorkflowDecisionContinuation(stale, "resume", {
+      root,
+      workflow: "setup",
+      input: {},
+      sessionId,
+      writablePaths: setupGuidelinePaths,
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(missingRoot, { recursive: true, force: true });
+  }
+});
+
+test("newtrack schema clarification returns a typed current-stage resume", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-newtrack-schema-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    const packet = invoke({
+      root,
+      workflow: "newtrack",
+      input: {
+        trackId: "invalid_spec_schema_20260715",
+        spec: { version: 1, schema: "not-cadre-spec" },
+        commitMode: "off",
+      },
+      execute: false,
+    });
+    assert.equal(packet.ok, false);
+    assert.equal(packet.decision.kind, "clarification");
+    assert.equal(packet.decision.current_stage, "spec");
+    assert.deepEqual(packet.decision.prompts, []);
+    assert.deepEqual(packet.required, ["spec"]);
+    const sessionId = packet.decision.session_id;
+    assert.match(sessionId, /^[a-f0-9]{24}$/);
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "newtrack",
+      input: {},
+      sessionId,
+      writablePaths: ["/arguments/input/spec"],
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -527,6 +815,13 @@ test("public newtrack packets collect spec then plan and execute the exact conti
       `cadre/tracks/${trackId}/spec.md`,
     ]);
     const sessionId = packet.decision.session_id;
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "newtrack",
+      input: {},
+      sessionId,
+      writablePaths: newTrackSpecPaths,
+    });
 
     packet = invoke({
       root,
@@ -538,7 +833,13 @@ test("public newtrack packets collect spec then plan and execute the exact conti
     assert.equal(packet.decision.kind, "clarification");
     assert.equal(packet.decision.current_stage, "plan");
     assert.equal(packet.decision.session_id, sessionId);
-    assert.deepEqual(packet.decision.resume, { approval: { session_id: sessionId } });
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "newtrack",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("plan"),
+    });
     assert.deepEqual(packet.required, ["plan"]);
     assert.deepEqual(packet.artifacts, []);
 
@@ -552,6 +853,13 @@ test("public newtrack packets collect spec then plan and execute the exact conti
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "plan");
     assert.equal(packet.decision.session_id, sessionId);
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "newtrack",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("plan"),
+    });
     assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
       `cadre/tracks/${trackId}/plan.json`,
       `cadre/tracks/${trackId}/plan.md`,
@@ -647,6 +955,13 @@ test("public formula pour packets retain formula identity through staged continu
       `cadre/tracks/${trackId}/spec.md`,
     ]);
     const sessionId = packet.decision.session_id;
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "formula",
+      input: {},
+      sessionId,
+      writablePaths: newTrackSpecPaths,
+    });
 
     packet = invoke({
       root,
@@ -676,6 +991,13 @@ test("public formula pour packets retain formula identity through staged continu
     assert.deepEqual(packet.data.variables, { service: "billing" });
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "plan");
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "formula",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("plan"),
+    });
     assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
       `cadre/tracks/${trackId}/plan.json`,
       `cadre/tracks/${trackId}/plan.md`,
@@ -797,6 +1119,13 @@ test("public revise packets preserve declared spec then plan staging through the
       `cadre/tracks/${trackId}/spec.md`,
     ]);
     const sessionId = packet.decision.session_id;
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "revise",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("spec"),
+    });
 
     packet = invoke({
       root,
@@ -808,7 +1137,13 @@ test("public revise packets preserve declared spec then plan staging through the
     assert.equal(packet.decision.kind, "clarification");
     assert.equal(packet.decision.current_stage, "plan_changes");
     assert.equal(packet.decision.session_id, sessionId);
-    assert.deepEqual(packet.decision.resume, { approval: { session_id: sessionId } });
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "revise",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("plan"),
+    });
     assert.deepEqual(packet.required, ["plan"]);
     assert.deepEqual(packet.artifacts, []);
 
@@ -822,6 +1157,13 @@ test("public revise packets preserve declared spec then plan staging through the
     assert.equal(packet.decision.kind, "approval");
     assert.equal(packet.decision.stage, "plan_changes");
     assert.equal(packet.decision.session_id, sessionId);
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "revise",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths("plan"),
+    });
     assert.deepEqual(packet.artifacts.map((artifact) => artifact.path).filter(Boolean).sort(), [
       `cadre/tracks/${trackId}/plan.json`,
       `cadre/tracks/${trackId}/plan.md`,
@@ -984,15 +1326,15 @@ test("public skill packets read and resume formatted references in the same sess
     assert.deepEqual(packet.decision.approved_stages, ["skill"]);
     assert.equal(packet.decision.current_stage, "references");
     assert.deepEqual(packet.next, { tool: "cadre_read", arguments: { uri: packet.resources[0] } });
-    assert.deepEqual(packet.decision.resume, {
-      tool: "cadre_workflow",
-      arguments: {
-        root,
-        workflow: "skill",
-        input: { formattedReferences: "<reference-id to formatted text>" },
-        execute: false,
-        approval: { session_id: sessionId },
-      },
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "skill",
+      input: { formattedReferences: {} },
+      sessionId,
+      writablePaths: [
+        "/arguments/input/formattedReferences/guide",
+        "/arguments/input/formattedReferences/secondary",
+      ],
     });
 
     packet = invoke({
@@ -1006,6 +1348,13 @@ test("public skill packets read and resume formatted references in the same sess
     assert.equal(packet.decision.session_id, sessionId);
     assert.equal(packet.resources.length, 1);
     assert.deepEqual(packet.next, { tool: "cadre_read", arguments: { uri: packet.resources[0] } });
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "skill",
+      input: { formattedReferences: {} },
+      sessionId,
+      writablePaths: ["/arguments/input/formattedReferences/secondary"],
+    });
 
     packet = invoke({
       root,
@@ -1041,6 +1390,53 @@ test("public skill packets read and resume formatted references in the same sess
   }
 });
 
+test("refresh analysis returns a typed selection call and accepts an explicit empty selection", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-refresh-selection-"));
+  const invoke = (request) => {
+    const parsed = parseWorkflowToolRequest(request);
+    return core.workflowPacketV1(parsed.root, workflowRuntimeArgs(parsed));
+  };
+  try {
+    assert.equal(spawnSync("git", ["init"], { cwd: root, encoding: "utf8" }).status, 0);
+    fs.mkdirSync(path.join(root, "cadre"), { recursive: true });
+    fs.writeFileSync(path.join(root, "cadre", "setup_state.json"), "{\"version\":1}\n");
+    const packet = invoke({
+      root,
+      workflow: "refresh",
+      input: { commitMode: "off" },
+      execute: false,
+    });
+    assert.equal(packet.ok, false);
+    assert.equal(packet.decision.kind, "clarification");
+    assert.equal(packet.decision.session_id, null);
+    assert.deepEqual(packet.decision.prompts.map((prompt) => prompt.id), ["refresh-levels"]);
+    assert.equal(packet.decision.prompts[0].allowCustom, false);
+    assert.equal(packet.decision.prompts[0].customArgument, undefined);
+    assert.equal(packet.decision.prompts[0].responseTarget.customArgument, undefined);
+    assertWorkflowDecisionContinuation(packet, "resume", {
+      root,
+      workflow: "refresh",
+      input: { commitMode: "off" },
+      writablePaths: ["/arguments/input/refreshLevels"],
+    });
+
+    const analyzed = invoke({
+      root,
+      workflow: "refresh",
+      input: { commitMode: "off", refreshLevels: [] },
+      execute: false,
+    });
+    assert.equal(analyzed.ok, true, analyzed.errors.join(" "));
+    assert.equal(analyzed.phase, "complete");
+    assert.deepEqual(analyzed.decision, { kind: "complete" });
+    assert.deepEqual(analyzed.data.selected_levels, []);
+    assert.equal(analyzed.data.refresh_analysis.kind, "cadre.refresh_analysis.v1");
+    assert.equal(analyzed.next, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public refresh packets execute the exact frozen technical-stage continuation", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-public-refresh-staging-"));
   const invoke = (request) => {
@@ -1064,6 +1460,16 @@ test("public refresh packets execute the exact frozen technical-stage continuati
     assert.equal(packet.decision.stage, "technical");
     assert.deepEqual(packet.artifacts.map((artifact) => artifact.path), ["cadre/lsp.json"]);
     const sessionId = packet.decision.session_id;
+    assertWorkflowDecisionContinuation(packet, "amend", {
+      root,
+      workflow: "refresh",
+      input: {},
+      sessionId,
+      writablePaths: inputPaths(
+        "proposedContext.techStack", "proposedContext.styleGuideIds", "styleGuideIds",
+        "proposedContext.repositoryTopology", "proposedContext.repos", "writeLsp", "setupLsp", "lsp",
+      ),
+    });
     const approvedContent = fs.readFileSync(path.join(root, "cadre", "lsp.json"), "utf8");
 
     packet = invoke({

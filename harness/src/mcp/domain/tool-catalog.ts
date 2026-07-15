@@ -9,7 +9,7 @@ export const SERVER_INSTRUCTIONS = [
   "Cadre is a packet-led runtime. Call cadre_workflow first for workflows, cadre_action for a packet named by a workflow response, and cadre_read only for a relevant resource URI.",
   "Pass a root candidate to project-scoped calls. Cadre resolves it internally; setup accepts an uninitialized directory.",
   "Cadre owns control-plane, provider, worker, approval, merge, and generated projection state.",
-  "In staged workflows, session_id alone resumes and is not approval; stage, stage_hash, stage_revision, and approved_stages require explicit user approval.",
+  "Use returned decision.resume or decision.amend calls for non-approval continuation; their session_id-only approval state is not approval. stage, stage_hash, stage_revision, and approved_stages require explicit user approval.",
 ].join(" ");
 
 const root: JsonObject = {
@@ -30,7 +30,7 @@ export const TOOLS: JsonObject[] = [
         execute: { type: "boolean", description: "Apply the workflow after every required stage is approved; omit or false for preview." },
         approval: {
           type: "object",
-          description: "Resume or control a staged session. session_id alone resumes and is not approval. After explicit user approval, echo stage, stage_hash, stage_revision, and the exact approved_stages prefix from the reviewed decision. complete is valid only after all stages. cancel abandons the session.",
+          description: "Control a staged session through a returned typed call. Exact decision.resume and decision.amend calls carry session_id only and are not approval. After explicit user approval, echo stage, stage_hash, stage_revision, and the exact approved_stages prefix from the reviewed decision. complete is valid only after all stages. cancel abandons the session.",
           properties: {
             session_id: { type: "string", pattern: "^[a-f0-9]{24}$" },
             stage: { type: "string" },

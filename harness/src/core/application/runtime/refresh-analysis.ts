@@ -125,7 +125,12 @@ export function refreshLevelIds(args: RuntimeArgs = {}, recommended: string[] = 
 }
 
 export function refreshSelectionProvided(args: RuntimeArgs = {}): boolean {
-  return rawRequestedLevels(args).length > 0;
+  const raw = rawArgs(args);
+  return [
+    "refreshLevels", "refresh_levels", "refreshScope", "refresh_scope", "scope", "scopes",
+    "all", "patterns", "styleGuides", "style_guides", "docs", "projections", "diagnostics",
+    "lsp", "writeLsp", "write_lsp", "setupLsp", "setup_lsp",
+  ].some((key) => Object.prototype.hasOwnProperty.call(raw, key) && raw[key] !== undefined);
 }
 
 function compactWorkspace(value: JsonObject): JsonObject {
@@ -337,10 +342,9 @@ export function refreshLevelPrompt(analysis: JsonObject): JsonObject {
       tool: "cadre_workflow",
       workflow: "refresh",
       argument: "refreshLevels",
-      customArgument: "refreshLevels",
       selectedIds: asStringArray(analysis.recommended_levels),
     },
-    "refreshLevels"
+    null
   );
   return prompt;
 }

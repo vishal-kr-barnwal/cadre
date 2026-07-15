@@ -104,13 +104,13 @@ atomically contains `skill.json` and generated `SKILL.md`; only after its
 approval can the collective references stage be formatted and materialized.
 For a `source_path`, Cadre returns one capability-bound source read at a time
 while the references stage is active. Supply incremental
-`formattedReferences` or `formatted_references` values keyed by reference ID
-through the exact `decision.resume` call, preserving the same approval session.
+`formattedReferences` values at the per-reference `decision.writable_paths` in
+the returned `decision.resume`, preserving the same approval session.
 Future reference targets remain unmaterialized during formatting.
 
 Rename and remove use one staged `mutation` review over the exact source,
-destination, and deletion set. For every workflow, `approval: {session_id}`
-alone resumes without approval. Only explicit approval may add the exact
+destination, and deletion set. For every workflow, a returned session-only
+`decision.resume` or `decision.amend` is not approval. Only explicit approval may add the exact
 returned `stage`, `stage_hash`, `stage_revision`, and cumulative
 `approved_stages` prefix, and only the exact returned final `next` call executes
 after all stages are approved.

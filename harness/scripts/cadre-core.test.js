@@ -1450,6 +1450,60 @@ test("workflowPacketEnvelopeV1 retains bounded workflow data, artifacts, resourc
   ]);
   assert.equal(packet.artifacts.some((artifact) => artifact.title === "Release approval" && artifact.kind === "packet"), true);
 
+  const unsafeContinuation = core.workflowPacketEnvelopeV1(root, { workflow: "setup" }, {
+    ok: true,
+    workflow: "setup",
+    phase_state: "awaiting_clarification",
+    intent_prompts: [{
+      id: "unsafe-target",
+      choices: [{ id: "value" }],
+      responseTarget: { tool: "cadre_workflow", workflow: "setup", argument: "__proto__.value" },
+    }],
+  });
+  assert.equal(unsafeContinuation.decision.kind, "blocked");
+  assert.match(unsafeContinuation.decision.reason, /Invalid clarification response target.*unsafe/i);
+
+  const invalidTargets = [
+    { id: "reserved-argument", argument: "root" },
+    { id: "reserved-custom", argument: "providerMode", customArgument: "approval" },
+    { id: "scalar-map", argument: "providerMode", valueMap: { local: "local" } },
+    { id: "reserved-map", argument: "providerMode", valueMap: { local: { root: "/escape" } } },
+    { id: "cross-target-map", argument: "providerMode", valueMap: { local: { syncMode: "local" } } },
+  ];
+  for (const target of invalidTargets) {
+    const blocked = core.workflowPacketEnvelopeV1(root, { workflow: "setup" }, {
+      ok: true,
+      workflow: "setup",
+      phase_state: "awaiting_clarification",
+      intent_prompts: [{
+        id: target.id,
+        choices: [{ id: "local" }],
+        responseTarget: { tool: "cadre_workflow", workflow: "setup", ...target },
+      }],
+    });
+    assert.equal(blocked.decision.kind, "blocked", target.id);
+    assert.match(blocked.decision.reason, /Invalid clarification response target/i, target.id);
+  }
+
+  const outsideActiveStage = core.workflowPacketEnvelopeV1(root, { workflow: "setup" }, {
+    ok: true,
+    workflow: "setup",
+    phase_state: "awaiting_clarification",
+    approval: {
+      session_id: "0123456789abcdef01234567",
+      session_resumable: true,
+      current_stage: "product",
+      stages: [{ id: "product", input_keys: ["product"] }],
+    },
+    intent_prompts: [{
+      id: "future-stage-target",
+      choices: [{ id: "workflow" }],
+      responseTarget: { tool: "cadre_workflow", workflow: "setup", argument: "workflowPolicy" },
+    }],
+  });
+  assert.equal(outsideActiveStage.decision.kind, "blocked");
+  assert.match(outsideActiveStage.decision.reason, /outside the active stage: workflowPolicy/i);
+
   const workflowFields = [
     ["setup", "scaffolded"],
     ["setup_assist", "scaffolded"],
@@ -1947,7 +2001,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
       providerMode: "local",
       syncMode: "local",
       setupLsp: true,
-      styleGuideIds: ["general"],
+      styleGuideIds: [],
       integrations: {},
       product: { title: "Product", summary: "Test product" },
       productGuidelines: { title: "Product Guidelines", summary: "Keep setup review evidence explicit." },
@@ -1964,6 +2018,8 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.equal(preview.approval.manual_approval_required, true);
     assert.match(preview.approval.manual_approval_prompt, /approve product/);
     assert.equal(preview.approval.current_stage, "product");
+    assert.deepEqual(preview.styleGuides.detected, ["typescript"]);
+    assert.deepEqual(preview.styleGuides.selected, []);
     const productArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/product.md");
     assert.ok(productArtifact);
     assert.equal(Object.prototype.hasOwnProperty.call(productArtifact, "content"), false);
@@ -2035,11 +2091,7 @@ test("workflow setup requires staged approval before writing reviewed artifacts"
     assert.deepEqual(technicalManifest.files.map((file) => file.path).sort(), [
       "cadre/lsp.json",
       "cadre/styleguides/README.md",
-      "cadre/styleguides/general.json",
-      "cadre/styleguides/general.md",
       "cadre/styleguides/index.json",
-      "cadre/styleguides/typescript.json",
-      "cadre/styleguides/typescript.md",
       "cadre/tech-stack.json",
       "cadre/tech-stack.md",
     ]);
@@ -2204,37 +2256,49 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     ]);
     for (const prompt of preview.native_prompts) {
       assert.equal(prompt.schema, "cadre.native_prompt.v1");
-      assert.equal(prompt.allowCustom, true);
       assert.equal(prompt.responseTarget.tool, "cadre_workflow");
       assert.equal(prompt.responseTarget.workflow, "setup");
-      assert.equal(typeof prompt.customArgument, "string");
       assert.ok(prompt.choices.length > 0);
     }
 
     const provider = preview.native_prompts.find((prompt) => prompt.id === "setup-provider-mode");
     assert.equal(provider.selectionMode, "single");
+    assert.equal(provider.allowCustom, false);
+    assert.equal(provider.customArgument, undefined);
     assert.equal(provider.responseTarget.argument, "providerMode");
     assert.equal(provider.choices.find((choice) => choice.id === "local").recommended, true);
 
     const sync = preview.native_prompts.find((prompt) => prompt.id === "setup-sync-mode");
     assert.equal(sync.selectionMode, "single");
+    assert.equal(sync.allowCustom, false);
+    assert.equal(sync.customArgument, undefined);
     assert.equal(sync.responseTarget.argument, "syncMode");
     assert.equal(sync.choices.find((choice) => choice.id === "shared").recommended, true);
 
     const styleGuides = preview.native_prompts.find((prompt) => prompt.id === "setup-style-guides");
     assert.equal(styleGuides.selectionMode, "multi");
+    assert.equal(styleGuides.allowCustom, false);
+    assert.equal(styleGuides.customArgument, undefined);
     assert.equal(styleGuides.responseTarget.argument, "styleGuideIds");
     assert.ok(styleGuides.choices.some((choice) => choice.id === "general" && choice.recommended === true));
     assert.ok(styleGuides.choices.some((choice) => choice.id === "typescript" && choice.recommended === true));
 
     const lsp = preview.native_prompts.find((prompt) => prompt.id === "setup-lsp");
     assert.equal(lsp.selectionMode, "single");
+    assert.equal(lsp.allowCustom, false);
+    assert.equal(lsp.customArgument, undefined);
     assert.equal(lsp.responseTarget.argument, "writeLsp");
+    assert.deepEqual(lsp.responseTarget.valueMap["write-lsp"], { writeLsp: true });
+    assert.deepEqual(lsp.responseTarget.valueMap["skip-lsp"], { writeLsp: false });
+    assert.equal(lsp.responseTarget.valueMode, "value_map");
     assert.ok(lsp.choices.some((choice) => choice.id === "write-lsp" && choice.recommended === true));
 
     const optionalMcps = preview.native_prompts.find((prompt) => prompt.id === "setup-optional-mcps");
     assert.equal(optionalMcps.selectionMode, "multi");
-    assert.equal(optionalMcps.responseTarget.argument, "integrations");
+    assert.equal(optionalMcps.allowCustom, true);
+    assert.equal(optionalMcps.customArgument, "integrations.other");
+    assert.equal(optionalMcps.responseTarget.argument, "integrations.optional_mcps");
+    assert.equal(optionalMcps.responseTarget.customArgument, "integrations.other");
     assert.ok(optionalMcps.choices.some((choice) => choice.id === "code_search"));
 
     const compact = core.workflowPacket(root, {
@@ -2245,9 +2309,26 @@ test("workflow setup dry-run returns native recommendation prompts", () => {
     const compactProvider = compact.native_prompts.find((prompt) => prompt.id === "setup-provider-mode");
     assert.equal(compactProvider.selectionMode, "single");
     assert.equal(compactProvider.argument, "providerMode");
+    assert.deepEqual(compactProvider.responseTarget.valueMap.local, { providerMode: "local" });
     assert.ok(compactProvider.choices.some((choice) => choice.id === "local" && choice.label === "Local" && choice.recommended === true));
-    assert.equal(compactProvider.allowCustom, true);
+    assert.equal(compactProvider.allowCustom, false);
+    assert.equal(compactProvider.customArgument, null);
+    assert.equal(compactProvider.responseTarget.customArgument, null);
+    assert.deepEqual(compactProvider.responseTarget.selectedIds, []);
+    assert.equal(compactProvider.responseTarget.valueMode, "value_map");
+    assert.equal(compactProvider.responseTarget.customMode, "replace");
     assert.ok(compact.native_prompts.find((prompt) => prompt.id === "setup-style-guides").choices.some((choice) => choice.id === "typescript" && choice.recommended === true));
+    const compactLsp = compact.native_prompts.find((prompt) => prompt.id === "setup-lsp");
+    assert.deepEqual(compactLsp.responseTarget.valueMap["write-lsp"], { writeLsp: true });
+    assert.deepEqual(compactLsp.responseTarget.valueMap["skip-lsp"], { writeLsp: false });
+    assert.equal(compactLsp.responseTarget.valueMode, "value_map");
+    assert.equal(compactLsp.responseTarget.customMode, "replace");
+    const compactOptionalMcps = compact.native_prompts.find((prompt) => prompt.id === "setup-optional-mcps");
+    assert.equal(compactOptionalMcps.customArgument, "integrations.other");
+    assert.equal(compactOptionalMcps.responseTarget.customArgument, "integrations.other");
+    assert.deepEqual(compactOptionalMcps.responseTarget.selectedIds, []);
+    assert.equal(compactOptionalMcps.responseTarget.valueMode, "selected_ids");
+    assert.equal(compactOptionalMcps.responseTarget.customMode, "replace");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2272,6 +2353,25 @@ test("workflow setup dry-run exposes clarification prompts before approval", () 
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.json")), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "product.md")), false);
     assert.equal(git(root, ["status", "--porcelain", "--", "cadre"]).stdout.trim(), "");
+
+    const publicPreview = core.workflowPacketV1(root, {
+      workflow: "setup",
+      providerMode: "local",
+      styleGuideIds: [],
+      writeLsp: false,
+      integrations: {},
+    });
+    assert.equal(publicPreview.decision.kind, "clarification");
+    assert.deepEqual(publicPreview.decision.resume, {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow: "setup",
+        input: { providerMode: "local", styleGuideIds: [], writeLsp: false, integrations: {} },
+        execute: false,
+      },
+    });
+    assert.ok(publicPreview.decision.writable_paths.every((value) => value.startsWith("/arguments/input/")));
 
     const emptyPayload = core.workflowPacket(root, {
       workflow: "setup",
@@ -2626,17 +2726,14 @@ test("workflow setup writes detected and requested style guides from templates",
     assert.equal(setup.styleGuides.source, "tech-stack.json");
     assert.ok(setup.styleGuides.detected.includes("typescript"));
     assert.ok(setup.styleGuides.detected.includes("html-css"));
-    assert.ok(setup.styleGuides.selected.includes("general"));
-    assert.ok(setup.styleGuides.selected.includes("python"));
+    assert.deepEqual(setup.styleGuides.selected, ["python"]);
     assert.deepEqual(setup.styleGuides.missing, []);
     assert.equal(setup.approval.approval_complete, true);
-    assert.ok(setup.styleGuides.written.includes("cadre/styleguides/general.md"));
-    assert.ok(setup.styleGuides.written.includes("cadre/styleguides/typescript.md"));
     assert.ok(setup.styleGuides.written.includes("cadre/styleguides/python.md"));
     assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "index.json")), true);
     assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "README.md")), true);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "general.json")), true);
-    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), true);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "general.json")), false);
+    assert.equal(fs.existsSync(path.join(root, "cadre", "styleguides", "typescript.json")), false);
     assert.equal(fs.existsSync(path.join(root, "cadre", "code_styleguides")), false);
     assert.equal(setup.lsp_setup.written, true);
     assert.ok(setup.lsp_setup.added.includes("typescript"));
@@ -6198,8 +6295,6 @@ test("multi-level refresh collects and materializes only the active selected sta
       "cadre/repos.json",
       "cadre/repos.md",
       "cadre/styleguides/README.md",
-      "cadre/styleguides/general.json",
-      "cadre/styleguides/general.md",
       "cadre/styleguides/index.json",
       "cadre/styleguides/typescript.json",
       "cadre/styleguides/typescript.md",
@@ -6319,7 +6414,7 @@ test("style-guide refresh analyzes drift and preserves selection unless removal 
       assert.equal(paths.includes("cadre/styleguides/custom-team.json"), false);
       const index = readJson(path.join(root, "cadre", "styleguides", "index.json"));
       assert.deepEqual(index.selected, explicit
-        ? ["general", "typescript"]
+        ? ["typescript"]
         : ["custom-team", "general", "python", "typescript"]);
       assert.equal(fs.readFileSync(path.join(root, "cadre", "styleguides", "custom-team.json"), "utf8"), customCanonical);
       assert.equal(fs.readFileSync(path.join(root, "cadre", "styleguides", "custom-team.md"), "utf8"), customProjection);

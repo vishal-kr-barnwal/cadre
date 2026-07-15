@@ -107,7 +107,7 @@ function sourcePause(root: string, skillId: string, requests: JsonObject[], appr
     else if (path.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
     else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root)}&path=${encodeURIComponent(source)}`);
   }
-  const decision = skillFormattingDecision(root, approval);
+  const decision = skillFormattingDecision(root, approval, requests.map((request) => asOptionalString(request.id)).filter((value): value is string => Boolean(value)));
   return errors.length ? {
     ok: false,
     phase_state: "awaiting_clarification",
@@ -413,6 +413,7 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     phase_state: "awaiting_clarification",
     stage: "reference_evidence",
     approval,
+    decision: skillFormattingDecision(root, asJsonObject(approval), collection.missingReferenceIds),
     missing_payload: ["formattedReferences"],
     missing_reference_ids: collection.missingReferenceIds,
     error: `Reference content is required for: ${collection.missingReferenceIds.join(", ")}`,

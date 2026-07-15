@@ -8,23 +8,21 @@ description: "Use when the user invokes {{command}} or asks to start or continue
 Start or continue Cadre's `{{workflow}}` workflow through the packet-owned MCP
 contract.
 
-1. Call `cadre_workflow` with one nested request containing the resolved
-   project `root`, `workflow:"{{workflow}}"`, workflow-specific `input`, and
-   `execute:false`. Keep workflow fields inside `input` and omit `approval` on
-   the initial call.
-2. Follow the returned `decision`. If `next` is non-null, invoke exactly
-   `next.tool` with `next.arguments` once for that packet. After collecting
-   requested clarification or formatted reference content, use an exact
-   returned `decision.resume`; do not invent a resume call.
-3. Use `cadre_action` and `cadre_read` only when the packet returns that exact
-   action or resource. Outside `next`, use only an exact returned
-   `decision.required.write_back`, `data.workers[].dispatch.record_finish_packet`,
-   or `data.worker_callbacks[].record_finish_packet`; never invent merge or
-   cleanup callbacks.
+1. Call `cadre_workflow` with resolved project `root`,
+   `workflow:"{{workflow}}"`, workflow `input`, and `execute:false`. Keep fields
+   inside `input`; omit `approval` initially.
+2. Follow `decision`. If `next` is non-null, invoke exactly `next.tool` with `next.arguments`
+   once. For clarification or formatting, fill only
+   `decision.writable_paths` in `decision.resume`. For an explicit current-stage
+   edit, do the same with `decision.amend`. Invoke the returned full call; its
+   approval object contains only `session_id` and is not approval.
+   Apply prompt `value_map` patches or `selected_id(s)` exactly, preserving
+   `false` and `[]`; use custom text only when `allowCustom` is true.
+3. Use `cadre_action`, `cadre_read`, provider write-back, worker completion,
+   merge, or cleanup only through the exact returned typed call.
 4. Generate and review only the current stage: `decision.stage` for approval or
    `decision.current_stage` for clarification and formatting. Later stages stay
-   pending. `approval:{session_id}` alone resumes that session and is not
-   approval. After explicit user approval of the complete current stage, send
+   pending. After explicit user approval of the complete current stage, send
    its exact `stage`, `stage_hash`, `stage_revision`, and cumulative
    `approved_stages`. When no stage remains, invoke the exact returned `next`
    unchanged.

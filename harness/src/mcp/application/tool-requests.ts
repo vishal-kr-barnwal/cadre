@@ -1,5 +1,6 @@
 import type { JsonObject, RuntimeArgs } from "../../types";
 import { isRecord } from "../../guards";
+import { WORKFLOW_INPUT_RESERVED_KEYS } from "../../workflow-control-keys";
 
 interface WorkflowApproval {
   stage?: string;
@@ -29,15 +30,6 @@ export interface ActionToolRequest {
 export interface ReadToolRequest {
   uri: string;
 }
-
-const WORKFLOW_CONTROL_KEYS = new Set([
-  "root", "workflow", "execute", "approval", "skipSync", "source_manifest", "lspResult", "lsp_result",
-  "source_snapshot", "source_files", "source_file_hashes", "configOwnerRoot", "config_owner_root",
-  "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
-  "approvalStageHash", "approval_stage_hash", "approvalStageRevision", "approval_stage_revision",
-  "approvedStages", "approved_stages", "approvalComplete", "approval_complete",
-  "approvalCancel", "approval_cancel",
-]);
 
 const ACTION_INTERNAL_KEYS = new Set([
   "root", "action", "execute", "skipSync", "source_manifest", "source_snapshot", "source_files", "source_file_hashes", "lspResult", "lsp_result",
@@ -128,7 +120,7 @@ export function parseWorkflowToolRequest(value: unknown): WorkflowToolRequest {
   const request = object(value, "cadre_workflow arguments");
   onlyKeys(request, ["root", "workflow", "input", "execute", "approval"], "cadre_workflow arguments");
   const input = optionalObject(request.input, "cadre_workflow.input");
-  rejectControlKeys(input, WORKFLOW_CONTROL_KEYS, "cadre_workflow.input");
+  rejectControlKeys(input, WORKFLOW_INPUT_RESERVED_KEYS, "cadre_workflow.input");
   const approval = workflowApproval(request.approval);
   return {
     root: requiredString(request.root, "cadre_workflow.root"),

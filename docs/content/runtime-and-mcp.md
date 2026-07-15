@@ -47,15 +47,17 @@ or resource before considering another public tool.
 A workflow response has at most one immediate single-agent continuation. If
 `next` is non-null, clients invoke exactly `next.tool` with `next.arguments`
 once for that packet. The only typed callbacks outside `next` are
-an exact `decision.resume` after clarification or reference formatting,
+`decision.resume` after clarification or reference formatting,
+`decision.amend` for an explicit current-stage edit,
 `decision.required.write_back` after external provider evidence is collected,
 each `data.workers[].dispatch.record_finish_packet` in a parallel fan-out, and
 exact completion or recovery callbacks reissued under
 `data.worker_callbacks[].record_finish_packet`.
 Clients do not recover any other action from prose or internal fields.
 
-For staged workflows, `approval:{session_id}` alone resumes the active stage
-and is not approval. Only explicit user approval permits the exact current
+For staged workflows, fill only `decision.writable_paths` in the complete
+returned `decision.resume` or `decision.amend`. Their session-only approval
+state is not approval. Only explicit user approval permits the exact current
 `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and next
 cumulative `approved_stages` prefix; a clarification's `decision.current_stage`
 is not an approval stage token. The runtime generates

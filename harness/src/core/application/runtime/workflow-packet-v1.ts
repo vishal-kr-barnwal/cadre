@@ -3,6 +3,13 @@ import { asJsonArray, asJsonObject, asOptionalString, asStringArray, isJsonValue
 
 import type { CoreResult } from "./contracts";
 import { approvalPayload } from "./approval-request";
+import {
+  approvalStageInputKeys,
+  promptWritableInputPaths,
+  publicWorkflowInput,
+  workflowContinuationCall,
+  writableInputPaths,
+} from "./workflow-continuations";
 import { workflowPacket } from "./workflow-packet";
 
 export type CadrePublicTool = "cadre_workflow" | "cadre_action" | "cadre_read";
@@ -61,7 +68,7 @@ function boundedJsonObject(value: unknown): JsonObject {
   return bounded && typeof bounded === "object" && !Array.isArray(bounded) ? bounded : {};
 }
 
-function approvalDecision(result: JsonObject): JsonObject | null {
+function approvalDecision(root: string, workflow: string, result: JsonObject): JsonObject | null {
   const approval = asJsonObject(result.approval);
   if (approval.cancelled === true) return null;
   const currentStage = asOptionalString(approval.current_stage);
@@ -82,20 +89,25 @@ function approvalDecision(result: JsonObject): JsonObject | null {
     }
     return null;
   }
+  const sessionId = asOptionalString(approval.session_id) || null;
+  const writable = writableInputPaths(approvalStageInputKeys(approval, currentStage));
+  if (writable.error) return { kind: "blocked", reason: writable.error };
   return {
     kind: "approval",
     stage: currentStage,
     title: asOptionalString(approval.current_stage_title) || null,
-    session_id: asOptionalString(approval.session_id) || null,
+    session_id: sessionId,
     stage_hash: asOptionalString(approval.current_stage_hash) || null,
     stage_revision: typeof approval.current_stage_revision === "number" ? approval.current_stage_revision : null,
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
+    amend: sessionId && approval.session_resumable === true ? workflowContinuationCall(root, workflow, {}, sessionId) : null,
+    writable_paths: writable.paths,
     prompt: asOptionalString(approval.manual_approval_prompt) || "Review the current stage and ask for explicit user approval.",
   };
 }
 
-function workflowDecision(result: JsonObject): JsonObject {
+function workflowDecision(root: string, workflow: string, result: JsonObject, args: RuntimeArgs): JsonObject {
   const explicit = asJsonObject(result.decision);
   if (Object.keys(explicit).length > 0) return explicit;
   const skills = asJsonObject(result.project_skills);
@@ -103,32 +115,49 @@ function workflowDecision(result: JsonObject): JsonObject {
   if (Object.keys(skillDecision).length > 0) return skillDecision;
   const approvalState = asJsonObject(result.approval);
   const approvalError = asOptionalString(approvalState.approval_error);
-  if (approvalError) return {
-    kind: "blocked",
-    reason: approvalError,
-    session_id: asOptionalString(approvalState.session_id) || null,
-    current_stage: asOptionalString(approvalState.current_stage) || null,
-    stage_hash: asOptionalString(approvalState.current_stage_hash) || null,
-    stage_revision: typeof approvalState.current_stage_revision === "number"
-      ? approvalState.current_stage_revision
-      : null,
-    approved_stages: asStringArray(approvalState.approved_stages),
-    pending_stages: asStringArray(approvalState.pending_stages),
-  };
+  if (approvalError) {
+    const sessionId = asOptionalString(approvalState.session_id) || null;
+    const currentStage = asOptionalString(approvalState.current_stage) || null;
+    const writable = writableInputPaths(approvalStageInputKeys(approvalState, currentStage));
+    return {
+      kind: "blocked",
+      reason: writable.error || approvalError,
+      session_id: sessionId,
+      current_stage: currentStage,
+      stage_hash: asOptionalString(approvalState.current_stage_hash) || null,
+      stage_revision: typeof approvalState.current_stage_revision === "number"
+        ? approvalState.current_stage_revision
+        : null,
+      approved_stages: asStringArray(approvalState.approved_stages),
+      pending_stages: asStringArray(approvalState.pending_stages),
+      resume: sessionId && approvalState.session_resumable === true
+        ? workflowContinuationCall(root, workflow, {}, sessionId)
+        : null,
+      writable_paths: writable.paths,
+    };
+  }
   const intentPrompts = asJsonArray(result.intent_prompts);
-  const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
+  const prompts = (intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts)).map(asJsonObject);
   if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {
     const approval = asJsonObject(result.approval);
     const sessionId = asOptionalString(approval.session_id) || null;
+    const resumableSessionId = sessionId && approval.session_resumable === true ? sessionId : null;
+    const currentStage = asOptionalString(approval.current_stage) || null;
+    const stageInputKeys = approvalStageInputKeys(approval, currentStage);
+    const required = asStringArray(result.missing_payload);
+    const writableRequired = required.length > 0 ? required : (resumableSessionId && prompts.length === 0 ? stageInputKeys : []);
+    const writable = promptWritableInputPaths(prompts, writableRequired, workflow, resumableSessionId ? stageInputKeys : []);
+    if (writable.error) return { kind: "blocked", reason: `Invalid clarification response target: ${writable.error}` };
     return {
       kind: "clarification",
       prompts,
-      required: asStringArray(result.missing_payload),
+      required,
       session_id: sessionId,
-      current_stage: asOptionalString(approval.current_stage) || null,
+      current_stage: currentStage,
       approved_stages: asStringArray(approval.approved_stages),
       pending_stages: asStringArray(approval.pending_stages),
-      resume: sessionId ? { approval: { session_id: sessionId } } : null,
+      resume: workflowContinuationCall(root, workflow, resumableSessionId ? {} : publicWorkflowInput(args), resumableSessionId),
+      writable_paths: writable.paths,
     };
   }
   if (result.phase_state === "pending_provider") {
@@ -137,7 +166,7 @@ function workflowDecision(result: JsonObject): JsonObject {
   if (result.ok === false) {
     return { kind: "blocked", reason: asOptionalString(result.error || result.reason || result.stage) || "Cadre workflow failed" };
   }
-  const approval = approvalDecision(result);
+  const approval = approvalDecision(root, workflow, result);
   if (approval) return approval;
   const completed = ["executed", "complete", "completed"].includes(String(result.phase_state || ""));
   return { kind: completed ? "complete" : "ready" };
@@ -389,7 +418,7 @@ export function workflowPacketEnvelopeV1(root: string, args: RuntimeArgs, value:
     ok,
     workflow,
     phase: asOptionalString(result.phase_state) || (ok ? "ready" : "blocked"),
-    decision: workflowDecision(result),
+    decision: workflowDecision(root, workflow, result, args),
     required: requiredInputs(result, workflow, args),
     next: nextCall(root, workflow, result, resources, args),
     artifacts: workflowArtifacts(result),

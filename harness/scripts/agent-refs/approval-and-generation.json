@@ -6,14 +6,14 @@
   "markdownUse": "human_projection_only",
   "rules": [
     "Generate, materialize, and ask for explicit user approval of only the current stage.",
-    "A session_id-only continuation is a resume, not approval.",
+    "A returned decision.resume or decision.amend with session_id-only approval state is not approval.",
     "Never send stage, stage_hash, stage_revision, approved_stages, or complete before explicit user approval of the exact current review set.",
     "Never inline generated artifact bodies when review paths are available."
   ],
   "sections": [
     {
       "heading": "Resume",
-      "body": "For current-stage clarification or formatting, continue the same workflow with `approval: {session_id}` only. Preserve the approved prefix and do not reopen or pre-generate later stages."
+      "body": "For current-stage clarification or formatting, fill only decision.writable_paths in the returned decision.resume and invoke that full call. For an explicit current-stage revision, use decision.amend the same way. Both preserve the approved prefix and never approve, reopen, or pre-generate later stages."
     },
     {
       "heading": "Stage",

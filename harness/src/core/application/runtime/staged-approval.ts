@@ -180,6 +180,7 @@ export function stagedApprovalState(
     workflow,
     required: true,
     session_id: sessionId,
+    session_resumable: Boolean(session && active),
     payload_hash: session?.payload_hash || payloadHash,
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
@@ -187,10 +188,9 @@ export function stagedApprovalState(
     manual_approval_required: !deferredForClarification,
     manual_approval_prompt: manualPrompt,
     deferred_for_clarification: deferredForClarification,
-    resume_without_approval: deferredForClarification ? { approval: { session_id: sessionId } } : null,
     approval_instruction: active
       ? deferredForClarification
-        ? `Collect only the missing ${active.id} input, then resume session ${sessionId} without recording approval.`
+        ? `Collect only the missing ${active.id} input, then use the returned public decision.resume without recording approval.`
         : `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.`
       : "Ask the user for explicit staged approval before sending any staged approval packet.",
     not_approval: [
@@ -216,6 +216,7 @@ export function stagedApprovalState(
         title: stage.title,
         description: stage.description,
         approved: approved.has(stage.id),
+        input_keys: stage.inputKeys || [],
         revision: session ? stageRecord(session, stage.id)?.revision ?? 0 : 0,
         hash: stageHashes[stage.id],
         file_count: stageFiles.length,
@@ -247,7 +248,7 @@ export function stagedApprovalState(
         ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."]
         : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`]
       : active && deferredForClarification
-        ? [`Resume ${workflow} with approval.session_id:${sessionId} after collecting only the missing ${active.id} input; this continuation is not approval.`]
+        ? [`Fill only the returned decision.writable_paths after collecting the missing ${active.id} input, then invoke decision.resume; this continuation is not approval.`]
         : active
         ? [
           `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,

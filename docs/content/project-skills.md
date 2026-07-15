@@ -543,11 +543,11 @@ The opaque source token is bound to that canonical root and unchanged file
 content, so use the URI exactly as returned. Source files and their parent path
 must be regular, link-free project entries; Cadre rejects symlinked sources
 even when their target remains inside the project. Read the returned resource,
-format it, and use the exact `decision.resume` call shape with
-`formattedReferences` or `formatted_references` mapping each reference ID to
-its formatted text. Partial mappings are accepted and accumulated in the same
+format it, then fill only the per-reference `decision.writable_paths` in the
+returned `decision.resume`. Its `formattedReferences` object maps each requested
+reference ID to formatted text. Partial mappings are accepted and accumulated in the same
 session, so Cadre can request the next source one by one. During this pause,
-`approval: {session_id}` is resume state only and no reference target is
+the continuation's session-only approval object is resume state only and no reference target is
 materialized. When all requested content is ready, Cadre materializes the
 collective references stage for review.
 
@@ -568,8 +568,9 @@ Mutation review stages are dynamic:
   and source deletion in the same atomic review.
 
 Only the active stage is written at final repository paths; later stages stay
-pending and unmaterialized. `approval: {session_id}` alone resumes and never
-approves. After explicit user approval, send the exact returned `stage` and
+pending and unmaterialized. Use the returned `decision.resume` or
+`decision.amend`; their session-only approval state never approves. After
+explicit user approval, send the exact returned `stage` and
 its `stage_hash` and `stage_revision` with the cumulative `approved_stages`
 prefix. After every stage is approved, invoke the exact returned `next` call
 for completion and execution. If reviewed files or the source skill change

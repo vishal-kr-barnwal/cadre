@@ -40,11 +40,11 @@ JSON/JSONL file and its projection therefore share one approval and hash
 snapshot, as do grouped technical files or a collective reference change.
 After explicit user approval, send `approval: {session_id, stage, stage_hash,
 stage_revision, approved_stages}` with the exact returned stage, hash, revision,
-and cumulative approved-stage prefix. `approval: {session_id}` alone only
-resumes the session; it does not approve a stage. If the workflow pauses for clarification or source formatting
-after a session exists, keep that session and invoke the exact returned
-continuation using the returned `decision.resume` data after collecting the
-requested input.
+and cumulative approved-stage prefix. If the workflow pauses for clarification
+or source formatting, fill only the returned `decision.writable_paths` in the
+complete `decision.resume`; its session-only approval state does not approve a
+stage. Use `decision.amend` the same way when the user explicitly edits the
+active review stage.
 
 Only after every stage is approved does Cadre return the final `next` call.
 Invoke that call unchanged; it carries completion and execution authorization.
@@ -79,9 +79,14 @@ What setup gathers:
 
 Setup dry-runs may include `native_prompts` with schema
 `cadre.native_prompt.v1`. Agents should present those through the host client's
-native selection UI when available, then pass the selected ids or custom "Other"
-text back as structured setup arguments such as `providerMode`, `syncMode`,
-`styleGuideIds`, `writeLsp`, and `integrations`. Prompt answers are not stored
+native selection UI when available, then pass the selected ids back as
+structured setup arguments such as `providerMode`, `syncMode`,
+`styleGuideIds`, `writeLsp`, and `integrations`. Accept custom "Other" text only
+when the prompt sets `allowCustom:true`, using its exact `customArgument`.
+Apply `responseTarget.valueMode` exactly: merge `value_map` patches, set one
+`selected_id`, or set the `selected_ids` array including `[]`; preserve mapped
+`false` values and follow `customMode`.
+Prompt answers are not stored
 as standalone Cadre state. Answer setup prompts before asking the user to
 approve the current setup review stage.
 

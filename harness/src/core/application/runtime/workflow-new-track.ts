@@ -127,6 +127,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   if (collection.schemaIssues.length > 0 && !approvalError) {
     const encodedRoot = encodeURIComponent(root);
     const artifact = collection.activeKind || "spec";
+    const schemaInput = collection.missingEvidence.length > 0 ? collection.missingEvidence : [artifact];
     return {
       ...summary,
       ok: false,
@@ -137,11 +138,11 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       approval,
       schema_errors: collection.schemaIssues,
       schema_resources: [`cadre://artifact-schema?root=${encodedRoot}&artifact=${artifact}`],
-      missing_payload: collection.missingEvidence,
-      required_payload: collection.missingEvidence,
+      missing_payload: schemaInput,
+      required_payload: schemaInput,
       warnings,
       next_actions: [
-        `Load the Cadre ${artifact} schema, correct only the current ${artifact} input, and resume this approval session without recording approval.`,
+        `Load the Cadre ${artifact} schema, correct only decision.writable_paths for the current ${artifact}, and invoke decision.resume without recording approval.`,
       ],
       error: `Current newtrack ${artifact} JSON does not match the Cadre schema.`,
     };
@@ -160,7 +161,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
       required_payload: collection.missingEvidence,
       warnings,
       next_actions: [
-        `Supply only the current ${collection.activeKind || "spec"} evidence and resume with approval.session_id; session resume is not approval.`,
+        `Supply only the current ${collection.activeKind || "spec"} evidence at decision.writable_paths and invoke decision.resume; session resume is not approval.`,
       ],
       error: intentPrompts.length > 0
         ? "New track intent needs clearer goal, outcome, acceptance, or scope evidence before spec review."

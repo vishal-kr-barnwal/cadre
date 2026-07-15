@@ -67,12 +67,14 @@ Symptoms:
 - Release requests completed-track evidence or substantive `releaseNotes`.
 
 Cadre no longer writes default artifacts before it has workflow-specific
-evidence. Supply meaningful project content requested by `intent_prompts`, then
-continue the same workflow using the exact returned `decision.resume` data.
+evidence. Supply meaningful project content requested by `intent_prompts` only
+at the returned `decision.writable_paths`, then invoke the complete
+`decision.resume` call.
 Clarification before the first review stage does not create target previews or
 an approval session. If a session already exists, clarification keeps that same
-session; resume it with `approval: {session_id}` and the requested input, which
-does not approve the current stage.
+session. Fill only the returned `decision.writable_paths` in the complete
+`decision.resume` call. Its session-only approval state does not approve the
+current stage.
 
 ## A Staged Workflow Repeats Or Generates Future Files
 
@@ -85,11 +87,11 @@ Symptoms:
 
 Fix:
 
-1. Keep the original session for clarification and formatting pauses. Continue
-   with the exact returned `decision.resume` data or call shape after adding
-   only the requested content. A clarification may return an approval fragment;
-   reference formatting may return full tool arguments.
-2. To resume without approval, send only `approval: {session_id}`. Never add
+1. Keep the original session for clarification and formatting pauses. Add only
+   the requested content at `decision.writable_paths` in the complete returned
+   `decision.resume`, then invoke it. For an explicit edit to the active review
+   stage, use the returned `decision.amend` the same way.
+2. A resume or amendment carries only `approval: {session_id}`. Never add
    `stage`, `stage_hash`, `stage_revision`, `approved_stages`, or `complete`
    until the user explicitly approves the active atomic file set.
 3. After approval, send the exact returned `stage`, `stage_hash`,
@@ -114,9 +116,9 @@ Fix:
 - If the earlier preview is untouched and wholly unapproved, rerun the
   corrected payload; Cadre supersedes it and restores its baseline
   automatically.
-- If any stage was approved, resume that session or cancel it through the same
-  workflow with `approval: {session_id}` or cancel it with
-  `approval: {session_id, cancel:true}`.
+- If any stage was approved, continue through the exact returned
+  `decision.resume` or `decision.amend`. To abandon it, cancel through the same
+  workflow with `approval: {session_id, cancel:true}`.
 - If a file was edited, staged, or committed, preserve that work and reconcile
   it deliberately. Cadre will not overwrite it or silently roll Git state
   backward.

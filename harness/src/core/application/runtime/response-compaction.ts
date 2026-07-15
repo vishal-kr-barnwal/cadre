@@ -187,6 +187,16 @@ function compactNativePrompts(value: unknown): JsonObject[] {
     const prompt = asJsonObject(entry);
     const target = asJsonObject(prompt.responseTarget);
     const choices = Array.isArray(prompt.choices) ? prompt.choices.map(asJsonObject) : [];
+    const responseTarget = {
+      tool: asOptionalString(target.tool) || null,
+      workflow: asOptionalString(target.workflow) || null,
+      argument: asOptionalString(target.argument) || null,
+      customArgument: asOptionalString(target.customArgument) || null,
+      valueMap: asJsonObject(target.valueMap),
+      selectedIds: asStringArray(target.selectedIds),
+      valueMode: asOptionalString(target.valueMode) || (asOptionalString(prompt.selectionMode) === "multi" ? "selected_ids" : "selected_id"),
+      customMode: asOptionalString(target.customMode) || "replace",
+    };
     return {
       id: asOptionalString(prompt.id) || null,
       title: asOptionalString(prompt.title) || null,
@@ -195,6 +205,7 @@ function compactNativePrompts(value: unknown): JsonObject[] {
       allowCustom: prompt.allowCustom === true,
       argument: asOptionalString(target.argument) || null,
       customArgument: asOptionalString(prompt.customArgument) || asOptionalString(target.customArgument) || null,
+      responseTarget,
       choices: choices.map((choice) => ({
         id: asOptionalString(choice.id) || null,
         label: asOptionalString(choice.label) || asOptionalString(choice.id) || null,

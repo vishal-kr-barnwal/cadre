@@ -27,9 +27,10 @@ target-preview recovery across staged workflows.
   formula pour review spec before plan. Project-skill create/update reviews the
   skill before formatting and reviewing references; rename/remove reviews one
   exact mutation set.
-- Only the active stage's review files are generated and materialized. A
-  session-only `approval: {session_id}` resumes clarification or formatting and
-  is never approval; stage approval requires the exact returned stage, hash,
+- Only the active stage's review files are generated and materialized.
+  Clarification returns a complete `decision.resume`, active-stage edits return
+  `decision.amend`, and only their declared `writable_paths` may change. Their
+  session-only approval state is never approval; stage approval requires the exact returned stage, hash,
   revision, and cumulative prefix, and final execution invokes the exact
   returned `next`.
 - Formula pour now retains its formula identity, resolved variables, and

@@ -119,7 +119,10 @@ In Copilot or Antigravity, activate the Cadre skill and ask for `cadre-setup`.
 Setup asks for product context, tech stack, topology, sync mode, provider mode,
 quality gate, optional CI templates, and LSP setup. Setup dry-runs can return
 native recommendation prompts for Codex, Claude, Copilot, and Antigravity so
-you can select one or more recommended options, or type a custom "Other" value.
+you can select one or more recommended options. A custom "Other" value is
+accepted only when that prompt returns `allowCustom:true` and a
+`customArgument`. Prompt selections follow the returned `valueMode` and
+`valueMap` exactly, including mapped `false` and empty selections.
 Discovery packets can inspect the fresh repository before `cadre/` exists.
 Cadre staged dry-runs generate and materialize only the active stage at its
 intended target paths so you can inspect `git diff`; later stages remain pending
@@ -130,8 +133,10 @@ stage, with every file it owns treated atomically.
 
 Active review-set materialization is the only class of pre-execution write.
 Durable state transitions, trace records, indexes, events, and non-review
-effects require `execute:true`. `approval:{session_id}` alone resumes the
-existing stage and is not approval. Only after explicit user approval should a
+effects require `execute:true`. Clarification uses the full returned
+`decision.resume`; an explicit active-stage edit uses `decision.amend`. Change
+only their `writable_paths`; their session-only approval state is not approval.
+Only after explicit user approval should a
 continuation include the exact returned `decision.stage`, `decision.stage_hash`,
 `decision.stage_revision`, and cumulative `approved_stages` prefix. Execution
 is offered only after every stage is approved; invoke only the exact returned

@@ -127,7 +127,7 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       required_payload: collection.missingEvidence,
       warnings,
       error: `Current revision stage requires evidence-backed ${collection.missingEvidence.join(" and ")} JSON.`,
-      next_actions: ["Supply only the current revision artifact and resume with the returned approval session; this is not approval."],
+      next_actions: ["Supply only the current revision artifact at decision.writable_paths and invoke decision.resume; this is not approval."],
     };
   }
   if (args.execute !== true) {

@@ -40,9 +40,8 @@ export function setupApprovalStages(polyrepoRequested: boolean): ApprovalStage[]
         "techStackOther", "techStackIntent", "techStackSummary",
         "styleGuideIds", "style_guide_ids", "styleGuides", "style_guides",
         "writeLsp", "write_lsp", "setupLsp", "setup_lsp", "lsp",
-        "lspSetupOther",
-        "providerMode", "provider_mode", "provider", "providerModeOther",
-        "syncMode", "sync_mode", "syncModeOther", "teamSize", "team_size",
+        "providerMode", "provider_mode", "provider",
+        "syncMode", "sync_mode", "teamSize", "team_size",
         "integrations", "config",
         "topology", "polyrepo", "repos",
         "ciProvider", "ci_provider", "writeCi", "write_ci",
@@ -175,6 +174,7 @@ export function releaseApprovalStages(_hasGitActions: boolean): ApprovalStage[] 
       title: "Release Notes",
       description: "Human-facing release notes for the selected completed tracks.",
       documentIds: ["release_notes"],
+      inputKeys: ["releaseNotes", "release_notes"],
     },
   ];
 }
@@ -186,6 +186,7 @@ export function handoffApprovalStages(): ApprovalStage[] {
       title: "Handoff",
       description: "Generated handoff document and its structured canonical context.",
       documentIds: ["handoff"],
+      inputKeys: ["handoffText", "handoff_text"],
     },
   ];
 }

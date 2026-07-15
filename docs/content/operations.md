@@ -134,9 +134,9 @@ restores the recorded baseline and removes review-only Git intent-to-add state
 before producing the new preview.
 
 If any overlapping stage was approved, resume or explicitly cancel that
-approval instead of starting a competing payload. `approval: {session_id}`
-resumes that session without approving a stage. Cancellation uses the same
-workflow with `approval: {session_id, cancel:true}`. It succeeds only
+approval instead of starting a competing payload. Use the complete returned
+session-only recovery call; it does not approve a stage. Cancellation uses the
+same workflow with `approval: {session_id, cancel:true}`. It succeeds only
 when preview content, the Git index, and the recorded HEAD baseline are
 unchanged. If validation or restoration fails, Cadre keeps the session and
 reports the paths that need deliberate recovery; never delete the session or

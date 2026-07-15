@@ -243,7 +243,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       approval,
       warnings,
       error: `Current refresh level requires evidence-backed canonical input: ${documents.missingEvidence.join(", ")}`,
-      next_actions: ["Use the refresh analysis to supply the current level under proposedContext, then resume with the returned approval session; this is not approval."],
+      next_actions: ["Use the refresh analysis to supply the current level only at decision.writable_paths, then invoke the returned decision.resume; this is not approval."],
     };
   }
   const awaitingDocumentReview = args.execute === true && semanticRefresh && !stagedApprovalReady(approval);

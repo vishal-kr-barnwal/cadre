@@ -353,9 +353,13 @@ function styleGuideFiles(root: string, args: RuntimeArgs): ReviewFile[] {
   const styleGuides = setupStyleGuides(root, {
     ...args,
     ...(isRecord(techStack) ? { techStack: asJsonObject(techStack) } : {}),
-    styleGuideIds: requestedIds,
+    ...(rawIds === undefined ? {} : { styleGuideIds: requestedIds }),
   });
-  const selected = Array.from(new Set([...asStringArray(styleGuides.selected), ...customIds])).sort();
+  const selected = Array.from(new Set([
+    ...asStringArray(styleGuides.selected),
+    ...(rawIds === undefined ? currentIds : []),
+    ...customIds,
+  ])).sort();
   const missing = asStringArray(styleGuides.missing).filter((id) => !customIds.includes(id));
   return styleGuideReviewFiles({
     ...styleGuides,

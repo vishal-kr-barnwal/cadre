@@ -13,6 +13,7 @@ import { readApprovalSession } from "./approval-session-store";
 import type { ReviewFile } from "./contracts";
 import { renderProjectSkillProjection } from "./project-skill-projection";
 import type { ApprovalStage } from "./staged-approval-stages";
+import { inputObjectMemberPointer } from "./workflow-continuations";
 
 export interface SkillReferencePlan {
   changedPaths: string[];
@@ -371,8 +372,12 @@ export function approvedSkillExecutionFiles(
   return { files, manifest };
 }
 
-export function skillFormattingDecision(root: string, approval: JsonObject): JsonObject {
+export function skillFormattingDecision(root: string, approval: JsonObject, missingReferenceIds: string[] = []): JsonObject {
   const sessionId = asOptionalString(approval.session_id) || null;
+  const referencePaths = Array.from(new Set(missingReferenceIds)).flatMap((id) => {
+    const pointer = inputObjectMemberPointer("formattedReferences", id);
+    return pointer ? [pointer] : [];
+  });
   return {
     kind: "format_reference",
     required: ["formattedReferences"],
@@ -385,10 +390,11 @@ export function skillFormattingDecision(root: string, approval: JsonObject): Jso
       arguments: {
         root,
         workflow: "skill",
-        input: { formattedReferences: "<reference-id to formatted text>" },
+        input: { formattedReferences: {} },
         execute: false,
         approval: { session_id: sessionId },
       },
     } : null,
+    writable_paths: referencePaths.length > 0 ? referencePaths : ["/arguments/input/formattedReferences"],
   };
 }

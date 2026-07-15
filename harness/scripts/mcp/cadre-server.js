@@ -2041,6 +2041,7 @@ function compactApproval(value) {
     required: approval.required !== false,
     ...approval.cancelled === true ? { cancelled: true } : {},
     session_id: asOptionalString(approval.session_id) || null,
+    session_resumable: approval.session_resumable === true,
     explicit_user_approval_required: approval.explicit_user_approval_required === true,
     manual_approval_required: approval.manual_approval_required === true,
     manual_approval_prompt: asOptionalString(approval.manual_approval_prompt) || null,
@@ -2058,6 +2059,7 @@ function compactApproval(value) {
     current_document: compactCurrentDocument(approval.current_document),
     stages: stages.map((stage) => ({
       id: asOptionalString(stage.id) || null,
+      input_keys: asStringArray(stage.input_keys),
       hash: asOptionalString(stage.hash) || null,
       revision: typeof stage.revision === "number" ? stage.revision : 0
     })),
@@ -2234,6 +2236,16 @@ function compactNativePrompts(value) {
     const prompt = asJsonObject(entry);
     const target2 = asJsonObject(prompt.responseTarget);
     const choices = Array.isArray(prompt.choices) ? prompt.choices.map(asJsonObject) : [];
+    const responseTarget = {
+      tool: asOptionalString(target2.tool) || null,
+      workflow: asOptionalString(target2.workflow) || null,
+      argument: asOptionalString(target2.argument) || null,
+      customArgument: asOptionalString(target2.customArgument) || null,
+      valueMap: asJsonObject(target2.valueMap),
+      selectedIds: asStringArray(target2.selectedIds),
+      valueMode: asOptionalString(target2.valueMode) || (asOptionalString(prompt.selectionMode) === "multi" ? "selected_ids" : "selected_id"),
+      customMode: asOptionalString(target2.customMode) || "replace"
+    };
     return {
       id: asOptionalString(prompt.id) || null,
       title: asOptionalString(prompt.title) || null,
@@ -2242,6 +2254,7 @@ function compactNativePrompts(value) {
       allowCustom: prompt.allowCustom === true,
       argument: asOptionalString(target2.argument) || null,
       customArgument: asOptionalString(prompt.customArgument) || asOptionalString(target2.customArgument) || null,
+      responseTarget,
       choices: choices.map((choice2) => ({
         id: asOptionalString(choice2.id) || null,
         label: asOptionalString(choice2.label) || asOptionalString(choice2.id) || null,
@@ -5830,13 +5843,10 @@ function setupStyleGuides(root2, args = {}) {
   const techStack = techStackForPacket(root2, args) || {};
   const detected = styleGuideIdsForTechStack(techStack).filter((id) => available.has(id));
   const rawArgs6 = args;
+  const selectionProvided = Object.prototype.hasOwnProperty.call(rawArgs6, "styleGuideIds") || Object.prototype.hasOwnProperty.call(rawArgs6, "style_guide_ids");
   const requested = requestedStyleGuideIds(rawArgs6.styleGuideIds ?? rawArgs6.style_guide_ids);
   const missing = requested.filter((id) => !available.has(id));
-  const selected = Array.from(/* @__PURE__ */ new Set([
-    ...available.has("general") ? ["general"] : [],
-    ...detected,
-    ...requested.filter((id) => available.has(id))
-  ])).sort();
+  const selected = Array.from(new Set(selectionProvided ? requested.filter((id) => available.has(id)) : [...available.has("general") ? ["general"] : [], ...detected])).sort();
   return {
     ok: true,
     valid: missing.length === 0,
@@ -9901,6 +9911,7 @@ function choice(id, label, description, recommended = false) {
   return { id, label, description, recommended };
 }
 function nativePrompt(id, title, question, selectionMode, choices, responseTarget, customArgument) {
+  const allowCustom = Boolean(customArgument);
   return {
     version: 1,
     schema: "cadre.native_prompt.v1",
@@ -9909,10 +9920,14 @@ function nativePrompt(id, title, question, selectionMode, choices, responseTarge
     question,
     selectionMode,
     choices,
-    allowCustom: true,
-    customLabel: "Other",
-    customArgument,
-    responseTarget
+    allowCustom,
+    ...allowCustom ? { customLabel: "Other", customArgument } : {},
+    responseTarget: {
+      ...responseTarget,
+      ...customArgument ? { customArgument } : {},
+      valueMode: Object.keys(asJsonObject(responseTarget.valueMap)).length > 0 ? "value_map" : selectionMode === "multi" ? "selected_ids" : "selected_id",
+      customMode: selectionMode === "multi" && customArgument === responseTarget.argument ? "append_unique" : "replace"
+    }
   };
 }
 function recommendedProviderMode(provider) {
@@ -9935,14 +9950,13 @@ function providerPrompt(provider) {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "providerMode",
-      customArgument: "providerModeOther",
       valueMap: {
         local: { providerMode: "local" },
         github: { providerMode: "github" },
         gitlab: { providerMode: "gitlab" }
       }
     },
-    "providerModeOther"
+    null
   );
 }
 function hasAnyArg(args, names) {
@@ -9964,13 +9978,12 @@ function syncPrompt(syncMode) {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "syncMode",
-      customArgument: "syncModeOther",
       valueMap: {
         local: { syncMode: "local" },
         shared: { syncMode: "shared" }
       }
     },
-    "syncModeOther"
+    null
   );
 }
 function styleGuideDescription(id, detected, selected) {
@@ -9994,10 +10007,9 @@ function styleGuidePrompt(styleGuides) {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "styleGuideIds",
-      customArgument: "styleGuideIds",
       selectedIds: asStringArray(styleGuides.selected)
     },
-    "styleGuideIds"
+    null
   );
 }
 function lspRecommendationIds(lspSetup2) {
@@ -10022,13 +10034,12 @@ function lspPrompt(lspSetup2) {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "writeLsp",
-      customArgument: "lspSetupOther",
       valueMap: {
         "write-lsp": { writeLsp: true },
         "skip-lsp": { writeLsp: false }
       }
     },
-    "lspSetupOther"
+    null
   );
 }
 function optionalMcpRecommendations(integrations) {
@@ -10056,7 +10067,7 @@ function optionalMcpPrompt(integrations) {
     {
       tool: "cadre_workflow",
       workflow: "setup",
-      argument: "integrations",
+      argument: "integrations.optional_mcps",
       customArgument: "integrations.other",
       selectedIds: []
     },
@@ -11839,14 +11850,11 @@ function setupApprovalStages(polyrepoRequested) {
         "setupLsp",
         "setup_lsp",
         "lsp",
-        "lspSetupOther",
         "providerMode",
         "provider_mode",
         "provider",
-        "providerModeOther",
         "syncMode",
         "sync_mode",
-        "syncModeOther",
         "teamSize",
         "team_size",
         "integrations",
@@ -12005,7 +12013,8 @@ function releaseApprovalStages(_hasGitActions) {
       id: "release_notes",
       title: "Release Notes",
       description: "Human-facing release notes for the selected completed tracks.",
-      documentIds: ["release_notes"]
+      documentIds: ["release_notes"],
+      inputKeys: ["releaseNotes", "release_notes"]
     }
   ];
 }
@@ -12015,7 +12024,8 @@ function handoffApprovalStages() {
       id: "handoff",
       title: "Handoff",
       description: "Generated handoff document and its structured canonical context.",
-      documentIds: ["handoff"]
+      documentIds: ["handoff"],
+      inputKeys: ["handoffText", "handoff_text"]
     }
   ];
 }
@@ -12135,6 +12145,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
     workflow,
     required: true,
     session_id: sessionId,
+    session_resumable: Boolean(session && active),
     payload_hash: session?.payload_hash || payloadHash,
     approval_session_argument: "approvalSessionId",
     approval_argument: "approvalComplete",
@@ -12142,8 +12153,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
     manual_approval_required: !deferredForClarification,
     manual_approval_prompt: manualPrompt,
     deferred_for_clarification: deferredForClarification,
-    resume_without_approval: deferredForClarification ? { approval: { session_id: sessionId } } : null,
-    approval_instruction: active ? deferredForClarification ? `Collect only the missing ${active.id} input, then resume session ${sessionId} without recording approval.` : `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.` : "Ask the user for explicit staged approval before sending any staged approval packet.",
+    approval_instruction: active ? deferredForClarification ? `Collect only the missing ${active.id} input, then use the returned public decision.resume without recording approval.` : `Ask the user for explicit approval of only ${active.id}; if no native prompt exists, ask manually and wait.` : "Ask the user for explicit staged approval before sending any staged approval packet.",
     not_approval: [
       "Agent review is not approval.",
       "No warnings is not approval.",
@@ -12167,6 +12177,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
         title: stage.title,
         description: stage.description,
         approved: approved.has(stage.id),
+        input_keys: stage.inputKeys || [],
         revision: session ? stageRecord(session, stage.id)?.revision ?? 0 : 0,
         hash: stageHashes[stage.id],
         file_count: stageFiles.length,
@@ -12193,7 +12204,7 @@ function stagedApprovalState(root2, workflow, args, stages, reviewFiles2, extras
     intent_to_add_paths: session?.intent_to_add_paths || [],
     approved_review_files: approvedFiles,
     approved_review_paths: approvedPaths,
-    next_actions: complete ? approvalError ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."] : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`] : active && deferredForClarification ? [`Resume ${workflow} with approval.session_id:${sessionId} after collecting only the missing ${active.id} input; this continuation is not approval.`] : active ? [
+    next_actions: complete ? approvalError ? [approvalError, "Restart review from the returned current stage and packet-issued approvalSessionId."] : [`Call ${workflow} with execute:true, approvalComplete:true, and approvalSessionId:${sessionId} to apply the approved staged payload.`] : active && deferredForClarification ? [`Fill only the returned decision.writable_paths after collecting the missing ${active.id} input, then invoke decision.resume; this continuation is not approval.`] : active ? [
       `Ask the user to approve only the ${active.id} stage; do not approve it yourself after review.`,
       `Only after explicit user approval, call ${workflow} again with approvalSessionId:${sessionId}, approvalStage:${active.id}, the returned current_stage_hash/current_stage_revision, and approvedStages including exactly the next stage.`,
       "After all stages are approved in dry-run calls, call the mutating packet with execute:true, approvalComplete:true, and the same approvalSessionId."
@@ -12304,6 +12315,7 @@ function workflowNewTrack(root2, args = {}) {
   if (collection.schemaIssues.length > 0 && !approvalError) {
     const encodedRoot = encodeURIComponent(root2);
     const artifact = collection.activeKind || "spec";
+    const schemaInput = collection.missingEvidence.length > 0 ? collection.missingEvidence : [artifact];
     return {
       ...summary,
       ok: false,
@@ -12314,11 +12326,11 @@ function workflowNewTrack(root2, args = {}) {
       approval,
       schema_errors: collection.schemaIssues,
       schema_resources: [`cadre://artifact-schema?root=${encodedRoot}&artifact=${artifact}`],
-      missing_payload: collection.missingEvidence,
-      required_payload: collection.missingEvidence,
+      missing_payload: schemaInput,
+      required_payload: schemaInput,
       warnings,
       next_actions: [
-        `Load the Cadre ${artifact} schema, correct only the current ${artifact} input, and resume this approval session without recording approval.`
+        `Load the Cadre ${artifact} schema, correct only decision.writable_paths for the current ${artifact}, and invoke decision.resume without recording approval.`
       ],
       error: `Current newtrack ${artifact} JSON does not match the Cadre schema.`
     };
@@ -12337,7 +12349,7 @@ function workflowNewTrack(root2, args = {}) {
       required_payload: collection.missingEvidence,
       warnings,
       next_actions: [
-        `Supply only the current ${collection.activeKind || "spec"} evidence and resume with approval.session_id; session resume is not approval.`
+        `Supply only the current ${collection.activeKind || "spec"} evidence at decision.writable_paths and invoke decision.resume; session resume is not approval.`
       ],
       error: intentPrompts.length > 0 ? "New track intent needs clearer goal, outcome, acceptance, or scope evidence before spec review." : `Current newtrack stage requires evidence-backed ${collection.missingEvidence.join(" and ")} JSON.`
     };
@@ -14834,7 +14846,27 @@ function refreshLevelIds(args = {}, recommended = []) {
   return REFRESH_LEVELS.filter((level) => selected.has(level));
 }
 function refreshSelectionProvided(args = {}) {
-  return rawRequestedLevels(args).length > 0;
+  const raw = rawArgs4(args);
+  return [
+    "refreshLevels",
+    "refresh_levels",
+    "refreshScope",
+    "refresh_scope",
+    "scope",
+    "scopes",
+    "all",
+    "patterns",
+    "styleGuides",
+    "style_guides",
+    "docs",
+    "projections",
+    "diagnostics",
+    "lsp",
+    "writeLsp",
+    "write_lsp",
+    "setupLsp",
+    "setup_lsp"
+  ].some((key) => Object.prototype.hasOwnProperty.call(raw, key) && raw[key] !== void 0);
 }
 function compactWorkspace(value) {
   const adapters = asArray(value.adapters).map(asJsonObject);
@@ -15021,10 +15053,9 @@ function refreshLevelPrompt(analysis) {
       tool: "cadre_workflow",
       workflow: "refresh",
       argument: "refreshLevels",
-      customArgument: "refreshLevels",
       selectedIds: asStringArray(analysis.recommended_levels)
     },
-    "refreshLevels"
+    null
   );
   return prompt;
 }
@@ -15545,9 +15576,13 @@ function styleGuideFiles(root2, args) {
   const styleGuides = setupStyleGuides(root2, {
     ...args,
     ...isRecord(techStack) ? { techStack: asJsonObject(techStack) } : {},
-    styleGuideIds: requestedIds
+    ...rawIds === void 0 ? {} : { styleGuideIds: requestedIds }
   });
-  const selected = Array.from(/* @__PURE__ */ new Set([...asStringArray(styleGuides.selected), ...customIds])).sort();
+  const selected = Array.from(/* @__PURE__ */ new Set([
+    ...asStringArray(styleGuides.selected),
+    ...rawIds === void 0 ? currentIds : [],
+    ...customIds
+  ])).sort();
   const missing = asStringArray(styleGuides.missing).filter((id) => !customIds.includes(id));
   return styleGuideReviewFiles({
     ...styleGuides,
@@ -15981,7 +16016,7 @@ function workflowRefresh(root2, args = {}) {
       approval,
       warnings,
       error: `Current refresh level requires evidence-backed canonical input: ${documents.missingEvidence.join(", ")}`,
-      next_actions: ["Use the refresh analysis to supply the current level under proposedContext, then resume with the returned approval session; this is not approval."]
+      next_actions: ["Use the refresh analysis to supply the current level only at decision.writable_paths, then invoke the returned decision.resume; this is not approval."]
     };
   }
   const awaitingDocumentReview = args.execute === true && semanticRefresh && !stagedApprovalReady(approval);
@@ -16450,7 +16485,7 @@ function workflowRevise(root2, args = {}) {
       required_payload: collection.missingEvidence,
       warnings,
       error: `Current revision stage requires evidence-backed ${collection.missingEvidence.join(" and ")} JSON.`,
-      next_actions: ["Supply only the current revision artifact and resume with the returned approval session; this is not approval."]
+      next_actions: ["Supply only the current revision artifact at decision.writable_paths and invoke decision.resume; this is not approval."]
     };
   }
   if (args.execute !== true) {
@@ -17471,6 +17506,169 @@ function readProjectSourceFile(root2, requestedPath) {
 var import_node_crypto7 = __toESM(require("node:crypto"));
 var import_node_fs36 = __toESM(require("node:fs"));
 var import_node_path59 = __toESM(require("node:path"));
+
+// src/workflow-control-keys.ts
+var WORKFLOW_INPUT_RESERVED_KEYS = /* @__PURE__ */ new Set([
+  "root",
+  "workflow",
+  "execute",
+  "approval",
+  "skipSync",
+  "source_manifest",
+  "source_snapshot",
+  "source_files",
+  "source_file_hashes",
+  "lspResult",
+  "lsp_result",
+  "configOwnerRoot",
+  "config_owner_root",
+  "approvalStage",
+  "approval_stage",
+  "approvalSessionId",
+  "approval_session_id",
+  "approvalStageHash",
+  "approval_stage_hash",
+  "approvalStageRevision",
+  "approval_stage_revision",
+  "approvedStages",
+  "approved_stages",
+  "approvalComplete",
+  "approval_complete",
+  "approvalCancel",
+  "approval_cancel",
+  "_cadreApprovalInputError"
+]);
+function isWorkflowInputReservedKey(value) {
+  return WORKFLOW_INPUT_RESERVED_KEYS.has(value);
+}
+
+// src/core/application/runtime/workflow-continuations.ts
+var FORBIDDEN_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
+function safeArgumentSegments(value) {
+  const segments = value.split(".");
+  return segments.length > 0 && segments.every((segment) => /^[A-Za-z][A-Za-z0-9_]*$/.test(segment) && !FORBIDDEN_SEGMENTS.has(segment)) && !isWorkflowInputReservedKey(segments[0]) ? segments : null;
+}
+function inputArgumentPointer(value) {
+  const argument = asOptionalString(value);
+  if (!argument) return null;
+  const segments = safeArgumentSegments(argument);
+  return segments ? `/arguments/input/${segments.join("/")}` : null;
+}
+function inputObjectMemberPointer(argument, member) {
+  const base = inputArgumentPointer(argument);
+  if (!base || FORBIDDEN_SEGMENTS.has(member)) return null;
+  return `${base}/${member.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+}
+function preferredArguments(values) {
+  const result = [];
+  const semantic = /* @__PURE__ */ new Set();
+  for (const value of values) {
+    const key = value.split(".").map((segment) => segment.replace(/_/g, "").toLowerCase()).join(".");
+    if (semantic.has(key)) continue;
+    semantic.add(key);
+    result.push(value);
+  }
+  return result.slice(0, 32);
+}
+function writableInputPaths(arguments_) {
+  const paths = [];
+  for (const argument of preferredArguments(arguments_)) {
+    const pointer = inputArgumentPointer(argument);
+    if (!pointer) return { paths: [], error: `Unsafe workflow input target: ${argument}` };
+    if (!paths.includes(pointer)) paths.push(pointer);
+  }
+  return { paths, error: null };
+}
+function promptResponseTarget(prompt) {
+  const nested = asJsonObject(prompt.responseTarget);
+  if (Object.keys(nested).length > 0) return nested;
+  return {
+    tool: prompt.tool,
+    workflow: prompt.workflow,
+    argument: prompt.argument,
+    customArgument: prompt.customArgument,
+    valueMap: prompt.valueMap,
+    selectedIds: prompt.selectedIds
+  };
+}
+function promptTargetError(prompt, workflow) {
+  const id = asOptionalString(prompt.id) || "(unnamed prompt)";
+  const target2 = promptResponseTarget(prompt);
+  if (asOptionalString(target2.tool) !== "cadre_workflow") return `${id} does not target cadre_workflow`;
+  if (asOptionalString(target2.workflow) !== workflow) return `${id} targets a different workflow`;
+  if (!inputArgumentPointer(target2.argument)) return `${id} has an unsafe or missing input argument`;
+  if (target2.customArgument != null && !inputArgumentPointer(target2.customArgument)) {
+    return `${id} has an unsafe custom input argument`;
+  }
+  if (target2.valueMap != null && !isRecord(target2.valueMap)) return `${id} has a non-object value map`;
+  const valueMap = asJsonObject(target2.valueMap);
+  if (Object.keys(valueMap).length > 0) {
+    const missing = asJsonArray(prompt.choices).map((choice2) => asOptionalString(asJsonObject(choice2).id)).filter((choiceId) => Boolean(choiceId) && valueMap[choiceId] === void 0);
+    if (missing.length > 0) return `${id} is missing choice mappings for: ${missing.join(", ")}`;
+    const argument = asOptionalString(target2.argument);
+    for (const [choiceId, patch] of Object.entries(valueMap)) {
+      if (!isRecord(patch)) return `${id} has a non-object mapping for choice: ${choiceId}`;
+      const patchPaths = mappedPatchPaths(patch);
+      if (patchPaths.length === 0) return `${id} has an empty mapping for choice: ${choiceId}`;
+      const outsideTarget = patchPaths.find((path74) => path74 !== argument && !path74.startsWith(`${argument}.`));
+      if (outsideTarget) return `${id} mapping for ${choiceId} writes outside its declared target: ${outsideTarget}`;
+    }
+  }
+  return null;
+}
+function mappedPatchPaths(value, prefix = []) {
+  const paths = [];
+  for (const [key, nested] of Object.entries(value)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key) || FORBIDDEN_SEGMENTS.has(key)) return [`!unsafe:${[...prefix, key].join(".")}`];
+    if (prefix.length === 0 && isWorkflowInputReservedKey(key)) return [`!reserved:${key}`];
+    const next = [...prefix, key];
+    if (isRecord(nested) && Object.keys(nested).length > 0) paths.push(...mappedPatchPaths(nested, next));
+    else paths.push(next.join("."));
+  }
+  return paths;
+}
+function promptWritableInputPaths(prompts, required, workflow, allowedArguments = []) {
+  const arguments_ = [];
+  for (const prompt of prompts) {
+    const error = promptTargetError(prompt, workflow);
+    if (error) return { paths: [], error };
+    const target2 = promptResponseTarget(prompt);
+    const argument = asOptionalString(target2.argument);
+    const customArgument = asOptionalString(target2.customArgument);
+    if (argument) arguments_.push(argument);
+    if (customArgument) arguments_.push(customArgument);
+  }
+  arguments_.push(...required);
+  const outsideStage = arguments_.find((argument) => allowedArguments.length > 0 && !allowedArguments.some((allowed) => argument === allowed || argument.startsWith(`${allowed}.`)));
+  if (outsideStage) return { paths: [], error: `Workflow input target is outside the active stage: ${outsideStage}` };
+  return writableInputPaths(arguments_);
+}
+function publicWorkflowInput(args) {
+  const input = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (!WORKFLOW_INPUT_RESERVED_KEYS.has(key)) input[key] = value;
+  }
+  return input;
+}
+function workflowContinuationCall(root2, workflow, input, sessionId) {
+  return {
+    tool: "cadre_workflow",
+    arguments: {
+      root: root2,
+      workflow,
+      input,
+      execute: false,
+      ...sessionId ? { approval: { session_id: sessionId } } : {}
+    }
+  };
+}
+function approvalStageInputKeys(approval, stageId) {
+  if (!stageId) return [];
+  const stage = asJsonArray(approval.stages).map((entry) => asJsonObject(entry)).find((entry) => asOptionalString(entry.id) === stageId);
+  return stage ? asStringArray(stage.input_keys) : [];
+}
+
+// src/core/application/runtime/skill-stage-lifecycle.ts
 function referenceRecords(manifest) {
   return (Array.isArray(manifest?.references) ? manifest.references : []).map(asJsonObject);
 }
@@ -17752,8 +17950,12 @@ function approvedSkillExecutionFiles(root2, args, sourceId, targetId) {
   }
   return { files, manifest };
 }
-function skillFormattingDecision(root2, approval) {
+function skillFormattingDecision(root2, approval, missingReferenceIds = []) {
   const sessionId = asOptionalString(approval.session_id) || null;
+  const referencePaths = Array.from(new Set(missingReferenceIds)).flatMap((id) => {
+    const pointer = inputObjectMemberPointer("formattedReferences", id);
+    return pointer ? [pointer] : [];
+  });
   return {
     kind: "format_reference",
     required: ["formattedReferences"],
@@ -17766,11 +17968,12 @@ function skillFormattingDecision(root2, approval) {
       arguments: {
         root: root2,
         workflow: "skill",
-        input: { formattedReferences: "<reference-id to formatted text>" },
+        input: { formattedReferences: {} },
         execute: false,
         approval: { session_id: sessionId }
       }
-    } : null
+    } : null,
+    writable_paths: referencePaths.length > 0 ? referencePaths : ["/arguments/input/formattedReferences"]
   };
 }
 
@@ -17863,7 +18066,7 @@ function sourcePause(root2, skillId, requests, approval) {
     else if (import_node_path60.default.resolve(validated.canonicalRoot, "cadre", "skills", skillId, asOptionalString(request.target_path) || "") === validated.canonicalPath) errors.push(`source_path collides with its managed target: ${source}`);
     else resources.push(`cadre://project-skill-source?root=${encodeURIComponent(root2)}&path=${encodeURIComponent(source)}`);
   }
-  const decision = skillFormattingDecision(root2, approval);
+  const decision = skillFormattingDecision(root2, approval, requests.map((request) => asOptionalString(request.id)).filter((value) => Boolean(value)));
   return errors.length ? {
     ok: false,
     phase_state: "awaiting_clarification",
@@ -18133,6 +18336,7 @@ function workflowSkill(root2, args) {
     phase_state: "awaiting_clarification",
     stage: "reference_evidence",
     approval,
+    decision: skillFormattingDecision(root2, asJsonObject(approval), collection.missingReferenceIds),
     missing_payload: ["formattedReferences"],
     missing_reference_ids: collection.missingReferenceIds,
     error: `Reference content is required for: ${collection.missingReferenceIds.join(", ")}`
@@ -18463,7 +18667,7 @@ function boundedJsonObject(value) {
   const bounded = boundedJsonValue(value);
   return bounded && typeof bounded === "object" && !Array.isArray(bounded) ? bounded : {};
 }
-function approvalDecision(result) {
+function approvalDecision(root2, workflow, result) {
   const approval = asJsonObject(result.approval);
   if (approval.cancelled === true) return null;
   const currentStage = asOptionalString(approval.current_stage);
@@ -18480,19 +18684,24 @@ function approvalDecision(result) {
     }
     return null;
   }
+  const sessionId = asOptionalString(approval.session_id) || null;
+  const writable = writableInputPaths(approvalStageInputKeys(approval, currentStage));
+  if (writable.error) return { kind: "blocked", reason: writable.error };
   return {
     kind: "approval",
     stage: currentStage,
     title: asOptionalString(approval.current_stage_title) || null,
-    session_id: asOptionalString(approval.session_id) || null,
+    session_id: sessionId,
     stage_hash: asOptionalString(approval.current_stage_hash) || null,
     stage_revision: typeof approval.current_stage_revision === "number" ? approval.current_stage_revision : null,
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
+    amend: sessionId && approval.session_resumable === true ? workflowContinuationCall(root2, workflow, {}, sessionId) : null,
+    writable_paths: writable.paths,
     prompt: asOptionalString(approval.manual_approval_prompt) || "Review the current stage and ask for explicit user approval."
   };
 }
-function workflowDecision(result) {
+function workflowDecision(root2, workflow, result, args) {
   const explicit = asJsonObject(result.decision);
   if (Object.keys(explicit).length > 0) return explicit;
   const skills = asJsonObject(result.project_skills);
@@ -18500,30 +18709,45 @@ function workflowDecision(result) {
   if (Object.keys(skillDecision).length > 0) return skillDecision;
   const approvalState = asJsonObject(result.approval);
   const approvalError = asOptionalString(approvalState.approval_error);
-  if (approvalError) return {
-    kind: "blocked",
-    reason: approvalError,
-    session_id: asOptionalString(approvalState.session_id) || null,
-    current_stage: asOptionalString(approvalState.current_stage) || null,
-    stage_hash: asOptionalString(approvalState.current_stage_hash) || null,
-    stage_revision: typeof approvalState.current_stage_revision === "number" ? approvalState.current_stage_revision : null,
-    approved_stages: asStringArray(approvalState.approved_stages),
-    pending_stages: asStringArray(approvalState.pending_stages)
-  };
+  if (approvalError) {
+    const sessionId = asOptionalString(approvalState.session_id) || null;
+    const currentStage = asOptionalString(approvalState.current_stage) || null;
+    const writable = writableInputPaths(approvalStageInputKeys(approvalState, currentStage));
+    return {
+      kind: "blocked",
+      reason: writable.error || approvalError,
+      session_id: sessionId,
+      current_stage: currentStage,
+      stage_hash: asOptionalString(approvalState.current_stage_hash) || null,
+      stage_revision: typeof approvalState.current_stage_revision === "number" ? approvalState.current_stage_revision : null,
+      approved_stages: asStringArray(approvalState.approved_stages),
+      pending_stages: asStringArray(approvalState.pending_stages),
+      resume: sessionId && approvalState.session_resumable === true ? workflowContinuationCall(root2, workflow, {}, sessionId) : null,
+      writable_paths: writable.paths
+    };
+  }
   const intentPrompts = asJsonArray(result.intent_prompts);
-  const prompts = intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts);
+  const prompts = (intentPrompts.length > 0 ? intentPrompts : asJsonArray(result.native_prompts)).map(asJsonObject);
   if (prompts.length > 0 || result.phase_state === "awaiting_clarification") {
     const approval2 = asJsonObject(result.approval);
     const sessionId = asOptionalString(approval2.session_id) || null;
+    const resumableSessionId = sessionId && approval2.session_resumable === true ? sessionId : null;
+    const currentStage = asOptionalString(approval2.current_stage) || null;
+    const stageInputKeys = approvalStageInputKeys(approval2, currentStage);
+    const required = asStringArray(result.missing_payload);
+    const writableRequired = required.length > 0 ? required : resumableSessionId && prompts.length === 0 ? stageInputKeys : [];
+    const writable = promptWritableInputPaths(prompts, writableRequired, workflow, resumableSessionId ? stageInputKeys : []);
+    if (writable.error) return { kind: "blocked", reason: `Invalid clarification response target: ${writable.error}` };
     return {
       kind: "clarification",
       prompts,
-      required: asStringArray(result.missing_payload),
+      required,
       session_id: sessionId,
-      current_stage: asOptionalString(approval2.current_stage) || null,
+      current_stage: currentStage,
       approved_stages: asStringArray(approval2.approved_stages),
       pending_stages: asStringArray(approval2.pending_stages),
-      resume: sessionId ? { approval: { session_id: sessionId } } : null
+      resume: workflowContinuationCall(root2, workflow, resumableSessionId ? {} : publicWorkflowInput(args), resumableSessionId),
+      writable_paths: writable.paths
     };
   }
   if (result.phase_state === "pending_provider") {
@@ -18532,7 +18756,7 @@ function workflowDecision(result) {
   if (result.ok === false) {
     return { kind: "blocked", reason: asOptionalString(result.error || result.reason || result.stage) || "Cadre workflow failed" };
   }
-  const approval = approvalDecision(result);
+  const approval = approvalDecision(root2, workflow, result);
   if (approval) return approval;
   const completed = ["executed", "complete", "completed"].includes(String(result.phase_state || ""));
   return { kind: completed ? "complete" : "ready" };
@@ -18733,7 +18957,7 @@ function workflowPacketEnvelopeV1(root2, args, value) {
     ok,
     workflow,
     phase: asOptionalString(result.phase_state) || (ok ? "ready" : "blocked"),
-    decision: workflowDecision(result),
+    decision: workflowDecision(root2, workflow, result, args),
     required: requiredInputs(result, workflow, args),
     next: nextCall(root2, workflow, result, resources, args),
     artifacts: workflowArtifacts(result),
@@ -20628,7 +20852,7 @@ var SERVER_INSTRUCTIONS = [
   "Cadre is a packet-led runtime. Call cadre_workflow first for workflows, cadre_action for a packet named by a workflow response, and cadre_read only for a relevant resource URI.",
   "Pass a root candidate to project-scoped calls. Cadre resolves it internally; setup accepts an uninitialized directory.",
   "Cadre owns control-plane, provider, worker, approval, merge, and generated projection state.",
-  "In staged workflows, session_id alone resumes and is not approval; stage, stage_hash, stage_revision, and approved_stages require explicit user approval."
+  "Use returned decision.resume or decision.amend calls for non-approval continuation; their session_id-only approval state is not approval. stage, stage_hash, stage_revision, and approved_stages require explicit user approval."
 ].join(" ");
 var root = {
   type: "string",
@@ -20647,7 +20871,7 @@ var TOOLS = [
         execute: { type: "boolean", description: "Apply the workflow after every required stage is approved; omit or false for preview." },
         approval: {
           type: "object",
-          description: "Resume or control a staged session. session_id alone resumes and is not approval. After explicit user approval, echo stage, stage_hash, stage_revision, and the exact approved_stages prefix from the reviewed decision. complete is valid only after all stages. cancel abandons the session.",
+          description: "Control a staged session through a returned typed call. Exact decision.resume and decision.amend calls carry session_id only and are not approval. After explicit user approval, echo stage, stage_hash, stage_revision, and the exact approved_stages prefix from the reviewed decision. complete is valid only after all stages. cancel abandons the session.",
           properties: {
             session_id: { type: "string", pattern: "^[a-f0-9]{24}$" },
             stage: { type: "string" },
@@ -21615,35 +21839,6 @@ function artifactPacket2(deps, args) {
 }
 
 // src/mcp/application/tool-requests.ts
-var WORKFLOW_CONTROL_KEYS = /* @__PURE__ */ new Set([
-  "root",
-  "workflow",
-  "execute",
-  "approval",
-  "skipSync",
-  "source_manifest",
-  "lspResult",
-  "lsp_result",
-  "source_snapshot",
-  "source_files",
-  "source_file_hashes",
-  "configOwnerRoot",
-  "config_owner_root",
-  "approvalStage",
-  "approval_stage",
-  "approvalSessionId",
-  "approval_session_id",
-  "approvalStageHash",
-  "approval_stage_hash",
-  "approvalStageRevision",
-  "approval_stage_revision",
-  "approvedStages",
-  "approved_stages",
-  "approvalComplete",
-  "approval_complete",
-  "approvalCancel",
-  "approval_cancel"
-]);
 var ACTION_INTERNAL_KEYS = /* @__PURE__ */ new Set([
   "root",
   "action",
@@ -21744,7 +21939,7 @@ function parseWorkflowToolRequest(value) {
   const request = object(value, "cadre_workflow arguments");
   onlyKeys(request, ["root", "workflow", "input", "execute", "approval"], "cadre_workflow arguments");
   const input = optionalObject(request.input, "cadre_workflow.input");
-  rejectControlKeys(input, WORKFLOW_CONTROL_KEYS, "cadre_workflow.input");
+  rejectControlKeys(input, WORKFLOW_INPUT_RESERVED_KEYS, "cadre_workflow.input");
   const approval = workflowApproval(request.approval);
   return {
     root: requiredString(request.root, "cadre_workflow.root"),

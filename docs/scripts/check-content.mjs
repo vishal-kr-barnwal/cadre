@@ -146,10 +146,16 @@ function checkStagedWorkflowContract(docsBySlug) {
   }
 
   const workflowReference = docsBySlug.get("workflow-reference")?.content ?? ""
-  requireContract(workflowReference, /approval\s*:\s*\{session_id\}/, "workflow-reference.md: missing session-only resume")
   requireContract(workflowReference, /decision\.resume/, "workflow-reference.md: missing deferred resume")
+  requireContract(workflowReference, /decision\.amend/, "workflow-reference.md: missing active-stage amendment")
+  requireContract(workflowReference, /writable_paths/, "workflow-reference.md: missing bounded continuation writes")
+  requireContract(workflowReference, /session-only approval state.*not approval/s, "workflow-reference.md: missing non-approval continuation rule")
   requireContract(workflowReference, /approved_stages/, "workflow-reference.md: missing cumulative approval prefix")
   requireContract(workflowReference, /product.*product_guidelines.*technical.*workflow/s, "workflow-reference.md: missing setup stage order")
+
+  const mcpReference = docsBySlug.get("mcp-reference")?.content ?? ""
+  requireContract(mcpReference, /value_map.*selected_id.*selected_ids/s, "mcp-reference.md: missing native prompt mapping rules")
+  requireContract(mcpReference, /allowCustom:true.*customArgument.*customMode/s, "mcp-reference.md: missing custom prompt guard")
 
   const workflows = docsBySlug.get("workflows")?.content ?? ""
   requireContract(workflows, /style-guides/, "workflows.md: missing style-guide refresh level")

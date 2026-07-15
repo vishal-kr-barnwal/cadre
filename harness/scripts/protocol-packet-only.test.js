@@ -137,6 +137,9 @@ test("Master skill JSON is a conditional v1 reference contract", () => {
   assert.equal(skill.activation.tool, "cadre_workflow");
   assert.equal(skill.activation.protocol_reads_required, false);
   assert.ok(skill.invariants.some((rule) => /never truncated/.test(rule)));
+  assert.ok(skill.invariants.some((rule) => /decision\.resume.*decision\.amend/.test(rule)));
+  assert.ok(skill.invariants.some((rule) => /writable_paths/.test(rule)));
+  assert.ok(skill.invariants.some((rule) => /stage, stage_hash, stage_revision, or approved_stages/.test(rule)));
   assert.ok(skill.workflows.includes("implement"));
   assert.ok(skill.references.every((reference) => reference.id && reference.when));
 });
@@ -150,16 +153,22 @@ test("Staged workflow guidance distinguishes session resume from stage approval"
   for (const text of [shim, commandTemplate]) {
     const normalized = text.replace(/\s+/g, " ");
     assert.match(text, /decision\.resume/);
+    assert.match(text, /decision\.amend/);
+    assert.match(text, /writable_paths/);
+    assert.match(text, /value_map/);
+    assert.match(text, /false/);
     assert.match(text, /session_id/);
     assert.match(normalized, /is not approval/);
     assert.match(normalized, /later stages (?:remain|stay) pending/i);
   }
-  assert.ok(approvalReference.rules.some((rule) => /session_id-only.*resume.*not approval/i.test(rule)));
-  assert.ok(approvalReference.rules.some((rule) => /stage, approved_stages, or complete.*explicit user approval/i.test(rule)));
+  assert.ok(approvalReference.rules.some((rule) => /decision\.resume.*decision\.amend.*session_id-only.*not approval/i.test(rule)));
+  assert.ok(approvalReference.rules.some((rule) => /stage, stage_hash, stage_revision, approved_stages, or complete.*explicit user approval/i.test(rule)));
   const approvalSections = new Map(approvalReference.sections.map((section) => [section.heading, section.body]));
   assert.match(approvalSections.get("Stage"), /every returned artifact.*atomic set/i);
   assert.match(approvalSections.get("Execute"), /exact returned `next` unchanged/i);
-  assert.ok(nativePrompts.rules.some((rule) => /session.*without recording approval/i.test(rule)));
+  assert.ok(nativePrompts.rules.some((rule) => /writable_paths.*session-only.*never records approval/i.test(rule)));
+  assert.ok(nativePrompts.rules.some((rule) => /value_map.*selected_id.*selected_ids.*empty array.*false/i.test(rule)));
+  assert.ok(nativePrompts.rules.some((rule) => /allowCustom.*customArgument.*customMode/i.test(rule)));
 });
 
 test("Staged workflow protocols preserve active-stage collection order", () => {

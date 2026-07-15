@@ -136,13 +136,13 @@ export function setupStyleGuides(root: string, args: RuntimeArgs = {}): CoreResu
   const techStack = techStackForPacket(root, args) || {};
   const detected = styleGuideIdsForTechStack(techStack).filter((id) => available.has(id));
   const rawArgs = args as UnknownRecord;
+  const selectionProvided = Object.prototype.hasOwnProperty.call(rawArgs, "styleGuideIds")
+    || Object.prototype.hasOwnProperty.call(rawArgs, "style_guide_ids");
   const requested = requestedStyleGuideIds(rawArgs.styleGuideIds ?? rawArgs.style_guide_ids);
   const missing = requested.filter((id) => !available.has(id));
-  const selected = Array.from(new Set([
-    ...(available.has("general") ? ["general"] : []),
-    ...detected,
-    ...requested.filter((id) => available.has(id)),
-  ])).sort();
+  const selected = Array.from(new Set(selectionProvided
+    ? requested.filter((id) => available.has(id))
+    : [...(available.has("general") ? ["general"] : []), ...detected])).sort();
   return {
     ok: true,
     valid: missing.length === 0,

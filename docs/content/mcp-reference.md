@@ -31,14 +31,30 @@ Starts or continues a workflow.
 | `workflow` | yes | A supported Cadre workflow ID such as `setup`, `implement`, or `review`. |
 | `input` | no | Workflow-specific structured input. |
 | `execute` | no | `false` previews/decides; `true` requests the confirmed mutation path. |
-| `approval` | no | Nested staged-session control. `{session_id}` alone resumes and is not approval; after explicit approval, add the exact `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and cumulative `approved_stages` prefix. |
+| `approval` | no | Nested staged-session control carried by packet-issued calls. Invoke the exact returned `decision.resume` or `decision.amend` for non-approval continuation. After explicit approval, add the exact `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and cumulative `approved_stages` prefix. |
 
-For example, this fragment resumes the current stage without approving it:
+For example, a clarification returns a complete call like this. Fill only the
+paths listed beside it in `decision.writable_paths`, then invoke it:
 
 ```json
 {
-  "approval": {
-    "session_id": "returned-session-id"
+  "decision": {
+    "kind": "clarification",
+    "resume": {
+      "tool": "cadre_workflow",
+      "arguments": {
+        "root": "/project",
+        "workflow": "setup",
+        "input": {},
+        "execute": false,
+        "approval": {
+          "session_id": "0123456789abcdef01234567"
+        }
+      }
+    },
+    "writable_paths": [
+      "/arguments/input/techStack"
+    ]
   }
 }
 ```
@@ -58,7 +74,8 @@ fragment records exactly that next prefix:
 }
 ```
 
-Do not add `stage`, `approved_stages`, or `complete` to a session-only resume.
+Do not add `stage`, `stage_hash`, `stage_revision`, `approved_stages`, or
+`complete` to a session-only resume or amendment.
 `complete:true` is valid only when every stage is included in the exact
 cumulative prefix. Canonical/projection pairs and grouped stage files are
 approved atomically. `decision.current_stage` identifies work during
@@ -73,13 +90,24 @@ continuation. When it is non-null, invoke exactly `next.tool` with
 The typed callbacks outside `next` are limited to:
 
 - After collecting requested clarification or formatted reference content,
-  continue with the exact returned `decision.resume` data.
+  change only `decision.writable_paths` in the returned `decision.resume`, then
+  invoke that complete call.
+- After the user explicitly requests an edit to the active review stage, change
+  only `decision.writable_paths` in the returned `decision.amend`, then invoke
+  that complete call.
 - After collecting requested evidence from an external provider integration,
   invoke `decision.required.write_back` with that evidence.
 - For parallel fan-out, invoke each
   `data.workers[].dispatch.record_finish_packet` once with that worker's result.
 - If worker completion or recovery remains pending, invoke only the exact calls
   reissued under `data.worker_callbacks[].record_finish_packet`.
+
+For a native prompt, transform the selection through its `responseTarget`:
+`value_map` merges the exact object for each selected ID, `selected_id` sets the
+single ID at `argument`, and `selected_ids` sets the ID array, including `[]`.
+Preserve mapped `false` and empty values. Apply custom text only when
+`allowCustom:true`, at `customArgument` using `customMode` (`replace` or
+`append_unique`). Every write must remain inside `decision.writable_paths`.
 
 These callbacks are not permission to derive other actions from response data
 or prose. Merge, cleanup, polling, and every other immediate continuation must

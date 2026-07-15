@@ -51,14 +51,16 @@ advances through product, product guidelines, grouped technical context, and
 workflow policy; new-track and revision reviews advance from spec to plan when
 both are in scope.
 
-`approval:{session_id}` alone resumes the active stage and never records
+For clarification, fill only the returned `decision.writable_paths` in the
+complete `decision.resume` call; for an explicit active-stage edit, do the same
+with `decision.amend`. Their session-only approval state never records
 approval. After the user explicitly approves the exact active review set, the
 client sends the returned `decision.stage` and the next cumulative
 `approved_stages` prefix together with that decision's `stage_hash` and
 `stage_revision`. The stamp binds approval to the reviewed bytes and becomes
 stale when the stage changes. A clarification's `decision.current_stage` names
 the work still being collected; it is not approval. Once a session exists,
-clarification and reference-formatting responses use the exact returned
+clarification and reference-formatting responses return a full
 `decision.resume` so the same session and approved prefix are preserved.
 
 Final `execute:true` verifies the frozen target files still match the reviewed
@@ -98,6 +100,7 @@ relevant resource URIs. `next` is the sole immediate single-agent Cadre
 continuation, and a client invokes exactly `next.tool` with `next.arguments`
 once for that packet. The only deferred or fan-out callbacks are
 `decision.resume` after requested clarification or reference formatting,
+`decision.amend` after an explicit request to revise the active review stage,
 provider `decision.required.write_back` after external evidence collection, each
 parallel worker's `data.workers[].dispatch.record_finish_packet`, and exact
 completion or recovery callbacks reissued under

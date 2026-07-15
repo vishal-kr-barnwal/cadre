@@ -23,8 +23,9 @@ export function nativePrompt(
   selectionMode: "single" | "multi",
   choices: JsonObject[],
   responseTarget: JsonObject,
-  customArgument: string
+  customArgument: string | null
 ): JsonObject {
+  const allowCustom = Boolean(customArgument);
   return {
     version: 1,
     schema: "cadre.native_prompt.v1",
@@ -33,10 +34,18 @@ export function nativePrompt(
     question,
     selectionMode,
     choices,
-    allowCustom: true,
-    customLabel: "Other",
-    customArgument,
-    responseTarget,
+    allowCustom,
+    ...(allowCustom ? { customLabel: "Other", customArgument } : {}),
+    responseTarget: {
+      ...responseTarget,
+      ...(customArgument ? { customArgument } : {}),
+      valueMode: Object.keys(asJsonObject(responseTarget.valueMap)).length > 0
+        ? "value_map"
+        : selectionMode === "multi" ? "selected_ids" : "selected_id",
+      customMode: selectionMode === "multi" && customArgument === responseTarget.argument
+        ? "append_unique"
+        : "replace",
+    },
   };
 }
 
@@ -61,14 +70,13 @@ function providerPrompt(provider: JsonObject): JsonObject {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "providerMode",
-      customArgument: "providerModeOther",
       valueMap: {
         local: { providerMode: "local" },
         github: { providerMode: "github" },
         gitlab: { providerMode: "gitlab" },
       },
     },
-    "providerModeOther"
+    null
   );
 }
 
@@ -92,13 +100,12 @@ function syncPrompt(syncMode: string): JsonObject {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "syncMode",
-      customArgument: "syncModeOther",
       valueMap: {
         local: { syncMode: "local" },
         shared: { syncMode: "shared" },
       },
     },
-    "syncModeOther"
+    null
   );
 }
 
@@ -124,10 +131,9 @@ function styleGuidePrompt(styleGuides: JsonObject): JsonObject {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "styleGuideIds",
-      customArgument: "styleGuideIds",
       selectedIds: asStringArray(styleGuides.selected),
     },
-    "styleGuideIds"
+    null
   );
 }
 
@@ -156,13 +162,12 @@ function lspPrompt(lspSetup: JsonObject): JsonObject | null {
       tool: "cadre_workflow",
       workflow: "setup",
       argument: "writeLsp",
-      customArgument: "lspSetupOther",
       valueMap: {
         "write-lsp": { writeLsp: true },
         "skip-lsp": { writeLsp: false },
       },
     },
-    "lspSetupOther"
+    null
   );
 }
 
@@ -192,7 +197,7 @@ function optionalMcpPrompt(integrations: unknown): JsonObject | null {
     {
       tool: "cadre_workflow",
       workflow: "setup",
-      argument: "integrations",
+      argument: "integrations.optional_mcps",
       customArgument: "integrations.other",
       selectedIds: [],
     },

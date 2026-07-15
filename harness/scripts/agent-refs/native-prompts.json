@@ -7,12 +7,14 @@
   "rules": [
     "Use the client's native selector when available.",
     "Return answers as structured workflow input; never write prompt-response files.",
-    "When a session_id is returned, resume that exact session without recording approval."
+    "Apply responseTarget exactly: value_map merges each selected id's object patch, selected_id sets argument to the selected id, and selected_ids sets argument to the selected id array including an empty array; preserve false and empty values.",
+    "Accept custom text only when allowCustom is true; write it at customArgument using customMode (replace or append_unique).",
+    "Fill only decision.writable_paths in the returned decision.resume call; a session-only continuation never records approval."
   ],
   "sections": [
     {
       "heading": "Clarification",
-      "body": "When decision.kind is clarification, ask only the returned prompts. Continue with answers under `input` and the exact returned session-only resume. `approval: {session_id}` preserves the session; it does not approve the stage."
+      "body": "When decision.kind is clarification, ask only the returned prompts. Transform selections through responseTarget.valueMode: merge exact valueMap patches, set one selected id, or set the selected id array including []. Apply custom text only when allowCustom is true and follow customArgument/customMode. Preserve false and empty values. Put the result only at decision.writable_paths inside decision.resume, then invoke that full call. Its session-only approval object preserves the session; it does not approve the stage."
     }
   ],
   "platforms": {
