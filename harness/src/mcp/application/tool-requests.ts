@@ -88,6 +88,9 @@ function workflowApproval(value: unknown): WorkflowApproval | undefined {
   onlyKeys(approval, ["stage", "session_id", "approved_stages", "complete", "cancel"], "cadre_workflow.approval");
   const stage = optionalString(approval.stage, "approval.stage");
   const sessionId = optionalString(approval.session_id, "approval.session_id");
+  if (sessionId && !/^[a-f0-9]{24}$/.test(sessionId)) {
+    invalid("approval.session_id must be a 24-character lowercase hexadecimal Cadre session id");
+  }
   if (approval.approved_stages !== undefined && (!Array.isArray(approval.approved_stages) || !approval.approved_stages.every((entry) => typeof entry === "string"))) {
     invalid("approval.approved_stages must be an array of strings");
   }

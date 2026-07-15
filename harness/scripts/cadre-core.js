@@ -9297,10 +9297,15 @@ function previewFilesForStages(session, stageIds) {
 function sessionDirectory(root) {
   return import_node_path37.default.join(root, "cadre", "local", "approval-sessions");
 }
+function isApprovalSessionId(value) {
+  return typeof value === "string" && /^[a-f0-9]{24}$/.test(value);
+}
 function sessionFile(root, sessionId) {
+  if (!isApprovalSessionId(sessionId)) throw new Error("Invalid approval session id");
   return import_node_path37.default.join(sessionDirectory(root), `${sessionId}.json`);
 }
 function readApprovalSession(root, sessionId) {
+  if (!isApprovalSessionId(sessionId)) return null;
   try {
     return JSON.parse(import_node_fs21.default.readFileSync(sessionFile(root, sessionId), "utf8"));
   } catch {
@@ -9308,6 +9313,7 @@ function readApprovalSession(root, sessionId) {
   }
 }
 function writeApprovalSession(root, session) {
+  if (!isApprovalSessionId(session.session_id)) throw new Error("Invalid approval session id");
   ensureNativeState(root);
   import_node_fs21.default.mkdirSync(sessionDirectory(root), { recursive: true });
   const target2 = sessionFile(root, session.session_id);
@@ -9317,6 +9323,7 @@ function writeApprovalSession(root, session) {
   import_node_fs21.default.renameSync(temporary, target2);
 }
 function removeApprovalSession(root, sessionId) {
+  if (!isApprovalSessionId(sessionId)) throw new Error("Invalid approval session id");
   import_node_fs21.default.rmSync(sessionFile(root, sessionId), { force: true });
 }
 function approvalSessions(root) {

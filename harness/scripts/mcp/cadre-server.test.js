@@ -570,6 +570,7 @@ test("MCP root resolution rejects harness skill directories without project stat
     const approvalSchema = byName.get("cadre_workflow").inputSchema.properties.approval;
     assert.deepEqual(Object.keys(approvalSchema.properties).sort(), ["approved_stages", "cancel", "complete", "session_id", "stage"]);
     assert.equal(approvalSchema.additionalProperties, false);
+    assert.equal(approvalSchema.properties.session_id.pattern, "^[a-f0-9]{24}$");
     assert.match(approvalSchema.description, /session_id alone resumes and is not approval/);
     assert.match(approvalSchema.description, /exact approved_stages prefix only after explicit user approval/);
     assert.ok(Math.ceil(JSON.stringify(tools.tools).length / 4) <= 1700);
@@ -619,6 +620,18 @@ test("MCP root resolution rejects harness skill directories without project stat
         arguments: { root, workflow: "status", input: { approvalComplete: true } },
       }),
       /reserved control fields: approvalComplete/,
+    );
+    await assert.rejects(
+      request("tools/call", {
+        name: "cadre_workflow",
+        arguments: {
+          root,
+          workflow: "setup",
+          input: {},
+          approval: { session_id: "../../outside" },
+        },
+      }),
+      /24-character lowercase hexadecimal/,
     );
     await assert.rejects(
       request("tools/call", {

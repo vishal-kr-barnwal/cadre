@@ -37,11 +37,17 @@ function sessionDirectory(root: string): string {
   return path.join(root, "cadre", "local", "approval-sessions");
 }
 
+export function isApprovalSessionId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{24}$/.test(value);
+}
+
 function sessionFile(root: string, sessionId: string): string {
+  if (!isApprovalSessionId(sessionId)) throw new Error("Invalid approval session id");
   return path.join(sessionDirectory(root), `${sessionId}.json`);
 }
 
 export function readApprovalSession(root: string, sessionId: string): ApprovalSession | null {
+  if (!isApprovalSessionId(sessionId)) return null;
   try {
     return JSON.parse(fs.readFileSync(sessionFile(root, sessionId), "utf8")) as ApprovalSession;
   } catch {
@@ -50,6 +56,7 @@ export function readApprovalSession(root: string, sessionId: string): ApprovalSe
 }
 
 export function writeApprovalSession(root: string, session: ApprovalSession): void {
+  if (!isApprovalSessionId(session.session_id)) throw new Error("Invalid approval session id");
   ensureNativeState(root);
   fs.mkdirSync(sessionDirectory(root), { recursive: true });
   const target = sessionFile(root, session.session_id);
@@ -59,6 +66,7 @@ export function writeApprovalSession(root: string, session: ApprovalSession): vo
 }
 
 export function removeApprovalSession(root: string, sessionId: string): void {
+  if (!isApprovalSessionId(sessionId)) throw new Error("Invalid approval session id");
   fs.rmSync(sessionFile(root, sessionId), { force: true });
 }
 

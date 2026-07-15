@@ -4779,6 +4779,44 @@ test("setup amends only its current unapproved stage without resetting the appro
   }
 });
 
+test("setup rejects malformed approval session ids without escaping session storage", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-approval-session-id-test-"));
+  try {
+    git(root, ["init"]);
+    const sentinel = path.join(root, "escape.json");
+    write(sentinel, "{\"safe\":true}\n");
+    const before = fs.readFileSync(sentinel, "utf8");
+    const result = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: "../../../escape",
+      providerMode: "local",
+      syncMode: "local",
+      setupLsp: false,
+      styleGuideIds: [],
+      integrations: {},
+      product: { title: "Safe Product", summary: "Keep malformed session identifiers outside storage." },
+      productGuidelines: { title: "Guidelines", summary: "Validate approval identity before reading session files." },
+      techStack: { languages: ["TypeScript"] },
+      workflowPolicy: { title: "Workflow", summary: "Fail closed without mutating approval state." },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /Approval session was not found/);
+    assert.equal(fs.readFileSync(sentinel, "utf8"), before);
+    const cancelled = core.workflowPacket(root, {
+      workflow: "setup",
+      approvalSessionId: "../../../escape",
+      approvalCancel: true,
+    });
+    assert.equal(cancelled.ok, false);
+    assert.match(cancelled.error, /Approval session was not found/);
+    assert.equal(fs.readFileSync(sentinel, "utf8"), before);
+    const sessionDir = path.join(root, "cadre", "local", "approval-sessions");
+    assert.deepEqual(fs.existsSync(sessionDir) ? fs.readdirSync(sessionDir) : [], []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("setup cancellation restores an existing Cadre ignore file exactly", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-setup-existing-ignore-cancel-test-"));
   try {

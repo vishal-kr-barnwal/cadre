@@ -32,7 +32,7 @@ export const TOOLS: JsonObject[] = [
           type: "object",
           description: "Resume or control a staged session. session_id alone resumes and is not approval. Add stage and the exact approved_stages prefix only after explicit user approval; complete is valid only after all stages. cancel abandons the session.",
           properties: {
-            session_id: { type: "string" },
+            session_id: { type: "string", pattern: "^[a-f0-9]{24}$" },
             stage: { type: "string" },
             approved_stages: { type: "array", items: { type: "string" } },
             complete: { type: "boolean" },

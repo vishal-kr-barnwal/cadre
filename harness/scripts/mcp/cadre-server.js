@@ -9400,10 +9400,15 @@ function previewFilesForStages(session, stageIds) {
 function sessionDirectory(root2) {
   return import_node_path37.default.join(root2, "cadre", "local", "approval-sessions");
 }
+function isApprovalSessionId(value) {
+  return typeof value === "string" && /^[a-f0-9]{24}$/.test(value);
+}
 function sessionFile(root2, sessionId) {
+  if (!isApprovalSessionId(sessionId)) throw new Error("Invalid approval session id");
   return import_node_path37.default.join(sessionDirectory(root2), `${sessionId}.json`);
 }
 function readApprovalSession(root2, sessionId) {
+  if (!isApprovalSessionId(sessionId)) return null;
   try {
     return JSON.parse(import_node_fs22.default.readFileSync(sessionFile(root2, sessionId), "utf8"));
   } catch {
@@ -9411,6 +9416,7 @@ function readApprovalSession(root2, sessionId) {
   }
 }
 function writeApprovalSession(root2, session) {
+  if (!isApprovalSessionId(session.session_id)) throw new Error("Invalid approval session id");
   ensureNativeState(root2);
   import_node_fs22.default.mkdirSync(sessionDirectory(root2), { recursive: true });
   const target2 = sessionFile(root2, session.session_id);
@@ -9420,6 +9426,7 @@ function writeApprovalSession(root2, session) {
   import_node_fs22.default.renameSync(temporary, target2);
 }
 function removeApprovalSession(root2, sessionId) {
+  if (!isApprovalSessionId(sessionId)) throw new Error("Invalid approval session id");
   import_node_fs22.default.rmSync(sessionFile(root2, sessionId), { force: true });
 }
 function approvalSessions(root2) {
@@ -20590,7 +20597,7 @@ var TOOLS = [
           type: "object",
           description: "Resume or control a staged session. session_id alone resumes and is not approval. Add stage and the exact approved_stages prefix only after explicit user approval; complete is valid only after all stages. cancel abandons the session.",
           properties: {
-            session_id: { type: "string" },
+            session_id: { type: "string", pattern: "^[a-f0-9]{24}$" },
             stage: { type: "string" },
             approved_stages: { type: "array", items: { type: "string" } },
             complete: { type: "boolean" },
@@ -21641,6 +21648,9 @@ function workflowApproval(value) {
   onlyKeys(approval, ["stage", "session_id", "approved_stages", "complete", "cancel"], "cadre_workflow.approval");
   const stage = optionalString(approval.stage, "approval.stage");
   const sessionId = optionalString(approval.session_id, "approval.session_id");
+  if (sessionId && !/^[a-f0-9]{24}$/.test(sessionId)) {
+    invalid("approval.session_id must be a 24-character lowercase hexadecimal Cadre session id");
+  }
   if (approval.approved_stages !== void 0 && (!Array.isArray(approval.approved_stages) || !approval.approved_stages.every((entry) => typeof entry === "string"))) {
     invalid("approval.approved_stages must be an array of strings");
   }
