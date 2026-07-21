@@ -15,7 +15,7 @@ import type { CoreResult } from "./contracts";
 import { hasGeneratedMarker, markdownDocJson, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { appendCadreEvent, appendCadreMessage, nativeStateSummary } from "./native-state";
 import { trackHandoffJsonPath } from "./plan-docs";
-import { planIntegrity } from "./planning";
+import { planIntegrity, worktreePlan } from "./planning";
 import { regenIndex } from "./project-maintenance";
 import { projectSkillDiagnostics } from "./project-skills";
 import { prCiStatus, reviewAssist } from "./quality-gates";
@@ -26,22 +26,91 @@ import { applyStagedApprovalSessionPayload, handoffApprovalStages, stagedApprova
 import { availableWork, fleetStatus, liveStatus, metadataTrackSummary, selectedTrackId, teamBoard, teamStatus } from "./status";
 import { findTrack, trackContext } from "./track-context";
 import { handoffIntentPrompts, meaningfulHandoffText } from "./workflow-evidence";
+import {
+  deferredTaskPacket,
+  implementationTarget,
+  parallelImplementation,
+  worktreeSetupContinuation,
+  worktreesReady,
+} from "./implementation-orchestration";
 import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
 import { doctor } from "./workspace-health";
 
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
-  const prep = implementationPrep(root, {
-    ...args,
-    claim: args.claim === true || args.execute === true,
-  });
+  const shouldClaim = args.claim === true || args.execute === true;
+  const preflight = implementationPrep(root, { ...args, claim: false });
+  const prep = preflight.ok !== false && shouldClaim
+    ? implementationPrep(root, { ...args, claim: true })
+    : preflight;
   const trackId = asOptionalString(prep.selected_track) || args.trackId || args.track_id || null;
+  const schedule = trackId ? phaseSchedule(root, { ...args, trackId }) : null;
+  const integrationWorktrees = trackId && prep.ok !== false
+    ? worktreePlan(root, { ...args, trackId, repo: undefined, execute: false })
+    : null;
+  const ok = prep.ok !== false && schedule?.ok !== false && integrationWorktrees?.ok !== false;
+  const orchestration = {
+    prepare_implementation: prep,
+    phase_schedule: schedule,
+  };
+  const target = ok ? implementationTarget(orchestration) : null;
+  const worktreeSetup = ok && trackId && integrationWorktrees
+    ? worktreeSetupContinuation(root, trackId, integrationWorktrees, args)
+    : null;
+  const task = target && integrationWorktrees
+    ? deferredTaskPacket(root, target, integrationWorktrees)
+    : null;
+  const parallelReady = Boolean(
+    target
+    && integrationWorktrees
+    && worktreesReady(integrationWorktrees)
+    && parallelImplementation(target),
+  );
   return {
     ...workflowSummary(root, "implement", args),
-    ok: prep.ok !== false,
+    ok,
+    phase_state: ok
+      ? worktreeSetup
+        ? "awaiting_worktree"
+        : task
+          ? "implementation_ready"
+          : parallelReady
+            ? "parallel_ready"
+            : "ready"
+      : "blocked",
     prepare_implementation: prep,
-    phase_schedule: trackId ? phaseSchedule(root, { ...args, trackId }) : null,
+    phase_schedule: schedule,
+    integration_worktrees: integrationWorktrees,
+    next: worktreeSetup,
+    ...(task ? { task } : {}),
+    ...(worktreeSetup ? {
+      decision: {
+        kind: "worktree_setup",
+        track_id: trackId,
+        prompt: "Create and check out the required integration worktree before implementation begins.",
+        call: worktreeSetup,
+      },
+    } : task ? {
+      decision: {
+        kind: "implementation_task",
+        track_id: trackId,
+        task_key: task.task_key || null,
+        prompt: "Perform the task in working_root, then invoke complete_packet with implementation evidence.",
+      },
+    } : parallelReady ? {
+      decision: {
+        kind: "parallel_ready",
+        track_id: trackId,
+        prompt: "The integration worktrees are ready; schedule the next dependency-ready worker wave.",
+      },
+    } : {}),
+    ...(ok ? {} : {
+      error: asOptionalString(prep.error || prep.reason)
+        || asOptionalString(schedule?.error)
+        || asOptionalString(integrationWorktrees?.error)
+        || "Implementation preparation failed",
+    }),
   };
 }
 
@@ -329,7 +398,32 @@ export function workflowHandoff(root: string, args: RuntimeArgs = {}): CoreResul
     subject,
     handoff_path: path.relative(root, handoffPath),
   });
+  if (event.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: false,
+      phase_state: "recovery_required",
+      stage: "event_log",
+      message,
+      event,
+      error: asOptionalString(event.error) || "Handoff was written but its required audit event was not recorded",
+    };
+  }
   const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  if (approvalAudit.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: false,
+      phase_state: "recovery_required",
+      stage: "approval_audit",
+      message,
+      event,
+      approval_audit: approvalAudit,
+      error: asOptionalString(approvalAudit.error) || "Handoff approval audit was not recorded",
+    };
+  }
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "handoff",

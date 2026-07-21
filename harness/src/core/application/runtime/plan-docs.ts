@@ -3,6 +3,7 @@ import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../.
 import type { CadreTrack, JsonObject, ParsedPlan, PlanPhase, PlanTask } from "../../../types";
 
 import { appendCanonicalJsonReference, markerForPlanStatus, normalizedText } from "./markdown-docs";
+import { canonicalizePlanGraph } from "./plan-graph";
 import { specItemsFromRaw } from "./spec-docs";
 import { asArray } from "./status";
 
@@ -233,7 +234,8 @@ export function normalizePlanManualVerification(plan: JsonObject, specJson?: Jso
 }
 
 export function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
-  const phases = asArray(raw.phases).map((rawPhase, phaseOffset) => {
+  const graph = canonicalizePlanGraph(raw);
+  const phases = asArray(graph.plan.phases).map((rawPhase, phaseOffset) => {
     const phase = asJsonObject(rawPhase);
     const phaseIndex = Number(phase.phase_index || phase.index || phaseOffset + 1);
     const phaseDepends = asStringArray(phase.depends_on);
@@ -286,7 +288,13 @@ export function planJsonToParsedPlan(raw: JsonObject): ParsedPlan {
       line: Number(phase.line || phaseIndex * 100),
     } as PlanPhase;
   });
-  return { ok: true, phases, tasks: phases.flatMap((phase) => phase.tasks), warnings: [], errors: [] };
+  return {
+    ok: graph.issues.length === 0,
+    phases,
+    tasks: phases.flatMap((phase) => phase.tasks),
+    warnings: [],
+    errors: graph.issues.map((entry) => String(entry.message || "Invalid plan graph")),
+  };
 }
 
 export function renderPlanMarkdown(raw: JsonObject, canonicalSource?: string): string {

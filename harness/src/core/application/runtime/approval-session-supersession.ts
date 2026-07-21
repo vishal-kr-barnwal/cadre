@@ -135,7 +135,10 @@ export function supersedeUnapprovedApprovalSessions(
     }
     const sessions = listApprovalSessions(root, { lifecycleLocked: true, includeRecoveryPending: true });
     const recoveryPending = sessions.filter((session) => (
-      session.cancellation_recovery_required === true || session.supersession_recovery_required === true
+      session.cancellation_recovery_required === true
+      || session.supersession_recovery_required === true
+      || session.reopen_recovery_required === true
+      || session.materialization_recovery_required === true
     ));
     if (recoveryPending.length > 0) {
       return {

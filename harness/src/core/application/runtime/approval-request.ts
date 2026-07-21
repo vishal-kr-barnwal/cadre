@@ -1,14 +1,13 @@
 import crypto from "node:crypto";
 import path from "node:path";
-
 import { asOptionalString, asStringArray } from "../../../guards";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
-
 import { readApprovalSession } from "./approval-session-store";
+import { reopenApprovalStage } from "./approval-stage-reopen";
+import { inspectNewTrackTarget, newTrackRestartSafetyError } from "./new-track-target-state";
 import type { ApprovalStage } from "./staged-approval-stages";
 import { availableStyleGuideIds, normalizeStyleGuideId, requestedStyleGuideIds } from "./tech-stack";
 import { normalizeProviderMode } from "../../infrastructure/runtime/project-config";
-
 const CONTROL_KEYS = new Set([
   "root",
   "workflow",
@@ -18,6 +17,10 @@ const CONTROL_KEYS = new Set([
   "approval_complete",
   "approvalCancel",
   "approval_cancel",
+  "approvalReopenStage",
+  "approval_reopen_stage",
+  "approvalRestart",
+  "approval_restart",
   "approvalStage",
   "approval_stage",
   "approvalStageHash",
@@ -34,7 +37,6 @@ const CONTROL_KEYS = new Set([
   "compact",
   "skipSync",
 ]);
-
 const COMMON_PAYLOAD_ALIAS_GROUPS = [
   ["productGuidelines", "product_guidelines"],
   ["techStack", "tech_stack"],
@@ -81,6 +83,7 @@ const REFRESH_SEMANTIC_KEYS = [
 
 export const APPROVAL_INPUT_ERROR = "_cadreApprovalInputError";
 export const APPROVAL_PERSISTED_PAYLOAD = "_cadreApprovalPersistedPayload";
+export const APPROVAL_RESTARTED = "_cadreApprovalRestarted";
 
 function rawArgs(args: RuntimeArgs): UnknownRecord {
   return args as UnknownRecord;
@@ -136,12 +139,24 @@ export function hasApprovalIntent(args: RuntimeArgs): boolean {
     || raw.approvalStage !== undefined
     || raw.approval_stage !== undefined
     || raw.approvalCancel === true
-    || raw.approval_cancel === true;
+    || raw.approval_cancel === true
+    || requestedApprovalReopenStage(args) !== null
+    || approvalRestartRequested(args);
 }
 
 export function approvalCancelRequested(args: RuntimeArgs): boolean {
   const raw = rawArgs(args);
   return raw.approvalCancel === true || raw.approval_cancel === true;
+}
+
+export function requestedApprovalReopenStage(args: RuntimeArgs = {}): string | null {
+  const raw = rawArgs(args);
+  return asOptionalString(raw.approvalReopenStage || raw.approval_reopen_stage) || null;
+}
+
+export function approvalRestartRequested(args: RuntimeArgs = {}): boolean {
+  const raw = rawArgs(args);
+  return raw.approvalRestart === true || raw.approval_restart === true;
 }
 
 function controlPayload(args: RuntimeArgs): JsonObject {
@@ -231,7 +246,7 @@ function canonicalPayload(value: JsonObject, workflow?: string): JsonObject {
 function rawApprovalPayload(args: RuntimeArgs): JsonObject {
   const payload: JsonObject = {};
   for (const [key, value] of Object.entries(rawArgs(args))) {
-    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR && key !== APPROVAL_PERSISTED_PAYLOAD) {
+    if (!CONTROL_KEYS.has(key) && key !== APPROVAL_INPUT_ERROR && key !== APPROVAL_PERSISTED_PAYLOAD && key !== APPROVAL_RESTARTED) {
       payload[key] = value as JsonObject[string];
     }
   }
@@ -353,6 +368,81 @@ export function applyApprovalSessionPayload(root: string, args: RuntimeArgs = {}
   }
   const session = readApprovalSession(root, sessionId);
   if (!session || session.workflow !== workflow) return { ...canonicalInput, ...controls };
+  const reopenStage = requestedApprovalReopenStage(args);
+  if (reopenStage) {
+    delete controls.approvalReopenStage;
+    delete controls.approval_reopen_stage;
+    if (Object.keys(canonicalInput).length > 0) {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: "Reopen a stage in its own call, then amend only the returned active-stage writable paths.",
+      };
+    }
+    const reopened = reopenApprovalStage(root, sessionId, workflow, reopenStage);
+    if (reopened.ok === false) {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: asOptionalString(reopened.error) || `Unable to reopen approval stage ${reopenStage}.`,
+      };
+    }
+    const updated = readApprovalSession(root, sessionId);
+    return { ...(updated?.payload || session.payload), ...controls };
+  }
+  if (approvalRestartRequested(args)) {
+    delete controls.approvalRestart;
+    delete controls.approval_restart;
+    if (workflow !== "newtrack") {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: "approval.restart is supported only for an owned newtrack draft.",
+      };
+    }
+    if (Object.keys(canonicalInput).length > 0) {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: "Restart an owned draft in its own call, then amend the returned spec stage.",
+      };
+    }
+    const trackId = asOptionalString(session.payload.trackId || session.payload.track_id);
+    if (!trackId) {
+      return { ...session.payload, ...controls, [APPROVAL_INPUT_ERROR]: "Owned newtrack draft is missing its exact track id." };
+    }
+    const targetState = inspectNewTrackTarget(root, trackId, sessionId);
+    if (targetState.kind !== "vacant" && targetState.kind !== "owned_draft") {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: targetState.reason
+          || "Newtrack restart is blocked because the target is not wholly owned by this approval session.",
+      };
+    }
+    const started = newTrackRestartSafetyError(root, trackId);
+    if (started) {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: `Newtrack restart is unsafe because ${started}; use revise instead.`,
+      };
+    }
+    const firstStage = session.stage_order?.[0];
+    if (!firstStage) {
+      return { ...session.payload, ...controls, [APPROVAL_INPUT_ERROR]: "Approval session has no restartable stage ledger." };
+    }
+    const restarted = reopenApprovalStage(root, sessionId, workflow, firstStage, { allowUnapproved: true, restartTrackId: trackId });
+    if (restarted.ok === false) {
+      return {
+        ...session.payload,
+        ...controls,
+        [APPROVAL_INPUT_ERROR]: asOptionalString(restarted.error) || "Unable to restart the owned newtrack draft.",
+      };
+    }
+    const updated = readApprovalSession(root, sessionId);
+    return { ...(updated?.payload || session.payload), ...controls, [APPROVAL_RESTARTED]: true };
+  }
   if (invalidChoice) {
     if (hasApprovalIntent(args)) {
       return {

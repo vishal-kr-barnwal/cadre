@@ -241,6 +241,38 @@ export function stagedApprovalState(
   ]));
   const currentRecord = active && session ? stageRecord(session, active.id) : null;
   const validForExecute = !approvalError && complete && authoritativeApprovedIds.length === stages.length;
+  const currentReviewArtifacts = reviewArtifactsFromFiles(activeFiles);
+  const selectedComponents = active?.id === "technical"
+    ? Array.from(new Set(activeFiles.flatMap((file) => {
+      if (file.path === "cadre/lsp.json") return ["lsp"];
+      if (file.documentId === "tech_stack") return ["tech_stack"];
+      if (file.documentId === "styleguides") return ["style_guides"];
+      if (file.documentId === "repos") return ["repository_topology"];
+      return [];
+    })))
+    : [];
+  const omittedComponents = active?.id === "technical"
+    ? ["tech_stack", "style_guides", "repository_topology", "lsp"]
+      .filter((component) => !selectedComponents.includes(component))
+      .map((component) => ({ component, reason: "not selected or not applicable to this frozen technical stage" }))
+    : [];
+  const currentReviewSet = active ? {
+    version: 1,
+    schema: "cadre.review_set.v1",
+    complete: true,
+    truncated: false,
+    workflow,
+    session_id: responseSessionId,
+    stage: active.id,
+    stage_hash: stageHashes[active.id],
+    stage_revision: currentRecord?.revision ?? null,
+    file_count: currentReviewArtifacts.length,
+    files: currentReviewArtifacts,
+    primary_document: currentReviewArtifacts.find((file) => file.review_role === "human") || null,
+    manifest_path: asOptionalString(asJsonObject(stageBundle).manifest_path) || null,
+    selected_components: selectedComponents,
+    omitted_components: omittedComponents,
+  } : null;
   const manualPrompt = active && responseSessionId && !deferredForClarification && !approvalError && !recoveryRequired
     ? stageApprovalPrompt(workflow, active, responseSessionId, activeFiles)
     : null;
@@ -308,9 +340,10 @@ export function stagedApprovalState(
     current_document: active ? {
       id: active.id,
       title: active.title,
-      files: reviewArtifactsFromFiles(activeFiles),
+      files: currentReviewArtifacts,
     } : null,
-    current_review_artifacts: reviewArtifactsFromFiles(activeFiles),
+    current_review_artifacts: currentReviewArtifacts,
+    current_review_set: currentReviewSet,
     current_review_bundle: stageBundle,
     review_bundle: stageBundle,
     intent_to_add_paths: session?.intent_to_add_paths || [],

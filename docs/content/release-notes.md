@@ -13,6 +13,25 @@ The next Cadre update makes every approval workflow lazy by stage, makes
 refresh analysis-first, and extends placeholder-safe clarification and
 target-preview recovery across staged workflows.
 
+- Any approved stage can now be reopened through an exact typed call. Cadre
+  transactionally preserves the earlier approved prefix, invalidates the
+  selected stage and every later stage, restores or removes their owned target
+  and bundle files, and regenerates the chain with new review stamps. This is
+  shared by setup, new-track, revise, refresh, handoff, release, and project-skill
+  staged workflows.
+- New-track restart reuses the exact ID for an owned draft or a proven
+  never-started closed track. It no longer invents an `-revised` ID, compensates
+  stale track-index/event effects, rechecks state under the lifecycle lock, and
+  routes tracks with implementation evidence to `revise`.
+- Review packets expose a complete, untruncated `decision.review_set` by
+  default. Grouped technical review reports tech-stack, style-guide, LSP, and
+  repository-topology selections; TechStack and Workflow projections render
+  every canonical field as semantic Markdown.
+- Plans canonicalize phase/task IDs and dependency levels before approval, and
+  every scheduler rejects invalid persisted graphs consistently. Implement
+  creates all missing affected integration worktrees through its first returned
+  action, resumes automatically, and defers completion until task results exist.
+
 - `cadre-refresh` now analyzes repository and control-plane drift before asking
   the user to choose one or more recommended levels: product, product
   guidelines, tech stack, style guides, workflow, patterns, repository

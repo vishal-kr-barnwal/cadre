@@ -18,7 +18,8 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 | Root | Required on every project-scoped call and resolved internally. |
 | Clarification | Before review begins, calls that lack meaningful evidence return prompts without creating approval sessions or template artifacts. `decision.resume` is always a complete public call; fill only its sibling `writable_paths`. After a session begins it carries session-only approval state and preserves the same approved prefix. |
 | Preview | `execute:false` generates and materializes only the active stage's deterministic files. Later stages remain pending and unmaterialized. |
-| Approval | Session-only approval state inside a returned `decision.resume` or `decision.amend` is not approval. A structured value written at a writable path replaces that value, so send the complete artifact object; a returned namespace-member path replaces only that member. Only after explicit user approval may the object include the exact `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and next cumulative `approved_stages` prefix; never substitute clarification-only `decision.current_stage` or reuse a stale stamp. All files owned by that stage are one atomic review set. |
+| Approval | Session-only approval state inside a returned `decision.resume` or `decision.amend` is not approval. A structured value written at a writable path replaces that value, so send the complete artifact object; a returned namespace-member path replaces only that member. Only after explicit user approval may the object include the exact `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and next cumulative `approved_stages` prefix; never substitute clarification-only `decision.current_stage` or reuse a stale stamp. `decision.review_set` is the complete, untruncated atomic file set and should be shown by default. |
+| Reopen | Every approved stage has an exact `decision.reopen` call. It preserves the earlier approved prefix, invalidates and restores or removes that stage plus all later-stage outputs transactionally, and regenerates them in order with new review stamps. |
 | Supersession | A new payload can replace untouched, wholly unapproved overlapping previews. Approved, edited, staged, or committed targets are preserved and reported. |
 | Cancellation | `approval:{session_id, cancel:true}` restores a target preview only after workflow, content, Git-index, and HEAD-baseline validation; failure retains the session. |
 | Execution | `execute:true` is valid only after prerequisites and every staged approval are satisfied. A staged workflow returns an execution continuation only then; invoke exactly the returned `next`. |
@@ -37,6 +38,10 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
   repository topology, LSP, and infrastructure choices as one atomic stage.
   Only the active stage is materialized; patterns and other generated state do
   not add separate approval stages.
+- Review output: `product.md`, `product_guidelines.md`, semantic
+  `tech-stack.md`, selected style-guide projections, optional `lsp.json` and
+  repository topology, and semantic `workflow.md` are returned as review paths
+  without requiring a separate request.
 - Output: canonical `cadre/` context, projections, native state defaults,
   optional shared-sync attributes, and hosted CI scaffolding.
 - Common failures: ambiguous provider remotes, weak project intent, dirty target
@@ -52,6 +57,9 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
   project-specific evidence, then `spec` → `plan`. The plan remains pending
   and unmaterialized until the spec is explicitly approved. Empty or generic
   objects do not materialize previews.
+- Restart: an owned draft or proven never-started closed track can be reset and
+  recreated under the same exact ID. Cadre does not suffix the ID; a track with
+  work, branch, worktree, or event evidence must use `revise`.
 - Output: canonical track spec/plan, task graph, projections, events, and an
   exact `next` call when implementation can proceed.
 - Common failures: untestable acceptance criteria, missing task dependencies,
@@ -65,7 +73,10 @@ confirmed mutation. Project-skill selection runs before workflow-specific work.
 - Approval: implementation itself is not a staged document approval; returned
   task completion or parallel actions remain packet-owned.
 - Output: task context, phase schedule, applicable rules, test impact,
-  completion requirements, or an exact parallel-dispatch `next` call.
+  completion requirements, or an exact worktree-setup/parallel-dispatch `next`
+  call. Missing affected integration worktrees are created first and the action
+  resumes implementation automatically; task completion is not reported before
+  real task results exist.
 - Common failures: no ready task, blockers, ownership collision, unresolved repo,
   invalid skill, or unfinished prerequisite.
 

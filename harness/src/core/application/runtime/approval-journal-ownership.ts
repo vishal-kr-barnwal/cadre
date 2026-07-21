@@ -106,6 +106,12 @@ export function cancellationJournalOwnershipError(
       expectedPaths.add(previewPath);
     }
   }
+  for (const materializedPath of session.materialized_target_paths || []) {
+    if (!owned.targets.has(materializedPath)) {
+      return `Materialized approval target is not owned by a recovery snapshot: ${materializedPath}`;
+    }
+    expectedPaths.add(materializedPath);
+  }
   const nativeIgnore = owned.targets.get("cadre/.gitignore");
   const optionalNativeIgnore = nativeIgnore
     && nativeIgnore.preview !== nativeIgnore.before

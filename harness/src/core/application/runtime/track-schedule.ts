@@ -10,6 +10,7 @@ import { claimsOverlap, normalizeClaimPath } from "./collision";
 import type { Claim, ClaimConflict, CoreResult, HoldInfo, PhaseScheduleNode, TaskCounts, WorkState } from "./contracts";
 import { planJsonPathForPlanPath, planJsonToParsedPlan } from "./plan-docs";
 import { unresolvedPlanRepos } from "./repo-resolution";
+import { completedTaskKeys, readyTasksForPhase, taskBlockedBy } from "./task-readiness";
 import { findTrack } from "./track-context";
 
 export function workStateForTrack(track: CadreTrack): WorkState | null {
@@ -276,12 +277,13 @@ export function phaseSchedule(root: string, args: RuntimeArgs = {}): CoreResult 
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
   const plan = parsePlanFile(track.plan_path);
   const topology = loadTopology(root);
+  const completedTasks = completedTaskKeys(plan);
   const aliasMap = new Map<string, PlanPhase>();
   for (const phase of plan.phases || []) {
     for (const alias of phaseAliases(phase)) aliasMap.set(alias, phase);
   }
 
-  const errors: CoreResult[] = [];
+  const errors: CoreResult[] = (plan.errors || []).map((message) => ({ message }));
   const phases: PhaseScheduleNode[] = (plan.phases || []).map((phase, index, all) => {
     const rawDepends = Object.prototype.hasOwnProperty.call(phase.annotations || {}, "depends")
       ? String((phase.annotations || {}).depends || "").trim()
@@ -298,6 +300,8 @@ export function phaseSchedule(root: string, args: RuntimeArgs = {}): CoreResult 
     }
     const dependsOn = phaseDependencyIds(phase, all[index - 1], aliasMap);
     const claims = claimsForPhase(root, phase, topology);
+    const readyTasks = readyTasksForPhase(phase, completedTasks);
+    const readyTaskKeys = new Set(readyTasks.map((task) => task.task_key));
     return {
       phase_id: `phase${phase.phase_index}`,
       phase_index: phase.phase_index ?? index + 1,
@@ -307,6 +311,7 @@ export function phaseSchedule(root: string, args: RuntimeArgs = {}): CoreResult 
       status: phaseStatus(phase),
       task_counts: taskCounts({ phases: [phase] }),
       claims,
+      ready_tasks: readyTasks.map((task) => task.task_key),
       tasks: (phase.tasks || []).map((task) => ({
         task_key: task.task_key ?? "",
         task_index: task.task_index ?? 0,
@@ -315,6 +320,8 @@ export function phaseSchedule(root: string, args: RuntimeArgs = {}): CoreResult 
         repo: task.repo || (topology.polyrepo ? topology.defaultRepo : "."),
         files: task.files || [],
         depends: task.depends || [],
+        blocked_by: taskBlockedBy(task, completedTasks),
+        ready: readyTaskKeys.has(task.task_key),
         labels: task.labels || [],
       })),
     };
@@ -329,6 +336,7 @@ export function phaseSchedule(root: string, args: RuntimeArgs = {}): CoreResult 
     ? phases
       .filter((phase) => !["completed", "blocked"].includes(phase.status))
       .filter((phase) => phase.depends_on.every((dep) => completed.has(dep)))
+      .filter((phase) => Array.isArray(phase.ready_tasks) && phase.ready_tasks.length > 0)
     : [];
   const { groups, conflicts } = groupReadyPhases(ready);
   return {

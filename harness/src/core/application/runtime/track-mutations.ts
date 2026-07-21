@@ -81,20 +81,26 @@ export function metadataPatch(root: string, args: RuntimeArgs = {}): CoreResult 
     root,
     lockName: trackLockName(track.track_id),
   });
+  const event = result.ok ? appendCadreEvent(root, {
+    kind: "metadata_updated",
+    workflow: "metadata_patch",
+    track_id: track.track_id,
+    patch_keys: Object.keys(patch).sort(),
+    tags: asStringArray(asJsonObject(patch).tags),
+    depends_on: asStringArray(asJsonObject(patch).depends_on),
+  }) : null;
   return {
-    ok: result.ok,
+    ok: result.ok && event?.ok !== false,
+    ...(event?.ok === false ? {
+      recovery_required: true,
+      stage: "event_log",
+      error: asOptionalString(event.error) || "Metadata changed but its required audit event was not recorded",
+    } : {}),
     track_id: track.track_id,
     metadata_path: path.relative(root, track.metadata_path),
     patch_keys: Object.keys(patch).sort(),
     result,
-    event: result.ok ? appendCadreEvent(root, {
-      kind: "metadata_updated",
-      workflow: "metadata_patch",
-      track_id: track.track_id,
-      patch_keys: Object.keys(patch).sort(),
-      tags: asStringArray(asJsonObject(patch).tags),
-      depends_on: asStringArray(asJsonObject(patch).depends_on),
-    }) : null,
+    event,
   };
 }
 
@@ -189,7 +195,12 @@ export function claimTrackUnlocked(root: string, track: CadreTrack, options: Run
     previous_owner: heldBy || null,
   });
   return {
-    ok: true,
+    ok: event.ok !== false,
+    ...(event.ok === false ? {
+      recovery_required: true,
+      stage: "event_log",
+      error: asOptionalString(event.error) || "Track claim changed state but its audit event was not recorded",
+    } : {}),
     claimed: true,
     track_id: track.track_id,
     owner: identity,
@@ -227,6 +238,19 @@ export function setTrackStatus(root: string, trackId: string, status: string, ar
       track_id: trackId,
       status,
     });
+    if (event.ok === false) {
+      return {
+        ok: false,
+        recovery_required: true,
+        stage: "event_log",
+        error: asOptionalString(event.error) || "Track status changed but its audit event was not recorded",
+        track_id: trackId,
+        status,
+        metadata,
+        regen,
+        event,
+      };
+    }
     const controlCommit = commitTrace(root, args, {
       kind: "control",
       workflow: "status",
@@ -332,24 +356,30 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
     );
     const planPatch = writeArtifactPairAtomic(root, canonicalPath, canonicalContent, projectionPath, projectionContent, { lock: false });
     if (planPatch.ok === false) return { ok: false, track_id: track.track_id, stage: "plan_pair_write", metadata, plan_json: planPatch };
+    const event = appendCadreEvent(root, {
+      kind: "task_result_recorded",
+      workflow: "record_task_result",
+      track_id: track.track_id,
+      phase_index: phaseIndex,
+      task_index: taskIndex,
+      task_key: task.task_key,
+      status: args.status || "completed",
+      commit_sha: commitSha || null,
+      repo: args.repo || task.repo || null,
+    });
     return {
-      ok: true,
+      ok: event.ok !== false,
+      ...(event.ok === false ? {
+        recovery_required: true,
+        stage: "event_log",
+        error: asOptionalString(event.error) || "Task result changed state but its audit event was not recorded",
+      } : {}),
       track_id: track.track_id,
       task_key: task.task_key,
       line: task.line,
       status: args.status || "completed",
       commit_sha: commitSha || null,
-      event: appendCadreEvent(root, {
-        kind: "task_result_recorded",
-        workflow: "record_task_result",
-        track_id: track.track_id,
-        phase_index: phaseIndex,
-        task_index: taskIndex,
-        task_key: task.task_key,
-        status: args.status || "completed",
-        commit_sha: commitSha || null,
-        repo: args.repo || task.repo || null,
-      }),
+      event,
       metadata,
       plan_json: planPatch,
     };

@@ -1,6 +1,7 @@
 import path from "node:path";
 
-import type { RuntimeArgs } from "../../../types";
+import type { JsonObject, RuntimeArgs } from "../../../types";
+import { asOptionalString } from "../../../guards";
 import type { RuntimeEnvelope } from "../../domain/protocol-types";
 import { envelope } from "../envelope";
 import type { RuntimeDependencies } from "../ports";
@@ -22,6 +23,25 @@ export function trackPacket(deps: RuntimeDependencies, args: RuntimeArgs): Runti
   if (action === "phase_schedule") return envelope(deps.core.phaseSchedule(root, args));
   if (action === "prepare_implementation") return envelope(deps.core.implementationPrep(root, args));
   if (action === "plan_assist") return envelope(deps.core.planAssist(root, args));
-  if (action === "worktree_plan") return envelope(deps.core.worktreePlan(root, args));
+  if (action === "worktree_plan") {
+    const response = envelope(deps.core.worktreePlan(root, args));
+    if (response.ok && args.execute === true) {
+      const trackId = asOptionalString(args.trackId || args.track_id);
+      const input: JsonObject = { ...(trackId ? { trackId } : {}) };
+      for (const key of ["repo", "base", "head", "branch", "agentIdentifier", "maxWorkers"] as const) {
+        if (args[key] != null) input[key] = args[key] as JsonObject[string];
+      }
+      response.next = {
+        tool: "cadre_workflow",
+        arguments: {
+          root,
+          workflow: "implement",
+          input,
+          execute: false,
+        },
+      };
+    }
+    return response;
+  }
   return envelope({ ok: false, error: `Unknown cadre_action action: track.${action}` });
 }

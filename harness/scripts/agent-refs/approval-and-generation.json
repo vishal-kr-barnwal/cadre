@@ -9,6 +9,8 @@
     "A returned decision.resume or decision.amend with session_id-only approval state is not approval.",
     "A structured value written at decision.writable_paths is authoritative and replaces that value; send the complete artifact object. Namespace containers such as proposedContext and formattedReferences retain untouched named members.",
     "Never send stage, stage_hash, stage_revision, approved_stages, or complete before explicit user approval of the exact current review set.",
+    "Show every path in decision.review_set by default and do not omit grouped technical, LSP, style-guide, or repository-topology choices.",
+    "When the user selects decision.reopen, invoke its exact call; Cadre invalidates that stage and every dependent later stage before regenerating them in order.",
     "Never inline generated artifact bodies when review paths are available."
   ],
   "sections": [
@@ -19,6 +21,10 @@
     {
       "heading": "Stage",
       "body": "Review every returned artifact for decision.stage as one atomic set. After explicit approval, call the same workflow with `approval: {session_id, stage, stage_hash, stage_revision, approved_stages}` using the exact values from that decision and exactly the next cumulative prefix."
+    },
+    {
+      "heading": "Reopen",
+      "body": "If the user asks to revise an approved stage, choose its exact decision.reopen entry. Cadre preserves the approved prefix before that stage, restores or removes its owned outputs and all later outputs, then returns the reopened stage with a new revision for ordered re-review. Newtrack restarts reuse the exact track id only for a wholly owned draft or a proven never-started track; started tracks route to revise."
     },
     {
       "heading": "Execute",

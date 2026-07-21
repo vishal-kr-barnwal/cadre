@@ -27,6 +27,15 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
   const phaseIndex = Number(args.phaseIndex);
   const taskIndex = Number(args.taskIndex);
   const plan = parsePlanFile(track.plan_path);
+  if (plan.ok === false) {
+    return {
+      ok: false,
+      stage: "plan_graph",
+      blocked: true,
+      errors: plan.errors,
+      reason: plan.errors[0] || "Canonical plan graph is invalid",
+    };
+  }
   const phase = (plan.phases || []).find((item) => item.phase_index === phaseIndex);
   const task = phase && (phase.tasks || []).find((item) => item.task_index === taskIndex);
   if (!task) return { ok: false, error: `Task not found: phase ${phaseIndex} task ${taskIndex}` };
@@ -222,6 +231,23 @@ export function completeTaskInner(root: string, args: RuntimeArgs = {}): CoreRes
     summary: args.summary || null,
     journal_key: journalKey,
   });
+  if (event.ok === false) {
+    return {
+      ok: false,
+      recovery_required: true,
+      stage: "event_log",
+      error: asOptionalString(event.error) || "Task completion changed state but its required audit event was not recorded",
+      track_id: track.track_id,
+      task_key: stateTaskResult.task_key,
+      working_root: workingRoot,
+      threshold,
+      coverage,
+      product_commit: productCommit,
+      task_result: stateTaskResult,
+      event,
+      journal: completedJournal.ok === false ? completedJournal : completedJournal.value || completedJournal,
+    };
+  }
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "complete",

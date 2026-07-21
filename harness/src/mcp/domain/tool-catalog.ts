@@ -30,7 +30,7 @@ export const TOOLS: JsonObject[] = [
         execute: { type: "boolean", description: "Apply the workflow after every required stage is approved; omit or false for preview." },
         approval: {
           type: "object",
-          description: "Control a staged session through a returned typed call. Exact decision.resume and decision.amend calls carry session_id only and are not approval. After explicit user approval, echo stage, stage_hash, stage_revision, and the exact approved_stages prefix from the reviewed decision. complete is valid only after all stages. cancel abandons the session.",
+          description: "Control a staged session through a returned typed call. Exact decision.resume, decision.amend, and decision.reopen calls are not approval. After explicit user approval, echo stage, stage_hash, stage_revision, and the exact approved_stages prefix from the reviewed decision. reopen_stage invalidates that approved stage and every later stage. restart resets an owned newtrack draft under the same track id. complete is valid only after all stages. cancel abandons the session.",
           properties: {
             session_id: { type: "string", pattern: "^[a-f0-9]{24}$" },
             stage: { type: "string" },
@@ -39,6 +39,8 @@ export const TOOLS: JsonObject[] = [
             approved_stages: { type: "array", items: { type: "string" } },
             complete: { type: "boolean" },
             cancel: { type: "boolean" },
+            reopen_stage: { type: "string" },
+            restart: { type: "boolean" },
           },
           additionalProperties: false,
         },

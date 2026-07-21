@@ -12,6 +12,7 @@ import type { ArtifactDefinition, ArtifactRenderResult, CoreResult } from "./con
 import { appendCanonicalJsonReference, hasGeneratedMarker, normalizedText, renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
 import { renderPlanMarkdown } from "./plan-docs";
 import { renderProjectSkillProjection } from "./project-skill-projection";
+import { renderSemanticProjection } from "./semantic-projections";
 import { renderSpecMarkdown, renderStyleGuideMarkdown } from "./spec-docs";
 import { asArray } from "./status";
 import { markdownPayloadError } from "./workflow-response";
@@ -82,13 +83,15 @@ export function renderArtifact(root: string, def: ArtifactDefinition): ArtifactR
     canonicalContent = fs.readFileSync(canonicalPath, "utf8");
     raw = readJson<JsonObject | null>(canonicalPath, null);
     if (!raw) return { ok: false, artifact_id: def.id, canonical_path: def.canonical, projection_path: def.projection, error: "Invalid canonical JSON" };
-    if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw, def.canonical);
+    const semanticProjection = renderSemanticProjection(def.schema, raw, def.title, def.canonical);
+    if (semanticProjection) body = semanticProjection;
+    else if (def.schema === "cadre.plan.v1") body = renderPlanMarkdown(raw, def.canonical);
     else if (def.schema === "cadre.spec.v1") body = renderSpecMarkdown(raw, def.canonical);
     else if (def.schema === "cadre.styleguide.v1") body = renderStyleGuideMarkdown(raw);
     else if (def.schema === "cadre.styleguide_index.v1") body = renderJsonCodeblock(def.title, raw);
     else if (def.schema === "cadre.release.v1") body = releaseMarkdownFromMetadata(raw);
     else if (def.schema === "cadre.project-skill.v1") body = renderProjectSkillProjection(raw as unknown as ManagedManifest);
-    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.workflow.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title, def.canonical);
+    else if (["cadre.product.v1", "cadre.product_guidelines.v1", "cadre.handoff.v1"].includes(def.schema)) body = renderMarkdownDoc(raw, def.title, def.canonical);
     else body = renderJsonCodeblock(def.title, raw);
   } else {
     missingCanonical = true;

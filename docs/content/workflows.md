@@ -114,6 +114,16 @@ Setup collects and reviews stages in this fixed order:
 
 Cadre materializes only the active stage. It does not prewrite guidelines,
 technical files, or workflow policy while product is under review.
+Every stage response includes the complete `decision.review_set`, so the
+default review presentation names both JSON and Markdown paths. The technical
+stage also reports selected and omitted tech-stack, style-guide, LSP, and
+repository-topology components instead of showing only the tech stack.
+`tech-stack.md` and `workflow.md` are semantic projections of all canonical
+fields rather than JSON fenced into Markdown.
+
+If the user revises an approved stage, invoke its exact `decision.reopen` call.
+Cadre preserves the earlier approved prefix, invalidates that stage and every
+later stage, removes stale owned outputs, and regenerates the chain in order.
 
 What setup writes:
 
@@ -165,6 +175,10 @@ generated specs or plans into chat.
 New-track always collects and reviews `spec` first. Only after spec approval
 does it collect and materialize `plan`; both stages stay in one approval
 session, and execution follows only after plan approval.
+Reopening spec invalidates plan in that same session. Restarting an owned draft
+or a proven never-started closed track removes only Cadre-owned pristine state
+and reuses the exact ID; it never creates an `-revised` variant. Started tracks
+are directed to `cadre-revise`.
 Generated Markdown projections include readable review sections plus the
 canonical JSON detail block, so human review can inspect the same structured
 fields Cadre agents use.
@@ -322,11 +336,21 @@ The implementation packet:
 - Checks owner/lease state and cross-track collisions.
 - Parses the plan and computes ready phases.
 - Returns worktree and repo routing.
+- Returns an executable `track.worktree_plan` continuation before scheduling
+  whenever an affected integration worktree is missing. That action creates all
+  required mono- or polyrepo worktrees and resumes implementation.
 - Dispatches namespaced `parallel.*` actions through `cadre_action` when safe.
 
 Sequential phases run one unfinished task at a time. Parallel phases dispatch
 only tasks whose phase dependencies, task dependencies, worker state, and file
 claims are ready.
+
+Plans are canonicalized before approval: phases use `phaseN`, tasks use
+`phaseN_taskN`, phase dependencies reference only phase IDs, and task
+dependencies reference only task keys. Mixed dependency levels block plan
+review instead of surviving until implementation. For sequential work, Cadre
+returns the task-completion packet as required deferred data and does not invoke
+it before the implementation result exists.
 
 Task completion should use the returned `cadre_action` `task.complete` call so verification, coverage,
 product commits, plan progress, metadata, journals, events, and git notes are

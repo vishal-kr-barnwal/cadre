@@ -40,7 +40,10 @@ its intended target paths, such as `cadre/product.md` or
 `cadre/tracks/<id>/spec.json`. Later stages remain pending and unmaterialized.
 The compact response returns the active review files under `artifacts`, where
 each entry reports its path and, when applicable, `target_path` or
-`review_path`.
+`review_path`. Its `decision.review_set` is the authoritative complete,
+untruncated list and is shown by default. Grouped technical review also names
+the selected and omitted tech-stack, style-guide, LSP, and repository-topology
+components so the user can choose what to review.
 
 That target preview is intentionally worktree-mutating so humans and agents can
 use ordinary `git diff`. New files are marked intent-to-add so their content is
@@ -62,6 +65,15 @@ stale when the stage changes. A clarification's `decision.current_stage` names
 the work still being collected; it is not approval. Once a session exists,
 clarification and reference-formatting responses return a full
 `decision.resume` so the same session and approved prefix are preserved.
+
+Every approved stage is also exposed through `decision.reopen`. Invoking the
+selected exact call keeps the same session, preserves the earlier approved
+prefix, restores or removes the selected stage's owned output and every later
+stage's output, and regenerates the selected stage with a new hash and
+revision. This applies to every staged workflow. A new-track restart similarly
+reuses the exact ID for an owned draft or proven never-started closed track;
+Cadre never invents an `-revised` ID, and tracks with implementation evidence
+route to `revise`.
 
 Final `execute:true` verifies the frozen target files still match the reviewed
 content and fails closed when either side of a pair drifted after approval. An
@@ -107,6 +119,12 @@ completion or recovery callbacks reissued under
 `data.worker_callbacks[].record_finish_packet`. There is no
 fallback direct-tool alias. Detailed evidence is fetched explicitly rather
 than embedded in every response.
+
+For implementation, Cadre checks affected integration worktrees before
+scheduling a task or parallel wave. When any are missing, `next` is an
+executable `track.worktree_plan` action that creates all affected worktrees and
+returns the resumed implementation packet. Sequential task completion remains
+deferred until the task's actual result is available.
 
 Useful compact resources include `cadre://team-board`, `cadre://my-next-actions`,
 `cadre://review-queue`, `cadre://handoff-inbox`, `cadre://quality-gate`,

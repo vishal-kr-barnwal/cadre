@@ -4,7 +4,7 @@ import type { JsonObject, RuntimeArgs } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 
 import { approvalHeadExpectation, readApprovalSession, previewFileRecords } from "./approval-session-store";
-import { writeArtifactFilesAtomic } from "./artifact-pairs";
+import { materializeApprovalTargets } from "./approval-materialization-journal";
 import { inspectReviewGitState, reviewOutputMode } from "./review-output";
 import { reviewStats } from "./review-bundles";
 
@@ -66,7 +66,7 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
       };
     }
     const materializedFiles = session.snapshot_files.filter((file) => file.missing !== true);
-    const mutation = writeArtifactFilesAtomic(root, materializedFiles.map((file) => ({ path: file.path, content: file.content })));
+    const mutation = materializeApprovalTargets(root, session, materializedFiles.map((file) => file.path));
     return {
       ok: mutation.ok !== false,
       stage: mutation.ok === false ? "staged_review_materialize" : undefined,
@@ -136,7 +136,7 @@ export function validateApprovedTargetReviewFiles(root: string, args: RuntimeArg
       files: Array.from(new Set(paths)).sort(),
     };
   }
-  const finalMutation = writeArtifactFilesAtomic(root, finalFiles.map((file) => ({ path: file.path, content: file.content })));
+  const finalMutation = materializeApprovalTargets(root, session, finalFiles.map((file) => file.path));
   if (finalMutation.ok === false) {
     return {
       ok: false,

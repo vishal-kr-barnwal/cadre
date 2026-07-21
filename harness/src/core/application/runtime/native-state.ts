@@ -5,9 +5,15 @@ import type { JsonObject } from "../../../types";
 import { asJsonObject, asOptionalString } from "../../../guards";
 import type { CoreResult } from "./contracts";
 import { appendJsonl, fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
+import { withLock } from "../../infrastructure/runtime/locking";
 import { gitIdentity } from "../../infrastructure/runtime/system";
 
 export type MessageBox = "inbox" | "outbox";
+export const CADRE_EVENTS_LOCK = "events-log";
+
+export function withCadreEventLock(root: string, operation: () => CoreResult): CoreResult {
+  return withLock(root, CADRE_EVENTS_LOCK, operation, { retries: 401, retryDelayMs: 25 });
+}
 
 export function nativeStatePaths(root: string): JsonObject {
   return {
@@ -88,7 +94,14 @@ export function ensureNativeState(root: string): CoreResult {
   };
 }
 
-export function appendCadreEvent(root: string, event: JsonObject): CoreResult {
+export function appendCadreEvent(
+  root: string,
+  event: JsonObject,
+  options: { lock?: boolean } = {},
+): CoreResult {
+  if (options.lock !== false) {
+    return withCadreEventLock(root, () => appendCadreEvent(root, event, { lock: false }));
+  }
   ensureNativeState(root);
   const recorded_at = asOptionalString(event.recorded_at) || utcNow();
   const kind = asOptionalString(event.kind || event.type) || "event";
@@ -105,6 +118,32 @@ export function appendCadreEvent(root: string, event: JsonObject): CoreResult {
   const file = path.join(root, "cadre", "events.jsonl");
   appendJsonl(file, entry);
   return { ok: true, path: path.relative(root, file), event: entry };
+}
+
+export function removeCadreEvent(root: string, eventId: string): CoreResult {
+  return withCadreEventLock(root, () => {
+    const file = path.join(root, "cadre", "events.jsonl");
+    if (!fs.existsSync(file)) return { ok: true, removed: false, event_id: eventId };
+    const before = fs.readFileSync(file, "utf8");
+    const lines = before.split(/\r?\n/).filter(Boolean);
+    const retained = lines.filter((line) => {
+      try {
+        return asOptionalString(asJsonObject(JSON.parse(line)).id) !== eventId;
+      } catch {
+        return true;
+      }
+    });
+    if (retained.length === lines.length) return { ok: true, removed: false, event_id: eventId };
+    const temporary = `${file}.${process.pid}.event-remove-tmp`;
+    try {
+      fs.writeFileSync(temporary, retained.length > 0 ? `${retained.join("\n")}\n` : "");
+      fs.renameSync(temporary, file);
+    } catch (error) {
+      fs.rmSync(temporary, { force: true });
+      throw error;
+    }
+    return { ok: true, removed: true, event_id: eventId, path: path.relative(root, file) };
+  });
 }
 
 export function readCadreEvents(root: string, limit = 50): JsonObject[] {

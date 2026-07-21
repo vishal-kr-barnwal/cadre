@@ -1,11 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
 import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
-import type { RuntimeArgs, TrackMetadata } from "../../../types";
+import type { RuntimeArgs, TrackMetadata, UnknownRecord } from "../../../types";
 
 import { safeName } from "../../infrastructure/runtime/json-store";
+import { withTrackLock } from "../../infrastructure/runtime/locking";
 import { gitIdentity } from "../../infrastructure/runtime/system";
-import { approvalSessionForTarget, closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "./approval-session-store";
+import { closeApprovalSessionFromArgs, readApprovalSession, recordApprovalCompletionFromArgs } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult } from "./contracts";
 import { trackGenerationWarnings } from "./generation-quality";
@@ -23,6 +22,13 @@ import {
   validateApprovedTargetReviewFiles,
 } from "./staged-approval";
 import { markdownPayloadError, workflowSummary } from "./workflow-response";
+import {
+  APPROVAL_RESTARTED,
+  approvalRestartRequested,
+  requestedApprovalSessionId,
+} from "./approval-request";
+import { inspectNewTrackTarget } from "./new-track-target-state";
+import { reconcileNewTrackRestarts, restartPristineTrack } from "./new-track-restart-journal";
 
 function trackMetadata(root: string, trackId: string, args: RuntimeArgs): TrackMetadata {
   const supplied = asJsonObject(args.metadata);
@@ -54,22 +60,9 @@ function clarificationWithoutTarget(summary: CoreResult, prompts: ReturnType<typ
   };
 }
 
-function occupiedTrackTargets(root: string, trackId: string, allowedSessionId: string | null): string[] {
-  const relativeDirectory = `cadre/tracks/${safeName(trackId)}`;
-  try {
-    return fs.readdirSync(path.join(root, relativeDirectory), { withFileTypes: true })
-      .map((entry) => `${relativeDirectory}/${entry.name}`)
-      .filter((relativePath) => {
-        const owner = approvalSessionForTarget(root, relativePath);
-        return !owner || owner.workflow !== "newtrack" || owner.session_id !== allowedSessionId;
-      });
-  } catch {
-    return [];
-  }
-}
-
-export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+function workflowNewTrackUnlocked(root: string, args: RuntimeArgs = {}): CoreResult {
   args = applyStagedApprovalSessionPayload(root, args, "newtrack");
+  let restarted = (args as UnknownRecord)[APPROVAL_RESTARTED] === true;
   const summary = workflowSummary(root, "newtrack", args);
   const markdownError = markdownPayloadError(args);
   if (markdownError) return { ...summary, ...markdownError };
@@ -78,20 +71,96 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   if (!trackId) return clarificationWithoutTarget(summary, intentPrompts);
 
   const metadata = trackMetadata(root, trackId, args);
-  const stages = newTrackApprovalStages();
-  const collection = newTrackStageCollection(root, args, trackId, stages, metadata);
-  const metadataPath = `cadre/tracks/${safeName(trackId)}/metadata.json`;
-  const occupiedTargets = occupiedTrackTargets(root, trackId, collection.cursor.session?.session_id || null);
-  if (occupiedTargets.length > 0) {
+  const restartSessionId = requestedApprovalSessionId(args);
+  let targetState = inspectNewTrackTarget(root, trackId, restartSessionId);
+  if (approvalRestartRequested(args) && !restartSessionId) {
+    if (targetState.kind !== "pristine_track") {
+      return {
+        ...summary,
+        ok: false,
+        dry_run: true,
+        track_id: trackId,
+        target_ownership: targetState,
+        error: targetState.kind === "established_track"
+          ? `Track ${trackId} has started or retained state; revise it instead of restarting.`
+          : `Track ${trackId} is not a proven pristine track and cannot be restarted without its owning approval session.`,
+      };
+    }
+    const reset = restartPristineTrack(root, trackId);
+    if (!reset.ok) {
+      return {
+        ...summary,
+        ok: false,
+        dry_run: true,
+        track_id: trackId,
+        stage: "newtrack_restart",
+        restart: reset,
+        error: asOptionalString(reset.error) || `Unable to restart pristine track ${trackId}.`,
+      };
+    }
+    const mutable = { ...args } as UnknownRecord;
+    delete mutable.approvalRestart;
+    delete mutable.approval_restart;
+    mutable[APPROVAL_RESTARTED] = true;
+    args = mutable as RuntimeArgs;
+    restarted = true;
+    targetState = inspectNewTrackTarget(root, trackId, null);
+  }
+  if (targetState.kind !== "vacant" && targetState.kind !== "owned_draft") {
+    const exactDraft = targetState.kind === "foreign_draft"
+      && targetState.owner?.workflow === "newtrack"
+      && targetState.ownerTrackId === trackId;
+    const revise = {
+      tool: "cadre_workflow",
+      arguments: { root, workflow: "revise", input: { trackId }, execute: false },
+    };
     return {
       ...summary,
       ok: false,
       dry_run: true,
       track_id: trackId,
-      occupied_targets: occupiedTargets,
-      error: `Track target already exists or collides after path normalization: cadre/tracks/${safeName(trackId)}`,
+      occupied_targets: targetState.occupied,
+      target_ownership: targetState,
+      ...(exactDraft && targetState.owner ? {
+        decision: {
+          kind: "draft_exists",
+          track_id: trackId,
+          session_id: targetState.owner.session_id,
+          resume: {
+            tool: "cadre_workflow",
+            arguments: { root, workflow: "newtrack", input: {}, execute: false, approval: { session_id: targetState.owner.session_id } },
+          },
+          restart: {
+            tool: "cadre_workflow",
+            arguments: { root, workflow: "newtrack", input: {}, execute: false, approval: { session_id: targetState.owner.session_id, restart: true } },
+          },
+          cancel: {
+            tool: "cadre_workflow",
+            arguments: { root, workflow: "newtrack", input: {}, execute: false, approval: { session_id: targetState.owner.session_id, cancel: true } },
+          },
+        },
+      } : targetState.kind === "pristine_track" ? {
+        decision: {
+          kind: "pristine_track_exists",
+          track_id: trackId,
+          restart: {
+            tool: "cadre_workflow",
+            arguments: { root, workflow: "newtrack", input: { trackId }, execute: false, approval: { restart: true } },
+          },
+          revise,
+        },
+      } : targetState.kind === "established_track" ? {
+        decision: { kind: "track_exists", track_id: trackId, revise },
+      } : {}),
+      error: [
+        `Track target already exists or collides after path normalization: cadre/tracks/${safeName(trackId)}`,
+        targetState.reason,
+      ].filter(Boolean).join("; "),
     };
   }
+  const stages = newTrackApprovalStages();
+  const collection = newTrackStageCollection(root, args, trackId, stages, metadata);
+  const metadataPath = `cadre/tracks/${safeName(trackId)}/metadata.json`;
   const approval = stagedApprovalState(root, "newtrack", args, stages, collection.files, {
     track_id: trackId,
     final_only_files: ["cadre/tracks.json", "cadre/events.jsonl"],
@@ -122,6 +191,14 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     warnings,
     ...(collection.metadata ? { metadata: collection.metadata } : {}),
     ...(assist ? { plan_assist: assist } : {}),
+    ...(restarted ? {
+      restart: {
+        ok: true,
+        session_id: restartSessionId || null,
+        track_id: trackId,
+        reused_id: true,
+      },
+    } : {}),
   };
   if (cancelled) return { ...base, ok: true, dry_run: true, phase_state: "cancelled" };
   if (collection.schemaIssues.length > 0 && !approvalError) {
@@ -129,7 +206,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     const artifact = collection.activeKind || "spec";
     const schemaInput = collection.missingEvidence.length > 0 ? collection.missingEvidence : [artifact];
     return {
-      ...summary,
+      ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_clarification",
@@ -149,7 +226,7 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
   }
   if ((intentPrompts.length > 0 || collection.missingEvidence.length > 0) && !approvalError) {
     return {
-      ...summary,
+      ...base,
       ok: false,
       dry_run: true,
       phase_state: "awaiting_clarification",
@@ -252,7 +329,37 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
         track_id: trackId,
         approval_session_id: approvalSessionId || null,
       });
+  if (event.ok === false || formulaEvent?.ok === false) {
+    const failedEvent = event.ok === false ? event : formulaEvent;
+    return {
+      ...base,
+      ok: false,
+      dry_run: false,
+      phase_state: "recovery_required",
+      stage: "event_log",
+      metadata_path: metadataPath,
+      regen,
+      event,
+      formula_event: formulaEvent,
+      error: asOptionalString(asJsonObject(failedEvent).error) || "Newtrack artifacts were written but a required audit event was not recorded; retry execution",
+    };
+  }
   const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  if (approvalAudit.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      dry_run: false,
+      phase_state: "recovery_required",
+      stage: "approval_audit",
+      metadata_path: metadataPath,
+      regen,
+      event,
+      formula_event: formulaEvent,
+      approval_audit: approvalAudit,
+      error: asOptionalString(approvalAudit.error) || "Newtrack approval audit was not recorded; retry execution",
+    };
+  }
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "newtrack",
@@ -290,4 +397,26 @@ export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResu
     reused_review_files: asStringArray(reviewValidation.files),
     worktree_plan: worktreePlan(root, { trackId }),
   };
+}
+
+export function workflowNewTrack(root: string, args: RuntimeArgs = {}): CoreResult {
+  const restartRecovery = reconcileNewTrackRestarts(root);
+  if (!restartRecovery.ok) {
+    return {
+      ...workflowSummary(root, "newtrack", args),
+      ok: false,
+      phase_state: "recovery_required",
+      stage: "newtrack_restart_recovery",
+      recovery_required: true,
+      error: restartRecovery.error || "An interrupted newtrack restart requires recovery",
+    };
+  }
+  const sessionId = requestedApprovalSessionId(args);
+  const persisted = sessionId ? readApprovalSession(root, sessionId) : null;
+  const trackId = asOptionalString(
+    args.trackId || args.track_id || persisted?.payload.trackId || persisted?.payload.track_id,
+  );
+  return args.execute === true && trackId
+    ? withTrackLock(root, trackId, () => workflowNewTrackUnlocked(root, args)) as CoreResult
+    : workflowNewTrackUnlocked(root, args);
 }

@@ -152,9 +152,11 @@ export function workflowReviewBundle(
     ? [`Ignored unsafe reviewBundleDir ${explicitDir}; using a temp review bundle outside the project control plane.`]
     : [];
   if (unsafeExplicitDir) directory = defaultDirectory;
-  if (!explicitDir || unsafeExplicitDir) fs.rmSync(directory, { recursive: true, force: true });
+  const continuingSession = Boolean(args.approvalSessionId || args.approval_session_id);
+  const temporaryBundle = !explicitDir || unsafeExplicitDir;
+  if (temporaryBundle && !continuingSession) fs.rmSync(directory, { recursive: true, force: true });
   fs.mkdirSync(directory, { recursive: true });
-  if (explicitDir && !unsafeExplicitDir && previousStage) {
+  if (previousStage && (!temporaryBundle || continuingSession)) {
     const cleanup = reconcileExplicitBundleMembership(directory, reviewFiles, previousStage);
     if (!cleanup.ok) {
       const error = cleanup.error || "Unable to reconcile the explicit review bundle";
@@ -264,6 +266,17 @@ export function trackLearningsText(trackId: string): string {
   return (asOptionalString(seed.text) || "# Track Learnings: {{track_id}}\n\n")
     .replace(/\{\{track_id\}\}/g, trackId)
     .replace(/\n*$/, "\n");
+}
+
+export function trackLearningsSeed(trackId: string, recordedAt = utcNow()): JsonObject {
+  return {
+    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
+    id: "initial",
+    kind: "learnings_seed",
+    track_id: trackId,
+    recorded_at: recordedAt,
+    text: trackLearningsText(trackId),
+  };
 }
 
 export function installedStyleGuideIds(root: string): string[] {

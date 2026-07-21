@@ -340,7 +340,8 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
   const approvalAudit = args.execute === true && reviewFiles.length > 0 && operationsOk
     ? recordApprovalCompletionFromArgs(root, args)
     : null;
-  const controlCommit = args.execute === true && mutatingRefresh && operationsOk
+  const auditOk = !approvalAudit || approvalAudit.ok !== false;
+  const controlCommit = args.execute === true && mutatingRefresh && operationsOk && auditOk
     ? commitTrace(root, args, {
       kind: "control",
       workflow: "refresh",
@@ -357,7 +358,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
       },
     })
     : null;
-  const completedOk = operationsOk && (!controlCommit || controlCommit.ok !== false);
+  const completedOk = operationsOk && auditOk && (!controlCommit || controlCommit.ok !== false);
   const approvalSessionClose = args.execute === true && reviewFiles.length > 0 && completedOk
     ? closeApprovalSessionFromArgs(root, args)
     : null;
@@ -408,6 +409,7 @@ export function workflowRefresh(root: string, args: RuntimeArgs = {}): CoreResul
     warnings: [
       ...warnings,
       ...(!operationsOk && projectionRepair?.ok === false ? [asOptionalString(projectionRepair.error) || "Projection refresh failed"] : []),
+      ...(!auditOk ? [asOptionalString(asJsonObject(approvalAudit).error) || "Refresh approval audit was not recorded"] : []),
     ],
   };
 }

@@ -1,11 +1,11 @@
 import path from "node:path";
 import { asJsonObject, asNumber, asOptionalString, asString, asStringArray } from "../../../guards";
-import type { CadreTrack, CommandResult, JsonObject, PlanPhase, PlanTask, RuntimeArgs, UnknownRecord } from "../../../types";
+import type { CadreTrack, CommandResult, JsonObject, PlanTask, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import { safeName } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { runCommand } from "../../infrastructure/runtime/system";
-import { branchSetEntryForRepo, ensureIntegrationWorktree, workerRef, workerWorktreePath } from "./branch-set";
+import { branchSetEntryForRepo, branchSetForTrack, ensureIntegrationWorktree, workerRef, workerWorktreePath } from "./branch-set";
 import { claimsOverlap, normalizeClaimPath } from "./collision";
 import type { CoreResult, ParallelWorker } from "./contracts";
 import { AGENT_IDENTIFIERS, isAgentIdentifier } from "./dispatch-adapters";
@@ -15,6 +15,7 @@ import { readParallelState, recordParallelWorker } from "./parallel-state";
 import { likelyTestCandidatesForFile } from "./planning";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
 import { asArray } from "./status";
+import { completedTaskKeys, readyTasksForPhase } from "./task-readiness";
 import { findTrack } from "./track-context";
 import { parsePlanFile, phaseSchedule } from "./track-schedule";
 import { withSharedControlPlaneSync } from "./workflow-response";
@@ -139,16 +140,13 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
   const maxWorkers = positiveInt(args.maxWorkers || args.limit, 8);
   const activeSlotCount = activeWorkers.filter((worker) => ["in_progress", "awaiting_merge"].includes(worker.status)).length;
   const availableSlots = Math.max(0, maxWorkers - activeSlotCount);
-  const activeTaskKeys = new Set(activeWorkers.map((worker) => asOptionalString(worker.task_key)).filter(Boolean));
-  const completeTaskKeys = new Set(
-    plan.tasks
-      .filter((task) => ["x", "-"].includes(task.marker))
-      .map((task) => task.task_key)
-      .concat(activeWorkers
-        .filter((worker) => ["awaiting_merge", "merged"].includes(worker.status))
-        .map((worker) => asString(worker.task_key))
-        .filter(Boolean))
-  );
+  const activeTaskKeys = new Set(activeWorkers
+    .map((worker) => asOptionalString(worker.task_key))
+    .filter((taskKey): taskKey is string => Boolean(taskKey)));
+  const completeTaskKeys = completedTaskKeys(plan, activeWorkers
+    .filter((worker) => worker.status === "merged")
+    .map((worker) => asString(worker.task_key))
+    .filter(Boolean));
   const activeClaims = activeWorkers.flatMap((worker) => {
     const phase = plan.phases.find((item) => item.phase_index === worker.phase_index);
     const task = phase?.tasks.find((item) => item.task_index === worker.task_index || item.task_key === worker.task_key);
@@ -159,18 +157,7 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
       task_key: worker.task_key,
     }));
   });
-  const normalizeTaskDependency = (phase: PlanPhase, dep: string): string => {
-    const taskMatch = dep.match(/^task(\d+)$/i);
-    if (taskMatch?.[1]) return `phase${phase.phase_index}_task${taskMatch[1]}`;
-    const phaseTaskMatch = dep.match(/^phase(\d+)_task(\d+)$/i);
-    if (phaseTaskMatch?.[1] && phaseTaskMatch[2]) return `phase${phaseTaskMatch[1]}_task${phaseTaskMatch[2]}`;
-    return dep;
-  };
-  const taskIsReady = (phase: PlanPhase, task: PlanTask): boolean => {
-    if (["x", "-", "!", "~"].includes(task.marker)) return false;
-    if (activeTaskKeys.has(task.task_key)) return false;
-    const dependencies = (task.depends || []).map((dep) => normalizeTaskDependency(phase, dep));
-    if (dependencies.some((dep) => !completeTaskKeys.has(dep))) return false;
+  const claimIsReady = (task: PlanTask): boolean => {
     const taskClaims = (task.files || []).map((file) => ({
       repo: task.repo || loadTopology(root).defaultRepo || ".",
       file: normalizeClaimPath(file),
@@ -179,15 +166,11 @@ export function parallelWorkersForWave(root: string, track: CadreTrack, args: Ru
       activeClaims.every((active) => claim.repo !== active.repo || !claimsOverlap(claim.file, active.file))
     );
   };
-  const readyTasksForPhase = (phase: PlanPhase): PlanTask[] => {
-    const execution = asString(phase.annotations.execution, "sequential");
-    if (execution === "parallel") return phase.tasks.filter((task) => taskIsReady(phase, task));
-    const firstOpen = phase.tasks.find((task) => !["x", "-"].includes(task.marker));
-    return firstOpen && taskIsReady(phase, firstOpen) ? [firstOpen] : [];
-  };
   const phases = plan.phases.filter((phase) => phaseIds.includes(`phase${phase.phase_index}`));
   const candidateWorkers = phases
-    .flatMap((phase) => readyTasksForPhase(phase).map((task) => ({
+    .flatMap((phase) => readyTasksForPhase(phase, completeTaskKeys, activeTaskKeys)
+      .filter(claimIsReady)
+      .map((task) => ({
       worker_id: `${track.track_id}_${asString(task.task_key)}`,
       phase_id: `phase${phase.phase_index}`,
       phase_index: phase.phase_index,
@@ -229,6 +212,33 @@ export function runPlannedCommands(commands: CoreResult[]): CommandResult[] {
 export function parallelSetupWorkers(root: string, track: CadreTrack, args: RuntimeArgs = {}): CoreResult {
   const agentIdentifier = asOptionalString(args.agentIdentifier);
   if (!isAgentIdentifier(agentIdentifier)) return { ok: false, action: "setup_workers", error: `cadre_action parallel.setup_workers requires input.agentIdentifier ${AGENT_IDENTIFIERS.map((item) => `"${item}"`).join(", ")}`, accepted_agent_identifiers: [...AGENT_IDENTIFIERS] };
+  const execute = args.execute === true;
+  const plannedIntegrationSet = branchSetForTrack(root, track, { ...args, repo: undefined });
+  const integrationSetupResults = execute
+    ? plannedIntegrationSet.map((entry) => ensureIntegrationWorktree(entry))
+    : [];
+  const integrationBranchSet = execute
+    ? branchSetForTrack(root, track, { ...args, repo: undefined })
+    : plannedIntegrationSet;
+  const allAffectedIntegrationsReady = integrationBranchSet.length > 0
+    && integrationBranchSet.every((entry) => entry.exists && entry.health === "ready")
+    && integrationSetupResults.every((result) => result.ok !== false);
+  if (execute && !allAffectedIntegrationsReady) {
+    return {
+      ok: false,
+      action: "setup_workers",
+      stage: "integration_worktree_health",
+      track_id: track.track_id,
+      execute: true,
+      integration_branch_set: integrationBranchSet,
+      integration_setup_results: integrationSetupResults,
+      workers: [],
+      commands: [],
+      results: [],
+      state_records: [],
+      error: "Every affected integration worktree must be ready before parallel workers can be created.",
+    };
+  }
   const wave = parallelWorkersForWave(root, track, args);
   if (wave.ok === false) return wave;
   const topology = loadTopology(root);
@@ -243,9 +253,11 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
     const sourceRoot = asString(branchEntry?.source_root || entry.root || root);
     const trackBranch = asString(branchEntry?.track_branch || asOptionalString(asJsonObject(entry).head) || track.metadata.git_branch || `track/${track.track_id}`);
     const ref = asOptionalString(worker.worker_ref) || workerRef(track.track_id, repo, asString(worker.task_key));
-    const integration = args.execute === true && branchEntry ? ensureIntegrationWorktree(branchEntry) : null;
+    const integration = integrationSetupResults[plannedIntegrationSet.findIndex((item) => item.repo === repo)] || null;
     const integrationCommand = branchEntry?.commands?.[0] || null;
-    const integrationOk = !integration || integration.ok !== false;
+    const integrationOk = !execute
+      ? true
+      : Boolean(branchEntry?.exists && branchEntry.health === "ready");
     const commandCwd = branchEntry?.source_root || sourceRoot;
     commands.push(plannedCommand(
       "git",
@@ -265,8 +277,8 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
       dispatch: workerDispatchPayload(root, track, worker, worktree, sourceRoot, agentIdentifier),
     };
   });
-  const execute = args.execute === true;
-  const runnableWorkers = workers.flatMap((worker, index) => {
+  const workerIntegrationsReady = workers.every((worker) => worker.integration_ready === true);
+  const runnableWorkers = (execute && !workerIntegrationsReady ? [] : workers).flatMap((worker, index) => {
     const command = commands[index];
     return worker.integration_ready !== false && command ? [{ worker, command }] : [];
   });
@@ -292,14 +304,26 @@ export function parallelSetupWorkers(root: string, track: CadreTrack, args: Runt
       }
     });
   }
+  const responseWorkers = workers.map((worker, index) => ({
+    ...worker,
+    dispatch: !execute || results[index]?.ok === true ? worker.dispatch : null,
+  }));
   return {
-    ok: results.every((result) => result.ok) && stateRecords.every((record) => record.ok !== false),
+    ok: workerIntegrationsReady
+      && (!execute || (
+        results.length === workers.length
+        && results.every((result) => result.ok)
+        && stateRecords.length === workers.length
+        && stateRecords.every((record) => record.ok !== false)
+      )),
     track_id: track.track_id,
     action: "setup_workers",
     execute,
     dry_run: !execute,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
-    workers,
+    integration_branch_set: integrationBranchSet,
+    integration_setup_results: integrationSetupResults,
+    workers: responseWorkers,
     commands,
     results,
     state_records: stateRecords,
@@ -410,9 +434,10 @@ export function parallelWorkflow(root: string, args: RuntimeArgs = {}): CoreResu
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
   const repoError = repoEntriesError(root, track, args);
   if (repoError) return repoError;
+  const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
+  if (schedule.ok === false) return { ...schedule, action, stage: "plan_graph" };
   if (action === "plan") {
-    const schedule = phaseSchedule(root, { ...args, trackId: track.track_id });
-    return { ok: schedule.ok !== false, track_id: track.track_id, schedule, state: readParallelState(track) };
+    return { ok: true, track_id: track.track_id, schedule, state: readParallelState(track) };
   }
   if (action === "next_wave") return parallelWorkersForWave(root, track, args);
   if (action === "setup_workers") return parallelSetupWorkers(root, track, args);

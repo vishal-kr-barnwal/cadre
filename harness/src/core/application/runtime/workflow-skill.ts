@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-
 import { asJsonObject, asOptionalString, errorMessage } from "../../../guards";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 import { applySkillChanges, emptyManagedManifest, validateManagedManifest, type ManagedManifest, type SkillOperation } from "../../domain/project-skill-management";
@@ -13,12 +12,11 @@ import { readProjectSourceFile } from "../../infrastructure/runtime/project-sour
 import { closeApprovalSessionFromArgs, readApprovalSession, recordApprovalCompletionFromArgs, unapprovedSkillTargetApproval } from "./approval-session-store";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, ReviewFile } from "./contracts";
-import { appendCadreEvent } from "./native-state";
+import { appendCadreEvent, removeCadreEvent } from "./native-state";
 import { renderProjectSkillProjection } from "./project-skill-projection";
 import { applySkillApprovalPayload, approvedSkillExecutionFiles, collectSkillStage, skillFormattingDecision, skillReferencePlan } from "./skill-stage-lifecycle";
 import { stagedApprovalError, stagedApprovalReady, stagedApprovalState, validateApprovedTargetReviewFiles } from "./staged-approval";
 import type { ApprovalStage } from "./staged-approval-stages";
-
 function knownRepos(root: string): Set<string> {
   const known = new Set([".", "root"]);
   for (const value of Array.isArray(loadTopology(root).repos.repos) ? loadTopology(root).repos.repos! : []) {
@@ -27,7 +25,6 @@ function knownRepos(root: string): Set<string> {
   }
   return known;
 }
-
 function readManifest(root: string, id: string): { manifest?: ManagedManifest; error?: string } {
   const file = path.join(root, "cadre", "skills", id, "skill.json");
   try {
@@ -246,19 +243,6 @@ function approvalStages(operation: SkillOperation, referenceReviewPaths: string[
   ];
 }
 
-interface FileBaseline { existed: boolean; content: string | null }
-
-function captureFileBaseline(file: string): FileBaseline {
-  const existed = fs.existsSync(file);
-  return { existed, content: existed ? fs.readFileSync(file, "utf8") : null };
-}
-
-function restoreFileBaseline(file: string, baseline: FileBaseline): void {
-  if (!baseline.existed) { fs.rmSync(file, { force: true }); return; }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, baseline.content || "");
-}
-
 function destructiveSessionIntegrity(
   root: string,
   operation: SkillOperation,
@@ -442,14 +426,16 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
   const traceBefore = beginTrace(root);
   let recoverMutation: (() => void) | null = null;
   try {
-    const eventsPath = path.join(root, "cadre", "events.jsonl");
-    const eventsBaseline = captureFileBaseline(eventsPath);
     const mutation = atomicSkillMutation(root, id, operation === "remove" ? null : newId, approvedExecution?.files || desired.files);
     let mutationSettled = false;
+    const mutationEventIds: string[] = [];
     const rollback = () => {
       if (mutationSettled) return;
       mutation.rollback();
-      restoreFileBaseline(eventsPath, eventsBaseline);
+      for (const eventId of mutationEventIds) {
+        const eventRemoval = removeCadreEvent(root, eventId);
+        if (eventRemoval.ok === false) throw new Error(asOptionalString(eventRemoval.error) || "Unable to remove rolled-back skill event");
+      }
       mutation.finish();
       mutationSettled = true;
       recoverMutation = null;
@@ -471,7 +457,21 @@ export function workflowSkill(root: string, args: RuntimeArgs): CoreResult {
     ])).sort();
     const eventKind = `project_skill_${operation === "create" ? "created" : operation === "update" ? "updated" : operation === "rename" ? "renamed" : "removed"}`;
     const event = appendCadreEvent(root, { kind: eventKind, workflow: "skill", skill_id: id, new_skill_id: operation === "rename" ? newId : null, approval_session_id: approvalSessionId || null });
-    const approvalAudit = stages.length > 0 ? recordApprovalCompletionFromArgs(root, reviewArgs) : null;
+    if (event.ok === false) {
+      rollback();
+      return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "event_log", rolled_back: true, written: [], removed: [], event };
+    }
+    const mutationEventId = asOptionalString(asJsonObject(event.event).id);
+    if (mutationEventId) mutationEventIds.push(mutationEventId);
+    const approvalAudit = stages.length > 0
+      ? recordApprovalCompletionFromArgs(root, reviewArgs)
+      : null;
+    if (approvalAudit?.ok === false) {
+      rollback();
+      return { ok: false, operation, skill_id: id, phase_state: "recovery_required", stage: "approval_audit", rolled_back: true, written: [], removed: [], event, approval_audit: approvalAudit };
+    }
+    const approvalEventId = asOptionalString(asJsonObject(asJsonObject(approvalAudit).event).id);
+    if (approvalEventId && asJsonObject(approvalAudit).reused !== true) mutationEventIds.push(approvalEventId);
     const files = [...written, ...removed, "cadre/events.jsonl"];
     const controlCommit = commitTrace(root, args, { kind: "control", workflow: "skill", action: operation, type: operation === "remove" ? "chore" : "feat", scope: "skill", subject: `${operation} project skill ${operation === "rename" ? `${id} as ${newId}` : id}`, before: traceBefore, files, forceEnabled: true, allowDirty: stages.length > 0, note: { event_id: asOptionalString(asJsonObject(event.event).id), skill_id: id, new_skill_id: operation === "rename" ? newId : null } });
     if (controlCommit.ok === false) {

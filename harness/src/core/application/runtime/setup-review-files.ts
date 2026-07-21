@@ -11,6 +11,7 @@ import {
   textReviewFile,
 } from "./review-bundles";
 import type { SetupEvidenceStage } from "./setup-evidence";
+import { renderSemanticProjection, renderTechStackMarkdown } from "./semantic-projections";
 import { renderStyleGuideMarkdown } from "./spec-docs";
 import { techStackForPacket } from "./tech-stack";
 import { normalizeProjectDoc, templateJson } from "./workflow-response";
@@ -27,6 +28,7 @@ function projectDocumentPair(
   const canonicalPath = `cadre/${filename}.json`;
   const projectionPath = `cadre/${filename}.md`;
   const canonicalContent = `${JSON.stringify(value, null, 2)}\n`;
+  const schema = `cadre.${documentId}.v1`;
   return documentReviewPair(
     documentId,
     jsonReviewFile(canonicalPath, canonicalTitle, source, value),
@@ -36,8 +38,9 @@ function projectDocumentPair(
       canonicalPath,
       withGeneratedMarker(
         canonicalPath,
-        `cadre.${documentId}.v1`,
-        renderMarkdownDoc(value, renderTitle, canonicalPath),
+        schema,
+        renderSemanticProjection(schema, value, renderTitle, canonicalPath)
+          || renderMarkdownDoc(value, renderTitle, canonicalPath),
         { canonicalContent, projection: projectionPath },
       ),
     ),
@@ -175,7 +178,7 @@ function technicalFiles(
         withGeneratedMarker(
           "cadre/tech-stack.json",
           "cadre.tech_stack.v1",
-          renderJsonCodeblock("Tech stack", projection),
+          renderTechStackMarkdown(projection, "cadre/tech-stack.json"),
           { canonicalContent, projection: "cadre/tech-stack.md" },
         ),
       ),

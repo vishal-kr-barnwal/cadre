@@ -13,7 +13,8 @@ exactly `next.tool` with `next.arguments`, at most once for that packet. The
 typed deferred continuations outside `next` are `decision.resume` after
 collecting clarification or formatted reference content and changing only its
 returned `writable_paths`, `decision.amend` when the user explicitly revises
-the active review stage,
+the active review stage, any exact `decision.reopen[].call` selected by the
+user to invalidate that stage and every later stage in the same session,
 `decision.required.write_back` after collecting requested external provider
 evidence, and each parallel worker's
 `data.workers[].dispatch.record_finish_packet`, used once with that worker's
@@ -36,8 +37,9 @@ treat Markdown projections as canonical.
 For staged workflows, collect and review only the current stage:
 `decision.stage` for approval or `decision.current_stage` for clarification and
 formatting. Later stages remain pending and unmaterialized. Treat every file in
-the current stage as one atomic review set, including canonical/projection pairs
-and grouped technical or reference files. Invoke the returned `decision.resume`
+`decision.review_set` as one complete, untruncated atomic review set, including
+canonical/projection pairs and grouped technical or reference files. Show those
+review paths by default. Invoke the returned `decision.resume`
 for clarification and `decision.amend` for an explicit active-stage revision;
 edit only their `writable_paths`. A structured value replaces that path, so
 send the complete artifact object. Their session-only approval state is not
@@ -46,6 +48,8 @@ exact returned `stage`, `stage_hash`, `stage_revision`, and cumulative
 `approved_stages` prefix. These values bind approval to the reviewed revision;
 never reuse them after the stage changes. When no stage remains, invoke the
 exact returned `next` unchanged; it carries execution and completion
-authorization. Execution never substitutes for stage approval. If a
+authorization. During implementation, a worktree-setup `next` creates every
+missing affected integration worktree and resumes implementation; do not stop
+merely because those worktrees were absent. Execution never substitutes for stage approval. If a
 packet is blocked, report its error or requested narrowing; do not truncate or
 invent required project-skill rules.

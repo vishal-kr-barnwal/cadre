@@ -15,6 +15,9 @@ import { trackContext } from "./track-context";
 import { metadataPatch, setTrackStatus } from "./track-mutations";
 import { workflowArchive, workflowHandoff, workflowImplement, workflowReview, workflowStatus, workflowValidate } from "./workflow-basic";
 import { workflowNewTrack } from "./workflow-new-track";
+import { reconcileNewTrackRestarts } from "./new-track-restart-journal";
+import { requestedApprovalSessionId } from "./approval-request";
+import { readApprovalSessionResult, reconcileApprovalTransactions } from "./approval-session-store";
 import { workflowRefresh, workflowRevert } from "./workflow-refresh-revert";
 import { workflowRelease } from "./workflow-release-revise";
 import { workflowRevise } from "./workflow-revise";
@@ -25,6 +28,52 @@ import { workflowSkill } from "./workflow-skill";
 
 export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult {
   const workflow = asOptionalString(args.workflow) || asOptionalString(args.action) || "status";
+  const restartRecovery = reconcileNewTrackRestarts(root);
+  if (!restartRecovery.ok) {
+    return shapeWorkflowResponse(root, workflow, args, {
+      ...workflowSummary(root, workflow, args),
+      ok: false,
+      phase_state: "recovery_required",
+      stage: "newtrack_restart_recovery",
+      recovery_required: true,
+      error: restartRecovery.error || "An interrupted newtrack restart requires recovery",
+    });
+  }
+  const approvalRecovery = reconcileApprovalTransactions(root);
+  if (!approvalRecovery.ok) {
+    return shapeWorkflowResponse(root, workflow, args, {
+      ...workflowSummary(root, workflow, args),
+      ok: false,
+      phase_state: "recovery_required",
+      stage: "approval_recovery",
+      recovery_required: true,
+      error: approvalRecovery.error || "An interrupted approval transaction requires recovery",
+    });
+  }
+  const approvalSessionId = requestedApprovalSessionId(args);
+  const approvalRead = approvalSessionId ? readApprovalSessionResult(root, approvalSessionId) : null;
+  if (approvalRead?.recovery_required) {
+    const error = approvalRead.error || "An interrupted approval transaction requires recovery";
+    return shapeWorkflowResponse(root, workflow, args, {
+      ...workflowSummary(root, workflow, args),
+      ok: false,
+      phase_state: "recovery_required",
+      stage: "approval_recovery",
+      recovery_required: true,
+      approval: {
+        kind: "cadre.staged_approval.v1",
+        required: true,
+        session_id: approvalSessionId,
+        session_resumable: false,
+        approval_recovery_required: true,
+        approval_error: error,
+        current_stage: null,
+        approved_stages: [],
+        pending_stages: [],
+      },
+      error,
+    });
+  }
   const markdownError = markdownPayloadError(args);
   if (markdownError) return shapeWorkflowResponse(root, workflow, args, { ...workflowSummary(root, workflow, args), ...markdownError });
   if (workflow === "skill") {
@@ -179,6 +228,20 @@ export function workflowPacket(root: string, args: RuntimeArgs = {}): CoreResult
           status,
           reason,
         });
+        if (event.ok === false) {
+          return {
+            ...summary,
+            ok: false,
+            dry_run: false,
+            phase_state: "recovery_required",
+            stage: "event_log",
+            track_context: context,
+            status_result: statusResult,
+            metadata_patch: patch,
+            event,
+            error: asOptionalString(event.error) || "Flag state changed but its required audit event was not recorded",
+          };
+        }
         const controlCommit = commitTrace(root, args, {
           kind: "control",
           workflow: "flag",

@@ -12,7 +12,7 @@ import {
   type ApprovalBeforeFile,
   type ApprovalSession,
 } from "./approval-session-model";
-import { appendCadreEvent, ensureNativeState, readCadreEvents } from "./native-state";
+import { appendCadreEvent, ensureNativeState, readCadreEvents, withCadreEventLock } from "./native-state";
 import {
   removeReviewIntentToAddAtomic,
   reviewHeadFiles,
@@ -28,6 +28,18 @@ import {
   reconcileApprovalSupersessionForSession,
   reconcileApprovalSupersessions,
 } from "./approval-supersession-journal";
+import {
+  approvalReopenJournalError,
+  approvalReopenJournalIds,
+  approvalReopenSessionSnapshot,
+  reconcileApprovalReopen,
+} from "./approval-reopen-journal";
+import {
+  approvalMaterializationJournalError,
+  approvalMaterializationJournalIds,
+  approvalMaterializationSessionSnapshot,
+  reconcileApprovalMaterialization,
+} from "./approval-materialization-journal";
 
 export type { ApprovalBeforeFile, ApprovalSession } from "./approval-session-model";
 
@@ -64,6 +76,47 @@ export interface ApprovalSessionReadResult {
 
 export interface ApprovalSessionReadOptions {
   lifecycleLocked?: boolean;
+  restartTrackLockHeld?: string;
+}
+
+export interface ApprovalTransactionRecoveryResult {
+  ok: boolean;
+  pending: boolean;
+  error?: string;
+}
+
+/** Reconcile target materialization and stage-reopen transactions before workflows observe project state. */
+export function reconcileApprovalTransactions(root: string): ApprovalTransactionRecoveryResult {
+  for (let pass = 0; pass < 4; pass += 1) {
+    const sessionIds = new Set([
+      ...approvalMaterializationJournalIds(root),
+      ...approvalReopenJournalIds(root),
+    ]);
+    if (sessionIds.size === 0) return { ok: true, pending: false };
+    for (const sessionId of sessionIds) {
+      const materialization = reconcileApprovalMaterialization(root, sessionId);
+      if (!materialization.ok && materialization.pending) {
+        return {
+          ok: false,
+          pending: true,
+          error: materialization.error || `Interrupted approval materialization could not be reconciled: ${sessionId}`,
+        };
+      }
+      const reopen = reconcileApprovalReopen(root, sessionId);
+      if (!reopen.ok && reopen.pending) {
+        return {
+          ok: false,
+          pending: true,
+          error: reopen.error || `Interrupted approval reopen could not be reconciled: ${sessionId}`,
+        };
+      }
+    }
+  }
+  return {
+    ok: false,
+    pending: true,
+    error: "Approval transaction journals kept changing during recovery; retry after concurrent approval work finishes",
+  };
 }
 
 export function approvalSessionStorageError(root: string): string | null {
@@ -84,6 +137,14 @@ export function approvalSessionStorageError(root: string): string | null {
       return `Approval session file is invalid or unreadable: ${name}`;
     }
   }
+  for (const sessionId of approvalReopenJournalIds(root)) {
+    const error = approvalReopenJournalError(root, sessionId);
+    if (error) return error;
+  }
+  for (const sessionId of approvalMaterializationJournalIds(root)) {
+    const error = approvalMaterializationJournalError(root, sessionId);
+    if (error) return error;
+  }
   return null;
 }
 
@@ -94,6 +155,22 @@ export function readApprovalSessionResult(
 ): ApprovalSessionReadResult {
   if (!isApprovalSessionId(sessionId)) {
     return { session: null, recovery_required: false, error: "Invalid approval session id" };
+  }
+  const materialization = reconcileApprovalMaterialization(root, sessionId, options);
+  if (!materialization.ok && materialization.pending) {
+    return {
+      session: null,
+      recovery_required: true,
+      error: materialization.error || "Interrupted approval materialization could not be reconciled",
+    };
+  }
+  const reopen = reconcileApprovalReopen(root, sessionId, options);
+  if (!reopen.ok && reopen.pending) {
+    return {
+      session: null,
+      recovery_required: true,
+      error: reopen.error || "Interrupted approval reopen could not be reconciled",
+    };
   }
   const supersession = reconcileApprovalSupersessionForSession(root, sessionId, options);
   if (!supersession.ok && supersession.pending) {
@@ -171,13 +248,19 @@ export function listApprovalSessions(root: string, options: ApprovalSessionListO
   const sessionIds = new Set([
     ...names.filter((name) => /^[a-f0-9]{24}\.json$/.test(name)).map((name) => name.slice(0, -5)),
     ...approvalCancellationJournalIds(root),
+    ...approvalReopenJournalIds(root),
+    ...approvalMaterializationJournalIds(root),
   ]);
   const sessions = Array.from(sessionIds).flatMap((sessionId) => {
     const result = readApprovalSessionResult(root, sessionId, options);
     if (result.session) return [result.session];
     if (!options.includeRecoveryPending || !result.recovery_required) return [];
-    const pending = approvalCancellationSessionSnapshot(root, sessionId);
-    return pending ? [{ ...pending, cancellation_recovery_required: true }] : [];
+    const cancellation = approvalCancellationSessionSnapshot(root, sessionId);
+    if (cancellation) return [{ ...cancellation, cancellation_recovery_required: true }];
+    const reopen = approvalReopenSessionSnapshot(root, sessionId);
+    if (reopen) return [{ ...reopen, reopen_recovery_required: true }];
+    const materialization = approvalMaterializationSessionSnapshot(root, sessionId);
+    return materialization ? [{ ...materialization, materialization_recovery_required: true }] : [];
   });
   if (!options.includeRecoveryPending || supersession.ok) return sessions;
   const known = new Set(sessions.map((session) => session.session_id));
@@ -189,8 +272,12 @@ export function listApprovalSessions(root: string, options: ApprovalSessionListO
   ];
 }
 
-export function approvalSessionForTarget(root: string, relativePath: string): ApprovalSession | null {
-  return listApprovalSessions(root)
+export function approvalSessionForTarget(
+  root: string,
+  relativePath: string,
+  options: ApprovalSessionReadOptions = {},
+): ApprovalSession | null {
+  return listApprovalSessions(root, options)
     .filter((session) => session.snapshot_files.some((file) => file.missing !== true && file.path === relativePath))
     .sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0] || null;
 }
@@ -284,7 +371,14 @@ export function recordApprovalPreview(
   return { ok: true, session_id: sessionId };
 }
 
-export function recordApprovalCompletion(root: string, sessionId: string): CoreResult {
+export function recordApprovalCompletion(
+  root: string,
+  sessionId: string,
+  options: { eventLockHeld?: boolean } = {},
+): CoreResult {
+  if (options.eventLockHeld !== true) {
+    return withCadreEventLock(root, () => recordApprovalCompletion(root, sessionId, { eventLockHeld: true }));
+  }
   const session = readApprovalSession(root, sessionId);
   if (!session) return { ok: false, error: "Approval session was not found for completion audit" };
   const existing = readCadreEvents(root, 0).find((event) => (
@@ -305,7 +399,7 @@ export function recordApprovalCompletion(root: string, sessionId: string): CoreR
         projection_path: file.projectionPath || file.path,
         sha256: textHash(file.content),
       })),
-  });
+  }, { lock: false });
 }
 
 export function closeApprovalSession(root: string, sessionId: string): CoreResult {
@@ -321,9 +415,13 @@ function sessionIdFromArgs(args: RuntimeArgs): string | null {
   return asOptionalString(args.approvalSessionId || args.approval_session_id) || null;
 }
 
-export function recordApprovalCompletionFromArgs(root: string, args: RuntimeArgs): CoreResult {
+export function recordApprovalCompletionFromArgs(
+  root: string,
+  args: RuntimeArgs,
+  options: { eventLockHeld?: boolean } = {},
+): CoreResult {
   const sessionId = sessionIdFromArgs(args);
-  return sessionId ? recordApprovalCompletion(root, sessionId) : { ok: true, skipped: true, reason: "no staged approval session" };
+  return sessionId ? recordApprovalCompletion(root, sessionId, options) : { ok: true, skipped: true, reason: "no staged approval session" };
 }
 
 export function closeApprovalSessionFromArgs(root: string, args: RuntimeArgs): CoreResult {

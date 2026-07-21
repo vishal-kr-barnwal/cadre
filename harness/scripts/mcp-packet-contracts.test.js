@@ -42,6 +42,7 @@ function loadSource(name, entry) {
 
 const { parallelPacket } = loadPacket("parallel");
 const { jobPacket } = loadPacket("job");
+const { trackPacket } = loadPacket("track");
 const { parseWorkflowToolRequest, workflowRuntimeArgs } = loadSource("workflow-tool-requests", ["mcp", "application", "tool-requests.ts"]);
 
 test.after(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
@@ -137,6 +138,40 @@ function dependencies(stateWorkers = []) {
     },
   };
 }
+
+test("executed worktree setup resumes the implement workflow", () => {
+  const root = "/project";
+  const response = trackPacket({
+    rootResolver: { requireCadreRoot: ({ root: candidate }) => candidate },
+    core: { worktreePlan: () => ({ ok: true, track_id: "track-1", branch_set: [{ repo: "root", health: "ready" }] }) },
+  }, {
+    root,
+    action: "worktree_plan",
+    trackId: "track-1",
+    repo: "root",
+    base: "main",
+    head: "track/track-1",
+    agentIdentifier: "codex",
+    maxWorkers: 3,
+    execute: true,
+  });
+  assert.deepEqual(response.next, {
+    tool: "cadre_workflow",
+    arguments: {
+      root,
+      workflow: "implement",
+      input: {
+        trackId: "track-1",
+        repo: "root",
+        base: "main",
+        head: "track/track-1",
+        agentIdentifier: "codex",
+        maxWorkers: 3,
+      },
+      execute: false,
+    },
+  });
+});
 
 test("parallel packets return exact immediate continuations and explicit fan-out callbacks", () => {
   const root = "/project";

@@ -16,6 +16,7 @@ export { loadTopology } from "../infrastructure/runtime/project-config";
 export { lspReview, polyrepoPreflight, regenIndex } from "./runtime/project-maintenance";
 export { prCiStatus, reviewAssist, reviewMachineGate, testCoverage } from "./runtime/quality-gates";
 export { repoMap } from "./runtime/repo-map";
+export { renderSemanticProjection, renderTechStackMarkdown, renderWorkflowMarkdown } from "./runtime/semantic-projections";
 export { implementationPrep } from "./runtime/repo-resolution";
 export { providerEvidence, recordReview, reviewEvidence, syncControlPlane } from "./runtime/review-records";
 export { projectSkillDetail, projectSkillDiagnostics, projectSkillSelection, projectSkillTargetRepos } from "./runtime/project-skills";

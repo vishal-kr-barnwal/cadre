@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { asBoolean, asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
-
 import { appendJsonl, fileExists, writeJson } from "../../infrastructure/runtime/json-store";
 import { configuredProvider } from "../../infrastructure/runtime/project-config";
 import { isCadreProjectRoot } from "../../infrastructure/runtime/system";
@@ -11,9 +10,11 @@ import { closeApprovalSessionFromArgs, recordApprovalCompletionFromArgs } from "
 import { renderJsonCodeblock } from "./artifact-actions";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult } from "./contracts";
+import { requiredAuditFailure } from "./event-audit";
 import { setupGenerationWarnings } from "./generation-quality";
 import { summarizeLspSetupResult } from "./health-summaries";
 import { renderMarkdownDoc, withGeneratedMarker } from "./markdown-docs";
+import { renderSemanticProjection, renderTechStackMarkdown } from "./semantic-projections";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
 import { setupShouldWriteLsp } from "./review-bundles";
 import { setupMissingEvidence } from "./setup-evidence";
@@ -26,7 +27,6 @@ import { applyStagedApprovalSessionPayload, setupApprovalStages, stagedApprovalE
 import { setupStyleGuides, techStackFromArgs, techStackSummary } from "./tech-stack";
 import { markdownPayloadError, normalizeProjectDoc, templateJson, templateManifest, workflowResponseMode, workflowSummary } from "./workflow-response";
 import { doctor, workspaceHealth } from "./workspace-health";
-
 export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult {
   args = applyStagedApprovalSessionPayload(root, args, "setup");
   const summary = workflowSummary(root, "setup", args);
@@ -297,8 +297,14 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   };
   const writeProjectDoc = (relativePath: string, kind: string, value: JsonObject, title: string): void => {
     const jsonPath = relativePath.replace(/\.md$/, ".json");
+    const canonicalPath = `cadre/${jsonPath}`;
+    const schema = `cadre.${kind}.v1`;
     writeSetupJson(jsonPath, value);
-    writeText(relativePath, withGeneratedMarker(`cadre/${jsonPath}`, `cadre.${kind}.v1`, renderMarkdownDoc(value, title, `cadre/${jsonPath}`)));
+    writeText(relativePath, withGeneratedMarker(
+      canonicalPath,
+      schema,
+      renderSemanticProjection(schema, value, title, canonicalPath) || renderMarkdownDoc(value, title, canonicalPath),
+    ));
   };
 
   fs.mkdirSync(path.join(cadreDir, "tracks"), { recursive: true });
@@ -327,7 +333,7 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
   writeSetupJson("tech-stack.json", techStackFromArgs(args) || {});
   writeText(
     "tech-stack.md",
-    withGeneratedMarker("cadre/tech-stack.json", "cadre.tech_stack.v1", renderJsonCodeblock("Tech stack", techStackFromArgs(args) || {}), {
+    withGeneratedMarker("cadre/tech-stack.json", "cadre.tech_stack.v1", renderTechStackMarkdown(techStackFromArgs(args) || {}, "cadre/tech-stack.json"), {
       canonicalContent: `${JSON.stringify(techStackFromArgs(args) || {}, null, 2)}\n`,
       projection: "cadre/tech-stack.md",
     })
@@ -428,13 +434,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     ciProvider,
     { ...args, topology: polyrepoRequested ? "polyrepo" : "monorepo" }
   );
-  const polyrepoSetup = polyrepoRequested && repos
-    ? {
-      gitattributes,
-      ci: ciSetup,
-      submodules: setupSubmodulePlan(root, repos, args),
-    }
-    : null;
+  const polyrepoSetup = polyrepoRequested && repos ? {
+    gitattributes,
+    ci: ciSetup,
+    submodules: setupSubmodulePlan(root, repos, args),
+  } : null;
   const setupEvent = appendCadreEvent(root, {
     kind: "setup_completed",
     workflow: "setup",
@@ -444,7 +448,11 @@ export function workflowSetup(root: string, args: RuntimeArgs = {}): CoreResult 
     written_count: written.length,
     skipped_count: skipped.length,
   });
+  const eventFailure = requiredAuditFailure(setupEvent, "event_log", "Setup completed but its required audit event could not be recorded; retry execution", { ...result, scaffolded: true, written, skipped, event: setupEvent });
+  if (eventFailure) return eventFailure;
   const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  const auditFailure = requiredAuditFailure(approvalAudit, "approval_audit", "Setup completed but its approval audit could not be recorded; retry execution", { ...result, scaffolded: true, written, skipped, event: setupEvent, approval_audit: approvalAudit });
+  if (auditFailure) return auditFailure;
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "setup",

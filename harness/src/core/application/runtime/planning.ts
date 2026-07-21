@@ -8,6 +8,7 @@ import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { branchSetForTrack, ensureIntegrationWorktree } from "./branch-set";
 import { normalizeClaimPath } from "./collision";
 import type { CoreResult } from "./contracts";
+import { canonicalizePlanGraph } from "./plan-graph";
 import { repoEntriesError, unresolvedPlanRepos } from "./repo-resolution";
 import { findTrack } from "./track-context";
 import { listTracks, parsePlanFile, parsePlanJson, phaseSchedule } from "./track-schedule";
@@ -83,6 +84,7 @@ export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
   const track = trackId ? findTrack(root, trackId) : null;
   if (trackId && !track && !args.plan) return { ok: false, error: `Track not found: ${trackId}` };
   const topology = loadTopology(root);
+  const rawPlanIssues = args.plan ? canonicalizePlanGraph(asJsonObject(args.plan)).issues : [];
   const plan = args.plan
     ? parsePlanJson(normalizePlanJson(String(trackId || asOptionalString(args.plan.track_id) || "draft"), args.plan))
     : track
@@ -138,7 +140,7 @@ export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
   const schedule = track ? phaseSchedule(root, { ...args, trackId: track.track_id }) : null;
   const limit = Number(args.limit || 50);
   return {
-    ok: repoErrors.length === 0 && plan.ok !== false,
+    ok: repoErrors.length === 0 && plan.ok !== false && rawPlanIssues.length === 0,
     root,
     track_id: track?.track_id || trackId,
     topology: {
@@ -153,7 +155,11 @@ export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
     schedule,
     semantic_impact: semanticImpact,
     missing_claim_suggestions: missingClaimSuggestions(root, topology, plan.tasks || [], Math.min(limit, 25)),
-    errors: [...(plan.errors || []), ...repoErrors],
+    errors: [
+      ...rawPlanIssues.map((entry) => asString(entry.message, "Invalid plan graph")),
+      ...(plan.errors || []),
+      ...repoErrors,
+    ],
     warnings: plan.warnings || [],
   };
 }
@@ -161,15 +167,29 @@ export function planAssist(root: string, args: RuntimeArgs = {}): CoreResult {
 export function worktreePlan(root: string, args: RuntimeArgs = {}): CoreResult {
   const track = findTrack(root, args.trackId || args.track_id);
   if (!track) return { ok: false, error: `Track not found: ${args.trackId || args.track_id}` };
+  const plan = parsePlanFile(track.plan_path);
+  if (plan.ok === false) {
+    return {
+      ok: false,
+      stage: "plan_graph",
+      track_id: track.track_id,
+      errors: plan.errors,
+      error: plan.errors[0] || "Canonical plan graph is invalid",
+    };
+  }
   const repoError = repoEntriesError(root, track, args);
   if (repoError) return repoError;
   const topology = loadTopology(root);
   const branchSet = branchSetForTrack(root, track, args);
   const execute = args.execute === true;
   const setup_results = execute ? branchSet.map((entry) => ensureIntegrationWorktree(entry)) : [];
+  const resolvedBranchSet = branchSet.map((entry, index) => {
+    const result = setup_results[index];
+    return isRecord(result?.entry) ? asJsonObject(result.entry) : entry;
+  });
   const plans = branchSet.map((entry, index) => {
     const result = setup_results[index];
-    const resultEntry = isRecord(result?.entry) ? asJsonObject(result.entry) : entry;
+    const resultEntry = resolvedBranchSet[index] || entry;
     return {
       repo: entry.repo,
       source_root: entry.source_root,
@@ -188,13 +208,16 @@ export function worktreePlan(root: string, args: RuntimeArgs = {}): CoreResult {
     };
   });
   return {
-    ok: setup_results.every((result) => result.ok !== false) && branchSet.every((entry) => entry.health === "ready" || entry.health === "missing"),
+    ok: setup_results.every((result) => result.ok !== false)
+      && resolvedBranchSet.every((entry) => execute
+        ? entry.health === "ready"
+        : entry.health === "ready" || entry.health === "missing"),
     root,
     track_id: track.track_id,
     execute,
     dry_run: !execute,
     topology: topology.polyrepo ? "polyrepo" : "monorepo",
-    branch_set: branchSet,
+    branch_set: resolvedBranchSet,
     plans,
     setup_results,
   };
@@ -209,6 +232,9 @@ export function planIntegrity(root: string, trackId: string | null = null): Core
   const warnings: JsonObject[] = [];
   for (const track of tracks) {
     const plan = parsePlanFile(track.plan_path);
+    for (const message of plan.errors || []) {
+      errors.push({ track_id: track.track_id, message });
+    }
     const seenKeys = new Set<string>();
     for (const phase of plan.phases) {
       const execution = phase.annotations.execution || "sequential";
@@ -225,7 +251,7 @@ export function planIntegrity(root: string, trackId: string | null = null): Core
           errors.push({ track_id: track.track_id, line: task.line, task_key: task.task_key, message: "Task has no repo annotation and repos.json has no default_repo" });
         }
         for (const dep of task.depends || []) {
-          if (!/^task\d+$|^phase\d+_task\d+$/.test(dep)) {
+          if (!/^phase\d+_task\d+$|^phase\d+_manual_verification$|^track_manual_verification$/.test(dep)) {
             warnings.push({ track_id: track.track_id, line: task.line, task_key: task.task_key, message: `Unrecognized dependency reference ${dep}` });
           }
         }

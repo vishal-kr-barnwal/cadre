@@ -6,6 +6,7 @@ import { readJson } from "../../infrastructure/runtime/json-store";
 import { approvalStageCursor, scopedApprovalReviewFiles, type ApprovalStageCursor } from "./approval-stage-cursor";
 import type { ReviewFile } from "./contracts";
 import { withGeneratedMarker } from "./markdown-docs";
+import { newTrackSchemaIssues } from "./intent-prompts";
 import { renderPlanMarkdown, trackPlanJsonPath, trackSpecJsonPath } from "./plan-docs";
 import { documentReviewPair, jsonReviewFile, textReviewFile } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
@@ -17,6 +18,7 @@ export interface ReviseStageCollection {
   cursor: ApprovalStageCursor;
   activeKind: "spec" | "plan" | null;
   missingEvidence: string[];
+  schemaIssues: JsonObject[];
   files: ReviewFile[];
 }
 
@@ -74,8 +76,11 @@ export function reviseStageCollection(
   const missingEvidence = activeKind && !meaningfulRevisionArtifact(raw[activeKind], activeKind, track.track_id)
     ? [activeKind]
     : [];
+  const schemaIssues = activeKind && isRecord(raw[activeKind])
+    ? newTrackSchemaIssues(args, [activeKind])
+    : [];
   let currentFiles: ReviewFile[] = [];
-  if (activeKind && missingEvidence.length === 0) {
+  if (activeKind && missingEvidence.length === 0 && schemaIssues.length === 0) {
     const existingSpec = readJson<JsonObject | null>(trackSpecJsonPath(track), null);
     const revisedSpec = isRecord(raw.spec) ? normalizeSpecJson(track.track_id, raw.spec) : null;
     currentFiles = activeKind === "spec"
@@ -86,6 +91,7 @@ export function reviseStageCollection(
     cursor,
     activeKind,
     missingEvidence,
+    schemaIssues,
     files: scopedApprovalReviewFiles(cursor, currentFiles),
   };
 }

@@ -91,6 +91,16 @@ function samplePlan(id, overrides = {}) {
             commit_shas: [],
             repo_shas: {},
           },
+          {
+            task_index: 3,
+            task_key: "phase1_manual_verification",
+            title: "User Manual Verification",
+            status: "pending",
+            task_type: "user_manual_verification",
+            files: [],
+            depends_on: ["phase1_task1", "phase1_task2"],
+            manual_verification: { scope: "phase", suggested_checks: [] },
+          },
         ],
       },
       {
@@ -108,6 +118,16 @@ function samplePlan(id, overrides = {}) {
             depends_on: [],
             commit_shas: [],
             repo_shas: {},
+          },
+          {
+            task_index: 2,
+            task_key: "phase2_manual_verification",
+            title: "User Manual Verification",
+            status: "pending",
+            task_type: "user_manual_verification",
+            files: [],
+            depends_on: ["phase2_task1"],
+            manual_verification: { scope: "phase", suggested_checks: [] },
           },
         ],
       },
@@ -913,36 +933,54 @@ test("parsePlanJson captures execution, repo ownership, dependencies, and commit
     version: 1,
     schema: "cadre.plan.v1",
     track_id: "typed",
-    phases: [{
-      phase_index: 1,
-      title: "Phase 1: Typed Work",
-      execution_mode: "parallel",
-      depends_on: ["phase0"],
-      tasks: [{
-        task_index: 1,
-        task_key: "phase1_task1",
-        title: "Touch runtime",
-        status: "in_progress",
-        files: ["src/runtime.ts", "tests/runtime.test.ts"],
-        repo: "app",
-        depends_on: ["task0"],
-        commit_shas: ["abc1234"],
-        repo_shas: { app: "deadbeef" },
-      }],
-    }],
+    phases: [
+      {
+        phase_index: 1,
+        title: "Phase 1: Prerequisite",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [{
+          task_index: 1,
+          task_key: "phase1_task1",
+          title: "Prepare runtime",
+          status: "completed",
+          files: ["src/prerequisite.ts"],
+          depends_on: [],
+          commit_shas: ["base123"],
+          repo_shas: { app: "base123" },
+        }],
+      },
+      {
+        phase_index: 2,
+        title: "Phase 2: Typed Work",
+        execution_mode: "parallel",
+        depends_on: ["phase1"],
+        tasks: [{
+          task_index: 1,
+          task_key: "phase2_task1",
+          title: "Touch runtime",
+          status: "in_progress",
+          files: ["src/runtime.ts", "tests/runtime.test.ts"],
+          repo: "app",
+          depends_on: ["phase1_task1"],
+          commit_shas: ["abc1234"],
+          repo_shas: { app: "deadbeef" },
+        }],
+      },
+    ],
   });
 
   assert.equal(plan.ok, true);
-  assert.equal(plan.phases.length, 1);
-  assert.equal(plan.tasks.length, 1);
-  assert.equal(plan.phases[0].annotations.execution, "parallel");
-  assert.equal(plan.phases[0].annotations.depends, "phase0");
-  assert.equal(plan.tasks[0].task_key, "phase1_task1");
-  assert.deepEqual(plan.tasks[0].files, ["src/runtime.ts", "tests/runtime.test.ts"]);
-  assert.equal(plan.tasks[0].repo, "app");
-  assert.deepEqual(plan.tasks[0].depends, ["task0"]);
-  assert.ok(plan.tasks[0].commit_shas.includes("abc1234"));
-  assert.equal(plan.tasks[0].repo_shas.app, "deadbeef");
+  assert.equal(plan.phases.length, 2);
+  assert.equal(plan.tasks.length, 2);
+  assert.equal(plan.phases[1].annotations.execution, "parallel");
+  assert.equal(plan.phases[1].annotations.depends, "phase1");
+  assert.equal(plan.tasks[1].task_key, "phase2_task1");
+  assert.deepEqual(plan.tasks[1].files, ["src/runtime.ts", "tests/runtime.test.ts"]);
+  assert.equal(plan.tasks[1].repo, "app");
+  assert.deepEqual(plan.tasks[1].depends, ["phase1_task1"]);
+  assert.ok(plan.tasks[1].commit_shas.includes("abc1234"));
+  assert.equal(plan.tasks[1].repo_shas.app, "deadbeef");
 });
 
 test("build emits required runtime bundles without obsolete standalone helpers", () => {
@@ -1028,7 +1066,7 @@ test("implementationPrep returns bounded candidate context", () => {
     const prep = core.implementationPrep(root, { identity: "dev@example.com" });
     assert.equal(prep.ok, true);
     assert.equal(prep.selected_track, "prep_20260617");
-    assert.equal(prep.context.task_counts.total, 4);
+    assert.equal(prep.context.task_counts.total, 6);
     assert.equal(prep.integrity.ok, true);
     assert.equal(prep.team_summary.total_tracks, 1);
   } finally {
@@ -1532,7 +1570,7 @@ test("phaseSchedule splits ready phases with file ownership conflicts", () => {
   }
 });
 
-test("workflowPacketV1 emits executable sequential and parallel continuations", () => {
+test("workflowPacketV1 emits worktree-first sequential and parallel continuations", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-workflow-next-test-"));
   try {
     git(root, ["init"]);
@@ -1547,6 +1585,8 @@ test("workflowPacketV1 emits executable sequential and parallel continuations", 
         planTask(1, 2, "Start later work", ["src/later.js"]),
       ],
     }]));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed sequential track"]);
 
     const sequential = core.workflowPacketV1(root, { workflow: "implement", trackId: sequentialTrack });
     assert.equal(sequential.ok, true);
@@ -1554,11 +1594,19 @@ test("workflowPacketV1 emits executable sequential and parallel continuations", 
       tool: "cadre_action",
       arguments: {
         root,
-        action: "task.complete",
-        input: { trackId: sequentialTrack, phaseIndex: 1, taskIndex: 1 },
+        action: "track.worktree_plan",
+        input: { trackId: sequentialTrack, repo: "root" },
         execute: true,
       },
     });
+    assert.equal(core.worktreePlan(root, { trackId: sequentialTrack, repo: "root", execute: true }).ok, true);
+    const sequentialReady = core.workflowPacketV1(root, { workflow: "implement", trackId: sequentialTrack });
+    assert.equal(sequentialReady.next, null);
+    assert.deepEqual(sequentialReady.required, ["data.task.complete_packet"]);
+    assert.equal(
+      sequentialReady.data.task.complete_packet.arguments.input.workingRoot,
+      path.join(root, ".worktrees", "cadre", "tracks", sequentialTrack, "integrate", "root"),
+    );
 
     const parallelTrack = "next_parallel_20260617";
     writeTrack(root, parallelTrack, planFromPhases(parallelTrack, [{
@@ -1571,13 +1619,23 @@ test("workflowPacketV1 emits executable sequential and parallel continuations", 
         planTask(1, 2, "Build UI", ["src/ui.js"]),
       ],
     }]));
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed parallel track"]);
 
     const parallelWithoutIdentity = core.workflowPacketV1(root, {
       workflow: "implement",
       trackId: parallelTrack,
     });
-    assert.equal(parallelWithoutIdentity.next, null);
+    assert.equal(parallelWithoutIdentity.next.arguments.action, "track.worktree_plan");
     assert.deepEqual(parallelWithoutIdentity.required, ["agentIdentifier"]);
+    assert.equal(core.worktreePlan(root, { trackId: parallelTrack, repo: "root", execute: true }).ok, true);
+
+    const parallelReadyWithoutIdentity = core.workflowPacketV1(root, {
+      workflow: "implement",
+      trackId: parallelTrack,
+    });
+    assert.equal(parallelReadyWithoutIdentity.next, null);
+    assert.deepEqual(parallelReadyWithoutIdentity.required, ["agentIdentifier"]);
 
     const parallel = core.workflowPacketV1(root, {
       workflow: "implement",
@@ -3157,7 +3215,7 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.equal(emptyStructuredTrack.ok, false);
     assert.equal(emptyStructuredTrack.phase_state, "awaiting_clarification");
     assert.equal(emptyStructuredTrack.stage, "schema_validation");
-    assert.equal(Object.prototype.hasOwnProperty.call(emptyStructuredTrack, "review_bundle"), false);
+    assert.equal(emptyStructuredTrack.review_bundle, null);
 
     const schemaOnlyTrack = core.workflowPacket(root, {
       workflow: "newtrack",
@@ -3181,7 +3239,7 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.equal(schemaOnlyTrack.stage, "intent_clarification");
     assert.ok(schemaOnlyTrack.intent_prompts.some((prompt) => prompt.id === "newtrack-goal"));
     assert.ok(schemaOnlyTrack.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
-    assert.equal(Object.prototype.hasOwnProperty.call(schemaOnlyTrack, "review_bundle"), false);
+    assert.equal(schemaOnlyTrack.review_bundle, null);
 
     const detailedPlanWeakSpec = core.workflowPacket(root, {
       workflow: "newtrack",
@@ -3216,7 +3274,11 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-outcome"));
     assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-acceptance"));
     assert.ok(detailedPlanWeakSpec.intent_prompts.some((prompt) => prompt.id === "newtrack-scope"));
-    assert.equal(Object.prototype.hasOwnProperty.call(detailedPlanWeakSpec, "review_bundle"), false);
+    assert.ok(detailedPlanWeakSpec.review_bundle);
+    assert.deepEqual(detailedPlanWeakSpec.review_artifacts.map((artifact) => artifact.path).sort(), [
+      "cadre/tracks/oauth_drift_20260625/spec.json",
+      "cadre/tracks/oauth_drift_20260625/spec.md",
+    ]);
 
     const schemaDrift = core.workflowPacket(root, {
       workflow: "newtrack",
@@ -3249,7 +3311,7 @@ test("workflow clarity gates ask before generating vague newtrack, revise, and r
     assert.equal(schemaDrift.schema_errors.some((entry) => entry.field === "plan.tasks"), false);
     assert.ok(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=spec")));
     assert.equal(schemaDrift.schema_resources.some((uri) => uri.includes("artifact=plan")), false);
-    assert.equal(Object.prototype.hasOwnProperty.call(schemaDrift, "review_bundle"), false);
+    assert.equal(schemaDrift.review_bundle, null);
 
     const specSchema = core.artifactPacket(root, { action: "schema", artifact: "spec" });
     assert.equal(specSchema.ok, true);
@@ -4814,7 +4876,7 @@ test("artifact sync rejects legacy import and regenerates projections from canon
     assert.match(legacyImport.error, /Legacy Markdown import is not supported/);
 
     const preview = core.artifactPacket(root, { action: "sync", scope: "track:legacy_20260618" });
-    assert.equal(preview.ok, true);
+    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.schema_errors));
     assert.equal(preview.dry_run, true);
     assert.equal(preview.approval.required, false);
     assert.ok(preview.artifacts.some((artifact) => artifact.artifact_id === "track:legacy_20260618:spec" && artifact.legacy_import_available === false));
@@ -4878,9 +4940,12 @@ test("workflow revise reviews proposed track files before writing", () => {
       phase_index: 3,
       title: "Phase 3: Follow-up",
       execution_mode: "sequential",
-      depends_on: [],
+      depends_on: ["phase2"],
       tasks: [planTask(3, 1, "Recheck", [])],
     });
+    revisedPlan.phases[3].phase_index = 4;
+    revisedPlan.phases[3].title = "Phase 4: User Manual Verification";
+    revisedPlan.phases[3].depends_on = ["phase1", "phase2", "phase3"];
 
     const preview = core.workflowPacket(root, {
       workflow: "revise",
@@ -4889,7 +4954,7 @@ test("workflow revise reviews proposed track files before writing", () => {
       plan: revisedPlan,
       reviewBundleDir: ".revise-review",
     });
-    assert.equal(preview.ok, true);
+    assert.equal(preview.ok, true, preview.error || JSON.stringify(preview.schema_errors));
     assert.equal(preview.dry_run, true);
     const planArtifact = preview.review_artifacts.find((artifact) => artifact.path === "cadre/tracks/revise_20260618/plan.md");
     assert.ok(planArtifact);
@@ -5185,9 +5250,12 @@ test("target staged review previews appear in git diff and reject drift", () => 
       phase_index: 3,
       title: "Phase 3: Target preview",
       execution_mode: "sequential",
-      depends_on: [],
+      depends_on: ["phase2"],
       tasks: [planTask(3, 1, "Inspect git diff", [])],
     });
+    revisedPlan.phases[3].phase_index = 4;
+    revisedPlan.phases[3].title = "Phase 4: User Manual Verification";
+    revisedPlan.phases[3].depends_on = ["phase1", "phase2", "phase3"];
     const args = {
       workflow: "revise",
       trackId: "target_preview_20260626",

@@ -3,6 +3,7 @@ import { asJsonArray, asJsonObject, asOptionalString, asStringArray, isJsonValue
 
 import type { CoreResult } from "./contracts";
 import { approvalPayload } from "./approval-request";
+import { implementationNext, implementationRequired } from "./implementation-orchestration";
 import {
   approvalStageInputKeys,
   promptWritableInputPaths,
@@ -68,6 +69,24 @@ function boundedJsonObject(value: unknown): JsonObject {
   return bounded && typeof bounded === "object" && !Array.isArray(bounded) ? bounded : {};
 }
 
+function approvalReopenOptions(root: string, workflow: string, approval: JsonObject): JsonObject[] {
+  const sessionId = asOptionalString(approval.session_id);
+  if (!sessionId) return [];
+  return asStringArray(approval.approved_stages).map((stage) => ({
+    stage,
+    call: {
+      tool: "cadre_workflow",
+      arguments: {
+        root,
+        workflow,
+        input: {},
+        execute: false,
+        approval: { session_id: sessionId, reopen_stage: stage },
+      },
+    },
+  }));
+}
+
 function approvalDecision(root: string, workflow: string, result: JsonObject): JsonObject | null {
   const approval = asJsonObject(result.approval);
   if (approval.cancelled === true) return null;
@@ -77,7 +96,27 @@ function approvalDecision(root: string, workflow: string, result: JsonObject): J
       approval.session_id
       && asStringArray(approval.pending_stages).length === 0
       && approval.approval_error == null
-    ) return null;
+    ) {
+      if (result.dry_run === false || ["executed", "complete", "completed"].includes(String(result.phase_state || ""))) {
+        return null;
+      }
+      return {
+        kind: "ready",
+        session_id: asOptionalString(approval.session_id) || null,
+        approved_stages: asStringArray(approval.approved_stages),
+        pending_stages: [],
+        reopen: approvalReopenOptions(root, workflow, approval),
+        review_set: {
+          version: 1,
+          schema: "cadre.review_set.collection.v1",
+          complete: true,
+          truncated: false,
+          stages: asJsonArray(approval.review_documents),
+          files: asJsonArray(approval.review_files),
+        },
+        prompt: "All stages are approved. Execute the returned next call, or reopen an approved stage to revise it and every dependent stage.",
+      };
+    }
     const human = asJsonObject(result.human_review);
     if (human.required === true && human.confirmed !== true) {
       return {
@@ -102,12 +141,14 @@ function approvalDecision(root: string, workflow: string, result: JsonObject): J
     approved_stages: asStringArray(approval.approved_stages),
     pending_stages: asStringArray(approval.pending_stages),
     amend: sessionId && approval.session_resumable === true ? workflowContinuationCall(root, workflow, {}, sessionId) : null,
+    reopen: approvalReopenOptions(root, workflow, approval),
+    review_set: asJsonObject(approval.current_review_set),
     writable_paths: writable.paths,
     prompt: asOptionalString(approval.manual_approval_prompt) || "Review the current stage and ask for explicit user approval.",
   };
 }
 
-function workflowDecision(root: string, workflow: string, result: JsonObject, args: RuntimeArgs): JsonObject {
+function workflowDecisionBase(root: string, workflow: string, result: JsonObject, args: RuntimeArgs): JsonObject {
   const approvalState = asJsonObject(result.approval);
   const approvalError = asOptionalString(approvalState.approval_error);
   if (approvalState.approval_recovery_required === true) {
@@ -129,6 +170,15 @@ function workflowDecision(root: string, workflow: string, result: JsonObject, ar
       session_id: asOptionalString(approvalState.session_id) || null,
       cleanup_pending: cancellation.cleanup_pending === true,
       warning: asOptionalString(cancellation.warning) || null,
+    };
+  }
+  if (result.recovery_required === true || result.phase_state === "recovery_required") {
+    return {
+      kind: "recovery_required",
+      reason: asOptionalString(result.error || result.reason || result.stage) || "Cadre recovery must complete before continuing",
+      session_id: asOptionalString(approvalState.session_id) || null,
+      resume: null,
+      writable_paths: [],
     };
   }
   const explicit = asJsonObject(result.decision);
@@ -193,37 +243,21 @@ function workflowDecision(root: string, workflow: string, result: JsonObject, ar
   return { kind: completed ? "complete" : "ready" };
 }
 
-interface ImplementationTarget {
-  trackId: string;
-  phase: JsonObject;
-  readyGroups: string[][];
-}
-
-function implementationTarget(result: JsonObject): ImplementationTarget | null {
-  const prep = asJsonObject(result.prepare_implementation);
-  const trackId = asOptionalString(prep.selected_track) || asOptionalString(result.track_id);
-  if (!trackId || prep.ok === false) return null;
-  const schedule = asJsonObject(result.phase_schedule);
-  const readyPhaseIds = new Set(asStringArray(schedule.ready_phases));
-  const phase = asJsonArray(schedule.phases)
-    .map((entry) => asJsonObject(entry))
-    .find((entry) => readyPhaseIds.has(String(entry.phase_id || "")));
-  return phase
-    ? { trackId, phase, readyGroups: asJsonArray(schedule.ready_groups).map((entry) => asStringArray(entry)) }
-    : null;
-}
-
-function parallelImplementation(target: ImplementationTarget): boolean {
-  return target.phase.execution === "parallel" || (target.readyGroups[0]?.length || 0) > 1;
+function workflowDecision(root: string, workflow: string, result: JsonObject, args: RuntimeArgs): JsonObject {
+  const decision = workflowDecisionBase(root, workflow, result, args);
+  if (decision.reopen !== undefined || ["recovery_required", "cancelled", "complete"].includes(String(decision.kind || ""))) {
+    return decision;
+  }
+  const reopen = approvalReopenOptions(root, workflow, asJsonObject(result.approval));
+  return reopen.length > 0 ? { ...decision, reopen } : decision;
 }
 
 function requiredInputs(result: JsonObject, workflow: string, args: RuntimeArgs): string[] {
-  const target = workflow === "implement" ? implementationTarget(result) : null;
   return Array.from(new Set([
     ...asStringArray(result.missing_payload),
     ...(result.ok === false ? asStringArray(result.required_payload) : []),
     ...(result.required_provider_mcp ? ["providerEvidence"] : []),
-    ...(target && parallelImplementation(target) && !args.agentIdentifier ? ["agentIdentifier"] : []),
+    ...(workflow === "implement" ? implementationRequired(result, args) : []),
     ...(workflow === "debug" && args.execute !== true ? ["execute"] : []),
   ]));
 }
@@ -292,29 +326,6 @@ function actionCall(root: string, action: string, input: JsonObject = {}, execut
   };
 }
 
-function implementNext(root: string, result: JsonObject, args: RuntimeArgs): WorkflowNextCall | null {
-  const target = implementationTarget(result);
-  if (!target) return null;
-  const task = asJsonArray(target.phase.tasks)
-    .map((entry) => asJsonObject(entry))
-    .find((entry) => !["x", "-", "!"].includes(String(entry.marker || "")));
-  if (!task) return null;
-
-  if (parallelImplementation(target)) {
-    if (!args.agentIdentifier) return null;
-    const input: JsonObject = { trackId: target.trackId, groupIndex: 0 };
-    if (args.maxWorkers != null) input.maxWorkers = args.maxWorkers;
-    input.agentIdentifier = args.agentIdentifier;
-    return actionCall(root, "parallel.next_wave", input);
-  }
-
-  const phaseIndex = Number(target.phase.phase_index || 0);
-  const taskIndex = Number(task.task_index || 0);
-  return phaseIndex > 0 && taskIndex > 0
-    ? actionCall(root, "task.complete", { trackId: target.trackId, phaseIndex, taskIndex }, true)
-    : null;
-}
-
 function nextCall(root: string, workflow: string, result: JsonObject, resources: string[], args: RuntimeArgs): WorkflowNextCall | null {
   const explicit = publicCall(result.next) || publicCall(result.next_intent);
   if (explicit) return explicit;
@@ -376,7 +387,7 @@ function nextCall(root: string, workflow: string, result: JsonObject, resources:
   if (snapshot) return snapshot;
   const job = asJsonObject(result.job);
   if (job.id) return actionCall(root, "job.result", { jobId: String(job.id) });
-  if (workflow === "implement") return implementNext(root, result, args);
+  if (workflow === "implement") return implementationNext(root, result, args) as WorkflowNextCall | null;
   return null;
 }
 
@@ -390,8 +401,8 @@ const WORKFLOW_ALIASES: Record<string, string> = {
 const COMMON_DATA_FIELDS = ["dry_run", "operation", "stage", "sync_pre", "sync_post", "control_commit"];
 const WORKFLOW_DATA_FIELDS: Record<string, string[]> = {
   setup: ["topology", "provider", "sync_mode", "workspace_health", "workspace", "dependency_graph", "lsp", "lsp_setup", "integrations", "styleguide_ids", "project_skills", "scaffolded", "written", "skipped", "gitattributes", "ci_setup", "polyrepo_setup", "force"],
-  newtrack: ["track_id", "track_context", "plan_assist", "generation_quality", "project_skills", "write", "regen"],
-  implement: ["prepare_implementation", "phase_schedule", "project_skills"],
+  newtrack: ["track_id", "track_context", "plan_assist", "generation_quality", "project_skills", "write", "regen", "restart"],
+  implement: ["prepare_implementation", "phase_schedule", "integration_worktrees", "task", "project_skills"],
   status: ["status", "project_skills"],
   review: ["track_context", "review_assist", "gate", "provider", "required_provider_mcp", "required_evidence", "unsupported_reason", "project_skills"],
   validate: ["doctor", "team", "integrity", "collisions", "fleet", "branch_sets", "native_state", "project_skill_diagnostics", "projection_validation"],

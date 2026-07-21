@@ -132,6 +132,24 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       next_actions: ["Supply only the current revision artifact at decision.writable_paths and invoke decision.resume; this is not approval."],
     };
   }
+  if (collection.schemaIssues.length > 0 && !approvalError) {
+    const artifact = collection.activeKind || "plan";
+    return {
+      ...base,
+      ok: false,
+      dry_run: true,
+      phase_state: "awaiting_clarification",
+      stage: "schema_validation",
+      schema_errors: collection.schemaIssues,
+      schema_resources: [`cadre://artifact-schema?root=${encodeURIComponent(root)}&artifact=${artifact}`],
+      missing_payload: [artifact],
+      required_payload: [artifact],
+      next_actions: [
+        `Load the Cadre ${artifact} schema, correct only decision.writable_paths, and invoke decision.resume without recording approval.`,
+      ],
+      error: `Current revise ${artifact} JSON does not match the Cadre schema.`,
+    };
+  }
   if (args.execute !== true) {
     return {
       ...base,
@@ -195,7 +213,8 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
   const approvalAudit = writeResult.ok !== false && (!regen || regen.ok !== false)
     ? recordApprovalCompletionFromArgs(root, args)
     : null;
-  const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false)
+  const auditOk = !approvalAudit || approvalAudit.ok !== false;
+  const controlCommit = writeResult.ok !== false && (!regen || regen.ok !== false) && auditOk
     ? commitTrace(root, args, {
       kind: "control",
       workflow: "revise",
@@ -207,16 +226,20 @@ export function workflowRevise(root: string, args: RuntimeArgs = {}): CoreResult
       note: { revised_spec: Boolean(revisedSpec), revised_plan: Boolean(revisedPlan) },
     })
     : null;
-  const approvalSessionClose = writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false)
+  const approvalSessionClose = writeResult.ok !== false && (!regen || regen.ok !== false) && auditOk && (!controlCommit || controlCommit.ok !== false)
     ? closeApprovalSessionFromArgs(root, args)
     : null;
   return {
     ...base,
-    ok: writeResult.ok !== false && (!regen || regen.ok !== false) && (!controlCommit || controlCommit.ok !== false),
+    ok: writeResult.ok !== false && (!regen || regen.ok !== false) && auditOk && (!controlCommit || controlCommit.ok !== false),
     dry_run: false,
-    phase_state: writeResult.ok === false || (regen && regen.ok === false) || (controlCommit && controlCommit.ok === false)
+    phase_state: writeResult.ok === false || (regen && regen.ok === false) || !auditOk || (controlCommit && controlCommit.ok === false)
       ? "recovery_required"
       : "executed",
+    ...(!auditOk ? {
+      stage: "approval_audit",
+      error: asOptionalString(asJsonObject(approvalAudit).error) || "Revised artifacts were written but their approval audit was not recorded",
+    } : {}),
     write: writeResult,
     regen,
     control_commit: controlCommit,

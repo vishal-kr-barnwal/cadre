@@ -82,10 +82,13 @@ export function cancelApprovalSession(root: string, sessionId: string, expectedW
     const outputMode = asOptionalString(session.payload.reviewOutputMode || session.payload.review_output_mode);
     const explicitBundleDirectory = asOptionalString(session.payload.reviewBundleDir || session.payload.review_bundle_dir || session.payload.reviewDir || session.payload.review_dir);
     const targetMode = !explicitBundleDirectory && !["bundle", "temp", "temporary"].includes(outputMode || "");
-    const previewPaths = new Set((targetMode ? session.preview_files : [])
-      .filter((file) => file.missing !== true)
-      .map((file) => asOptionalString(file.path))
-      .filter((file): file is string => Boolean(file)));
+    const previewPaths = new Set([
+      ...(targetMode ? session.preview_files
+        .filter((file) => file.missing !== true)
+        .map((file) => asOptionalString(file.path))
+        .filter((file): file is string => Boolean(file)) : []),
+      ...(session.materialized_target_paths || []),
+    ]);
     const restoreSnapshots = approvalRestoreSnapshots(session);
     const beforeByPath = new Map(approvalRestoreBeforeFiles(session).map((before) => [before.path, before]));
     const nativeIgnore = restoreSnapshots.find((file) => file.path === "cadre/.gitignore" && file.missing !== true);

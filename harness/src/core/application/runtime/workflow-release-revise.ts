@@ -186,6 +186,19 @@ export function workflowRelease(root: string, args: RuntimeArgs = {}): CoreResul
     return current;
   }, { lock: false });
   const approvalAudit = recordApprovalCompletionFromArgs(root, args);
+  if (approvalAudit.ok === false) {
+    return {
+      ...base,
+      ok: false,
+      phase_state: "recovery_required",
+      stage: "approval_audit",
+      dry_run: false,
+      setup_state: indexPatch,
+      approval_audit: approvalAudit,
+      review_validation: reviewValidation,
+      error: asOptionalString(approvalAudit.error) || "Release artifacts were written but their approval audit was not recorded",
+    };
+  }
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "release",

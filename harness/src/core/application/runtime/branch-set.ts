@@ -31,6 +31,17 @@ function gitRepository(cwd: string): string | null {
   }
 }
 
+function gitTopLevel(cwd: string): string | null {
+  const result = runCommand("git", ["rev-parse", "--show-toplevel"], { cwd });
+  if (!result.ok || !result.stdout.trim()) return null;
+  const candidate = path.resolve(cwd, result.stdout.trim());
+  try {
+    return fs.realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
+}
+
 function branchExists(cwd: string, branch: string): boolean {
   return runCommand("git", ["rev-parse", "--verify", "--quiet", branch], { cwd }).ok;
 }
@@ -124,8 +135,23 @@ export function branchSetEntry(root: string, track: CadreTrack, repo: string, in
   const currentBranch = exists ? gitBranch(integrationWorktree) : null;
   const expectedRepository = gitRepository(sourceRoot);
   const actualRepository = exists ? gitRepository(integrationWorktree) : null;
-  const wrongRepo = Boolean(exists && expectedRepository && actualRepository && expectedRepository !== actualRepository);
-  const wrongBranch = Boolean(exists && currentBranch && currentBranch !== trackBranch);
+  const expectedTopLevel = exists ? (() => {
+    try {
+      return fs.realpathSync(integrationWorktree);
+    } catch {
+      return path.resolve(integrationWorktree);
+    }
+  })() : null;
+  const actualTopLevel = exists ? gitTopLevel(integrationWorktree) : null;
+  const wrongRepo = Boolean(exists && (
+    !expectedRepository
+    || !actualRepository
+    || expectedRepository !== actualRepository
+    || !expectedTopLevel
+    || !actualTopLevel
+    || expectedTopLevel !== actualTopLevel
+  ));
+  const wrongBranch = Boolean(exists && !wrongRepo && currentBranch !== trackBranch);
   const health = !exists ? "missing" : wrongRepo ? "wrong_repo" : wrongBranch ? "wrong_branch" : "ready";
   return {
     repo,

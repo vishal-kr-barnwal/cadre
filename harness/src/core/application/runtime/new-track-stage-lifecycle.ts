@@ -1,7 +1,7 @@
 import { asJsonObject, isRecord } from "../../../guards";
 import type { JsonObject, RuntimeArgs, TrackMetadata, UnknownRecord } from "../../../types";
 
-import { safeName, utcNow } from "../../infrastructure/runtime/json-store";
+import { safeName } from "../../infrastructure/runtime/json-store";
 import { approvalStageCursor, scopedApprovalReviewFiles, type ApprovalStageCursor } from "./approval-stage-cursor";
 import { stageRecord } from "./approval-session-model";
 import type { ReviewFile } from "./contracts";
@@ -13,12 +13,13 @@ import {
   jsonReviewFile,
   plainReviewFile,
   textReviewFile,
+  trackLearningsSeed,
   trackLearningsText,
 } from "./review-bundles";
 import { renderSpecMarkdown } from "./spec-docs";
 import type { ApprovalStage } from "./staged-approval-stages";
 import { meaningfulRevisionArtifact } from "./workflow-evidence";
-import { normalizePlanJson, normalizeSpecJson, templateJson } from "./workflow-response";
+import { normalizePlanJson, normalizeSpecJson } from "./workflow-response";
 
 export interface NewTrackStageCollection {
   cursor: ApprovalStageCursor;
@@ -80,14 +81,7 @@ function planReviewFiles(trackId: string, plan: JsonObject): ReviewFile[] {
 
 function finalTrackFiles(trackId: string, metadata: TrackMetadata): ReviewFile[] {
   const base = `cadre/tracks/${safeName(trackId)}`;
-  const learningsEntry: JsonObject = {
-    ...templateJson("learnings_seed.json", { id: "initial", kind: "learnings_seed" }),
-    id: "initial",
-    kind: "learnings_seed",
-    track_id: trackId,
-    recorded_at: utcNow(),
-    text: trackLearningsText(trackId),
-  };
+  const learningsEntry = trackLearningsSeed(trackId);
   const learningsCanonical = `${JSON.stringify(learningsEntry)}\n`;
   return [
     {

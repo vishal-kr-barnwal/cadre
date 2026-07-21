@@ -37,6 +37,8 @@ export interface ApprovalSession {
   final_before_files?: ApprovalBeforeFile[];
   final_preview_files?: JsonObject[];
   final_intent_to_add_paths?: string[];
+  /** Exact project-relative targets materialized during approved execution. */
+  materialized_target_paths?: string[];
   ancillary_snapshot_files?: ReviewFile[];
   ancillary_before_files?: ApprovalBeforeFile[];
   snapshot_files: ReviewFile[];
@@ -46,6 +48,8 @@ export interface ApprovalSession {
   updated_at: string;
   cancellation_recovery_required?: boolean;
   supersession_recovery_required?: boolean;
+  reopen_recovery_required?: boolean;
+  materialization_recovery_required?: boolean;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -120,7 +124,9 @@ export function isApprovalSession(value: unknown): value is ApprovalSession {
     || !isStringArray(value.intent_to_add_paths)
     || typeof value.updated_at !== "string"
     || (value.cancellation_recovery_required !== undefined && typeof value.cancellation_recovery_required !== "boolean")
-    || (value.supersession_recovery_required !== undefined && typeof value.supersession_recovery_required !== "boolean")) {
+    || (value.supersession_recovery_required !== undefined && typeof value.supersession_recovery_required !== "boolean")
+    || (value.reopen_recovery_required !== undefined && typeof value.reopen_recovery_required !== "boolean")
+    || (value.materialization_recovery_required !== undefined && typeof value.materialization_recovery_required !== "boolean")) {
     return false;
   }
 
@@ -128,6 +134,7 @@ export function isApprovalSession(value: unknown): value is ApprovalSession {
     || !isOptionalArrayOf(value.final_before_files, isBeforeFile)
     || !isOptionalArrayOf(value.final_preview_files, isJsonObject)
     || (value.final_intent_to_add_paths !== undefined && !isStringArray(value.final_intent_to_add_paths))
+    || (value.materialized_target_paths !== undefined && !isStringArray(value.materialized_target_paths))
     || !isOptionalArrayOf(value.ancillary_snapshot_files, isReviewFile)
     || !isOptionalArrayOf(value.ancillary_before_files, isBeforeFile)) {
     return false;
@@ -256,6 +263,7 @@ export function synchronizeApprovalSession(session: ApprovalSession): ApprovalSe
     final_before_files: uniqueByPath(session.final_before_files || []),
     final_preview_files: uniquePreviewFiles(session.final_preview_files || []),
     final_intent_to_add_paths: Array.from(new Set(session.final_intent_to_add_paths || [])),
+    materialized_target_paths: Array.from(new Set(session.materialized_target_paths || [])),
     ancillary_snapshot_files: uniqueByPath(session.ancillary_snapshot_files || []),
     ancillary_before_files: uniqueByPath(session.ancillary_before_files || []),
     snapshot_files: uniqueByPath([

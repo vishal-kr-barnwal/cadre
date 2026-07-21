@@ -10,6 +10,8 @@ interface WorkflowApproval {
   approved_stages?: string[];
   complete?: boolean;
   cancel?: boolean;
+  reopen_stage?: string;
+  restart?: boolean;
 }
 
 export interface WorkflowToolRequest {
@@ -37,6 +39,7 @@ const ACTION_INTERNAL_KEYS = new Set([
   "approval", "approvalStage", "approval_stage", "approvalSessionId", "approval_session_id",
   "approvalStageHash", "approval_stage_hash", "approvalStageRevision", "approval_stage_revision",
   "approvedStages", "approved_stages", "approvalComplete", "approval_complete", "approvalCancel", "approval_cancel",
+  "approvalReopenStage", "approval_reopen_stage", "approvalRestart", "approval_restart",
 ]);
 
 function invalid(message: string): never {
@@ -89,7 +92,7 @@ function rejectControlKeys(value: JsonObject, reserved: ReadonlySet<string>, fie
 function workflowApproval(value: unknown): WorkflowApproval | undefined {
   if (value === undefined) return undefined;
   const approval = object(value, "cadre_workflow.approval");
-  onlyKeys(approval, ["stage", "stage_hash", "stage_revision", "session_id", "approved_stages", "complete", "cancel"], "cadre_workflow.approval");
+  onlyKeys(approval, ["stage", "stage_hash", "stage_revision", "session_id", "approved_stages", "complete", "cancel", "reopen_stage", "restart"], "cadre_workflow.approval");
   const stage = optionalString(approval.stage, "approval.stage");
   const stageHash = optionalString(approval.stage_hash, "approval.stage_hash");
   if (stageHash && !/^[a-f0-9]{64}$/.test(stageHash)) {
@@ -105,6 +108,24 @@ function workflowApproval(value: unknown): WorkflowApproval | undefined {
   }
   const complete = optionalBoolean(approval.complete, "approval.complete");
   const cancel = optionalBoolean(approval.cancel, "approval.cancel");
+  const reopenStage = optionalString(approval.reopen_stage, "approval.reopen_stage");
+  const restart = optionalBoolean(approval.restart, "approval.restart");
+  const stagedTransition = Boolean(
+    stage || stageHash || stageRevision !== undefined
+    || approval.approved_stages !== undefined || complete,
+  );
+  const operations = [
+    stagedTransition ? "stage approval/complete" : null,
+    cancel ? "cancel" : null,
+    reopenStage ? "reopen_stage" : null,
+    restart ? "restart" : null,
+  ].filter((entry): entry is string => Boolean(entry));
+  if (operations.length > 1) {
+    invalid(`cadre_workflow.approval operations are mutually exclusive: ${operations.join(", ")}`);
+  }
+  if ((cancel || reopenStage) && !sessionId) {
+    invalid(`approval.session_id is required for ${cancel ? "cancel" : "reopen_stage"}`);
+  }
   return {
     ...(stage ? { stage } : {}),
     ...(stageHash ? { stage_hash: stageHash } : {}),
@@ -113,6 +134,8 @@ function workflowApproval(value: unknown): WorkflowApproval | undefined {
     ...(approval.approved_stages ? { approved_stages: approval.approved_stages as string[] } : {}),
     ...(approval.complete !== undefined ? { complete } : {}),
     ...(approval.cancel !== undefined ? { cancel } : {}),
+    ...(reopenStage ? { reopen_stage: reopenStage } : {}),
+    ...(approval.restart !== undefined ? { restart } : {}),
   };
 }
 
@@ -145,6 +168,8 @@ export function workflowRuntimeArgs(request: WorkflowToolRequest): RuntimeArgs {
       approvedStages: request.approval.approved_stages,
       approvalComplete: request.approval.complete === true,
       approvalCancel: request.approval.cancel === true,
+      ...(request.approval.reopen_stage ? { approvalReopenStage: request.approval.reopen_stage } : {}),
+      ...(request.approval.restart !== undefined ? { approvalRestart: request.approval.restart === true } : {}),
     } : {}),
   } as RuntimeArgs;
 }

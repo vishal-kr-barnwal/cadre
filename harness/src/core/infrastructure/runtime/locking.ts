@@ -73,6 +73,11 @@ export function acquireLock(root: string, name: string, options: LockOptions = {
           };
         }
       }
+      const retryDelayMs = Number(options.retryDelayMs || 0);
+      if (attempt < Number(options.retries || 3) && Number.isFinite(retryDelayMs) && retryDelayMs > 0) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelayMs);
+        continue;
+      }
       return {
         ok: false,
         dir,

@@ -2,6 +2,7 @@ import type { CadreLock, JsonObject, RuntimeArgs, Topology, UnknownRecord } from
 
 export interface LockOptions extends RuntimeArgs {
   owner?: string | null;
+  retryDelayMs?: number;
 }
 
 export type JsonPatcher<T extends JsonObject = JsonObject> = (next: T, before: T) => T;

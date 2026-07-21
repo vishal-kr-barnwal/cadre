@@ -7,6 +7,7 @@ import { gitIdentity } from "../../infrastructure/runtime/system";
 import type { CoreResult } from "./contracts";
 import { packagedTemplateJson, packagedTemplatePath, packagedTemplatePaths, packagedTemplateSource, packagedTemplateText } from "./packaged-assets";
 import { normalizePlanManualVerification } from "./plan-docs";
+import { canonicalizePlanGraph } from "./plan-graph";
 import { compactWorkflowResponse } from "./response-compaction";
 import { syncControlPlane } from "./review-records";
 import { normalizedSpecFromRaw } from "./spec-docs";
@@ -450,7 +451,8 @@ export function normalizePlanJson(trackId: string, raw: unknown, specJson?: Json
     title: `Plan: ${trackId}`,
     ...asJsonObject(raw),
   };
-  return normalizePlanManualVerification({ ...plan, track_id: trackId }, specJson);
+  const withManualVerification = normalizePlanManualVerification({ ...plan, track_id: trackId }, specJson);
+  return canonicalizePlanGraph(withManualVerification).plan;
 }
 
 export function templateJson(relativePath: string, fallback: JsonObject): JsonObject {

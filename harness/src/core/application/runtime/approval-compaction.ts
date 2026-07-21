@@ -19,6 +19,63 @@ function compactCurrentDocument(value: unknown): JsonObject | null {
   };
 }
 
+function compactReviewSet(value: unknown): JsonObject | null {
+  if (!isRecord(value)) return null;
+  const reviewSet = asJsonObject(value);
+  const files = Array.isArray(reviewSet.files) ? reviewSet.files.map(asJsonObject) : [];
+  return {
+    version: reviewSet.version,
+    schema: asOptionalString(reviewSet.schema) || "cadre.review_set.v1",
+    complete: reviewSet.complete === true,
+    truncated: reviewSet.truncated === true,
+    workflow: asOptionalString(reviewSet.workflow) || null,
+    session_id: asOptionalString(reviewSet.session_id) || null,
+    stage: asOptionalString(reviewSet.stage) || null,
+    stage_hash: asOptionalString(reviewSet.stage_hash) || null,
+    stage_revision: typeof reviewSet.stage_revision === "number" ? reviewSet.stage_revision : null,
+    file_count: files.length,
+    files: files.map((file) => ({
+      path: asOptionalString(file.path) || null,
+      title: asOptionalString(file.title) || null,
+      kind: asOptionalString(file.kind) || null,
+      source: asOptionalString(file.source) || null,
+      document_id: asOptionalString(file.document_id) || null,
+      review_role: asOptionalString(file.review_role) || null,
+      canonical_path: asOptionalString(file.canonical_path) || null,
+      projection_path: asOptionalString(file.projection_path) || null,
+      approval_group: asOptionalString(file.approval_group) || null,
+      missing: file.missing === true,
+      bytes: typeof file.bytes === "number" ? file.bytes : null,
+      lines: typeof file.lines === "number" ? file.lines : null,
+      sha256: asOptionalString(file.sha256) || null,
+    })),
+    primary_document: isRecord(reviewSet.primary_document) ? asJsonObject(reviewSet.primary_document) : null,
+    manifest_path: asOptionalString(reviewSet.manifest_path) || null,
+    selected_components: asStringArray(reviewSet.selected_components),
+    omitted_components: Array.isArray(reviewSet.omitted_components)
+      ? reviewSet.omitted_components.map(asJsonObject)
+      : [],
+  };
+}
+
+function compactReviewFile(value: unknown): JsonObject {
+  const file = asJsonObject(value);
+  return {
+    path: asOptionalString(file.path) || null,
+    title: asOptionalString(file.title) || null,
+    kind: asOptionalString(file.kind) || null,
+    source: asOptionalString(file.source) || null,
+    document_id: asOptionalString(file.document_id) || null,
+    review_role: asOptionalString(file.review_role) || null,
+    canonical_path: asOptionalString(file.canonical_path) || null,
+    projection_path: asOptionalString(file.projection_path) || null,
+    missing: file.missing === true,
+    bytes: typeof file.bytes === "number" ? file.bytes : null,
+    lines: typeof file.lines === "number" ? file.lines : null,
+    sha256: asOptionalString(file.sha256) || null,
+  };
+}
+
 export function compactApproval(value: unknown): JsonObject | null {
   if (!value || !isRecord(value)) return null;
   const approval = asJsonObject(value);
@@ -60,6 +117,21 @@ export function compactApproval(value: unknown): JsonObject | null {
     approved_review_paths: asStringArray(approval.approved_review_paths),
     final_only_files: asStringArray(approval.final_only_files),
     current_document: compactCurrentDocument(approval.current_document),
+    current_review_set: compactReviewSet(approval.current_review_set),
+    review_files: Array.isArray(approval.review_files)
+      ? approval.review_files.map(compactReviewFile)
+      : [],
+    review_documents: Array.isArray(approval.review_documents)
+      ? approval.review_documents.map((value) => {
+        const document = asJsonObject(value);
+        return {
+          id: asOptionalString(document.id) || null,
+          title: asOptionalString(document.title) || null,
+          approved: document.approved === true,
+          files: Array.isArray(document.files) ? document.files.map(compactReviewFile) : [],
+        };
+      })
+      : [],
     stages: stages.map((stage) => ({
       id: asOptionalString(stage.id) || null,
       input_keys: asStringArray(stage.input_keys),

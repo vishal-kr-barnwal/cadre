@@ -575,13 +575,13 @@ test("MCP root resolution rejects harness skill directories without project stat
     assert.deepEqual(fieldsFor("cadre_read"), ["uri"]);
     const approvalSchema = byName.get("cadre_workflow").inputSchema.properties.approval;
     assert.deepEqual(Object.keys(approvalSchema.properties).sort(), [
-      "approved_stages", "cancel", "complete", "session_id", "stage", "stage_hash", "stage_revision",
+      "approved_stages", "cancel", "complete", "reopen_stage", "restart", "session_id", "stage", "stage_hash", "stage_revision",
     ]);
     assert.equal(approvalSchema.additionalProperties, false);
     assert.equal(approvalSchema.properties.session_id.pattern, "^[a-f0-9]{24}$");
     assert.equal(approvalSchema.properties.stage_hash.pattern, "^[a-f0-9]{64}$");
     assert.equal(approvalSchema.properties.stage_revision.minimum, 0);
-    assert.match(approvalSchema.description, /decision\.resume and decision\.amend.*session_id only.*not approval/);
+    assert.match(approvalSchema.description, /decision\.resume, decision\.amend, and decision\.reopen.*not approval/);
     assert.match(approvalSchema.description, /echo stage, stage_hash, stage_revision/);
     assert.ok(Math.ceil(JSON.stringify(tools.tools).length / 4) <= 1700);
     assert.ok(tools.tools.every((tool) => tool.inputSchema.additionalProperties === false));
@@ -1520,6 +1520,8 @@ test("MCP typed continuations and execution guards compose end to end", async ()
         ],
       }],
     });
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed continuation tracks"]);
 
     await initialize({ protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "continuation-test" } });
 
@@ -1539,18 +1541,33 @@ test("MCP typed continuations and execution guards compose end to end", async ()
       tool: "cadre_action",
       arguments: {
         root: fs.realpathSync(root),
-        action: "task.complete",
-        input: { trackId: "sequential_next", phaseIndex: 1, taskIndex: 1 },
+        action: "track.worktree_plan",
+        input: { trackId: "sequential_next", repo: "root" },
         execute: true,
       },
     });
+    const sequentialSetup = parseTextJson(await request("tools/call", {
+      name: sequential.next.tool,
+      arguments: sequential.next.arguments,
+    }));
+    assert.equal(sequentialSetup.ok, true, sequentialSetup.errors.join("\n"));
+    const sequentialReady = parseTextJson(await request("tools/call", {
+      name: sequentialSetup.next.tool,
+      arguments: sequentialSetup.next.arguments,
+    }));
+    assert.equal(sequentialReady.next, null);
+    assert.deepEqual(sequentialReady.required, ["data.task.complete_packet"]);
+    assert.equal(
+      sequentialReady.data.task.complete_packet.arguments.input.workingRoot,
+      path.join(fs.realpathSync(root), ".worktrees", "cadre", "tracks", "sequential_next", "integrate", "root"),
+    );
 
     const parallelBlocked = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
       arguments: { root, workflow: "implement", input: { trackId: "parallel_next" } },
     }));
-    assert.equal(parallelBlocked.next, null);
-    assert.deepEqual(parallelBlocked.required, ["agentIdentifier"]);
+    assert.equal(parallelBlocked.next.tool, "cadre_action");
+    assert.equal(parallelBlocked.next.arguments.action, "track.worktree_plan");
 
     const parallel = parseTextJson(await request("tools/call", {
       name: "cadre_workflow",
@@ -1561,10 +1578,21 @@ test("MCP typed continuations and execution guards compose end to end", async ()
       },
     }));
     assert.equal(parallel.next.tool, "cadre_action");
-    assert.equal(parallel.next.arguments.action, "parallel.next_wave");
-    const wave = parseTextJson(await request("tools/call", {
+    assert.equal(parallel.next.arguments.action, "track.worktree_plan");
+    const parallelSetup = parseTextJson(await request("tools/call", {
       name: parallel.next.tool,
       arguments: parallel.next.arguments,
+    }));
+    assert.equal(parallelSetup.ok, true, parallelSetup.errors.join("\n"));
+    const parallelReady = parseTextJson(await request("tools/call", {
+      name: parallelSetup.next.tool,
+      arguments: parallelSetup.next.arguments,
+    }));
+    assert.equal(parallelReady.next.tool, "cadre_action");
+    assert.equal(parallelReady.next.arguments.action, "parallel.next_wave");
+    const wave = parseTextJson(await request("tools/call", {
+      name: parallelReady.next.tool,
+      arguments: parallelReady.next.arguments,
     }));
     assert.equal(wave.next.tool, "cadre_action");
     assert.equal(wave.next.arguments.action, "parallel.setup_workers");

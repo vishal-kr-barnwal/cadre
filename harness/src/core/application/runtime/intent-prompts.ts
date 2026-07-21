@@ -2,6 +2,8 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 
 import { choice, nativePrompt } from "./native-prompts";
+import { normalizePlanManualVerification } from "./plan-docs";
+import { canonicalizePlanGraph } from "./plan-graph";
 import { revisionScope } from "./revision-scope";
 import { setupIntentStrategyAnswered, setupMissingEvidence, setupStageMissingEvidence, type SetupEvidenceStage } from "./setup-evidence";
 
@@ -204,6 +206,10 @@ export function newTrackSchemaIssues(
     issues.push(...checkSchemaLiteral(plan, "plan.schema", PLAN_SCHEMA));
     issues.push(...aliasIssues(plan, "plan", PLAN_FIELD_ALIASES));
     issues.push(...planPhaseShapeIssues(plan));
+    if (Array.isArray(plan.phases)) {
+      issues.push(...canonicalizePlanGraph(plan).issues);
+      issues.push(...canonicalizePlanGraph(normalizePlanManualVerification(plan, spec)).issues);
+    }
   }
   return issues;
 }

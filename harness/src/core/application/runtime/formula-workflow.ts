@@ -4,6 +4,7 @@ import path from "node:path";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../../guards";
 import type { CoreResult } from "./contracts";
+import { requiredAuditFailure } from "./event-audit";
 import { appendJsonl, fileExists, readJson, safeName, textHash, utcNow, writeJsonEnsured } from "../../infrastructure/runtime/json-store";
 import { appendCadreEvent, ensureNativeState } from "./native-state";
 import { beginTrace, commitTrace } from "./commit-trace";
@@ -259,7 +260,8 @@ function createWisp(root: string, args: RuntimeArgs): CoreResult {
   const file = wispPath(root, id);
   writeJsonEnsured(file, wisp);
   const event = appendCadreEvent(root, { kind: "wisp_created", workflow: "formula", formula_id, wisp_id: id });
-  return { ok: true, wisp_id: id, path: path.relative(root, file), wisp, event };
+  return requiredAuditFailure(event, "event_log", "Wisp was written without its required audit event", { wisp_id: id, path: path.relative(root, file), wisp, event })
+    || { ok: true, wisp_id: id, path: path.relative(root, file), wisp, event };
 }
 
 function listWisps(root: string): CoreResult {
@@ -311,7 +313,8 @@ function updateWispStep(root: string, args: RuntimeArgs): CoreResult {
   const next = { ...wisp, steps, status: asOptionalString(wisp.status) || "active", updated_at: now };
   writeJsonEnsured(file, next);
   const event = appendCadreEvent(root, { kind: "wisp_step_updated", workflow: "formula", wisp_id: id, step_id: asOptionalString(steps[index].step_id) || null, status });
-  return { ok: true, wisp_id: id, path: path.relative(root, file), step: steps[index], wisp: next, event };
+  return requiredAuditFailure(event, "event_log", "Wisp step changed without its required audit event", { wisp_id: id, path: path.relative(root, file), step: steps[index], wisp: next, event })
+    || { ok: true, wisp_id: id, path: path.relative(root, file), step: steps[index], wisp: next, event };
 }
 
 function squashWisp(root: string, args: RuntimeArgs): CoreResult {
@@ -336,6 +339,8 @@ function squashWisp(root: string, args: RuntimeArgs): CoreResult {
   const digestPath = path.join(root, "cadre", "operations", "wisp-digests.jsonl");
   appendJsonl(digestPath, digest);
   const event = appendCadreEvent(root, { kind: "wisp_squashed", workflow: "formula", wisp_id: id, digest_id: digest.id });
+  const eventFailure = requiredAuditFailure(event, "event_log", "Wisp digest was written without its required audit event", { wisp_id: id, digest, path: path.relative(root, digestPath), event });
+  if (eventFailure) return eventFailure;
   const controlCommit = commitTrace(root, args, {
     kind: "control",
     workflow: "wisp",
@@ -362,7 +367,8 @@ function burnWisp(root: string, args: RuntimeArgs): CoreResult {
   const existed = fileExists(file);
   if (existed) fs.rmSync(file, { force: true });
   const event = appendCadreEvent(root, { kind: "wisp_burned", workflow: "formula", wisp_id: id, existed });
-  return { ok: true, wisp_id: id, existed, path: path.relative(root, file), event };
+  return requiredAuditFailure(event, "event_log", "Wisp was removed without its required audit event", { wisp_id: id, existed, path: path.relative(root, file), event })
+    || { ok: true, wisp_id: id, existed, path: path.relative(root, file), event };
 }
 
 function pourFormula(root: string, args: RuntimeArgs): CoreResult {

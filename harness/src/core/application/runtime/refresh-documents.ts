@@ -8,6 +8,7 @@ import { readApprovalSession, unapprovedTargetBaselineContent } from "./approval
 import type { ReviewFile } from "./contracts";
 import type { RefreshLevel } from "./refresh-analysis";
 import { withGeneratedMarker, renderMarkdownDoc } from "./markdown-docs";
+import { renderSemanticProjection, renderTechStackMarkdown } from "./semantic-projections";
 import { documentReviewPair, jsonReviewFile, plainReviewFile, textReviewFile } from "./review-bundles";
 import { styleGuideReviewFiles } from "./setup-review-files";
 import { asArray } from "./status";
@@ -272,7 +273,8 @@ function projectDocumentFiles(root: string, args: RuntimeArgs, spec: ProjectDocu
   const projection = withGeneratedMarker(
     spec.canonical,
     spec.schema,
-    renderMarkdownDoc(canonical, spec.title, spec.canonical),
+    renderSemanticProjection(spec.schema, canonical, spec.title, spec.canonical)
+      || renderMarkdownDoc(canonical, spec.title, spec.canonical),
     { canonicalContent, projection: spec.projection }
   );
   return documentReviewPair(
@@ -296,7 +298,7 @@ function techStackFiles(root: string, args: RuntimeArgs, rawValue: unknown): Rev
   const projection = withGeneratedMarker(
     canonicalPath,
     "cadre.tech_stack.v1",
-    renderJsonCodeblock("Tech stack", candidate),
+    renderTechStackMarkdown(candidate, canonicalPath),
     { canonicalContent, projection: projectionPath }
   );
   return documentReviewPair(
