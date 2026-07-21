@@ -1,8 +1,9 @@
+import fs from "node:fs";
 import path from "node:path";
 import { asJsonObject, asOptionalString, isRecord } from "../../../guards";
 import type { CadreTrack, CommandResult, JsonObject, PlanTask, RuntimeArgs } from "../../../types";
 
-import { appendJsonl, readJson, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
+import { appendJsonl, fileExists, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
 import { gitIdentity, runCommand } from "../../infrastructure/runtime/system";
 import type { CompletionJournal, CoreResult, WorkingRoot } from "./contracts";
 import { manualVerificationScope } from "./plan-docs";
@@ -14,13 +15,29 @@ export function completionJournalPath(track: CadreTrack): string {
 }
 
 export function readCompletionJournal(track: CadreTrack): CompletionJournal {
-  const value = readJson<unknown>(completionJournalPath(track), { entries: {} });
-  if (!isRecord(value)) return { entries: {} };
+  const file = completionJournalPath(track);
+  if (!fileExists(file)) return { entries: {} };
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    return { entries: {}, invalid: true, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!isRecord(value) || !isRecord(value.entries)) return { entries: {}, invalid: true, error: "Completion journal must contain an entries object" };
+  const invalidEntry = Object.entries(value.entries).find(([, entry]) => !isRecord(entry));
+  if (invalidEntry) return { entries: {}, invalid: true, error: `Completion journal entry is invalid: ${invalidEntry[0]}` };
   const entries = isRecord(value.entries) ? value.entries : {};
   return {
     ...asJsonObject(value),
     entries: Object.fromEntries(Object.entries(entries).map(([key, entry]) => [key, asJsonObject(entry)])),
   };
+}
+
+export function completionJournalIntegrity(track: CadreTrack): CoreResult {
+  const journal = readCompletionJournal(track);
+  return journal.invalid === true
+    ? { ok: false, stage: "completion_journal", blocked: true, error: asOptionalString(journal.error) || "Completion journal is invalid" }
+    : { ok: true };
 }
 
 export function writeCompletionJournal(track: CadreTrack, journal: CompletionJournal): void {

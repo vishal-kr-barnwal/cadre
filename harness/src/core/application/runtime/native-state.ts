@@ -116,6 +116,10 @@ export function appendCadreEvent(
     actor,
   };
   const file = path.join(root, "cadre", "events.jsonl");
+  const duplicate = asOptionalString(entry.id)
+    ? readJsonlObjects(file, 0).find((candidate) => asOptionalString(candidate.id) === asOptionalString(entry.id))
+    : null;
+  if (duplicate) return { ok: true, path: path.relative(root, file), event: duplicate, duplicate: true };
   appendJsonl(file, entry);
   return { ok: true, path: path.relative(root, file), event: entry };
 }

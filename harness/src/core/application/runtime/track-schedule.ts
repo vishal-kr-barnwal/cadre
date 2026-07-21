@@ -6,7 +6,7 @@ import type { CadreTrack, JsonObject, ParsedPlan, PlanPhase, RuntimeArgs, TrackM
 import { staleInfo } from "../../infrastructure/runtime/coverage";
 import { fileExists, readJson } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
-import { claimsOverlap, normalizeClaimPath } from "./collision";
+import { claimsOverlap, normalizeClaimPath } from "./claim-paths";
 import type { Claim, ClaimConflict, CoreResult, HoldInfo, PhaseScheduleNode, TaskCounts, WorkState } from "./contracts";
 import { planJsonPathForPlanPath, planJsonToParsedPlan } from "./plan-docs";
 import { unresolvedPlanRepos } from "./repo-resolution";

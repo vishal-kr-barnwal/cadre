@@ -6,7 +6,7 @@ import type { CadreTrack, JsonObject, PlanTask, RuntimeArgs, Topology } from "..
 import { fileExists } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { branchSetForTrack, ensureIntegrationWorktree } from "./branch-set";
-import { normalizeClaimPath } from "./collision";
+import { normalizeClaimPath } from "./claim-paths";
 import type { CoreResult } from "./contracts";
 import { canonicalizePlanGraph } from "./plan-graph";
 import { repoEntriesError, unresolvedPlanRepos } from "./repo-resolution";

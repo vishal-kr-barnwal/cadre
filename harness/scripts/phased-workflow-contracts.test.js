@@ -30,6 +30,9 @@ function loadSource(name, entry) {
 }
 
 const core = loadSource("workflow-packet", ["core", "application", "api.ts"]);
+const commitTraceRuntime = loadSource("commit-trace", ["core", "application", "runtime", "commit-trace.ts"]);
+const lockingRuntime = loadSource("locking", ["core", "infrastructure", "runtime", "locking.ts"]);
+const { trackPacket } = loadSource("track-packet", ["mcp", "application", "packets", "track.ts"]);
 const { parseWorkflowToolRequest, workflowRuntimeArgs } = loadSource(
   "workflow-tool-requests",
   ["mcp", "application", "tool-requests.ts"],
@@ -1858,8 +1861,9 @@ function writeImplementTrack(root, trackId, options = {}) {
   assert.equal(regenerated.ok, true);
   const index = readJson(path.join(root, "cadre", "tracks.json"));
   assert.equal(index.schema, "cadre.tracks_index.v1");
-  assert.equal(index.counts.new, 1);
-  assert.deepEqual(index.tracks.map((track) => track.track_id), [trackId]);
+  const expectedTrackIds = options.expectedTrackIds || [trackId];
+  assert.equal(index.counts.new, expectedTrackIds.length);
+  assert.deepEqual(index.tracks.map((track) => track.track_id), [...expectedTrackIds].sort());
 }
 
 function seedImplementTrack(root, trackId, options = {}) {
@@ -1868,6 +1872,155 @@ function seedImplementTrack(root, trackId, options = {}) {
   git(root, ["add", "."]);
   git(root, ["commit", "-m", `seed ${trackId}`]);
 }
+
+test("expired local locks remain live while their owner process is alive", () => {
+  const expired = {
+    pid: process.pid,
+    hostname: os.hostname(),
+    acquired_at: new Date(Date.now() - 60_000).toISOString(),
+    updated_at: new Date(Date.now() - 60_000).toISOString(),
+    expires_at: new Date(Date.now() - 1_000).toISOString(),
+  };
+  assert.equal(lockingRuntime.lockIsStale(expired), false);
+  assert.equal(lockingRuntime.lockIsStale({ ...expired, hostname: "foreign.invalid" }), true);
+});
+
+test("stale lock takeover quarantines the observed owner and preserves the successor", () => withRoot(
+  "cadre-stale-lock-takeover-contract-",
+  (root) => {
+    const lockDir = path.join(root, "cadre", ".locks", "takeover.lock");
+    write(path.join(lockDir, "owner.json"), `${JSON.stringify({
+      name: "takeover",
+      token: "expired-owner",
+      pid: 99999999,
+      hostname: os.hostname(),
+      acquired_at: new Date(Date.now() - 60_000).toISOString(),
+      updated_at: new Date(Date.now() - 60_000).toISOString(),
+      expires_at: new Date(Date.now() - 1_000).toISOString(),
+    }, null, 2)}\n`);
+    const acquired = lockingRuntime.acquireLock(root, "takeover", { retries: 3 });
+    assert.equal(acquired.ok, true, JSON.stringify(acquired));
+    assert.notEqual(acquired.info.token, "expired-owner");
+    assert.equal(fs.readdirSync(path.dirname(lockDir)).some((name) => name.includes(".stale-")), false);
+    const contender = lockingRuntime.acquireLock(root, "takeover", { retries: 1 });
+    assert.equal(contender.ok, false);
+    assert.equal(contender.conflict, true);
+    assert.equal(lockingRuntime.releaseLock(acquired).ok, true);
+  },
+));
+
+test("fresh ownerless lock directories receive initialization grace before orphan recovery", () => withRoot(
+  "cadre-lock-initialization-grace-contract-",
+  (root) => {
+    const lockDir = path.join(root, "cadre", ".locks", "initialization.lock");
+    fs.mkdirSync(lockDir, { recursive: true });
+    const fresh = lockingRuntime.acquireLock(root, "initialization", { retries: 1 });
+    assert.equal(fresh.ok, false);
+    assert.equal(fresh.stale, false);
+    const old = new Date(Date.now() - 10_000);
+    fs.utimesSync(lockDir, old, old);
+    const recovered = lockingRuntime.acquireLock(root, "initialization", { retries: 2 });
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal(lockingRuntime.releaseLock(recovered).ok, true);
+  },
+));
+
+test("commit trace restores a pre-staged version when the worktree reverted to HEAD", () => withRoot(
+  "cadre-index-restore-no-change-contract-",
+  (root) => {
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    write(path.join(root, "tracked.txt"), "head\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed staged reversal"]);
+    write(path.join(root, "tracked.txt"), "staged\n");
+    git(root, ["add", "tracked.txt"]);
+    write(path.join(root, "tracked.txt"), "head\n");
+    const baselineSha = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const traced = commitTraceRuntime.commitTrace(root, {}, {
+      kind: "product",
+      workflow: "index_restore_test",
+      subject: "preserve staged reversal",
+      files: ["tracked.txt"],
+      allowDirty: true,
+    });
+    assert.equal(traced.ok, true, JSON.stringify(traced));
+    assert.equal(traced.skipped, true);
+    assert.equal(traced.index_restore.ok, true);
+    assert.equal(git(root, ["show", ":tracked.txt"]).stdout, "staged\n");
+    assert.equal(git(root, ["rev-parse", "HEAD"]).stdout.trim(), baselineSha);
+  },
+));
+
+test("commit trace accepts root commits and safely rolls back expanded unborn commits", () => withRoot(
+  "cadre-unborn-commit-integrity-contract-",
+  (root) => {
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    write(path.join(root, "claimed.txt"), "claimed\n");
+    const hookPath = path.join(root, ".git", "hooks", "pre-commit");
+    write(hookPath, "#!/bin/sh\nprintf 'expanded\\n' > expanded.txt\ngit add expanded.txt\n");
+    fs.chmodSync(hookPath, 0o755);
+    const rejected = commitTraceRuntime.commitTrace(root, {}, {
+      kind: "product",
+      workflow: "unborn_integrity_test",
+      subject: "reject expanded root commit",
+      files: ["claimed.txt"],
+      allowDirty: true,
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.stage, "git_commit_integrity");
+    assert.equal(rejected.rollback.ok, true, JSON.stringify(rejected));
+    assert.equal(spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: root }).status, 128);
+    assert.equal(fs.readFileSync(path.join(root, "claimed.txt"), "utf8"), "claimed\n");
+    assert.equal(fs.readFileSync(path.join(root, "expanded.txt"), "utf8"), "expanded\n");
+    assert.equal(git(root, ["diff", "--cached", "--name-only"]).stdout, "");
+
+    fs.rmSync(hookPath);
+    fs.rmSync(path.join(root, "expanded.txt"));
+    const accepted = commitTraceRuntime.commitTrace(root, {}, {
+      kind: "product",
+      workflow: "unborn_integrity_test",
+      subject: "accept exact root commit",
+      files: ["claimed.txt"],
+      allowDirty: true,
+    });
+    assert.equal(accepted.ok, true, JSON.stringify(accepted));
+    assert.equal(git(root, ["rev-list", "--parents", "-n", "1", accepted.commit_sha]).stdout.trim().split(/\s+/).length, 1);
+  },
+));
+
+test("commit trace rolls back a clean post-commit HEAD advance", () => withRoot(
+  "cadre-post-commit-head-advance-contract-",
+  (root) => {
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    write(path.join(root, "claimed.txt"), "baseline\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed post-commit advance"]);
+    const baselineSha = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    write(path.join(root, "claimed.txt"), "validated\n");
+    const hookPath = path.join(root, ".git", "hooks", "post-commit");
+    write(hookPath, "#!/bin/sh\nrm -f \"$0\"\nprintf 'advanced\\n' > advanced.txt\ngit add advanced.txt\ngit -c commit.gpgsign=false -c user.name=Hook -c user.email=hook@example.invalid commit -m 'hook: advance HEAD'\n");
+    fs.chmodSync(hookPath, 0o755);
+    const rejected = commitTraceRuntime.commitTrace(root, {}, {
+      kind: "product",
+      workflow: "post_commit_advance_test",
+      subject: "reject post-commit advance",
+      files: ["claimed.txt"],
+      allowDirty: true,
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.stage, "git_commit_integrity");
+    assert.equal(rejected.rollback.ok, true, JSON.stringify(rejected));
+    assert.equal(git(root, ["rev-parse", "HEAD"]).stdout.trim(), baselineSha);
+    assert.equal(git(root, ["diff", "--cached", "--name-only"]).stdout, "");
+    assert.deepEqual(git(root, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim().split(/\n/).sort(), ["?? advanced.txt", "M claimed.txt"]);
+  },
+));
 
 test("invalid persisted plan graphs block integrity and every scheduler before worktree setup", () => withRoot(
   "cadre-invalid-persisted-plan-contract-",
@@ -1993,6 +2146,63 @@ test("sequential implement returns an executable integration-worktree continuati
   },
 ));
 
+test("automatic worktree setup persists the first clean dispatch for dependency-owned continuation", () => withRoot(
+  "cadre-auto-worktree-dispatch-contract-",
+  (root) => {
+    const trackId = "auto-worktree-dispatch";
+    write(path.join(root, "Cargo.toml"), "[workspace]\n");
+    seedImplementTrack(root, trackId, {
+      tasks: [
+        {
+          task_index: 1,
+          task_key: "phase1_task1",
+          title: "Create workspace manifest",
+          status: "completed",
+          files: ["Cargo.toml"],
+          depends_on: [],
+          commit_shas: [],
+        },
+        {
+          task_index: 2,
+          task_key: "phase1_task2",
+          title: "Create contracts",
+          status: "pending",
+          files: ["contracts"],
+          depends_on: ["phase1_task1"],
+          commit_shas: [],
+        },
+      ],
+    });
+    const missing = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(missing.next.tool, "cadre_action");
+    const setup = trackPacket({
+      rootResolver: { requireCadreRoot: () => root },
+      core: { worktreePlan: core.worktreePlan },
+    }, {
+      root,
+      action: "worktree_plan",
+      ...missing.next.arguments.input,
+      execute: true,
+    });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    assert.equal(setup.next.arguments.execute, true);
+    const dispatched = invokeWorkflowCall(root, setup.next);
+    assert.equal(dispatched.ok, true, JSON.stringify(dispatched));
+    const state = readJson(path.join(root, "cadre", "tracks", trackId, "implement_state.json"));
+    assert.equal(state.sequential_dispatch.task_key, "phase1_task2");
+    assert.equal(state.sequential_dispatch.dispatch_clean, true);
+
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    write(path.join(integration, "Cargo.toml"), "[workspace]\nmembers = [\"contracts\"]\n");
+    write(path.join(integration, "contracts", "schema.json"), "{}\n");
+    const resumed = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    assert.equal(resumed.data.implementation_guard.continuation, true);
+    assert.equal(resumed.data.implementation_guard.dispatch_clean, true);
+    assert.equal(resumed.data.task.complete_packet.arguments.input.dispatchClean, true);
+  },
+));
+
 test("ready sequential implement returns deferred completion only after work", () => withRoot(
   "cadre-implement-deferred-completion-contract-",
   (root) => {
@@ -2003,6 +2213,7 @@ test("ready sequential implement returns deferred completion only after work", (
     const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
     assert.equal(fs.existsSync(integration), true);
     assert.equal(git(integration, ["branch", "--show-current"]).stdout.trim(), `track/${trackId}`);
+    const baselineSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
 
     const ready = core.workflowPacketV1(root, { workflow: "implement", trackId });
     assert.equal(ready.next, null);
@@ -2012,10 +2223,651 @@ test("ready sequential implement returns deferred completion only after work", (
       arguments: {
         root,
         action: "task.complete",
-        input: { trackId, phaseIndex: 1, taskIndex: 1, workingRoot: integration },
+        input: {
+          trackId,
+          phaseIndex: 1,
+          taskIndex: 1,
+          workingRoot: integration,
+          baselineSha,
+          dispatchClean: true,
+        },
         execute: true,
       },
     });
+  },
+));
+
+test("interrupted pending tasks retain completed-dependency authorization from their clean dispatch", () => withRoot(
+  "cadre-pending-dependency-dispatch-contract-",
+  (root) => {
+    const trackId = "pending-dependency-dispatch";
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      tasks: [
+        {
+          task_index: 1,
+          task_key: "phase1_task1",
+          title: "Create workspace manifests",
+          status: "completed",
+          files: ["Cargo.toml", "Cargo.lock"],
+          depends_on: [],
+          commit_shas: [],
+        },
+        {
+          task_index: 2,
+          task_key: "phase1_task2",
+          title: "Create contracts",
+          status: "pending",
+          files: ["contracts"],
+          depends_on: ["phase1_task1"],
+          commit_shas: [],
+        },
+      ],
+    });
+    write(path.join(root, "Cargo.toml"), "[workspace]\n");
+    write(path.join(root, "Cargo.lock"), "# initial lock\n");
+    git(root, ["add", "Cargo.toml", "Cargo.lock", "cadre/config.json"]);
+    git(root, ["commit", "-m", "feat: seed completed workspace manifests"]);
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    const baselineSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const dispatched = core.workflowPacketV1(root, { workflow: "implement", trackId, execute: true });
+    assert.equal(dispatched.ok, true, JSON.stringify(dispatched));
+    const state = readJson(path.join(root, "cadre", "tracks", trackId, "implement_state.json"));
+    assert.equal(state.sequential_dispatch.task_key, "phase1_task2");
+    assert.equal(state.sequential_dispatch.baseline_sha, baselineSha);
+    assert.equal(state.sequential_dispatch.dispatch_clean, true);
+
+    write(path.join(integration, "Cargo.toml"), "[workspace]\nmembers = [\"crates/shared-contracts\"]\n");
+    write(path.join(integration, "contracts", "openapi", "v1", "openapi.yaml"), "openapi: 3.1.0\n");
+    const resumed = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    assert.equal(resumed.data.implementation_guard.dispatch_clean, true);
+    const completeInput = resumed.data.task.complete_packet.arguments.input;
+    assert.equal(completeInput.dispatchClean, true);
+    assert.equal(completeInput.baselineSha, baselineSha);
+    const completed = core.completeTask(root, {
+      ...completeInput,
+      filesChanged: ["Cargo.toml", "contracts/openapi/v1/openapi.yaml"],
+      command: "printf 'Statements : 95%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+    assert.deepEqual(completed.product_commit.files, ["Cargo.toml", "contracts/openapi/v1/openapi.yaml"]);
+    assert.equal(git(integration, ["status", "--porcelain"]).stdout.trim(), "");
+  },
+));
+
+test("implement returns a state-only retry after the product commit succeeds but task-state recording fails", () => withRoot(
+  "cadre-product-commit-state-recovery-contract-",
+  (root) => {
+    const trackId = "product-commit-state-recovery";
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_task1",
+        title: "Create recoverable product",
+        status: "pending",
+        files: ["src/recoverable.js"],
+        depends_on: [],
+        commit_shas: [],
+      }],
+    });
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    const baselineSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+    write(path.join(integration, "src", "recoverable.js"), "export const recoverable = true;\n");
+    const planPath = path.join(root, "cadre", "tracks", trackId, "plan.json");
+    const planBefore = fs.readFileSync(planPath, "utf8");
+    const counter = path.join(root, "cadre", "local", "coverage-count.txt");
+    const coverageScript = [
+      "const fs=require('fs')",
+      "fs.mkdirSync(require('path').dirname(process.argv[2]),{recursive:true})",
+      "fs.appendFileSync(process.argv[2],'run\\n')",
+      "fs.unlinkSync(process.argv[1])",
+      "console.log('Statements : 96%')",
+    ].join(";");
+    const failed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      baselineSha,
+      dispatchClean: true,
+      filesChanged: ["src/recoverable.js"],
+      command: `node -e ${JSON.stringify(coverageScript)} ${JSON.stringify(planPath)} ${JSON.stringify(counter)}`,
+      coverageThreshold: 80,
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(failed.stage, "record_task_result");
+    const productSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+    assert.notEqual(productSha, baselineSha);
+    assert.equal(git(integration, ["status", "--porcelain"]).stdout.trim(), "");
+    assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+    const journalPath = path.join(root, "cadre", "tracks", trackId, "completion_journal.json");
+    let journal = readJson(journalPath);
+    const intent = Object.entries(journal.entries).find(([key]) => key.startsWith("intent:"));
+    assert.ok(intent);
+    assert.equal(intent[1].stage, "record_task_result_failed");
+    assert.equal(intent[1].commit_sha, productSha);
+    assert.deepEqual(intent[1].dirty_files, ["src/recoverable.js"]);
+
+    write(planPath, planBefore);
+    const recovery = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(recovery.ok, true, JSON.stringify(recovery));
+    assert.equal(recovery.phase, "state_recovery_ready");
+    assert.equal(recovery.decision.kind, "task_state_recovery");
+    assert.equal(recovery.next.arguments.input.stateRecovery, true);
+    assert.equal(recovery.next.arguments.input.completionJournalKey, intent[0]);
+    assert.equal(recovery.next.arguments.input.command, undefined);
+
+    const recovered = core.completeTask(root, recovery.next.arguments.input);
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal(git(integration, ["rev-parse", "HEAD"]).stdout.trim(), productSha);
+    assert.equal(fs.readFileSync(counter, "utf8"), "run\n", "state-only recovery must not rerun coverage");
+    const repairedPlan = readJson(planPath);
+    assert.equal(repairedPlan.phases[0].tasks[0].status, "completed");
+    assert.deepEqual(repairedPlan.phases[0].tasks[0].commit_shas, [productSha.slice(0, 12)]);
+    journal = readJson(journalPath);
+    assert.equal(journal.entries[intent[0]].stage, "completed");
+    assert.equal(git(root, ["status", "--porcelain", "--untracked-files=no"]).stdout.trim(), "");
+  },
+));
+
+test("a commit hook cannot smuggle an unclaimed path into a task product commit", () => withRoot(
+  "cadre-product-commit-membership-contract-",
+  (root) => {
+    const trackId = "product-commit-membership";
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_task1",
+        title: "Create claimed product",
+        status: "pending",
+        files: ["src/claimed.js"],
+        depends_on: [],
+        commit_shas: [],
+      }],
+    });
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    const baselineSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+    write(path.join(integration, "src", "claimed.js"), "export const claimed = true;\n");
+    const hookRelative = git(integration, ["rev-parse", "--git-path", "hooks/pre-commit"]).stdout.trim();
+    const hookPath = path.resolve(integration, hookRelative);
+    write(hookPath, "#!/bin/sh\nprintf 'smuggled\\n' > unclaimed.txt\ngit add unclaimed.txt\n");
+    fs.chmodSync(hookPath, 0o755);
+    const blocked = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      baselineSha,
+      dispatchClean: true,
+      filesChanged: ["src/claimed.js"],
+      command: "printf 'Statements : 98%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "product_commit_integrity");
+    assert.equal(blocked.recovery_required, false);
+    assert.equal(blocked.retry_ready, true);
+    assert.equal(blocked.rollback.ok, true, JSON.stringify(blocked));
+    assert.deepEqual(blocked.expected_files, ["src/claimed.js"]);
+    assert.deepEqual(blocked.actual_files, ["src/claimed.js", "unclaimed.txt"]);
+    assert.equal(git(integration, ["rev-parse", "HEAD"]).stdout.trim(), baselineSha);
+    assert.equal(git(integration, ["diff", "--cached", "--name-only"]).stdout, "");
+    assert.deepEqual(git(integration, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim().split(/\n/).sort(), ["?? src/claimed.js", "?? unclaimed.txt"]);
+    const plan = readJson(path.join(root, "cadre", "tracks", trackId, "plan.json"));
+    assert.equal(plan.phases[0].tasks[0].status, "pending");
+    const journal = readJson(path.join(root, "cadre", "tracks", trackId, "completion_journal.json"));
+    const intent = Object.entries(journal.entries).find(([key]) => key.startsWith("intent:"));
+    assert.ok(intent);
+    assert.equal(intent[1].stage, "commit_pending");
+    const rerun = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(rerun.ok, false);
+    assert.equal(rerun.next, null);
+    fs.rmSync(hookPath);
+    fs.rmSync(path.join(integration, "unclaimed.txt"), { force: true });
+    const retried = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      baselineSha,
+      dispatchClean: true,
+      filesChanged: ["src/claimed.js"],
+      command: "printf 'Statements : 98%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(retried.ok, true, JSON.stringify(retried));
+  },
+));
+
+test("state-only recovery resumes at the failed control-commit stage without duplicating task events", () => withRoot(
+  "cadre-control-commit-stage-recovery-contract-",
+  (root) => {
+    const trackId = "control-commit-stage-recovery";
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_task1",
+        title: "Create stage-aware recovery",
+        status: "pending",
+        files: ["src/stage-aware.js"],
+        depends_on: [],
+        commit_shas: [],
+      }],
+    });
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    const baselineSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+    write(path.join(integration, "src", "stage-aware.js"), "export const stageAware = true;\n");
+    const hookRelative = git(root, ["rev-parse", "--git-path", "hooks/commit-msg"]).stdout.trim();
+    const hookPath = path.resolve(root, hookRelative);
+    write(hookPath, "#!/bin/sh\nif grep -q '^cadre(complete):' \"$1\"; then exit 19; fi\nexit 0\n");
+    fs.chmodSync(hookPath, 0o755);
+
+    const failed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      baselineSha,
+      dispatchClean: true,
+      filesChanged: ["src/stage-aware.js"],
+      command: "printf 'Statements : 97%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(failed.control_commit.stage, "git_commit");
+    const journalPath = path.join(root, "cadre", "tracks", trackId, "completion_journal.json");
+    const failedJournal = readJson(journalPath);
+    const intent = Object.entries(failedJournal.entries).find(([key]) => key.startsWith("intent:"));
+    assert.ok(intent);
+    assert.equal(intent[1].stage, "control_commit_failed");
+    const eventPath = path.join(root, "cadre", "events.jsonl");
+    const taskEventsBefore = fs.readFileSync(eventPath, "utf8").trim().split(/\n/).map(JSON.parse)
+      .filter((event) => event.track_id === trackId && ["task_result_recorded", "task_completed"].includes(event.kind));
+    assert.deepEqual(taskEventsBefore.map((event) => event.kind).sort(), ["task_completed", "task_result_recorded"]);
+
+    fs.rmSync(hookPath);
+    const recovery = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(recovery.ok, true, JSON.stringify(recovery));
+    assert.equal(recovery.phase, "state_recovery_ready");
+    const recovered = core.completeTask(root, recovery.next.arguments.input);
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    const taskEventsAfter = fs.readFileSync(eventPath, "utf8").trim().split(/\n/).map(JSON.parse)
+      .filter((event) => event.track_id === trackId && ["task_result_recorded", "task_completed"].includes(event.kind));
+    assert.equal(taskEventsAfter.length, taskEventsBefore.length);
+    assert.equal(git(root, ["status", "--porcelain", "--untracked-files=no"]).stdout.trim(), "");
+  },
+));
+
+test("manual verification state recovery does not rerun the approved verification command", () => withRoot(
+  "cadre-manual-state-recovery-contract-",
+  (root) => {
+    const trackId = "manual-state-recovery";
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: { enabled: true, auto_product_commits: true, auto_control_commits: true, git_notes: false },
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_manual_verification",
+        title: "User Manual Verification",
+        status: "pending",
+        task_type: "user_manual_verification",
+        files: [],
+        depends_on: [],
+        manual_verification: { scope: "phase", suggested_checks: [] },
+      }],
+    });
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    const planPath = path.join(root, "cadre", "tracks", trackId, "plan.json");
+    const planBefore = fs.readFileSync(planPath, "utf8");
+    const counter = path.join(root, "cadre", "local", "manual-count.txt");
+    const commandScript = [
+      "const fs=require('fs')",
+      "fs.mkdirSync(require('path').dirname(process.argv[2]),{recursive:true})",
+      "fs.appendFileSync(process.argv[2],'run\\n')",
+      "fs.unlinkSync(process.argv[1])",
+      "console.log('manual ok')",
+    ].join(";");
+    const failed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      approvalComplete: true,
+      manualVerificationMode: "autorun",
+      manualVerificationCommand: `node -e ${JSON.stringify(commandScript)} ${JSON.stringify(planPath)} ${JSON.stringify(counter)}`,
+      manualVerificationSummary: "Approved manual verification.",
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(failed.stage, "record_task_result");
+    assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+    write(planPath, planBefore);
+
+    const recovery = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(recovery.ok, true, JSON.stringify(recovery));
+    assert.equal(recovery.phase, "state_recovery_ready");
+    assert.equal(recovery.next.arguments.input.stateRecovery, true);
+    const recovered = core.completeTask(root, recovery.next.arguments.input);
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+    const repairedPlan = readJson(planPath);
+    assert.equal(repairedPlan.phases[0].tasks[0].status, "completed");
+    assert.equal(repairedPlan.phases[0].tasks[0].completion_evidence.manual_verification.summary, "Approved manual verification.");
+  },
+));
+
+test("manual verification cannot change HEAD even when it leaves the worktree clean", () => withRoot(
+  "cadre-manual-head-drift-contract-",
+  (root) => {
+    const trackId = "manual-head-drift";
+    seedImplementTrack(root, trackId, {
+      tasks: [{
+        task_index: 1,
+        task_key: "phase1_manual_verification",
+        title: "User Manual Verification",
+        status: "pending",
+        task_type: "user_manual_verification",
+        files: [],
+        depends_on: [],
+        manual_verification: { scope: "phase", suggested_checks: [] },
+      }],
+    });
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    const baselineSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+    const command = "printf 'verified\\n' > manual-proof.txt && git add manual-proof.txt && git -c commit.gpgsign=false -c user.name=Verifier -c user.email=verifier@example.invalid commit -m 'test: verification drift'";
+    const blocked = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      approvalComplete: true,
+      manualVerificationMode: "autorun",
+      manualVerificationCommand: command,
+      manualVerificationSummary: "Approved a command that must not move HEAD.",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "implementation_baseline");
+    assert.equal(blocked.expected_head, baselineSha);
+    assert.notEqual(blocked.actual_head, baselineSha);
+    assert.equal(git(integration, ["status", "--porcelain"]).stdout.trim(), "");
+    const plan = readJson(path.join(root, "cadre", "tracks", trackId, "plan.json"));
+    assert.equal(plan.phases[0].tasks[0].status, "pending");
+  },
+));
+
+test("trace-disabled completion markers remain isolated between tracks", () => withRoot(
+  "cadre-completion-marker-track-isolation-contract-",
+  (root) => {
+    const firstTrack = "marker-isolation-first";
+    const secondTrack = "marker-isolation-second";
+    const manualTask = {
+      task_index: 1,
+      task_key: "phase1_manual_verification",
+      title: "User Manual Verification",
+      status: "pending",
+      task_type: "user_manual_verification",
+      files: [],
+      depends_on: [],
+      manual_verification: { scope: "phase", suggested_checks: [] },
+    };
+    write(path.join(root, "README.md"), "# Completion marker isolation\n");
+    writeImplementTrack(root, firstTrack, { tasks: [manualTask] });
+    writeImplementTrack(root, secondTrack, {
+      tasks: [manualTask],
+      expectedTrackIds: [firstTrack, secondTrack],
+    });
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "seed marker-isolation tracks"]);
+    for (const trackId of [firstTrack, secondTrack]) {
+      const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+      assert.equal(setup.ok, true, JSON.stringify(setup));
+    }
+    for (const trackId of [firstTrack, secondTrack]) {
+      const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+      const completed = core.completeTask(root, {
+        trackId,
+        phaseIndex: 1,
+        taskIndex: 1,
+        workingRoot: integration,
+        approvalComplete: true,
+        manualVerificationMode: "autorun",
+        manualVerificationCommand: "true",
+        manualVerificationSummary: `Approved ${trackId}.`,
+      });
+      assert.equal(completed.ok, true, JSON.stringify(completed));
+      assert.equal(completed.control_commit.skipped, true);
+    }
+    const markerDirectory = path.join(root, "cadre", "local", "completion-intents");
+    assert.equal(fs.readdirSync(markerDirectory).filter((file) => file.endsWith(".json")).length, 2);
+    const firstResume = core.workflowPacketV1(root, { workflow: "implement", trackId: firstTrack });
+    assert.notEqual(firstResume.phase, "state_recovery_ready", JSON.stringify(firstResume));
+    assert.notEqual(firstResume.decision?.kind, "task_state_recovery", JSON.stringify(firstResume));
+  },
+));
+
+test("a corrupt completion journal blocks implementation and task completion", () => withRoot(
+  "cadre-corrupt-completion-journal-contract-",
+  (root) => {
+    const trackId = "corrupt-completion-journal";
+    seedImplementTrack(root, trackId);
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+    write(path.join(root, "cadre", "tracks", trackId, "completion_journal.json"), "{not-json\n");
+
+    const implement = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(implement.ok, false);
+    assert.equal(implement.data.stage, "completion_journal");
+    assert.equal(implement.next, null);
+    const completion = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: integration,
+      allowNoCommit: true,
+    });
+    assert.equal(completion.ok, false);
+    assert.equal(completion.stage, "completion_journal");
+  },
+));
+
+test("implement returns and completes a HEAD-pinned repair for a partially staged task", () => withRoot(
+  "cadre-implement-partial-task-repair-contract-",
+  (root) => {
+    const trackId = "partial-task-repair";
+    write(path.join(root, "cadre", "config.json"), `${JSON.stringify({
+      traceability: {
+        enabled: true,
+        auto_product_commits: true,
+        auto_control_commits: true,
+        git_notes: false,
+      },
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      tasks: [
+        {
+          task_index: 1,
+          task_key: "phase1_task1",
+          title: "Create workspace manifests",
+          status: "completed",
+          files: ["Cargo.toml", "Cargo.lock"],
+          depends_on: [],
+          commit_shas: [],
+        },
+        {
+          task_index: 2,
+          task_key: "phase1_task2",
+          title: "Create native recipes",
+          status: "completed",
+          files: ["justfile"],
+          depends_on: [],
+          commit_shas: [],
+        },
+        {
+          task_index: 3,
+          task_key: "phase1_task3",
+          title: "Create shared contracts",
+          status: "pending",
+          files: [
+            ".env.example",
+            "infra/.env.example",
+            "contracts/event-schema",
+            "contracts/openapi",
+            "contracts/proto",
+            "crates/shared-contracts",
+            "packages/shared-types",
+          ],
+          depends_on: ["phase1_task1"],
+          commit_shas: [],
+        },
+        {
+          task_index: 4,
+          task_key: "phase1_manual_verification",
+          title: "User Manual Verification",
+          status: "pending",
+          task_type: "user_manual_verification",
+          files: [],
+          depends_on: ["phase1_task3"],
+          manual_verification: { scope: "phase", suggested_checks: [] },
+        },
+      ],
+    });
+    write(path.join(root, "Cargo.toml"), "[workspace]\n");
+    write(path.join(root, "Cargo.lock"), "# initial lock\n");
+    git(root, ["add", "Cargo.toml", "Cargo.lock"]);
+    git(root, ["commit", "-m", "feat: create workspace manifests"]);
+    const setup = core.worktreePlan(root, { trackId, repo: "root", execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const integration = path.join(root, ".worktrees", "cadre", "tracks", trackId, "integrate", "root");
+
+    write(path.join(integration, ".env.example"), "DATABASE_URL=\n");
+    write(path.join(integration, "infra", ".env.example"), "REDIS_URL=\n");
+    git(integration, ["add", ".env.example", "infra/.env.example"]);
+    git(integration, ["commit", "-m", "feat: partial shared contracts"]);
+    const partialSha = git(integration, ["rev-parse", "HEAD"]).stdout.trim();
+    const planPath = path.join(root, "cadre", "tracks", trackId, "plan.json");
+    const plan = readJson(planPath);
+    plan.phases[0].tasks[2].status = "completed";
+    plan.phases[0].tasks[2].commit_shas = [partialSha.slice(0, 12)];
+    write(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+    const metadataPath = path.join(root, "cadre", "tracks", trackId, "metadata.json");
+    const metadata = readJson(metadataPath);
+    metadata.last_task_result = { task_key: "phase1_task3", commit_sha: partialSha.slice(0, 12) };
+    metadata.last_test_run = {
+      command: "printf 'Statements : 94%%\\n'",
+      ok: true,
+      status: 0,
+      coverage: 94,
+      threshold: 80,
+      allow_missing_coverage: false,
+      allow_low_coverage: false,
+    };
+    write(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+
+    const residual = [
+      "Cargo.lock",
+      "Cargo.toml",
+      "contracts/event-schema/v1/event-envelope.schema.json",
+      "contracts/openapi/v1/openapi.yaml",
+      "contracts/proto/v1/common.proto",
+      "crates/shared-contracts/Cargo.toml",
+      "crates/shared-contracts/src/lib.rs",
+      "packages/shared-types/package.json",
+      "packages/shared-types/src/index.ts",
+    ];
+    for (const file of residual) write(path.join(integration, file), `${file}\n`);
+    const manifestStatus = git(integration, ["status", "--porcelain=v1", "--", "Cargo.toml", "Cargo.lock"]).stdout;
+    assert.match(manifestStatus, / M Cargo\.lock/);
+    assert.match(manifestStatus, / M Cargo\.toml/);
+
+    write(path.join(integration, "unclaimed.txt"), "must block\n");
+    const unclaimed = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(unclaimed.ok, false);
+    assert.equal(unclaimed.phase, "blocked");
+    assert.equal(unclaimed.next, null);
+    assert.match(unclaimed.errors[0], /outside the completed task scope/i);
+    fs.rmSync(path.join(integration, "unclaimed.txt"));
+
+    const ambiguousPlan = readJson(planPath);
+    ambiguousPlan.phases[0].tasks[1].commit_shas = [partialSha.slice(0, 12)];
+    write(planPath, `${JSON.stringify(ambiguousPlan, null, 2)}\n`);
+    const ambiguous = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(ambiguous.ok, false);
+    assert.equal(ambiguous.next, null);
+    assert.match(ambiguous.errors[0], /multiple completed tasks/i);
+    ambiguousPlan.phases[0].tasks[1].commit_shas = [];
+    write(planPath, `${JSON.stringify(ambiguousPlan, null, 2)}\n`);
+
+    const repair = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(repair.ok, true, JSON.stringify(repair));
+    assert.equal(repair.phase, "reconciliation_ready");
+    assert.equal(repair.decision.kind, "task_reconciliation");
+    assert.equal(repair.next.arguments.action, "task.complete");
+    const repairInput = repair.next.arguments.input;
+    assert.equal(repairInput.trackId, trackId);
+    assert.equal(repairInput.phaseIndex, 1);
+    assert.equal(repairInput.taskIndex, 3);
+    assert.equal(repairInput.workingRoot, integration);
+    assert.equal(repairInput.baselineSha, partialSha);
+    assert.match(repairInput.changeSetFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(repairInput.reconcileCommit, true);
+    assert.deepEqual(repairInput.filesChanged, residual);
+    assert.equal(repairInput.command, metadata.last_test_run.command);
+    assert.equal(repairInput.coverageThreshold, 80);
+    assert.equal(repairInput.allowMissingCoverage, false);
+    assert.equal(repairInput.allowLowCoverage, false);
+    assert.equal(repair.required.length, 0);
+
+    const driftFile = path.join(integration, residual[2]);
+    const originalDriftContent = fs.readFileSync(driftFile, "utf8");
+    write(driftFile, "changed after packet\n");
+    const drifted = core.completeTask(root, repairInput);
+    assert.equal(drifted.ok, false);
+    assert.equal(drifted.stage, "implementation_baseline");
+    assert.equal(git(integration, ["rev-parse", "HEAD"]).stdout.trim(), partialSha);
+    write(driftFile, originalDriftContent);
+
+    const reconciled = core.completeTask(root, repairInput);
+    assert.equal(reconciled.ok, true, JSON.stringify(reconciled));
+    assert.deepEqual(reconciled.product_commit.files, residual);
+    assert.equal(git(integration, ["status", "--porcelain"]).stdout.trim(), "");
+    const repairedPlan = readJson(planPath);
+    assert.deepEqual(repairedPlan.phases[0].tasks[2].commit_shas, [
+      partialSha.slice(0, 12),
+      reconciled.product_commit.commit_sha.slice(0, 12),
+    ]);
+
+    const manual = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(manual.ok, true, JSON.stringify(manual));
+    assert.equal(manual.phase, "implementation_ready");
+    assert.equal(manual.data.task.task_key, "phase1_manual_verification");
+    assert.equal(manual.data.implementation_guard.clean, true);
   },
 ));
 
@@ -2135,6 +2987,93 @@ test("polyrepo implement provisions every affected integration worktree", () => 
       assert.equal(fs.existsSync(entry.integration_worktree), true, entry.repo);
       assert.equal(git(entry.integration_worktree, ["branch", "--show-current"]).stdout.trim(), `track/${trackId}`);
     }
+  },
+));
+
+test("polyrepo omitted repos resolve only to the configured default during continuation and dependency scoping", () => withRoot(
+  "cadre-polyrepo-default-repo-scope-contract-",
+  (root) => {
+    const trackId = "polyrepo-default-repo-scope";
+    for (const repo of ["api", "web"]) {
+      const repoRoot = path.join(root, "repos", repo);
+      fs.mkdirSync(repoRoot, { recursive: true });
+      git(repoRoot, ["init", "-b", "master"]);
+      write(path.join(repoRoot, "README.md"), `# ${repo}\n`);
+      git(repoRoot, ["add", "."]);
+      git(repoRoot, ["commit", "-m", `seed ${repo}`]);
+    }
+    write(path.join(root, "cadre", "repos.json"), `${JSON.stringify({
+      mode: "polyrepo",
+      default_repo: "api",
+      repos: ["api", "web"].map((repo) => ({
+        name: repo,
+        submodule_path: `repos/${repo}`,
+        default_branch: "master",
+      })),
+    }, null, 2)}\n`);
+    seedImplementTrack(root, trackId, {
+      polyrepo: true,
+      tasks: [
+        {
+          task_index: 1,
+          task_key: "phase1_task1",
+          title: "Default API dependency",
+          status: "completed",
+          files: ["shared.txt"],
+          depends_on: [],
+          commit_shas: [],
+        },
+        {
+          task_index: 2,
+          task_key: "phase1_task2",
+          title: "Explicit web task",
+          status: "pending",
+          repo: "web",
+          files: ["src/web.js"],
+          depends_on: ["phase1_task1"],
+          commit_shas: [],
+        },
+        {
+          task_index: 3,
+          task_key: "phase1_task3",
+          title: "Default API continuation",
+          status: "pending",
+          files: ["src/default.js"],
+          depends_on: ["phase1_task2"],
+          commit_shas: [],
+        },
+      ],
+    });
+    const setup = core.worktreePlan(root, { trackId, execute: true });
+    assert.equal(setup.ok, true, JSON.stringify(setup));
+    const api = setup.branch_set.find((entry) => entry.repo === "api").integration_worktree;
+    const web = setup.branch_set.find((entry) => entry.repo === "web").integration_worktree;
+    const webPacket = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(webPacket.data.task.task_key, "phase1_task2");
+    write(path.join(web, "src", "web.js"), "export const web = true;\n");
+    write(path.join(web, "shared.txt"), "must stay in default api\n");
+    const crossRepo = core.completeTask(root, {
+      ...webPacket.data.task.complete_packet.arguments.input,
+      command: "printf 'Statements : 92%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(crossRepo.ok, false);
+    assert.equal(crossRepo.stage, "product_change_set");
+    assert.deepEqual(crossRepo.change_set.unclaimed_files, ["shared.txt"]);
+    fs.rmSync(path.join(web, "src"), { recursive: true, force: true });
+    fs.rmSync(path.join(web, "shared.txt"));
+
+    const planPath = path.join(root, "cadre", "tracks", trackId, "plan.json");
+    const plan = readJson(planPath);
+    plan.phases[0].tasks[1].status = "completed";
+    write(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+    write(path.join(api, "src", "default.js"), "export const api = true;\n");
+    const continuation = core.workflowPacketV1(root, { workflow: "implement", trackId });
+    assert.equal(continuation.ok, true, JSON.stringify(continuation));
+    assert.equal(continuation.phase, "implementation_ready");
+    assert.equal(continuation.data.task.task_key, "phase1_task3");
+    assert.equal(continuation.data.task.complete_packet.arguments.input.dispatchClean, false);
+    assert.equal(continuation.data.task.complete_packet.arguments.input.workingRoot, api);
   },
 ));
 

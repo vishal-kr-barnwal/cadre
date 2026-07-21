@@ -3,15 +3,19 @@ import { asJsonObject, asOptionalString, asStringArray, isRecord } from "../../.
 import type { CadreTrack, JsonObject, RuntimeArgs } from "../../../types";
 
 import { readJson, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
-import { withTrackLock } from "../../infrastructure/runtime/locking";
+import { withLock, withTrackLock } from "../../infrastructure/runtime/locking";
 import { beginTrace, commitTrace } from "./commit-trace";
 import type { CoreResult, ParallelState, ParallelWorker } from "./contracts";
-import { completeTask } from "./task-completion";
+import { completeTaskInner } from "./task-completion";
+import { TASK_COMPLETION_LOCK, taskCompletionLockOptions } from "./task-completion-lock";
 import { findTrack } from "./track-context";
 import { withSharedControlPlaneSync } from "./workflow-response";
 
 export function recordParallelWorker(root: string, args: RuntimeArgs = {}): CoreResult {
-  return withSharedControlPlaneSync(root, args, "record_parallel_worker", () => recordParallelWorkerInner(root, args));
+  const run = () => withSharedControlPlaneSync(root, args, "record_parallel_worker", () => recordParallelWorkerInner(root, args));
+  return args.completeTask === true
+    ? withLock(root, TASK_COMPLETION_LOCK, run, taskCompletionLockOptions(args))
+    : run();
 }
 
 interface ParallelCleanupRecord {
@@ -147,7 +151,7 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
 
   let completion: CoreResult | null = null;
   if (args.completeTask === true) {
-    completion = completeTask(root, {
+    completion = completeTaskInner(root, {
       trackId: track.track_id,
       phaseIndex: args.phaseIndex,
       taskIndex: args.taskIndex,
@@ -163,6 +167,7 @@ export function recordParallelWorkerUnlocked(root: string, track: CadreTrack, ar
       workingRoot: args.workingRoot || nextWorker.worktree || args.worktree,
       workerRef: nextWorker.worker_ref || args.workerRef || args.worker_ref,
       lock: false,
+      skipSync: true,
     });
     if (!completion.ok) return { ok: false, stage: "complete_task", state_path: statePath, worker: nextWorker, completion };
   }

@@ -6,7 +6,7 @@ import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 import { fileExists } from "../../infrastructure/runtime/json-store";
 import { loadPackageJson } from "../../infrastructure/runtime/project-config";
 import { commandExists, runCommand } from "../../infrastructure/runtime/system";
-import { normalizeClaimPath } from "./collision";
+import { normalizeClaimPath } from "./claim-paths";
 import type { CoreResult, RepoSymbol } from "./contracts";
 import { likelyTestCandidatesForFile } from "./planning";
 import { lspReview } from "./project-maintenance";

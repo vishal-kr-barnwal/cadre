@@ -1,6 +1,8 @@
 import { asJsonArray, asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { JsonObject, RuntimeArgs } from "../../../types";
 
+import { beginTrace, traceNonIgnoredFiles } from "./commit-trace";
+
 export interface ImplementationTarget {
   trackId: string;
   phase: JsonObject;
@@ -86,6 +88,8 @@ export function deferredTaskPacket(
   root: string,
   target: ImplementationTarget,
   worktreePlan: unknown,
+  dispatchClean = true,
+  allowDirtyContinuation = false,
 ): JsonObject | null {
   if (parallelImplementation(target) || !target.task || !worktreesReady(worktreePlan)) return null;
   const phaseIndex = Number(target.phase.phase_index || 0);
@@ -93,6 +97,9 @@ export function deferredTaskPacket(
   const worktree = taskWorktree(target.task, worktreePlan);
   const workingRoot = asOptionalString(worktree?.integration_worktree);
   if (phaseIndex <= 0 || taskIndex <= 0 || !workingRoot) return null;
+  const snapshot = beginTrace(workingRoot);
+  if (!snapshot.ok || snapshot.skipped || !snapshot.head_sha) return null;
+  if (dispatchClean && !allowDirtyContinuation && traceNonIgnoredFiles(snapshot).length > 0) return null;
   return {
     ...target.task,
     phase_index: phaseIndex,
@@ -102,6 +109,8 @@ export function deferredTaskPacket(
       phaseIndex,
       taskIndex,
       workingRoot,
+      baselineSha: snapshot.head_sha,
+      dispatchClean,
     }, true),
   };
 }

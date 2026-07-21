@@ -1,13 +1,22 @@
-import fs from "node:fs";
 import path from "node:path";
 
-import { asJsonObject, asOptionalString } from "../../../guards";
+import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { CommandResult, JsonObject, RuntimeArgs } from "../../../types";
 import { fileExists, textHash, utcNow } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { plannedGitAction, runCommand } from "../../infrastructure/runtime/system";
-import { artifactDefinitions } from "./artifact-catalog";
+import { claimPathError, concreteGitPathError, resolveClaimsToPaths } from "./claim-paths";
+import { projectionGuard } from "./commit-trace-projections";
 import type { CoreResult, PlannedGitAction } from "./contracts";
+import { traceFingerprint, traceResultFingerprint } from "./git-change-fingerprint";
+import { gitCommitMembership } from "./git-commit-membership";
+import { dirtyUniverseError, traceFileKind } from "./git-dirty-classification";
+import { withGitIndexLock } from "./git-index-lock";
+import { captureGitIndex, restoreGitIndex, rollbackGitCommit } from "./git-index-state";
+
+export { traceDirtyFiles, traceFileKind, traceNonIgnoredFiles } from "./git-dirty-classification";
+
+export { traceFingerprint } from "./git-change-fingerprint";
 
 const DEFAULT_NOTES_REF = "refs/notes/cadre";
 
@@ -15,6 +24,7 @@ export interface TraceSnapshot extends JsonObject {
   ok: boolean;
   cwd: string;
   git_root?: string;
+  head_sha?: string;
   entries: JsonObject;
   dirty_files: string[];
   skipped?: boolean;
@@ -30,6 +40,12 @@ export interface CommitTraceOptions {
   scope?: string;
   body?: string;
   files?: string[];
+  resolvedFiles?: string[];
+  expectedFingerprint?: string;
+  expectedResultFingerprint?: string;
+  expectedParentSha?: string;
+  expectedDirtyFiles?: string[];
+  expectedDirtyKind?: "product" | "nonignored";
   includeDirtyFiles?: string[];
   cwd?: string;
   before?: TraceSnapshot | null;
@@ -37,6 +53,7 @@ export interface CommitTraceOptions {
   allowDirty?: boolean;
   note?: JsonObject;
   trackId?: string | null;
+  taskKey?: string | null;
   repo?: string | null;
 }
 
@@ -76,21 +93,42 @@ export function notesPushEnabled(root: string): boolean {
   return traceability(root).push_notes !== false;
 }
 
-function statusEntries(cwd: string): JsonObject {
-  const result = runCommand("git", ["status", "--porcelain", "--untracked-files=all"], { cwd });
-  if (!result.ok) return {};
+interface StatusEntriesResult {
+  ok: boolean;
+  entries: JsonObject;
+  rename_pairs: Array<{ source: string; destination: string; status: string }>;
+  error?: string;
+}
+
+function statusEntries(cwd: string): StatusEntriesResult {
+  const result = runCommand("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd });
+  if (!result.ok) {
+    return {
+      ok: false,
+      entries: {},
+      rename_pairs: [],
+      error: result.stderr.trim() || result.stdout.trim() || "Unable to inspect Git status",
+    };
+  }
   const entries: JsonObject = {};
-  for (const line of result.stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const status = line.slice(0, 2);
-    const rawPath = line.slice(3).trim();
-    const files = rawPath.includes(" -> ") ? rawPath.split(" -> ") : [rawPath];
-    for (const file of files) {
-      const normalized = file.replace(/^"|"$/g, "");
-      if (normalized) entries[normalized] = status;
+  const renamePairs: Array<{ source: string; destination: string; status: string }> = [];
+  const records = result.stdout.split("\0");
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] || "";
+    if (record.length < 4) continue;
+    const status = record.slice(0, 2);
+    const file = record.slice(3);
+    if (file) entries[file] = status;
+    if (/[RC]/.test(status)) {
+      const source = records[index + 1] || "";
+      if (source && /R/.test(status)) {
+        entries[source] = status;
+        renamePairs.push({ source, destination: file, status });
+      }
+      index += 1;
     }
   }
-  return entries;
+  return { ok: true, entries, rename_pairs: renamePairs };
 }
 
 export function beginTrace(cwd: string): TraceSnapshot {
@@ -106,27 +144,27 @@ export function beginTrace(cwd: string): TraceSnapshot {
     };
   }
   const root = gitRoot.stdout.trim() || cwd;
-  const entries = statusEntries(root);
+  const status = statusEntries(root);
+  if (!status.ok) {
+    return {
+      ok: false,
+      cwd: root,
+      git_root: root,
+      entries: {},
+      dirty_files: [],
+      reason: status.error || "Unable to inspect Git status",
+    };
+  }
+  const head = runCommand("git", ["rev-parse", "HEAD"], { cwd: root });
+  const entries = status.entries;
   return {
     ok: true,
     cwd: root,
     git_root: root,
+    ...(head.ok && head.stdout.trim() ? { head_sha: head.stdout.trim() } : {}),
     entries,
     dirty_files: Object.keys(entries).sort(),
   };
-}
-
-function isControlPlaneFile(file: string): boolean {
-  const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (normalized.startsWith("cadre/local/")) return false;
-  if (normalized.startsWith("cadre/.locks/")) return false;
-  if (normalized.includes(".tmp")) return false;
-  return normalized.startsWith("cadre/")
-    || normalized === ".gitattributes"
-    || normalized === ".gitmodules"
-    || normalized === ".gitlab-ci.yml"
-    || normalized === "cadre-merge-train.gitlab-ci.yml"
-    || normalized.startsWith(".github/workflows/cadre-");
 }
 
 function changedAfter(before: TraceSnapshot | null | undefined, after: JsonObject): string[] {
@@ -138,29 +176,7 @@ function changedAfter(before: TraceSnapshot | null | undefined, after: JsonObjec
 }
 
 function uniqueFiles(files: string[]): string[] {
-  return Array.from(new Set(files.map((file) => file.replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean))).sort();
-}
-
-function projectionGuard(root: string, files: string[]): CoreResult {
-  const touched = new Set(uniqueFiles(files));
-  const errors: string[] = [];
-  const checked: string[] = [];
-  for (const definition of artifactDefinitions(root, { includeArchive: true })) {
-    if (!definition.projection || !touched.has(definition.canonical)) continue;
-    const canonical = path.join(root, definition.canonical);
-    const projection = path.join(root, definition.projection);
-    checked.push(definition.canonical);
-    if (!fileExists(canonical) || !fileExists(projection)) {
-      errors.push(`Canonical/projection pair is incomplete: ${definition.canonical} -> ${definition.projection}`);
-      continue;
-    }
-    const marker = fs.readFileSync(projection, "utf8").match(/<!--\s*cadre:generated\b[^>]*canonical_hash="([a-f0-9]+)"[^>]*-->/i);
-    const expected = textHash(fs.readFileSync(canonical, "utf8")).slice(0, 16);
-    if (!marker?.[1] || marker[1] !== expected) {
-      errors.push(`Projection marker is stale for ${definition.canonical}: ${definition.projection}`);
-    }
-  }
-  return { ok: errors.length === 0, checked, errors, ...(errors.length ? { error: errors[0] } : {}) };
+  return Array.from(new Set(files.filter(Boolean))).sort();
 }
 
 function conventionalSubject(type: string, scope: string, subject: string): string {
@@ -190,60 +206,119 @@ function writeNote(cwd: string, ref: string, sha: string, note: JsonObject): Com
   return runCommand("git", ["notes", "--ref", ref, "add", "-f", "-m", `${JSON.stringify(note, null, 2)}\n`, sha], { cwd });
 }
 
-interface GitIndexSnapshot {
-  path: string;
-  existed: boolean;
-  content: Buffer | null;
-}
-
-function captureGitIndex(cwd: string): GitIndexSnapshot | null {
-  const located = runCommand("git", ["rev-parse", "--git-path", "index"], { cwd });
-  if (!located.ok || !located.stdout.trim()) return null;
-  const indexPath = path.resolve(cwd, located.stdout.trim());
-  try {
-    return { path: indexPath, existed: true, content: fs.readFileSync(indexPath) };
-  } catch (error) {
-    const code = asOptionalString(asJsonObject(error).code);
-    return code === "ENOENT" ? { path: indexPath, existed: false, content: null } : null;
-  }
-}
-
-function restoreGitIndex(snapshot: GitIndexSnapshot): CoreResult {
-  const lockPath = `${snapshot.path}.lock`;
-  if (fileExists(lockPath)) {
-    return { ok: false, stage: "git_index_restore_lock", error: `Git index lock still exists: ${lockPath}` };
-  }
-  const temporary = `${snapshot.path}.cadre-restore-${process.pid}`;
-  try {
-    if (!snapshot.existed) {
-      fs.rmSync(snapshot.path, { force: true });
-      return { ok: true, restored: true, removed_new_index: true };
-    }
-    fs.writeFileSync(temporary, snapshot.content!);
-    fs.renameSync(temporary, snapshot.path);
-    return { ok: true, restored: true, bytes: snapshot.content!.length };
-  } catch (error) {
-    fs.rmSync(temporary, { force: true });
-    return { ok: false, stage: "git_index_restore", error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 export function commitTrace(root: string, args: RuntimeArgs, options: CommitTraceOptions): CoreResult {
   if (!traceEnabled(root, options.kind, args, options.forceEnabled === true)) {
     return { ok: true, skipped: true, reason: "traceability disabled or unconfigured" };
   }
   const cwd = options.cwd || root;
+  return withGitIndexLock(root, cwd, () => commitTraceUnlocked(root, args, options));
+}
+
+function commitTraceUnlocked(root: string, args: RuntimeArgs, options: CommitTraceOptions): CoreResult {
+  const cwd = options.cwd || root;
   const snapshot = options.before || beginTrace(cwd);
+  if (!snapshot.ok) {
+    return { ok: false, stage: "git_status", error: snapshot.reason || "Unable to inspect Git status" };
+  }
   if (snapshot.skipped) return { ok: true, skipped: true, reason: snapshot.reason || "git unavailable" };
   const gitRoot = asOptionalString(snapshot.git_root) || cwd;
-  const after = statusEntries(gitRoot);
-  const requestedFiles = options.files
-    ? uniqueFiles(options.files)
-    : uniqueFiles([
-      ...changedAfter(snapshot, after).filter((file) => options.kind === "product" ? !isControlPlaneFile(file) : isControlPlaneFile(file)),
-      ...(options.includeDirtyFiles || []),
-    ]);
-  const files = requestedFiles.filter((file) => after[file]);
+  const afterStatus = statusEntries(gitRoot);
+  if (!afterStatus.ok) return { ok: false, stage: "git_status", error: afterStatus.error || "Unable to inspect Git status" };
+  const after = afterStatus.entries;
+  if (options.files && options.resolvedFiles) {
+    return { ok: false, stage: "git_claim_scope", error: "Commit trace accepts files or resolvedFiles, not both" };
+  }
+  const resolvedFileErrors = options.resolvedFiles?.flatMap((file) => {
+    const error = concreteGitPathError(file);
+    return error ? [error] : [];
+  }) || [];
+  if (resolvedFileErrors.length > 0) {
+    return { ok: false, stage: "git_claim_scope", error: resolvedFileErrors[0], errors: resolvedFileErrors };
+  }
+  const exactFiles = options.resolvedFiles ? uniqueFiles(options.resolvedFiles) : null;
+  const missingExactFiles = exactFiles?.filter((file) => !Object.prototype.hasOwnProperty.call(after, file)) || [];
+  if (missingExactFiles.length > 0) {
+    return {
+      ok: false,
+      stage: "git_claim_scope",
+      error: `Resolved Git paths are no longer dirty: ${missingExactFiles.join(", ")}`,
+      missing_files: missingExactFiles,
+    };
+  }
+  const requestedErrors = options.files?.flatMap((claim) => {
+    const error = claimPathError(claim);
+    return error ? [error] : [];
+  }) || [];
+  const requestedClaims = options.files ? uniqueFiles(options.files.map((file) => file.trim())) : null;
+  if (requestedErrors.length > 0) {
+    return {
+      ok: false,
+      stage: "git_claim_scope",
+      error: requestedErrors[0],
+      errors: requestedErrors,
+      requested_files: requestedClaims || [],
+    };
+  }
+  const resolved = requestedClaims ? resolveClaimsToPaths(requestedClaims, Object.keys(after)) : null;
+  if (resolved && resolved.errors.length > 0) {
+    return {
+      ok: false,
+      stage: "git_claim_scope",
+      error: resolved.errors[0],
+      errors: resolved.errors,
+      requested_files: requestedClaims || [],
+    };
+  }
+  const included = options.includeDirtyFiles
+    ? resolveClaimsToPaths(options.includeDirtyFiles, Object.keys(after))
+    : { files: [], errors: [] };
+  if (included.errors.length > 0) {
+    return { ok: false, stage: "git_claim_scope", error: included.errors[0], errors: included.errors };
+  }
+  const files = exactFiles
+    || (requestedClaims
+      ? resolved?.files || []
+      : uniqueFiles([
+        ...changedAfter(snapshot, after).filter((file) => traceFileKind(file) === (options.kind === "product" ? "product" : "control")),
+        ...included.files,
+      ]));
+  const expectedDirtyFiles = options.expectedDirtyFiles ? uniqueFiles(options.expectedDirtyFiles) : null;
+  const expectedDirtyKind = options.expectedDirtyKind || "nonignored";
+  if (expectedDirtyFiles) {
+    const universeError = dirtyUniverseError(after, expectedDirtyFiles, expectedDirtyKind);
+    if (universeError) return universeError;
+  }
+  const partialRename = afterStatus.rename_pairs.find((pair) => (
+    files.includes(pair.source) !== files.includes(pair.destination)
+  ));
+  if (partialRename) {
+    return {
+      ok: false,
+      stage: "git_claim_scope",
+      error: `Rename endpoints must be committed together: ${partialRename.source} -> ${partialRename.destination}`,
+      rename: partialRename,
+      files,
+    };
+  }
+  if (options.expectedFingerprint) {
+    const fingerprint = traceFingerprint({
+      ok: true,
+      cwd: gitRoot,
+      git_root: gitRoot,
+      entries: after,
+      dirty_files: Object.keys(after).sort(),
+    }, expectedDirtyFiles || files);
+    if (fingerprint.ok === false || fingerprint.fingerprint !== options.expectedFingerprint) {
+      return {
+        ok: false,
+        stage: "implementation_baseline",
+        error: asOptionalString(fingerprint.error) || "The dirty change set changed after Cadre created its reconciliation packet.",
+        expected_fingerprint: options.expectedFingerprint,
+        actual_fingerprint: asOptionalString(fingerprint.fingerprint) || null,
+        fingerprint,
+      };
+    }
+  }
   if (files.length === 0) return { ok: true, skipped: true, reason: "no changed files to commit" };
   const projections = projectionGuard(root, files);
   if (projections.ok === false) return { ok: false, stage: "projection_drift", files, projection_validation: projections, error: projections.error };
@@ -261,15 +336,43 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
     };
   }
 
+  const commitBaseline = commitSha(gitRoot) || "";
+  const requiredParent = asOptionalString(options.expectedParentSha) || "";
+  if (requiredParent && commitBaseline !== requiredParent) {
+    return { ok: false, stage: "implementation_baseline", expected_head: requiredParent, actual_head: commitBaseline || null, error: "Git HEAD changed before Cadre acquired the commit boundary." };
+  }
   const indexBefore = captureGitIndex(gitRoot);
   if (!indexBefore) return { ok: false, stage: "git_index_snapshot", files, error: "Unable to snapshot the Git index before staging Cadre trace files." };
-  const add = runCommand("git", ["add", "-A", "--", ...files], { cwd: gitRoot });
-  if (!add.ok) {
-    const indexRestore = restoreGitIndex(indexBefore);
-    return { ok: false, stage: indexRestore.ok === false ? "git_add_index_restore" : "git_add", files, add, index_restore: indexRestore };
+  const stagedRenameFiles = new Set(afterStatus.rename_pairs
+    .filter((pair) => pair.status.startsWith("R"))
+    .flatMap((pair) => [pair.source, pair.destination]));
+  const filesToAdd = files.filter((file) => !stagedRenameFiles.has(file));
+  if (filesToAdd.length > 0) {
+    const add = runCommand("git", ["--literal-pathspecs", "add", "-A", "--", ...filesToAdd], { cwd: gitRoot });
+    if (!add.ok) {
+      const indexRestore = restoreGitIndex(indexBefore);
+      return { ok: false, stage: indexRestore.ok === false ? "git_add_index_restore" : "git_add", files, add, index_restore: indexRestore };
+    }
   }
-  const staged = runCommand("git", ["diff", "--cached", "--quiet", "--", ...files], { cwd: gitRoot });
-  if (staged.status === 0) return { ok: true, skipped: true, reason: "no staged changes", files };
+  if (expectedDirtyFiles) {
+    const stagedStatus = statusEntries(gitRoot);
+    if (!stagedStatus.ok) {
+      const indexRestore = restoreGitIndex(indexBefore);
+      return { ok: false, stage: "git_status", files, error: stagedStatus.error, index_restore: indexRestore };
+    }
+    const universeError = dirtyUniverseError(stagedStatus.entries, expectedDirtyFiles, expectedDirtyKind);
+    if (universeError) {
+      const indexRestore = restoreGitIndex(indexBefore);
+      return { ...universeError, files, index_restore: indexRestore };
+    }
+  }
+  const staged = runCommand("git", ["--literal-pathspecs", "diff", "--cached", "--quiet", "--", ...files], { cwd: gitRoot });
+  if (staged.status === 0) {
+    const indexRestore = restoreGitIndex(indexBefore);
+    return indexRestore.ok === false
+      ? { ok: false, stage: "git_index_restore", files, index_restore: indexRestore, error: "Cadre found no staged change but could not restore the caller's Git index." }
+      : { ok: true, skipped: true, reason: "no staged changes", files, index_restore: indexRestore };
+  }
 
   const traceId = `trace_${textHash(JSON.stringify({ root, files, now: utcNow(), workflow: options.workflow })).slice(0, 16)}`;
   const type = asOptionalString(args.commitType || args.commit_type) || options.type || (options.kind === "product" ? "feat" : "cadre");
@@ -281,12 +384,14 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
     "Cadre-Trace-Id": traceId,
     "Cadre-Workflow": options.workflow,
     "Cadre-Track": options.trackId || null,
+    "Cadre-Task": options.taskKey || null,
     "Cadre-Repo": options.repo || null,
   });
   const commit = runCommand("git", [
     "-c", "commit.gpgsign=false",
     "-c", "user.name=Cadre",
     "-c", "user.email=cadre@local.invalid",
+    "--literal-pathspecs",
     "commit",
     "-m", fullSubject,
     "-m", commitBody,
@@ -308,6 +413,42 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
   }
 
   const sha = commitSha(gitRoot);
+  const membership = sha ? gitCommitMembership(gitRoot, sha) : { ok: false, files: [], parent_sha: null };
+  const actualFiles = uniqueFiles(asStringArray(membership.files));
+  const expectedParent = requiredParent || commitBaseline;
+  const committedFingerprint = sha && options.expectedResultFingerprint
+    ? traceResultFingerprint(gitRoot, files, sha)
+    : null;
+  const validatedHead = commitSha(gitRoot);
+  const membershipValid = membership.ok !== false
+    && validatedHead === sha
+    && asStringArray(membership.parent_shas).length === (expectedParent ? 1 : 0)
+    && (asOptionalString(membership.parent_sha) || "") === expectedParent
+    && JSON.stringify(actualFiles) === JSON.stringify(uniqueFiles(files));
+  const contentValid = !options.expectedResultFingerprint
+    || (committedFingerprint?.ok !== false && asOptionalString(committedFingerprint?.fingerprint) === options.expectedResultFingerprint);
+  if (!sha || !membershipValid || !contentValid) {
+    const rollback = sha ? rollbackGitCommit(gitRoot, sha, expectedParent, indexBefore) : { ok: false, rolled_back: false };
+    return {
+      ok: false,
+      stage: "git_commit_integrity",
+      commit_sha: sha,
+      actual_head: validatedHead,
+      expected_parent: expectedParent || null,
+      actual_parent: asOptionalString(membership.parent_sha) || null,
+      expected_files: uniqueFiles(files),
+      actual_files: actualFiles,
+      expected_result_fingerprint: options.expectedResultFingerprint || null,
+      actual_result_fingerprint: asOptionalString(committedFingerprint?.fingerprint) || null,
+      membership,
+      fingerprint: committedFingerprint,
+      rollback,
+      rolled_back: rollback.rolled_back === true,
+      error: rollback.ok === false
+        ? "Cadre rejected an expanded or altered commit, but could not safely restore its exact baseline."
+        : "Cadre rejected and rolled back a commit that expanded or altered the validated task change set.",
+    };
+  }
   const notePayload: JsonObject = {
     version: 1,
     schema: "cadre.commit_trace.v1",
@@ -316,6 +457,7 @@ export function commitTrace(root: string, args: RuntimeArgs, options: CommitTrac
     workflow: options.workflow,
     action: options.action || null,
     track_id: options.trackId || null,
+    task_key: options.taskKey || null,
     repo: options.repo || null,
     files,
     commit_sha: sha,

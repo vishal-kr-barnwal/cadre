@@ -402,7 +402,7 @@ const COMMON_DATA_FIELDS = ["dry_run", "operation", "stage", "sync_pre", "sync_p
 const WORKFLOW_DATA_FIELDS: Record<string, string[]> = {
   setup: ["topology", "provider", "sync_mode", "workspace_health", "workspace", "dependency_graph", "lsp", "lsp_setup", "integrations", "styleguide_ids", "project_skills", "scaffolded", "written", "skipped", "gitattributes", "ci_setup", "polyrepo_setup", "force"],
   newtrack: ["track_id", "track_context", "plan_assist", "generation_quality", "project_skills", "write", "regen", "restart"],
-  implement: ["prepare_implementation", "phase_schedule", "integration_worktrees", "task", "project_skills"],
+  implement: ["prepare_implementation", "phase_schedule", "integration_worktrees", "implementation_guard", "task", "project_skills"],
   status: ["status", "project_skills"],
   review: ["track_context", "review_assist", "gate", "provider", "required_provider_mcp", "required_evidence", "unsupported_reason", "project_skills"],
   validate: ["doctor", "team", "integrity", "collisions", "fleet", "branch_sets", "native_state", "project_skill_diagnostics", "projection_validation"],

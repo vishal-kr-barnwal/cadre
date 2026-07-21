@@ -168,7 +168,7 @@ test("executed worktree setup resumes the implement workflow", () => {
         agentIdentifier: "codex",
         maxWorkers: 3,
       },
-      execute: false,
+      execute: true,
     },
   });
 });

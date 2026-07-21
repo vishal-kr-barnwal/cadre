@@ -6,7 +6,7 @@ import { safeName } from "../../infrastructure/runtime/json-store";
 import { loadTopology } from "../../infrastructure/runtime/project-config";
 import { runCommand } from "../../infrastructure/runtime/system";
 import { branchSetEntryForRepo, branchSetForTrack, ensureIntegrationWorktree, workerRef, workerWorktreePath } from "./branch-set";
-import { claimsOverlap, normalizeClaimPath } from "./collision";
+import { claimsOverlap, normalizeClaimPath } from "./claim-paths";
 import type { CoreResult, ParallelWorker } from "./contracts";
 import { AGENT_IDENTIFIERS, isAgentIdentifier } from "./dispatch-adapters";
 import { parallelCleanup } from "./parallel-cleanup";
@@ -15,6 +15,7 @@ import { readParallelState, recordParallelWorker } from "./parallel-state";
 import { likelyTestCandidatesForFile } from "./planning";
 import { repoEntriesError, repoEntriesForTrack } from "./repo-resolution";
 import { asArray } from "./status";
+import { resolveTaskChangeSet } from "./task-change-set";
 import { completedTaskKeys, readyTasksForPhase } from "./task-readiness";
 import { findTrack } from "./track-context";
 import { parsePlanFile, phaseSchedule } from "./track-schedule";
@@ -34,28 +35,6 @@ function approvalComplete(args: RuntimeArgs): boolean {
 
 function changedFilesFromArgs(args: RuntimeArgs): string[] {
   return asStringArray(args.filesChanged || args.files_changed || args.files);
-}
-
-function isManifestChange(file: string): boolean {
-  const base = path.basename(file).toLowerCase();
-  return [
-    "package.json",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "bun.lockb",
-    "pyproject.toml",
-    "poetry.lock",
-    "requirements.txt",
-    "cargo.toml",
-    "cargo.lock",
-    "go.mod",
-    "go.sum",
-    "pom.xml",
-    "build.gradle",
-    "settings.gradle",
-    "tsconfig.json",
-  ].includes(base);
 }
 
 function fileStem(file: string): string {
@@ -97,13 +76,27 @@ export function validateWorkerFinishEvidence(root: string, track: CadreTrack, ar
     };
   }
   const task = planTaskForWorker(track, args);
+  const plan = parsePlanFile(track.plan_path);
   const ownedFiles = asStringArray(task?.files).map(normalizeClaimPath).filter(Boolean);
   const likelyTests = Array.from(new Set(ownedFiles.flatMap((file) => likelyTestCandidatesForFile(root, file)).map(normalizeClaimPath)));
+  const dependencyScope = task
+    ? resolveTaskChangeSet(
+        plan,
+        task,
+        changed,
+        asOptionalString(args.repo) || task.repo || loadTopology(root).defaultRepo || ".",
+        {
+          includeDependencyClaims: true,
+          evidence: changed,
+          defaultRepo: asOptionalString(loadTopology(root).defaultRepo) || null,
+        },
+      )
+    : null;
+  const claimedFiles = dependencyScope?.authorized_files || [];
   const allowed = changed.filter((file) =>
-    ownedFiles.some((owned) => claimsOverlap(file, owned))
+    claimedFiles.includes(file)
     || likelyTests.includes(file)
     || isNarrowTestChange(file, ownedFiles)
-    || isManifestChange(file)
   );
   const violations = changed.filter((file) => !allowed.includes(file));
   const forceAccepted = violations.length > 0 && args.force === true && approvalComplete(args);
@@ -114,12 +107,14 @@ export function validateWorkerFinishEvidence(root: string, track: CadreTrack, ar
     worker_id: args.workerId || args.worker_id || null,
     task_key: task?.task_key || null,
     owned_files: ownedFiles,
+    dependency_task_keys: dependencyScope?.dependency_task_keys || [],
+    dependency_files: dependencyScope?.dependency_files || [],
     likely_tests: likelyTests,
     files_changed: changed,
     allowed_files_changed: allowed,
     unowned_files_changed: violations,
     reason: violations.length === 0
-      ? "All changed files are owned, likely related tests, or narrow manifest changes"
+      ? "All changed files are owned by the task, a completed dependency, or a narrowly related test"
       : (forceAccepted
         ? "Unowned changed files accepted because force and approvalComplete were supplied"
         : "Changed files include paths outside the worker ownership claim"),

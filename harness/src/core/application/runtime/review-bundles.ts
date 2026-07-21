@@ -6,7 +6,7 @@ import { asJsonObject, asOptionalString, asStringArray } from "../../../guards";
 import type { JsonObject, RuntimeArgs, UnknownRecord } from "../../../types";
 
 import { fileExists, readJson, safeName, utcNow, writeJson } from "../../infrastructure/runtime/json-store";
-import { normalizeClaimPath } from "./collision";
+import { normalizeClaimPath } from "./claim-paths";
 import type { CoreResult, ReviewFile } from "./contracts";
 import { reconcileExplicitBundleMembership } from "./explicit-review-bundle";
 import { reviewOutputMode, targetReviewBundle } from "./review-output";

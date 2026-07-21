@@ -37,7 +37,7 @@ export function trackPacket(deps: RuntimeDependencies, args: RuntimeArgs): Runti
           root,
           workflow: "implement",
           input,
-          execute: false,
+          execute: true,
         },
       };
     }

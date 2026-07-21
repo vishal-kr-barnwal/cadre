@@ -19,10 +19,12 @@ export interface CommandResult extends JsonObject {
 
 export interface LockInfo extends JsonObject {
   name?: string;
+  token?: string;
   pid?: number;
   owner?: string | null;
   acquired_at?: string;
   updated_at?: string;
+  expires_at?: string;
   hostname?: string;
 }
 
@@ -323,6 +325,17 @@ export interface RuntimeArgs extends JsonObject {
   repo?: string | null | undefined;
   repos?: string[] | JsonObject;
   workingRoot?: string | null | undefined;
+  baselineSha?: string | undefined;
+  baseline_sha?: string | undefined;
+  dispatchClean?: boolean | undefined;
+  reconcileCommit?: boolean | undefined;
+  reconcile_commit?: boolean | undefined;
+  stateRecovery?: boolean | undefined;
+  state_recovery?: boolean | undefined;
+  completionJournalKey?: string | undefined;
+  completion_journal_key?: string | undefined;
+  changeSetFingerprint?: string | undefined;
+  change_set_fingerprint?: string | undefined;
   claim?: boolean;
   threshold?: number;
   limit?: number;

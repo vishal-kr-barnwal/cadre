@@ -580,6 +580,60 @@ function setupTraceableProject(root) {
   return setup;
 }
 
+function setupScopedCompletionProject(root, trackId, plan) {
+  git(root, ["init"]);
+  write(path.join(root, "cadre", "config.json"), JSON.stringify({
+    traceability: {
+      enabled: true,
+      auto_product_commits: true,
+      auto_control_commits: true,
+      git_notes: false,
+    },
+  }, null, 2));
+  write(path.join(root, "cadre", ".gitignore"), "/local/\n");
+  write(path.join(root, "README.md"), "# Scoped completion test\n");
+  writeTrack(root, trackId, plan);
+  git(root, ["add", "."]);
+  git(root, ["commit", "-m", `seed ${trackId}`]);
+  return git(root, ["rev-parse", "HEAD"]).stdout.trim();
+}
+
+test("globstar directory claims match direct and nested files", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-globstar-claim-test-"));
+  try {
+    writeTrack(root, "globstar-pattern", samplePlan("globstar-pattern", {
+      phases: [{
+        phase_index: 1,
+        title: "Phase 1: Pattern",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [planTask(1, 1, "Claim TypeScript files", ["src/**/*.ts"])],
+      }],
+    }));
+    writeTrack(root, "globstar-concrete", samplePlan("globstar-concrete", {
+      phases: [{
+        phase_index: 1,
+        title: "Phase 1: Concrete paths",
+        execution_mode: "sequential",
+        depends_on: [],
+        tasks: [planTask(1, 1, "Claim concrete files", ["src/app.ts", "src/lib/app.ts", "src/app.js"])],
+      }],
+    }));
+
+    const scan = core.collisionScan(root);
+    assert.equal(scan.collisions.length, 2);
+    assert.deepEqual(
+      scan.collisions
+        .flatMap((collision) => collision.claims.map((claim) => claim.file))
+        .filter((file) => file !== "src/**/*.ts")
+        .sort(),
+      ["src/app.ts", "src/lib/app.ts"],
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("repoMap filters generated bundles and local variable noise", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-core-test-"));
   try {
@@ -699,6 +753,220 @@ test("commit trace records setup, newtrack, and task completion commits", () => 
     assert.equal(gitSubject(root, completed.control_commit.commit_sha), `cadre(complete): record ${trackId} phase 1 task 1`);
     assert.equal(gitNote(root, completed.product_commit.commit_sha).kind, "product");
     assert.equal(gitNote(root, completed.control_commit.commit_sha).product_commit_sha, completed.product_commit.commit_sha);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask commits directory and completed-dependency claims without sweeping unrelated files", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-scoped-task-commit-test-"));
+  try {
+    const trackId = "scoped_task_commit_20260721";
+    const plan = planFromPhases(trackId, [{
+      phase_index: 1,
+      title: "Phase 1: Scoped changes",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [
+        planTask(1, 1, "Create workspace manifests", ["Cargo.toml", "Cargo.lock"], { status: "completed" }),
+        planTask(1, 2, "Create shared contracts", ["contracts", "crates", "packages"], { depends_on: ["phase1_task1"] }),
+        planTask(1, 3, "Implement application", ["src"], { depends_on: ["phase1_task2"] }),
+        planTask(1, 4, "Rename application entrypoint", ["src"], { depends_on: ["phase1_task3"] }),
+      ],
+    }]);
+    write(path.join(root, "Cargo.toml"), "[workspace]\n");
+    write(path.join(root, "Cargo.lock"), "# initial lock\n");
+    write(path.join(root, "src", "trailing "), "initial\n");
+    const baselineSha = setupScopedCompletionProject(root, trackId, plan);
+    const changed = [
+      "Cargo.lock",
+      "Cargo.toml",
+      "contracts/-leading.yaml",
+      "contracts/:(glob)literal.yaml",
+      "contracts/cache.tmp.yaml",
+      "contracts/openapi/v1/openapi.yaml",
+      "contracts/schema-link",
+      "crates/shared-contracts/src/lib.rs",
+      "packages/shared-types/src/index.ts",
+    ];
+    for (const file of changed.filter((candidate) => candidate !== "contracts/schema-link")) write(path.join(root, file), `${file}\n`);
+    fs.symlinkSync("openapi/v1/openapi.yaml", path.join(root, "contracts", "schema-link"));
+    git(root, ["config", "core.filemode", "false"]);
+    fs.chmodSync(path.join(root, "Cargo.toml"), 0o755);
+    const manifestStatus = git(root, ["status", "--porcelain=v1", "--", "Cargo.toml", "Cargo.lock"]).stdout;
+    assert.match(manifestStatus, / M Cargo\.lock/);
+    assert.match(manifestStatus, / M Cargo\.toml/);
+    write(path.join(root, "contracts-old", "escape.yaml"), "unclaimed\n");
+
+    const unclaimed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 2,
+      workingRoot: root,
+      baselineSha,
+      dispatchClean: true,
+      command: "node -e \"require('fs').writeFileSync('coverage-ran.txt','yes')\"",
+      coverageThreshold: 80,
+    });
+    assert.equal(unclaimed.ok, false);
+    assert.equal(unclaimed.stage, "product_change_set");
+    assert.deepEqual(unclaimed.change_set.unclaimed_files, ["contracts-old/escape.yaml"]);
+    assert.equal(fs.existsSync(path.join(root, "coverage-ran.txt")), false, "scope validation must run before coverage commands");
+    fs.rmSync(path.join(root, "contracts-old"), { recursive: true, force: true });
+
+    const completed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 2,
+      workingRoot: root,
+      baselineSha,
+      dispatchClean: true,
+      filesChanged: changed,
+      command: "printf 'Statements : 93%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+    assert.deepEqual(completed.product_commit.files, [...changed].sort());
+    assert.deepEqual(completed.product_commit.note, null);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+    const task2 = readJson(path.join(root, "cadre", "tracks", trackId, "plan.json")).phases[0].tasks[1];
+    assert.equal(task2.status, "completed");
+    assert.equal(task2.commit_shas.length, 1);
+
+    const task3Baseline = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    write(path.join(root, "src", "app.js"), "export const app = true;\n");
+    write(path.join(root, "src", "trailing "), "modified\n");
+    write(path.join(root, "scratch", "unowned.js"), "export const stray = true;\n");
+    const wrongScope = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 3,
+      workingRoot: root,
+      baselineSha: task3Baseline,
+      dispatchClean: true,
+      filesChanged: ["src/app.js", "src/trailing ", "scratch/unowned.js"],
+      command: "printf 'Statements : 93%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(wrongScope.ok, false);
+    assert.deepEqual(wrongScope.change_set.unclaimed_files, ["scratch/unowned.js"]);
+    fs.rmSync(path.join(root, "scratch"), { recursive: true, force: true });
+
+    const broadEvidence = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 3,
+      workingRoot: root,
+      baselineSha: task3Baseline,
+      dispatchClean: true,
+      filesChanged: ["src"],
+      command: "printf 'Statements : 93%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(broadEvidence.ok, false);
+    assert.deepEqual(broadEvidence.change_set.unmatched_evidence, ["src"]);
+    assert.deepEqual(broadEvidence.change_set.missing_evidence, ["src/app.js", "src/trailing "]);
+
+    const exactEvidence = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 3,
+      workingRoot: root,
+      baselineSha: task3Baseline,
+      dispatchClean: true,
+      filesChanged: ["src/app.js", "src/trailing "],
+      command: "printf 'Statements : 93%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(exactEvidence.ok, true, JSON.stringify(exactEvidence));
+    assert.deepEqual(exactEvidence.product_commit.files, ["src/app.js", "src/trailing "]);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+
+    const renameBaseline = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    git(root, ["mv", "src/app.js", "src/renamed.js"]);
+    const renamed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 4,
+      workingRoot: root,
+      baselineSha: renameBaseline,
+      dispatchClean: true,
+      filesChanged: ["src/app.js", "src/renamed.js"],
+      command: "printf 'Statements : 93%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(renamed.ok, true, JSON.stringify(renamed));
+    assert.deepEqual(renamed.product_commit.files, ["src/app.js", "src/renamed.js"]);
+    assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completeTask serializes the full completion and releases its track lock after failure", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-complete-track-lock-test-"));
+  try {
+    const trackId = "completion_lock_20260721";
+    const plan = planFromPhases(trackId, [{
+      phase_index: 1,
+      title: "Phase 1: Locked completion",
+      execution_mode: "sequential",
+      depends_on: [],
+      tasks: [planTask(1, 1, "Complete under one lock", ["src/locked.js"])],
+    }]);
+    const baselineSha = setupScopedCompletionProject(root, trackId, plan);
+    write(path.join(root, "src", "locked.js"), "export const locked = true;\n");
+    const lockDir = path.join(root, "cadre", ".locks", `track_${trackId}.lock`);
+    fs.mkdirSync(lockDir, { recursive: true });
+    write(path.join(lockDir, "owner.json"), `${JSON.stringify({
+      name: `track:${trackId}`,
+      pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })}\n`);
+    const marker = path.join(root, "cadre", "local", "coverage-ran.txt");
+    const blocked = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: root,
+      baselineSha,
+      dispatchClean: true,
+      command: `node -e "require('fs').writeFileSync(${JSON.stringify(marker)},'yes')"`,
+      coverageThreshold: 80,
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.stage, "lock");
+    assert.equal(fs.existsSync(marker), false);
+    assert.equal(git(root, ["rev-parse", "HEAD"]).stdout.trim(), baselineSha);
+    fs.rmSync(lockDir, { recursive: true, force: true });
+
+    const failedCoverage = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: root,
+      baselineSha,
+      dispatchClean: true,
+      command: "node -e \"process.exit(9)\"",
+      coverageThreshold: 80,
+    });
+    assert.equal(failedCoverage.ok, false);
+    assert.equal(failedCoverage.stage, "coverage");
+    assert.equal(fs.existsSync(lockDir), false, "the whole-operation lock must release on failure");
+
+    const completed = core.completeTask(root, {
+      trackId,
+      phaseIndex: 1,
+      taskIndex: 1,
+      workingRoot: root,
+      baselineSha,
+      dispatchClean: true,
+      command: "printf 'Statements : 93%%\\n'",
+      coverageThreshold: 80,
+    });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
     assert.equal(git(root, ["status", "--porcelain"]).stdout.trim(), "");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1896,7 +2164,7 @@ test("completeTask records approved offline manual verification evidence", () =>
   }
 });
 
-test("completeTask autorun manual verification returns approval evidence without mutating plan", () => {
+test("completeTask blocks autorun manual verification that dirties product files", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cadre-manual-autorun-preview-test-"));
   try {
     git(root, ["init"]);
@@ -1912,8 +2180,9 @@ test("completeTask autorun manual verification returns approval evidence without
     });
 
     assert.equal(result.ok, false);
-    assert.equal(result.stage, "manual_verification_approval");
+    assert.equal(result.stage, "manual_verification_worktree");
     assert.equal(result.manual_verification.result.ok, true);
+    assert.deepEqual(result.dirty_files, ["manual-autorun.txt"]);
     assert.equal(fs.existsSync(path.join(root, "manual-autorun.txt")), true);
     const planJson = readJson(path.join(root, "cadre", "tracks", "manual_autorun_preview_20260619", "plan.json"));
     assert.equal(planJson.phases[0].tasks[1].status, "pending");
@@ -1982,12 +2251,12 @@ test("completeTask writes completion journal and native events on retry", () => 
     const first = core.completeTask(root, args);
     assert.equal(first.ok, true);
     const second = core.completeTask(root, args);
-    assert.equal(second.ok, true);
+    assert.equal(second.ok, true, JSON.stringify(second));
 
     const journal = JSON.parse(fs.readFileSync(path.join(root, "cadre", "tracks", "journal_20260617", "completion_journal.json"), "utf8"));
     const entries = Object.values(journal.entries);
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0].stage, "completed");
+    assert.equal(entries.length, 2);
+    assert.ok(entries.every((entry) => entry.stage === "completed"));
     const events = fs.readFileSync(path.join(root, "cadre", "events.jsonl"), "utf8")
       .trim()
       .split(/\n/)
@@ -6046,11 +6315,11 @@ test("cancellation rechecks supersession recovery inside the target lifecycle lo
     const productBefore = fs.readFileSync(productFile, "utf8");
     const transactionId = sessionId === "9".repeat(24) ? "8".repeat(24) : "9".repeat(24);
     const journalFile = path.join(sessionDirectory, `${transactionId}.supersede-journal.json`);
-    const originalMkdir = fs.mkdirSync;
+    const originalRename = fs.renameSync;
     let cancellationLockAcquisitions = 0;
     let injected = false;
-    fs.mkdirSync = function injectJournalInsideCancellationLock(target) {
-      const result = originalMkdir.apply(this, arguments);
+    fs.renameSync = function injectJournalInsideCancellationLock(_source, target) {
+      const result = originalRename.apply(this, arguments);
       const stack = new Error().stack || "";
       if (String(target).endsWith(path.join("cadre", ".locks", "approval-target-lifecycle.lock"))
         && stack.includes("cancelApprovalSession")) {
@@ -6070,7 +6339,7 @@ test("cancellation rechecks supersession recovery inside the target lifecycle lo
         approvalCancel: true,
       });
     } finally {
-      fs.mkdirSync = originalMkdir;
+      fs.renameSync = originalRename;
     }
     assert.equal(injected, true);
     assert.equal(blocked.ok, false);
@@ -6092,10 +6361,10 @@ test("preview materialization rechecks recovery inside the target lifecycle lock
     const transactionId = "7".repeat(24);
     const sessionDirectory = path.join(root, "cadre", "local", "approval-sessions");
     const journalFile = path.join(sessionDirectory, `${transactionId}.supersede-journal.json`);
-    const originalMkdir = fs.mkdirSync;
+    const originalRename = fs.renameSync;
     let injected = false;
-    fs.mkdirSync = function injectJournalInsidePreviewLock(target) {
-      const result = originalMkdir.apply(this, arguments);
+    fs.renameSync = function injectJournalInsidePreviewLock(_source, target) {
+      const result = originalRename.apply(this, arguments);
       const stack = new Error().stack || "";
       if (!injected
         && String(target).endsWith(path.join("cadre", ".locks", "approval-target-lifecycle.lock"))
@@ -6121,7 +6390,7 @@ test("preview materialization rechecks recovery inside the target lifecycle lock
         techStack: { languages: ["TypeScript"] },
       }));
     } finally {
-      fs.mkdirSync = originalMkdir;
+      fs.renameSync = originalRename;
     }
     assert.equal(injected, true);
     assert.equal(blocked.ok, false);

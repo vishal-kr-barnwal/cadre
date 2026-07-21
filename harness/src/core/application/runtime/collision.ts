@@ -1,55 +1,11 @@
 import { asString } from "../../../guards";
 
 import { loadTopology } from "../../infrastructure/runtime/project-config";
+import { claimsOverlap, normalizeClaimPath } from "./claim-paths";
 import type { Claim, CoreResult } from "./contracts";
 import { listTracks, planClaims } from "./track-schedule";
 
-export function normalizeClaimPath(file: unknown): string {
-  return String(file || "")
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
-    .replace(/^\.\//, "")
-    .replace(/\/$/, "");
-}
-
-export function globToRegExp(glob: string): RegExp {
-  const normalized = normalizeClaimPath(glob);
-  let out = "^";
-  for (let i = 0; i < normalized.length; i += 1) {
-    const char = normalized[i];
-    const next = normalized[i + 1];
-    if (char === "*" && next === "*") {
-      out += ".*";
-      i += 1;
-    } else if (char === "*") {
-      out += "[^/]*";
-    } else if (char === "?") {
-      out += "[^/]";
-    } else if (char && "\\^$+?.()|{}[]".includes(char)) {
-      out += `\\${char}`;
-    } else {
-      out += char;
-    }
-  }
-  return new RegExp(`${out}$`);
-}
-
-export function isGlobClaim(file: string): boolean {
-  return /[*?]/.test(file);
-}
-
-export function claimsOverlap(leftFile: string, rightFile: string): boolean {
-  const left = normalizeClaimPath(leftFile);
-  const right = normalizeClaimPath(rightFile);
-  if (!left || !right) return false;
-  if (left === right) return true;
-  if (right.startsWith(`${left}/`) || left.startsWith(`${right}/`)) return true;
-  if (isGlobClaim(left) && globToRegExp(left).test(right)) return true;
-  if (isGlobClaim(right) && globToRegExp(right).test(left)) return true;
-  return false;
-}
+export { claimsOverlap, globToRegExp, isGlobClaim, normalizeClaimPath } from "./claim-paths";
 
 export function collisionScan(root: string): CoreResult {
   const topology = loadTopology(root);

@@ -357,6 +357,7 @@ export function recordTaskResultUnlocked(root: string, args: RuntimeArgs = {}): 
     const planPatch = writeArtifactPairAtomic(root, canonicalPath, canonicalContent, projectionPath, projectionContent, { lock: false });
     if (planPatch.ok === false) return { ok: false, track_id: track.track_id, stage: "plan_pair_write", metadata, plan_json: planPatch };
     const event = appendCadreEvent(root, {
+      ...(args.dedupKey ? { id: `evt_${String(args.dedupKey).replace(/[^A-Za-z0-9_.-]+/g, "_")}` } : {}),
       kind: "task_result_recorded",
       workflow: "record_task_result",
       track_id: track.track_id,

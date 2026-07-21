@@ -33,6 +33,8 @@ import {
   worktreeSetupContinuation,
   worktreesReady,
 } from "./implementation-orchestration";
+import { recordImplementationDispatch } from "./implementation-dispatch";
+import { implementationWorktreeGate } from "./implementation-recovery";
 import { reviewGate } from "./track-mutations";
 import { listTracks, phaseSchedule } from "./track-schedule";
 import { workflowSummary } from "./workflow-response";
@@ -41,30 +43,55 @@ import { doctor } from "./workspace-health";
 export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreResult {
   const shouldClaim = args.claim === true || args.execute === true;
   const preflight = implementationPrep(root, { ...args, claim: false });
-  const prep = preflight.ok !== false && shouldClaim
-    ? implementationPrep(root, { ...args, claim: true })
-    : preflight;
-  const trackId = asOptionalString(prep.selected_track) || args.trackId || args.track_id || null;
+  const trackId = asOptionalString(preflight.selected_track) || args.trackId || args.track_id || null;
   const schedule = trackId ? phaseSchedule(root, { ...args, trackId }) : null;
-  const integrationWorktrees = trackId && prep.ok !== false
+  const integrationWorktrees = trackId && preflight.ok !== false
     ? worktreePlan(root, { ...args, trackId, repo: undefined, execute: false })
     : null;
-  const ok = prep.ok !== false && schedule?.ok !== false && integrationWorktrees?.ok !== false;
+  const readOk = preflight.ok !== false && schedule?.ok !== false && integrationWorktrees?.ok !== false;
   const orchestration = {
-    prepare_implementation: prep,
+    prepare_implementation: preflight,
     phase_schedule: schedule,
   };
-  const target = ok ? implementationTarget(orchestration) : null;
-  const worktreeSetup = ok && trackId && integrationWorktrees
+  const target = readOk ? implementationTarget(orchestration) : null;
+  const worktreeSetup = readOk && trackId && integrationWorktrees
     ? worktreeSetupContinuation(root, trackId, integrationWorktrees, args)
     : null;
-  const task = target && integrationWorktrees
-    ? deferredTaskPacket(root, target, integrationWorktrees)
+  const implementationGuard = readOk && trackId && integrationWorktrees && worktreesReady(integrationWorktrees)
+    ? implementationWorktreeGate(
+        root,
+        String(trackId),
+        integrationWorktrees,
+        target?.task,
+        Boolean(target && !parallelImplementation(target)),
+      )
     : null;
+  const prep = readOk && implementationGuard?.ok !== false && shouldClaim
+    ? implementationPrep(root, { ...args, claim: true })
+    : preflight;
+  const ready = readOk && prep.ok !== false && implementationGuard?.ok !== false;
+  const stateRecoveryReady = implementationGuard?.state_recovery_ready === true;
+  const reconciliation = implementationGuard?.reconciliation_ready === true || stateRecoveryReady
+    ? asJsonObject(implementationGuard.next)
+    : null;
+  const task = ready && !reconciliation && target && integrationWorktrees
+    ? deferredTaskPacket(
+        root,
+        target,
+        integrationWorktrees,
+        implementationGuard?.clean === true || implementationGuard?.dispatch_clean === true,
+        implementationGuard?.continuation === true,
+      )
+    : null;
+  const implementationDispatch = task && shouldClaim && implementationGuard?.clean === true && trackId
+    ? recordImplementationDispatch(root, String(trackId), task)
+    : null;
+  const ok = ready && implementationDispatch?.ok !== false;
   const parallelReady = Boolean(
     target
     && integrationWorktrees
     && worktreesReady(integrationWorktrees)
+    && implementationGuard?.clean === true
     && parallelImplementation(target),
   );
   return {
@@ -73,32 +100,46 @@ export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreRes
     phase_state: ok
       ? worktreeSetup
         ? "awaiting_worktree"
-        : task
-          ? "implementation_ready"
-          : parallelReady
-            ? "parallel_ready"
-            : "ready"
+        : reconciliation
+          ? stateRecoveryReady ? "state_recovery_ready" : "reconciliation_ready"
+          : task
+            ? "implementation_ready"
+            : parallelReady
+              ? "parallel_ready"
+              : "ready"
       : "blocked",
     prepare_implementation: prep,
     phase_schedule: schedule,
     integration_worktrees: integrationWorktrees,
-    next: worktreeSetup,
-    ...(task ? { task } : {}),
-    ...(worktreeSetup ? {
+    implementation_guard: implementationGuard,
+    implementation_dispatch: implementationDispatch,
+    ...(implementationGuard?.ok === false ? { stage: implementationGuard.stage, error: implementationGuard.error, blocked: implementationGuard.blocked } : {}),
+    next: ok ? worktreeSetup || reconciliation : null,
+    ...(ok && task ? { task } : {}),
+    ...(ok && worktreeSetup ? {
       decision: {
         kind: "worktree_setup",
         track_id: trackId,
         prompt: "Create and check out the required integration worktree before implementation begins.",
         call: worktreeSetup,
       },
-    } : task ? {
+    } : ok && reconciliation ? {
+      decision: {
+        kind: stateRecoveryReady ? "task_state_recovery" : "task_reconciliation",
+        track_id: trackId,
+        prompt: stateRecoveryReady
+          ? "A product commit succeeded before task state finished recording. Invoke the returned state-only recovery call."
+          : "A completed task left an attributable partial change set. Invoke the returned reconciliation call before continuing implementation.",
+        call: reconciliation,
+      },
+    } : ok && task ? {
       decision: {
         kind: "implementation_task",
         track_id: trackId,
         task_key: task.task_key || null,
         prompt: "Perform the task in working_root, then invoke complete_packet with implementation evidence.",
       },
-    } : parallelReady ? {
+    } : ok && parallelReady ? {
       decision: {
         kind: "parallel_ready",
         track_id: trackId,
@@ -109,6 +150,8 @@ export function workflowImplement(root: string, args: RuntimeArgs = {}): CoreRes
       error: asOptionalString(prep.error || prep.reason)
         || asOptionalString(schedule?.error)
         || asOptionalString(integrationWorktrees?.error)
+        || asOptionalString(implementationGuard?.error || implementationGuard?.reason)
+        || asOptionalString(implementationDispatch?.error)
         || "Implementation preparation failed",
     }),
   };
