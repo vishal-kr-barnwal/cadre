@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { packagePluginMarketplace } from "./package-plugin.js";
+import { configureClaudeMcpApproval, configureCodexMcpApproval } from "./permissions.js";
 
 const args = process.argv.slice(2);
 const marketplaceName = "cadre";
@@ -80,7 +81,7 @@ function replaceMarketplaceIfNeeded(
   return false;
 }
 
-function installCodex(targetRoot: string, allowReplacement: boolean): void {
+function installCodex(targetRoot: string, allowReplacement: boolean, autoApproveMcp: boolean): void {
   const existing = codexMarketplaces().find((entry) => entry.name === marketplaceName);
   const retained = replaceMarketplaceIfNeeded("codex", existing, targetRoot, allowReplacement);
   if (!retained) run("codex", ["plugin", "marketplace", "add", targetRoot]);
@@ -89,9 +90,14 @@ function installCodex(targetRoot: string, allowReplacement: boolean): void {
   if (!installed.some((entry) => entry.pluginId === pluginId && entry.installed && entry.enabled)) {
     throw new Error(`Codex did not report ${pluginId} as installed and enabled`);
   }
+  if (autoApproveMcp) {
+    const codexRoot = process.env.CODEX_HOME ? resolve(process.env.CODEX_HOME) : join(homedir(), ".codex");
+    const update = configureCodexMcpApproval(join(codexRoot, "config.toml"));
+    process.stdout.write(`${update.changed ? "Added" : "Retained"} Codex Cadre MCP approval in ${update.path}\n`);
+  }
 }
 
-function installClaude(targetRoot: string, allowReplacement: boolean): void {
+function installClaude(targetRoot: string, allowReplacement: boolean, autoApproveMcp: boolean): void {
   const existing = claudeMarketplaces().find((entry) => entry.name === marketplaceName);
   const retained = replaceMarketplaceIfNeeded("claude", existing, targetRoot, allowReplacement);
   if (!retained) run("claude", ["plugin", "marketplace", "add", targetRoot, "--scope", "user"]);
@@ -105,6 +111,10 @@ function installClaude(targetRoot: string, allowReplacement: boolean): void {
   const verified = runJson<InstalledEntry[]>("claude", ["plugin", "list", "--json"]);
   if (!verified.some((entry) => entry.id === pluginId && entry.scope === "user" && entry.enabled)) {
     throw new Error(`Claude did not report ${pluginId} as installed and enabled`);
+  }
+  if (autoApproveMcp) {
+    const update = configureClaudeMcpApproval(join(homedir(), ".claude", "settings.json"));
+    process.stdout.write(`${update.changed ? "Added" : "Retained"} Claude Cadre MCP approval in ${update.path}\n`);
   }
 }
 
@@ -154,8 +164,9 @@ try {
   if (prepared.backupRoot) process.stdout.write(`Previous marketplace retained at ${prepared.backupRoot}\n`);
   if (!args.includes("--prepare-only")) {
     const allowReplacement = args.includes("--replace-marketplace");
-    if (agent === "all" || agent === "codex") installCodex(targetRoot, allowReplacement);
-    if (agent === "all" || agent === "claude") installClaude(targetRoot, allowReplacement);
+    const autoApproveMcp = !args.includes("--prompt-mcp-tools");
+    if (agent === "all" || agent === "codex") installCodex(targetRoot, allowReplacement, autoApproveMcp);
+    if (agent === "all" || agent === "claude") installClaude(targetRoot, allowReplacement, autoApproveMcp);
     process.stdout.write(`Installed ${pluginId} for ${agent === "all" ? "Codex and Claude" : agent}.\n`);
     process.stdout.write("Start a new Codex conversation and run /reload-plugins in Claude Code.\n");
   }

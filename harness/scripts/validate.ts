@@ -115,7 +115,10 @@ for (const name of [
   else if (!readFileSync(path, "utf8").includes("## Sources")) errors.push(`default styleguide: ${name}.md lacks sources`);
 }
 
-for (const file of ["src/mcp/server.ts", "src/domain/templates.ts", "src/domain/init.ts", "src/domain/state.ts", "dist/cadre-mcp.mjs"]) {
+for (const file of [
+  "src/mcp/server.ts", "src/domain/templates.ts", "src/domain/init.ts", "src/domain/state.ts",
+  "scripts/permissions.ts", "dist/cadre-mcp.mjs"
+]) {
   if (!existsSync(join(root, file))) errors.push(`runtime: missing ${file}`);
 }
 if (existsSync(join(root, "skills", "create", "assets"))) errors.push("runtime: duplicate skill-local assets remain");

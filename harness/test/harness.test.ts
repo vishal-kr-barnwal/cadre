@@ -10,6 +10,11 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
+import {
+  CLAUDE_APPROVAL,
+  configureClaudeMcpApproval,
+  configureCodexMcpApproval
+} from "../scripts/permissions.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateRoot = join(root, "templates", "v1", "init");
@@ -224,8 +229,8 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "0.2.0+codex.test-build");
-  assert.equal(claudeManifest.version, "0.2.0+claude.test-build");
+  assert.equal(codexManifest.version, "0.2.1+codex.test-build");
+  assert.equal(claudeManifest.version, "0.2.1+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
@@ -244,9 +249,54 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "0.2.0+codex.test-build");
+  assert.equal(previousManifest.version, "0.2.1+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "0.2.0+codex.second-build");
+  assert.equal(updatedManifest.version, "0.2.1+codex.second-build");
+});
+
+test("installer permission helpers narrowly pre-approve Cadre MCP tools", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cadre-permissions-"));
+  const codexConfig = join(directory, "codex", "config.toml");
+  mkdirSync(dirname(codexConfig), { recursive: true });
+  writeFileSync(codexConfig, "# Preserve this comment\nmodel = \"gpt-5\"\n");
+
+  const codexFirst = configureCodexMcpApproval(codexConfig);
+  assert.equal(codexFirst.changed, true);
+  const codexBody = readFileSync(codexConfig, "utf8");
+  assert.match(codexBody, /# Preserve this comment/);
+  assert.match(codexBody, /\[plugins\."cadre@cadre"\.mcp_servers\.cadre\]/);
+  assert.match(codexBody, /default_tools_approval_mode = "approve"/);
+  assert.equal(configureCodexMcpApproval(codexConfig).changed, false);
+
+  writeFileSync(codexConfig, `${codexBody.replace(
+    "default_tools_approval_mode = \"approve\"",
+    "default_tools_approval_mode = \"prompt\""
+  )}`);
+  assert.equal(configureCodexMcpApproval(codexConfig).changed, true);
+  assert.match(readFileSync(codexConfig, "utf8"), /default_tools_approval_mode = "approve"/);
+
+  const claudeSettings = join(directory, "claude", "settings.json");
+  mkdirSync(dirname(claudeSettings), { recursive: true });
+  writeFileSync(claudeSettings, `{
+  // Preserve this comment
+  "permissions": {
+    "allow": ["Read"]
+  }
+}
+`);
+  const claudeFirst = configureClaudeMcpApproval(claudeSettings);
+  assert.equal(claudeFirst.changed, true);
+  const claudeBody = readFileSync(claudeSettings, "utf8");
+  assert.match(claudeBody, /\/\/ Preserve this comment/);
+  assert.match(claudeBody, new RegExp(CLAUDE_APPROVAL.replaceAll("*", "\\*")));
+  assert.equal(configureClaudeMcpApproval(claudeSettings).changed, false);
+
+  const deniedSettings = join(directory, "claude-denied.json");
+  writeFileSync(deniedSettings, '{"permissions":{"deny":["mcp__cadre__*"]}}\n');
+  assert.throws(
+    () => configureClaudeMcpApproval(deniedSettings),
+    /deny rule.*blocks Cadre MCP tools/
+  );
 });
 
 test("compiled MCP exposes versioned templates and initializes projects without copied runtime", async () => {

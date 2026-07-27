@@ -17,6 +17,8 @@ node --import tsx scripts/install.ts --agent all
 
 Use `--agent codex` or `--agent claude` to install for only one product. The prepared marketplace lives at `~/.cadre/marketplaces/cadre`; an existing marketplace with the same name at another location is never replaced unless `--replace-marketplace` is explicitly supplied. Previous locally prepared Cadre marketplace payloads are retained as timestamped backups during updates.
 
+Installation pre-approves only tools from Cadre's MCP server: Codex receives `default_tools_approval_mode = "approve"` under the `cadre@cadre` plugin policy, while Claude receives `mcp__cadre__*` in its user permission allowlist. Existing configuration and unrelated permission rules are preserved. Pass `--prompt-mcp-tools` to retain per-call MCP prompts instead.
+
 The packaged plugin includes the shared skills, MCP configuration, compiled runtime, and template set. Its structure can add hooks and apps later without copying runtime files into each project. After installation, start a new Codex conversation and run `/reload-plugins` in Claude Code.
 
 For package-only validation without registering or installing anything:
