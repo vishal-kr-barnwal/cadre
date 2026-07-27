@@ -1,4 +1,4 @@
 interface:
   display_name: "Cadre: Archive"
-  short_description: "Archive a completed Cadre track"
-  default_prompt: "Use $cadre-archive to archive a completed track and distill its patterns."
+  short_description: "Archive completed tracks as one batch"
+  default_prompt: "Use $cadre-archive to archive one or more completed tracks in a resumable batch and distill their patterns."

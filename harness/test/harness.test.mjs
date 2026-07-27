@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -102,6 +102,7 @@ No existing pattern is relevant.
   writeFileSync(join(trackRoot, "state.json"), `${JSON.stringify({
     schemaVersion: 1,
     trackId: "example",
+    title: "Example",
     type: "feature",
     status: "completed",
     checkpoint: "ready",
@@ -115,17 +116,20 @@ No existing pattern is relevant.
     reviewCycles: [{ cycle: 1, outcome: "clean" }],
     history: []
   }, null, 2)}\n`);
-  const projectPath = join(cadreRoot, "project.json");
-  const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.tracks.push({
-    id: "example", title: "Example", type: "feature", status: "completed",
-    dependencies: [], revision: 1, path: "tracks/example"
-  });
-  writeFileSync(projectPath, `${JSON.stringify(project, null, 2)}\n`);
   runState(projectRoot, "render");
   assert.equal(runState(projectRoot, "validate").status, 0);
 
-  const planPath = join(trackRoot, "plan.md");
+  const statePath = join(trackRoot, "state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  state.status = "archived";
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  const archiveRoot = join(cadreRoot, "archive", "example");
+  renameSync(trackRoot, archiveRoot);
+  runState(projectRoot, "render");
+  assert.equal(runState(projectRoot, "validate").status, 0);
+  assert.match(readFileSync(join(cadreRoot, "tracks.md"), "utf8"), /example.*archived/);
+
+  const planPath = join(archiveRoot, "plan.md");
   writeFileSync(planPath, readFileSync(planPath, "utf8").replace(" <!-- commit: abcdef2 -->", ""));
   const invalid = runState(projectRoot, "validate", true);
   assert.notEqual(invalid.status, 0);
@@ -155,6 +159,7 @@ None.
   writeFileSync(join(trackRoot, "state.json"), `${JSON.stringify({
     schemaVersion: 1,
     trackId: "interrupted",
+    title: "Interrupted",
     type: "bug",
     status: "drafting-plan",
     checkpoint: "commit-pending",
@@ -174,13 +179,6 @@ None.
     reviewCycles: [],
     history: []
   }, null, 2)}\n`);
-  const projectPath = join(cadreRoot, "project.json");
-  const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.tracks.push({
-    id: "interrupted", title: "Interrupted", type: "bug", status: "drafting-plan",
-    dependencies: [], revision: 1, path: "tracks/interrupted"
-  });
-  writeFileSync(projectPath, `${JSON.stringify(project, null, 2)}\n`);
   runState(projectRoot, "render");
   const result = runState(projectRoot, "validate");
   assert.match(result.stdout, /Cadre state is valid/);
@@ -221,6 +219,18 @@ test("create classifies project context and ambiguous planning commands must cla
   }
 });
 
+test("create bootstraps Git only when no worktree exists", () => {
+  const create = readFileSync(join(root, "skills", "cadre-create", "SKILL.md"), "utf8");
+  assert.match(create, /git rev-parse --show-toplevel/);
+  assert.match(create, /git init/);
+  assert.match(create, /never initialize a nested repository/);
+  assert.match(create, /git-initialized/);
+
+  const project = JSON.parse(readFileSync(join(templateRoot, "project.json"), "utf8"));
+  assert.ok(project.setup.operation.repositoryRoot);
+  assert.ok(project.setup.operation.gitDisposition);
+});
+
 test("create requires separate workflow and styleguide acceptance", () => {
   const create = readFileSync(join(root, "skills", "cadre-create", "SKILL.md"), "utf8");
   assert.match(create, /whether the default workflow is acceptable or the human wants changes/);
@@ -235,11 +245,82 @@ test("default styleguide catalog covers the supported stack", () => {
   const styleguideRoot = join(root, "skills", "cadre-create", "assets", "styleguides");
   const expected = [
     "go", "java", "kotlin", "maven", "gradle", "javascript", "typescript",
-    "react", "flutter", "dart", "swift", "swiftui", "python"
+    "react", "html-css", "flutter", "dart", "swift", "swiftui", "python"
   ];
   for (const name of expected) {
     const body = readFileSync(join(styleguideRoot, `${name}.md`), "utf8");
     assert.match(body, /^# /);
     assert.match(body, /## Sources/);
   }
+});
+
+test("archive supports a resumable multi-track batch", () => {
+  const archive = readFileSync(join(root, "skills", "cadre-archive", "SKILL.md"), "utf8");
+  assert.match(archive, /one or more `completed` tracks in a single batch/);
+  assert.match(archive, /all completed/);
+  assert.match(archive, /Reject the batch without partial mutation/);
+  assert.match(archive, /archive-operation\.json/);
+  assert.match(archive, /commit all approved archive moves and derived changes together/);
+
+  const operation = JSON.parse(readFileSync(join(templateRoot, "templates", "project", "archive-operation.json"), "utf8"));
+  assert.equal(operation.action, "archive");
+  assert.ok(Array.isArray(operation.selectedTracks));
+  assert.ok(Array.isArray(operation.completedTracks));
+
+  const projectRoot = fixture();
+  const invalidOperation = {
+    ...operation,
+    batchId: "archive-invalid",
+    baseCommit: "1111111",
+    expectedCommit: "cadre(archive): archive missing",
+    selectedTracks: ["missing"],
+    approvedArtifacts: ["archive/missing"],
+    approvedAt: "2026-07-27T00:00:00Z"
+  };
+  writeFileSync(
+    join(projectRoot, ".cadre", "operations", "archive-invalid.json"),
+    `${JSON.stringify(invalidOperation, null, 2)}\n`
+  );
+  const invalid = runState(projectRoot, "validate", true);
+  assert.match(invalid.stderr, /unknown selected track missing/);
+});
+
+test("track state is canonical and generated tracks omit paths and dependencies", () => {
+  const projectRoot = fixture();
+  const cadreRoot = join(projectRoot, ".cadre");
+  const trackRoot = join(cadreRoot, "tracks", "local-state");
+  mkdirSync(trackRoot, { recursive: true });
+  writeFileSync(join(trackRoot, "state.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    trackId: "local-state",
+    title: "Local state",
+    type: "feature",
+    status: "drafting-spec",
+    checkpoint: "approved",
+    revision: 1,
+    activePhase: null,
+    activeTask: null,
+    dependencies: ["missing-dependency"],
+    commits: { spec: null, plan: null },
+    artifactProgress: ["state.json"],
+    operation: {
+      action: "specify",
+      baseCommit: "1111111",
+      expectedCommit: "cadre(track): specify local-state",
+      approvedArtifacts: ["spec.md"],
+      approvedAt: "2026-07-27T00:00:00Z"
+    },
+    reviewCycles: [],
+    history: []
+  }, null, 2)}\n`);
+
+  runState(projectRoot, "render");
+  const tracks = readFileSync(join(cadreRoot, "tracks.md"), "utf8");
+  assert.match(tracks, /`local-state` Local state/);
+  assert.doesNotMatch(tracks, /Dependencies|Path|missing-dependency/);
+
+  const invalid = runState(projectRoot, "validate", true);
+  assert.match(invalid.stderr, /unknown dependency missing-dependency/);
+  const project = JSON.parse(readFileSync(join(cadreRoot, "project.json"), "utf8"));
+  assert.equal(Object.hasOwn(project, "tracks"), false);
 });

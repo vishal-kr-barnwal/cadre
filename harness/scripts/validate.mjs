@@ -32,21 +32,42 @@ for (const skill of skills) {
 }
 
 const projectTemplate = join(root, "skills", "cadre-create", "assets", "project", ".cadre");
-for (const file of ["workflow.md", "product.md", "guidelines.md", "tech-stack.md", "project.json", "bin/cadre-state.mjs"]) {
+for (const file of ["workflow.md", "product.md", "guidelines.md", "tech-stack.md", "project.json", "bin/cadre-state.mjs", "operations/.gitkeep"]) {
   if (!existsSync(join(projectTemplate, file))) errors.push(`project template: missing ${file}`);
 }
 const learningTemplate = join(projectTemplate, "templates", "track", "learning.md");
 if (!readFileSync(learningTemplate, "utf8").includes("<!-- cadre:pattern-seed:start -->")) {
   errors.push("project template: learning.md lacks the marked Pattern Seed section");
 }
+const archiveOperationTemplate = join(projectTemplate, "templates", "project", "archive-operation.json");
+if (!existsSync(archiveOperationTemplate)) {
+  errors.push("project template: missing archive-operation.json");
+} else {
+  try {
+    const archiveOperation = JSON.parse(readFileSync(archiveOperationTemplate, "utf8"));
+    if (archiveOperation.action !== "archive" || !Array.isArray(archiveOperation.selectedTracks)) {
+      errors.push("project template: invalid archive-operation.json");
+    }
+  } catch (error) {
+    errors.push(`project template: archive-operation.json: ${error.message}`);
+  }
+}
 const projectStateTemplate = JSON.parse(readFileSync(join(projectTemplate, "project.json"), "utf8"));
 if (projectStateTemplate.project?.context !== "{{greenfield|brownfield}}") {
   errors.push("project template: project context classification placeholder is missing");
 }
+if (!projectStateTemplate.setup?.operation?.repositoryRoot || !projectStateTemplate.setup?.operation?.gitDisposition) {
+  errors.push("project template: setup Git bootstrap fields are missing");
+}
+if (Object.hasOwn(projectStateTemplate, "tracks")) {
+  errors.push("project template: project.json must not duplicate track records");
+}
+const trackStateTemplate = JSON.parse(readFileSync(join(projectTemplate, "templates", "track", "state.json"), "utf8"));
+if (!trackStateTemplate.title) errors.push("project template: track state title is missing");
 const styleguideRoot = join(root, "skills", "cadre-create", "assets", "styleguides");
 for (const name of [
   "go", "java", "kotlin", "maven", "gradle", "javascript", "typescript",
-  "react", "flutter", "dart", "swift", "swiftui", "python"
+  "react", "html-css", "flutter", "dart", "swift", "swiftui", "python"
 ]) {
   const path = join(styleguideRoot, `${name}.md`);
   if (!existsSync(path)) errors.push(`default styleguide: missing ${name}.md`);

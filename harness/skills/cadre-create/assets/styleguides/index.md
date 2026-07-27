@@ -9,10 +9,13 @@ Use this catalog during `cadre-create`. Always propose the project template's `s
 | Kotlin | `kotlin.md`, plus `gradle.md` or `maven.md` when used |
 | Maven | `maven.md` |
 | Gradle | `gradle.md` |
+| HTML, CSS, or HTML/CSS | `html-css.md` |
 | JavaScript | `javascript.md` |
 | TypeScript | `javascript.md` and `typescript.md` |
-| React with JavaScript | `javascript.md` and `react.md` |
-| React with TypeScript | `javascript.md`, `typescript.md`, and `react.md` |
+| Browser JavaScript | `html-css.md` and `javascript.md` |
+| Browser TypeScript | `html-css.md`, `javascript.md`, and `typescript.md` |
+| React for the web with JavaScript | `html-css.md`, `javascript.md`, and `react.md` |
+| React for the web with TypeScript | `html-css.md`, `javascript.md`, `typescript.md`, and `react.md` |
 | Dart | `dart.md` |
 | Flutter | `dart.md` and `flutter.md` |
 | Swift | `swift.md` |

@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "trackId": "{{TRACK_ID}}",
+  "title": "{{TRACK_TITLE}}",
   "type": "{{feature|bug}}",
   "status": "drafting-plan",
   "checkpoint": "spec-approved",

@@ -2,7 +2,9 @@
 
 Cadre is a file-backed, Git-aware delivery harness shared by Codex and Claude Code. It turns product context into resumable feature and bug tracks, requires human approval at every state-changing boundary, and carries learning forward phase by phase. Create/spec/plan operations journal their approved artifacts and Git checkpoints so an interrupted command continues before or after its commit instead of restarting.
 
-Project creation separately asks for acceptance or changes to the default workflow and applicable styleguides. Bundled defaults cover Go, Java, Kotlin, Maven, Gradle, JavaScript, TypeScript, React, Dart, Flutter, Swift, SwiftUI, and Python; users may amend or replace any proposed guide.
+Each track's `state.json` is canonical. `project.json` does not duplicate track records, directory paths are derived from track status and ID, and generated `tracks.md` omits dependency and path data.
+
+Project creation separately asks for acceptance or changes to the default workflow and applicable styleguides. Bundled defaults cover Go, Java, Kotlin, Maven, Gradle, HTML/CSS, JavaScript, TypeScript, React, Dart, Flutter, Swift, SwiftUI, and Python; users may amend or replace any proposed guide.
 
 ## Install for local development
 
@@ -25,12 +27,12 @@ Codex invokes skills as `$cadre-create`, `$cadre-track`, and so on. Claude Code 
 
 | Command | Purpose |
 | --- | --- |
-| `create` | Classify greenfield/brownfield, then establish approved product, guideline, tech-stack, styleguide, workflow, template, and state artifacts. |
+| `create` | Classify greenfield/brownfield, initialize Git when absent, then establish approved product, guideline, tech-stack, styleguide, workflow, template, and state artifacts. |
 | `track` | Create or resume a feature/bug spec and phased plan, with its pattern seed embedded in incremental learning. |
 | `implement` | Execute an approved plan with dependency gates, incremental learning, tests, and commits. |
 | `review` | Review a ready track, record approved bugs, add remediation phases, or complete a clean track. |
 | `revise` | Revise a non-completed/non-archived track and assess dependent-track impact. |
-| `archive` | Archive a completed track, distill patterns, and reseed active tracks. |
+| `archive` | Archive one or more completed tracks as a resumable batch, distill patterns, and reseed active tracks. |
 | `refresh` | Refresh project context from user input and repository history. |
 | `revert` | Prepare and execute an approved Git-aware phase or track revert. |
 | `status` | Validate and summarize current state without mutation. |

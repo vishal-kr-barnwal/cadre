@@ -5,7 +5,7 @@ description: Validate and summarize current Cadre project, track, dependency, ph
 
 # Cadre Status
 
-Read `.cadre/workflow.md`, `project.json`, generated `tracks.md`, active track state/spec/plan files, and archive entries. This command is read-only.
+Read `.cadre/workflow.md`, `project.json`, generated `tracks.md`, and track-local state/spec/plan files discovered under both `tracks/` and `archive/`. Read dependency state from each track's `state.json`, never from `tracks.md`. This command is read-only.
 
 Run `node .cadre/bin/cadre-state.mjs status` and `node .cadre/bin/cadre-state.mjs validate`. If they disagree with files, report the inconsistency rather than repairing it.
 

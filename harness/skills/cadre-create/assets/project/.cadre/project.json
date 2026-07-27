@@ -13,11 +13,12 @@
       "action": "create",
       "baseCommit": "{{BASE_COMMIT_OR_NULL}}",
       "expectedCommit": "cadre(create): initialize project harness",
+      "repositoryRoot": "{{PROJECT_ROOT}}",
+      "gitDisposition": "{{existing|initialize}}",
       "approvedArtifacts": [],
       "approvedAt": "{{APPROVED_AT}}"
     }
   },
   "lastRefresh": null,
-  "tracks": [],
   "history": []
 }

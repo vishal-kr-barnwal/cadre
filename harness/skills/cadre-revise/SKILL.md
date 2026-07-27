@@ -12,5 +12,5 @@ Reject completed and archived tracks. Read `.cadre/workflow.md`, the full target
 3. Trace transitive dependent tracks. For each, classify impact as none, reseed-only, plan change, spec change, or invalidated work, with evidence. If evidence cannot resolve a material impact, ask the human before choosing a classification.
 4. Draft `revisions/revision-<ts>.md` from the template and exact diffs for every affected artifact. Preserve completed task history; supersede rather than erase it.
 5. Present the target revision and all cascading dependent-track changes together. Wait for explicit approval; partial approval must narrow the change set and trigger a new assessment.
-6. Apply approved changes, increment revision numbers, update the marked Pattern Seed sections of relevant active-track learning files, set affected execution states appropriately, append project/track history entries, and regenerate `tracks.md`.
+6. Apply approved changes, increment revision numbers, update the marked Pattern Seed sections of relevant active-track learning files, set affected execution states appropriately, append each affected track's local history, and regenerate `tracks.md`.
 7. Validate and commit `cadre(revise): update <track-id>`. Record the commit in the revision entry with a follow-up state commit if needed.

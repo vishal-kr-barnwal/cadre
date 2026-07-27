@@ -25,4 +25,4 @@ Treat the approved `plan.md` as the source of truth. Do not implement drafting, 
 7. When the task completes its phase, record a phase completion SHA in both `plan.md` and that phase's learning section. The verified final-task commit may serve as the phase commit.
 8. Re-read the plan before selecting the next task.
 
-When all phases—including track-level manual verification—are complete, validate state, set the track and project entry to `ready_for_review`, regenerate `tracks.md`, and commit `cadre(implement): ready <track-id>`. Never mark a track completed here.
+When all phases—including track-level manual verification—are complete, validate state, set the track-local state to `ready_for_review`, regenerate `tracks.md`, and commit `cadre(implement): ready <track-id>`. Never mark a track completed here.

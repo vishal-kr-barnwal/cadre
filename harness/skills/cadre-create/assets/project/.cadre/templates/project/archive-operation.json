@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "action": "archive",
+  "batchId": "archive-{{ARCHIVE_TS}}",
+  "status": "in_progress",
+  "checkpoint": "approved",
+  "baseCommit": "{{BASE_COMMIT}}",
+  "expectedCommit": "{{EXPECTED_COMMIT}}",
+  "selectedTracks": ["{{TRACK_ID}}"],
+  "completedTracks": [],
+  "approvedArtifacts": ["{{APPROVED_ARTIFACT}}"],
+  "artifactProgress": [],
+  "approvedAt": "{{APPROVED_AT}}",
+  "archiveCommit": null
+}

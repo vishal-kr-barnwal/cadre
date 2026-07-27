@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const TRACK_STATUSES = new Set([
@@ -10,7 +10,8 @@ const TRACK_STATUSES = new Set([
 const TRACK_TYPES = new Set(["feature", "bug"]);
 const REQUIRED_CONTEXT = [
   "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
-  "styleguides/general.md", "patterns/index.md", "project.json", "tracks.md"
+  "styleguides/general.md", "patterns/index.md", "operations", "tracks", "archive",
+  "project.json", "tracks.md"
 ];
 
 function findCadreRoot(start) {
@@ -145,25 +146,111 @@ function validateSpec(path, errors) {
   }
 }
 
-function buildTracks(project) {
+function validateArchiveOperations(root, byId, errors) {
+  const operationsRoot = join(root, "operations");
+  if (!existsSync(operationsRoot)) return;
+  let activeCount = 0;
+  for (const file of readdirSync(operationsRoot).filter((name) => name.endsWith(".json"))) {
+    const owner = `operations/${file}`;
+    const operation = readJson(join(operationsRoot, file), errors);
+    if (!operation) continue;
+    if (operation.action !== "archive") errors.push(`${owner}: unsupported action ${operation.action ?? "<missing>"}`);
+    validateOperation(operation, owner, errors);
+    if (!operation.batchId || file !== `${operation.batchId}.json`) {
+      errors.push(`${owner}: filename must match batchId`);
+    }
+    if (!["in_progress", "completed"].includes(operation.status)) {
+      errors.push(`${owner}: status must be in_progress or completed`);
+    }
+    if (operation.status === "in_progress") activeCount += 1;
+    if (!Array.isArray(operation.selectedTracks) || !operation.selectedTracks.length) {
+      errors.push(`${owner}: selectedTracks must be a non-empty array`);
+      continue;
+    }
+    if (new Set(operation.selectedTracks).size !== operation.selectedTracks.length) {
+      errors.push(`${owner}: selectedTracks contains duplicates`);
+    }
+    if (!Array.isArray(operation.completedTracks)) {
+      errors.push(`${owner}: completedTracks must be an array`);
+      continue;
+    }
+    for (const trackId of operation.selectedTracks) {
+      const track = byId.get(trackId);
+      if (!track) errors.push(`${owner}: unknown selected track ${trackId}`);
+      else if (!["completed", "archived"].includes(track.status)) {
+        errors.push(`${owner}: selected track ${trackId} is ${track.status}, not completed or archived`);
+      }
+    }
+    for (const trackId of operation.completedTracks) {
+      if (!operation.selectedTracks.includes(trackId)) errors.push(`${owner}: completed track ${trackId} was not selected`);
+      else if (byId.get(trackId)?.status !== "archived") errors.push(`${owner}: completed track ${trackId} is not archived`);
+    }
+    if (operation.status === "completed") {
+      if (operation.completedTracks.length !== operation.selectedTracks.length) {
+        errors.push(`${owner}: completed journal has unfinished selected tracks`);
+      }
+      if (!/^[0-9a-f]{7,40}$/.test(operation.archiveCommit ?? "")) {
+        errors.push(`${owner}: completed journal requires an archive commit SHA`);
+      }
+    } else if (operation.archiveCommit != null && !/^[0-9a-f]{7,40}$/.test(operation.archiveCommit)) {
+      errors.push(`${owner}: archiveCommit must be null or a commit SHA`);
+    }
+  }
+  if (activeCount > 1) errors.push("operations: more than one archive batch is in progress");
+}
+
+function discoverTracks(root, errors) {
+  const tracks = [];
+  const states = new Map();
+  const byId = new Map();
+  for (const directory of ["tracks", "archive"]) {
+    const directoryRoot = join(root, directory);
+    if (!existsSync(directoryRoot)) continue;
+    const entries = readdirSync(directoryRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const location = `${directory}/${entry.name}`;
+      const state = readJson(join(directoryRoot, entry.name, "state.json"), errors);
+      if (!state) continue;
+      const id = state.trackId;
+      if (!id) {
+        errors.push(`${location}: state trackId is required`);
+        continue;
+      }
+      if (entry.name !== id) errors.push(`${location}: directory name must match trackId ${id}`);
+      if (byId.has(id)) {
+        errors.push(`${id}: duplicate track state under ${byId.get(id).location} and ${location}`);
+        continue;
+      }
+      if (Object.hasOwn(state, "path")) errors.push(`${id}: state must not persist a path`);
+      const track = { ...state, id, location };
+      tracks.push(track);
+      states.set(id, state);
+      byId.set(id, track);
+    }
+  }
+  tracks.sort((left, right) => left.id.localeCompare(right.id));
+  return { tracks, states, byId };
+}
+
+function buildTracks(tracks) {
   const lines = [
     "# Tracks",
     "",
-    "Generated from `.cadre/project.json` by `node .cadre/bin/cadre-state.mjs render`.",
+    "Generated from track-local `state.json` files by `node .cadre/bin/cadre-state.mjs render`.",
     "",
-    "| Track | Type | Status | Dependencies | Revision | Path |",
-    "| --- | --- | --- | --- | ---: | --- |"
+    "| Track | Type | Status | Revision |",
+    "| --- | --- | --- | ---: |"
   ];
-  for (const track of project.tracks ?? []) {
-    const deps = track.dependencies?.length ? track.dependencies.map((id) => `\`${id}\``).join(", ") : "—";
-    lines.push(`| \`${track.id}\` ${track.title ?? ""} | ${track.type} | ${track.status} | ${deps} | ${track.revision ?? 1} | \`${track.path}\` |`);
+  for (const track of tracks) {
+    lines.push(`| \`${track.id}\` ${track.title ?? ""} | ${track.type} | ${track.status} | ${track.revision ?? 1} |`);
   }
   return `${lines.join("\n")}\n`;
 }
 
 function validate(root) {
   const errors = [];
-  const states = new Map();
   for (const file of REQUIRED_CONTEXT) {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
@@ -189,45 +276,35 @@ function validate(root) {
   if (project.lastRefresh && !/^[0-9a-f]{7,40}$/.test(project.lastRefresh.commit ?? "")) {
     errors.push("project.json: lastRefresh requires a commit SHA");
   }
-  if (!Array.isArray(project.tracks)) errors.push("project.json: tracks must be an array");
-  const tracks = Array.isArray(project.tracks) ? project.tracks : [];
-  const byId = new Map();
+  if (Object.hasOwn(project, "tracks")) errors.push("project.json: must not duplicate track records");
+  const { tracks, states, byId } = discoverTracks(root, errors);
   for (const track of tracks) {
-    if (!track.id || byId.has(track.id)) errors.push(`project.json: missing or duplicate track id ${track.id ?? "<empty>"}`);
-    else byId.set(track.id, track);
+    const state = states.get(track.id);
+    const trackRoot = join(root, track.location);
+    if (state.schemaVersion !== 1) errors.push(`${track.id}: unsupported state schemaVersion`);
+    if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
     if (!TRACK_TYPES.has(track.type)) errors.push(`${track.id}: type must be feature or bug`);
     if (!TRACK_STATUSES.has(track.status)) errors.push(`${track.id}: invalid status ${track.status}`);
     if (!Array.isArray(track.dependencies)) errors.push(`${track.id}: dependencies must be an array`);
-    if (!track.path) {
-      errors.push(`${track.id}: missing path`);
-      continue;
+    if (!Number.isInteger(track.revision) || track.revision < 1) errors.push(`${track.id}: revision must be a positive integer`);
+    if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
+    if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
+    if (state.operation != null) validateOperation(state.operation, `${track.id} state`, errors);
+    const expectedDirectory = track.status === "archived" ? "archive" : "tracks";
+    if (track.location !== `${expectedDirectory}/${track.id}`) {
+      errors.push(`${track.id}: status ${track.status} requires location ${expectedDirectory}/${track.id}`);
     }
-    const trackRoot = join(root, track.path);
-    const state = readJson(join(trackRoot, "state.json"), errors);
-    if (state) {
-      states.set(track.id, state);
-      if (state.trackId !== track.id) errors.push(`${track.id}: state trackId mismatch`);
-      if (state.type !== track.type) errors.push(`${track.id}: project/state type mismatch`);
-      if (state.status !== track.status) errors.push(`${track.id}: project/state status mismatch`);
-      if ((state.revision ?? 1) !== (track.revision ?? 1)) errors.push(`${track.id}: project/state revision mismatch`);
-      if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
-      if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
-      if (state.operation != null) validateOperation(state.operation, `${track.id} state`, errors);
-      if (JSON.stringify(state.dependencies ?? []) !== JSON.stringify(track.dependencies ?? [])) {
-        errors.push(`${track.id}: project/state dependencies mismatch`);
-      }
-      const specCommit = state.commits?.spec;
-      const planCommit = state.commits?.plan;
-      if (track.status !== "drafting-spec" && !specCommit && state.operation?.action !== "specify") {
-        errors.push(`${track.id}: status ${track.status} requires a recorded spec commit or active specify operation`);
-      }
-      if (["planned", "in_progress", "ready_for_review", "completed", "archived"].includes(track.status)
-        && !planCommit && state.operation?.action !== "plan") {
-        errors.push(`${track.id}: status ${track.status} requires a recorded plan commit or active plan operation`);
-      }
-      if (["completed", "archived"].includes(track.status) && state.reviewCycles?.at(-1)?.outcome !== "clean") {
-        errors.push(`${track.id}: ${track.status} track lacks a final clean review cycle`);
-      }
+    const specCommit = state.commits?.spec;
+    const planCommit = state.commits?.plan;
+    if (track.status !== "drafting-spec" && !specCommit && state.operation?.action !== "specify") {
+      errors.push(`${track.id}: status ${track.status} requires a recorded spec commit or active specify operation`);
+    }
+    if (["planned", "in_progress", "ready_for_review", "completed", "archived"].includes(track.status)
+      && !planCommit && state.operation?.action !== "plan") {
+      errors.push(`${track.id}: status ${track.status} requires a recorded plan commit or active plan operation`);
+    }
+    if (["completed", "archived"].includes(track.status) && state.reviewCycles?.at(-1)?.outcome !== "clean") {
+      errors.push(`${track.id}: ${track.status} track lacks a final clean review cycle`);
     }
     const specPath = join(trackRoot, "spec.md");
     const planPath = join(trackRoot, "plan.md");
@@ -243,9 +320,8 @@ function validate(root) {
         && state?.operation?.action !== "plan",
       errors
     );
-    if (track.status === "archived" && !track.path.startsWith("archive/")) errors.push(`${track.id}: archived path must be under archive/`);
-    if (track.status !== "archived" && !track.path.startsWith("tracks/")) errors.push(`${track.id}: active path must be under tracks/`);
   }
+  validateArchiveOperations(root, byId, errors);
   for (const track of tracks) {
     for (const dependency of track.dependencies ?? []) {
       if (!byId.has(dependency)) errors.push(`${track.id}: unknown dependency ${dependency}`);
@@ -272,10 +348,10 @@ function validate(root) {
   }
   for (const id of byId.keys()) visit(id, []);
   const tracksPath = join(root, "tracks.md");
-  if (existsSync(tracksPath) && readFileSync(tracksPath, "utf8") !== buildTracks(project)) {
+  if (existsSync(tracksPath) && readFileSync(tracksPath, "utf8") !== buildTracks(tracks)) {
     errors.push("tracks.md is stale; regenerate it after approved state changes");
   }
-  return { project, states, errors };
+  return { project, tracks, states, errors };
 }
 
 function nextCommand(track) {
@@ -296,7 +372,7 @@ if (command === "render") {
   else {
     const output = join(root, "tracks.md");
     if (existsSync(output)) readFileSync(output, "utf8");
-    writeFileSync(output, buildTracks(result.project));
+    writeFileSync(output, buildTracks(result.tracks));
     process.stdout.write(`Rendered ${output}\n`);
   }
 } else if (command === "validate") {
@@ -311,12 +387,12 @@ if (command === "render") {
     process.stdout.write(`Project: ${project.project?.name ?? "unknown"}; context=${project.project?.context ?? "unknown"}\n`);
     process.stdout.write(`Setup: ${project.setup?.status ?? "unknown"}; checkpoint=${project.setup?.checkpoint ?? "none"}; operation=${project.setup?.operation?.action ?? "none"}; commit=${project.setup?.commit ?? "none"}\n`);
     process.stdout.write(`Last refresh: ${project.lastRefresh?.commit ?? "none"}\n`);
-    for (const track of project.tracks) {
+    for (const track of result.tracks) {
       const dependencies = track.dependencies?.length ? track.dependencies.join(",") : "none";
       const state = result.states.get(track.id);
       process.stdout.write(`${track.id} [${track.type}] ${track.status}; checkpoint=${state?.checkpoint ?? "none"}; operation=${state?.operation?.action ?? "none"}; deps=${dependencies}; revision=${track.revision ?? 1}; phase=${state?.activePhase ?? "none"}; task=${state?.activeTask ?? "none"}; reviews=${state?.reviewCycles?.length ?? 0}; next=${nextCommand(track)}\n`);
     }
-    const counts = project.tracks.reduce((result, track) => {
+    const counts = result.tracks.reduce((result, track) => {
       result[track.status] = (result[track.status] ?? 0) + 1;
       return result;
     }, {});

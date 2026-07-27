@@ -16,6 +16,6 @@ Review only a `ready_for_review` track. Load `.cadre/workflow.md`, all track art
    - If none exist, present clean-review evidence and ask approval to complete the track.
 4. For approved findings, create `bugs/bug-<review-ts>.md` from the template and append new remediation phases to `plan.md`. Every added phase ends in `User Manual Verification`, followed by a new final `Track-level User Manual Verification` phase. Present the exact plan change and wait for approval.
 5. After approval, set state to `in_progress`, record the review cycle, regenerate `tracks.md`, validate, and commit `cadre(review): request changes for <track-id>`.
-6. For an approved clean review, record the clean cycle, set track/project status to `completed`, regenerate `tracks.md`, validate, and commit `cadre(review): complete <track-id>`.
+6. For an approved clean review, record the clean cycle, set track-local status to `completed`, regenerate `tracks.md`, validate, and commit `cadre(review): complete <track-id>`.
 
 Repeat review → implement → review until a human approves a clean review. Only this command may mark a track completed.

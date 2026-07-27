@@ -24,11 +24,11 @@ Inspect available files, history, state, and approved artifacts before asking. I
 
 During `create`, present this default workflow as its own approval item and ask whether it is acceptable or should be changed. Do not infer workflow acceptance from approval of product, stack, or other setup artifacts. Apply requested changes, present the revised workflow, and obtain explicit acceptance before writing it.
 
-Always propose `styleguides/general.md`. Match the approved tech stack against the bundled default catalog, then propose the applicable language, framework, and build-tool guides. For each guide, let the human choose the bundled default, an amended default, or a user-provided replacement. Framework/tool guides supplement their language guide: TypeScript supplements JavaScript; React supplements JavaScript or TypeScript; Flutter supplements Dart; SwiftUI supplements Swift; Maven or Gradle supplements Java/Kotlin. Copy only the approved set. In brownfield projects, existing enforced conventions take precedence unless the human explicitly approves replacing them.
+Always propose `styleguides/general.md`. Match the approved tech stack against the bundled default catalog, then propose the applicable language, framework, and build-tool guides. For each guide, let the human choose the bundled default, an amended default, or a user-provided replacement. Framework/tool guides supplement their language guide: HTML/CSS underpins browser UI; TypeScript supplements JavaScript; React for the web supplements HTML/CSS plus JavaScript or TypeScript; Flutter supplements Dart; SwiftUI supplements Swift; Maven or Gradle supplements Java/Kotlin. Copy only the approved set. In brownfield projects, existing enforced conventions take precedence unless the human explicitly approves replacing them.
 
 ### Interruption-safe operations
 
-For every multi-step state mutation—and specifically `create` and both spec/plan stages of `track`—write an operation journal in `project.json.setup.operation` or track `state.json.operation` immediately after approval and before artifact writes. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
+For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` for track-local flows, and a file derived from `.cadre/templates/project/archive-operation.json` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
 
 On every command entry, reconcile an existing journal before starting new work:
 
@@ -39,13 +39,16 @@ On every command entry, reconcile an existing journal before starting new work:
 
 Advance the checkpoint after each durable artifact write. Once the artifact commit is identified, append it to history, clear the operation, advance the lifecycle checkpoint, and commit the state record. This protocol makes interruption before a commit, after a commit, or before its follow-up state commit resumable.
 
+During `create`, detect an existing worktree with `git rev-parse --show-toplevel` and never initialize a nested repository. If no worktree exists, record the approved project root and `initialize` disposition in the setup journal, run `git init` there, verify the resulting root, and checkpoint it before the setup commit. Resume a pending initialization from the journal; stop if the observed repository conflicts with the recorded disposition or root.
+
 ### Sources of truth
 
 - `plan.md` is the execution source of truth for phases, tasks, order, status, and commit provenance.
 - `spec.md` is the scope and acceptance source of truth.
-- `state.json` is bookkeeping; it must agree with the approved spec and plan.
-- `project.json` is the project-level track/dependency/status index.
-- `tracks.md` is generated from `project.json`; never hand-edit it.
+- Each track's `state.json` is the canonical source for its identity, title, type, status, dependencies, revision, checkpoints, and operation history; it must agree with the approved spec and plan.
+- Track location is derived: non-archived state lives at `tracks/<track-id>` and archived state at `archive/<track-id>`. Never persist a track path field.
+- `project.json` contains project/setup/refresh history only; it does not duplicate track records.
+- `tracks.md` is a generated lifecycle summary discovered from track-local state. It intentionally omits dependencies and paths; never hand-edit it.
 - Git is the implementation history. Do not claim completion without recorded commits.
 
 ## Lifecycle
@@ -102,7 +105,7 @@ Every track revision gets `revisions/revision-<ts>.md`; every project refresh ge
 
 ## Archival and learning
 
-Archive only completed tracks. Distill durable phase learning into patterns with source track/task/commit provenance. Reconcile new learning with existing patterns, then propose relevant reseeding for all active tracks. Move the full track directory to `archive/`; never discard its history.
+Archive one or more selected completed tracks in one approved batch. Validate the whole selection before mutation, distill the selected learning as one corpus into patterns with source track/task/commit provenance, reconcile it with existing patterns, then propose relevant reseeding for all active tracks. Journal the ordered selection and per-track/artifact progress, move each full track directory to `archive/`, validate once, and commit the batch together. Never discard history or start another archive batch while one is incomplete.
 
 ## Git safety and commits
 
