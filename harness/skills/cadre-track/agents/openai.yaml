@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Track"
+  short_description: "Specify and plan a Cadre track"
+  default_prompt: "Use $cadre-track to create or resume a feature or bug track."

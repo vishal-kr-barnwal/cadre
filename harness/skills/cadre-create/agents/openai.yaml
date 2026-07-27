@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Create"
+  short_description: "Initialize a Cadre-managed project"
+  default_prompt: "Use $cadre-create to initialize Cadre for this repository."

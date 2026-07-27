@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Status"
+  short_description: "Show current Cadre project state"
+  default_prompt: "Use $cadre-status to show the current project and track state."

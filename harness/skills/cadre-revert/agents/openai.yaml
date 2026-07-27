@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Revert"
+  short_description: "Safely revert tracked Cadre delivery work"
+  default_prompt: "Use $cadre-revert to prepare a Git-aware phase or track revert."

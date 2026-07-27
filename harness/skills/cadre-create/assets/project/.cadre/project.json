@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "{{PROJECT_NAME}}",
+    "context": "{{greenfield|brownfield}}"
+  },
+  "setup": {
+    "status": "in_progress",
+    "checkpoint": "approved",
+    "commit": null,
+    "artifactProgress": [],
+    "operation": {
+      "action": "create",
+      "baseCommit": "{{BASE_COMMIT_OR_NULL}}",
+      "expectedCommit": "cadre(create): initialize project harness",
+      "approvedArtifacts": [],
+      "approvedAt": "{{APPROVED_AT}}"
+    }
+  },
+  "lastRefresh": null,
+  "tracks": [],
+  "history": []
+}

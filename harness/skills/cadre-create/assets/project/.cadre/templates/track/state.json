@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "trackId": "{{TRACK_ID}}",
+  "type": "{{feature|bug}}",
+  "status": "drafting-plan",
+  "checkpoint": "spec-approved",
+  "revision": 1,
+  "activePhase": null,
+  "activeTask": null,
+  "dependencies": [],
+  "commits": {
+    "spec": null,
+    "plan": null
+  },
+  "artifactProgress": [],
+  "operation": {
+    "action": "specify",
+    "baseCommit": "{{BASE_COMMIT_OR_NULL}}",
+    "expectedCommit": "cadre(track): specify {{TRACK_ID}}",
+    "approvedArtifacts": ["spec.md"],
+    "approvedAt": "{{APPROVED_AT}}"
+  },
+  "reviewCycles": [],
+  "history": []
+}

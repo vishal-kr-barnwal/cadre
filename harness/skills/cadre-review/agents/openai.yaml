@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Review"
+  short_description: "Review a completed Cadre track"
+  default_prompt: "Use $cadre-review to review a track that is ready for review."

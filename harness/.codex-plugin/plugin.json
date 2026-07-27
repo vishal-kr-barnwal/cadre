@@ -1,0 +1,18 @@
+{
+  "name": "cadre",
+  "version": "0.1.0",
+  "description": "A human-governed, Git-aware product delivery harness for Codex and Claude Code.",
+  "author": {
+    "name": "Cadre contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Cadre",
+    "shortDescription": "Govern spec-to-archive delivery workflows.",
+    "longDescription": "Cadre provides resumable create, track, implement, review, revise, archive, refresh, revert, status, and wisp workflows backed by project-local templates and Git state.",
+    "developerName": "Cadre contributors",
+    "category": "Developer Tools",
+    "capabilities": [],
+    "defaultPrompt": "Use Cadre to show the current project delivery status."
+  }
+}
