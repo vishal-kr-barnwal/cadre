@@ -217,6 +217,68 @@ None.
   assert.match(status.stdout, /checkpoint=commit-pending; operation=specify/);
 });
 
+test("approved active track revision is resumable and terminal history is not revisable", () => {
+  const projectRoot = fixture();
+  const trackRoot = join(projectRoot, ".cadre", "tracks", "revisable");
+  mkdirSync(trackRoot, { recursive: true });
+  writeFileSync(join(trackRoot, "spec.md"), `# Specification: Revisable
+
+## Functional Requirements
+- FR-001: Preserve an approved baseline.
+## Non-Functional Requirements
+- NFR-001: Resume safely.
+## Acceptance Criteria
+- AC-001: The revision is recorded.
+## Dependencies
+None.
+## Additional Information
+None.
+## Dependent-track impact
+None.
+`);
+  const statePath = join(trackRoot, "state.json");
+  const state = {
+    schemaVersion: 1,
+    trackId: "revisable",
+    title: "Revisable",
+    type: "feature",
+    status: "drafting-plan",
+    checkpoint: "revision-approved",
+    revision: 1,
+    activePhase: null,
+    activeTask: null,
+    dependencies: [],
+    commits: { spec: "aaaaaaa", plan: null },
+    artifactProgress: [],
+    operation: {
+      action: "revise",
+      checkpoint: "approved",
+      baseCommit: "1111111",
+      expectedCommit: "cadre(revise): update revisable",
+      approvedArtifacts: ["revisions/revision-20260728T000000Z.md", "spec.md"],
+      artifactProgress: [],
+      approvedAt: "2026-07-28T00:00:00Z",
+      sourceStatus: "drafting-plan",
+      targetStatus: "drafting-plan",
+      revisionPath: "revisions/revision-20260728T000000Z.md",
+      previousRevision: 1,
+      newRevision: 2
+    },
+    reviewCycles: [],
+    history: []
+  };
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  runState(projectRoot, "render");
+  assert.equal(runState(projectRoot, "validate").status, 0);
+  assert.match(runState(projectRoot, "status").stdout, /operation=revise/);
+
+  state.operation.sourceStatus = "completed";
+  state.operation.targetStatus = "completed";
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  const invalid = runState(projectRoot, "validate", true);
+  assert.match(invalid.stderr, /revise sourceStatus must have an approved active baseline/);
+});
+
 test("installer prepares a dual-product user plugin marketplace", () => {
   const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
   const target = join(parent, "cadre");
@@ -317,6 +379,9 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     }
     const resources = await client.listResources();
     assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v1/track/spec"));
+    assert.ok(resources.resources.some(
+      (resource) => resource.uri === "cadre://templates/v1/track/revise-operation"
+    ));
 
     const workflow = await client.callTool({ name: "template_get", arguments: { id: "project/workflow" } });
     assert.equal(workflow.isError, undefined);
@@ -388,6 +453,32 @@ test("create classifies project context and ambiguous planning commands must cla
     assert.match(body, /clarification gate/, `${skill} must apply the clarification gate`);
     assert.match(body, /Ask|ask/, `${skill} must ask when material ambiguity remains`);
   }
+});
+
+test("revise routes every lifecycle state without rewriting terminal history", () => {
+  const revise = readFileSync(join(root, "skills", "revise", "SKILL.md"), "utf8");
+  for (const status of [
+    "drafting-spec", "drafting-plan", "planned", "in_progress",
+    "ready_for_review", "completed", "archived"
+  ]) {
+    assert.match(revise, new RegExp(`\\b${status}\\b`));
+  }
+  assert.match(revise, /do not create a revision artifact/);
+  assert.match(revise, /Route a defect through `review`/);
+  assert.match(revise, /successor feature or bug track/);
+  assert.match(revise, /track\/revise-operation/);
+  assert.match(revise, /Resume a matching `revise` operation/);
+
+  const revision = readFileSync(join(providerRoot, "track", "revision.md"), "utf8");
+  assert.match(revision, /Source status/);
+  assert.match(revision, /Affected work and provenance/);
+  assert.match(revision, /Review and verification impact/);
+
+  const operation = JSON.parse(readFileSync(join(providerRoot, "track", "revise-operation.json"), "utf8"));
+  assert.equal(operation.action, "revise");
+  assert.equal(operation.checkpoint, "approved");
+  assert.ok(Array.isArray(operation.artifactProgress));
+  assert.equal(operation.newRevision, operation.previousRevision + 1);
 });
 
 test("create bootstraps Git only when no worktree exists", () => {

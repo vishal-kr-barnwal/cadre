@@ -5,9 +5,17 @@ import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 
 export interface OperationState {
   action?: string;
+  checkpoint?: string;
+  baseCommit?: string | null;
   expectedCommit?: string;
   approvedArtifacts?: string[];
+  artifactProgress?: string[];
   approvedAt?: string;
+  sourceStatus?: string;
+  targetStatus?: string;
+  revisionPath?: string;
+  previousRevision?: number;
+  newRevision?: number;
   [key: string]: unknown;
 }
 
@@ -100,6 +108,53 @@ function validateOperation(operation: OperationState | null | undefined, owner: 
     errors.push(`${owner}: operation approvedArtifacts must be a non-empty array`);
   }
   if (!operation.approvedAt) errors.push(`${owner}: operation approvedAt is required`);
+}
+
+function validateRevisionOperation(state: TrackState, owner: string, errors: string[]): void {
+  const operation = state.operation;
+  if (operation?.action !== "revise") return;
+
+  const allowedTargets: Record<string, string[]> = {
+    "drafting-plan": ["drafting-plan"],
+    planned: ["planned"],
+    in_progress: ["in_progress", "planned"],
+    ready_for_review: ["in_progress", "planned"]
+  };
+  const sourceStatus = operation.sourceStatus ?? "";
+  const targetStatus = operation.targetStatus ?? "";
+  if (!Object.hasOwn(allowedTargets, sourceStatus)) {
+    errors.push(`${owner}: revise sourceStatus must have an approved active baseline`);
+  } else if (!allowedTargets[sourceStatus]!.includes(targetStatus)) {
+    errors.push(`${owner}: revise transition ${sourceStatus} -> ${targetStatus || "<missing>"} is not allowed`);
+  }
+  if (state.status !== sourceStatus && state.status !== targetStatus) {
+    errors.push(`${owner}: state status ${state.status} must match the revise source or target status`);
+  }
+  if (!operation.checkpoint) errors.push(`${owner}: revise checkpoint is required`);
+  if (!Array.isArray(operation.artifactProgress)) errors.push(`${owner}: revise artifactProgress must be an array`);
+  if (!/^[0-9a-f]{7,40}$/.test(operation.baseCommit ?? "")) {
+    errors.push(`${owner}: revise baseCommit must be a Git commit SHA`);
+  }
+  if (operation.expectedCommit !== `cadre(revise): update ${state.trackId}`) {
+    errors.push(`${owner}: revise expectedCommit must target ${state.trackId}`);
+  }
+  const revisionPath = operation.revisionPath ?? "";
+  if (!/^revisions\/revision-[^/]+\.md$/.test(revisionPath)) {
+    errors.push(`${owner}: revise revisionPath must name a track revision artifact`);
+  } else if (!operation.approvedArtifacts?.includes(revisionPath)) {
+    errors.push(`${owner}: revise approvedArtifacts must include ${revisionPath}`);
+  }
+  const previousRevision = operation.previousRevision;
+  const newRevision = operation.newRevision;
+  if (!Number.isInteger(previousRevision) || (previousRevision ?? 0) < 1) {
+    errors.push(`${owner}: revise previousRevision must be a positive integer`);
+  }
+  if (!Number.isInteger(newRevision) || newRevision !== (previousRevision ?? 0) + 1) {
+    errors.push(`${owner}: revise newRevision must increment previousRevision by one`);
+  }
+  if (state.revision !== previousRevision && state.revision !== newRevision) {
+    errors.push(`${owner}: track revision must match the pending revise operation`);
+  }
 }
 
 function validateLearning(path: string, required: boolean, errors: string[]): void {
@@ -375,7 +430,10 @@ export function validateProject(projectRoot: string): ValidationResult {
     if (!Number.isInteger(track.revision) || (track.revision ?? 0) < 1) errors.push(`${track.id}: revision must be a positive integer`);
     if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
     if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
-    if (state.operation != null) validateOperation(state.operation, `${track.id} state`, errors);
+    if (state.operation != null) {
+      validateOperation(state.operation, `${track.id} state`, errors);
+      validateRevisionOperation(state, `${track.id} state`, errors);
+    }
     const expectedDirectory = track.status === "archived" ? "archive" : "tracks";
     if (track.location !== `${expectedDirectory}/${track.id}`) {
       errors.push(`${track.id}: status ${track.status} requires location ${expectedDirectory}/${track.id}`);

@@ -1,0 +1,14 @@
+{
+  "action": "revise",
+  "checkpoint": "approved",
+  "baseCommit": "{{BASE_COMMIT}}",
+  "expectedCommit": "cadre(revise): update {{TRACK_ID}}",
+  "approvedArtifacts": ["{{REVISION_PATH}}"],
+  "artifactProgress": [],
+  "approvedAt": "{{APPROVED_AT}}",
+  "sourceStatus": "{{SOURCE_STATUS}}",
+  "targetStatus": "{{TARGET_STATUS}}",
+  "revisionPath": "{{REVISION_PATH}}",
+  "previousRevision": 1,
+  "newRevision": 2
+}

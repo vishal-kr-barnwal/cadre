@@ -1,4 +1,4 @@
 interface:
   display_name: "Cadre: Revise"
-  short_description: "Revise an active Cadre track"
-  default_prompt: "Use $revise to update the specification or plan of an active track."
+  short_description: "Route or revise a Cadre track change"
+  default_prompt: "Use $revise to route a requested track change by lifecycle state and safely update any approved active baseline."

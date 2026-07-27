@@ -30,7 +30,7 @@ Always propose `styleguides/general.md`. Match the approved tech stack against t
 
 ### Interruption-safe operations
 
-For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` for track-local flows, and a file rendered from the MCP template `project/archive-operation` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
+For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, `revise`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` for track-local flows, and a file rendered from the MCP template `project/archive-operation` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
 
 On every command entry, reconcile an existing journal before starting new work:
 
@@ -60,16 +60,15 @@ For deterministic MCP mutations, call the read-only preview immediately before a
 
 ```text
 drafting-spec -> drafting-plan -> planned -> in_progress -> ready_for_review
-      ^                |              |             |              |
-      +------ revise --+--------------+-------------+              |
-                                                                    v
-                  completed <- clean approved review <- review -----+
-                       |                                  |
-                       v                                  +-> approved bugs
-                    archived                                  -> in_progress
+                     |             |             |              |
+                     +-- revise ---+-------------+              +-- revise --> in_progress/planned
+                                   |             |              +-- approved bugs --> in_progress
+                                   +-------------+              +-- clean review --> completed --> archived
+
+completed/archived -- changed intent --> successor track
 ```
 
-Legal track statuses are `drafting-spec`, `drafting-plan`, `planned`, `in_progress`, `ready_for_review`, `completed`, and `archived`. A completed or archived track cannot be revised. Only review can mark `completed`; only archive can mark `archived`.
+Legal track statuses are `drafting-spec`, `drafting-plan`, `planned`, `in_progress`, `ready_for_review`, `completed`, and `archived`. The `revise` command may be invoked in any status, but it routes according to the approved-baseline rules below; it does not make completed or archived history mutable. Only review can mark `completed`; only archive can mark `archived`.
 
 ## Track construction
 
@@ -106,7 +105,20 @@ Review acceptance criteria, non-functional requirements, diffs, callers, tests, 
 
 ## Revisions, refreshes, and cascading impact
 
-Every track revision gets `revisions/revision-<ts>.md`; every project refresh gets `refreshes/refresh-<ts>.md`. Assess transitive dependent tracks whenever a spec, acceptance criterion, dependency, workflow, pattern, tech-stack, or styleguide change may affect them. Present all cascading changes for approval before mutation. Preserve superseded content and completed-work provenance rather than erasing history.
+`revise` is callable at any point, with these state-specific semantics:
+
+- In `drafting-spec`, continue the interrupted or active `track` specification flow. There is no approved baseline yet, so do not create a revision entry.
+- In `drafting-plan`, a change to the approved specification is a revision; a change only to the unapproved plan continues the `track` planning flow.
+- In `planned`, revise the approved baseline and remain `planned`.
+- In `in_progress`, first reconcile any operation and active or dirty task work. Preserve completed tasks and commits, supersede rather than erase affected work, and remain `in_progress` when all dependencies are satisfied. Return to `planned` when a newly approved dependency is incomplete.
+- In `ready_for_review`, use `review` for defects against the approved specification. Use `revise` for a changed desired outcome, scope, requirement, or acceptance criterion; invalidate review readiness, append the necessary delivery and manual-verification work, and return to `in_progress`, or `planned` when an approved dependency is incomplete.
+- In `completed` or `archived`, keep the track immutable and propose a successor feature or bug track that references it. Do not reopen it or rewrite its clean-review history.
+
+A semantic revision requires an approved specification baseline and no unresolved non-revision operation. Reconcile a matching revision journal before doing new work. If active implementation or dirty work overlaps the revision, present its exact state and obtain approval to complete, preserve as superseded, or revert it before applying the revision.
+
+Every approved semantic revision gets `revisions/revision-<ts>.md` and a track-local `operation.action` of `revise` before artifact mutation. Increment the track revision once per approved revision; increment the specification revision only when the specification changes and the plan revision only when the plan changes. A revision must record its source and target status, base commit, affected phases/tasks, treatment of completed and partial work, review-readiness impact, and transitive dependency impact. Preserve completed-work provenance and append replacement work rather than erasing history.
+
+Every project refresh gets `refreshes/refresh-<ts>.md`. Assess transitive dependent tracks whenever a spec, acceptance criterion, dependency, workflow, pattern, tech-stack, or styleguide change may affect them. Present all cascading changes for approval before mutation. Preserve superseded content and completed-work provenance rather than erasing history.
 
 ## Archival and learning
 
