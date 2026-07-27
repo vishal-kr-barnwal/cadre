@@ -11,11 +11,25 @@ const skills = [
 ];
 const errors = [];
 
-for (const manifest of [".codex-plugin/plugin.json", ".claude-plugin/plugin.json", "package.json"]) {
+for (const manifest of [
+  ".codex-plugin/plugin.json", ".claude-plugin/plugin.json", "marketplace/codex.json",
+  "marketplace/claude.json", "package.json"
+]) {
   try {
     JSON.parse(readFileSync(join(root, manifest), "utf8"));
   } catch (error) {
     errors.push(`${manifest}: ${error.message}`);
+  }
+}
+
+const codexMarketplace = JSON.parse(readFileSync(join(root, "marketplace", "codex.json"), "utf8"));
+const claudeMarketplace = JSON.parse(readFileSync(join(root, "marketplace", "claude.json"), "utf8"));
+for (const [name, marketplace] of [["Codex", codexMarketplace], ["Claude", claudeMarketplace]]) {
+  const entry = marketplace.plugins?.find((plugin) => plugin.name === "cadre");
+  if (marketplace.name !== "cadre" || !entry) errors.push(`${name} marketplace: missing cadre entry`);
+  else {
+    const source = typeof entry.source === "string" ? entry.source : entry.source.path;
+    if (source !== "./plugins/cadre") errors.push(`${name} marketplace: invalid local source`);
   }
 }
 

@@ -5,7 +5,7 @@
   "description": "Cross-agent, human-governed software delivery harness",
   "type": "module",
   "scripts": {
-    "install:project": "node scripts/install.mjs --agent all --scope project",
+    "install:plugin": "node scripts/install.mjs --agent all",
     "test": "node --test",
     "validate": "node scripts/validate.mjs"
   },

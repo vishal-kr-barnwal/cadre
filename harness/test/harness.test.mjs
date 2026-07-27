@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -186,14 +188,38 @@ None.
   assert.match(status.stdout, /checkpoint=commit-pending; operation=specify/);
 });
 
-test("installer writes both project skill locations and refuses accidental overwrite", () => {
-  const target = mkdtempSync(join(tmpdir(), "cadre-install-"));
-  execFileSync(process.execPath, [join(root, "scripts", "install.mjs"), "--agent", "all", "--scope", "project", "--target", target]);
-  assert.ok(existsSync(join(target, ".agents", "skills", "cadre-track", "SKILL.md")));
-  assert.ok(existsSync(join(target, ".claude", "skills", "cadre-track", "SKILL.md")));
-  const duplicate = spawnSync(process.execPath, [join(root, "scripts", "install.mjs"), "--agent", "all", "--scope", "project", "--target", target], { encoding: "utf8" });
-  assert.notEqual(duplicate.status, 0);
-  assert.match(duplicate.stderr, /already exists/);
+test("installer prepares a dual-product user plugin marketplace", () => {
+  const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
+  const target = join(parent, "cadre");
+  execFileSync(process.execPath, [
+    join(root, "scripts", "install.mjs"), "--agent", "all", "--prepare-only",
+    "--marketplace-root", target, "--cachebuster", "test-build"
+  ]);
+
+  const pluginRoot = join(target, "plugins", "cadre");
+  assert.ok(existsSync(join(pluginRoot, "skills", "cadre-track", "SKILL.md")));
+  const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+  assert.equal(codexManifest.version, "0.1.0+codex.test-build");
+  assert.equal(claudeManifest.version, "0.1.0+claude.test-build");
+
+  const codexMarketplace = JSON.parse(readFileSync(join(target, ".agents", "plugins", "marketplace.json"), "utf8"));
+  const claudeMarketplace = JSON.parse(readFileSync(join(target, ".claude-plugin", "marketplace.json"), "utf8"));
+  assert.equal(codexMarketplace.plugins[0].source.path, "./plugins/cadre");
+  assert.equal(claudeMarketplace.plugins[0].source, "./plugins/cadre");
+
+  execFileSync(process.execPath, [
+    join(root, "scripts", "install.mjs"), "--agent", "all", "--prepare-only",
+    "--marketplace-root", target, "--cachebuster", "second-build"
+  ]);
+  const backups = readdirSync(parent).filter((entry) => entry.startsWith("cadre.backup-"));
+  assert.equal(backups.length, 1);
+  const previousManifest = JSON.parse(readFileSync(
+    join(parent, backups[0], "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
+  ));
+  assert.equal(previousManifest.version, "0.1.0+codex.test-build");
+  const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
+  assert.equal(updatedManifest.version, "0.1.0+codex.second-build");
 });
 
 test("every post-create command loads the shared workflow", () => {

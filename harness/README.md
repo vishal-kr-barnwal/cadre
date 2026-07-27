@@ -6,20 +6,23 @@ Each track's `state.json` is canonical. `project.json` does not duplicate track 
 
 Project creation separately asks for acceptance or changes to the default workflow and applicable styleguides. Bundled defaults cover Go, Java, Kotlin, Maven, Gradle, HTML/CSS, JavaScript, TypeScript, React, Dart, Flutter, Swift, SwiftUI, and Python; users may amend or replace any proposed guide.
 
-## Install for local development
+## Install as a user plugin
 
-Node.js 18 or newer is required only for the installer and validator.
+Node.js 18 or newer plus the `codex` and/or `claude` CLI is required. The installer builds one local dual-product marketplace, registers it, and installs Cadre at user scope so it is available across projects.
 
 ```sh
-node scripts/install.mjs --agent all --scope project --target /path/to/project
+node scripts/install.mjs --agent all
 ```
 
-This copies the same Agent Skills into `.agents/skills/` for Codex and `.claude/skills/` for Claude Code. Use `--scope user` to install into the current user's agent directories, or `--force` to replace an existing Cadre installation after reviewing the new version.
+Use `--agent codex` or `--agent claude` to install for only one product. The prepared marketplace lives at `~/.cadre/marketplaces/cadre`; an existing marketplace with the same name at another location is never replaced unless `--replace-marketplace` is explicitly supplied. Previous locally prepared Cadre marketplace payloads are retained as timestamped backups during updates.
 
-The repository is also a native plugin bundle:
+The packaged plugin keeps the shared skills and is ready to include plugin-scoped MCP, hook, script, asset, command, agent, or server components when those files are added later. After installation, start a new Codex conversation and run `/reload-plugins` in Claude Code.
 
-- Codex reads `.codex-plugin/plugin.json` and the shared `skills/` directory.
-- Claude Code reads `.claude-plugin/plugin.json` and the same `skills/` directory. During development, start it with `claude --plugin-dir /absolute/path/to/cadre`.
+For package-only validation without registering or installing anything:
+
+```sh
+node scripts/install.mjs --agent all --prepare-only --marketplace-root /tmp/cadre
+```
 
 ## Commands
 

@@ -1,0 +1,16 @@
+{
+  "name": "cadre",
+  "owner": {
+    "name": "Cadre contributors"
+  },
+  "description": "Cadre plugin marketplace for human-governed software delivery workflows.",
+  "plugins": [
+    {
+      "name": "cadre",
+      "source": "./plugins/cadre",
+      "description": "A human-governed, Git-aware product delivery harness.",
+      "category": "Developer Tools",
+      "strict": true
+    }
+  ]
+}
