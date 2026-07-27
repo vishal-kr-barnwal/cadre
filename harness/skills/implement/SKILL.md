@@ -7,6 +7,8 @@ description: Resume and execute an approved Cadre track plan phase by phase, enf
 
 Treat the approved `plan.md` as the source of truth. Do not implement drafting, ready-for-review, completed, or archived tracks.
 
+Call `project_status` and `state_validate` before selecting work. If the Cadre MCP is unavailable, stop and preserve the current checkpoint; do not substitute a copied runtime.
+
 ## Start or resume
 
 1. Read `.cadre/workflow.md`, project state, the track spec, plan, state, the marked Pattern Seed and full phase history in `learning.md`, relevant patterns/styleguides, and dependency states.
@@ -25,4 +27,4 @@ Treat the approved `plan.md` as the source of truth. Do not implement drafting, 
 7. When the task completes its phase, record a phase completion SHA in both `plan.md` and that phase's learning section. The verified final-task commit may serve as the phase commit.
 8. Re-read the plan before selecting the next task.
 
-When all phases—including track-level manual verification—are complete, validate state, set the track-local state to `ready_for_review`, regenerate `tracks.md`, and commit `cadre(implement): ready <track-id>`. Never mark a track completed here.
+When all phases—including track-level manual verification—are complete, set the track-local state to `ready_for_review`, call `tracks_render_preview`, present and apply its unchanged digest with `tracks_render_apply`, call `state_validate`, and commit `cadre(implement): ready <track-id>`. Never mark a track completed here.

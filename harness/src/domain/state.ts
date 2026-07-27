@@ -1,7 +1,69 @@
-#!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+export interface OperationState {
+  action?: string;
+  expectedCommit?: string;
+  approvedArtifacts?: string[];
+  approvedAt?: string;
+  [key: string]: unknown;
+}
+
+export interface ReviewCycle {
+  outcome?: string;
+  [key: string]: unknown;
+}
+
+export interface TrackState {
+  schemaVersion: number;
+  trackId: string;
+  title: string;
+  type: string;
+  status: string;
+  checkpoint?: string;
+  revision?: number;
+  activePhase?: string | number | null;
+  activeTask?: string | null;
+  dependencies?: string[];
+  commits?: { spec?: string | null; plan?: string | null };
+  artifactProgress?: string[];
+  operation?: OperationState | null;
+  reviewCycles?: ReviewCycle[];
+  path?: unknown;
+  [key: string]: unknown;
+}
+
+export interface ProjectState {
+  schemaVersion: number;
+  runtimeVersion?: string;
+  templateSetVersion?: string;
+  project?: { name?: string; context?: string };
+  setup?: {
+    status?: string;
+    checkpoint?: string;
+    commit?: string | null;
+    artifactProgress?: string[];
+    operation?: OperationState | null;
+  };
+  lastRefresh?: { commit?: string } | null;
+  history?: unknown[];
+  tracks?: unknown;
+  [key: string]: unknown;
+}
+
+export interface DiscoveredTrack extends TrackState {
+  id: string;
+  location: string;
+}
+
+export interface ValidationResult {
+  project: ProjectState | null;
+  tracks: DiscoveredTrack[];
+  states: Map<string, TrackState>;
+  errors: string[];
+}
 
 const TRACK_STATUSES = new Set([
   "drafting-spec", "drafting-plan", "planned", "in_progress",
@@ -14,27 +76,20 @@ const REQUIRED_CONTEXT = [
   "project.json", "tracks.md"
 ];
 
-function findCadreRoot(start) {
-  let cursor = resolve(start);
-  while (true) {
-    const candidate = join(cursor, ".cadre", "project.json");
-    if (existsSync(candidate)) return join(cursor, ".cadre");
-    const parent = dirname(cursor);
-    if (parent === cursor) throw new Error("No .cadre/project.json found from current directory upward");
-    cursor = parent;
-  }
+export function cadreRoot(projectRoot: string): string {
+  return join(resolve(projectRoot), ".cadre");
 }
 
-function readJson(path, errors) {
+function readJson<T>(path: string, errors: string[]): T | null {
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8")) as T;
   } catch (error) {
-    errors.push(`${path}: invalid JSON (${error.message})`);
+    errors.push(`${path}: invalid JSON (${error instanceof Error ? error.message : String(error)})`);
     return null;
   }
 }
 
-function validateOperation(operation, owner, errors) {
+function validateOperation(operation: OperationState | null | undefined, owner: string, errors: string[]): void {
   if (!operation || typeof operation !== "object") {
     errors.push(`${owner}: incomplete state requires an operation journal`);
     return;
@@ -47,7 +102,7 @@ function validateOperation(operation, owner, errors) {
   if (!operation.approvedAt) errors.push(`${owner}: operation approvedAt is required`);
 }
 
-function validateLearning(path, required, errors) {
+function validateLearning(path: string, required: boolean, errors: string[]): void {
   if (!existsSync(path)) {
     if (required) errors.push(`${path}: missing learning file`);
     return;
@@ -60,21 +115,38 @@ function validateLearning(path, required, errors) {
   }
 }
 
-function parsePlan(path, errors) {
+interface PlanTask {
+  checked: boolean;
+  id: string;
+  phase: number;
+  ordinal: number;
+  title: string;
+  commit: string | null;
+  line: number;
+}
+
+interface PlanPhase {
+  number: number;
+  title: string;
+  tasks: PlanTask[];
+  completionCommit: string | null | undefined;
+}
+
+function parsePlan(path: string, errors: string[]): PlanPhase[] {
   if (!existsSync(path)) {
     errors.push(`${path}: missing plan`);
     return [];
   }
-  const phases = [];
+  const phases: PlanPhase[] = [];
   for (const [index, line] of readFileSync(path, "utf8").split(/\r?\n/).entries()) {
     const phase = line.match(/^## Phase (\d+): (.+)$/);
     if (phase) {
-      phases.push({ number: Number(phase[1]), title: phase[2].trim(), tasks: [], completionCommit: undefined });
+      phases.push({ number: Number(phase[1]), title: phase[2]!.trim(), tasks: [], completionCommit: undefined });
       continue;
     }
     const phaseCommit = line.match(/^- Phase completion commit: (pending|`([0-9a-f]{7,40})`)$/);
     if (phaseCommit && phases.length) {
-      phases.at(-1).completionCommit = phaseCommit[1] === "pending" ? null : phaseCommit[2];
+      phases.at(-1)!.completionCommit = phaseCommit[1] === "pending" ? null : phaseCommit[2]!;
       continue;
     }
     const task = line.match(/^- \[([ xX])\] (T(\d+)\.(\d+)) (.+)$/);
@@ -83,16 +155,16 @@ function parsePlan(path, errors) {
       errors.push(`${path}:${index + 1}: task appears before a phase`);
       continue;
     }
-    let remainder = task[5].trim();
-    let commit = null;
+    let remainder = task[5]!.trim();
+    let commit: string | null = null;
     const marker = remainder.match(/^(.*?)\s+<!-- commit: ([0-9a-f]{7,40}) -->$/);
     if (marker) {
-      remainder = marker[1].trim();
-      commit = marker[2];
+      remainder = marker[1]!.trim();
+      commit = marker[2]!;
     }
-    phases.at(-1).tasks.push({
-      checked: task[1].toLowerCase() === "x",
-      id: task[2],
+    phases.at(-1)!.tasks.push({
+      checked: task[1]!.toLowerCase() === "x",
+      id: task[2]!,
       phase: Number(task[3]),
       ordinal: Number(task[4]),
       title: remainder,
@@ -103,7 +175,7 @@ function parsePlan(path, errors) {
   return phases;
 }
 
-function validatePlan(path, status, errors) {
+function validatePlan(path: string, status: string, errors: string[]): void {
   const phases = parsePlan(path, errors);
   if (!phases.length) return;
   phases.forEach((phase, phaseIndex) => {
@@ -123,7 +195,7 @@ function validatePlan(path, status, errors) {
     if (phaseDone && !phase.completionCommit) errors.push(`${path}: completed phase ${phase.number} has no completion commit`);
     if (!phaseDone && phase.completionCommit) errors.push(`${path}: incomplete phase ${phase.number} has a completion commit`);
   });
-  if (phases.at(-1).title !== "Track-level User Manual Verification") {
+  if (phases.at(-1)!.title !== "Track-level User Manual Verification") {
     errors.push(`${path}: final phase must be Track-level User Manual Verification`);
   }
   if (["ready_for_review", "completed", "archived"].includes(status)) {
@@ -132,7 +204,7 @@ function validatePlan(path, status, errors) {
   }
 }
 
-function validateSpec(path, errors) {
+function validateSpec(path: string, errors: string[]): void {
   if (!existsSync(path)) {
     errors.push(`${path}: missing specification`);
     return;
@@ -146,20 +218,27 @@ function validateSpec(path, errors) {
   }
 }
 
-function validateArchiveOperations(root, byId, errors) {
+function validateArchiveOperations(root: string, byId: Map<string, DiscoveredTrack>, errors: string[]): void {
   const operationsRoot = join(root, "operations");
   if (!existsSync(operationsRoot)) return;
   let activeCount = 0;
   for (const file of readdirSync(operationsRoot).filter((name) => name.endsWith(".json"))) {
     const owner = `operations/${file}`;
-    const operation = readJson(join(operationsRoot, file), errors);
+    const operation = readJson<OperationState & {
+      action?: string;
+      batchId?: string;
+      status?: string;
+      selectedTracks?: string[];
+      completedTracks?: string[];
+      archiveCommit?: string | null;
+    }>(join(operationsRoot, file), errors);
     if (!operation) continue;
     if (operation.action !== "archive") errors.push(`${owner}: unsupported action ${operation.action ?? "<missing>"}`);
     validateOperation(operation, owner, errors);
     if (!operation.batchId || file !== `${operation.batchId}.json`) {
       errors.push(`${owner}: filename must match batchId`);
     }
-    if (!["in_progress", "completed"].includes(operation.status)) {
+    if (!operation.status || !["in_progress", "completed"].includes(operation.status)) {
       errors.push(`${owner}: status must be in_progress or completed`);
     }
     if (operation.status === "in_progress") activeCount += 1;
@@ -199,10 +278,14 @@ function validateArchiveOperations(root, byId, errors) {
   if (activeCount > 1) errors.push("operations: more than one archive batch is in progress");
 }
 
-function discoverTracks(root, errors) {
-  const tracks = [];
-  const states = new Map();
-  const byId = new Map();
+function discoverTracks(root: string, errors: string[]): {
+  tracks: DiscoveredTrack[];
+  states: Map<string, TrackState>;
+  byId: Map<string, DiscoveredTrack>;
+} {
+  const tracks: DiscoveredTrack[] = [];
+  const states = new Map<string, TrackState>();
+  const byId = new Map<string, DiscoveredTrack>();
   for (const directory of ["tracks", "archive"]) {
     const directoryRoot = join(root, directory);
     if (!existsSync(directoryRoot)) continue;
@@ -211,7 +294,7 @@ function discoverTracks(root, errors) {
       .sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const location = `${directory}/${entry.name}`;
-      const state = readJson(join(directoryRoot, entry.name, "state.json"), errors);
+      const state = readJson<TrackState>(join(directoryRoot, entry.name, "state.json"), errors);
       if (!state) continue;
       const id = state.trackId;
       if (!id) {
@@ -220,7 +303,7 @@ function discoverTracks(root, errors) {
       }
       if (entry.name !== id) errors.push(`${location}: directory name must match trackId ${id}`);
       if (byId.has(id)) {
-        errors.push(`${id}: duplicate track state under ${byId.get(id).location} and ${location}`);
+        errors.push(`${id}: duplicate track state under ${byId.get(id)!.location} and ${location}`);
         continue;
       }
       if (Object.hasOwn(state, "path")) errors.push(`${id}: state must not persist a path`);
@@ -234,11 +317,11 @@ function discoverTracks(root, errors) {
   return { tracks, states, byId };
 }
 
-function buildTracks(tracks) {
+export function buildTracks(tracks: DiscoveredTrack[]): string {
   const lines = [
     "# Tracks",
     "",
-    "Generated from track-local `state.json` files by `node .cadre/bin/cadre-state.mjs render`.",
+    "Generated from track-local `state.json` files by the Cadre MCP server.",
     "",
     "| Track | Type | Status | Revision |",
     "| --- | --- | --- | ---: |"
@@ -249,15 +332,18 @@ function buildTracks(tracks) {
   return `${lines.join("\n")}\n`;
 }
 
-function validate(root) {
+export function validateProject(projectRoot: string): ValidationResult {
+  const root = cadreRoot(projectRoot);
   const errors = [];
   for (const file of REQUIRED_CONTEXT) {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
-  const project = readJson(join(root, "project.json"), errors);
-  if (!project) return { project: null, errors };
+  const project = readJson<ProjectState>(join(root, "project.json"), errors);
+  if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors };
   if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
-  if (!["greenfield", "brownfield"].includes(project.project?.context)) {
+  if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) errors.push(`project.json: runtimeVersion must be ${CADRE_RUNTIME_VERSION}`);
+  if (project.templateSetVersion !== TEMPLATE_SET_VERSION) errors.push(`project.json: templateSetVersion must be ${TEMPLATE_SET_VERSION}`);
+  if (!project.project?.context || !["greenfield", "brownfield"].includes(project.project.context)) {
     errors.push("project.json: project context must be greenfield or brownfield");
   }
   if (!project.setup?.checkpoint) errors.push("project.json: setup checkpoint is required");
@@ -279,14 +365,14 @@ function validate(root) {
   if (Object.hasOwn(project, "tracks")) errors.push("project.json: must not duplicate track records");
   const { tracks, states, byId } = discoverTracks(root, errors);
   for (const track of tracks) {
-    const state = states.get(track.id);
+    const state = states.get(track.id)!;
     const trackRoot = join(root, track.location);
     if (state.schemaVersion !== 1) errors.push(`${track.id}: unsupported state schemaVersion`);
     if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
     if (!TRACK_TYPES.has(track.type)) errors.push(`${track.id}: type must be feature or bug`);
     if (!TRACK_STATUSES.has(track.status)) errors.push(`${track.id}: invalid status ${track.status}`);
     if (!Array.isArray(track.dependencies)) errors.push(`${track.id}: dependencies must be an array`);
-    if (!Number.isInteger(track.revision) || track.revision < 1) errors.push(`${track.id}: revision must be a positive integer`);
+    if (!Number.isInteger(track.revision) || (track.revision ?? 0) < 1) errors.push(`${track.id}: revision must be a positive integer`);
     if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
     if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
     if (state.operation != null) validateOperation(state.operation, `${track.id} state`, errors);
@@ -333,16 +419,16 @@ function validate(root) {
       }
     }
   }
-  const visiting = new Set();
-  const visited = new Set();
-  function visit(id, trail) {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  function visit(id: string, trail: string[]): void {
     if (visiting.has(id)) {
       errors.push(`dependency cycle: ${[...trail, id].join(" -> ")}`);
       return;
     }
     if (visited.has(id) || !byId.has(id)) return;
     visiting.add(id);
-    for (const dep of byId.get(id).dependencies ?? []) visit(dep, [...trail, id]);
+    for (const dep of byId.get(id)!.dependencies ?? []) visit(dep, [...trail, id]);
     visiting.delete(id);
     visited.add(id);
   }
@@ -354,53 +440,63 @@ function validate(root) {
   return { project, tracks, states, errors };
 }
 
-function nextCommand(track) {
+function nextCommand(track: DiscoveredTrack): string {
   return ({
     "drafting-spec": "track", "drafting-plan": "track", planned: "implement",
     in_progress: "implement", ready_for_review: "review", completed: "archive", archived: "—"
   })[track.status] ?? "—";
 }
 
-const args = process.argv.slice(2);
-const command = args.find((arg) => !arg.startsWith("--")) ?? "status";
-const rootArgIndex = args.indexOf("--root");
-const root = rootArgIndex >= 0 ? resolve(args[rootArgIndex + 1], ".cadre") : findCadreRoot(process.cwd());
-const result = validate(root);
+export function renderTracksPreview(projectRoot: string): {
+  path: string;
+  content: string;
+  previousContent: string | null;
+  changed: boolean;
+  digest: string;
+} {
+  const result = validateProject(projectRoot);
+  if (!result.project) throw new Error(result.errors.join("\n") || "Cadre project state is unavailable");
+  const blockingErrors = result.errors.filter((error) => error !== "tracks.md is stale; regenerate it after approved state changes");
+  if (blockingErrors.length) throw new Error(blockingErrors.join("\n"));
+  const path = join(cadreRoot(projectRoot), "tracks.md");
+  const previousContent = existsSync(path) ? readFileSync(path, "utf8") : null;
+  const content = buildTracks(result.tracks);
+  const digest = createHash("sha256").update(JSON.stringify({ content, previousContent })).digest("hex");
+  return { path, content, previousContent, changed: previousContent !== content, digest };
+}
 
-if (command === "render") {
-  if (!result.project) process.exitCode = 1;
-  else {
-    const output = join(root, "tracks.md");
-    if (existsSync(output)) readFileSync(output, "utf8");
-    writeFileSync(output, buildTracks(result.tracks));
-    process.stdout.write(`Rendered ${output}\n`);
+export function writeTracks(projectRoot: string, proposalDigest: string): string {
+  const preview = renderTracksPreview(projectRoot);
+  if (preview.digest !== proposalDigest) {
+    throw new Error("tracks.md proposal is stale; preview it again before applying");
   }
-} else if (command === "validate") {
-  if (result.errors.length) {
-    process.stderr.write(`${result.errors.join("\n")}\n`);
-    process.exitCode = 1;
-  } else process.stdout.write("Cadre state is valid.\n");
-} else if (command === "status") {
+  if (existsSync(preview.path)) {
+    if (lstatSync(preview.path).isSymbolicLink()) throw new Error("Refusing to write tracks.md through a symbolic link");
+    readFileSync(preview.path, "utf8");
+  }
+  writeFileSync(preview.path, preview.content);
+  return preview.path;
+}
+
+export function formatStatus(projectRoot: string): { text: string; result: ValidationResult } {
+  const result = validateProject(projectRoot);
   const project = result.project;
-  if (!project) process.exitCode = 1;
-  else {
-    process.stdout.write(`Project: ${project.project?.name ?? "unknown"}; context=${project.project?.context ?? "unknown"}\n`);
-    process.stdout.write(`Setup: ${project.setup?.status ?? "unknown"}; checkpoint=${project.setup?.checkpoint ?? "none"}; operation=${project.setup?.operation?.action ?? "none"}; commit=${project.setup?.commit ?? "none"}\n`);
-    process.stdout.write(`Last refresh: ${project.lastRefresh?.commit ?? "none"}\n`);
-    for (const track of result.tracks) {
-      const dependencies = track.dependencies?.length ? track.dependencies.join(",") : "none";
-      const state = result.states.get(track.id);
-      process.stdout.write(`${track.id} [${track.type}] ${track.status}; checkpoint=${state?.checkpoint ?? "none"}; operation=${state?.operation?.action ?? "none"}; deps=${dependencies}; revision=${track.revision ?? 1}; phase=${state?.activePhase ?? "none"}; task=${state?.activeTask ?? "none"}; reviews=${state?.reviewCycles?.length ?? 0}; next=${nextCommand(track)}\n`);
-    }
-    const counts = result.tracks.reduce((result, track) => {
-      result[track.status] = (result[track.status] ?? 0) + 1;
-      return result;
-    }, {});
-    process.stdout.write(`Counts: ready_for_review=${counts.ready_for_review ?? 0}; completed=${counts.completed ?? 0}; archived=${counts.archived ?? 0}\n`);
-    process.stdout.write(`Validation: ${result.errors.length ? `${result.errors.length} error(s)` : "clean"}\n`);
-    if (result.errors.length) process.exitCode = 1;
+  if (!project) return { text: result.errors.join("\n"), result };
+  const lines = [
+    `Project: ${project.project?.name ?? "unknown"}; context=${project.project?.context ?? "unknown"}`,
+    `Setup: ${project.setup?.status ?? "unknown"}; checkpoint=${project.setup?.checkpoint ?? "none"}; operation=${project.setup?.operation?.action ?? "none"}; commit=${project.setup?.commit ?? "none"}`,
+    `Last refresh: ${project.lastRefresh?.commit ?? "none"}`
+  ];
+  for (const track of result.tracks) {
+    const dependencies = track.dependencies?.length ? track.dependencies.join(",") : "none";
+    const state = result.states.get(track.id);
+    lines.push(`${track.id} [${track.type}] ${track.status}; checkpoint=${state?.checkpoint ?? "none"}; operation=${state?.operation?.action ?? "none"}; deps=${dependencies}; revision=${track.revision ?? 1}; phase=${state?.activePhase ?? "none"}; task=${state?.activeTask ?? "none"}; reviews=${state?.reviewCycles?.length ?? 0}; next=${nextCommand(track)}`);
   }
-} else {
-  process.stderr.write("Usage: cadre-state.mjs [status|validate|render] [--root PROJECT_ROOT]\n");
-  process.exitCode = 2;
+  const counts = result.tracks.reduce<Record<string, number>>((summary, track) => {
+    summary[track.status] = (summary[track.status] ?? 0) + 1;
+    return summary;
+  }, {});
+  lines.push(`Counts: ready_for_review=${counts.ready_for_review ?? 0}; completed=${counts.completed ?? 0}; archived=${counts.archived ?? 0}`);
+  lines.push(`Validation: ${result.errors.length ? `${result.errors.length} error(s)` : "clean"}`);
+  return { text: `${lines.join("\n")}\n`, result };
 }

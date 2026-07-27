@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync
 } from "node:fs";
@@ -7,16 +7,21 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const stateScript = join(root, "skills", "create", "assets", "project", ".cadre", "bin", "cadre-state.mjs");
-const templateRoot = join(root, "skills", "create", "assets", "project", ".cadre");
+const templateRoot = join(root, "templates", "v1", "init");
+const providerRoot = join(root, "templates", "v1");
 
 function fixture() {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-test-"));
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
+  project.runtimeVersion = "0.2.0";
+  project.templateSetVersion = "v1";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
   project.setup = {
@@ -30,10 +35,27 @@ function fixture() {
   return projectRoot;
 }
 
-function runState(projectRoot, command, expectFailure = false) {
-  const result = spawnSync(process.execPath, [stateScript, command, "--root", projectRoot], { encoding: "utf8" });
-  if (!expectFailure && result.status !== 0) throw new Error(result.stderr || result.stdout);
-  return result;
+function runState(projectRoot: string, command: "render" | "validate" | "status", expectFailure = false) {
+  let status = 0;
+  let stdout = "";
+  let stderr = "";
+  try {
+    if (command === "render") {
+      const preview = renderTracksPreview(projectRoot);
+      writeTracks(projectRoot, preview.digest);
+      stdout = `${preview.path}\n`;
+    } else if (command === "validate") {
+      const validation = validateProject(projectRoot);
+      status = validation.errors.length ? 1 : 0;
+      stdout = status ? "" : "Cadre state is valid\n";
+      stderr = status ? `${validation.errors.join("\n")}\n` : "";
+    } else stdout = formatStatus(projectRoot).text;
+  } catch (error) {
+    status = 1;
+    stderr = `${error instanceof Error ? error.message : String(error)}\n`;
+  }
+  if (!expectFailure && status !== 0) throw new Error(stderr || stdout);
+  return { status, stdout, stderr };
 }
 
 test("empty initialized project validates", () => {
@@ -48,6 +70,8 @@ test("approved create operation remains valid before its artifact commit", () =>
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
+  project.runtimeVersion = "0.2.0";
+  project.templateSetVersion = "v1";
   project.project.name = "Interrupted setup";
   project.project.context = "greenfield";
   project.setup.operation.baseCommit = null;
@@ -192,7 +216,7 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
   const target = join(parent, "cadre");
   execFileSync(process.execPath, [
-    join(root, "scripts", "install.mjs"), "--agent", "all", "--prepare-only",
+    "--import", "tsx", join(root, "scripts", "install.ts"), "--agent", "all", "--prepare-only",
     "--marketplace-root", target, "--cachebuster", "test-build"
   ]);
 
@@ -200,8 +224,11 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "0.1.0+codex.test-build");
-  assert.equal(claudeManifest.version, "0.1.0+claude.test-build");
+  assert.equal(codexManifest.version, "0.2.0+codex.test-build");
+  assert.equal(claudeManifest.version, "0.2.0+claude.test-build");
+  assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
+  assert.equal(existsSync(join(pluginRoot, "scripts")), false);
 
   const codexMarketplace = JSON.parse(readFileSync(join(target, ".agents", "plugins", "marketplace.json"), "utf8"));
   const claudeMarketplace = JSON.parse(readFileSync(join(target, ".claude-plugin", "marketplace.json"), "utf8"));
@@ -209,17 +236,74 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   assert.equal(claudeMarketplace.plugins[0].source, "./plugins/cadre");
 
   execFileSync(process.execPath, [
-    join(root, "scripts", "install.mjs"), "--agent", "all", "--prepare-only",
+    "--import", "tsx", join(root, "scripts", "install.ts"), "--agent", "all", "--prepare-only",
     "--marketplace-root", target, "--cachebuster", "second-build"
   ]);
   const backups = readdirSync(parent).filter((entry) => entry.startsWith("cadre.backup-"));
   assert.equal(backups.length, 1);
   const previousManifest = JSON.parse(readFileSync(
-    join(parent, backups[0], "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
+    join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "0.1.0+codex.test-build");
+  assert.equal(previousManifest.version, "0.2.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "0.1.0+codex.second-build");
+  assert.equal(updatedManifest.version, "0.2.0+codex.second-build");
+});
+
+test("compiled MCP exposes versioned templates and initializes projects without copied runtime", async () => {
+  const client = new Client({ name: "cadre-test", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(root, "dist", "cadre-mcp.mjs")]
+  });
+  await client.connect(transport);
+  try {
+    const tools = await client.listTools();
+    for (const name of [
+      "template_catalog", "template_get", "styleguide_resolve", "project_status",
+      "state_validate", "project_init_preview", "project_init_apply",
+      "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply"
+    ]) {
+      assert.ok(tools.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`);
+    }
+    const resources = await client.listResources();
+    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v1/track/spec"));
+
+    const workflow = await client.callTool({ name: "template_get", arguments: { id: "project/workflow" } });
+    assert.equal(workflow.isError, undefined);
+    assert.equal((workflow.structuredContent as { id?: string }).id, "project/workflow");
+
+    const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
+    const files = [
+      ["product.md", "# Product\n"],
+      ["guidelines.md", "# Guidelines\n"],
+      ["tech-stack.md", "# Tech Stack\n- TypeScript\n"],
+      ["workflow.md", "# Workflow\nRead before edit.\n"],
+      ["styleguides/general.md", "# General Styleguide\n"]
+    ].map(([path, content]) => ({ path: path!, content: content! }));
+    const input = {
+      projectRoot,
+      projectName: "MCP fixture",
+      context: "greenfield",
+      gitDisposition: "existing",
+      baseCommit: null,
+      approvedAt: "2026-07-28T00:00:00.000Z",
+      files
+    };
+    const preview = await client.callTool({ name: "project_init_preview", arguments: input });
+    assert.equal(preview.isError, undefined);
+    const digest = (preview.structuredContent as { digest?: string }).digest;
+    assert.match(digest ?? "", /^[0-9a-f]{64}$/);
+    const applied = await client.callTool({
+      name: "project_init_apply",
+      arguments: { ...input, proposalDigest: digest }
+    });
+    assert.equal(applied.isError, undefined);
+    assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
+    assert.equal(existsSync(join(projectRoot, ".cadre", "bin")), false);
+    assert.equal(existsSync(join(projectRoot, ".cadre", "templates")), false);
+  } finally {
+    await client.close();
+  }
 });
 
 test("plugin namespace is not repeated in skill identities", () => {
@@ -261,7 +345,7 @@ test("create bootstraps Git only when no worktree exists", () => {
   assert.match(create, /git rev-parse --show-toplevel/);
   assert.match(create, /git init/);
   assert.match(create, /never initialize a nested repository/);
-  assert.match(create, /git-initialized/);
+  assert.match(create, /setup_record_git_initialized/);
 
   const project = JSON.parse(readFileSync(join(templateRoot, "project.json"), "utf8"));
   assert.ok(project.setup.operation.repositoryRoot);
@@ -271,7 +355,7 @@ test("create bootstraps Git only when no worktree exists", () => {
 test("create requires separate workflow and styleguide acceptance", () => {
   const create = readFileSync(join(root, "skills", "create", "SKILL.md"), "utf8");
   assert.match(create, /whether the default workflow is acceptable or the human wants changes/);
-  assert.match(create, /copy the default, amend it, or use a user-provided replacement/);
+  assert.match(create, /use the default, amend it, or use a user-provided replacement/);
 
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
   assert.match(workflow, /Create-time workflow and styleguide acceptance/);
@@ -279,7 +363,7 @@ test("create requires separate workflow and styleguide acceptance", () => {
 });
 
 test("default styleguide catalog covers the supported stack", () => {
-  const styleguideRoot = join(root, "skills", "create", "assets", "styleguides");
+  const styleguideRoot = join(providerRoot, "styleguides");
   const expected = [
     "go", "java", "kotlin", "maven", "gradle", "javascript", "typescript",
     "react", "html-css", "flutter", "dart", "swift", "swiftui", "python"
@@ -296,10 +380,10 @@ test("archive supports a resumable multi-track batch", () => {
   assert.match(archive, /one or more `completed` tracks in a single batch/);
   assert.match(archive, /all completed/);
   assert.match(archive, /Reject the batch without partial mutation/);
-  assert.match(archive, /archive-operation\.json/);
+  assert.match(archive, /project\/archive-operation/);
   assert.match(archive, /commit all approved archive moves and derived changes together/);
 
-  const operation = JSON.parse(readFileSync(join(templateRoot, "templates", "project", "archive-operation.json"), "utf8"));
+  const operation = JSON.parse(readFileSync(join(providerRoot, "project", "archive-operation.json"), "utf8"));
   assert.equal(operation.action, "archive");
   assert.ok(Array.isArray(operation.selectedTracks));
   assert.ok(Array.isArray(operation.completedTracks));
@@ -337,7 +421,7 @@ test("track state is canonical and generated tracks omit paths and dependencies"
     revision: 1,
     activePhase: null,
     activeTask: null,
-    dependencies: ["missing-dependency"],
+    dependencies: [],
     commits: { spec: null, plan: null },
     artifactProgress: ["state.json"],
     operation: {
@@ -354,8 +438,12 @@ test("track state is canonical and generated tracks omit paths and dependencies"
   runState(projectRoot, "render");
   const tracks = readFileSync(join(cadreRoot, "tracks.md"), "utf8");
   assert.match(tracks, /`local-state` Local state/);
-  assert.doesNotMatch(tracks, /Dependencies|Path|missing-dependency/);
+  assert.doesNotMatch(tracks, /Dependencies|Path/);
 
+  const statePath = join(trackRoot, "state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  state.dependencies = ["missing-dependency"];
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
   const invalid = runState(projectRoot, "validate", true);
   assert.match(invalid.stderr, /unknown dependency missing-dependency/);
   const project = JSON.parse(readFileSync(join(cadreRoot, "project.json"), "utf8"));

@@ -1,5 +1,7 @@
 {
   "schemaVersion": 1,
+  "runtimeVersion": "{{RUNTIME_VERSION}}",
+  "templateSetVersion": "{{TEMPLATE_SET_VERSION}}",
   "project": {
     "name": "{{PROJECT_NAME}}",
     "context": "{{greenfield|brownfield}}"

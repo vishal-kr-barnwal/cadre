@@ -2,6 +2,8 @@
 
 This file governs every Cadre command except that `wisp` does not mutate Cadre state. If a command-specific instruction conflicts with this file, stop and present the conflict to the human.
 
+Cadre's plugin-scoped MCP server is the authoritative runtime and immutable template provider. Project-local `.cadre/` contains only approved mutable context, lifecycle artifacts, and history; it must not contain copied Cadre runtime code or template catalogs. Stateful commands fail closed when required Cadre MCP tools are unavailable.
+
 ## Non-negotiable operating rules
 
 ### Read before edit
@@ -28,7 +30,7 @@ Always propose `styleguides/general.md`. Match the approved tech stack against t
 
 ### Interruption-safe operations
 
-For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` for track-local flows, and a file derived from `.cadre/templates/project/archive-operation.json` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
+For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` for track-local flows, and a file rendered from the MCP template `project/archive-operation` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
 
 On every command entry, reconcile an existing journal before starting new work:
 
@@ -39,7 +41,9 @@ On every command entry, reconcile an existing journal before starting new work:
 
 Advance the checkpoint after each durable artifact write. Once the artifact commit is identified, append it to history, clear the operation, advance the lifecycle checkpoint, and commit the state record. This protocol makes interruption before a commit, after a commit, or before its follow-up state commit resumable.
 
-During `create`, detect an existing worktree with `git rev-parse --show-toplevel` and never initialize a nested repository. If no worktree exists, record the approved project root and `initialize` disposition in the setup journal, run `git init` there, verify the resulting root, and checkpoint it before the setup commit. Resume a pending initialization from the journal; stop if the observed repository conflicts with the recorded disposition or root.
+During `create`, detect an existing worktree with `git rev-parse --show-toplevel` and never initialize a nested repository. If no worktree exists, record the approved project root and `initialize` disposition through the MCP initialization preview/apply gate before running `git init` there. Verify the resulting root and record that checkpoint before the setup commit. Resume a pending initialization from the journal; stop if the observed repository conflicts with the recorded disposition or root.
+
+For deterministic MCP mutations, call the read-only preview immediately before apply, show the exact proposal to the human, and pass its digest unchanged. A changed digest requires a new proposal and approval. The MCP never grants approval, runs Git, or replaces required repository inspection.
 
 ### Sources of truth
 
@@ -49,6 +53,7 @@ During `create`, detect an existing worktree with `git rev-parse --show-toplevel
 - Track location is derived: non-archived state lives at `tracks/<track-id>` and archived state at `archive/<track-id>`. Never persist a track path field.
 - `project.json` contains project/setup/refresh history only; it does not duplicate track records.
 - `tracks.md` is a generated lifecycle summary discovered from track-local state. It intentionally omits dependencies and paths; never hand-edit it.
+- Templates are immutable plugin resources addressed by logical IDs such as `track/spec`; they are rendered into approved artifacts but are never copied into `.cadre/`.
 - Git is the implementation history. Do not claim completion without recorded commits.
 
 ## Lifecycle
