@@ -1,15 +1,16 @@
 import { createHash } from "node:crypto";
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync
+  existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync
 } from "node:fs";
-import { homedir } from "node:os";
 import { dirname } from "node:path";
-import { isAbsolute, join, parse, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { buildTracks } from "./state.js";
 import { getTemplate } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
+import { safeProjectRoot } from "./paths.js";
 
 export { CADRE_RUNTIME_VERSION } from "./version.js";
+export { safeProjectRoot } from "./paths.js";
 
 export interface ApprovedFile {
   path: string;
@@ -43,17 +44,6 @@ const REQUIRED_APPROVED_FILES = new Set([
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
-}
-
-export function safeProjectRoot(input: string): string {
-  const root = resolve(input);
-  if (root === parse(root).root || root === resolve(homedir())) {
-    throw new Error(`Refusing broad project root ${root}`);
-  }
-  if (!existsSync(root) || !statSync(root).isDirectory()) {
-    throw new Error(`Project root is not an existing directory: ${root}`);
-  }
-  return root;
 }
 
 function normalizeCadrePath(input: string): string {
@@ -129,14 +119,14 @@ export function previewProjectInit(input: ProjectInitInput): ProjectInitProposal
   const approvedPaths = [...approved.keys()].sort();
   const generated = new Map<string, string>([
     ...approved.entries(),
+    [".gitignore", getTemplate("project/gitignore").content],
     ["project.json", projectState(input, approvedPaths)],
     ["patterns/index.md", getTemplate("project/patterns/index").content],
     ["tracks.md", buildTracks([])],
     ["operations/.gitkeep", ""],
     ["tracks/.gitkeep", ""],
     ["archive/.gitkeep", ""],
-    ["refreshes/.gitkeep", ""],
-    ["wisps/.gitkeep", ""]
+    ["refreshes/.gitkeep", ""]
   ]);
   const files = [...generated.entries()]
     .map(([path, content]) => ({ path, content, sha256: hash(content) }))

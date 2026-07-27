@@ -60,16 +60,33 @@ for (const skill of skills) {
 
 const templateRoot = join(root, "templates", "v1");
 const projectTemplate = join(templateRoot, "init");
-for (const file of ["workflow.md", "product.md", "guidelines.md", "tech-stack.md", "project.json", "operations/.gitkeep"]) {
+for (const file of [".gitignore", "workflow.md", "product.md", "guidelines.md", "tech-stack.md", "project.json", "operations/.gitkeep"]) {
   if (!existsSync(join(projectTemplate, file))) errors.push(`project template: missing ${file}`);
 }
 for (const forbidden of ["bin", "templates"]) {
   if (existsSync(join(projectTemplate, forbidden))) errors.push(`project template: must not ship .cadre/${forbidden}`);
 }
+const cadreGitignore = readFileSync(join(projectTemplate, ".gitignore"), "utf8");
+if (!cadreGitignore.includes("/.worktrees/") || !cadreGitignore.includes("/wisps/")) {
+  errors.push("project template: .gitignore must exclude worktrees and wisps");
+}
 const providerLearningTemplate = join(templateRoot, "track", "learning.md");
 if (!existsSync(providerLearningTemplate)
   || !readFileSync(providerLearningTemplate, "utf8").includes("<!-- cadre:pattern-seed:start -->")) {
   errors.push("template provider: learning.md lacks the marked Pattern Seed section");
+}
+const providerPlanTemplate = join(templateRoot, "track", "plan.md");
+if (!existsSync(providerPlanTemplate)
+  || !readFileSync(providerPlanTemplate, "utf8").includes("Phase dependencies")
+  || !readFileSync(providerPlanTemplate, "utf8").includes("Task dependencies")) {
+  errors.push("template provider: plan.md lacks explicit DAG dependencies");
+}
+const executionTemplate = join(templateRoot, "track", "execution.json");
+try {
+  const execution = readJson<{ schemaVersion?: number; nodes?: unknown }>(executionTemplate);
+  if (execution.schemaVersion !== 1 || execution.nodes == null) errors.push("template provider: invalid execution.json");
+} catch (error) {
+  errors.push(`template provider: execution.json: ${errorMessage(error)}`);
 }
 const archiveOperationTemplate = join(templateRoot, "project", "archive-operation.json");
 try {
@@ -102,8 +119,12 @@ if (Object.hasOwn(projectStateTemplate, "tracks")) {
   errors.push("project template: project.json must not duplicate track records");
 }
 
-const trackStateTemplate = readJson<{ title?: string }>(join(templateRoot, "track", "state.json"));
+const trackStateTemplate = readJson<{ title?: string; lastExecution?: unknown }>(join(templateRoot, "track", "state.json"));
 if (!trackStateTemplate.title) errors.push("template provider: track state title is missing");
+if (!Object.hasOwn(trackStateTemplate, "lastExecution")) errors.push("template provider: track state lacks lastExecution");
+if (Object.hasOwn(trackStateTemplate, "activePhase") || Object.hasOwn(trackStateTemplate, "activeTask")) {
+  errors.push("template provider: active execution nodes must not be duplicated in track state");
+}
 
 const styleguideRoot = join(templateRoot, "styleguides");
 for (const name of [
@@ -117,9 +138,20 @@ for (const name of [
 
 for (const file of [
   "src/mcp/server.ts", "src/domain/templates.ts", "src/domain/init.ts", "src/domain/state.ts",
+  "src/domain/plan.ts", "src/domain/execution.ts", "src/domain/worktrees.ts",
   "scripts/permissions.ts", "dist/cadre-mcp.mjs"
 ]) {
   if (!existsSync(join(root, file))) errors.push(`runtime: missing ${file}`);
+}
+for (const agent of ["cadre-phase-worker.md", "cadre-task-worker.md"]) {
+  const path = join(root, "agents", agent);
+  if (!existsSync(path)) errors.push(`plugin agent: missing ${agent}`);
+  else {
+    const body = readFileSync(path, "utf8");
+    if (!body.includes("Do not spawn agents") || !body.includes("Never edit `.cadre/**`")) {
+      errors.push(`plugin agent: ${agent} lacks scheduler/state isolation rules`);
+    }
+  }
 }
 if (existsSync(join(root, "skills", "create", "assets"))) errors.push("runtime: duplicate skill-local assets remain");
 for (const file of ["scripts/install.mjs", "scripts/package-plugin.mjs", "scripts/validate.mjs", "test/harness.test.mjs"]) {

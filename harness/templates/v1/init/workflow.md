@@ -30,7 +30,7 @@ Always propose `styleguides/general.md`. Match the approved tech stack against t
 
 ### Interruption-safe operations
 
-For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, `revise`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` for track-local flows, and a file rendered from the MCP template `project/archive-operation` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
+For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, `implement`, finding-bearing `review`, `revise`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` plus `executions/execution-<ts>.json` for implementation, track `state.json.operation` for other track-local flows, and a file rendered from the MCP template `project/archive-operation` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
 
 On every command entry, reconcile an existing journal before starting new work:
 
@@ -43,18 +43,19 @@ Advance the checkpoint after each durable artifact write. Once the artifact comm
 
 During `create`, detect an existing worktree with `git rev-parse --show-toplevel` and never initialize a nested repository. If no worktree exists, record the approved project root and `initialize` disposition through the MCP initialization preview/apply gate before running `git init` there. Verify the resulting root and record that checkpoint before the setup commit. Resume a pending initialization from the journal; stop if the observed repository conflicts with the recorded disposition or root.
 
-For deterministic MCP mutations, call the read-only preview immediately before apply, show the exact proposal to the human, and pass its digest unchanged. A changed digest requires a new proposal and approval. The MCP never grants approval, runs Git, or replaces required repository inspection.
+For deterministic MCP mutations, call the read-only preview immediately before apply, show the exact proposal to the human, and pass its digest unchanged. A changed digest requires a new proposal and approval. The MCP never grants approval or replaces required repository inspection. Its Git surface is limited to constrained, digest-gated Cadre worktree creation, integration, and safe cleanup; it accepts no arbitrary command, path, force deletion, or automatic conflict resolution.
 
 ### Sources of truth
 
-- `plan.md` is the execution source of truth for phases, tasks, order, status, and commit provenance.
+- `plan.md` is the execution source of truth for phase/task identities, dependencies, verification barriers, completion, and commit provenance. Display order is only a deterministic scheduling tie-breaker.
 - `spec.md` is the scope and acceptance source of truth.
-- Each track's `state.json` is the canonical source for its identity, title, type, status, dependencies, revision, checkpoints, and operation history; it must agree with the approved spec and plan.
+- Each track's `state.json` is the canonical source for its identity, title, type, status, track dependencies, revision, checkpoints, operation pointer, completed execution, and history; it must agree with the approved spec and plan. Active execution nodes are derived from the execution journal, never duplicated as singular active phase/task fields.
 - Track location is derived: non-archived state lives at `tracks/<track-id>` and archived state at `archive/<track-id>`. Never persist a track path field.
 - `project.json` contains project/setup/refresh history only; it does not duplicate track records.
 - `tracks.md` is a generated lifecycle summary discovered from track-local state. It intentionally omits dependencies and paths; never hand-edit it.
 - Templates are immutable plugin resources addressed by logical IDs such as `track/spec`; they are rendered into approved artifacts but are never copied into `.cadre/`.
 - Git is the implementation history. Do not claim completion without recorded commits.
+- `.cadre/.gitignore` keeps `.worktrees/` and `wisps/` out of Git. Worktree and Wisp contents are runtime-only and never Cadre history.
 
 ## Lifecycle
 
@@ -74,34 +75,49 @@ Legal track statuses are `drafting-spec`, `drafting-plan`, `planned`, `in_progre
 
 - Track type is exactly `feature` or `bug`.
 - A spec contains functional requirements, non-functional requirements, acceptance criteria, additional information, dependencies, and impact.
-- A plan contains ordered phases and tasks. Every delivery/remediation phase ends with a task named `User Manual Verification`.
-- The final phase is named `Track-level User Manual Verification` and also ends with a `User Manual Verification` task.
+- A plan is an acyclic graph. Every regular phase explicitly declares phase dependencies; every regular task explicitly declares same-phase task dependencies. Missing declarations, unknown references, self-dependencies, cross-phase task dependencies, and cycles are invalid.
+- Every delivery/remediation phase ends with a task named `User Manual Verification`; its dependencies are derived as every sibling delivery task and must not be repeated in the plan.
+- The final phase is named `Track-level User Manual Verification`, contains only `User Manual Verification`, and implicitly depends on every preceding phase. Those dependencies are derived and must not be repeated.
 - A track may start implementation only when every declared dependency is completed or archived after completion.
 - After spec and plan approval, populate the marked Pattern Seed section at the top of `learning.md` only from relevant, existing patterns and cite the source pattern paths. Do not create a separate seed file.
 
-## Implementation discipline
+## Implementation scheduling and discipline
 
-1. Load this workflow and the full current track before acting.
-2. At phase start, read the previous phase's learning; phase one reads the marked Pattern Seed section in the same file.
-3. Select work from the plan, one task at a time. Re-read the plan between tasks.
-4. Follow read-before-edit. Keep scope limited to the active task.
+`implement` defaults to parallel mode unless the human explicitly requests sequential execution. Persist the requested and effective mode in the execution journal. Parallel mode is permission to schedule ready work concurrently, not a requirement to create workers: when fewer than two safe executable nodes are ready, execute in the main agent without a worktree. Bound workers by the minimum of ready nodes, host capacity, and the approved workflow maximum of 3.
+
+The main agent is the only scheduler. Workers never spawn workers, mutate `.cadre/**`, merge, resolve integration conflicts, delete worktrees, or record human approval. A phase is either owned by one phase worker for internally sequential work or coordinated by the main agent through task workers; never both at once. A phase/task worker edits product files only in its assigned absolute worktree, runs focused verification, returns a structured diff/evidence/learning summary, and waits for main-agent human approval before creating Conventional Commits.
+
+Cadre worktrees use sibling namespaces because one worktree cannot safely contain another:
+
+```text
+.cadre/.worktrees/<track>/<execution>/phases/P1
+.cadre/.worktrees/<track>/<execution>/tasks/P1--t1-1
+```
+
+Git ancestry comes from the recorded base commit, not directory nesting. A task-worker branch merges without squashing into the registered phase integration worktree when one exists, otherwise into the canonical branch used by the main-coordinated phase. Tasks executed internally by a phase worker are already on that phase branch and do not get a redundant task merge. Phase branches merge without squashing, one at a time, into the canonical branch. The main agent performs every preview/apply gate and journal transition. A worker commit is recorded immediately in the execution journal; the plan task becomes complete only after canonical integration and records that reachable worker commit SHA.
+
+1. Load this workflow and the full current track. Validate the DAG and reconcile the execution journal, Git worktrees, branch tips, dirty files, and recent commits before scheduling.
+2. Root phases read the marked Pattern Seed. Every other phase reads learning from all declared dependency phases; parallel sibling phases do not assume each other's learning.
+3. Derive ready phases and tasks from completed dependencies. Use plan order only to break ties.
+4. Follow read-before-edit and keep every worker limited to its assigned node and worktree.
 5. Write/update tests and documentation required by the spec and Definition of Done.
-6. Run focused tests during work, then formatting/lint/type checks and the relevant broader suite.
-7. Present the diff and evidence. Manual-verification tasks require explicit human confirmation.
-8. Create Conventional Commits for meaningful implementation units. At minimum, commit each completed task; a large task may contain several meaningful commits.
-9. Mark a task complete only after verification and record its implementation commit SHA in `plan.md`. Use a follow-up `cadre(implement): record ...` commit for bookkeeping when necessary.
-10. When a phase completes, record its completion commit SHA in both `plan.md` and that phase's `learning.md` section. The final manual-verification task commit may serve as the phase completion commit.
-11. Append phase-scoped learning. Do not overwrite prior learning.
+6. Run focused checks per task, combined phase checks after task integration, and the relevant broader suite after conflict resolution, phase integration, and before track verification.
+7. Present every worker diff and evidence through the main agent. A worker commits only after explicit human approval.
+8. Resolve task conflicts in the phase integration worktree and phase conflicts in the canonical worktree. Present the resolution and rerun combined verification; never let the leaf worker silently resolve integration conflicts.
+9. Phase-level manual verification becomes ready only after every sibling task is integrated. Run its technical evidence in the phase worktree through the phase worker when present, otherwise through main; the human approval is always mediated and recorded by main before phase integration.
+10. Track-level manual verification becomes ready only after every phase is integrated and is executed entirely by the main agent in the canonical worktree.
+11. Remove a worktree with `git worktree remove` and delete its branch without force only after clean, recorded integration. Never delete dirty, conflicted, unintegrated, or mismatched work.
+12. Append dependency-aware phase learning. Do not overwrite earlier learning.
 
 ## Definition of Done
 
 A task is done when its approved outcome exists, relevant tests cover success/failure/edge cases, checks pass or documented exceptions are approved, formatting and repository conventions are satisfied, docs are updated, no unrelated changes are included, artifacts were shown to the human, and commit provenance is recorded.
 
-A phase is done when all tasks are done, phase learning is recorded, and its final User Manual Verification is explicitly approved. A track is ready for review only after its final track-level manual verification. It is completed only after an approved clean review.
+A phase is done when all tasks are integrated, phase learning is recorded, combined verification passes, and its final User Manual Verification is explicitly approved. A track is ready for review only after all execution nodes are complete, all worker branches are integrated, all worktrees are removed, the journal is finalized, and track-level manual verification is approved in main. It is completed only after an approved clean review bound to the current execution ID, plan revision, graph digest, and reviewed HEAD.
 
 ## Review and remediation
 
-Review acceptance criteria, non-functional requirements, diffs, callers, tests, security, compatibility, error paths, and learning claims. Present findings before recording them. Approved findings go in `bugs/bug-<review-ts>.md`; add remediation phases to the plan, ending each with manual verification and restoring a final track-level verification phase. Set the track back to `in_progress`. Repeat implement/review until a clean review is approved.
+Review acceptance criteria, non-functional requirements, diffs, callers, tests, security, compatibility, error paths, and learning claims. Present findings before recording them. Approved findings go in `bugs/bug-<review-ts>.md`; insert dependency-aware remediation phases before the single final track-level verification phase, ending each with manual verification. Reset the final barrier to pending while preserving its prior evidence in the review cycle and completed execution journal. A replacement execution carries already-completed plan nodes forward from their commit provenance and schedules only pending work. Set the track back to `in_progress`. A clean cycle records the current execution ID, plan revision, graph digest, and reviewed HEAD. Repeat implement/review until a clean review is approved.
 
 ## Revisions, refreshes, and cascading impact
 
@@ -122,7 +138,7 @@ Every project refresh gets `refreshes/refresh-<ts>.md`. Assess transitive depend
 
 ## Archival and learning
 
-Archive one or more selected completed tracks in one approved batch. Validate the whole selection before mutation, distill the selected learning as one corpus into patterns with source track/task/commit provenance, reconcile it with existing patterns, then propose relevant reseeding for all active tracks. Journal the ordered selection and per-track/artifact progress, move each full track directory to `archive/`, validate once, and commit the batch together. Never discard history or start another archive batch while one is incomplete.
+Archive one or more selected completed tracks in one approved batch. Require `completed` status and clean centralized state validation; do not recompute the DAG, manual-verification barriers, or review evidence inside archive. Validate the whole selection before mutation, distill the selected learning as one corpus into patterns with source track/task/commit provenance, reconcile it with existing patterns, then propose relevant reseeding for all active tracks. Journal the ordered selection and per-track/artifact progress, move each full track directory to `archive/`, validate once, and commit the batch together. Never discard history or start another archive batch while one is incomplete.
 
 ## Git safety and commits
 

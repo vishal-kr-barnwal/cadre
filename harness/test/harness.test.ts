@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync
+  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -10,6 +10,15 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
+import { parsePlan, validatePlanGraph } from "../src/domain/plan.js";
+import {
+  applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionStart, executionStatus,
+  previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionStart
+} from "../src/domain/execution.js";
+import {
+  applyWorktreeCleanup, applyWorktreeCreate, applyWorktreeIntegration, managedWorktreeStatus,
+  previewWorktreeCleanup, previewWorktreeCreate, previewWorktreeIntegration
+} from "../src/domain/worktrees.js";
 import {
   CLAUDE_APPROVAL,
   configureClaudeMcpApproval,
@@ -25,7 +34,7 @@ function fixture() {
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "0.2.0";
+  project.runtimeVersion = "0.3.0";
   project.templateSetVersion = "v1";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
@@ -63,6 +72,86 @@ function runState(projectRoot: string, command: "render" | "validate" | "status"
   return { status, stdout, stderr };
 }
 
+function writePlannedTrack(projectRoot: string, trackId = "parallel-track"): string {
+  const trackRoot = join(projectRoot, ".cadre", "tracks", trackId);
+  mkdirSync(trackRoot, { recursive: true });
+  writeFileSync(join(trackRoot, "spec.md"), `# Specification: Parallel track
+
+## Functional Requirements
+- FR-001: Execute approved work.
+## Non-Functional Requirements
+- NFR-001: Preserve deterministic state.
+## Acceptance Criteria
+- AC-001: The execution can resume.
+## Dependencies
+None.
+## Additional Information
+None.
+## Dependent-track impact
+None.
+`);
+  writeFileSync(join(trackRoot, "plan.md"), `# Plan: Parallel track
+
+- Spec revision: 1
+- Plan revision: 1
+
+## Phase 1: Deliver
+- Phase dependencies: none
+
+- [ ] T1.1 Implement
+  - Task dependencies: none
+- [ ] T1.2 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 2: Track-level User Manual Verification
+- [ ] T2.1 User Manual Verification
+- Phase completion commit: pending
+`);
+  writeFileSync(join(trackRoot, "learning.md"), `# Incremental Learning
+
+<!-- cadre:pattern-seed:start -->
+## Pattern Seed
+No existing pattern is relevant.
+<!-- cadre:pattern-seed:end -->
+`);
+  writeFileSync(join(trackRoot, "state.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    trackId,
+    title: "Parallel track",
+    type: "feature",
+    status: "planned",
+    checkpoint: "ready",
+    revision: 1,
+    dependencies: [],
+    commits: { spec: "aaaaaaa", plan: "bbbbbbb" },
+    artifactProgress: [],
+    operation: null,
+    lastExecution: null,
+    reviewCycles: [],
+    history: []
+  }, null, 2)}\n`);
+  return trackRoot;
+}
+
+function gitText(projectRoot: string, args: string[]): string {
+  return execFileSync("git", args, { cwd: projectRoot, encoding: "utf8" }).trim();
+}
+
+function gitFixture(): { projectRoot: string; head: string } {
+  const projectRoot = mkdtempSync(join(tmpdir(), "cadre-worktree-"));
+  mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
+  writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
+  writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
+  writeFileSync(join(projectRoot, "app.txt"), "base\n");
+  execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
+  gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
+  gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
+  gitText(projectRoot, ["config", "commit.gpgsign", "false"]);
+  gitText(projectRoot, ["add", "."]);
+  gitText(projectRoot, ["commit", "-m", "chore: initialize fixture"]);
+  return { projectRoot, head: gitText(projectRoot, ["rev-parse", "HEAD"]) };
+}
+
 test("empty initialized project validates", () => {
   const projectRoot = fixture();
   runState(projectRoot, "render");
@@ -70,12 +159,279 @@ test("empty initialized project validates", () => {
   assert.match(result.stdout, /Cadre state is valid/);
 });
 
+test("plan DAG validation derives manual barriers and rejects dependency cycles", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "cadre-plan-"));
+  const planPath = join(projectRoot, "plan.md");
+  writeFileSync(planPath, `# Plan: DAG
+
+- Spec revision: 1
+- Plan revision: 1
+
+## Phase 1: First
+- Phase dependencies: P2
+- [ ] T1.1 First task
+  - Task dependencies: none
+- [ ] T1.2 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 2: Second
+- Phase dependencies: P1
+- [ ] T2.1 Second task
+  - Task dependencies: none
+- [ ] T2.2 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 3: Track-level User Manual Verification
+- [ ] T3.1 User Manual Verification
+- Phase completion commit: pending
+`);
+  const errors: string[] = [];
+  const graph = parsePlan(planPath, errors);
+  validatePlanGraph(planPath, graph, "planned", errors);
+  assert.ok(errors.some((error) => error.includes("dependency cycle")));
+  assert.deepEqual(graph.phases[0]!.tasks.at(-1)!.dependencies, ["T1.1"]);
+  assert.deepEqual(graph.phases.at(-1)!.dependencies, ["P1", "P2"]);
+});
+
+test("execution journal gates tasks behind their running phase and validates persisted graph identity", () => {
+  const projectRoot = fixture();
+  const trackRoot = writePlannedTrack(projectRoot);
+  runState(projectRoot, "render");
+  const input = {
+    projectRoot,
+    trackId: "parallel-track",
+    executionId: "20260728T010000Z",
+    requestedMode: "parallel" as const,
+    effectiveMode: "parallel" as const,
+    maxWorkers: 3,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T01:00:00.000Z"
+  };
+  const preview = previewExecutionStart(input);
+  applyExecutionStart(input, preview.digest);
+  assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyPhases, ["P1"]);
+  assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyTasks, []);
+  assert.throws(() => previewExecutionNodeUpdate({
+    projectRoot, trackId: input.trackId, executionId: input.executionId, nodeId: "T1.1", status: "running"
+  }), /until phase P1 is running/);
+
+  const phaseUpdate = {
+    projectRoot, trackId: input.trackId, executionId: input.executionId, nodeId: "P1", status: "running" as const
+  };
+  const phasePreview = previewExecutionNodeUpdate(phaseUpdate);
+  applyExecutionNodeUpdate(phaseUpdate, phasePreview.digest);
+  assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyTasks, ["T1.1"]);
+
+  const journalPath = join(trackRoot, "executions", `execution-${input.executionId}.json`);
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  delete journal.nodes["T1.2"];
+  writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  assert.ok(validateProject(projectRoot).errors.some((error) => error.includes("do not exactly match")));
+
+  assert.throws(() => previewExecutionStart({
+    ...input,
+    executionId: "another-execution",
+    requestedMode: "sequential",
+    effectiveMode: "parallel"
+  }), /cannot become parallel/);
+});
+
+test("replacement executions carry completed plan provenance forward", () => {
+  const projectRoot = fixture();
+  const trackRoot = writePlannedTrack(projectRoot, "remediation-track");
+  writeFileSync(join(trackRoot, "plan.md"), `# Plan: Remediation track
+
+- Spec revision: 1
+- Plan revision: 2
+
+## Phase 1: Original delivery
+- Phase dependencies: none
+- [x] T1.1 Implement <!-- commit: abcdef1 -->
+  - Task dependencies: none
+- [x] T1.2 User Manual Verification <!-- commit: abcdef2 -->
+- Phase completion commit: \`abcdef2\`
+
+## Phase 2: Remediate review findings
+- Phase dependencies: P1
+- [ ] T2.1 Fix finding
+  - Task dependencies: none
+- [ ] T2.2 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 3: Track-level User Manual Verification
+- [ ] T3.1 User Manual Verification
+- Phase completion commit: pending
+`);
+  const input = {
+    projectRoot,
+    trackId: "remediation-track",
+    executionId: "review-cycle-2",
+    requestedMode: "parallel" as const,
+    effectiveMode: "parallel" as const,
+    maxWorkers: 3,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T02:00:00.000Z"
+  };
+  const preview = previewExecutionStart(input);
+  applyExecutionStart(input, preview.digest);
+  const status = executionStatus(projectRoot, input.trackId, input.executionId);
+  assert.equal(status.journal.nodes.P1?.status, "completed");
+  assert.equal(status.journal.nodes["T1.1"]?.workerCommit, "abcdef1");
+  assert.equal(status.journal.nodes["T1.2"]?.approval?.startsWith("carried forward"), true);
+  assert.deepEqual(status.readyPhases, ["P2"]);
+  assert.deepEqual(status.readyTasks, []);
+});
+
+test("execution start and finish resume across their two-file checkpoints", () => {
+  const projectRoot = fixture();
+  const trackRoot = writePlannedTrack(projectRoot, "checkpoint-track");
+  writeFileSync(join(trackRoot, "plan.md"), `# Plan: Checkpoint track
+
+- Spec revision: 1
+- Plan revision: 1
+
+## Phase 1: Deliver
+- Phase dependencies: none
+- [x] T1.1 Implement <!-- commit: abcdef1 -->
+  - Task dependencies: none
+- [x] T1.2 User Manual Verification <!-- commit: abcdef2 -->
+- Phase completion commit: \`abcdef2\`
+
+## Phase 2: Track-level User Manual Verification
+- [x] T2.1 User Manual Verification <!-- commit: abcdef3 -->
+- Phase completion commit: \`abcdef3\`
+`);
+  const startInput = {
+    projectRoot,
+    trackId: "checkpoint-track",
+    executionId: "checkpoint-1",
+    requestedMode: "sequential" as const,
+    effectiveMode: "sequential" as const,
+    maxWorkers: 1,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T03:00:00.000Z"
+  };
+  const start = previewExecutionStart(startInput);
+  mkdirSync(dirname(start.journalPath), { recursive: true });
+  writeFileSync(start.journalPath, `${JSON.stringify(start.journal, null, 2)}\n`);
+  applyExecutionStart(startInput, start.digest);
+
+  const finishInput = {
+    projectRoot,
+    trackId: startInput.trackId,
+    executionId: startInput.executionId,
+    headCommit: "ccccccc",
+    completedAt: "2026-07-28T04:00:00.000Z"
+  };
+  const finish = previewExecutionFinish(finishInput);
+  writeFileSync(finish.journalPath, `${JSON.stringify(finish.journal, null, 2)}\n`);
+  const resumedFinish = previewExecutionFinish(finishInput);
+  applyExecutionFinish(finishInput, resumedFinish.digest);
+  const state = JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8"));
+  assert.equal(state.status, "ready_for_review");
+  assert.equal(state.operation, null);
+  assert.equal(state.lastExecution.executionId, startInput.executionId);
+});
+
+test("worktree tools integrate task-to-phase and phase-to-main, then clean up safely", () => {
+  const { projectRoot, head } = gitFixture();
+  const phaseInput = {
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1", baseCommit: head
+  };
+  const phasePreview = previewWorktreeCreate(phaseInput);
+  const phase = applyWorktreeCreate(phaseInput, phasePreview.digest);
+  const taskInput = {
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "T1.1", phaseId: "P1", baseCommit: head
+  };
+  const taskPreview = previewWorktreeCreate(taskInput);
+  const task = applyWorktreeCreate(taskInput, taskPreview.digest);
+  writeFileSync(join(task.path, "app.txt"), "implemented by task\n");
+  gitText(task.path, ["add", "app.txt"]);
+  gitText(task.path, ["commit", "-m", "feat: implement task"]);
+
+  const taskIntegration = previewWorktreeIntegration(taskInput);
+  assert.deepEqual(taskIntegration.changedFiles, ["app.txt"]);
+  assert.equal(applyWorktreeIntegration(taskInput, taskIntegration.digest).status, "integrated");
+  const taskCleanup = previewWorktreeCleanup(taskInput);
+  applyWorktreeCleanup(taskInput, taskCleanup.digest);
+  assert.equal(existsSync(task.path), false);
+
+  const phaseIntegrationInput = {
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1"
+  };
+  const phaseIntegration = previewWorktreeIntegration(phaseIntegrationInput);
+  assert.equal(applyWorktreeIntegration(phaseIntegrationInput, phaseIntegration.digest).status, "integrated");
+  const phaseCleanup = previewWorktreeCleanup(phaseIntegrationInput);
+  applyWorktreeCleanup(phaseIntegrationInput, phaseCleanup.digest);
+
+  assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "implemented by task\n");
+  assert.equal(gitText(projectRoot, ["status", "--porcelain"]), "");
+  const status = managedWorktreeStatus(projectRoot);
+  assert.equal(status.worktrees.filter((worktree) => worktree.managed).length, 0);
+  assert.deepEqual(status.orphanedDirectories, []);
+  assert.equal(existsSync(phase.path), false);
+});
+
+test("a main-coordinated task worker integrates directly into the canonical worktree", () => {
+  const { projectRoot, head } = gitFixture();
+  const input = {
+    projectRoot, trackId: "main-phase", executionId: "run-1", nodeId: "T1.1", phaseId: "P1", baseCommit: head
+  };
+  const create = previewWorktreeCreate(input);
+  const worker = applyWorktreeCreate(input, create.digest);
+  writeFileSync(join(worker.path, "app.txt"), "main-coordinated task\n");
+  gitText(worker.path, ["add", "app.txt"]);
+  gitText(worker.path, ["commit", "-m", "feat: implement main-coordinated task"]);
+
+  const integration = previewWorktreeIntegration(input);
+  assert.equal(integration.targetPath, realpathSync(projectRoot));
+  assert.equal(applyWorktreeIntegration(input, integration.digest).status, "integrated");
+  const cleanup = previewWorktreeCleanup(input);
+  applyWorktreeCleanup(input, cleanup.digest);
+  assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "main-coordinated task\n");
+});
+
+test("worktree integration reports conflicts without resolving them", () => {
+  const { projectRoot, head } = gitFixture();
+  const input = {
+    projectRoot, trackId: "conflict-track", executionId: "run-1", nodeId: "P1", baseCommit: head
+  };
+  const create = previewWorktreeCreate(input);
+  const worker = applyWorktreeCreate(input, create.digest);
+  writeFileSync(join(worker.path, "app.txt"), "worker version\n");
+  gitText(worker.path, ["add", "app.txt"]);
+  gitText(worker.path, ["commit", "-m", "feat: change worker version"]);
+
+  writeFileSync(join(projectRoot, "app.txt"), "main version\n");
+  gitText(projectRoot, ["add", "app.txt"]);
+  gitText(projectRoot, ["commit", "-m", "feat: change main version"]);
+  const integration = previewWorktreeIntegration(input);
+  const result = applyWorktreeIntegration(input, integration.digest);
+  assert.equal(result.status, "conflicted");
+  assert.deepEqual(result.conflicts, ["app.txt"]);
+  assert.match(readFileSync(join(projectRoot, "app.txt"), "utf8"), /<<<<<<< HEAD/);
+  assert.throws(() => previewWorktreeCleanup(input), /not integrated/);
+});
+
+test("worker branches cannot integrate protected Cadre state", () => {
+  const { projectRoot, head } = gitFixture();
+  const input = {
+    projectRoot, trackId: "protected-track", executionId: "run-1", nodeId: "P1", baseCommit: head
+  };
+  const create = previewWorktreeCreate(input);
+  const worker = applyWorktreeCreate(input, create.digest);
+  writeFileSync(join(worker.path, ".cadre", "workflow.md"), "# Worker changed workflow\n");
+  gitText(worker.path, ["add", ".cadre/workflow.md"]);
+  gitText(worker.path, ["commit", "-m", "chore: change protected state"]);
+  assert.throws(() => previewWorktreeIntegration(input), /modifies protected \.cadre state/);
+});
+
 test("approved create operation remains valid before its artifact commit", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-setup-resume-"));
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "0.2.0";
+  project.runtimeVersion = "0.3.0";
   project.templateSetVersion = "v1";
   project.project.name = "Interrupted setup";
   project.project.context = "greenfield";
@@ -112,10 +468,17 @@ None.
 ## Dependent-track impact
 None.
 `);
-  writeFileSync(join(trackRoot, "plan.md"), `# Plan: Example
+  const planPath = join(trackRoot, "plan.md");
+  writeFileSync(planPath, `# Plan: Example
+
+- Spec revision: 1
+- Plan revision: 1
 
 ## Phase 1: Deliver
+- Phase dependencies: none
+
 - [x] T1.1 Implement <!-- commit: abcdef1 -->
+  - Task dependencies: none
 - [x] T1.2 User Manual Verification <!-- commit: abcdef2 -->
 - Phase completion commit: \`abcdef2\`
 
@@ -130,6 +493,36 @@ None.
 No existing pattern is relevant.
 <!-- cadre:pattern-seed:end -->
 `);
+  const graph = parsePlan(planPath);
+  mkdirSync(join(trackRoot, "executions"), { recursive: true });
+  writeFileSync(join(trackRoot, "executions", "execution-example.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    executionId: "example",
+    trackId: "example",
+    status: "completed",
+    checkpoint: "completed",
+    requestedMode: "parallel",
+    effectiveMode: "sequential",
+    maxWorkers: 3,
+    planRevision: 1,
+    planCommit: "bbbbbbb",
+    graphDigest: graph.digest,
+    baseCommit: "1111111",
+    startedAt: "2026-07-27T00:00:00Z",
+    completedAt: "2026-07-27T01:00:00Z",
+    headCommit: "ccccccc",
+    nodes: Object.fromEntries([
+      ["P1", "phase", "P1", []],
+      ["T1.1", "task", "P1", []],
+      ["T1.2", "manual-verification", "P1", ["T1.1"]],
+      ["P2", "phase", "P2", ["P1"]],
+      ["T2.1", "manual-verification", "P2", ["P1"]]
+    ].map(([id, kind, phaseId, dependencies]) => [id, {
+      id, kind, phaseId, dependencies, status: "completed", workerId: null,
+      worktreePath: null, branch: null, workerCommit: null, mergeCommit: null,
+      verification: "passed", approval: "approved", blocker: null
+    }]))
+  }, null, 2)}\n`);
   writeFileSync(join(trackRoot, "state.json"), `${JSON.stringify({
     schemaVersion: 1,
     trackId: "example",
@@ -138,13 +531,26 @@ No existing pattern is relevant.
     status: "completed",
     checkpoint: "ready",
     revision: 1,
-    activePhase: null,
-    activeTask: null,
     dependencies: [],
     commits: { spec: "aaaaaaa", plan: "bbbbbbb" },
     artifactProgress: [],
     operation: null,
-    reviewCycles: [{ cycle: 1, outcome: "clean" }],
+    lastExecution: {
+      executionId: "example",
+      journal: "executions/execution-example.json",
+      planRevision: 1,
+      graphDigest: graph.digest,
+      headCommit: "ccccccc",
+      completedAt: "2026-07-27T01:00:00Z"
+    },
+    reviewCycles: [{
+      cycle: 1,
+      outcome: "clean",
+      executionId: "example",
+      planRevision: 1,
+      graphDigest: graph.digest,
+      reviewedHead: "ccccccc"
+    }],
     history: []
   }, null, 2)}\n`);
   runState(projectRoot, "render");
@@ -160,8 +566,8 @@ No existing pattern is relevant.
   assert.equal(runState(projectRoot, "validate").status, 0);
   assert.match(readFileSync(join(cadreRoot, "tracks.md"), "utf8"), /example.*archived/);
 
-  const planPath = join(archiveRoot, "plan.md");
-  writeFileSync(planPath, readFileSync(planPath, "utf8").replace(" <!-- commit: abcdef2 -->", ""));
+  const archivedPlanPath = join(archiveRoot, "plan.md");
+  writeFileSync(archivedPlanPath, readFileSync(archivedPlanPath, "utf8").replace(" <!-- commit: abcdef2 -->", ""));
   const invalid = runState(projectRoot, "validate", true);
   assert.notEqual(invalid.status, 0);
   assert.match(invalid.stderr, /completed task T1\.2 has no commit marker/);
@@ -195,8 +601,6 @@ None.
     status: "drafting-plan",
     checkpoint: "commit-pending",
     revision: 1,
-    activePhase: null,
-    activeTask: null,
     dependencies: [],
     commits: { spec: null, plan: null },
     artifactProgress: ["spec.md"],
@@ -245,8 +649,6 @@ None.
     status: "drafting-plan",
     checkpoint: "revision-approved",
     revision: 1,
-    activePhase: null,
-    activeTask: null,
     dependencies: [],
     commits: { spec: "aaaaaaa", plan: null },
     artifactProgress: [],
@@ -291,10 +693,12 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "0.2.1+codex.test-build");
-  assert.equal(claudeManifest.version, "0.2.1+claude.test-build");
+  assert.equal(codexManifest.version, "0.3.0+codex.test-build");
+  assert.equal(claudeManifest.version, "0.3.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
+  assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
+  assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
 
   const codexMarketplace = JSON.parse(readFileSync(join(target, ".agents", "plugins", "marketplace.json"), "utf8"));
@@ -311,9 +715,9 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "0.2.1+codex.test-build");
+  assert.equal(previousManifest.version, "0.3.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "0.2.1+codex.second-build");
+  assert.equal(updatedManifest.version, "0.3.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve Cadre MCP tools", () => {
@@ -373,7 +777,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     for (const name of [
       "template_catalog", "template_get", "styleguide_resolve", "project_status",
       "state_validate", "project_init_preview", "project_init_apply",
-      "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply"
+      "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
+      "execution_graph_validate", "execution_start_preview", "execution_start_apply",
+      "execution_node_preview", "execution_node_apply", "execution_status",
+      "execution_finish_preview", "execution_finish_apply", "worktree_create_preview",
+      "worktree_create_apply", "integration_preview", "integration_apply",
+      "worktree_cleanup_preview", "worktree_cleanup_apply", "worktree_status"
     ]) {
       assert.ok(tools.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`);
     }
@@ -414,6 +823,11 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(applied.isError, undefined);
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
+    assert.equal(
+      readFileSync(join(projectRoot, ".cadre", ".gitignore"), "utf8"),
+      "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n"
+    );
+    assert.equal(existsSync(join(projectRoot, ".cadre", "wisps")), false);
     assert.equal(existsSync(join(projectRoot, ".cadre", "bin")), false);
     assert.equal(existsSync(join(projectRoot, ".cadre", "templates")), false);
   } finally {
@@ -560,8 +974,6 @@ test("track state is canonical and generated tracks omit paths and dependencies"
     status: "drafting-spec",
     checkpoint: "approved",
     revision: 1,
-    activePhase: null,
-    activeTask: null,
     dependencies: [],
     commits: { spec: null, plan: null },
     artifactProgress: ["state.json"],

@@ -6,8 +6,6 @@
   "status": "drafting-plan",
   "checkpoint": "spec-approved",
   "revision": 1,
-  "activePhase": null,
-  "activeTask": null,
   "dependencies": [],
   "commits": {
     "spec": null,
@@ -21,6 +19,7 @@
     "approvedArtifacts": ["spec.md"],
     "approvedAt": "{{APPROVED_AT}}"
   },
+  "lastExecution": null,
   "reviewCycles": [],
   "history": []
 }

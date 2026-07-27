@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
+import { readAndValidatePlan, type PlanGraph } from "./plan.js";
+import { validateExecutionJournal } from "./execution.js";
 
 export interface OperationState {
   action?: string;
@@ -21,6 +23,10 @@ export interface OperationState {
 
 export interface ReviewCycle {
   outcome?: string;
+  executionId?: string;
+  planRevision?: number;
+  graphDigest?: string;
+  reviewedHead?: string;
   [key: string]: unknown;
 }
 
@@ -32,12 +38,18 @@ export interface TrackState {
   status: string;
   checkpoint?: string;
   revision?: number;
-  activePhase?: string | number | null;
-  activeTask?: string | null;
   dependencies?: string[];
   commits?: { spec?: string | null; plan?: string | null };
   artifactProgress?: string[];
   operation?: OperationState | null;
+  lastExecution?: {
+    executionId?: string;
+    journal?: string;
+    planRevision?: number;
+    graphDigest?: string;
+    headCommit?: string;
+    completedAt?: string;
+  } | null;
   reviewCycles?: ReviewCycle[];
   path?: unknown;
   [key: string]: unknown;
@@ -79,7 +91,7 @@ const TRACK_STATUSES = new Set([
 ]);
 const TRACK_TYPES = new Set(["feature", "bug"]);
 const REQUIRED_CONTEXT = [
-  "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
+  ".gitignore", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
   "styleguides/general.md", "patterns/index.md", "operations", "tracks", "archive",
   "project.json", "tracks.md"
 ];
@@ -157,6 +169,21 @@ function validateRevisionOperation(state: TrackState, owner: string, errors: str
   }
 }
 
+function validateImplementOperation(state: TrackState, owner: string, errors: string[]): void {
+  const operation = state.operation;
+  if (operation?.action !== "implement") return;
+  if (state.status !== "in_progress") errors.push(`${owner}: implement operation requires in_progress status`);
+  if (!operation.executionId || !/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/.test(String(operation.executionId))) {
+    errors.push(`${owner}: implement executionId is invalid`);
+  }
+  if (!/^executions\/execution-[0-9A-Za-z-]+\.json$/.test(String(operation.journal ?? ""))) {
+    errors.push(`${owner}: implement journal path is invalid`);
+  }
+  if (!["parallel", "sequential"].includes(String(operation.mode ?? ""))) errors.push(`${owner}: implement mode is invalid`);
+  if (!/^[0-9a-f]{64}$/.test(String(operation.graphDigest ?? ""))) errors.push(`${owner}: implement graphDigest is invalid`);
+  if (!Number.isInteger(operation.planRevision) || Number(operation.planRevision) < 1) errors.push(`${owner}: implement planRevision is invalid`);
+}
+
 function validateLearning(path: string, required: boolean, errors: string[]): void {
   if (!existsSync(path)) {
     if (required) errors.push(`${path}: missing learning file`);
@@ -167,95 +194,6 @@ function validateLearning(path: string, required: boolean, errors: string[]): vo
   const end = "<!-- cadre:pattern-seed:end -->";
   if (!body.includes(start) || !body.includes(end) || body.indexOf(start) >= body.indexOf(end)) {
     errors.push(`${path}: missing or invalid marked Pattern Seed section`);
-  }
-}
-
-interface PlanTask {
-  checked: boolean;
-  id: string;
-  phase: number;
-  ordinal: number;
-  title: string;
-  commit: string | null;
-  line: number;
-}
-
-interface PlanPhase {
-  number: number;
-  title: string;
-  tasks: PlanTask[];
-  completionCommit: string | null | undefined;
-}
-
-function parsePlan(path: string, errors: string[]): PlanPhase[] {
-  if (!existsSync(path)) {
-    errors.push(`${path}: missing plan`);
-    return [];
-  }
-  const phases: PlanPhase[] = [];
-  for (const [index, line] of readFileSync(path, "utf8").split(/\r?\n/).entries()) {
-    const phase = line.match(/^## Phase (\d+): (.+)$/);
-    if (phase) {
-      phases.push({ number: Number(phase[1]), title: phase[2]!.trim(), tasks: [], completionCommit: undefined });
-      continue;
-    }
-    const phaseCommit = line.match(/^- Phase completion commit: (pending|`([0-9a-f]{7,40})`)$/);
-    if (phaseCommit && phases.length) {
-      phases.at(-1)!.completionCommit = phaseCommit[1] === "pending" ? null : phaseCommit[2]!;
-      continue;
-    }
-    const task = line.match(/^- \[([ xX])\] (T(\d+)\.(\d+)) (.+)$/);
-    if (!task) continue;
-    if (!phases.length) {
-      errors.push(`${path}:${index + 1}: task appears before a phase`);
-      continue;
-    }
-    let remainder = task[5]!.trim();
-    let commit: string | null = null;
-    const marker = remainder.match(/^(.*?)\s+<!-- commit: ([0-9a-f]{7,40}) -->$/);
-    if (marker) {
-      remainder = marker[1]!.trim();
-      commit = marker[2]!;
-    }
-    phases.at(-1)!.tasks.push({
-      checked: task[1]!.toLowerCase() === "x",
-      id: task[2]!,
-      phase: Number(task[3]),
-      ordinal: Number(task[4]),
-      title: remainder,
-      commit,
-      line: index + 1
-    });
-  }
-  return phases;
-}
-
-function validatePlan(path: string, status: string, errors: string[]): void {
-  const phases = parsePlan(path, errors);
-  if (!phases.length) return;
-  phases.forEach((phase, phaseIndex) => {
-    if (phase.number !== phaseIndex + 1) errors.push(`${path}: phases must be sequential from 1`);
-    if (!phase.tasks.length) errors.push(`${path}: phase ${phase.number} has no tasks`);
-    phase.tasks.forEach((task, taskIndex) => {
-      if (task.phase !== phase.number) errors.push(`${path}:${task.line}: ${task.id} is in the wrong phase`);
-      if (task.ordinal !== taskIndex + 1) errors.push(`${path}:${task.line}: task ordinals must be sequential`);
-      if (task.checked && !task.commit) errors.push(`${path}:${task.line}: completed task ${task.id} has no commit marker`);
-      if (!task.checked && task.commit) errors.push(`${path}:${task.line}: pending task ${task.id} has a commit marker`);
-    });
-    if (phase.tasks.at(-1)?.title !== "User Manual Verification") {
-      errors.push(`${path}: phase ${phase.number} must end with User Manual Verification`);
-    }
-    const phaseDone = phase.tasks.length > 0 && phase.tasks.every((task) => task.checked);
-    if (phase.completionCommit === undefined) errors.push(`${path}: phase ${phase.number} lacks a completion commit field`);
-    if (phaseDone && !phase.completionCommit) errors.push(`${path}: completed phase ${phase.number} has no completion commit`);
-    if (!phaseDone && phase.completionCommit) errors.push(`${path}: incomplete phase ${phase.number} has a completion commit`);
-  });
-  if (phases.at(-1)!.title !== "Track-level User Manual Verification") {
-    errors.push(`${path}: final phase must be Track-level User Manual Verification`);
-  }
-  if (["ready_for_review", "completed", "archived"].includes(status)) {
-    const pending = phases.flatMap((phase) => phase.tasks).filter((task) => !task.checked);
-    if (pending.length) errors.push(`${path}: ${status} track has ${pending.length} pending task(s)`);
   }
 }
 
@@ -393,6 +331,16 @@ export function validateProject(projectRoot: string): ValidationResult {
   for (const file of REQUIRED_CONTEXT) {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
+  const gitignorePath = join(root, ".gitignore");
+  if (existsSync(gitignorePath)) {
+    const gitignore = readFileSync(gitignorePath, "utf8");
+    if (!gitignore.split(/\r?\n/).includes("/.worktrees/")) {
+      errors.push(`${gitignorePath}: must ignore /.worktrees/`);
+    }
+    if (!gitignore.split(/\r?\n/).includes("/wisps/")) {
+      errors.push(`${gitignorePath}: must ignore /wisps/`);
+    }
+  }
   const project = readJson<ProjectState>(join(root, "project.json"), errors);
   if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors };
   if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
@@ -433,6 +381,10 @@ export function validateProject(projectRoot: string): ValidationResult {
     if (state.operation != null) {
       validateOperation(state.operation, `${track.id} state`, errors);
       validateRevisionOperation(state, `${track.id} state`, errors);
+      validateImplementOperation(state, `${track.id} state`, errors);
+    }
+    if (Object.hasOwn(state, "activePhase") || Object.hasOwn(state, "activeTask")) {
+      errors.push(`${track.id}: activePhase and activeTask are redundant; derive active nodes from the execution journal`);
     }
     const expectedDirectory = track.status === "archived" ? "archive" : "tracks";
     if (track.location !== `${expectedDirectory}/${track.id}`) {
@@ -447,15 +399,13 @@ export function validateProject(projectRoot: string): ValidationResult {
       && !planCommit && state.operation?.action !== "plan") {
       errors.push(`${track.id}: status ${track.status} requires a recorded plan commit or active plan operation`);
     }
-    if (["completed", "archived"].includes(track.status) && state.reviewCycles?.at(-1)?.outcome !== "clean") {
-      errors.push(`${track.id}: ${track.status} track lacks a final clean review cycle`);
-    }
     const specPath = join(trackRoot, "spec.md");
     const planPath = join(trackRoot, "plan.md");
     const learningPath = join(trackRoot, "learning.md");
     if (existsSync(specPath)) validateSpec(specPath, errors);
     else if (track.status !== "drafting-spec" && state?.operation?.action !== "specify") errors.push(`${track.id}: missing spec.md`);
-    if (existsSync(planPath)) validatePlan(planPath, track.status, errors);
+    let planGraph: PlanGraph | null = null;
+    if (existsSync(planPath)) planGraph = readAndValidatePlan(planPath, track.status, errors);
     else if (["planned", "in_progress", "ready_for_review", "completed", "archived"].includes(track.status)
       && state?.operation?.action !== "plan") errors.push(`${track.id}: missing plan.md`);
     validateLearning(
@@ -464,6 +414,25 @@ export function validateProject(projectRoot: string): ValidationResult {
         && state?.operation?.action !== "plan",
       errors
     );
+    validateExecutionJournal(trackRoot, state, planGraph, errors);
+    if (["ready_for_review", "completed", "archived"].includes(track.status)) {
+      const managedRoot = join(root, ".worktrees", track.id);
+      if (existsSync(managedRoot) && readdirSync(managedRoot).length) {
+        errors.push(`${track.id}: finalized track retains managed execution worktrees`);
+      }
+    }
+    if (["completed", "archived"].includes(track.status)) {
+      const review = state.reviewCycles?.at(-1);
+      const execution = state.lastExecution;
+      if (review?.outcome !== "clean") errors.push(`${track.id}: ${track.status} track lacks a final clean review cycle`);
+      else if (!execution
+        || review.executionId !== execution.executionId
+        || review.planRevision !== execution.planRevision
+        || review.graphDigest !== execution.graphDigest
+        || review.reviewedHead !== execution.headCommit) {
+        errors.push(`${track.id}: final clean review is not bound to the current completed execution`);
+      }
+    }
   }
   validateArchiveOperations(root, byId, errors);
   for (const track of tracks) {
@@ -548,7 +517,10 @@ export function formatStatus(projectRoot: string): { text: string; result: Valid
   for (const track of result.tracks) {
     const dependencies = track.dependencies?.length ? track.dependencies.join(",") : "none";
     const state = result.states.get(track.id);
-    lines.push(`${track.id} [${track.type}] ${track.status}; checkpoint=${state?.checkpoint ?? "none"}; operation=${state?.operation?.action ?? "none"}; deps=${dependencies}; revision=${track.revision ?? 1}; phase=${state?.activePhase ?? "none"}; task=${state?.activeTask ?? "none"}; reviews=${state?.reviewCycles?.length ?? 0}; next=${nextCommand(track)}`);
+    const execution = state?.operation?.action === "implement"
+      ? `${String(state.operation.executionId ?? "unknown")}/${String(state.operation.mode ?? "unknown")}`
+      : state?.lastExecution?.executionId ?? "none";
+    lines.push(`${track.id} [${track.type}] ${track.status}; checkpoint=${state?.checkpoint ?? "none"}; operation=${state?.operation?.action ?? "none"}; execution=${execution}; deps=${dependencies}; revision=${track.revision ?? 1}; reviews=${state?.reviewCycles?.length ?? 0}; next=${nextCommand(track)}`);
   }
   const counts = result.tracks.reduce<Record<string, number>>((summary, track) => {
     summary[track.status] = (summary[track.status] ?? 0) + 1;

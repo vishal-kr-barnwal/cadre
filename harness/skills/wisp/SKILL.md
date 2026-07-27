@@ -5,11 +5,11 @@ description: Perform lightweight exploration, investigation, spikes, or question
 
 # Cadre Wisp
 
-If `.cadre/workflow.md` exists, read it first and retain its safety, repository, human-review, and read-before-edit rules while bypassing its delivery-state mutations. You may call the read-only `project_status` and `state_validate` tools for context, but MCP availability is not required for a stateless exploration. Keep the exploration outside Cadre state: do not change `.cadre/`, track status, learning, patterns, or Cadre history.
+If `.cadre/workflow.md` exists, read it first and retain its safety, repository, human-review, and read-before-edit rules while bypassing its delivery-state mutations. You may call the read-only `project_status` and `state_validate` tools for context, but MCP availability is not required for a stateless exploration. Keep the exploration outside Cadre state: except for ignored disposable output under `.cadre/wisps/`, do not change `.cadre/`, track status, learning, patterns, or Cadre history.
 
-1. Define the exploration question and expected disposable output.
+1. Define the exploration question and expected disposable output. When persistent disposable output is useful, use `.cadre/wisps/<timestamp>-<slug>/`; `.cadre/.gitignore` must exclude it from Git.
 2. Inspect relevant repository files. Before editing any existing file, read it and its directly relevant context; inspect the directory before creating a file.
-3. Prefer read-only investigation and temporary files outside the repository. If persistent repository edits are requested, show the proposed scope and obtain approval; do not commit automatically.
+3. Prefer read-only investigation and temporary files outside the repository. Wisp files under `.cadre/wisps/` never enter Cadre state or commits. If persistent product-file edits are requested, show the proposed scope and obtain approval; do not commit automatically.
 4. Return findings, evidence, uncertainty, and a recommendation.
 5. If the result should become product work, recommend `$track`; do not retroactively mutate Cadre state from the wisp.
 

@@ -9,6 +9,8 @@ Cadre is installed as a user plugin. Its bundled TypeScript MCP server provides 
 - Greenfield and brownfield project onboarding, with an explicit classification gate when the repository is ambiguous.
 - Human approval of every generated artifact and lifecycle state transition.
 - Resumable create, specification, planning, implementation, review, revision, and archive flows.
+- Parallel-by-default implementation of dependency DAGs, with an explicit sequential mode.
+- Isolated phase and task workers in Cadre-managed Git worktrees, coordinated and integrated only by the main agent.
 - Feature and bug tracks with functional requirements, non-functional requirements, acceptance criteria, dependencies, phased tasks, and manual-verification gates.
 - Dependency enforcement before implementation and cascading-impact analysis after specification, workflow, stack, styleguide, or pattern changes.
 - Incremental learning in each track's `learning.md`; every phase reads the previous phase's learning before work starts.
@@ -145,7 +147,7 @@ Claude Code: /cadre:track Fix duplicate invoice creation as a bug
 Cadre proposes and separately approves:
 
 - `spec.md`, containing functional requirements, non-functional requirements, acceptance criteria, dependencies, additional information, and dependent-track impact;
-- `plan.md`, split into ordered phases and tasks;
+- `plan.md`, defining an acyclic phase/task dependency graph with derived manual-verification barriers;
 - `learning.md`, whose marked Pattern Seed contains only patterns relevant to the approved track.
 
 Every delivery phase ends with `User Manual Verification`. The final phase is always `Track-level User Manual Verification`.
@@ -157,7 +159,16 @@ Codex:      $cadre:implement passwordless-login
 Claude Code: /cadre:implement passwordless-login
 ```
 
-Implementation starts only after declared dependencies are completed. Cadre resumes the first unfinished task, reads incremental learning, verifies the work, presents the changes, records task and phase commit SHAs, and advances the track to `ready_for_review` only after final manual verification.
+Parallel mode is the default. Request sequential execution explicitly when needed:
+
+```text
+Codex:      $cadre:implement passwordless-login sequentially
+Claude Code: /cadre:implement passwordless-login sequentially
+```
+
+Implementation starts only after declared track dependencies are completed. Phase and task dependencies form a validated DAG. When at least two safe nodes are ready, the main agent can create bounded workers in isolated worktrees; when parallelization offers no benefit, it executes the ready node itself. The main agent remains the only scheduler, state owner, merger, conflict resolver, worktree cleaner, and recorder of human approval.
+
+Every delivery phase ends with a derived manual-verification barrier over its tasks. The final track-level manual verification depends on every delivery phase and always runs in the main agent against the canonical worktree. Cadre resumes from its execution journal, reads dependency-phase learning, verifies and presents each change before commit, records task and phase provenance, and advances the track to `ready_for_review` only after all barriers pass.
 
 ### 4. Review and complete the track
 
@@ -183,7 +194,7 @@ Archive accepts one or more completed tracks in one resumable batch. It distills
 | --- | --- |
 | `create` | Initialize or resume Cadre, classify project context, initialize Git when needed, and establish approved project artifacts. |
 | `track` | Create or resume a feature/bug specification, phased plan, dependency set, and learning seed. |
-| `implement` | Execute the approved plan task by task with dependency gates, tests, learning, verification, and commit provenance. |
+| `implement` | Execute or resume the approved phase/task DAG in parallel by default or explicitly sequentially, with worktrees, tests, learning, approvals, and commit provenance. |
 | `review` | Review a ready track, record approved findings, add remediation phases, or complete an approved clean cycle. |
 | `revise` | Route a requested change by lifecycle state, revise an approved active baseline, or propose a successor for completed history. |
 | `archive` | Archive one or more completed tracks, distill patterns, and reseed active tracks by relevance. |
@@ -219,6 +230,7 @@ An initialized project has this shape:
 
 ```text
 .cadre/
+├── .gitignore
 ├── project.json
 ├── product.md
 ├── guidelines.md
@@ -235,17 +247,20 @@ An initialized project has this shape:
 │       ├── spec.md
 │       ├── plan.md
 │       ├── learning.md
+│       ├── executions/
 │       ├── bugs/
 │       └── revisions/
 ├── archive/
-└── wisps/
+├── .worktrees/                  # ignored, temporary execution worktrees
+└── wisps/                       # ignored, disposable exploration output
 ```
 
 Important sources of truth:
 
 - `spec.md` defines track scope and acceptance.
-- `plan.md` defines execution order, task state, and commit provenance.
-- Track-local `state.json` defines identity, type, lifecycle status, dependencies, revision, checkpoints, and operation history.
+- `plan.md` defines the phase/task dependency DAG, task state, manual barriers, and commit provenance.
+- `executions/execution-<id>.json` is the resumable runtime journal. Ready and active nodes are derived from it; track state does not duplicate an active phase or task.
+- Track-local `state.json` defines identity, type, lifecycle status, track dependencies, revision, checkpoints, operation history, and the last completed execution reference.
 - `project.json` contains project setup and refresh history; it does not duplicate track records.
 - `tracks.md` is generated from track-local state and is never hand-edited.
 - Track directory paths are derived from status and ID. A path is never persisted in track state.
@@ -261,6 +276,15 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `styleguide_resolve` | No | Resolve default styleguides for an approved technology list. |
 | `project_status` | No | Summarize project and track checkpoints, including resumable operations. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
+| `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
+| `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
+| `execution_node_preview` / `execution_node_apply` | Preview/apply | Persist one legal, dependency-gated execution-node transition. |
+| `execution_status` | No | Derive ready phases, ready tasks within running phases, active nodes, and blockers. |
+| `execution_finish_preview` / `execution_finish_apply` | Preview/apply | Require completed nodes, current plan evidence, and removed worktrees before `ready_for_review`. |
+| `worktree_create_preview` / `worktree_create_apply` | Preview/apply | Create or reconcile one derived phase/task worktree and branch. |
+| `integration_preview` / `integration_apply` | Preview/apply | Inspect and merge a clean worker branch into its derived parent, reporting conflicts without resolving them. |
+| `worktree_cleanup_preview` / `worktree_cleanup_apply` | Preview/apply | Remove only a clean worker whose branch is proven integrated into its parent. |
+| `worktree_status` | No | Report Cadre-managed worktrees and orphaned runtime directories. |
 | `project_init_preview` | No | Return the complete proposed initialization file set and digest. |
 | `project_init_apply` | Yes | Atomically create `.cadre` only when inputs match the approved preview digest. |
 | `setup_record_git_initialized` | Yes | Record the verified Git-initialization checkpoint. |
@@ -268,16 +292,35 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `tracks_render_preview` | No | Preview the derived `tracks.md` content and digest. |
 | `tracks_render_apply` | Yes | Write `tracks.md` only when current state matches the approved preview digest. |
 
-The MCP server does not run Git commands and cannot approve its own proposals. Deterministic writes use preview/apply digests to reject stale or changed proposals.
+The MCP server cannot approve its own proposals or run arbitrary shell commands. Its Git surface is limited to derived Cadre worktree creation, non-squash integration, status, and verified cleanup. It never force-deletes a branch, resolves a conflict, edits product files, or commits on behalf of a worker. Deterministic writes and Git mutations use preview/apply digests to reject stale proposals.
+
+### Worktree layout and worker model
+
+Phase and task worktrees are siblings because Git worktrees cannot be physically nested safely:
+
+```text
+.cadre/.worktrees/<track-id>/<execution-id>/
+├── phases/P1
+└── tasks/P1--t1-1
+```
+
+Task branches merge into a registered phase integration branch when one exists; for a phase coordinated directly in main, they merge into the canonical branch. Phase branches merge into the canonical branch. Cleanup prunes the worktree and branch only after ancestry proves the integration is present in the derived parent.
+
+Codex uses implementation subagents when parallel nodes are available. Claude Code uses the packaged `cadre-phase-worker` and `cadre-task-worker` definitions. Both follow the same contract: workers stay in their assigned worktree, read before editing, modify product files only, run focused verification, never spawn nested workers, and stop uncommitted until the main agent presents their work and obtains human approval. Claude agent teams are intentionally not required.
 
 ## Resumability and safety
 
-Multi-step state changes—including revisions—write an operation journal before artifact mutation. On the next invocation, Cadre reconciles that journal with the files, working tree, and recent commits:
+Multi-step state changes—including revisions and implementation executions—write an operation or execution journal before artifact mutation. On the next invocation, Cadre reconciles that journal with files, worker identities, registered worktrees, branches, dirty state, commits, and merges:
 
 - matching dirty work resumes at the first incomplete checkpoint;
 - a clean tree with the expected commit records the commit instead of repeating work;
 - completed artifact work with pending bookkeeping finishes only the state-record commit;
+- committed or integrated DAG nodes are not repeated, and newly ready nodes are scheduled immediately after durable transitions;
 - any mismatch stops and is presented to the human rather than guessed, discarded, reset, or restarted.
+
+Task conflicts are resolved and reverified in the owning phase worktree. Phase conflicts are resolved and reverified in the canonical worktree. The main agent presents every resolution before recording its merge commit. A revision or refresh that changes execution-governing context first quiesces active workers and reconciles their work; a changed plan graph creates a new execution identity rather than rewriting the old journal.
+
+Archive remains deliberately small: it accepts only tracks that centralized state validation already proves are `completed` with a clean review bound to the current execution, plan revision, graph digest, and reviewed head. It does not rerun implementation barriers or review logic.
 
 Product work uses Conventional Commits. Cadre-only state commits use `cadre(<command>): <description>`. Reverts prefer additive `git revert` commits over destructive history rewriting.
 
@@ -292,7 +335,7 @@ npm run validate   # Build and validate skills, templates, runtime, and manifest
 npm run build      # Build dist/cadre-mcp.mjs
 ```
 
-The test suite exercises state validation, interrupted operations, plan and learning invariants, marketplace packaging, MCP discovery and initialization, multi-track archival, and permission configuration. Before publishing a change, run:
+The test suite exercises state validation, interrupted operations, DAG invariants, execution gating, nested task-to-phase and phase-to-main worktree integration, safe cleanup, marketplace packaging, MCP discovery and initialization, multi-track archival, and permission configuration. Before publishing a change, run:
 
 ```sh
 npm run check

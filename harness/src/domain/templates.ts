@@ -36,6 +36,7 @@ function walk(root: string, directory = root): string[] {
 
 function templateId(path: string): string | null {
   if (path.endsWith("/.gitkeep")) return null;
+  if (path === "init/.gitignore") return "project/gitignore";
   const withoutExtension = path.slice(0, -extname(path).length);
   const styleguidePrefix = "styleguides/";
   if (path.startsWith(styleguidePrefix)) return `styleguide/${withoutExtension.slice(styleguidePrefix.length)}`;
@@ -44,6 +45,7 @@ function templateId(path: string): string | null {
 }
 
 function mimeType(path: string): string {
+  if (path.endsWith(".gitignore")) return "text/plain";
   return path.endsWith(".json") ? "application/json" : "text/markdown";
 }
 

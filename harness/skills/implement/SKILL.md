@@ -1,30 +1,74 @@
 ---
 name: implement
-description: Resume and execute an approved Cadre track plan phase by phase, enforcing dependency completion, read-before-edit, incremental learning, tests, manual verification, task commits, and ready-for-review transition. Use for the implement command on a planned or in-progress track.
+description: Execute or resume an approved Cadre plan as a dependency DAG, using parallel workers by default when safe, sequential execution when requested, isolated Git worktrees, main-agent integration, incremental learning, verification, and commit provenance. Use for the implement command on a planned or in-progress track.
 ---
 
 # Cadre Implement
 
-Treat the approved `plan.md` as the source of truth. Do not implement drafting, ready-for-review, completed, or archived tracks.
+Treat the approved `plan.md` as the source of truth. Implement only `planned` or `in_progress` tracks. The main agent is the sole scheduler and Cadre-state owner: workers must never spawn workers, edit `.cadre/**`, merge branches, resolve integration conflicts, remove worktrees, or record human approval.
 
-Call `project_status` and `state_validate` before selecting work. If the Cadre MCP is unavailable, stop and preserve the current checkpoint; do not substitute a copied runtime.
+Call `project_status`, `state_validate`, `execution_graph_validate`, and `worktree_status` before selecting work. If the required Cadre MCP is unavailable, stop at the current checkpoint.
 
-## Start or resume
+## Select and persist execution mode
 
-1. Read `.cadre/workflow.md`, project state, the track spec, plan, state, the marked Pattern Seed and full phase history in `learning.md`, relevant patterns/styleguides, and dependency states.
-2. Block if any declared dependency is not `completed` or `archived` as completed. Report the exact dependency.
-3. Resume the first in-progress task, otherwise the first pending task. Never repeat completed work.
-4. At the start of every phase, read the previous phase's learning section. For phase one, read the marked Pattern Seed section at the top of `learning.md`.
+- Default to `parallel` when the human does not specify a mode.
+- Use `sequential` only when explicitly requested.
+- Parallel mode creates workers only when at least two safe executable nodes are ready. Otherwise execute in main without worktree overhead.
+- Bound worker count by ready nodes, host capacity, and the workflow maximum.
+- Persist requested/effective mode in the execution journal. Changing it during execution requires a clean safe boundary, a presented proposal, and approval.
 
-## Execute a task
+For a new execution, call `execution_start_preview`, show the exact journal/state proposal, obtain approval, and pass the unchanged digest to `execution_start_apply`. Commit `cadre(implement): start <track-id>`. For an existing `implement` operation, reconcile it instead of creating another execution.
 
-1. Read every existing file before editing it, plus directly relevant callers, tests, types, and configuration. Inspect the target directory before creating a new file. Never change a file based only on an assumption.
-2. Present the intended task change and obtain approval when the workflow requires a mutation gate.
-3. Implement only the current task. Add/update tests, run focused checks, then formatting and broader relevant checks.
-4. Show the artifact/diff and verification evidence for human review. A manual-verification task completes only after explicit human confirmation.
-5. Commit a meaningful unit using Conventional Commits. Large tasks may have multiple meaningful commits; do not create empty checkpoint commits.
-6. Append task and phase learning to `learning.md`, including evidence and reusable-pattern candidates. Mark the plan task complete with the implementation commit SHA, update track history, and commit bookkeeping as `cadre(implement): record <track-id> <task-id>`.
-7. When the task completes its phase, record a phase completion SHA in both `plan.md` and that phase's learning section. The verified final-task commit may serve as the phase commit.
-8. Re-read the plan before selecting the next task.
+## Resume before scheduling
 
-When all phases—including track-level manual verification—are complete, set the track-local state to `ready_for_review`, call `tracks_render_preview`, present and apply its unchanged digest with `tracks_render_apply`, call `state_validate`, and commit `cadre(implement): ready <track-id>`. Never mark a track completed here.
+1. Read `.cadre/workflow.md`, project and track state, spec, plan, execution journal, marked Pattern Seed, dependency-phase learning, patterns/styleguides, and declared track dependencies.
+2. Reconcile journal nodes with worker identities, `git worktree list`, branch tips, dirty files, commits, and merges. Never repeat a committed or integrated node.
+3. Block when a declared track dependency is not completed or archived after completion.
+4. Stop and present any journal/Git mismatch. Never reset, discard, reconstruct, force-delete, or silently restart.
+
+## Schedule the DAG
+
+Call `execution_status` after every durable transition. Plan display order breaks ties only.
+
+- A root phase reads the Pattern Seed. Any other phase reads learning from all declared dependency phases.
+- A phase is either assigned to one phase worker for internally sequential work or coordinated by main through task workers; never both simultaneously. A phase integration worktree without a phase `workerId` is coordination state, not phase-worker ownership.
+- The main agent creates every worker. On Codex, use an available implementation worker subagent with the bounded prompt below. On Claude Code, prefer the plugin-provided `cadre-phase-worker` and `cadre-task-worker`. Do not use Claude agent teams.
+- If only one safe execution node is ready, execute it in main.
+- Phase and task worktrees are siblings. Use `worktree_create_preview` and `worktree_create_apply`; record the returned absolute path/branch through `execution_node_preview` and `execution_node_apply` before spawning.
+
+### Worker prompt contract
+
+Provide the exact absolute worktree, track/execution/node IDs, approved outcome, dependencies and learning to read, relevant files, required checks, and expected Conventional Commit scope. State explicitly:
+
+- operate only in the assigned worktree and read files before editing;
+- edit product files only and never edit `.cadre/**`;
+- do not spawn agents, merge, rebase, reset, clean up, or force Git operations;
+- run focused verification and return changed files, tests/checks, risks, learning candidates, and the proposed commit message;
+- stop with changes uncommitted at `awaiting_approval` until main presents them and the human approves.
+
+## Approve, commit, and integrate
+
+1. Transition a worker node from `running` to `awaiting_approval` with its verification summary.
+2. Read the worker diff and evidence. Present them to the human through main.
+3. After approval, direct the worker to create its Conventional Commit, verify the worktree is clean, and record its SHA as `committed`.
+4. For a task worker, call `integration_preview` and show the exact task merge. The MCP derives its parent as the registered phase worktree when one exists, otherwise the canonical worktree. Pass the unchanged digest to `integration_apply`. A task executed directly by main or internally by a phase worker is already on its parent branch: verify its approved commit is reachable and do not invent an integration step. For a phase worktree, use the same gate for phase-to-canonical integration. Never squash.
+5. If integration reports conflicts, mark `conflicted`. Resolve task conflicts in the phase worktree and phase conflicts in main, read every conflicted file and both sides, rerun combined verification, present the resolution, and record the resulting merge commit only after approval.
+6. For a worker worktree, mark the node `integrated`, then preview/apply worktree cleanup. Cleanup must refuse dirty, conflicted, or unintegrated work and must not force branch deletion.
+7. Mark a task complete after its worker integration, or after its approved direct/phase-worker commit is verified on the parent branch. Mark it complete in `plan.md` with its reachable task commit SHA during canonical phase bookkeeping.
+
+## Verification barriers and learning
+
+- Phase `User Manual Verification` is a derived barrier over all sibling tasks. Prepare technical evidence in the phase worktree through its phase worker when present, otherwise through main. The main agent always presents and records the human approval.
+- After approval, integrate the phase branch, record every task commit, the phase completion merge SHA, and dependency-aware phase learning in canonical `plan.md`/`learning.md`; commit `cadre(implement): record <track-id> <phase-id>`.
+- Track-level `User Manual Verification` is a derived barrier over every phase. Execute it only in main, against the fully integrated canonical worktree, and obtain explicit human approval.
+
+## Complete execution
+
+When all journal nodes and plan tasks are complete, all phase learning/provenance is recorded, all worktrees are removed, and track verification is approved:
+
+1. Run the relevant full checks and inspect the final diff/history.
+2. Call `execution_finish_preview`; present its exact completed journal and `ready_for_review` transition.
+3. After approval, call `execution_finish_apply` with the unchanged digest.
+4. Preview/apply `tracks.md`, call `state_validate`, and commit `cadre(implement): ready <track-id>`.
+
+Never mark a track `completed`; only an approved clean `review` may do that.

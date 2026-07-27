@@ -1,10 +1,10 @@
 {
   "name": "cadre",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A human-governed, Git-aware product delivery harness for Codex and Claude Code.",
   "author": {
     "name": "Cadre contributors"
   },
   "license": "MIT",
-  "keywords": ["workflow", "planning", "review", "git", "agent-skills"]
+  "keywords": ["workflow", "planning", "parallel-agents", "worktrees", "review", "git", "agent-skills"]
 }

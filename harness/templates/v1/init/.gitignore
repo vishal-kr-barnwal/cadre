@@ -1,0 +1,5 @@
+# Cadre-managed temporary execution worktrees
+/.worktrees/
+
+# Disposable Wisp output
+/wisps/

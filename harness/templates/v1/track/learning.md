@@ -1,6 +1,6 @@
 # Incremental Learning: {{TRACK_TITLE}}
 
-Never overwrite an earlier phase. Each new phase begins by reading the previous phase entry; phase one begins from the marked Pattern Seed section below.
+Never overwrite an earlier phase. Each phase begins by reading the learning of every declared dependency phase. A root phase reads the marked Pattern Seed section below. Parallel sibling phases do not assume or consume each other's learning.
 
 <!-- cadre:pattern-seed:start -->
 ## Pattern Seed
@@ -19,7 +19,7 @@ If no existing pattern is relevant, state that explicitly rather than inventing 
 
 ### Inputs read
 
-{{FILES_PATTERNS_PREVIOUS_LEARNING}}
+{{FILES_PATTERNS_DEPENDENCY_PHASE_LEARNING}}
 
 ### Task observations
 
