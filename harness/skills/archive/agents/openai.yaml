@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Archive"
+  short_description: "Archive completed tracks as one batch"
+  default_prompt: "Use $archive to archive one or more completed tracks in a resumable batch and distill their patterns."

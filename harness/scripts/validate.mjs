@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skills = [
-  "cadre-create", "cadre-track", "cadre-implement", "cadre-review", "cadre-revise",
-  "cadre-archive", "cadre-refresh", "cadre-revert", "cadre-status", "cadre-wisp"
+  "create", "track", "implement", "review", "revise",
+  "archive", "refresh", "revert", "status", "wisp"
 ];
 const errors = [];
 
@@ -45,7 +45,7 @@ for (const skill of skills) {
   }
 }
 
-const projectTemplate = join(root, "skills", "cadre-create", "assets", "project", ".cadre");
+const projectTemplate = join(root, "skills", "create", "assets", "project", ".cadre");
 for (const file of ["workflow.md", "product.md", "guidelines.md", "tech-stack.md", "project.json", "bin/cadre-state.mjs", "operations/.gitkeep"]) {
   if (!existsSync(join(projectTemplate, file))) errors.push(`project template: missing ${file}`);
 }
@@ -78,7 +78,7 @@ if (Object.hasOwn(projectStateTemplate, "tracks")) {
 }
 const trackStateTemplate = JSON.parse(readFileSync(join(projectTemplate, "templates", "track", "state.json"), "utf8"));
 if (!trackStateTemplate.title) errors.push("project template: track state title is missing");
-const styleguideRoot = join(root, "skills", "cadre-create", "assets", "styleguides");
+const styleguideRoot = join(root, "skills", "create", "assets", "styleguides");
 for (const name of [
   "go", "java", "kotlin", "maven", "gradle", "javascript", "typescript",
   "react", "html-css", "flutter", "dart", "swift", "swiftui", "python"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Refresh"
+  short_description: "Refresh Cadre project context"
+  default_prompt: "Use $refresh to refresh project context from user input and repository changes."

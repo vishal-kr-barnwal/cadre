@@ -26,7 +26,7 @@ node scripts/install.mjs --agent all --prepare-only --marketplace-root /tmp/cadr
 
 ## Commands
 
-Codex invokes skills as `$cadre-create`, `$cadre-track`, and so on. Claude Code project skills use `/cadre-create`; plugin-installed Claude skills are namespaced, for example `/cadre:cadre-create`.
+Plugin-installed skills use the Cadre namespace exactly once: `$cadre:create` and `$cadre:track` in Codex, or `/cadre:create` and `/cadre:track` in Claude Code.
 
 | Command | Purpose |
 | --- | --- |

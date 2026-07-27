@@ -11,4 +11,4 @@ npm test
 npm run validate
 ```
 
-Keep `.cadre/workflow.md` authoritative for lifecycle rules. All command skills must load it before stateful work, all generated project artifacts must come from `skills/cadre-create/assets/project/.cadre/templates/`, and state changes must remain human-approved and resumable.
+Keep `.cadre/workflow.md` authoritative for lifecycle rules. All command skills must load it before stateful work, all generated project artifacts must come from `skills/create/assets/project/.cadre/templates/`, and state changes must remain human-approved and resumable.

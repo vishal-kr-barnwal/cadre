@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const stateScript = join(root, "skills", "cadre-create", "assets", "project", ".cadre", "bin", "cadre-state.mjs");
-const templateRoot = join(root, "skills", "cadre-create", "assets", "project", ".cadre");
+const stateScript = join(root, "skills", "create", "assets", "project", ".cadre", "bin", "cadre-state.mjs");
+const templateRoot = join(root, "skills", "create", "assets", "project", ".cadre");
 
 function fixture() {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-test-"));
@@ -44,7 +44,7 @@ test("empty initialized project validates", () => {
 });
 
 test("approved create operation remains valid before its artifact commit", () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), "cadre-create-resume-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "cadre-setup-resume-"));
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
@@ -197,7 +197,7 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   ]);
 
   const pluginRoot = join(target, "plugins", "cadre");
-  assert.ok(existsSync(join(pluginRoot, "skills", "cadre-track", "SKILL.md")));
+  assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
   assert.equal(codexManifest.version, "0.1.0+codex.test-build");
@@ -222,10 +222,21 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   assert.equal(updatedManifest.version, "0.1.0+codex.second-build");
 });
 
+test("plugin namespace is not repeated in skill identities", () => {
+  for (const skill of [
+    "create", "track", "implement", "review", "revise",
+    "archive", "refresh", "revert", "status", "wisp"
+  ]) {
+    const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+    assert.ok(body.startsWith(`---\nname: ${skill}\n`));
+    assert.equal(existsSync(join(root, "skills", `cadre-${skill}`)), false);
+  }
+});
+
 test("every post-create command loads the shared workflow", () => {
   for (const skill of [
-    "cadre-track", "cadre-implement", "cadre-review", "cadre-revise", "cadre-archive",
-    "cadre-refresh", "cadre-revert", "cadre-status", "cadre-wisp"
+    "track", "implement", "review", "revise", "archive",
+    "refresh", "revert", "status", "wisp"
   ]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /\.cadre\/workflow\.md/, `${skill} must load the shared workflow`);
@@ -233,12 +244,12 @@ test("every post-create command loads the shared workflow", () => {
 });
 
 test("create classifies project context and ambiguous planning commands must clarify", () => {
-  const create = readFileSync(join(root, "skills", "cadre-create", "SKILL.md"), "utf8");
+  const create = readFileSync(join(root, "skills", "create", "SKILL.md"), "utf8");
   assert.match(create, /greenfield/);
   assert.match(create, /brownfield/);
   assert.match(create, /blocking question/);
 
-  for (const skill of ["cadre-track", "cadre-revise", "cadre-refresh"]) {
+  for (const skill of ["track", "revise", "refresh"]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /clarification gate/, `${skill} must apply the clarification gate`);
     assert.match(body, /Ask|ask/, `${skill} must ask when material ambiguity remains`);
@@ -246,7 +257,7 @@ test("create classifies project context and ambiguous planning commands must cla
 });
 
 test("create bootstraps Git only when no worktree exists", () => {
-  const create = readFileSync(join(root, "skills", "cadre-create", "SKILL.md"), "utf8");
+  const create = readFileSync(join(root, "skills", "create", "SKILL.md"), "utf8");
   assert.match(create, /git rev-parse --show-toplevel/);
   assert.match(create, /git init/);
   assert.match(create, /never initialize a nested repository/);
@@ -258,7 +269,7 @@ test("create bootstraps Git only when no worktree exists", () => {
 });
 
 test("create requires separate workflow and styleguide acceptance", () => {
-  const create = readFileSync(join(root, "skills", "cadre-create", "SKILL.md"), "utf8");
+  const create = readFileSync(join(root, "skills", "create", "SKILL.md"), "utf8");
   assert.match(create, /whether the default workflow is acceptable or the human wants changes/);
   assert.match(create, /copy the default, amend it, or use a user-provided replacement/);
 
@@ -268,7 +279,7 @@ test("create requires separate workflow and styleguide acceptance", () => {
 });
 
 test("default styleguide catalog covers the supported stack", () => {
-  const styleguideRoot = join(root, "skills", "cadre-create", "assets", "styleguides");
+  const styleguideRoot = join(root, "skills", "create", "assets", "styleguides");
   const expected = [
     "go", "java", "kotlin", "maven", "gradle", "javascript", "typescript",
     "react", "html-css", "flutter", "dart", "swift", "swiftui", "python"
@@ -281,7 +292,7 @@ test("default styleguide catalog covers the supported stack", () => {
 });
 
 test("archive supports a resumable multi-track batch", () => {
-  const archive = readFileSync(join(root, "skills", "cadre-archive", "SKILL.md"), "utf8");
+  const archive = readFileSync(join(root, "skills", "archive", "SKILL.md"), "utf8");
   assert.match(archive, /one or more `completed` tracks in a single batch/);
   assert.match(archive, /all completed/);
   assert.match(archive, /Reject the batch without partial mutation/);

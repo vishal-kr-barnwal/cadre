@@ -1,4 +1,0 @@
-interface:
-  display_name: "Cadre: Wisp"
-  short_description: "Explore without Cadre tracking"
-  default_prompt: "Use $cadre-wisp for untracked exploratory work."

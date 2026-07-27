@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cadre: Implement"
+  short_description: "Execute an approved Cadre plan"
+  default_prompt: "Use $implement to resume and execute an approved track plan."
