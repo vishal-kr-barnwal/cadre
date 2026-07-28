@@ -1,95 +1,84 @@
 ---
 title: Development
-description: Set up the workspace, choose the right module boundary, build generated runtime files, and contribute safely.
+description: Work safely in the Cadre harness and documentation workspace.
 section: Contributor Guide
-order: 180
+order: 170
 ---
 
 # Development
 
-This repository is the Cadre harness/package repository. Do not initialize a
-root `cadre/` control plane here unless a fixture explicitly tests setup
-behavior.
+This repository builds the Cadre package. It is not itself a Cadre-initialized
+target project. Do not create a root `.cadre/` unless a fixture explicitly tests
+project creation.
 
-## Workspace Setup
-
-From the repository root:
+## Install The Workspace
 
 ```bash
-pnpm install
-pnpm check
+pnpm install --frozen-lockfile
 ```
 
-Use `pnpm --filter cadre-ai check` for harness-only validation and
-`pnpm --filter cadre-docs dev` for local documentation work.
+The root workspace contains `harness/` and `docs/`.
 
-## Source Boundaries
-
-| Area | Owns | Must not own |
-|---|---|---|
-| Domain | Pure policy, value types, parsing, and decisions | Node.js, filesystem, Git, MCP, UI, or process execution |
-| Application | One bounded capability and orchestration through ports | Direct platform effects or broad unnormalized JSON |
-| Infrastructure | Filesystem, Git, processes, locks, stores, generated assets | Business policy |
-| MCP | Boundary normalization, tool/resource routing, compact envelopes | Duplicate workflow engines |
-| CLI | Installation, client wiring, and presentation | Canonical project workflow state |
-| Docs | Public explanations derived from current master sources | A second runtime contract |
-
-Keep every `harness/src/**/*.ts` file at or below 500 lines. Split by cohesive
-responsibility before a file crosses the limit.
-
-## Master And Generated Sources
-
-Edit these master sources:
-
-- `harness/src/` for runtime, MCP, LSP, DAP, and CLI TypeScript;
-- `harness/skills/cadre/` for the skill contract and protocols;
-- `harness/scripts/agent-refs/` for maintainer reference sources;
-- `harness/templates/` for target-project and CI templates;
-- `docs/` for the public site and Markdown content.
-
-Build runtime JavaScript with:
+## Common Commands
 
 ```bash
-pnpm --filter cadre-ai build
+pnpm check                         # Harness and docs checks
+pnpm --filter cadre-ai check       # TypeScript only
+pnpm --filter cadre-ai test        # Build and all harness tests
+pnpm --filter cadre-ai validate    # Build and package-source validation
+pnpm --filter cadre-ai build       # Build the two dist bundles
+pnpm --filter cadre-docs check     # Content, lint, types, and static build
+pnpm --filter cadre-docs dev       # Local documentation server
 ```
 
-Ignored plugin fixtures can be regenerated for validation:
+## Edit Source Files
+
+Primary sources are:
+
+- `harness/skills/*/SKILL.md` and `agents/openai.yaml`;
+- `harness/agents/` worker definitions;
+- `harness/src/domain/` and `harness/src/mcp/`;
+- `harness/scripts/*.ts`;
+- `harness/templates/v1/`;
+- tracked plugin manifests, MCP configs, and marketplace catalogs;
+- `harness/test/`;
+- `docs/content/` and the docs application.
+
+`harness/dist/` and `node_modules/` are generated and ignored. The installed
+marketplace under `~/.cadre/marketplaces/cadre` is also generated. Never make a
+source fix only in those outputs.
+
+## TypeScript Conventions
+
+- Read an existing file and its direct callers/tests/templates before editing.
+- Normalize MCP and JSON input at boundaries.
+- Prefer explicit interfaces, literal unions, and validation over broad
+  business-logic `unknown` values.
+- Keep the MCP server focused on registration and boundary schemas; move
+  reusable behavior into the relevant capability module.
+- Preserve atomic writes, stale-digest rejection, path safety, Git ancestry
+  checks, and resumable checkpoints.
+- Prefer cohesive modules. Avoid casually growing already-large files; split
+  when a real capability boundary can be separated safely.
+
+## Focused Tests
+
+From `harness/`:
 
 ```bash
-pnpm --filter cadre-ai generate
+node --import tsx --test --test-name-pattern='<pattern>' test/harness.test.ts
+node --import tsx --test test/cli.test.ts
 ```
 
-Never implement a fix only in `harness/scripts/cadre-core.js` or
-`harness/scripts/mcp/cadre-server.js`; the next build will overwrite it.
+Run focused coverage first, then the full harness check appropriate to the
+change.
 
-## Add A Configuration Key
+## Documentation Work
 
-1. Decide which bounded capability owns the behavior.
-2. Add an explicit type and normalize the value when loading project config.
-3. Add the default to `harness/templates/config.json` only when setup should
-   generate it for every project.
-4. Thread behavior through application/domain policy rather than key lookups in
-   unrelated workflows.
-5. Add default, override, invalid-input, and compatibility tests.
-6. Update configuration, tuning, and reference documentation.
+Markdown frontmatter, navigation membership, heading IDs, internal links,
+workflow coverage, MCP tool coverage, and release version are checked by
+`docs/scripts/check-content.mjs`. The site statically exports through Next.js.
 
-## Add A Tool, Action, Or Resource
-
-Prefer an action or resource over another public MCP tool. Keep the public
-three-tool contract small. Define boundary schemas, normalize input, use typed
-application contracts, compact the response, and add routing plus packet-only
-tests.
-
-## Change A Project Skill
-
-Project-skill behavior spans domain policy, repository storage, selection,
-workflow envelopes, resources, protocols, and docs. Test required-rule safety,
-optional budget behavior, explicit selectors, repo targeting, references, and
-malformed manifests together.
-
-## Commit Discipline
-
-Preserve unrelated worktree changes. Use small local commits with clear intent.
-Do not rewrite user work or push unless explicitly requested. Source and
-generated runtime changes that represent one implementation should remain
-reviewable together.
+When React components are touched, keep static data at module scope, reuse the
+existing shadcn components, and avoid adding client-side state for content-only
+changes.

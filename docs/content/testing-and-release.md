@@ -1,109 +1,83 @@
 ---
-title: Testing & Release
-description: Run targeted tests, architecture and generation checks, simulations, installer validation, and the local release process.
+title: Testing And Release
+description: Validate the runtime, package payload, native installers, and documentation before release.
 section: Contributor Guide
-order: 190
+order: 180
 ---
 
-# Testing & Release
+# Testing And Release
 
-Cadre releases combine a TypeScript runtime, generated JavaScript, packaged
-assets, native client installers, and public documentation. A passing unit test
-alone is not a release signal.
+Release validation covers TypeScript, runtime behavior, skill/template/package
+integrity, the npm payload, both native clients, and the public docs.
 
-## Test Layers
-
-| Layer | Purpose |
-|---|---|
-| Typecheck | Preserve strict TypeScript contracts across runtime and MCP boundaries. |
-| Architecture | Enforce source ownership, generated boundaries, and file-size rules. |
-| Runtime | Build JavaScript from TypeScript and detect generated drift. |
-| Packet tests | Exercise workflow decisions, actions, resources, approvals, and mutations. |
-| Contract tests | Keep the three-tool surface packet-only and token efficient. |
-| Client tests | Validate generated plugin shells, marketplaces, approvals, install, and uninstall. |
-| Simulation | Exercise team-scale ownership, workers, reviews, and state transitions. |
-| Docs checks | Validate content coverage, links, metadata, type safety, static export, and responsive behavior. |
-
-## Targeted Development Loop
-
-Run the narrowest relevant test first, for example:
-
-```bash
-pnpm --filter cadre-ai exec node --test scripts/cadre-skill.test.js
-pnpm --filter cadre-ai exec node --test scripts/mcp/cadre-server.test.js
-pnpm --filter cadre-docs check:content
-```
-
-Then run the full harness check:
+## Harness Checks
 
 ```bash
 pnpm --filter cadre-ai check
+pnpm --filter cadre-ai test
+pnpm --filter cadre-ai validate
 ```
 
-Before handoff or release, run the workspace check:
+- `check` runs strict TypeScript without emitting.
+- `test` builds both bundles and runs CLI plus integration tests.
+- `validate` builds and verifies manifests, marketplace catalogs, package
+  identity, the sole `cadre-ai` bin, self-contained dependency policy, skills,
+  agent isolation rules, templates, MCP configs, and absence of retired source.
+
+## Package Inspection
 
 ```bash
-pnpm check
+pnpm --filter cadre-ai pack --dry-run
 ```
 
-## Generated Output Validation
+Confirm the payload contains manifests, MCP configs, skills, agents, immutable
+templates, license, README, and both runtime bundles. It must not contain source
+tests, development dependencies, `node_modules`, or a second binary alias.
 
-The harness check typechecks sources, builds runtime JavaScript, verifies
-generated plugin fixtures, runs tests, and executes the team-scale simulation.
-Review generated diffs after the build; an unexpected large bundle change often
-reveals a source boundary or packaging mistake.
+## Documentation Checks
 
-## Native Installer Release Gate
+```bash
+pnpm --filter cadre-docs check
+```
 
-Before creating or publishing a release, validate the local build against both
-native clients:
+This runs content validation, ESLint, TypeScript, and the static Next.js build.
+The docs package version and release notes must match `harness/package.json`.
+
+## Native Installer Validation
+
+Build locally and install for both supported clients:
 
 ```bash
 pnpm --filter cadre-ai build
-node harness/scripts/cadre-cli.js install --target all --scope user
-node harness/scripts/cadre-cli.js install --target all --scope user --check
-codex plugin list | rg -A3 -B2 'Marketplace `cadre`|cadre@cadre'
+node harness/dist/cadre-cli.mjs doctor
+node harness/dist/cadre-cli.mjs install --target all --scope user
+codex plugin list --json
 claude plugin list --json
 ```
 
-Both clients must show the candidate `cadre@cadre` version installed and
-enabled. Generated MCP configuration must point to
-`harness/scripts/mcp/cadre-server.js`. Stop the release if either client or
-installer check fails.
+Verify:
 
-## Release Pipeline
+- both clients report `cadre@cadre` installed and enabled at the candidate
+  version (with installation cache-buster metadata where applicable);
+- Codex launches `./dist/cadre-mcp.mjs` from the packaged plugin root;
+- Claude launches `${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs`;
+- Codex has the plugin-scoped MCP approval mode;
+- Claude has both the `cadre` enabled server and `mcp__cadre__*` allow rule;
+- a new Codex session and reloaded Claude session discover all ten skills.
 
-```mermaid
-flowchart LR
-  A["Version and release notes"] --> B["Harness and docs checks"]
-  B --> C["Pack dry run"]
-  C --> D["Native client install checks"]
-  D --> E["Release commit"]
-  E --> F["Signed release tag"]
-  F --> G["GitHub release publication"]
-  G --> H["Trusted npm publish"]
-  H --> I["Docs build and deploy"]
-```
+There is no current `install --check` mode. Native listing and a real skill/MCP
+smoke test are the verification path.
 
-Local preparation stops after the signed tag. Publishing a GitHub release is a
-separate explicit action that triggers npm Trusted Publishing and the docs
-pipeline.
+## Release Sequence
 
-## Version Policy
+1. Update runtime, package, and both plugin manifest versions together.
+2. Update docs package version and release notes.
+3. Install with the locked workspace dependencies.
+4. Run harness check, tests, validation, and package inspection.
+5. Run the complete docs check.
+6. Validate local-build installation against Codex and Claude.
+7. Stop and fix any installer, listing, discovery, MCP, permission, or version
+   mismatch before creating or publishing the release.
 
-- Major: breaking layout, workflow behavior, public contract, or native-state
-  schema changes that require coordinated migration.
-- Minor: new workflows, supported clients, capabilities, or opt-in behavior.
-- Patch: compatible fixes and documentation corrections.
-
-Use tags named `release-X.Y.Z` and annotated messages named `Release - X.Y.Z`.
-Keep `harness/CHANGELOG.md`, package metadata, and public release notes aligned.
-
-## Release Review Checklist
-
-- Compare the candidate against the previous release tag.
-- Document additions, behavior changes, fixes, migration, and known cautions.
-- Confirm package contents with a pack dry run.
-- Verify a clean worktree after generated builds.
-- Verify the signed tag points to the intended release commit.
-- Do not push, publish, or deploy as an implied side effect of local tagging.
+Publishing, tagging, pushing, and external release creation require explicit
+user authorization; local validation does not imply it.

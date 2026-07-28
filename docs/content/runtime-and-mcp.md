@@ -1,135 +1,104 @@
 ---
-title: Runtime & MCP
-description: Follow a request through the skill shim, MCP transport, router, application services, domain logic, infrastructure, and compact response.
+title: Runtime And MCP
+description: The stdio server, immutable resources, tool families, schemas, and mutation guarantees.
 section: Contributor Guide
 order: 150
 ---
 
-# Runtime & MCP
+# Runtime And MCP
 
-Cadre exposes a small public MCP surface while keeping workflow behavior in
-typed application and domain modules. Contributors should trace a request from
-the public contract inward rather than starting in generated JavaScript.
+`dist/cadre-mcp.mjs` is a self-contained Node.js stdio MCP server built from
+`harness/src/mcp/server.ts`. It identifies itself with the package runtime
+version and exposes immutable templates plus purpose-built project-state tools.
 
-## Request Path
+## Server Instructions
 
-```mermaid
-flowchart LR
-  A["Coding client"] --> B["Installed SKILL.md shim"]
-  B --> C["cadre-mcp stdio transport"]
-  C --> D["MCP tool catalog and router"]
-  D --> E["Packet/application service"]
-  E --> F["Domain policy"]
-  E --> G["Infrastructure ports"]
-  G --> H["Filesystem, Git, process, locks"]
-  E --> I["Compact workflow envelope"]
-  I --> A
+The server tells clients to:
+
+- read existing artifacts before proposing edits;
+- present complete proposed artifacts before mutation;
+- call preview immediately before its matching apply;
+- pass proposal digests unchanged;
+- inspect `project_status` once at command entry and reserve
+  `state_validate` for final mutation gates;
+- treat the plan as the implementation source of truth.
+
+Skills contain the full workflow procedure. The MCP does not route generic
+workflow packets.
+
+## Template Resources
+
+Every file under `templates/v1/` is registered as an immutable MCP resource:
+
+```text
+cadre://templates/v1/<relative-template-path>
 ```
 
-The installed shim activates Cadre and states invariants. It does not embed the
-workflow engine. `cadre-mcp` serves three public tools, the resource registry,
-and the packaged setup templates needed at runtime. Source skill metadata,
-workflow protocols, and maintainer references are not exposed as MCP resources.
+The catalog records logical ID, URI, relative path, media type, content, and
+SHA-256 hash. The server caches the immutable catalog for its lifetime.
 
-## Public Tool Boundary
+Skills normally request known bundles with `template_get_many`; catalog
+discovery is unnecessary when the logical IDs are already declared.
 
-- `cadre_workflow` starts or continues a named workflow and returns one current
-  decision plus at most one deterministic next call.
-- `cadre_action` executes a namespaced action returned by a packet.
-- `cadre_read` reads one targeted resource URI returned by a packet.
+## Tool Families
 
-This boundary replaced a larger direct-tool surface with token-efficient v1
-contracts. Retired flat packet names are not routing aliases. Public requests
-remain nested as `{root, workflow, input, execute, approval}` or
-`{root, action, input, execute}`. Add new behavior behind an action, workflow,
-or resource before considering another public tool.
-
-A workflow response has at most one immediate single-agent continuation. If
-`next` is non-null, clients invoke exactly `next.tool` with `next.arguments`
-once for that packet. The only typed callbacks outside `next` are
-`decision.resume` after clarification or reference formatting,
-`decision.amend` for an explicit current-stage edit,
-`decision.required.write_back` after external provider evidence is collected,
-each `data.workers[].dispatch.record_finish_packet` in a parallel fan-out, and
-exact completion or recovery callbacks reissued under
-`data.worker_callbacks[].record_finish_packet`.
-Clients do not recover any other action from prose or internal fields.
-
-For staged workflows, fill only `decision.writable_paths` in the complete
-returned `decision.resume` or `decision.amend`. Their session-only approval
-state is not approval. Only explicit user approval permits the exact current
-`decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and next
-cumulative `approved_stages` prefix; a clarification's `decision.current_stage`
-is not an approval stage token. The runtime generates
-and materializes only that active stage's atomic file set, leaves later stages
-pending, and returns an execution `next` only after the full stage order is
-approved.
-
-## MCP Layers
-
-The MCP implementation follows four layers:
-
-| Layer | Responsibility |
+| Family | Tools |
 |---|---|
-| Presentation | Stdio transport, protocol framing, and server startup. |
-| Application | Packet handlers, workflow envelopes, review support, jobs, and resources. |
-| Domain | Tool/resource definitions and protocol types without filesystem effects. |
-| Infrastructure | Root resolution, job process management, and LSP daemon access. |
+| Templates | `template_catalog`, `template_get`, `template_get_many`, `styleguide_resolve` |
+| Project health | `project_status`, `state_validate` |
+| Plan graph | `execution_graph_validate` |
+| Review governance | `review_complete_preview`, `review_complete_apply` |
+| Archive governance | `archive_batch_preview`, `archive_batch_apply`, `archive_batch_record_preview`, `archive_batch_record_apply` |
+| Execution lifecycle | `execution_start_*`, `execution_node_*`, `execution_nodes_*`, `execution_status`, `execution_finish_*` |
+| Worktrees | `worktree_create_*`, `integration_*`, `worktree_cleanup_*`, `worktree_status` |
+| Project initialization | `project_init_preview`, `project_init_apply`, `setup_record_git_initialized`, `setup_record_commit` |
+| Derived index | `tracks_render_preview`, `tracks_render_apply` |
 
-Normalize untrusted MCP input at the boundary. Application and domain code
-should receive explicit types rather than broad JSON bags.
+The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 
-The stdio lifecycle supports MCP `2025-11-25` and `2025-06-18`. Normal requests
-follow `initialize`, the negotiated-version response, and
-`notifications/initialized`. Malformed JSON and invalid JSON-RPC requests are
-reported with the standard parse and invalid-request errors.
+## Result Shape
 
-## Root Resolution
+Successful tools return JSON content under a consistent `{ ok: true, ... }`
+envelope. Failures return `{ ok: false, error }` and mark the MCP result as an
+error. `project_status` also returns its human-readable summary as text.
 
-Every project-scoped call carries a root candidate. The runtime resolves it to
-the active Cadre control repository. Setup-safe reads accept an uninitialized
-candidate, but other project calls must not guess across unrelated repositories.
+Inputs are validated with Zod before reaching domain behavior. Track, phase,
+task, execution, batch, commit, digest, and timestamp formats are constrained at
+the tool boundary.
 
-Polyrepo operations resolve product repositories only through declared topology
-and packet context. Never use process working directory as an implicit product
-repository selection when a resolved root is available.
+## Preview/Apply Contract
 
-## Workflow Envelopes
+A preview computes all consequences and a proposal digest without mutating.
+Apply receives the same semantic input plus that digest. Domain code recomputes
+the proposal and refuses stale state.
 
-The core v1 workflow packet adapter compacts rich internal results once into a
-stable response:
+Read-only previews are not approval. Skill contracts remain responsible for
+presenting the exact proposal and obtaining explicit human acceptance before
+apply.
 
-- `ok`, `workflow`, `phase`, and `decision`;
-- required input or evidence names;
-- one immediate single-agent `next` tool call when deterministic progress is possible;
-- bounded `artifacts` and relevant resource URIs;
-- workflow-specific summaries under `data`;
-- `warnings` and structured `errors`.
+Not every workflow write has a dedicated MCP mutation. Track drafting,
+revision, refresh, remediation, and revert use journaled skill-side artifact
+writes plus MCP validation and derived-index gates. Contributors should not add
+generic file-write tools to erase that explicit ownership boundary.
 
-Do not re-expand large internal payloads into every response. Prefer a compact
-summary and a targeted resource.
+## Git Boundary
 
-## Resources
+MCP Git operations are limited to Cadre-derived worktrees:
 
-Resources separate discoverable evidence from the hot workflow response.
-One typed registry owns definitions and query contracts. `resources/list`
-contains fixed resources; `resources/templates/list` contains parameterized
-templates. The application resource service validates every URI against that
-registry and delegates to typed runtime capabilities. Packaged skill contracts,
-workflow protocols, and agent references are deliberately absent from the
-runtime resource surface.
+- preview/create a worker worktree at an exact base commit;
+- preview/non-squash merge a clean worker branch into its derived parent;
+- report conflicts without resolving them;
+- preview/remove a clean worktree and safely deletable integrated branch;
+- report registered worktrees and orphaned empty runtime directories.
 
-When adding a resource:
+The runtime never commits product changes for a worker, stages arbitrary files,
+resets history, force-deletes branches, or decides conflict resolution.
 
-1. Define its URI, description, and required query contract.
-2. Normalize query input at the MCP boundary.
-3. Delegate to application/domain behavior.
-4. Return bounded JSON with explicit warnings and errors.
-5. Add catalog, routing, packet-only, and regression tests.
+## Adding Or Changing A Tool
 
-## Generated Runtime
-
-TypeScript in `harness/src/` is the master source. The JavaScript files under
-`harness/scripts/` are build outputs included in the npm package. Always edit
-TypeScript first, run the runtime build, and review generated changes together
-with their source.
+1. Put reusable behavior and typed inputs/outputs in the relevant domain
+   module.
+2. Add boundary validation and narrow annotations in `src/mcp/server.ts`.
+3. Add positive, rejection, stale-digest, and recovery coverage.
+4. Update the owning skill contract and MCP reference.
+5. Run harness check, tests, validation, and package inspection.

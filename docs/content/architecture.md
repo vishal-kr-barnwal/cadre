@@ -1,167 +1,106 @@
 ---
 title: Architecture
-description: Harness package layout, thin install-time plugin bundles, source files, and development flow.
+description: Package layout, plugin assembly, runtime boundaries, and generated artifacts.
 section: Contributor Guide
 order: 140
 ---
 
 # Architecture
 
-This repository is the Cadre harness/package repository. It builds the runtime,
-skill shim, source workflow metadata, setup templates, tests, and install-time
-thin plugin bundles that users install into Claude Code, OpenAI Codex, GitHub
-Copilot, and Google Antigravity.
+Cadre 3.0 is one publishable TypeScript package that installs native user
+plugins for Codex and Claude Code. The target repository stores delivery state,
+not runtime code.
 
-The installed activation surface is target-specific. Codex and Claude Code
-receive short-named, self-contained workflow shims, producing `$cadre:<workflow>`
-and `/cadre:<workflow>` picker entries without a generic umbrella command.
-Copilot and Antigravity retain the generic Cadre activation shim. A target
-repository may separately own `cadre/skills/<id>/skill.json` manifests with
-optional `SKILL.md` human projections. Those project skills are discovered from
-the active control repo, selected by workflow and repo context, and returned
-through MCP packets and resources; they are not installed or resolved globally.
-
-## Repository Shape
+## Repository Layout
 
 ```text
-.
-├── docs/                         # Public Next.js/shadcn docs website
-│   ├── app/                      # App Router routes and homepage
-│   ├── components/               # Docs shell, Markdown renderer, shadcn UI
-│   ├── content/                  # Markdown documentation source
-│   └── public/                   # Static assets such as the Cadre logo
-├── harness/
-│   ├── skills/cadre/             # Master skill and workflow protocols
-│   ├── scripts/agent-refs/       # Maintainer reference sources
-│   ├── templates/                # Target-project templates and CI templates
-│   ├── src/                      # TypeScript runtime, MCP, and LSP sources
-│   └── scripts/                  # Built JS runtime, generator, tests, helper scripts
-├── AGENTS.md
-├── CLAUDE.md
-└── README.md
+harness/
+├── skills/<workflow>/
+│   ├── SKILL.md
+│   └── agents/openai.yaml
+├── agents/
+│   ├── cadre-phase-worker.md
+│   └── cadre-task-worker.md
+├── src/
+│   ├── domain/
+│   └── mcp/server.ts
+├── scripts/
+├── templates/v1/
+├── test/
+├── .codex-plugin/plugin.json
+├── .claude-plugin/plugin.json
+├── .mcp.codex.json
+├── .mcp.json
+└── marketplace/
 ```
 
-Root `docs/` is the only public documentation source. The plugin bundles do not
-depend on the retired harness documentation folder.
+Root `docs/` is the public Next.js documentation site. Root workspace files
+coordinate the `cadre-ai` and `cadre-docs` packages.
 
-## Master Sources
+## Source Boundaries
 
-Edit master sources, then run generation or install commands when plugin shells
-need to be materialized.
+| Path | Responsibility |
+|---|---|
+| `skills/*/SKILL.md` | Human-facing workflow, approval, recovery, and tool-use contracts. |
+| `skills/*/agents/openai.yaml` | Explicit Codex picker metadata. |
+| `agents/` | Claude phase/task worker isolation contracts. |
+| `src/domain/templates.ts` | Immutable template catalog and styleguide resolution. |
+| `src/domain/init.ts` | Digest-gated project initialization and setup checkpoints. |
+| `src/domain/state.ts` | Project discovery, validation, status, and derived track index. |
+| `src/domain/plan.ts` | Plan parsing and DAG/manual-barrier validation. |
+| `src/domain/execution.ts` | Execution journals, node transitions, and finish gating. |
+| `src/domain/worktrees.ts` | Constrained worktree creation, integration, status, and cleanup. |
+| `src/domain/governance.ts` | Review completion and archive-batch governance. |
+| `src/mcp/server.ts` | MCP server instructions, resource registration, schemas, and tool adapters. |
+| `scripts/` | Build, CLI, installation, uninstall, permissions, packaging, and source validation. |
+| `templates/v1/` | Versioned project, track, operation, and styleguide templates. |
 
-| Source | Owns |
-|--------|------|
-| `harness/skills/cadre/SKILL.md` | Self-contained packet-led Cadre activation shim. |
-| `harness/skills/cadre/workflow-command-template.md` | Thin workflow-bound command shim shared by Codex and Claude Code generation. |
-| `harness/skills/cadre/skill.json` | Maintainer-facing `cadre.skill.v1` source contract used by source validation. |
-| `harness/skills/cadre/protocols/` | Compact maintainer-facing workflow protocol definitions used by source validation and documentation. |
-| `harness/scripts/agent-refs/` | Maintainer reference sources for workflow and source-contract validation. |
-| `harness/templates/` | Target-project templates embedded into `cadre-mcp` and written by `cadre-setup`. |
-| `harness/src/` | TypeScript runtime, MCP server, LSP helpers, and core application logic. |
-| `docs/` | Public Next.js/shadcn documentation website. |
-| `docs/content/` | Markdown source for generated documentation routes. |
-| `docs/public/` | Static assets served by the docs app. |
+The domain directory currently includes filesystem and Git-aware behavior; it
+is not a pure dependency-free DDD layer. Preserve the real capability
+boundaries rather than imposing an architecture the source does not have.
 
-Generated plugin and marketplace outputs under `harness/.agents/`,
-`harness/.claude/`, `harness/.claude-plugin/`, and `harness/plugins/` are
-ignored local validation fixtures. User-facing copies are written by
-`cadre install`.
+## Build Outputs
 
-## Install-Time Plugin Bundles
+`pnpm --filter cadre-ai build` uses esbuild to create two ignored bundles:
 
-`harness/scripts/generate-skills.sh` builds platform-specific bundles from one
-source of truth for local validation. The published `cadre-ai` package writes
-the same thin plugin shape through `cadre install`.
+- `dist/cadre-cli.mjs` — executable installer/doctor/uninstaller;
+- `dist/cadre-mcp.mjs` — self-contained stdio MCP server.
 
-| Output | Purpose |
-|--------|---------|
-| `harness/plugins/cadre/` | OpenAI Codex plugin bundle. |
-| `harness/plugins/cadre-claude/` | Claude Code plugin bundle. |
-| `harness/plugins/cadre-copilot/` | GitHub Copilot CLI plugin bundle. |
-| `harness/plugins/cadre-antigravity/` | Google Antigravity plugin bundle. |
-| `harness/.agents/skills/cadre/` | Harness-local Codex skill output. |
-| `harness/.claude/skills/cadre/` | Harness-local Claude skill output. |
-| `harness/.agents/plugins/marketplace.json` | Harness-local Codex marketplace. |
-| `harness/.claude-plugin/marketplace.json` | Harness-local Claude marketplace. |
-| generated root `.agents/plugins/marketplace.json` | Repo-root Codex marketplace path in local fixtures. |
-| generated root `.claude-plugin/marketplace.json` | Repo-root Claude marketplace path in local fixtures. |
+Both target Node.js 18 and bundle their runtime dependencies. The published
+package declares no production dependencies.
 
-The generator:
+Never edit `dist/` directly.
 
-- Generates the same 19 short-named workflow skills for Codex and Claude Code;
-  Codex adds explicit-only OpenAI metadata, while Claude Code exposes each
-  skill through `/cadre:<workflow>`.
-- Copies the generic master `SKILL.md` shim into the Copilot and Antigravity
-  bundles.
-- Writes platform MCP configs that point at the global `cadre-mcp` runtime.
-- Keeps plugins thin: no copied assets, scripts, or platform worker agents.
-- Embeds only runtime setup templates into `scripts/mcp/cadre-server.js`; skill
-  contracts, workflow protocols, and maintainer references stay out of the
-  published MCP bundle.
-- Uses MCP-provided worker prompts for parallel dispatch; Claude uses `Task`,
-  Codex uses multi-agent tool discovery, Copilot uses its custom-agent flow, and
-  Antigravity uses subagent dispatch from the parallel execution reference.
-- Rewrites marketplace files in the selected generated or install location.
+## Plugin Sources And Installed Marketplace
 
-## Runtime Build
+The tracked `.codex-plugin/`, `.claude-plugin/`, MCP configs, skills, agents,
+templates, and marketplace catalogs are package sources.
 
-Runtime JavaScript under `harness/scripts/` is built from TypeScript under
-`harness/src/`.
+At installation time, `packagePluginMarketplace` copies those sources plus the
+built MCP bundle into `~/.cadre/marketplaces/cadre/plugins/cadre`. It creates
+Codex and Claude marketplace roots and adds product-specific SemVer build
+metadata as a cache-buster. The package version remains unchanged.
 
-```bash
-pnpm --filter cadre-ai build
-```
+The prior owned marketplace payload is renamed to a timestamped backup before
+the replacement is activated.
 
-The default full validation command runs typecheck, runtime build, generated
-bundle production checks, tests, and the team-scale simulation:
+## Client Differences
 
-```bash
-pnpm --filter cadre-ai check
-```
+Codex discovers skills from the plugin manifest and uses `.mcp.codex.json` to
+run `node ./dist/cadre-mcp.mjs` with plugin-root cwd. Claude discovers the same
+skills through its plugin namespace, loads worker agent definitions, and uses
+`${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs` from `.mcp.json`.
 
-## Development Flow
+Both clients operate the same workflow and state contracts. Client-specific
+metadata does not create different lifecycle semantics.
 
-For harness changes:
+## Safety Architecture
 
-1. Edit master source files.
-2. Run targeted tests when the change is narrow.
-3. Run `pnpm --filter cadre-ai generate` when local plugin fixtures need
-   validation.
-4. Run `pnpm --filter cadre-ai check` before handoff.
-
-Useful commands:
-
-```bash
-pnpm --filter cadre-ai typecheck
-pnpm --filter cadre-ai build
-pnpm --filter cadre-ai generate
-pnpm --filter cadre-ai exec node --test scripts/protocol-packet-only.test.js
-pnpm --filter cadre-ai check
-```
-
-## Public Docs Flow
-
-Root `docs/` is a static-export Next.js app. The release workflow runs only
-when a GitHub release is published; it publishes the `cadre-ai` npm package,
-then builds the app from Markdown content in `docs/content/` and deploys the
-generated `docs/out` artifact to Cloudflare Pages through Wrangler Direct
-Upload. It creates the Pages project on first deploy when needed and
-intentionally does not require MkDocs, Docusaurus, or another documentation
-framework.
-
-When public documentation describes plugin internals, keep it aligned with the
-master sources under `harness/`. When plugin instruction references are needed,
-place maintainer-only validation inputs under `harness/scripts/agent-refs/`.
-They are source fixtures and are not served by `cadre-mcp` as resources.
-
-## Versioning
-
-Cadre uses semantic versioning:
-
-| Bump | When |
-|------|------|
-| Major | Breaking changes to `cadre/` layout, workflow behavior, or native state schema. |
-| Minor | New workflows, platform support, or opt-in features. |
-| Patch | Bug fixes and documentation. |
-
-Per-release changes are recorded in `harness/CHANGELOG.md`.
+- Every project root is canonicalized and broad roots are rejected.
+- Templates are immutable and addressed by versioned logical IDs/resources.
+- Deterministic mutations bind their exact proposal to a SHA-256 digest.
+- Multi-step workflow mutations journal before artifact or Git changes.
+- Worktree Git operations use derived paths/branches and refuse unsafe cleanup.
+- The main agent is the sole scheduler, integrator, conflict resolver, Cadre
+  state writer, and recorder of human approval.
+- The runtime does not expose arbitrary shell execution or general file edits.
