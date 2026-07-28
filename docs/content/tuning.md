@@ -1,92 +1,78 @@
 ---
-title: Tuning
-description: Tune Cadre for solo work, shared teams, polyrepos, strict review, large skill catalogs, and safe parallelism.
+title: Workflow Tuning
+navTitle: Tuning
+description: Adjust context, planning, execution, verification, and approval without bypassing Cadre state.
 section: Operations
 order: 100
 ---
 
-# Tuning
+# Workflow Tuning
 
-Tune Cadre around repository risk, team topology, and context size. Start from
-the generated defaults, measure packet evidence and workflow friction, then
-change one control at a time.
+Cadre is tuned through approved artifacts and explicit workflow requests, not
+through hidden runtime knobs.
 
-## Tuning Profiles
+## Keep Context Focused
 
-| Profile | Recommended direction | Watch for |
-|---|---|---|
-| Solo project | Local sync and provider modes; keep automatic local trace commits and notes | Unnecessary hosted evidence or shared-sync overhead. |
-| Shared team | Shared sync, explicit control branch, provider evidence, second reviewer where required | Control-plane conflicts, stale identity, and pushed-note policy. |
-| Polyrepo | Explicit repo map, provider integration, merge train, repo-scoped ownership | Ambiguous repo selection and cross-repo review drift. |
-| Strict review | Require second reviewer; keep unreviewed and unpinned ship overrides disabled | Self-review, stale reviewed SHAs, or missing manual verification. |
-| Large skill catalog | Keep workflow/repo selectors narrow; adjust inline budget only after inspecting diagnostics | Optional guidance crowding out task context. |
-| Parallel delivery | Annotate dependencies and file scopes; grow worker waves gradually | Overlapping claims, weak finish evidence, and merge-back conflicts. |
+- Put stable product and engineering decisions in project context.
+- Put track-specific requirements and acceptance in `spec.md`.
+- Put executable work and verification in `plan.md`.
+- Put only semantically relevant durable patterns in the marked Pattern Seed.
+- Let later phases read learning only from declared dependency phases.
 
-## Project-Skill Context Budget
+This keeps worker prompts bounded while preserving the evidence required for
+correct decisions.
 
-`project_skills.inline_rule_budget` defaults to `2400`. The budget bounds
-optional inline rule context across selected project skills. Required rules are
-not silently truncated; if required content alone exceeds the available
-contract, the packet reports a blocking diagnostic.
+## Shape Plans For Safe Concurrency
 
-Tune the budget when:
+Parallelism follows dependencies. To expose safe work:
 
-- selected optional rules are consistently omitted and materially needed;
-- several narrowly targeted skills legitimately apply to the same workflow;
-- packet context remains comfortably below the client's usable limit.
+- split independent outcomes into separate phases or tasks;
+- declare every phase dependency explicitly;
+- declare every regular same-phase task dependency explicitly;
+- avoid two nodes that must modify the same tightly coupled files at once;
+- include tests, formatting, documentation, and Definition of Done work as
+  explicit tasks;
+- keep the derived manual-verification barriers intact.
 
-Do not raise it to compensate for unscoped skills. First narrow workflows,
-repository selectors, rule selectors, and lazy references.
+Do not create artificial parallelism. When only one node is ready, Cadre runs it
+in main without worktree overhead.
 
-## Review Strictness
+## Select Sequential Mode When Useful
 
-Keep these defaults for most repositories:
+Sequential mode is appropriate when work is highly coupled, the repository has
+expensive shared setup, or parallel workers would repeatedly collide. Request
+it explicitly at implementation start.
 
-```json
-{
-  "require_second_reviewer": false,
-  "allow_unreviewed_ship": false,
-  "allow_unpinned_review_ship": false
-}
-```
+Parallel mode remains useful for independent phases or tasks with clear file
+and dependency boundaries. The main agent bounds workers by ready nodes, host
+capacity, and the approved workflow maximum.
 
-Enable `require_second_reviewer` for protected or regulated delivery paths.
-The two `allow_*` settings are escape valves and should remain false unless the
-repository has an explicit alternative evidence policy.
+## Centralize Shared Preparation
 
-## Provider Evidence
+Before spawning workers, main should perform shared dependency installation,
+registry access, image pulls, code generation, and other network preparation.
+Workers should use locked/offline modes when the repository supports them.
 
-Use `provider_mode:"local"` for work that intentionally does not depend on
-hosted pull requests or checks. Use `github` or `gitlab` when ship/land must
-reason about hosted review and CI. In hosted modes, missing provider MCP
-evidence is a real gate rather than a reason to invent CLI evidence.
+This reduces permission churn and prevents concurrent mutation of shared
+caches or generated state.
 
-## Traceability
+## Tune Verification In The Plan
 
-Automatic product and control commits reduce unfinished state, but they also
-shape commit history. Tune them as a group with Git-note policy:
+Each task should name focused checks. Each phase manual barrier should define
+evidence the human can actually evaluate. Track-level manual verification
+should exercise the fully integrated canonical repository.
 
-- keep product commits on when task completion should be durable immediately;
-- keep control commits on when Cadre state changes must be traceable;
-- keep automation commits on for packet-owned maintenance;
-- leave local wisps uncommitted unless the team intentionally shares them;
-- push Git notes only when the remote and team workflow support the notes ref.
+Project-wide expectations—formatting, type checks, test suites, commit rules,
+or release constraints—belong in `.cadre/workflow.md` and
+`.cadre/tech-stack.md`. Use `refresh` to change them.
 
-## Parallel Throughput
+## Keep Approvals Decision-Ready
 
-Cadre does not expose a single “go faster” switch. Throughput comes from better
-plans:
+Group only changes that share one decision and whose evidence already exists.
+Cadre can batch immediately valid execution-node bookkeeping, but it must not
+batch across an unobserved commit, verification, integration, conflict
+resolution, or human approval.
 
-1. Split work into dependency-correct phases.
-2. Give each task precise file claims and tests.
-3. Keep shared foundation work sequential.
-4. Dispatch only independent ready tasks.
-5. Require worker finish evidence for owned files and tests.
-6. Merge and validate each wave before expanding concurrency.
-
-## Measure The Result
-
-Use status, project-skill diagnostics, worker state, review evidence, provider
-readiness, and test impact to decide whether a change helped. Revert tuning that
-increases warnings, ambiguity, context omission, or recovery work without a
-clear delivery benefit.
+Archive deliberately groups all selected moves, pattern changes, seed updates,
+and the derived index into one complete batch proposal. Review similarly
+presents findings with exact remediation artifacts when possible.

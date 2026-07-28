@@ -1,89 +1,81 @@
 ---
-title: Configuration
-description: Choose safe defaults for project sync, provider evidence, review policy, traceability, and project-skill context.
+title: Project Configuration
+navTitle: Configuration
+description: Configure Cadre through approved project context, workflow, styleguides, and track plans.
 section: Operations
 order: 90
 ---
 
-# Configuration
+# Project Configuration
 
-Cadre stores project operating policy in `cadre/config.json`. Setup creates a
-conservative baseline; maintainers review changes through normal Git history.
-Use the [Configuration Reference](configuration-reference.md) for every key.
+Cadre 3.0 does not use the retired `cadre/config.json` policy model. Persistent
+behavior is defined by approved, version-controlled artifacts under `.cadre/`.
 
-## A Practical Baseline
+## Configuration Sources
 
-For a solo project that does not require hosted pull-request evidence:
+| Artifact | Governs |
+|---|---|
+| `.cadre/product.md` | Product purpose, users, behavior, scope, and constraints. |
+| `.cadre/guidelines.md` | Engineering principles, trust boundaries, non-goals, and decision rules. |
+| `.cadre/tech-stack.md` | Languages, frameworks, build tools, platforms, and verification commands. |
+| `.cadre/workflow.md` | Lifecycle, approval, testing, review, commit, and delivery expectations. |
+| `.cadre/styleguides/*.md` | General and technology-specific implementation conventions. |
+| `.cadre/patterns/index.md` | Durable reusable patterns and provenance. |
+| Track `spec.md` | Track scope, requirements, acceptance, and dependencies. |
+| Track `plan.md` | Execution DAG, tasks, verification barriers, and task provenance. |
+| Execution journal | Requested/effective mode, worker bound, graph identity, and runtime evidence. |
 
-```json
-{
-  "sync_mode": "local",
-  "provider_mode": "local",
-  "project_skills": {
-    "inline_rule_budget": 2400
-  },
-  "traceability": {
-    "auto_product_commits": true,
-    "auto_control_commits": true,
-    "git_notes": true,
-    "push_notes": true
-  }
-}
-```
+These files are human-readable sources of truth, not generated projections of
+a hidden configuration database.
 
-This is a subset, not a replacement template. Keep setup-generated keys unless
-you have verified their effect and default in the reference.
+## Change Project Context
 
-## Configuration Model
-
-Cadre reads the active control repository's configuration after resolving the
-project root. Workflow inputs can provide supported per-call values, such as
-provider or sync selections during setup, but persistent project policy belongs
-in `cadre/config.json`.
-
-Configuration affects four distinct concerns:
-
-| Concern | Important keys | Typical decision |
-|---|---|---|
-| State movement | `sync_mode`, `control_remote`, `control_branch` | Keep local or share the Cadre control plane. |
-| Review and publication | `require_second_reviewer`, `allow_unreviewed_ship`, `allow_unpinned_review_ship` | Decide how strictly ship/land gates evidence. |
-| Hosted provider | `provider_mode`, `provider_mcp_required`, `remote_host` | Use local evidence or require GitHub/GitLab integration evidence. |
-| Context and trace | `project_skills`, `coverage_command`, `traceability`, `merge_train` | Bound context, tests, commits, notes, and publication grouping. |
-
-## Configuration Precedence
-
-For behavior that supports a workflow override, an explicit packet input wins
-for that call. Otherwise Cadre uses project configuration, detected repository
-information, and finally the runtime default. Detection is evidence, not a
-license to silently replace an explicit project policy.
-
-Provider selection follows this shape:
+Use `refresh` when product, engineering, workflow, technology, styleguide, or
+pattern context drifts:
 
 ```text
-explicit workflow input -> configured provider_mode -> unambiguous remote detection -> local
+$cadre:refresh
+/cadre:refresh
 ```
 
-## Safe Change Procedure
+Refresh inspects user input, repository changes since setup or the last
+refresh, completed-track outcomes, and current code/manifests. It proposes
+focused diffs and a refresh record before writing.
 
-1. Change one policy group at a time.
-2. Run `cadre-validate` and inspect workspace health.
-3. Run `cadre-status` and confirm the reported provider and sync modes.
-4. Exercise the affected workflow as a dry run before publication.
-5. Review control-plane and Git-note behavior with another contributor when
-   enabling shared automation.
-6. Record the rationale in the configuration change.
+Changes that affect active execution wait for a safe boundary. Changes that
+affect track scope or plans follow `revise` impact and approval rules.
 
-## Operational Checks
+## Change A Track
 
-After configuration changes, verify:
+Use `revise` for a change to an approved specification, acceptance criterion,
+dependency, or plan. Do not edit track state by hand or use `refresh` to bypass
+track-specific impact assessment.
 
-- provider mode matches the repository host and integration availability;
-- shared sync points at the intended remote and branch;
-- review policy cannot accidentally bypass commit pinning;
-- coverage commands run from the expected repository root;
-- project-skill diagnostics show the intended budget and selected skills;
-- trace commits and Git notes match the team's repository policy;
-- merge-train automation is enabled only for teams that use it.
+## Choose Execution Mode
 
-> Conservative settings are intentionally easier to relax than permissive
-> publication settings are to audit after the fact.
+Implementation defaults to parallel mode. Ask for sequential mode in the
+workflow request:
+
+```text
+$cadre:implement checkout sequentially
+/cadre:implement checkout sequentially
+```
+
+The execution journal persists requested/effective mode and its worker bound.
+Changing mode after execution starts requires a clean safe boundary and
+approval.
+
+## Change Styleguides
+
+`create` resolves defaults from the approved technology list and asks whether
+to accept, amend, or replace each one. Later changes belong in `refresh` so the
+technology list, styleguide set, active-track impact, and Git record stay
+consistent.
+
+## Safe Editing Rule
+
+Cadre artifacts are ordinary version-controlled files, but stateful workflows
+expect their changes to be approved, journaled, validated, and committed with
+matching provenance. Use the owning workflow instead of manually changing
+`project.json`, track `state.json`, execution journals, operation journals, or
+the generated `tracks.md` index.

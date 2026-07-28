@@ -1,196 +1,61 @@
 ---
-title: Team And Polyrepo
-description: Shared sync, ownership, leases, team boards, polyrepo control repos, and merge trains.
+title: Polyrepo Mode — Coming Soon
+navTitle: Polyrepo (Coming Soon)
+description: Current single-repository boundary and the planned direction for coordinated multi-repository delivery.
 section: Operations
 order: 120
 ---
 
-# Team And Polyrepo
+# Polyrepo Mode — Coming Soon
 
-Cadre supports solo work, single-repo teams, and polyrepo control repos. The
-same workflow packets operate in every topology, but sync, ownership, provider
-evidence, and publication behavior change based on project configuration.
+Cadre 3.0 operates on one Git repository and one `.cadre/` control plane at a
+time. Coordinated polyrepo delivery is planned, but it is not part of the
+current runtime or workflow set.
 
-## Monorepo Mode
+## Current Boundary
 
-Monorepo mode is the default. If `cadre/repos.json` does not exist, Cadre treats
-the project root as the product repo.
+Today:
 
-Use:
+- `create` initializes context for one repository root;
+- a track's plan, execution journal, commits, worktrees, review, and archive
+  history belong to that repository;
+- worktree paths and Git operations are derived inside that repository;
+- state validation assumes one canonical Git history;
+- no `ship`, `land`, provider-evidence, merge-train, or cross-repository
+  workflow is installed.
 
-- `cadre-ship` for publication planning.
-- `cadre-status` for live status and team boards.
-- `cadre-review` for the quality gate.
-- `cadre-validate` for state and annotation checks.
+Do not create an ad hoc multi-repository `repos.json`, copy one `.cadre/`
+directory across repositories, or treat old 2.x ship/land documentation as a
+supported 3.0 contract.
 
-Absent `cadre/config.json`, provider mode is local and no hosted provider MCP
-evidence is required.
+## Planned Direction
 
-## Shared Sync
+Polyrepo mode is intended to preserve Cadre's existing guarantees while adding
+an explicit control-repository model. Any future design needs to make these
+boundaries concrete:
 
-For teams, choose shared sync during setup. Shared sync pushes and pulls the
-control plane so teammates see owners, leases, review queues, blockers, and
-available work.
+- repository identities, roots, remotes, and default branches;
+- which repository owns shared product/workflow context;
+- repo-qualified phase/task ownership and dependencies;
+- per-repository worktree and commit provenance;
+- cross-repository readiness and manual-verification barriers;
+- partial integration and rollback behavior;
+- review evidence for a change spanning several Git histories;
+- resumable coordination when only part of a repository group succeeds.
 
-Shared sync covers:
+The main agent must remain the sole state owner and integrator. Workers must
+remain bounded to assigned repositories/worktrees, and every cross-repository
+mutation must remain explicit, reviewable, and recoverable.
 
-- `cadre/` project state.
-- Native Cadre event, message, formula, and operation state.
-- Review and handoff evidence.
-- Team-board visible ownership and blocker state.
+## Until Polyrepo Ships
 
-Product code remains local until ship or land workflows publish it.
+Use an independent Cadre project in each repository. Express external
+repository prerequisites in the affected track's specification and additional
+information, and coordinate their ordering outside Cadre.
 
-Shared-mode mutating workflows run a sync preamble and postamble through
-Cadre packets. Merge attributes protect machine-owned state such as native state
-files and parallel worker audit files from unsafe text merges.
+Do not claim atomic cross-repository delivery. Review, complete, and archive
+each repository's work against its own commits and verification evidence.
 
-## Ownership And Leases
-
-Cadre records owner and reviewer information from the running git identity,
-usually `git config user.email` with `user.name` as fallback.
-
-Ownership is the durable assignment. Shared-mode leases are advisory activity
-signals. A lease can include owner, host, acquired time, and heartbeat time so
-teammates can see who is actively driving a track.
-
-Leases are swept when stale. The canonical staleness window is 30 minutes.
-Monorepo/local mode does not need advisory leases.
-
-## Team Boards
-
-Useful compact resources:
-
-| Resource | Use |
-|----------|-----|
-| `cadre://team-board` | WIP, owners, blockers, handoffs, reviews, and native evidence. |
-| `cadre://my-next-actions` | Current user's WIP, review work, handoffs, available work, and reclaimable work. |
-| `cadre://review-queue` | Tracks awaiting review or changes. |
-| `cadre://handoff-inbox` | Incoming resumable context. |
-| `cadre://quality-gate` | Plan integrity, review gate, and collision state for one track. |
-| `cadre://parallel-state` | Worker wave and merge-back state. |
-| `cadre://repo-topology` | Mono/polyrepo topology and configured repos. |
-| `cadre://integrations` | Optional MCP availability and LSP coverage in one compact view. |
-
-These resources are bounded so agents do not need to reread the whole Cadre
-tree to answer status questions.
-
-## Polyrepo Control Repo
-
-Polyrepo mode is opt-in. It activates when `cadre/repos.json` exists with
-`"mode": "polyrepo"`.
-
-The control repo owns Cadre state and native Cadre memory:
-
-```text
-platform-control/
-├── cadre/
-│   ├── repos.json
-│   ├── config.json
-│   └── tracks/<id>/
-│   ├── events.jsonl
-│   ├── messages/
-│   └── local/wisps/   # git-ignored local runs
-├── .gitmodules
-├── repos/api/
-├── repos/web/
-└── .worktrees/<track_id>/<repo>/
-```
-
-`.gitmodules` is authoritative for submodule path and URL. `cadre/repos.json`
-adds Cadre metadata such as `default_repo`, `default_branch`, and enabled state.
-
-Example:
-
-```json
-{
-  "mode": "polyrepo",
-  "control_repo": { "name": "platform-control", "path": "." },
-  "default_repo": "api",
-  "repos": [
-    {
-      "name": "api",
-      "submodule_path": "repos/api",
-      "url": "git@github.com:org/api.git",
-      "default_branch": "main",
-      "enabled": true
-    },
-    {
-      "name": "web",
-      "submodule_path": "repos/web",
-      "url": "git@github.com:org/web.git",
-      "default_branch": "main",
-      "enabled": true
-    }
-  ]
-}
-```
-
-## Repo-Scoped Work
-
-Tasks can include repo annotations:
-
-```markdown
-- [ ] Task 1: Add API endpoint
-  <!-- repo: api -->
-  <!-- files: src/routes/session.ts -->
-
-- [ ] Task 2: Add UI form
-  <!-- repo: web -->
-  <!-- files: src/pages/login.tsx -->
-```
-
-If a task has no `<!-- repo: -->` annotation, Cadre routes it to
-`default_repo`.
-
-Polyrepo implementation behavior:
-
-- Worktrees are per repo under `.worktrees/<track_id>/<repo>/`.
-- Commits are recorded per repo.
-- Parallel file conflict checks compare `(repo, file)` tuples.
-- Reverts group SHAs per repo and stop on the first conflict.
-- Status and LSP/code-intelligence output are repo-qualified.
-
-Project skills remain owned by the control repo under `cadre/skills/`. A skill
-manifest may declare `selectors.repos: [api, web]`; Cadre selects it only when the current packet
-or track targets one of those repository names. It does not merge skill
-catalogs from product submodules. Lookup-only versus change-oriented behavior
-belongs in atomic manifest rules and is not treated as an authorization rule.
-
-## Ship Vs Land
-
-Use `cadre-ship` for monorepos. Use `cadre-land` for polyrepo control repos.
-
-`cadre-land`:
-
-1. Enforces the review gate.
-2. Runs all-or-nothing local preflight across touched product repos.
-3. Pushes each product repo's `track/<id>` branch and the control branch.
-4. Plans or opens one PR/MR per touched product repo plus one control PR/MR.
-5. Applies a shared `cadre-track:<id>` label.
-6. Records provider URLs and evidence through Cadre packets.
-
-Hosted provider actions must use GitHub or GitLab MCP evidence when configured.
-
-## Merge Train
-
-The generated merge train lands a cross-repo PR group in a safe order:
-
-1. Verify sibling PRs/MRs are approved and green.
-2. Merge product PRs/MRs first using merge commits.
-3. Capture deterministic merge SHAs.
-4. Update control-repo submodule gitlinks to those SHAs.
-5. Re-run control checks.
-6. Merge the control PR/MR last.
-
-The train is not truly atomic because GitHub and GitLab do not provide
-cross-repo atomic merge. If one repo fails after others have landed, the train
-halts, reports the landed and blocked repos, and can be re-triggered
-idempotently after the blocker is fixed.
-
-Required setup:
-
-- A cross-repo token such as `CADRE_TRAIN_TOKEN` with write access to every
-  product repo.
-- Branch protection on product repos and the control repo.
-- Merge commits enabled so submodule gitlinks can pin deterministic merge SHAs.
+This page will become the operational polyrepo guide when the runtime and skill
+contracts exist. Until then, “Coming Soon” is a product boundary, not a hidden
+or experimental mode.
