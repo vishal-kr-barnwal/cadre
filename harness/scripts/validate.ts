@@ -42,8 +42,8 @@ if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.0.0") 
   errors.push("package: expected publish identity cadre-ai@3.0.0");
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
-if (packageManifest.bin?.cadre !== "dist/cadre-cli.mjs" || packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs") {
-  errors.push("package: cadre and cadre-ai bins must point at dist/cadre-cli.mjs");
+if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
+  errors.push("package: cadre-ai must be the sole bin and point at dist/cadre-cli.mjs");
 }
 for (const entry of ["dist/", "skills/", "templates/", ".codex-plugin/", ".claude-plugin/"]) {
   if (!packageManifest.files?.includes(entry)) errors.push(`package: files must include ${entry}`);

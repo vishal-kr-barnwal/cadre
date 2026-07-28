@@ -60,10 +60,7 @@ test("global CLI exposes publish identity and self-contained runtime diagnostics
   assert.match(doctor.stdout, /self-contained runtime: ok/);
 
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  assert.deepEqual(manifest.bin, {
-    cadre: "dist/cadre-cli.mjs",
-    "cadre-ai": "dist/cadre-cli.mjs"
-  });
+  assert.deepEqual(manifest.bin, { "cadre-ai": "dist/cadre-cli.mjs" });
   assert.equal(manifest.dependencies, undefined);
 });
 
