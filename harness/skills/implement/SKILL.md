@@ -41,7 +41,10 @@ Before creating workers, inspect the approved plan, repository scripts, lockfile
 Call `execution_status` when resuming an execution or when no mutation response is available. After a successful execution mutation, use its returned `derivedStatus` instead of making a redundant status call. Use `execution_nodes_preview` and `execution_nodes_apply` when one already-approved scheduling or bookkeeping decision produces multiple immediately valid transitions. The ordered batch is a transport optimization only: never batch across a human approval, commit, verification, integration, conflict resolution, or other external action whose evidence does not exist at preview time. Plan display order breaks ties only.
 
 - A root phase reads the Pattern Seed. Any other phase reads learning from all declared dependency phases.
-- A phase is either assigned to one phase worker for internally sequential work or coordinated by main through task workers; never both simultaneously. A phase integration worktree without a phase `workerId` is coordination state, not phase-worker ownership.
+- Treat the track as a hierarchical DAG: phase dependencies determine active phases, task dependencies determine ready work inside each running phase, and main schedules one global ready queue subject to `maxWorkers`. Different phases may use different execution modes concurrently.
+- Every non-trivial active phase uses a main-owned integration worktree. A phase `workerId` is a temporary execution lease, not ownership of that worktree. Use direct main execution for one ready task, a phase worker for a tightly coupled sequential chain when delegation is already justified, and task-worker fan-out when at least two independent tasks in that phase are ready.
+- A phase has only one mutating execution mode at a time, but may switch modes at a clean checkpoint. Before phase-worker-to-task-worker fan-out, finish and record the current task, verify the phase worktree is clean, record its HEAD in the phase verification, release the phase worker through a `running`-to-`running` node update with `workerId: null`, and keep that worker inactive. Main may assign a new phase worker only after every active task worker in that phase is completed and its integration/cleanup is recorded.
+- Create every task-worker wave from the same recorded clean phase HEAD. Merge approved tasks into the phase worktree one at a time; derive the next wave only after those merges, so downstream tasks start from the updated phase HEAD.
 - The main agent creates every worker. On Codex, use an available implementation worker subagent with the bounded prompt below. On Claude Code, prefer the plugin-provided `cadre-phase-worker` and `cadre-task-worker`. Do not use Claude agent teams.
 - If only one safe execution node is ready, execute it in main.
 - Phase and task worktrees are siblings. Use `worktree_create_preview` and `worktree_create_apply`; record the returned absolute path/branch through `execution_node_preview` and `execution_node_apply` before spawning.
@@ -53,6 +56,7 @@ Provide the exact absolute worktree, track/execution/node IDs, approved outcome,
 - operate only in the assigned worktree and read files before editing;
 - edit product files only and never edit `.cadre/**`;
 - do not spawn agents, merge, rebase, reset, clean up, or force Git operations;
+- a phase worker must stop at a requested clean handoff, report the committed phase HEAD and clean status, and remain inactive while task workers for that phase run;
 - run focused verification and return changed files, tests/checks, risks, learning candidates, and the proposed commit message for the current task;
 - stop after each regular task with that task's changes uncommitted at `awaiting_approval` until main presents them and the human approves;
 - after approval, commit only that task and return its SHA; do not begin the next phase task until main confirms the checkpoint is recorded.
@@ -62,7 +66,7 @@ Provide the exact absolute worktree, track/execution/node IDs, approved outcome,
 1. Transition a worker node from `running` to `awaiting_approval` with its verification summary.
 2. Read the worker diff and evidence. Present them to the human through main.
 3. After approval, direct the worker to create its Conventional Commit, verify the worktree is clean, and record its SHA as `committed`.
-4. For a task worker, call `integration_preview` and show the exact task merge. The MCP derives its parent as the registered phase worktree when one exists, otherwise the canonical worktree. Pass the unchanged digest to `integration_apply`. A task executed directly by main or internally by a phase worker is already on its parent branch: verify its approved commit is reachable and do not invent an integration step. For a phase worktree, use the same gate for phase-to-canonical integration. Never squash.
+4. For a task worker, call `integration_preview` and show the exact task merge. The MCP derives its parent as the registered phase worktree when one exists, otherwise the canonical worktree. Use the canonical fallback only for an explicitly direct, single-task phase; create a phase integration worktree before delegated work in multi-task or phase-verified delivery. Pass the unchanged digest to `integration_apply`. A task executed directly by main or internally by a phase worker is already on its parent branch: verify its approved commit is reachable and do not invent an integration step. For a phase worktree, use the same gate for phase-to-canonical integration. Never squash.
 5. If integration reports conflicts, mark `conflicted`. Resolve task conflicts in the phase worktree and phase conflicts in main, read every conflicted file and both sides, rerun combined verification, present the resolution, and record the resulting merge commit only after approval.
 6. For a worker worktree, mark the node `integrated`, then preview/apply worktree cleanup. Cleanup must refuse dirty, conflicted, or unintegrated work and must not force branch deletion.
 7. Mark a task complete after its worker integration, or after its approved direct/phase-worker commit is verified on the parent branch. Mark it complete in `plan.md` with its reachable task commit SHA during canonical phase bookkeeping.
@@ -71,7 +75,7 @@ Every regular task in a phase has its own Conventional Commit and distinct recor
 
 ## Verification barriers and learning
 
-- Phase `User Manual Verification` is a derived barrier over all sibling tasks. Prepare technical evidence in the phase worktree through its phase worker when present, otherwise through main. The main agent always presents and records the human approval.
+- Phase `User Manual Verification` is a derived barrier over all sibling tasks. After task workers are quiescent, prepare technical evidence in the phase worktree through an active phase worker when present, otherwise through main. The main agent always presents and records the human approval.
 - After approval, integrate the phase branch, record every task commit, the phase completion merge SHA, and dependency-aware phase learning in canonical `plan.md`/`learning.md`; commit `cadre(implement): record <track-id> <phase-id>`.
 - Track-level `User Manual Verification` is a derived barrier over every phase. Execute it only in main, against the fully integrated canonical worktree, and obtain explicit human approval.
 

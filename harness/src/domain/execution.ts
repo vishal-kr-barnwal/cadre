@@ -17,6 +17,7 @@ export interface ExecutionNode {
   dependencies: string[];
   status: ExecutionNodeStatus;
   workerId: string | null;
+  workerHistory?: string[];
   worktreePath: string | null;
   branch: string | null;
   workerCommit: string | null;
@@ -139,6 +140,7 @@ function buildNodes(graph: PlanGraph): Record<string, ExecutionNode> {
       dependencies: [...phase.dependencies],
       status: phaseCompleted ? "completed" : "pending",
       workerId: null,
+      workerHistory: [],
       worktreePath: null,
       branch: null,
       workerCommit: null,
@@ -155,6 +157,7 @@ function buildNodes(graph: PlanGraph): Record<string, ExecutionNode> {
         dependencies: [...phase.dependencies, ...task.dependencies],
         status: task.checked ? "completed" : "pending",
         workerId: null,
+        workerHistory: [],
         worktreePath: null,
         branch: null,
         workerCommit: task.checked ? task.commit : null,
@@ -329,8 +332,18 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
   if (journal.status !== "in_progress") throw new Error("execution is not in progress");
   const node = journal.nodes[input.nodeId];
   if (!node) throw new Error(`unknown execution node ${input.nodeId}`);
-  if (!ALLOWED_TRANSITIONS[node.status]?.includes(input.status)) {
+  const workerAssignmentChanged = Object.hasOwn(input, "workerId")
+    && (input.workerId ?? null) !== node.workerId;
+  const phaseWorkerHandoff = node.kind === "phase"
+    && node.status === "running"
+    && input.status === "running"
+    && workerAssignmentChanged
+    && (node.workerId == null || input.workerId == null);
+  if (!ALLOWED_TRANSITIONS[node.status]?.includes(input.status) && !phaseWorkerHandoff) {
     throw new Error(`illegal execution transition ${node.status} -> ${input.status}`);
+  }
+  if (phaseWorkerHandoff && node.workerId != null && input.workerId == null && !input.verification) {
+    throw new Error(`${node.id} requires clean-checkpoint verification before releasing its phase worker`);
   }
   const completed = new Set(
     Object.values(journal.nodes).filter((candidate) => candidate.status === "completed").map((candidate) => candidate.id)
@@ -358,6 +371,12 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
     "verification", "approval", "blocker"
   ] as const) {
     if (Object.hasOwn(input, field)) updated[field] = input[field] ?? null;
+  }
+  if (Object.hasOwn(input, "workerId")) {
+    const workerHistory = new Set(node.workerHistory ?? []);
+    if (node.workerId != null) workerHistory.add(node.workerId);
+    if (updated.workerId != null) workerHistory.add(updated.workerId);
+    updated.workerHistory = [...workerHistory];
   }
   if (!["blocked", "conflicted"].includes(input.status)) updated.blocker = null;
   if (["blocked", "conflicted"].includes(input.status) && !updated.blocker) {
@@ -400,13 +419,13 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
     if (node.kind === "phase") {
       const taskWorkers = Object.values(journal.nodes).filter(
         (candidate) => candidate.phaseId === node.id && candidate.kind !== "phase"
-          && candidate.workerId != null
+          && candidate.workerId != null && candidate.status !== "completed"
       );
-      if (taskWorkers.length) throw new Error(`${node.id} cannot use a phase worker after task workers were assigned`);
+      if (taskWorkers.length) throw new Error(`${node.id} cannot acquire a phase worker while task workers are active`);
     } else {
       const phase = journal.nodes[node.phaseId];
       if (phase?.workerId != null) {
-        throw new Error(`${node.id} cannot use a task worker while ${node.phaseId} has a phase worker`);
+        throw new Error(`${node.id} cannot use a task worker while ${node.phaseId} has an active phase worker`);
       }
     }
   }
@@ -643,6 +662,11 @@ export function validateExecutionJournal(
   for (const [id, node] of Object.entries(journal.nodes ?? {})) {
     if (id !== node.id) errors.push(`${state.trackId}: execution node key ${id} does not match node id`);
     if (!validStatuses.has(node.status)) errors.push(`${state.trackId}: execution node ${id} has invalid status ${node.status}`);
+    if (node.workerHistory != null && (!Array.isArray(node.workerHistory)
+      || node.workerHistory.some((workerId) => typeof workerId !== "string" || workerId.length === 0)
+      || new Set(node.workerHistory).size !== node.workerHistory.length)) {
+      errors.push(`${state.trackId}: execution node ${id} has invalid worker history`);
+    }
     for (const dependency of node.dependencies ?? []) {
       if (!Object.hasOwn(journal.nodes, dependency)) errors.push(`${state.trackId}: execution node ${id} has unknown dependency ${dependency}`);
       else if (!["pending", "blocked"].includes(node.status) && !completedNodes.has(dependency)) {
@@ -666,12 +690,13 @@ export function validateExecutionJournal(
     }
   }
   for (const phase of Object.values(journal.nodes ?? {}).filter((node) => node.kind === "phase")) {
-    const phaseWorker = phase.workerId != null;
+    const phaseWorker = phase.status === "running" && phase.workerId != null;
     const taskWorkers = Object.values(journal.nodes).filter(
-      (node) => node.phaseId === phase.id && node.kind !== "phase" && node.workerId != null
+      (node) => node.phaseId === phase.id && node.kind !== "phase"
+        && node.workerId != null && node.status !== "completed"
     );
     if (phaseWorker && taskWorkers.length) {
-      errors.push(`${state.trackId}: ${phase.id} mixes phase-worker and task-worker ownership`);
+      errors.push(`${state.trackId}: ${phase.id} has concurrent phase-worker and task-worker ownership`);
     }
   }
   if (operation?.action === "implement" && journal.status !== "in_progress") errors.push(`${state.trackId}: active implement operation requires an in-progress journal`);

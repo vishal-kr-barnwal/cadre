@@ -424,6 +424,67 @@ test("execution journal gates tasks behind their running phase and validates per
   }), /must omit the execution- journal filename prefix/);
 });
 
+test("a phase can hand off between phase and task workers at clean checkpoints", () => {
+  const projectRoot = fixture();
+  writePlannedTrack(projectRoot, "hybrid-track");
+  runState(projectRoot, "render");
+  const scope = { projectRoot, trackId: "hybrid-track", executionId: "hybrid-1" };
+  const startInput = {
+    ...scope,
+    requestedMode: "parallel" as const,
+    effectiveMode: "parallel" as const,
+    maxWorkers: 3,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T01:15:00.000Z"
+  };
+  const start = previewExecutionStart(startInput);
+  applyExecutionStart(startInput, start.digest);
+
+  const transition = (update: Parameters<typeof previewExecutionNodeUpdate>[0]) => {
+    const preview = previewExecutionNodeUpdate(update);
+    return applyExecutionNodeUpdate(update, preview.digest);
+  };
+  transition({ ...scope, nodeId: "P1", status: "running", workerId: "phase-worker-1" });
+
+  assert.throws(() => previewExecutionNodeUpdate({
+    ...scope, nodeId: "T1.1", status: "running", workerId: "task-worker-1"
+  }), /active phase worker/);
+  assert.throws(() => previewExecutionNodeUpdate({
+    ...scope, nodeId: "P1", status: "running", workerId: null
+  }), /clean-checkpoint verification/);
+
+  transition({
+    ...scope,
+    nodeId: "P1",
+    status: "running",
+    workerId: null,
+    verification: "phase worktree clean at abcdef0"
+  });
+  transition({ ...scope, nodeId: "T1.1", status: "running", workerId: "task-worker-1" });
+  assert.throws(() => previewExecutionNodeUpdate({
+    ...scope, nodeId: "P1", status: "running", workerId: "phase-worker-2"
+  }), /task workers are active/);
+
+  transition({ ...scope, nodeId: "T1.1", status: "awaiting_approval", verification: "focused checks passed" });
+  transition({
+    ...scope,
+    nodeId: "T1.1",
+    status: "committed",
+    workerCommit: "abcdef1",
+    approval: "approved"
+  });
+  transition({ ...scope, nodeId: "T1.1", status: "integrating" });
+  transition({ ...scope, nodeId: "T1.1", status: "integrated", mergeCommit: "abcdef2" });
+  transition({ ...scope, nodeId: "T1.1", status: "completed" });
+  const reassigned = transition({
+    ...scope, nodeId: "P1", status: "running", workerId: "phase-worker-2"
+  });
+
+  assert.deepEqual(reassigned.journal.nodes.P1?.workerHistory, ["phase-worker-1", "phase-worker-2"]);
+  assert.deepEqual(reassigned.journal.nodes["T1.1"]?.workerHistory, ["task-worker-1"]);
+  assert.equal(validateProject(projectRoot).errors.length, 0);
+});
+
 test("execution transitions require distinct task commits and clear resolved blockers", () => {
   const projectRoot = fixture();
   const trackRoot = writePlannedTrack(projectRoot, "provenance-track");
