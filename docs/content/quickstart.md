@@ -1,143 +1,132 @@
 ---
 title: Quickstart
-description: Take one Cadre-managed change from project setup through delivery and archive.
+description: Run a first human-approved Cadre track from project creation through archive.
 section: Start Here
 order: 30
 ---
 
 # Quickstart
 
-This walkthrough shows the shortest complete Cadre lifecycle. It assumes Cadre
-is [installed and verified](getting-started.md) and that you are working in a
-target project, not in the Cadre harness repository.
+This walkthrough assumes Cadre is installed and the client has been reloaded.
+Cadre commands are agent skills, not `cadre-ai` shell subcommands.
 
-## 1. Initialize The Project
+## 1. Create Project Context
 
-Choose the setup workflow from your coding client's command picker:
+Open the target repository in Codex or Claude Code:
 
 ```text
 # Codex
-$cadre:setup
+$cadre:create
 
 # Claude Code
-/cadre:setup
+/cadre:create
 ```
 
-Copilot and Antigravity retain the generic Cadre skill; activate it there and
-ask for `cadre-setup`. The remaining examples use portable `cadre-*` workflow
-IDs. In Codex, select `$cadre:<workflow>`; in Claude Code, select
-`/cadre:<workflow>`.
+Cadre inspects the repository, establishes its exact root and Git disposition,
+and explicitly classifies the project as greenfield or brownfield. When the
+evidence is ambiguous, it asks before drafting.
 
-Setup detects repository topology, provider remotes, build tools, and optional
-language services. It returns one review stage at a time. Inspect each generated
-target-path preview with normal Git tools and explicitly approve it before Cadre
-continues. A preview written into `cadre/` is not approval by itself.
+Review the proposed product, engineering guidelines, technology stack,
+workflow, styleguides, patterns, and project state. Workflow and styleguides
+receive explicit approval. Only after the full file set and project/Git choices
+are approved does Cadre create `.cadre/`, validate it, and record setup commits.
 
-When setup finishes, verify the runtime:
+## 2. Create A Feature Or Bug Track
 
 ```text
 # Codex
+$cadre:track Add passwordless login as a feature
+
+# Claude Code
+/cadre:track Fix duplicate invoice creation as a bug
+```
+
+Cadre first proposes `spec.md` with functional requirements, non-functional
+requirements, acceptance criteria, dependencies, and additional information.
+After spec approval and commit, it proposes `plan.md` and `learning.md`.
+
+The plan is an acyclic dependency graph:
+
+- each regular phase declares phase dependencies;
+- each regular task declares same-phase task dependencies;
+- every delivery phase ends with a derived `User Manual Verification` barrier;
+- the final phase contains only track-level manual verification and depends on
+  every delivery phase.
+
+The track becomes `planned` only after the plan graph and pattern seed are
+approved, validated, and committed.
+
+## 3. Check Status
+
+```text
 $cadre:status
-$cadre:validate
-
-# Claude Code
 /cadre:status
-/cadre:validate
-
-# Copilot and Antigravity request names
-cadre-status
-cadre-validate
 ```
 
-Check the returned workspace health, provider mode, sync mode, and any degraded
-LSP or integration evidence before starting work.
+Status is read-only. It reports project and track checkpoints, pending
+operations, dependencies, execution nodes, review/archive readiness, validation
+errors, and managed worktrees.
 
-## 2. Create A Track
-
-Describe one outcome rather than a list of implementation instructions:
+## 4. Implement The Plan
 
 ```text
-cadre-newtrack "Add organization-scoped API keys with revocation"
+$cadre:implement passwordless-login
+/cadre:implement passwordless-login
 ```
 
-Cadre may ask bounded clarification questions. It then stages the canonical
-spec and plan separately. Review acceptance criteria first, then tasks,
-dependencies, file annotations, tests, and manual verification.
-
-A useful track has:
-
-- a user-visible or operator-visible outcome;
-- explicit non-goals;
-- testable acceptance criteria;
-- tasks with dependencies and likely file scopes;
-- required automated and manual verification.
-
-## 3. Implement The Plan
-
-Start implementation without manually choosing an internal task:
+Parallel mode is the default. Request sequential execution explicitly:
 
 ```text
-cadre-implement
+$cadre:implement passwordless-login sequentially
+/cadre:implement passwordless-login sequentially
 ```
 
-The workflow packet selects applicable project skills, resolves the next safe
-task, returns bounded context, and may offer a parallel dispatch action when
-the plan has independent phases and non-overlapping file claims. Follow only
-the packet's returned next action.
+Cadre starts a digest-gated execution journal, derives ready nodes from the
+plan, and creates workers only when at least two safe nodes can run. Workers use
+isolated Git worktrees and stop after each regular task so the main agent can
+present its diff and verification for human approval.
 
-As work completes, Cadre records task evidence, product commits when enabled,
-events, notes, and trace information. Do not edit canonical task or event state
-by hand.
+The main agent alone records state, directs commits, integrates branches,
+resolves conflicts, removes worktrees, and records manual verification. When
+all nodes, learning, provenance, and cleanup are complete, an approved finish
+transition moves the track to `ready_for_review`.
 
-## 4. Review The Result
+## 5. Review
 
 ```text
-cadre-review
+$cadre:review passwordless-login
+/cadre:review passwordless-login
 ```
 
-Review evaluates the current track against its spec, plan, tests, diagnostics,
-reviewed commit identity, provider evidence, and configured policy. Address
-blocking findings and rerun review until the gate is ready.
+Review inspects the recorded implementation range and relevant context. If it
+finds actionable bugs, it presents the findings together with exact bug and
+remediation-plan artifacts. Approved remediation returns the track to
+implementation.
 
-Use `cadre-debug` for a concrete failure with reproduction evidence. Use
-`cadre-revise` when the accepted scope or plan genuinely needs to change.
+If the evidence is clean—or the human explicitly rejects proposed findings and
+accepts the risks—Cadre previews a clean completion bound to the current
+execution, plan revision, graph digest, and reviewed HEAD. Only `review` can
+mark the track `completed`.
 
-## 5. Deliver
-
-For a monorepo or ordinary single repository:
+## 6. Archive Completed Work
 
 ```text
-cadre-ship
+$cadre:archive passwordless-login
+/cadre:archive passwordless-login
 ```
 
-For a polyrepo control repository:
+Archive can process one or more completed tracks in a single approved,
+resumable batch. It moves track history to the derived archive location,
+distills durable learning into project patterns, reseeds relevant active
+tracks, rebuilds `tracks.md`, and records Git provenance.
 
-```text
-cadre-land
-```
+## Supporting Commands
 
-Ship and land are publication workflows. They validate review state and return
-provider actions; they do not authorize an agent to invent provider evidence or
-bypass a review gate.
+- Use `revise` when the approved desired behavior, scope, or plan changes.
+- Use `refresh` when project product, workflow, stack, styleguides, or patterns
+  drift from repository evidence or user intent.
+- Use `revert` to prepare an additive Git-aware reversal.
+- Use `wisp` for lightweight exploration that should not mutate Cadre state.
 
-## 6. Archive And Inspect
-
-After delivery:
-
-```text
-cadre-archive
-cadre-status
-```
-
-Archive closes the active work while preserving its spec, plan, review,
-journal, events, and traceability. Status should show no unexpected blockers,
-leases, unfinished workers, or publication work.
-
-## What To Learn Next
-
-- Read [Capabilities](capabilities.md) to understand the whole product surface.
-- Read [Core Concepts](how-cadre-works.md) for the packet and state model.
-- Use [Configuration](configuration.md) and [Tuning](tuning.md) before enabling
-  shared sync, strict provider evidence, or broader parallel execution.
-- Keep [Troubleshooting](troubleshooting.md) nearby when a packet stops at a
-  validation, approval, provider, or ownership boundary.
+Continue with [How Cadre Works](how-cadre-works.md) or the complete
+[Workflow Guide](workflows.md).

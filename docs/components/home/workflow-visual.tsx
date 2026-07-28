@@ -1,11 +1,10 @@
-import { ArchiveIcon, CheckCircle2Icon, GitPullRequestIcon, NetworkIcon, PencilRulerIcon, ShieldCheckIcon } from "lucide-react"
+import { ArchiveIcon, GitPullRequestIcon, NetworkIcon, PencilRulerIcon, ShieldCheckIcon } from "lucide-react"
 
 const steps = [
-  { label: "Setup", icon: PencilRulerIcon },
+  { label: "Create", icon: PencilRulerIcon },
   { label: "Track", icon: NetworkIcon },
   { label: "Implement", icon: GitPullRequestIcon },
   { label: "Review", icon: ShieldCheckIcon },
-  { label: "Ship / Land", icon: CheckCircle2Icon },
   { label: "Archive", icon: ArchiveIcon },
 ]
 
@@ -14,8 +13,8 @@ export function WorkflowVisual() {
     <div className="rounded-2xl border bg-card p-5 shadow-sm">
       <div className="mb-5 flex items-center justify-between border-b pb-4">
         <div>
-          <p className="text-sm font-medium text-foreground">Packet-owned workflow</p>
-          <p className="text-xs text-muted-foreground">Cadre MCP coordinates every state change.</p>
+          <p className="text-sm font-medium text-foreground">Human-governed workflow</p>
+          <p className="text-xs text-muted-foreground">Cadre validates every durable transition.</p>
         </div>
         <div className="h-2 w-16 rounded-full bg-cadre-teal" />
       </div>
@@ -39,9 +38,9 @@ export function WorkflowVisual() {
         })}
       </div>
       <div className="mt-5 grid grid-cols-3 gap-3 text-center text-xs font-medium text-muted-foreground">
-        <div className="rounded-lg bg-cadre-teal-soft px-3 py-2 text-cadre-ink">MCP</div>
-        <div className="rounded-lg bg-cadre-amber-soft px-3 py-2 text-cadre-ink">Events</div>
-        <div className="rounded-lg bg-muted px-3 py-2 text-cadre-ink">LSP</div>
+        <div className="rounded-lg bg-cadre-teal-soft px-3 py-2 text-cadre-ink">Templates</div>
+        <div className="rounded-lg bg-cadre-amber-soft px-3 py-2 text-cadre-ink">Digests</div>
+        <div className="rounded-lg bg-muted px-3 py-2 text-cadre-ink">Worktrees</div>
       </div>
     </div>
   )

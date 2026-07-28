@@ -1,7 +1,7 @@
 ---
 title: Cadre
 navTitle: Overview
-description: Context-driven development harness for AI coding agents.
+description: Human-governed, Git-aware delivery for Codex and Claude Code.
 section: Start Here
 order: 10
 ---
@@ -12,115 +12,71 @@ order: 10
 
 **Measure twice, code once.**
 
-Cadre is a context-driven development harness for AI coding agents. It gives
-Claude Code and OpenAI Codex the same packet-owned workflow: structured setup,
-spec-first tracks, native task memory, review gates, team boards, parallel
-worker orchestration, and mono/polyrepo delivery.
+Cadre is a human-governed, Git-aware delivery harness for OpenAI Codex and
+Claude Code. It turns approved project context into resumable feature and bug
+tracks, carries learning forward between phases, and records implementation
+provenance in Git.
 
-Cadre is not a prompt collection that asks agents to edit state by hand. The
-installed plugins are thin MCP entrypoints with `SKILL.md` and client MCP
-configuration. The global `cadre-mcp` runtime contains the three-tool server,
-typed resource registry, setup template inventory, jobs, and code-intelligence
-helpers; maintainer contracts, protocols, and references stay out of the
-runtime bundle.
-Agents call Cadre packets, and those packets own Cadre state, native event and
-message logs, review records, provider evidence, and derived indexes.
+Cadre is installed as a user plugin. Its bundled TypeScript MCP server provides
+immutable versioned templates and narrow state/Git operations. A target project
+keeps only approved mutable delivery state under `.cadre/`; runtime code,
+workflow skills, worker definitions, and templates stay in the plugin.
 
-## Why Cadre Exists
+## What Cadre Solves
 
-AI coding sessions often lose context, skip handoff details, or compete over
-the same files when a team works in parallel. Cadre makes the workflow durable:
+| Need | Cadre's approach |
+|---|---|
+| Project context | Human-approved product, engineering, stack, workflow, styleguide, and pattern artifacts. |
+| Delivery planning | Feature or bug specifications followed by a validated phase/task dependency DAG. |
+| Implementation | Parallel by default when safe, explicitly sequential when requested, with isolated worktrees. |
+| Human control | Every artifact and lifecycle transition is presented before mutation. |
+| Recovery | Durable setup, operation, and execution journals reconcile files and Git after interruption. |
+| Quality | Per-phase and track-level manual verification followed by evidence-backed review. |
+| Learning | Dependency-aware phase learning and durable pattern distillation during archive. |
 
-| Need | Cadre answer |
-|------|--------------|
-| Project context | Canonical product, workflow, pattern, tech-stack, and style-guide artifacts with generated human projections. |
-| Work planning | Canonical track specs and plans with testable acceptance criteria, file annotations, and generated review projections. |
-| Durable memory | Cadre stores the task graph, dependencies, notes, blockers, handoffs, events, and local wisps. |
-| Team safety | Owners, advisory leases, collision scans, review queues, and shared sync. |
-| Code intelligence | Repo maps, dependency graph, test impact, diagnostics, and optional LSP review. |
-| Delivery | Review gates, hosted provider evidence, monorepo ship, and polyrepo land. |
-
-## Quick Start
-
-Install Cadre and wire detected clients:
-
-```bash
-npm install -g cadre-ai
-cadre install
-```
-
-In a target project, choose setup from the client picker:
-
-```text
-# Codex
-$cadre:setup
-
-# Claude Code
-/cadre:setup
-```
-
-Copilot and Antigravity retain the generic Cadre skill and accept
-`cadre-setup` as the workflow request. Codex and Claude Code expose all 19
-registered workflows directly and omit the redundant generic umbrella entry.
-
-Then use the normal lifecycle:
-
-```text
-cadre-newtrack "Add OAuth login"
-cadre-implement
-cadre-review
-cadre-ship
-cadre-archive
-```
-
-Use `cadre-land` instead of `cadre-ship` when the project is a polyrepo control
-repo.
-
-## Workflow Lifecycle
+## Lifecycle
 
 ```mermaid
 flowchart LR
-  A["cadre-setup"] --> B["cadre-newtrack"]
-  B --> C["cadre-implement"]
-  C --> D["cadre-review"]
-  D --> E{"Topology"}
-  E -->|Monorepo| F["cadre-ship"]
-  E -->|Polyrepo| G["cadre-land"]
-  F --> H["cadre-archive"]
-  G --> H
-  H --> I["cadre-release"]
+  A["create"] --> B["track"]
+  B --> C["implement"]
+  C --> D["review"]
+  D -->|approved bugs| C
+  D -->|clean approval| E["completed"]
+  E --> F["archive"]
+  B -. changed intent .-> G["revise"]
+  C -. changed intent .-> G
+  D -. changed intent .-> G
+  G --> B
+  G --> C
 ```
 
-Every project-scoped packet call carries a `root` argument. Cadre MCP resolves
-that root, reads the relevant bounded context, performs the requested operation,
-and returns a structured decision plus at most one typed `next` call. Agents
-summarize packet results; they do not manually reconstruct Cadre state.
+`refresh` updates project context, `revert` prepares additive Git reversals,
+`status` validates without mutation, and `wisp` explores without entering the
+tracked lifecycle.
 
-## Documentation Map
+## Ten Workflow Skills
 
-- [Getting Started](getting-started.md): install the plugin, run
-  first setup, and verify the runtime.
-- [How Cadre Works](how-cadre-works.md): packet-owned workflows, MCP,
-  tracks, review gates, provider evidence, and code intelligence.
-- [Workflows](workflows.md): detailed guide for every `cadre-*` workflow.
-- [Architecture](architecture.md): harness package layout, thin install-time
-  plugins, source-of-truth files, and development commands.
-- [Team And Polyrepo](team-and-polyrepo.md): shared sync, ownership, leases,
-  fleet boards, cross-repo PR groups, and merge train behavior.
-- [Parallel Execution](parallel-execution.md): plan annotations, worker waves,
-  file claims, merge-back, and recovery.
-- [Troubleshooting](troubleshooting.md): common install, MCP, provider,
-  LSP, and plugin-generation failures.
-- [Release Notes](release-notes.md): current package changes and upgrade
-  notes.
+| Skill | Purpose |
+|---|---|
+| `create` | Initialize or resume an approved `.cadre/` project. |
+| `track` | Specify and plan a feature or bug. |
+| `implement` | Execute the approved dependency DAG. |
+| `review` | Record approved findings or complete a clean review. |
+| `revise` | Change active approved scope or propose a successor. |
+| `archive` | Archive completed tracks and distill patterns. |
+| `refresh` | Reconcile project context with current evidence. |
+| `revert` | Additively reverse a task, phase, or track. |
+| `status` | Validate and summarize current project state. |
+| `wisp` | Perform lightweight untracked exploration. |
 
-## Repository Roles
+## Start Here
 
-This repository is the Cadre harness/package repository. The implementation
-lives under `harness/`; the public documentation website lives in the root
-`docs/` Next.js app, with these Markdown pages under `docs/content/`.
-
-Plugin bundles are thin install-time entrypoints written by `cadre install`.
-Harness-local generated copies under `harness/.agents/`, `harness/.claude/`,
-`harness/.claude-plugin/`, and `harness/plugins/` are ignored validation
-fixtures, not source files.
+- [Installation](getting-started.md) covers the `cadre-ai` CLI, client
+  installation, permissions, update, and uninstall behavior.
+- [Quickstart](quickstart.md) walks through the first create-to-archive cycle.
+- [How Cadre Works](how-cadre-works.md) explains approval, journals, state, and
+  the MCP boundary.
+- [Workflows](workflows.md) describes when to use each skill.
+- [Parallel Execution](parallel-execution.md) explains workers and worktrees.
+- [Troubleshooting](troubleshooting.md) covers common recovery paths.

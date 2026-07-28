@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ArrowRightIcon, BookOpenIcon, BoxesIcon, GitBranchIcon, Layers3Icon, LifeBuoyIcon, MenuIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react"
+import { ArrowRightIcon, BookOpenIcon, GitBranchIcon, Layers3Icon, LifeBuoyIcon, MenuIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react"
 
 import { Brand } from "@/components/brand"
 import { WorkflowVisual } from "@/components/home/workflow-visual"
@@ -26,29 +26,29 @@ import type { DocMeta } from "@/lib/docs"
 
 const featureCards = [
   {
-    title: "Packet-owned workflows",
+    title: "Human approval gates",
     description:
-      "Agents call deterministic Cadre packets instead of editing plans, metadata, or review state by hand.",
+      "Artifacts, commits, integrations, verification, and lifecycle changes stay proposals until you approve them.",
     icon: WorkflowIcon,
   },
   {
-    title: "Durable task memory",
+    title: "Resumable delivery",
     description:
-      "Native Cadre events, messages, journals, and plans keep work available across sessions.",
-    icon: BoxesIcon,
+      "Project, track, operation, and execution journals reconcile repository and Git state after interruptions.",
+    icon: ShieldCheckIcon,
   },
   {
-    title: "Team-scale delivery",
+    title: "Safe parallel execution",
     description:
-      "Ownership, advisory leases, review queues, provider evidence, and mono/polyrepo publication stay coordinated.",
-    icon: ShieldCheckIcon,
+      "Dependency-ready workers use isolated worktrees while the main agent owns scheduling, integration, and approval.",
+    icon: GitBranchIcon,
   },
 ]
 
 const quickLinks = [
   { title: "Getting Started", href: "/getting-started", icon: BookOpenIcon },
   { title: "Architecture", href: "/architecture", icon: Layers3Icon },
-  { title: "Team + Polyrepo", href: "/team-and-polyrepo", icon: GitBranchIcon },
+  { title: "Parallel Execution", href: "/parallel-execution", icon: GitBranchIcon },
   { title: "Troubleshooting", href: "/troubleshooting", icon: LifeBuoyIcon },
 ]
 
@@ -118,9 +118,9 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                 Measure twice, code once.
               </p>
               <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-                Cadre is a context-driven development harness for AI coding agents,
-                combining spec-first tracks, native task memory, review gates,
-                team boards, parallel worker orchestration, and mono/polyrepo delivery.
+                Cadre is a human-governed, Git-aware delivery harness for Codex and
+                Claude Code, combining approved project context, spec-first tracks,
+                resumable execution, review gates, and safe parallel worktrees.
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -133,7 +133,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               </Button>
             </div>
             <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
-              {["Claude Code", "OpenAI Codex", "native Cadre memory"].map((label) => (
+              {["Claude Code", "OpenAI Codex", "versioned MCP runtime"].map((label) => (
                 <div key={label} className="rounded-xl border bg-card px-4 py-3 text-sm font-medium text-cadre-ink">
                   {label}
                 </div>
@@ -148,11 +148,11 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
         <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
           <div className="mb-10 flex max-w-3xl flex-col gap-3">
             <h2 className="text-3xl font-semibold tracking-normal text-cadre-ink">
-              A workflow layer agents can actually operate.
+              Durable delivery without hidden workflow state.
             </h2>
             <p className="text-muted-foreground">
-              The docs are organized around how Cadre works in practice: setup,
-              planning, implementation, review, delivery, teams, and internals.
+              The docs follow the actual create-to-archive lifecycle: context,
+              planning, implementation, verification, review, learning, and recovery.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
@@ -178,8 +178,8 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                 Documentation map
               </h2>
               <p className="text-muted-foreground">
-                Start with the workflow guide, then go deeper into architecture,
-                team-scale operation, parallel execution, and support.
+                Start with installation and the first track, then go deeper into
+                lifecycle rules, parallel execution, MCP tools, and recovery.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
