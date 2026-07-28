@@ -21,6 +21,10 @@ import {
   previewWorktreeCleanup, previewWorktreeCreate, previewWorktreeIntegration
 } from "../src/domain/worktrees.js";
 import {
+  applyArchiveBatch, applyArchiveBatchRecord, applyReviewComplete,
+  previewArchiveBatch, previewArchiveBatchRecord, previewReviewComplete
+} from "../src/domain/governance.js";
+import {
   CLAUDE_APPROVAL,
   configureClaudeMcpApproval,
   configureCodexMcpApproval
@@ -129,6 +133,120 @@ No existing pattern is relevant.
     operation: null,
     lastExecution: null,
     reviewCycles: [],
+    history: []
+  }, null, 2)}\n`);
+  return trackRoot;
+}
+
+function writeFinalizedTrack(
+  projectRoot: string,
+  trackId: string,
+  status: "ready_for_review" | "completed"
+): string {
+  const trackRoot = join(projectRoot, ".cadre", "tracks", trackId);
+  mkdirSync(join(trackRoot, "executions"), { recursive: true });
+  writeFileSync(join(trackRoot, "spec.md"), `# Specification: ${trackId}
+
+## Functional Requirements
+- FR-001: Finish.
+## Non-Functional Requirements
+- NFR-001: Preserve evidence.
+## Acceptance Criteria
+- AC-001: The work is complete.
+## Dependencies
+None.
+## Additional Information
+None.
+## Dependent-track impact
+None.
+`);
+  const planPath = join(trackRoot, "plan.md");
+  writeFileSync(planPath, `# Plan: ${trackId}
+
+- Spec revision: 1
+- Plan revision: 1
+
+## Phase 1: Deliver
+- Phase dependencies: none
+
+- [x] T1.1 Implement <!-- commit: abcdef1 -->
+  - Task dependencies: none
+- [x] T1.2 User Manual Verification <!-- commit: abcdef2 -->
+- Phase completion commit: \`abcdef2\`
+
+## Phase 2: Track-level User Manual Verification
+- [x] T2.1 User Manual Verification <!-- commit: abcdef3 -->
+- Phase completion commit: \`abcdef3\`
+`);
+  writeFileSync(join(trackRoot, "learning.md"), `# Incremental Learning
+
+<!-- cadre:pattern-seed:start -->
+## Pattern Seed
+No existing pattern is relevant.
+<!-- cadre:pattern-seed:end -->
+`);
+  const graph = parsePlan(planPath);
+  const executionId = `${trackId}-execution`;
+  writeFileSync(join(trackRoot, "executions", `execution-${executionId}.json`), `${JSON.stringify({
+    schemaVersion: 1,
+    executionId,
+    trackId,
+    status: "completed",
+    checkpoint: "completed",
+    requestedMode: "sequential",
+    effectiveMode: "sequential",
+    maxWorkers: 1,
+    planRevision: 1,
+    planCommit: "bbbbbbb",
+    graphDigest: graph.digest,
+    baseCommit: "1111111",
+    startedAt: "2026-07-27T00:00:00Z",
+    completedAt: "2026-07-27T01:00:00Z",
+    headCommit: "ccccccc",
+    nodes: Object.fromEntries([
+      ["P1", "phase", "P1", []],
+      ["T1.1", "task", "P1", []],
+      ["T1.2", "manual-verification", "P1", ["T1.1"]],
+      ["P2", "phase", "P2", ["P1"]],
+      ["T2.1", "manual-verification", "P2", ["P1"]]
+    ].map(([id, kind, phaseId, dependencies]) => [id, {
+      id, kind, phaseId, dependencies, status: "completed", workerId: null,
+      worktreePath: null, branch: null, workerCommit: null, mergeCommit: null,
+      verification: "passed", approval: "approved", blocker: null
+    }]))
+  }, null, 2)}\n`);
+  const cleanReview = {
+    cycle: 1,
+    reviewedAt: "2026-07-27T01:30:00Z",
+    outcome: "clean",
+    executionId,
+    planRevision: 1,
+    graphDigest: graph.digest,
+    reviewedHead: "ccccccc",
+    commitRange: "bbbbbbb..ccccccc",
+    approval: "approved"
+  };
+  writeFileSync(join(trackRoot, "state.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    trackId,
+    title: trackId,
+    type: "feature",
+    status,
+    checkpoint: status,
+    revision: 1,
+    dependencies: [],
+    commits: { spec: "aaaaaaa", plan: "bbbbbbb" },
+    artifactProgress: [],
+    operation: null,
+    lastExecution: {
+      executionId,
+      journal: `executions/execution-${executionId}.json`,
+      planRevision: 1,
+      graphDigest: graph.digest,
+      headCommit: "ccccccc",
+      completedAt: "2026-07-27T01:00:00Z"
+    },
+    reviewCycles: status === "completed" ? [cleanReview] : [],
     history: []
   }, null, 2)}\n`);
   return trackRoot;
@@ -526,6 +644,65 @@ test("execution start and finish resume across their two-file checkpoints", () =
   assert.equal(state.status, "ready_for_review");
   assert.equal(state.operation, null);
   assert.equal(state.lastExecution.executionId, startInput.executionId);
+});
+
+test("clean review completion previews and applies its exact state and derived index together", () => {
+  const projectRoot = fixture();
+  const trackRoot = writeFinalizedTrack(projectRoot, "reviewed-track", "ready_for_review");
+  runState(projectRoot, "render");
+  const input = {
+    projectRoot,
+    trackId: "reviewed-track",
+    reviewedAt: "2026-07-28T02:00:00.000Z",
+    reviewedHead: "ccccccc",
+    commitRange: "bbbbbbb..ccccccc",
+    approval: "Human rejected F1 and approved clean completion with the risk accepted.",
+    acceptedRisks: ["F1: accepted bounded compatibility risk"]
+  };
+  const preview = previewReviewComplete(input);
+  assert.equal(preview.state.status, "completed");
+  assert.match(preview.tracksContent, /reviewed-track.*completed/);
+  assert.deepEqual(preview.state.reviewCycles?.at(-1)?.acceptedRisks, input.acceptedRisks);
+  applyReviewComplete(input, preview.digest);
+  assert.equal(JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8")).status, "completed");
+  assert.equal(runState(projectRoot, "validate").status, 0);
+});
+
+test("archive batch preview includes archived rows and records provenance without another batch decision", () => {
+  const projectRoot = fixture();
+  writeFinalizedTrack(projectRoot, "archive-track", "completed");
+  runState(projectRoot, "render");
+  const input = {
+    projectRoot,
+    batchId: "archive-20260728T020000Z",
+    selectedTracks: ["archive-track"],
+    baseCommit: "ddddddd",
+    approvedAt: "2026-07-28T02:00:00.000Z",
+    updates: [{
+      path: "patterns/archive-pattern.md",
+      content: "# Pattern: Archive pattern\n\n## Provenance\n- Track: `archive-track`\n"
+    }, {
+      path: "patterns/index.md",
+      content: "# Pattern Catalog\n\n- [Archive pattern](archive-pattern.md)\n"
+    }]
+  };
+  const preview = previewArchiveBatch(input);
+  assert.match(preview.tracksContent, /archive-track.*archived/);
+  assert.doesNotMatch(preview.tracksContent, /archive-track.*completed/);
+  applyArchiveBatch(input, preview.digest);
+  assert.equal(existsSync(join(projectRoot, ".cadre", "tracks", "archive-track")), false);
+  assert.equal(existsSync(join(projectRoot, ".cadre", "archive", "archive-track")), true);
+
+  const recordInput = {
+    projectRoot,
+    batchId: input.batchId,
+    archiveCommit: "eeeeeee"
+  };
+  const record = previewArchiveBatchRecord(recordInput);
+  applyArchiveBatchRecord(recordInput, record.digest);
+  const state = JSON.parse(readFileSync(join(projectRoot, ".cadre", "archive", "archive-track", "state.json"), "utf8"));
+  assert.equal(state.commits.archive, "eeeeeee");
+  assert.equal(runState(projectRoot, "validate").status, 0);
 });
 
 test("worktree tools integrate task-to-phase and phase-to-main, then clean up safely", () => {
@@ -1060,7 +1237,9 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
       "state_validate", "project_init_preview", "project_init_apply",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
-      "execution_graph_validate", "execution_start_preview", "execution_start_apply",
+      "execution_graph_validate", "review_complete_preview", "review_complete_apply",
+      "archive_batch_preview", "archive_batch_apply", "archive_batch_record_preview", "archive_batch_record_apply",
+      "execution_start_preview", "execution_start_apply",
       "execution_node_preview", "execution_node_apply", "execution_nodes_preview", "execution_nodes_apply", "execution_status",
       "execution_finish_preview", "execution_finish_apply", "worktree_create_preview",
       "worktree_create_apply", "integration_preview", "integration_apply",

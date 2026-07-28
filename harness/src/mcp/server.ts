@@ -54,6 +54,17 @@ import {
   type WorktreeCreateInput,
   type WorktreeIntegrationInput
 } from "../domain/worktrees.js";
+import {
+  applyArchiveBatch,
+  applyArchiveBatchRecord,
+  applyReviewComplete,
+  previewArchiveBatch,
+  previewArchiveBatchRecord,
+  previewReviewComplete,
+  type ArchiveBatchInput,
+  type ArchiveBatchRecordInput,
+  type ReviewCompleteInput
+} from "../domain/governance.js";
 
 function result<T extends object>(value: T, summary?: string) {
   return {
@@ -204,6 +215,109 @@ export function createCadreServer(): McpServer {
       const graph = parsePlan(planPath, errors);
       validatePlanGraph(planPath, graph, state.status ?? "planned", errors);
       return result({ valid: errors.length === 0, graph, errors });
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  const reviewCompleteSchema = {
+    projectRoot: z.string().min(1),
+    trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    reviewedAt: z.iso.datetime(),
+    reviewedHead: z.string().regex(/^[0-9a-f]{7,40}$/),
+    commitRange: z.string().regex(/^[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}$/),
+    approval: z.string().min(1),
+    acceptedRisks: z.array(z.string().min(1)).optional()
+  };
+
+  server.registerTool("review_complete_preview", {
+    title: "Preview clean review completion",
+    description: "Preview the exact clean-review cycle, completed track state, and derived index behind one digest.",
+    inputSchema: reviewCompleteSchema,
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async (input) => {
+    try {
+      return result(previewReviewComplete(input as ReviewCompleteInput));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  server.registerTool("review_complete_apply", {
+    title: "Apply clean review completion",
+    description: "Apply an approved clean-review transition only while its exact state and index preview remain current.",
+    inputSchema: { ...reviewCompleteSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  }, async ({ proposalDigest, ...input }) => {
+    try {
+      return result(applyReviewComplete(input as ReviewCompleteInput, proposalDigest));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  const archiveBatchSchema = {
+    projectRoot: z.string().min(1),
+    batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
+    selectedTracks: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).min(1),
+    baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/),
+    approvedAt: z.iso.datetime(),
+    updates: z.array(z.object({ path: z.string().min(1), content: z.string() }))
+  };
+
+  server.registerTool("archive_batch_preview", {
+    title: "Preview complete archive batch",
+    description: "Preview selected moves, lifecycle states, pattern/seed writes, operation journal, and the post-archive track index together.",
+    inputSchema: archiveBatchSchema,
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async (input) => {
+    try {
+      return result(previewArchiveBatch(input as ArchiveBatchInput));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  server.registerTool("archive_batch_apply", {
+    title: "Apply complete archive batch",
+    description: "Journal and apply one approved archive batch only while its complete preview remains current.",
+    inputSchema: { ...archiveBatchSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  }, async ({ proposalDigest, ...input }) => {
+    try {
+      return result(applyArchiveBatch(input as ArchiveBatchInput, proposalDigest));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  const archiveRecordSchema = {
+    projectRoot: z.string().min(1),
+    batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
+    archiveCommit: z.string().regex(/^[0-9a-f]{7,40}$/)
+  };
+
+  server.registerTool("archive_batch_record_preview", {
+    title: "Preview archive provenance record",
+    description: "Preview the authorized follow-up that records the archive commit in track, project, and batch state.",
+    inputSchema: archiveRecordSchema,
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async (input) => {
+    try {
+      return result(previewArchiveBatchRecord(input as ArchiveBatchRecordInput));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  server.registerTool("archive_batch_record_apply", {
+    title: "Record archive provenance",
+    description: "Record an approved batch's immutable archive commit and complete its journal behind a stale-state digest.",
+    inputSchema: { ...archiveRecordSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  }, async ({ proposalDigest, ...input }) => {
+    try {
+      return result(applyArchiveBatchRecord(input as ArchiveBatchRecordInput, proposalDigest));
     } catch (error) {
       return failure(error);
     }
