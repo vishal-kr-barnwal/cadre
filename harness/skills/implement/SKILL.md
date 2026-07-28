@@ -26,9 +26,19 @@ For a new execution, call `execution_start_preview`, show the exact journal/stat
 3. Block when a declared track dependency is not completed or archived after completion.
 4. Stop and present any journal/Git mismatch. Never reset, discard, reconstruct, force-delete, or silently restart.
 
+## Preflight host permissions
+
+Before creating workers, inspect the approved plan, repository scripts, lockfiles, and likely verification commands. Distinguish host security permission from Cadre lifecycle approval: a shell/network/listener prompt authorizes the host operation only; it does not approve an artifact, commit, merge, manual-verification result, or state transition.
+
+- Use already-approved commands and prefixes without asking again. Never request permission speculatively or retry equivalent command spellings to obtain a different prompt.
+- Centralize shared dependency installation, registry access, image pulls, code generation, and other network preparation in main before workers start. Workers should use locked/offline modes when the repository supports them.
+- Prefer existing repository scripts and narrowly scoped commands. Do not combine unrelated or differently privileged shell segments into one command, because the host evaluates each segment independently.
+- Avoid scaffolding modes that create nested repositories or require deleting generated `.git` directories. Inspect generator options and target directories first.
+- When a required permission is not already available, request one narrow reusable command prefix with the exact reason. If a worker encounters an unexpected prompt, it stops and reports the exact blocked command to main instead of issuing repeated variants.
+
 ## Schedule the DAG
 
-Call `execution_status` when resuming an execution or when no mutation response is available. After a successful `execution_start_apply` or `execution_node_apply`, use its returned `derivedStatus` instead of making a redundant status call. Plan display order breaks ties only.
+Call `execution_status` when resuming an execution or when no mutation response is available. After a successful execution mutation, use its returned `derivedStatus` instead of making a redundant status call. Use `execution_nodes_preview` and `execution_nodes_apply` when one already-approved scheduling or bookkeeping decision produces multiple immediately valid transitions. The ordered batch is a transport optimization only: never batch across a human approval, commit, verification, integration, conflict resolution, or other external action whose evidence does not exist at preview time. Plan display order breaks ties only.
 
 - A root phase reads the Pattern Seed. Any other phase reads learning from all declared dependency phases.
 - A phase is either assigned to one phase worker for internally sequential work or coordinated by main through task workers; never both simultaneously. A phase integration worktree without a phase `workerId` is coordination state, not phase-worker ownership.
@@ -43,8 +53,9 @@ Provide the exact absolute worktree, track/execution/node IDs, approved outcome,
 - operate only in the assigned worktree and read files before editing;
 - edit product files only and never edit `.cadre/**`;
 - do not spawn agents, merge, rebase, reset, clean up, or force Git operations;
-- run focused verification and return changed files, tests/checks, risks, learning candidates, and the proposed commit message;
-- stop with changes uncommitted at `awaiting_approval` until main presents them and the human approves.
+- run focused verification and return changed files, tests/checks, risks, learning candidates, and the proposed commit message for the current task;
+- stop after each regular task with that task's changes uncommitted at `awaiting_approval` until main presents them and the human approves;
+- after approval, commit only that task and return its SHA; do not begin the next phase task until main confirms the checkpoint is recorded.
 
 ## Approve, commit, and integrate
 
@@ -55,6 +66,8 @@ Provide the exact absolute worktree, track/execution/node IDs, approved outcome,
 5. If integration reports conflicts, mark `conflicted`. Resolve task conflicts in the phase worktree and phase conflicts in main, read every conflicted file and both sides, rerun combined verification, present the resolution, and record the resulting merge commit only after approval.
 6. For a worker worktree, mark the node `integrated`, then preview/apply worktree cleanup. Cleanup must refuse dirty, conflicted, or unintegrated work and must not force branch deletion.
 7. Mark a task complete after its worker integration, or after its approved direct/phase-worker commit is verified on the parent branch. Mark it complete in `plan.md` with its reachable task commit SHA during canonical phase bookkeeping.
+
+Every regular task in a phase has its own Conventional Commit and distinct recorded SHA, including tasks executed sequentially by one phase worker. Manual-verification nodes may record the approved phase-head or merge evidence instead of inventing an empty commit. A phase must remain `running` until every sibling task and its manual-verification barrier are `completed`; only then may it advance to approval, commit, integration, and cleanup.
 
 ## Verification barriers and learning
 

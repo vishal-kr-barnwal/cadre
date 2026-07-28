@@ -91,6 +91,8 @@ Legal track statuses are `drafting-spec`, `drafting-plan`, `planned`, `in_progre
 
 The main agent is the only scheduler. Workers never spawn workers, mutate `.cadre/**`, merge, resolve integration conflicts, delete worktrees, or record human approval. A phase is either owned by one phase worker for internally sequential work or coordinated by the main agent through task workers; never both at once. A phase/task worker edits product files only in its assigned absolute worktree, runs focused verification, returns a structured diff/evidence/learning summary, and waits for main-agent human approval before creating Conventional Commits.
 
+Before creating workers, main performs a host-permission preflight from the approved plan, repository scripts, lockfiles, and likely checks. Host security permission and Cadre lifecycle approval are separate: a shell, network, listener, or filesystem prompt does not approve an artifact, commit, merge, verification result, or journal transition. Reuse already-approved commands and prefixes; centralize shared installs, registry access, image pulls, and code generation; use locked/offline worker commands where supported; and request a new permission only for one exact necessary operation with a narrow reusable prefix. Do not chain unrelated privilege levels, repeat equivalent commands, or use scaffolding modes that create nested repositories requiring destructive cleanup. A worker that encounters an unexpected permission stops and reports the exact command to main.
+
 Cadre worktrees use sibling namespaces because one worktree cannot safely contain another:
 
 ```text
@@ -102,13 +104,13 @@ Git ancestry comes from the recorded base commit, not directory nesting. A task-
 
 1. Load this workflow and the full current track. Validate the DAG and reconcile the execution journal, Git worktrees, branch tips, dirty files, and recent commits before scheduling.
 2. Root phases read the marked Pattern Seed. Every other phase reads learning from all declared dependency phases; parallel sibling phases do not assume each other's learning.
-3. Derive ready phases and tasks from completed dependencies. Use plan order only to break ties.
+3. Derive ready phases and tasks from completed dependencies. Use plan order only to break ties. When one approved decision yields multiple transitions that are already valid, use the ordered `execution_nodes_preview`/`execution_nodes_apply` batch. Never batch across a human approval, commit, verification, integration, conflict resolution, or other external evidence boundary.
 4. Follow read-before-edit and keep every worker limited to its assigned node and worktree.
 5. Write/update tests and documentation required by the spec and Definition of Done.
 6. Run focused checks per task, combined phase checks after task integration, and the relevant broader suite after conflict resolution, phase integration, and before track verification.
-7. Present every worker diff and evidence through the main agent. A worker commits only after explicit human approval.
+7. Present every worker diff and evidence through the main agent. A worker commits only after explicit human approval. A phase worker checkpoints one regular task at a time: it returns that task's uncommitted diff, then creates only that task's Conventional Commit after approval and waits for main to record the distinct SHA before starting the next task. Manual-verification nodes may reuse approved phase-head or merge evidence instead of creating empty commits.
 8. Resolve task conflicts in the phase integration worktree and phase conflicts in the canonical worktree. Present the resolution and rerun combined verification; never let the leaf worker silently resolve integration conflicts.
-9. Phase-level manual verification becomes ready only after every sibling task is integrated. Run its technical evidence in the phase worktree through the phase worker when present, otherwise through main; the human approval is always mediated and recorded by main before phase integration.
+9. Phase-level manual verification becomes ready only after every sibling task is integrated. Run its technical evidence in the phase worktree through the phase worker when present, otherwise through main; the human approval is always mediated and recorded by main before phase integration. A phase remains `running` until all sibling tasks and this barrier are `completed`; journal-gated integration and cleanup must not run early.
 10. Track-level manual verification becomes ready only after every phase is integrated and is executed entirely by the main agent in the canonical worktree.
 11. Remove a worktree with `git worktree remove` and delete its branch without force only after clean, recorded integration. Never delete dirty, conflicted, unintegrated, or mismatched work.
 12. Append dependency-aware phase learning. Do not overwrite earlier learning.

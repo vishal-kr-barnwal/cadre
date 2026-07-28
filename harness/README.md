@@ -72,6 +72,8 @@ By default, installation applies these narrowly scoped rules:
 
 Existing configuration, comments, and unrelated permission rules are preserved. A Claude deny rule is never removed or overridden. These rules suppress the host application's per-tool prompt; they do not bypass Cadre's requirement to present artifacts and lifecycle mutations to the human for approval.
 
+Implementation may still need host permission for network access, dependency installation, container images, local listeners, or filesystem writes outside the workspace. Cadre preflights those operations before workers start, centralizes shared downloads, reuses existing narrow approvals, and asks only for an exact necessary command when no suitable permission exists. These host prompts are operational security gates, not lifecycle approvals.
+
 To retain per-call MCP permission prompts:
 
 ```sh
@@ -281,6 +283,7 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
 | `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
 | `execution_node_preview` / `execution_node_apply` | Preview/apply | Persist one legal, dependency-gated execution-node transition and return its derived execution status. |
+| `execution_nodes_preview` / `execution_nodes_apply` | Preview/apply | Atomically persist an ordered batch of legal transitions behind one stale-state digest without crossing evidence or approval boundaries. |
 | `execution_status` | No | Derive ready phases, ready tasks within running phases, active nodes, and blockers. |
 | `execution_finish_preview` / `execution_finish_apply` | Preview/apply | Require completed nodes, current plan evidence, and removed worktrees before `ready_for_review`. |
 | `worktree_create_preview` / `worktree_create_apply` | Preview/apply | Create or reconcile one derived phase/task worktree and branch. |
@@ -308,7 +311,7 @@ Phase and task worktrees are siblings because Git worktrees cannot be physically
 
 Task branches merge into a registered phase integration branch when one exists; for a phase coordinated directly in main, they merge into the canonical branch. Phase branches merge into the canonical branch. Cleanup prunes the worktree and branch only after ancestry proves the integration is present in the derived parent.
 
-Codex uses implementation subagents when parallel nodes are available. Claude Code uses the packaged `cadre-phase-worker` and `cadre-task-worker` definitions. Both follow the same contract: workers stay in their assigned worktree, read before editing, modify product files only, run focused verification, never spawn nested workers, and stop uncommitted until the main agent presents their work and obtains human approval. Claude agent teams are intentionally not required.
+Codex uses implementation subagents when parallel nodes are available. Claude Code uses the packaged `cadre-phase-worker` and `cadre-task-worker` definitions. Both follow the same contract: workers stay in their assigned worktree, read before editing, modify product files only, run focused verification, never spawn nested workers, and stop uncommitted until the main agent presents their work and obtains human approval. A phase worker checkpoints one regular task at a time and creates a distinct approved commit for each task; manual-verification evidence does not require an empty commit. Claude agent teams are intentionally not required.
 
 ## Resumability and safety
 

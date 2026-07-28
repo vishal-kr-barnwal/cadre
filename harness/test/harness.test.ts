@@ -1154,6 +1154,24 @@ test("every post-create command loads the shared workflow", () => {
   }
 });
 
+test("implementation guidance preserves approval, permission, batching, and task-commit boundaries", () => {
+  const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
+  const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
+  const phaseWorker = readFileSync(join(root, "agents", "cadre-phase-worker.md"), "utf8");
+  const taskWorker = readFileSync(join(root, "agents", "cadre-task-worker.md"), "utf8");
+
+  for (const body of [implement, workflow]) {
+    assert.match(body, /host security permission/i);
+    assert.match(body, /execution_nodes_preview/);
+    assert.match(body, /Never batch across a human approval/i);
+    assert.match(body, /distinct recorded SHA|distinct SHA/);
+  }
+  assert.match(phaseWorker, /one regular task at a time/);
+  assert.match(phaseWorker, /commit only that task/);
+  assert.match(phaseWorker, /unexpected host permission/);
+  assert.match(taskWorker, /unexpected host permission/);
+});
+
 test("commands reuse status validation and batch related template reads", () => {
   for (const skill of [
     "track", "implement", "review", "revise", "archive",
