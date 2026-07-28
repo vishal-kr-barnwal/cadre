@@ -274,7 +274,7 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | --- | --- | --- |
 | `template_catalog` | No | List template IDs, resource URIs, media types, and content hashes. |
 | `template_get` | No | Read one versioned template by logical ID. |
-| `template_get_many` | No | Read an ordered template bundle in one call. |
+| `template_get_many` | No | Read an ordered template bundle in one call; immutable catalog contents are cached for the server lifetime. |
 | `styleguide_resolve` | No | Resolve default styleguides for an approved technology list. |
 | `project_status` | No | Summarize project and track checkpoints, including resumable operations. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |

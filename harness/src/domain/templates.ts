@@ -15,6 +15,8 @@ export interface TemplateRecord {
   sha256: string;
 }
 
+let catalogCache: readonly TemplateRecord[] | null = null;
+
 function locateTemplateRoot(): string {
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -50,23 +52,26 @@ function mimeType(path: string): string {
 }
 
 export function templateCatalog(): TemplateRecord[] {
-  const root = locateTemplateRoot();
-  return walk(root)
-    .map((relativePath): TemplateRecord | null => {
-      const id = templateId(relativePath);
-      if (!id) return null;
-      const content = readFileSync(join(root, relativePath), "utf8");
-      return {
-        id,
-        uri: `cadre://templates/${TEMPLATE_SET_VERSION}/${id}`,
-        relativePath,
-        mimeType: mimeType(relativePath),
-        content,
-        sha256: createHash("sha256").update(content).digest("hex")
-      };
-    })
-    .filter((entry): entry is TemplateRecord => entry !== null)
-    .sort((left, right) => left.id.localeCompare(right.id));
+  if (!catalogCache) {
+    const root = locateTemplateRoot();
+    catalogCache = walk(root)
+      .map((relativePath): TemplateRecord | null => {
+        const id = templateId(relativePath);
+        if (!id) return null;
+        const content = readFileSync(join(root, relativePath), "utf8");
+        return {
+          id,
+          uri: `cadre://templates/${TEMPLATE_SET_VERSION}/${id}`,
+          relativePath,
+          mimeType: mimeType(relativePath),
+          content,
+          sha256: createHash("sha256").update(content).digest("hex")
+        };
+      })
+      .filter((entry): entry is TemplateRecord => entry !== null)
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+  return catalogCache.map((template) => ({ ...template }));
 }
 
 export function getTemplate(id: string): TemplateRecord {

@@ -5,7 +5,7 @@ import {
 import { dirname } from "node:path";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { buildTracks } from "./state.js";
-import { getTemplate } from "./templates.js";
+import { getTemplates } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { safeProjectRoot } from "./paths.js";
 
@@ -62,8 +62,8 @@ function assertRendered(content: string, path: string): void {
   if (/\{\{[^}]+\}\}/.test(content)) throw new Error(`${path} contains unresolved template placeholders`);
 }
 
-function projectState(input: ProjectInitInput, approvedPaths: string[]): string {
-  const state = JSON.parse(getTemplate("project/project").content) as {
+function projectState(input: ProjectInitInput, approvedPaths: string[], template: string): string {
+  const state = JSON.parse(template) as {
     runtimeVersion?: string;
     templateSetVersion?: string;
     project: { name: string; context: string };
@@ -117,11 +117,14 @@ export function previewProjectInit(input: ProjectInitInput): ProjectInitProposal
   }
 
   const approvedPaths = [...approved.keys()].sort();
+  const [gitignoreTemplate, projectTemplate, patternIndexTemplate] = getTemplates([
+    "project/gitignore", "project/project", "project/patterns/index"
+  ]);
   const generated = new Map<string, string>([
     ...approved.entries(),
-    [".gitignore", getTemplate("project/gitignore").content],
-    ["project.json", projectState(input, approvedPaths)],
-    ["patterns/index.md", getTemplate("project/patterns/index").content],
+    [".gitignore", gitignoreTemplate!.content],
+    ["project.json", projectState(input, approvedPaths, projectTemplate!.content)],
+    ["patterns/index.md", patternIndexTemplate!.content],
     ["tracks.md", buildTracks([])],
     ["operations/.gitkeep", ""],
     ["tracks/.gitkeep", ""],

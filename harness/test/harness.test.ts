@@ -984,6 +984,10 @@ test("commands reuse status validation and batch related template reads", () => 
     assert.match(body, /template_get_many/, `${skill} must batch related template reads`);
     assert.doesNotMatch(body, /`template_get`(?!_many)/, `${skill} must not request templates one at a time`);
   }
+
+  const initialization = readFileSync(join(root, "src", "domain", "init.ts"), "utf8");
+  assert.match(initialization, /getTemplates\(\[/);
+  assert.doesNotMatch(initialization, /getTemplate\(/);
 });
 
 test("create classifies project context and ambiguous planning commands must clarify", () => {
