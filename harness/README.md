@@ -27,39 +27,40 @@ Default idiomatic styleguides are included for Go, Java, Kotlin, Maven, Gradle, 
 - Node.js 18 or newer
 - Git
 - The `codex` CLI, the `claude` CLI, or both
-- A local checkout of this repository
 
 ## Install
 
-Install development dependencies once:
+Install the published CLI:
 
 ```sh
-npm install
+npm install -g cadre-ai
+cadre-ai doctor
 ```
 
-Install for both Codex and Claude Code:
+Install for every detected client:
 
 ```sh
-node --import tsx scripts/install.ts --agent all
+cadre-ai install
 ```
 
 Install for only one agent:
 
 ```sh
 # Codex only
-node --import tsx scripts/install.ts --agent codex
+cadre-ai install --target codex
 
 # Claude Code only
-node --import tsx scripts/install.ts --agent claude
+cadre-ai install --target claude
 ```
 
 The installer:
 
-1. Builds the self-contained `dist/cadre-mcp.mjs` server.
-2. Packages the skills, MCP configuration, runtime, and templates into a local marketplace.
-3. Registers the marketplace and installs `cadre@cadre` at user scope.
-4. Verifies that the selected agent reports the plugin as installed and enabled.
-5. Pre-approves only Cadre MCP tools so normal Cadre commands do not produce an extra permission prompt.
+1. Packages the skills, MCP configuration, self-contained runtime, and
+   templates into a local marketplace.
+2. Registers the marketplace and installs `cadre@cadre` at user scope.
+3. Verifies that the selected agent reports the plugin as installed and enabled.
+4. Pre-approves only Cadre MCP tools so normal Cadre commands do not produce an
+   extra permission prompt.
 
 The marketplace is stored at `~/.cadre/marketplaces/cadre`. When it is updated, the prior generated payload is retained as a timestamped backup.
 
@@ -68,7 +69,8 @@ The marketplace is stored at `~/.cadre/marketplaces/cadre`. When it is updated, 
 By default, installation applies these narrowly scoped rules:
 
 - Codex: `default_tools_approval_mode = "approve"` under `plugins."cadre@cadre".mcp_servers.cadre` in the user Codex configuration.
-- Claude Code: `mcp__cadre__*` in the user permission allowlist.
+- Claude Code: `cadre` in `enabledMcpjsonServers` and `mcp__cadre__*` in the
+  user permission allowlist.
 
 Existing configuration, comments, and unrelated permission rules are preserved. A Claude deny rule is never removed or overridden. These rules suppress the host application's per-tool prompt; they do not bypass Cadre's requirement to present artifacts and lifecycle mutations to the human for approval.
 
@@ -77,32 +79,44 @@ Implementation may still need host permission for network access, dependency ins
 To retain per-call MCP permission prompts:
 
 ```sh
-node --import tsx scripts/install.ts --agent codex --prompt-mcp-tools
+cadre-ai install --target codex --prompt-mcp-tools
 ```
 
 ### Other installer options
 
 | Option | Effect |
 | --- | --- |
-| `--agent all\|codex\|claude` | Select the target agent; defaults to `all`. |
+| `--target auto\|all\|codex\|claude` | Select the target client; defaults to `auto`. |
+| `--scope user` | Explicitly select the only supported installation scope. |
 | `--replace-marketplace` | Replace another configured marketplace named `cadre` after the installer detects the path mismatch. |
 | `--prompt-mcp-tools` | Do not add the Cadre MCP pre-approval rule. |
 | `--prepare-only` | Build the marketplace without registering, installing, or changing permission configuration. |
 | `--marketplace-root PATH` | Override the generated marketplace location; the path must end in `cadre`. |
 | `--cachebuster TOKEN` | Supply an explicit package cachebuster instead of the generated timestamp. |
+| `--dry-run` | Report the intended marketplace and client operations without applying them. |
 
 Package-only example:
 
 ```sh
-node --import tsx scripts/install.ts \
-  --agent all \
+cadre-ai install \
+  --target all \
   --prepare-only \
   --marketplace-root /tmp/cadre
 ```
 
 ### Update an existing installation
 
-Pull or check out the desired source version, run `npm install`, and rerun the same install command. The installer produces a new cache-busted package and updates the installed plugin. `--replace-marketplace` is needed only when an agent already has a marketplace named `cadre` pointing somewhere else.
+Install the desired package version and rerun the installer. It produces a new
+cache-busted marketplace payload and updates the installed plugin:
+
+```sh
+npm install -g cadre-ai@latest
+cadre-ai doctor
+cadre-ai install
+```
+
+`--replace-marketplace` is needed only when a client already has a marketplace
+named `cadre` pointing somewhere else.
 
 After installation or update:
 
@@ -340,16 +354,16 @@ Product work uses Conventional Commits. Cadre-only state commits use `cadre(<com
 Useful commands:
 
 ```sh
-npm run check      # TypeScript type checking
-npm test           # Build and run integration tests
-npm run validate   # Build and validate skills, templates, runtime, and manifests
-npm run build      # Build dist/cadre-mcp.mjs
+pnpm --filter cadre-ai check      # TypeScript type checking
+pnpm --filter cadre-ai test       # Build and run integration tests
+pnpm --filter cadre-ai validate   # Build and validate skills, templates, runtime, and manifests
+pnpm --filter cadre-ai build      # Build dist/cadre-cli.mjs and dist/cadre-mcp.mjs
 ```
 
 The test suite exercises state validation, interrupted operations, DAG invariants, execution gating, nested task-to-phase and phase-to-main worktree integration, safe cleanup, marketplace packaging, MCP discovery and initialization, multi-track archival, and permission configuration. Before publishing a change, run:
 
 ```sh
-npm run check
-npm test
-npm run validate
+pnpm --filter cadre-ai check
+pnpm --filter cadre-ai test
+pnpm --filter cadre-ai validate
 ```
