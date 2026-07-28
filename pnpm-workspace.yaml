@@ -8,3 +8,6 @@ allowBuilds:
   unrs-resolver: true
   workerd: true
   msw: false
+
+minimumReleaseAgeExclude:
+  - '@modelcontextprotocol/sdk@1.30.0'

@@ -1,7 +1,6 @@
 {
-  "name": "cadre-agent-harness",
-  "version": "0.3.0",
-  "private": true,
+  "name": "cadre-ai",
+  "version": "3.0.0",
   "description": "Cross-agent, human-governed software delivery harness",
   "type": "module",
   "scripts": {
