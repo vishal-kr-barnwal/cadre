@@ -240,6 +240,23 @@
     @apply absolute top-3 right-3 z-10 bg-background/90;
   }
 
+  .docs-command-prefix {
+    @apply font-semibold text-cadre-teal;
+  }
+
+  .docs-command-action {
+    @apply font-semibold text-foreground;
+  }
+
+  .docs-command-option,
+  .docs-command-string {
+    @apply text-cadre-amber;
+  }
+
+  .docs-command-argument {
+    @apply text-muted-foreground;
+  }
+
   .docs-table-wrap {
     @apply max-w-full overflow-x-auto rounded-xl border outline-none focus-visible:ring-3 focus-visible:ring-ring/50;
   }
