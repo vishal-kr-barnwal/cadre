@@ -159,6 +159,21 @@ test("empty initialized project validates", () => {
   assert.match(result.stdout, /Cadre state is valid/);
 });
 
+test("stale tracks index is repairable derived drift, not an invariant failure", () => {
+  const projectRoot = fixture();
+  writePlannedTrack(projectRoot, "derived-drift");
+  const validation = validateProject(projectRoot);
+  assert.equal(validation.errors.length, 0);
+  assert.deepEqual(validation.warnings, [
+    "TRACKS_INDEX_STALE: tracks.md is stale; regenerate it after approved state changes"
+  ]);
+  assert.equal(formatStatus(projectRoot).text.includes("derived=1 warning(s)"), true);
+
+  const preview = renderTracksPreview(projectRoot);
+  writeTracks(projectRoot, preview.digest);
+  assert.deepEqual(validateProject(projectRoot).warnings, []);
+});
+
 test("plan DAG validation derives manual barriers and rejects dependency cycles", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-plan-"));
   const planPath = join(projectRoot, "plan.md");

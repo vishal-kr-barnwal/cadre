@@ -83,6 +83,7 @@ export interface ValidationResult {
   tracks: DiscoveredTrack[];
   states: Map<string, TrackState>;
   errors: string[];
+  warnings: string[];
 }
 
 const TRACK_STATUSES = new Set([
@@ -327,7 +328,8 @@ export function buildTracks(tracks: DiscoveredTrack[]): string {
 
 export function validateProject(projectRoot: string): ValidationResult {
   const root = cadreRoot(projectRoot);
-  const errors = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
   for (const file of REQUIRED_CONTEXT) {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
@@ -342,7 +344,7 @@ export function validateProject(projectRoot: string): ValidationResult {
     }
   }
   const project = readJson<ProjectState>(join(root, "project.json"), errors);
-  if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors };
+  if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors, warnings };
   if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
   if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) errors.push(`project.json: runtimeVersion must be ${CADRE_RUNTIME_VERSION}`);
   if (project.templateSetVersion !== TEMPLATE_SET_VERSION) errors.push(`project.json: templateSetVersion must be ${TEMPLATE_SET_VERSION}`);
@@ -462,9 +464,9 @@ export function validateProject(projectRoot: string): ValidationResult {
   for (const id of byId.keys()) visit(id, []);
   const tracksPath = join(root, "tracks.md");
   if (existsSync(tracksPath) && readFileSync(tracksPath, "utf8") !== buildTracks(tracks)) {
-    errors.push("tracks.md is stale; regenerate it after approved state changes");
+    warnings.push("TRACKS_INDEX_STALE: tracks.md is stale; regenerate it after approved state changes");
   }
-  return { project, tracks, states, errors };
+  return { project, tracks, states, errors, warnings };
 }
 
 function nextCommand(track: DiscoveredTrack): string {
@@ -483,8 +485,7 @@ export function renderTracksPreview(projectRoot: string): {
 } {
   const result = validateProject(projectRoot);
   if (!result.project) throw new Error(result.errors.join("\n") || "Cadre project state is unavailable");
-  const blockingErrors = result.errors.filter((error) => error !== "tracks.md is stale; regenerate it after approved state changes");
-  if (blockingErrors.length) throw new Error(blockingErrors.join("\n"));
+  if (result.errors.length) throw new Error(result.errors.join("\n"));
   const path = join(cadreRoot(projectRoot), "tracks.md");
   const previousContent = existsSync(path) ? readFileSync(path, "utf8") : null;
   const content = buildTracks(result.tracks);
@@ -527,6 +528,9 @@ export function formatStatus(projectRoot: string): { text: string; result: Valid
     return summary;
   }, {});
   lines.push(`Counts: ready_for_review=${counts.ready_for_review ?? 0}; completed=${counts.completed ?? 0}; archived=${counts.archived ?? 0}`);
-  lines.push(`Validation: ${result.errors.length ? `${result.errors.length} error(s)` : "clean"}`);
+  lines.push(
+    `Validation: ${result.errors.length ? `${result.errors.length} error(s)` : "valid"}; `
+    + `derived=${result.warnings.length ? `${result.warnings.length} warning(s)` : "current"}`
+  );
   return { text: `${lines.join("\n")}\n`, result };
 }

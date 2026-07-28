@@ -68,13 +68,14 @@ function failure(error: unknown) {
   };
 }
 
-function serializableValidation(projectRoot: string) {
-  const validation = validateProject(safeProjectRoot(projectRoot));
+function serializableValidation(validation: ReturnType<typeof validateProject>) {
   return {
     valid: validation.errors.length === 0,
+    derivedStateCurrent: validation.warnings.length === 0,
     project: validation.project,
     tracks: validation.tracks,
-    errors: validation.errors
+    errors: validation.errors,
+    warnings: validation.warnings
   };
 }
 
@@ -152,7 +153,7 @@ export function createCadreServer(): McpServer {
   }, async ({ projectRoot }) => {
     try {
       const status = formatStatus(safeProjectRoot(projectRoot));
-      return result({ text: status.text, ...serializableValidation(projectRoot) }, status.text);
+      return result({ text: status.text, ...serializableValidation(status.result) }, status.text);
     } catch (error) {
       return failure(error);
     }
@@ -165,7 +166,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
-      return result(serializableValidation(projectRoot));
+      return result(serializableValidation(validateProject(safeProjectRoot(projectRoot))));
     } catch (error) {
       return failure(error);
     }
