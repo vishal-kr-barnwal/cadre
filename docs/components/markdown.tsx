@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown"
 import rehypeSlug from "rehype-slug"
 import remarkGfm from "remark-gfm"
 
+import { ClientCommandSwitcher } from "@/components/client-command-switcher"
 import { CodeBlock } from "@/components/code-block"
 import { MermaidDiagram } from "@/components/mermaid-diagram"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -44,6 +45,12 @@ export function Markdown({ content }: { content: string }) {
             }
 
             const code = child ? textContent(child.props.children).replace(/\n$/, "") : ""
+            const clientCommands = parseClientCommands(code)
+
+            if (clientCommands) {
+              return <ClientCommandSwitcher commands={clientCommands} />
+            }
+
             return <CodeBlock code={code} className={child?.props.className} />
           },
           table: ({ children }) => <ResponsiveTable>{children}</ResponsiveTable>,
@@ -53,6 +60,38 @@ export function Markdown({ content }: { content: string }) {
       </ReactMarkdown>
     </article>
   )
+}
+
+function parseClientCommands(code: string) {
+  const lines = code.split("\n")
+  const codexMarker = lines.findIndex((line) => line.trim() === "# Codex")
+  const claudeMarker = lines.findIndex((line) => line.trim() === "# Claude Code")
+
+  if (codexMarker >= 0 && claudeMarker > codexMarker) {
+    const codex = trimBlankLines(lines.slice(codexMarker + 1, claudeMarker)).join("\n")
+    const claude = trimBlankLines(lines.slice(claudeMarker + 1)).join("\n")
+    return codex && claude ? { codex, claude } : null
+  }
+
+  const commands = lines.map((line) => line.trim()).filter(Boolean)
+  const codex = commands.filter((line) => line.startsWith("$cadre:"))
+  const claude = commands.filter((line) => line.startsWith("/cadre:"))
+
+  if (codex.length === 0 || claude.length === 0 || codex.length + claude.length !== commands.length) {
+    return null
+  }
+
+  return { codex: codex.join("\n"), claude: claude.join("\n") }
+}
+
+function trimBlankLines(lines: string[]) {
+  let start = 0
+  let end = lines.length
+
+  while (start < end && lines[start].trim() === "") start += 1
+  while (end > start && lines[end - 1].trim() === "") end -= 1
+
+  return lines.slice(start, end)
 }
 
 function ResponsiveTable({ children }: { children: React.ReactNode }) {

@@ -38,7 +38,7 @@ are approved does Cadre create `.cadre/`, validate it, and record setup commits.
 $cadre:track Add passwordless login as a feature
 
 # Claude Code
-/cadre:track Fix duplicate invoice creation as a bug
+/cadre:track Add passwordless login as a feature
 ```
 
 Cadre first proposes `spec.md` with functional requirements, non-functional
