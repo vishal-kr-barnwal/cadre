@@ -2,7 +2,7 @@
   { "section": "Start Here", "slugs": ["overview", "getting-started", "quickstart"] },
   {
     "section": "User Guide",
-    "slugs": ["capabilities", "how-cadre-works", "workflows", "project-skills", "parallel-execution"]
+    "slugs": ["capabilities", "how-cadre-works", "workflows", "parallel-execution"]
   },
   {
     "section": "Operations",
@@ -14,6 +14,6 @@
   },
   {
     "section": "Reference",
-    "slugs": ["configuration-reference", "workflow-reference", "mcp-reference", "project-skill-reference", "release-notes"]
+    "slugs": ["configuration-reference", "workflow-reference", "mcp-reference", "release-notes"]
   }
 ]

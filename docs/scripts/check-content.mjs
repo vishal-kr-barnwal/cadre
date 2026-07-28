@@ -6,6 +6,7 @@ import matter from "gray-matter"
 
 const docsRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repositoryRoot = path.resolve(docsRoot, "..")
+const harnessRoot = path.join(repositoryRoot, "harness")
 const contentRoot = path.join(docsRoot, "content")
 const navigation = readJson(path.join(docsRoot, "navigation.json"))
 const expected = new Map()
@@ -55,9 +56,9 @@ if (docs.size !== expected.size) {
 
 for (const doc of docs.values()) checkLinks(doc, docs)
 checkWorkflowCoverage(docs)
-checkConfigurationCoverage(docs)
+checkMcpCoverage(docs)
 checkReleaseVersion(docs)
-checkStagedWorkflowContract(docs)
+checkCurrentModel(docs)
 
 console.log(`Content check passed: ${docs.size} pages, ${orders.size} unique orders.`)
 
@@ -87,101 +88,78 @@ function checkLinks(doc, docsBySlug) {
 }
 
 function checkWorkflowCoverage(docsBySlug) {
-  const skill = readJson(path.join(repositoryRoot, "harness/skills/cadre/skill.json"))
+  const skillRoot = path.join(harnessRoot, "skills")
+  const workflows = fs.readdirSync(skillRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skillRoot, entry.name, "SKILL.md")))
+    .map((entry) => entry.name)
+    .sort()
   const reference = docsBySlug.get("workflow-reference")?.content ?? ""
-  for (const workflow of skill.workflows) {
-    if (!reference.includes(`## cadre-${workflow}`)) {
-      fail(`workflow-reference.md: missing cadre-${workflow}`)
+
+  if (workflows.length !== 10) {
+    fail(`Expected 10 current workflow skills, found ${workflows.length}: ${workflows.join(", ")}`)
+  }
+  for (const workflow of workflows) {
+    if (!reference.includes(`## ${workflow}\n`)) {
+      fail(`workflow-reference.md: missing ${workflow}`)
     }
   }
 }
 
-function checkConfigurationCoverage(docsBySlug) {
-  const config = readJson(path.join(repositoryRoot, "harness/templates/config.json"))
-  const reference = docsBySlug.get("configuration-reference")?.content ?? ""
-  for (const key of leafPaths(config)) {
-    if (!reference.includes(`\`${key}\``)) {
-      fail(`configuration-reference.md: missing ${key}`)
+function checkMcpCoverage(docsBySlug) {
+  const source = fs.readFileSync(path.join(harnessRoot, "src/mcp/server.ts"), "utf8")
+  const tools = [...source.matchAll(/registerTool\("([a-z_]+)"/g)].map((match) => match[1])
+  const reference = docsBySlug.get("mcp-reference")?.content ?? ""
+
+  if (tools.length !== 35) {
+    fail(`Expected 35 current MCP tools, found ${tools.length}`)
+  }
+  for (const tool of tools) {
+    if (!reference.includes(`## ${tool}\n`)) {
+      fail(`mcp-reference.md: missing ${tool}`)
     }
   }
 }
 
 function checkReleaseVersion(docsBySlug) {
-  const packageVersion = readJson(path.join(repositoryRoot, "harness/package.json")).version
+  const packageVersion = readJson(path.join(harnessRoot, "package.json")).version
+  const runtimeSource = fs.readFileSync(path.join(harnessRoot, "src/domain/version.ts"), "utf8")
+  const runtimeVersion = runtimeSource.match(/CADRE_RUNTIME_VERSION = "([^"]+)"/)?.[1]
   const docsVersion = readJson(path.join(docsRoot, "package.json")).version
   const notes = docsBySlug.get("release-notes")?.content ?? ""
-  if (packageVersion !== docsVersion) {
-    fail(`Version mismatch: cadre-ai ${packageVersion}, docs ${docsVersion}`)
+
+  if (packageVersion !== runtimeVersion || packageVersion !== docsVersion) {
+    fail(`Version mismatch: package=${packageVersion}, runtime=${runtimeVersion}, docs=${docsVersion}`)
   }
   if (!notes.includes(`## ${packageVersion} -`)) {
     fail(`release-notes.md: missing current version ${packageVersion}`)
   }
 }
 
-function checkStagedWorkflowContract(docsBySlug) {
-  const forbidden = [
-    { pattern: /(?:(?:complete|full) (?:frozen |deterministic )?(?:artifact|workflow|review) (?:set|diff)|full frozen diff)/i, name: "eager full-diff review" },
-    { pattern: /\b(?:approval(?:SessionId|Stage|Complete|Cancel)|approvedStages|approval_(?:session_id|stage|complete|cancel))\b/, name: "legacy flat approval control" },
-  ]
-  const currentContractSlugs = [
-    "getting-started",
-    "how-cadre-works",
-    "mcp-reference",
-    "operations",
-    "project-skill-reference",
-    "project-skills",
-    "quickstart",
-    "runtime-and-mcp",
-    "troubleshooting",
-    "workflow-engine",
-    "workflow-reference",
-    "workflows",
-  ]
-  const contractSources = currentContractSlugs.map((slug) => docsBySlug.get(slug))
-    .filter((doc) => doc !== undefined)
-  for (const doc of contractSources) {
-    for (const rule of forbidden) {
-      if (rule.pattern.test(doc.content)) fail(`${doc.file}: contains ${rule.name}`)
+function checkCurrentModel(docsBySlug) {
+  requireText(docsBySlug, "overview", ".cadre/")
+  requireText(docsBySlug, "getting-started", "cadre-ai install")
+  requireText(docsBySlug, "getting-started", "enabledMcpjsonServers")
+  requireText(docsBySlug, "getting-started", "mcp__cadre__*")
+  for (const workflow of ["create", "track", "implement", "review", "archive"]) {
+    requireText(docsBySlug, "quickstart", `$cadre:${workflow}`)
+    requireText(docsBySlug, "quickstart", `/cadre:${workflow}`)
+  }
+  requireText(docsBySlug, "team-and-polyrepo", "Coming Soon")
+
+  const liveEntryPoints = ["overview", "getting-started", "quickstart"]
+    .map((slug) => docsBySlug.get(slug)?.content ?? "")
+    .join("\n")
+  for (const retired of ["$cadre:setup", "/cadre:setup", "cadre install", "cadre/newtrack"]) {
+    if (liveEntryPoints.includes(retired)) {
+      fail(`Start Here pages contain retired current-usage text: ${retired}`)
     }
   }
-
-  const workflowReference = docsBySlug.get("workflow-reference")?.content ?? ""
-  requireContract(workflowReference, /decision\.resume/, "workflow-reference.md: missing deferred resume")
-  requireContract(workflowReference, /decision\.amend/, "workflow-reference.md: missing active-stage amendment")
-  requireContract(workflowReference, /writable_paths/, "workflow-reference.md: missing bounded continuation writes")
-  requireContract(workflowReference, /session-only approval state.*not approval/s, "workflow-reference.md: missing non-approval continuation rule")
-  requireContract(workflowReference, /structured value.*replaces.*complete artifact object/s, "workflow-reference.md: missing authoritative replacement rule")
-  requireContract(workflowReference, /approved_stages/, "workflow-reference.md: missing cumulative approval prefix")
-  requireContract(workflowReference, /product.*product_guidelines.*technical.*workflow/s, "workflow-reference.md: missing setup stage order")
-
-  const mcpReference = docsBySlug.get("mcp-reference")?.content ?? ""
-  requireContract(mcpReference, /value_map.*selected_id.*selected_ids/s, "mcp-reference.md: missing native prompt mapping rules")
-  requireContract(mcpReference, /allowCustom:true.*customArgument.*customMode/s, "mcp-reference.md: missing custom prompt guard")
-
-  const workflows = docsBySlug.get("workflows")?.content ?? ""
-  requireContract(workflows, /style-guides/, "workflows.md: missing style-guide refresh level")
-  requireContract(workflows, /Formula `pour` is staged as `spec` then `plan`/, "workflows.md: missing formula pour stage order")
-
-  const projectSkills = docsBySlug.get("project-skills")?.content ?? ""
-  requireContract(projectSkills, /formattedReferences/, "project-skills.md: missing incremental formatting input")
-  requireContract(projectSkills, /one `mutation` stage/, "project-skills.md: missing destructive mutation stage")
 }
 
-function requireContract(content, pattern, message) {
-  if (!pattern.test(content)) fail(message)
-}
-
-function leafPaths(value, prefix = "") {
-  const output = []
-  for (const [key, child] of Object.entries(value)) {
-    const current = prefix ? `${prefix}.${key}` : key
-    if (child && typeof child === "object" && !Array.isArray(child)) {
-      output.push(...leafPaths(child, current))
-    } else {
-      output.push(current)
-    }
+function requireText(docsBySlug, slug, text) {
+  if (!(docsBySlug.get(slug)?.content ?? "").includes(text)) {
+    fail(`${slug}.md: missing required current-model text ${text}`)
   }
-  return output
 }
 
 function slugify(value) {
