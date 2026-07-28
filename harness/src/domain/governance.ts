@@ -146,6 +146,7 @@ interface ArchiveMove {
   sourcePath: string;
   targetPath: string;
   state: TrackState;
+  needsMove: boolean;
 }
 
 interface ArchiveOperation {
@@ -161,6 +162,7 @@ interface ArchiveOperation {
   approvedArtifacts: string[];
   artifactProgress: string[];
   approvedAt: string;
+  approvalDigest: string;
   archiveCommit: string | null;
 }
 
@@ -188,11 +190,13 @@ function directorySnapshot(path: string): Array<{ path: string; content: string 
 
 export function previewArchiveBatch(input: ArchiveBatchInput): {
   operationPath: string;
+  initialOperation: ArchiveOperation;
   operation: ArchiveOperation;
   moves: ArchiveMove[];
   writes: ArchiveContentUpdate[];
   tracksPath: string;
   tracksContent: string;
+  resuming: boolean;
   digest: string;
 } {
   if (!BATCH_ID.test(input.batchId)) throw new Error("invalid archive batchId");
@@ -203,6 +207,16 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
   }
   if (input.selectedTracks.some((trackId) => !TRACK_ID.test(trackId))) throw new Error("invalid selected track ID");
   const root = safeProjectRoot(input.projectRoot);
+  const operationPath = join(cadreRoot(root), "operations", `${input.batchId}.json`);
+  const existingOperation = existsSync(operationPath)
+    ? JSON.parse(readFileSync(operationPath, "utf8")) as ArchiveOperation
+    : null;
+  if (existingOperation && (existingOperation.action !== "archive"
+    || existingOperation.status !== "in_progress"
+    || existingOperation.baseCommit !== input.baseCommit
+    || JSON.stringify(existingOperation.selectedTracks) !== JSON.stringify(input.selectedTracks))) {
+    throw new Error(`archive batch ${input.batchId} does not match the approved input`);
+  }
   const validation = requireCurrentProject(root);
   const selected = new Set(input.selectedTracks);
   const updates = input.updates.map((update) => ({ ...update, path: update.path.replaceAll("\\", "/") }));
@@ -210,6 +224,16 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
     throw new Error("archive updates contain duplicate paths");
   }
   for (const update of updates) assertArchiveUpdate(update.path, selected);
+  const approvalDigest = hash({
+    batchId: input.batchId,
+    selectedTracks: input.selectedTracks,
+    baseCommit: input.baseCommit,
+    approvedAt: input.approvedAt,
+    updates
+  });
+  if (existingOperation && existingOperation.approvalDigest !== approvalDigest) {
+    throw new Error(`archive batch ${input.batchId} content differs from its approved journal`);
+  }
   const activeOperations = join(cadreRoot(root), "operations");
   const unfinished = existsSync(activeOperations)
     ? readdirSync(activeOperations).filter((file) => file.endsWith(".json")).find((file) => {
@@ -217,18 +241,23 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
       return operation.status === "in_progress";
     })
     : undefined;
-  if (unfinished) throw new Error(`active project operation must be reconciled first: ${unfinished}`);
+  if (unfinished && unfinished !== `${input.batchId}.json`) {
+    throw new Error(`active project operation must be reconciled first: ${unfinished}`);
+  }
   const moves = input.selectedTracks.map((trackId): ArchiveMove => {
     const track = validation.tracks.find((candidate) => candidate.id === trackId);
     const state = validation.states.get(trackId);
     if (!track || !state) throw new Error(`unknown selected track ${trackId}`);
-    if (track.status !== "completed" || track.location !== `tracks/${trackId}` || state.operation != null) {
+    const pending = track.status === "completed" && track.location === `tracks/${trackId}`;
+    const completed = existingOperation?.completedTracks.includes(trackId)
+      && track.status === "archived" && track.location === `archive/${trackId}`;
+    if ((!pending && !completed) || state.operation != null) {
       throw new Error(`${trackId} is not an eligible completed track`);
     }
-    const sourcePath = join(cadreRoot(root), "tracks", trackId);
+    const sourcePath = join(cadreRoot(root), pending ? "tracks" : "archive", trackId);
     const targetPath = join(cadreRoot(root), "archive", trackId);
-    if (existsSync(targetPath)) throw new Error(`archive target already exists for ${trackId}`);
-    return { trackId, sourcePath, targetPath, state: { ...state, status: "archived" } };
+    if (pending && existsSync(targetPath)) throw new Error(`archive target already exists for ${trackId}`);
+    return { trackId, sourcePath, targetPath, state: { ...state, status: "archived" }, needsMove: pending };
   });
   const proposedTracks = validation.tracks.map((track): DiscoveredTrack => selected.has(track.id)
     ? { ...track, status: "archived", location: `archive/${track.id}` }
@@ -240,23 +269,28 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
   const moveArtifacts = moves.map((move) => `archive/${move.trackId}`);
   const updateArtifacts = updates.map((update) => update.path);
   const approvedArtifacts = [...moveArtifacts, ...updateArtifacts, "tracks.md", "project.json"];
-  const operation: ArchiveOperation = {
+  const initialOperation: ArchiveOperation = {
     schemaVersion: 1,
     action: "archive",
     batchId: input.batchId,
     status: "in_progress",
-    checkpoint: "commit-pending",
+    checkpoint: "approved",
     baseCommit: input.baseCommit,
     expectedCommit,
     selectedTracks: [...input.selectedTracks],
-    completedTracks: [...input.selectedTracks],
+    completedTracks: [],
     approvedArtifacts,
-    artifactProgress: [...moveArtifacts, ...updateArtifacts, "tracks.md"],
+    artifactProgress: [],
     approvedAt: input.approvedAt,
+    approvalDigest,
     archiveCommit: null
   };
-  const operationPath = join(cadreRoot(root), "operations", `${input.batchId}.json`);
-  if (existsSync(operationPath)) throw new Error(`archive batch ${input.batchId} already exists`);
+  const operation: ArchiveOperation = {
+    ...initialOperation,
+    checkpoint: "commit-pending",
+    completedTracks: [...input.selectedTracks],
+    artifactProgress: [...moveArtifacts, ...updateArtifacts, "tracks.md"]
+  };
   const current = {
     project: readFileSync(join(cadreRoot(root), "project.json"), "utf8"),
     tracks: readFileSync(join(cadreRoot(root), "tracks.md"), "utf8"),
@@ -270,26 +304,49 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
   };
   return {
     operationPath,
+    initialOperation,
     operation,
     moves,
     writes: updates,
     tracksPath: join(cadreRoot(root), "tracks.md"),
     tracksContent,
-    digest: hash({ current, input, operation, moves: moves.map(({ trackId, state }) => ({ trackId, state })), updates, tracksContent })
+    resuming: existingOperation != null,
+    digest: hash({ current, input, initialOperation, operation, moves: moves.map(({ trackId, state, needsMove }) => ({ trackId, state, needsMove })), updates, tracksContent })
   };
 }
 
 export function applyArchiveBatch(input: ArchiveBatchInput, proposalDigest: string) {
   const proposal = previewArchiveBatch(input);
   if (proposal.digest !== proposalDigest) throw new Error("archive batch proposal is stale; preview it again");
-  writeApprovedFile(proposal.operationPath, json(proposal.operation));
+  const currentOperation = existsSync(proposal.operationPath)
+    ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation
+    : proposal.initialOperation;
+  if (!existsSync(proposal.operationPath)) writeApprovedFile(proposal.operationPath, json(currentOperation));
   mkdirSync(join(cadreRoot(input.projectRoot), "archive"), { recursive: true });
+  const completedTracks = new Set(currentOperation.completedTracks);
+  const artifactProgress = new Set(currentOperation.artifactProgress);
   for (const move of proposal.moves) {
-    renameSync(move.sourcePath, move.targetPath);
+    if (move.needsMove) renameSync(move.sourcePath, move.targetPath);
     writeApprovedFile(join(move.targetPath, "state.json"), json(move.state));
+    completedTracks.add(move.trackId);
+    artifactProgress.add(`archive/${move.trackId}`);
+    writeApprovedFile(proposal.operationPath, json({
+      ...currentOperation,
+      completedTracks: [...currentOperation.selectedTracks].filter((trackId) => completedTracks.has(trackId)),
+      artifactProgress: [...artifactProgress]
+    }));
   }
-  for (const update of proposal.writes) writeApprovedFile(join(cadreRoot(input.projectRoot), update.path), update.content);
+  for (const update of proposal.writes) {
+    writeApprovedFile(join(cadreRoot(input.projectRoot), update.path), update.content);
+    artifactProgress.add(update.path);
+    writeApprovedFile(proposal.operationPath, json({
+      ...currentOperation,
+      completedTracks: [...currentOperation.selectedTracks].filter((trackId) => completedTracks.has(trackId)),
+      artifactProgress: [...artifactProgress]
+    }));
+  }
   writeApprovedFile(proposal.tracksPath, proposal.tracksContent);
+  writeApprovedFile(proposal.operationPath, json(proposal.operation));
   const validation = validateProject(input.projectRoot);
   if (validation.errors.length || validation.warnings.length) {
     throw new Error([...validation.errors, ...validation.warnings].join("\n"));

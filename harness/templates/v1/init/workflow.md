@@ -51,6 +51,8 @@ During `create`, detect an existing worktree with `git rev-parse --show-toplevel
 
 For deterministic MCP mutations, call the read-only preview immediately before apply, show the exact proposal to the human, and pass its digest unchanged. A changed digest requires a new proposal and approval. The MCP never grants approval or replaces required repository inspection. Its Git surface is limited to constrained, digest-gated Cadre worktree creation, integration, and safe cleanup; it accepts no arbitrary command, path, force deletion, or automatic conflict resolution.
 
+Resuming an already-approved operation is the narrow exception to another human approval: the operation journal must contain the same approval/content digest and the newly previewed final artifacts must be identical to the approved proposal, with only recorded checkpoint progress changed. Any content, selection, consequence, or approval-digest mismatch requires a corrected proposal and new approval.
+
 When a command skill explicitly instructs direct writes for approved Cadre artifacts and no corresponding MCP mutation tool is declared, those direct writes are intentional. Do not search the global tool list for an undeclared operation. Journal the change first, use the available MCP validation and derived-render gates, and stop if the resulting state does not match the approved proposal.
 
 ### Sources of truth

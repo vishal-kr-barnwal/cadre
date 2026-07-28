@@ -15,6 +15,8 @@ Build one bounded context inventory from `project_status`, the current track pat
 
 The declared review mutation surface is `review_complete_preview`/`review_complete_apply` for clean completion. Finding-bearing review uses the explicitly journaled direct-write procedure below. Do not inspect the installed runtime, global tool catalog, or generated MCP bundle looking for another review-state tool.
 
+Expected human decision count is one per review cycle when the human accepts the recommended exact remediation, approves a clean review, or explicitly rejects findings and approves clean completion. Ask again only when the human changes the proposal or new evidence changes its content or consequences.
+
 ## Procedure
 
 1. Determine the commit range from the plan's recorded task commits. Inspect diffs and affected callers, tests, security boundaries, error paths, compatibility, acceptance criteria, and non-functional requirements.

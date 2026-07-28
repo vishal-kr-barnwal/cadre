@@ -663,7 +663,11 @@ test("clean review completion previews and applies its exact state and derived i
   assert.equal(preview.state.status, "completed");
   assert.match(preview.tracksContent, /reviewed-track.*completed/);
   assert.deepEqual(preview.state.reviewCycles?.at(-1)?.acceptedRisks, input.acceptedRisks);
-  applyReviewComplete(input, preview.digest);
+  writeFileSync(preview.tracksPath, `${readFileSync(preview.tracksPath, "utf8")}\n`);
+  assert.throws(() => applyReviewComplete(input, preview.digest), /proposal is stale/);
+  runState(projectRoot, "render");
+  const fresh = previewReviewComplete(input);
+  applyReviewComplete(input, fresh.digest);
   assert.equal(JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8")).status, "completed");
   assert.equal(runState(projectRoot, "validate").status, 0);
 });
@@ -689,7 +693,16 @@ test("archive batch preview includes archived rows and records provenance withou
   const preview = previewArchiveBatch(input);
   assert.match(preview.tracksContent, /archive-track.*archived/);
   assert.doesNotMatch(preview.tracksContent, /archive-track.*completed/);
-  applyArchiveBatch(input, preview.digest);
+  writeFileSync(preview.operationPath, `${JSON.stringify(preview.initialOperation, null, 2)}\n`);
+  assert.throws(() => previewArchiveBatch({
+    ...input,
+    updates: input.updates.map((update, index) => index === 0
+      ? { ...update, content: `${update.content}\nchanged after approval\n` }
+      : update)
+  }), /content differs from its approved journal/);
+  const resumed = previewArchiveBatch(input);
+  assert.equal(resumed.resuming, true);
+  applyArchiveBatch(input, resumed.digest);
   assert.equal(existsSync(join(projectRoot, ".cadre", "tracks", "archive-track")), false);
   assert.equal(existsSync(join(projectRoot, ".cadre", "archive", "archive-track")), true);
 
@@ -1368,6 +1381,9 @@ test("review and archive guidance coalesces exact approval decisions", () => {
   assert.match(archive, /do not call `template_catalog`/);
   assert.match(archive, /needs no second human approval/);
   assert.doesNotMatch(archive, /call `tracks_render_preview`/);
+  assert.match(review, /Expected human decision count is one per review cycle/);
+  assert.match(archive, /Expected human decision count is one for an explicit or uniquely eligible selection/);
+  assert.match(workflow, /same approval\/content digest/);
 });
 
 test("commands reuse status validation and batch related template reads", () => {
