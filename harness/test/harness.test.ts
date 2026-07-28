@@ -1172,6 +1172,19 @@ test("implementation guidance preserves approval, permission, batching, and task
   assert.match(taskWorker, /unexpected host permission/);
 });
 
+test("review and archive guidance coalesces exact approval decisions", () => {
+  const review = readFileSync(join(root, "skills", "review", "SKILL.md"), "utf8");
+  const archive = readFileSync(join(root, "skills", "archive", "SKILL.md"), "utf8");
+  const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
+
+  assert.match(review, /One response may approve both the finding disposition and the unchanged exact artifacts/);
+  assert.match(review, /reject all findings while explicitly accepting their risks and approve clean completion/);
+  assert.match(archive, /exactly one track is eligible/);
+  assert.match(archive, /without a selection-only approval/);
+  assert.match(archive, /exact derived `tracks\.md`/);
+  assert.match(workflow, /Combine related decisions into one approval/);
+});
+
 test("commands reuse status validation and batch related template reads", () => {
   for (const skill of [
     "track", "implement", "review", "revise", "archive",

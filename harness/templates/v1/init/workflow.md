@@ -14,6 +14,8 @@ Before editing an existing file, read the current file and its directly relevant
 
 Treat every artifact and state transition as a proposal until the human reviews and explicitly approves it. Present exact content or a focused diff, consequences, unknowns, and verification evidence. Approval for one artifact or transition does not imply approval for later ones. Persist an approved checkpoint before pausing a multi-stage flow so another session can resume it.
 
+Combine related decisions into one approval when their complete exact artifacts, state transitions, consequences, and verification are available together. In particular, do not split finding disposition from an already-prepared remediation proposal, reject-all risk acceptance from clean-review completion, or a uniquely determined archive selection from its full batch proposal. A combined response must unambiguously approve every included consequence. Any changed content, selection, digest, or newly discovered consequence requires a corrected proposal and new approval.
+
 ### Clarification gate
 
 Inspect available files, history, state, and approved artifacts before asking. If a material choice remains ambiguous and different answers would change scope, requirements, acceptance criteria, dependencies, compatibility, architecture, plans, or cascading state, ask the human a concise targeted question and pause that branch of work. Do not guess, choose a convenient default, or treat silence as approval. Continue without asking only when evidence resolves the choice or the assumption is immaterial and is explicitly disclosed.
