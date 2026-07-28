@@ -6,7 +6,7 @@
     "name": "Cadre contributors"
   },
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.mcp.codex.json",
   "interface": {
     "displayName": "Cadre",
     "shortDescription": "Govern spec-to-archive delivery workflows.",

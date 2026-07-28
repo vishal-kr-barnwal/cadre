@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cadre": {
+      "command": "node",
+      "args": ["./dist/cadre-mcp.mjs"],
+      "cwd": "."
+    }
+  }
+}

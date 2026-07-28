@@ -681,7 +681,7 @@ None.
   assert.match(invalid.stderr, /revise sourceStatus must have an approved active baseline/);
 });
 
-test("installer prepares a dual-product user plugin marketplace", () => {
+test("installer prepares a dual-product user plugin marketplace", async () => {
   const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
   const target = join(parent, "cadre");
   execFileSync(process.execPath, [
@@ -700,6 +700,31 @@ test("installer prepares a dual-product user plugin marketplace", () => {
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
+
+  const codexMcp = JSON.parse(readFileSync(join(pluginRoot, ".mcp.codex.json"), "utf8"));
+  const codexServer = codexMcp.mcpServers.cadre;
+  assert.equal(codexManifest.mcpServers, "./.mcp.codex.json");
+  assert.deepEqual(codexServer, {
+    command: "node",
+    args: ["./dist/cadre-mcp.mjs"],
+    cwd: "."
+  });
+  const claudeMcp = JSON.parse(readFileSync(join(pluginRoot, ".mcp.json"), "utf8"));
+  assert.equal(claudeMcp.mcpServers.cadre.args[0], "${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs");
+
+  const client = new Client({ name: "cadre-packaged-test", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: codexServer.command,
+    args: codexServer.args,
+    cwd: resolve(pluginRoot, codexServer.cwd)
+  });
+  await client.connect(transport);
+  try {
+    const tools = await client.listTools();
+    assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
+  } finally {
+    await client.close();
+  }
 
   const codexMarketplace = JSON.parse(readFileSync(join(target, ".agents", "plugins", "marketplace.json"), "utf8"));
   const claudeMarketplace = JSON.parse(readFileSync(join(target, ".claude-plugin", "marketplace.json"), "utf8"));

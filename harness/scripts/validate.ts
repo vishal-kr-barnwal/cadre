@@ -19,7 +19,7 @@ function readJson<T>(path: string): T {
 
 for (const manifest of [
   ".codex-plugin/plugin.json", ".claude-plugin/plugin.json", "marketplace/codex.json",
-  "marketplace/claude.json", "package.json", ".mcp.json"
+  "marketplace/claude.json", "package.json", ".mcp.json", ".mcp.codex.json"
 ]) {
   try {
     readJson<unknown>(join(root, manifest));
@@ -159,11 +159,22 @@ for (const file of ["scripts/install.mjs", "scripts/package-plugin.mjs", "script
 }
 
 const codexManifest = readJson<{ mcpServers?: string }>(join(root, ".codex-plugin", "plugin.json"));
-if (codexManifest.mcpServers !== "./.mcp.json") errors.push("Codex manifest: MCP companion path is missing");
-const mcp = readJson<{ mcpServers?: { cadre?: { command?: string; args?: string[] } } }>(join(root, ".mcp.json"));
-if (mcp.mcpServers?.cadre?.command !== "node"
-  || mcp.mcpServers.cadre.args?.[0] !== "${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs") {
-  errors.push("MCP config: Cadre stdio command is invalid");
+if (codexManifest.mcpServers !== "./.mcp.codex.json") {
+  errors.push("Codex manifest: MCP companion path is missing");
+}
+interface StdioMcpConfig {
+  mcpServers?: { cadre?: { command?: string; args?: string[]; cwd?: string } };
+}
+const codexMcp = readJson<StdioMcpConfig>(join(root, ".mcp.codex.json"));
+if (codexMcp.mcpServers?.cadre?.command !== "node"
+  || codexMcp.mcpServers.cadre.args?.[0] !== "./dist/cadre-mcp.mjs"
+  || codexMcp.mcpServers.cadre.cwd !== ".") {
+  errors.push("Codex MCP config: Cadre stdio command is invalid");
+}
+const claudeMcp = readJson<StdioMcpConfig>(join(root, ".mcp.json"));
+if (claudeMcp.mcpServers?.cadre?.command !== "node"
+  || claudeMcp.mcpServers.cadre.args?.[0] !== "${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs") {
+  errors.push("Claude MCP config: Cadre stdio command is invalid");
 }
 
 if (errors.length) {

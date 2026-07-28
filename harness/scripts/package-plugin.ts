@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { buildMcp } from "./build.js";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const requiredEntries = ["skills", "templates", "dist", ".mcp.json", "LICENSE", "README.md"];
+const requiredEntries = [
+  "skills", "templates", "dist", ".mcp.json", ".mcp.codex.json", "LICENSE", "README.md"
+];
 const optionalEntries = ["hooks", "hooks.json", ".app.json", "assets", "commands", "agents"];
 
 function readJson<T>(path: string): T {
