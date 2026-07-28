@@ -31,13 +31,16 @@ import {
   EXECUTION_NODE_STATUSES,
   applyExecutionFinish,
   applyExecutionNodeUpdate,
+  applyExecutionNodesUpdate,
   applyExecutionStart,
   executionStatus,
   previewExecutionFinish,
   previewExecutionNodeUpdate,
+  previewExecutionNodesUpdate,
   previewExecutionStart,
   type ExecutionFinishInput,
   type ExecutionNodeUpdateInput,
+  type ExecutionNodesUpdateInput,
   type ExecutionStartInput
 } from "../domain/execution.js";
 import {
@@ -243,10 +246,12 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  const executionNodeSchema = {
+  const executionNodeScopeSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
+    executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
+  };
+  const executionNodeUpdateSchema = {
     nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/),
     status: z.enum(EXECUTION_NODE_STATUSES),
     workerId: z.string().min(1).nullable().optional(),
@@ -258,6 +263,7 @@ export function createCadreServer(): McpServer {
     approval: z.string().min(1).nullable().optional(),
     blocker: z.string().min(1).nullable().optional()
   };
+  const executionNodeSchema = { ...executionNodeScopeSchema, ...executionNodeUpdateSchema };
 
   server.registerTool("execution_node_preview", {
     title: "Preview execution node transition",
@@ -280,6 +286,37 @@ export function createCadreServer(): McpServer {
   }, async ({ proposalDigest, ...input }) => {
     try {
       return result(applyExecutionNodeUpdate(input as ExecutionNodeUpdateInput, proposalDigest));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  const executionNodesSchema = {
+    ...executionNodeScopeSchema,
+    updates: z.array(z.object(executionNodeUpdateSchema)).min(1).max(128)
+  };
+
+  server.registerTool("execution_nodes_preview", {
+    title: "Preview ordered execution node transitions",
+    description: "Validate and preview an ordered, atomic batch of legal runtime node transitions without changing its journal.",
+    inputSchema: executionNodesSchema,
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async (input) => {
+    try {
+      return result(previewExecutionNodesUpdate(input as ExecutionNodesUpdateInput));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  server.registerTool("execution_nodes_apply", {
+    title: "Apply ordered execution node transitions",
+    description: "Apply an approved ordered batch atomically only when its single preview digest is unchanged.",
+    inputSchema: { ...executionNodesSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  }, async ({ proposalDigest, ...input }) => {
+    try {
+      return result(applyExecutionNodesUpdate(input as ExecutionNodesUpdateInput, proposalDigest));
     } catch (error) {
       return failure(error);
     }

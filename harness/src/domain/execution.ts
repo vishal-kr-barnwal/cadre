@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
 import { parsePlan, validatePlanGraph, type PlanGraph } from "./plan.js";
 
@@ -102,6 +102,16 @@ const EXECUTION_ID = /^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/;
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function writeJournalAtomically(path: string, journal: ExecutionJournal): void {
+  const temporaryPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`, { flag: "wx" });
+    renameSync(temporaryPath, path);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
 }
 
 function assertIdentifiers(trackId: string, executionId: string): void {
@@ -306,14 +316,16 @@ export interface ExecutionNodeUpdateInput {
   blocker?: string | null;
 }
 
-export function previewExecutionNodeUpdate(input: ExecutionNodeUpdateInput): {
-  path: string;
-  journal: ExecutionJournal;
-  digest: string;
-} {
-  const { journalPath } = executionPaths(input.projectRoot, input.trackId, input.executionId);
-  const currentBody = readFileSync(journalPath, "utf8");
-  const journal = JSON.parse(currentBody) as ExecutionJournal;
+export type ExecutionNodeUpdate = Omit<ExecutionNodeUpdateInput, "projectRoot" | "trackId" | "executionId">;
+
+export interface ExecutionNodesUpdateInput {
+  projectRoot: string;
+  trackId: string;
+  executionId: string;
+  updates: ExecutionNodeUpdate[];
+}
+
+function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpdate): void {
   if (journal.status !== "in_progress") throw new Error("execution is not in progress");
   const node = journal.nodes[input.nodeId];
   if (!node) throw new Error(`unknown execution node ${input.nodeId}`);
@@ -400,7 +412,45 @@ export function previewExecutionNodeUpdate(input: ExecutionNodeUpdateInput): {
   }
   journal.nodes[input.nodeId] = updated;
   journal.checkpoint = `${input.nodeId}:${input.status}`;
+}
+
+export function previewExecutionNodesUpdate(input: ExecutionNodesUpdateInput): {
+  path: string;
+  journal: ExecutionJournal;
+  digest: string;
+} {
+  if (!Array.isArray(input.updates) || input.updates.length < 1 || input.updates.length > 128) {
+    throw new Error("updates must contain 1 through 128 ordered node transitions");
+  }
+  const { journalPath } = executionPaths(input.projectRoot, input.trackId, input.executionId);
+  const currentBody = readFileSync(journalPath, "utf8");
+  const journal = JSON.parse(currentBody) as ExecutionJournal;
+  for (const update of input.updates) applyNodeTransition(journal, update);
   return { path: journalPath, journal, digest: hash({ currentBody, journal }) };
+}
+
+export function applyExecutionNodesUpdate(input: ExecutionNodesUpdateInput, proposalDigest: string): {
+  path: string;
+  journal: ExecutionJournal;
+  derivedStatus: ExecutionDerivedStatus;
+} {
+  const proposal = previewExecutionNodesUpdate(input);
+  if (proposal.digest !== proposalDigest) throw new Error("execution nodes proposal is stale; preview it again");
+  writeJournalAtomically(proposal.path, proposal.journal);
+  return {
+    path: proposal.path,
+    journal: proposal.journal,
+    derivedStatus: deriveExecutionStatus(proposal.journal)
+  };
+}
+
+export function previewExecutionNodeUpdate(input: ExecutionNodeUpdateInput): {
+  path: string;
+  journal: ExecutionJournal;
+  digest: string;
+} {
+  const { projectRoot, trackId, executionId, ...update } = input;
+  return previewExecutionNodesUpdate({ projectRoot, trackId, executionId, updates: [update] });
 }
 
 export function applyExecutionNodeUpdate(input: ExecutionNodeUpdateInput, proposalDigest: string): {
@@ -408,9 +458,10 @@ export function applyExecutionNodeUpdate(input: ExecutionNodeUpdateInput, propos
   journal: ExecutionJournal;
   derivedStatus: ExecutionDerivedStatus;
 } {
-  const proposal = previewExecutionNodeUpdate(input);
+  const { projectRoot, trackId, executionId, ...update } = input;
+  const proposal = previewExecutionNodesUpdate({ projectRoot, trackId, executionId, updates: [update] });
   if (proposal.digest !== proposalDigest) throw new Error("execution node proposal is stale; preview it again");
-  writeFileSync(proposal.path, `${JSON.stringify(proposal.journal, null, 2)}\n`);
+  writeJournalAtomically(proposal.path, proposal.journal);
   return {
     path: proposal.path,
     journal: proposal.journal,

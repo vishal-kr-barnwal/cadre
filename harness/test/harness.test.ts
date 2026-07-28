@@ -12,8 +12,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
 import { parsePlan, validatePlanGraph } from "../src/domain/plan.js";
 import {
-  applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionStart, executionStatus,
-  previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionStart, type ExecutionNodeStatus
+  applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionNodesUpdate, applyExecutionStart, executionStatus,
+  previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionNodesUpdate, previewExecutionStart,
+  type ExecutionNodeStatus
 } from "../src/domain/execution.js";
 import {
   applyWorktreeCleanup, applyWorktreeCreate, applyWorktreeIntegration, managedWorktreeStatus,
@@ -368,6 +369,66 @@ test("execution transitions require distinct task commits and clear resolved blo
     approval: "approved"
   });
   assert.equal(proposal.journal.nodes["T1.1"]?.blocker, null);
+});
+
+test("ordered execution-node batches are atomic, digest-gated, and preserve legal transitions", () => {
+  const projectRoot = fixture();
+  const trackRoot = writePlannedTrack(projectRoot, "batch-track");
+  runState(projectRoot, "render");
+  const scope = { projectRoot, trackId: "batch-track", executionId: "batch-1" };
+  const startInput = {
+    ...scope,
+    requestedMode: "sequential" as const,
+    effectiveMode: "sequential" as const,
+    maxWorkers: 1,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T01:45:00.000Z"
+  };
+  const start = previewExecutionStart(startInput);
+  applyExecutionStart(startInput, start.digest);
+
+  const begin = { ...scope, updates: [
+    { nodeId: "P1", status: "running" as const },
+    { nodeId: "T1.1", status: "running" as const }
+  ] };
+  const beginPreview = previewExecutionNodesUpdate(begin);
+  applyExecutionNodesUpdate(begin, beginPreview.digest);
+
+  const journalPath = join(trackRoot, "executions", "execution-batch-1.json");
+  const beforeInvalidBatch = readFileSync(journalPath, "utf8");
+  assert.throws(() => previewExecutionNodesUpdate({ ...scope, updates: [
+    { nodeId: "T1.1", status: "awaiting_approval", verification: "passed" },
+    { nodeId: "T1.1", status: "completed" }
+  ] }), /illegal execution transition awaiting_approval -> completed/);
+  assert.equal(readFileSync(journalPath, "utf8"), beforeInvalidBatch);
+
+  const approvalStep = { ...scope, updates: [
+    { nodeId: "T1.1", status: "awaiting_approval" as const, verification: "passed" }
+  ] };
+  const stale = previewExecutionNodesUpdate(approvalStep);
+  writeFileSync(journalPath, `${beforeInvalidBatch.trimEnd()}\n\n`);
+  assert.throws(() => applyExecutionNodesUpdate(approvalStep, stale.digest), /proposal is stale/);
+  const fresh = previewExecutionNodesUpdate(approvalStep);
+  applyExecutionNodesUpdate(approvalStep, fresh.digest);
+
+  const finishPhase = { ...scope, updates: [
+    { nodeId: "T1.1", status: "committed" as const, workerCommit: "abcdef1", approval: "approved" },
+    { nodeId: "T1.1", status: "integrating" as const },
+    { nodeId: "T1.1", status: "integrated" as const, mergeCommit: "abcdef2" },
+    { nodeId: "T1.1", status: "completed" as const },
+    { nodeId: "T1.2", status: "running" as const },
+    { nodeId: "T1.2", status: "awaiting_manual_verification" as const },
+    { nodeId: "T1.2", status: "completed" as const, approval: "approved" },
+    { nodeId: "P1", status: "awaiting_approval" as const, verification: "passed" },
+    { nodeId: "P1", status: "committed" as const, workerCommit: "abcdef3", approval: "approved" },
+    { nodeId: "P1", status: "integrating" as const },
+    { nodeId: "P1", status: "integrated" as const, mergeCommit: "abcdef4" },
+    { nodeId: "P1", status: "completed" as const }
+  ] };
+  const finishPreview = previewExecutionNodesUpdate(finishPhase);
+  const finished = applyExecutionNodesUpdate(finishPhase, finishPreview.digest);
+  assert.deepEqual(finished.derivedStatus.readyPhases, ["P2"]);
+  assert.equal(finished.journal.checkpoint, "P1:completed");
 });
 
 test("replacement executions carry completed plan provenance forward", () => {
@@ -1000,7 +1061,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       "state_validate", "project_init_preview", "project_init_apply",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
       "execution_graph_validate", "execution_start_preview", "execution_start_apply",
-      "execution_node_preview", "execution_node_apply", "execution_status",
+      "execution_node_preview", "execution_node_apply", "execution_nodes_preview", "execution_nodes_apply", "execution_status",
       "execution_finish_preview", "execution_finish_apply", "worktree_create_preview",
       "worktree_create_apply", "integration_preview", "integration_apply",
       "worktree_cleanup_preview", "worktree_cleanup_apply", "worktree_status"
