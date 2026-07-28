@@ -213,7 +213,6 @@ tmp/
 /.claude-plugin/
 /harness/.agents/
 /harness/.claude/
-/harness/.claude-plugin/
 /harness/plugins/
 
 # Node / PNPM
