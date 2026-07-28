@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { AlertTriangleIcon } from "lucide-react"
-import { useTheme } from "next-themes"
+
+import { useTheme } from "@/components/theme-provider"
 
 type RenderState =
   | { status: "loading" }
