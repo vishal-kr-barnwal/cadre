@@ -9,6 +9,12 @@ Review only a `ready_for_review` track. Load `.cadre/workflow.md`, all track art
 
 Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP is unavailable, stop without changing review state.
 
+## Read context once
+
+Build one bounded context inventory from `project_status`, the current track paths, and the reviewed Git range. Read each required artifact once. Do not run a line-count pass before reading, repeat `rg --files` discovery, or reread a whole file after truncated output; continue from the first unread line. During consecutive review cycles in the same flow, reuse unchanged product, workflow, pattern, and styleguide context and verify it by Git path/hash; reread the current state, plan, execution, new review range, and affected files/callers. Use batched parallel reads where independent.
+
+The declared review mutation surface is `review_complete_preview`/`review_complete_apply` for clean completion. Finding-bearing review uses the explicitly journaled direct-write procedure below. Do not inspect the installed runtime, global tool catalog, or generated MCP bundle looking for another review-state tool.
+
 ## Procedure
 
 1. Determine the commit range from the plan's recorded task commits. Inspect diffs and affected callers, tests, security boundaries, error paths, compatibility, acceptance criteria, and non-functional requirements.
@@ -19,6 +25,6 @@ Call `project_status` first and use its embedded structured validation; do not r
    - If the human changes the finding subset or remediation, rebuild and validate the exact proposal and request approval once for that changed proposal. Do not reuse approval for superseded content.
    - If no findings exist, present clean-review evidence and the exact completion transition once, then ask approval to complete the track.
 4. For approved changes, record a resumable `review` operation before changing the bug artifact, plan, or state. Increment the plan revision, set state to `in_progress`, reset review readiness, and record the review cycle. Call `tracks_render_preview`, show and apply its unchanged digest with `tracks_render_apply`, call `state_validate`, and commit `cadre(review): request changes for <track-id>`. Record that commit SHA as the new approved plan commit, clear the operation, and use `cadre(review): record changes for <track-id>` for follow-up bookkeeping when needed. The prior completed execution remains historical until `implement` starts a new execution ID for the changed graph.
-5. For an approved clean review, including an explicit reject-and-complete decision, bind the clean cycle and any accepted risks to `lastExecution.executionId`, its plan revision, graph digest, and reviewed HEAD. Set track-local status to `completed`, preview/apply the derived tracks index through the same MCP digest gate, call `state_validate`, and commit `cadre(review): complete <track-id>`.
+5. For an approved clean review, including an explicit reject-and-complete decision, bind the clean cycle and any accepted risks to `lastExecution.executionId`, its plan revision, graph digest, and reviewed HEAD. Call `review_complete_preview` with the exact approval record, evidence, and accepted risks, then pass its unchanged digest to `review_complete_apply`; this writes the completed track state and derived index together and returns final validation. Do not repeat `tracks_render_*`, `state_validate`, or `project_status` when that result is valid/current. If the preview differs materially from the transition already shown to the human, present the correction and obtain new approval before apply. Commit `cadre(review): complete <track-id>`.
 
 Repeat review → implement → review until a human approves a clean review. Only this command may mark a track completed.

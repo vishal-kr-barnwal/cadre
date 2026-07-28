@@ -1360,8 +1360,14 @@ test("review and archive guidance coalesces exact approval decisions", () => {
   assert.match(review, /reject all findings while explicitly accepting their risks and approve clean completion/);
   assert.match(archive, /exactly one track is eligible/);
   assert.match(archive, /without a selection-only approval/);
-  assert.match(archive, /exact derived `tracks\.md`/);
+  assert.match(archive, /generated `tracks\.md`/);
   assert.match(workflow, /Combine related decisions into one approval/);
+  assert.match(review, /review_complete_preview/);
+  assert.match(review, /Do not inspect the installed runtime/);
+  assert.match(archive, /archive_batch_preview/);
+  assert.match(archive, /do not call `template_catalog`/);
+  assert.match(archive, /needs no second human approval/);
+  assert.doesNotMatch(archive, /call `tracks_render_preview`/);
 });
 
 test("commands reuse status validation and batch related template reads", () => {
@@ -1466,8 +1472,8 @@ test("archive supports a resumable multi-track batch", () => {
   assert.match(archive, /one or more `completed` tracks in a single batch/);
   assert.match(archive, /all completed/);
   assert.match(archive, /Reject the batch without partial mutation/);
-  assert.match(archive, /project\/archive-operation/);
-  assert.match(archive, /commit all approved archive moves and derived changes together/);
+  assert.match(archive, /archive_batch_preview/);
+  assert.match(archive, /commit all approved archive moves and derived changes together/i);
 
   const operation = JSON.parse(readFileSync(join(providerRoot, "project", "archive-operation.json"), "utf8"));
   assert.equal(operation.action, "archive");

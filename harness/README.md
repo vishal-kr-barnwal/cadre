@@ -281,6 +281,9 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `project_status` | No | Summarize project and track checkpoints, including resumable operations. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
+| `review_complete_preview` / `review_complete_apply` | Preview/apply | Bind a clean review and accepted risks to the current execution, then write completed state and the exact derived index together. |
+| `archive_batch_preview` / `archive_batch_apply` | Preview/apply | Preview and apply selected moves, lifecycle states, patterns, seeds, journal, and post-archive index as one approved batch. |
+| `archive_batch_record_preview` / `archive_batch_record_apply` | Preview/apply | Record the resulting archive commit in track, project, and batch provenance without a second batch decision. |
 | `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
 | `execution_node_preview` / `execution_node_apply` | Preview/apply | Persist one legal, dependency-gated execution-node transition and return its derived execution status. |
 | `execution_nodes_preview` / `execution_nodes_apply` | Preview/apply | Atomically persist an ordered batch of legal transitions behind one stale-state digest without crossing evidence or approval boundaries. |
@@ -298,6 +301,8 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `tracks_render_apply` | Yes | Write `tracks.md` only when current state matches the approved preview digest. |
 
 The MCP server cannot approve its own proposals or run arbitrary shell commands. Its Git surface is limited to derived Cadre worktree creation, non-squash integration, status, and verified cleanup. It never force-deletes a branch, resolves a conflict, edits product files, or commits on behalf of a worker. Deterministic writes and Git mutations use preview/apply digests to reject stale proposals.
+
+Review and archive minimize approval fragmentation without weakening governance. A finding disposition and its exact remediation artifacts may share one approval; explicit reject-and-complete records accepted risks in the clean review; and a uniquely eligible archive target is included directly in the full batch proposal. The archive preview computes the post-move `tracks.md` before approval, including archived rows. Any changed content, selection, digest, or consequence requires a corrected proposal and renewed approval.
 
 ### Worktree layout and worker model
 
