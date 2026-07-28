@@ -1,89 +1,108 @@
 ---
-title: State & Artifacts
-description: Canonical JSON, projections, tasks, events, reviews, trace notes, locks, and generated indexes.
+title: State And Artifacts
+description: Sources of truth, generated indexes, operation journals, and project layout.
 section: Contributor Guide
-order: 170
+order: 160
 ---
 
-# State & Artifacts
+# State And Artifacts
 
-Cadre separates canonical machine state from reviewable human projections.
-Contributors must preserve that ownership boundary in every workflow.
+An initialized repository keeps approved mutable Cadre state under `.cadre/`.
+The installed plugin owns the runtime and immutable template catalog.
 
-## Ownership Model
+## Project Layout
 
-```mermaid
-flowchart TD
-  A["Workflow packet"] --> B["Canonical JSON and JSONL state"]
-  A --> C["Native events, messages, reviews, journals"]
-  B --> D["Generated Markdown projections"]
-  C --> D
-  B --> E["Status and resource indexes"]
-  C --> E
-  D --> F["Human review"]
-  F --> A
+```text
+.cadre/
+├── .gitignore
+├── project.json
+├── product.md
+├── guidelines.md
+├── tech-stack.md
+├── workflow.md
+├── tracks.md
+├── styleguides/
+├── patterns/
+│   └── index.md
+├── operations/
+│   ├── refresh-<id>.json
+│   └── archive-<id>.json
+├── refreshes/
+├── tracks/
+│   └── <track-id>/
+│       ├── state.json
+│       ├── spec.md
+│       ├── plan.md
+│       ├── learning.md
+│       ├── executions/
+│       ├── bugs/
+│       └── revisions/
+├── archive/
+├── .worktrees/             # ignored execution worktrees
+└── wisps/                  # ignored disposable exploration output
 ```
 
-Markdown projections are review surfaces, not canonical workflow input. When a
-projection is stale, regenerate it from canonical state through a Cadre packet.
+## Sources Of Truth
 
-## Canonical Project Context
+- `project.json` owns runtime/template versions, project identity, setup state,
+  refresh history, and project history. It does not duplicate tracks.
+- Track `state.json` owns identity, type, lifecycle status, dependencies,
+  revision, checkpoints, commits, pending operation, last execution, review
+  cycles, and history.
+- `spec.md` owns requirements, scope, acceptance, and dependency impact.
+- `plan.md` owns the phase/task graph, completion markers, and commit
+  provenance.
+- `executions/execution-<id>.json` owns runtime node status, worker identity,
+  worktree/branch data, verification, approval, commits, merges, and blockers.
+- `learning.md` owns the marked Pattern Seed plus phase/task learning.
+- `tracks.md` is a generated index derived from track-local state. Never edit
+  it by hand.
 
-Setup owns product, workflow, patterns, tech stack, style-guide selections,
-configuration, and topology. Tracks add canonical specs and plans. Project
-skills add validated repository-owned rule manifests and optional human
-projections.
+Track paths are derived from lifecycle status and track ID. Active tracks live
+under `tracks/`; archived tracks live under `archive/`. The path itself is not
+persisted in track state.
 
-Schemas should be versioned and explicit. Normalize legacy aliases or untrusted
-JSON at the infrastructure boundary, then use narrow application/domain types.
+## Lifecycle States
 
-## Native Work State
+```text
+drafting-spec -> drafting-plan -> planned -> in_progress -> ready_for_review
+                                      ^              |
+                                      | approved bugs|
+                                      +--------------+
 
-Native state records:
+ready_for_review -> completed -> archived
+```
 
-- task graph, dependencies, status, notes, blockers, and ownership;
-- events and messages used by status and team views;
-- handoffs and review queue state;
-- formula definitions and ignored local wisp runs;
-- parallel workers, claims, results, and merge-back progress;
-- publication and provider evidence.
+`revise` can move active work back to planning or implementation. Completed and
+archived tracks remain immutable; changed intent creates a successor.
 
-Derived views may be rebuilt; canonical events and records must not be replaced
-with a hand-written summary.
+## Operation Journals
 
-## Review And Release Artifacts
+Every multi-step mutation records intent and progress before changing the next
+artifact or Git state. Common fields include:
 
-Specs, plans, reviews, handoffs, refreshes, artifact sync, and releases can use
-staged target previews. Approval sessions retain per-stage hashes so final
-execution can detect regenerated or on-disk drift.
+- action and operation/batch/execution identity;
+- base commit and expected commit;
+- approved timestamp and artifact set;
+- artifact progress and durable checkpoint;
+- source/target status and operation-specific evidence;
+- resulting commit when it becomes known.
 
-Release artifacts in target projects are distinct from this harness
-repository's npm/GitHub release process.
+The journal is part of recovery correctness, not temporary metadata. Do not
+delete or replace it to make a blocked workflow appear fresh.
 
-## Traceability
+## Derived State
 
-Cadre connects task completion to product commits, control commits, journals,
-events, review records, and optional Git notes. The notes ref defaults to
-`refs/notes/cadre`. Treat note pushing and automatic commits as repository
-policy, not universal behavior.
+`tracks_render_preview` reads all track-local state and produces the exact
+`tracks.md` content plus a digest. `tracks_render_apply` writes only when the
+same underlying state still produces that digest.
 
-## Locks And Concurrency
+Central validation checks both canonical state and whether derived state is
+current. A valid track with stale `tracks.md` is still an unhealthy project
+until the approved index repair is applied.
 
-Infrastructure locking protects packet-owned operations from concurrent writes.
-Do not delete lock files as generic recovery. First determine whether the
-owning operation is active, stale, or failed and use the returned lock stage and
-recovery evidence.
+## Versioning
 
-Parallel worker file claims are advisory coordination evidence. They complement
-worktrees and Git isolation; they do not make overlapping edits safe.
-
-## Artifact Extension Checklist
-
-When adding a canonical artifact:
-
-1. Define a versioned schema and typed normalized representation.
-2. Place read/write behavior behind infrastructure boundaries.
-3. Provide a deterministic projection when humans need to review it.
-4. Add catalog, preview, sync, drift, and malformed-input tests.
-5. Decide whether it belongs in setup, tracks, releases, or project skills.
-6. Document which surface is canonical and which is generated.
+`runtimeVersion` identifies Cadre behavior. `templateSetVersion` identifies the
+immutable artifact format bundle. Cadre 3.0 ships template set `v1`. Template
+resources use `cadre://templates/v1/...` URIs and include SHA-256 hashes.

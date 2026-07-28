@@ -1,88 +1,73 @@
 ---
 title: Capabilities
-description: What Cadre can coordinate across clients, repositories, teams, and delivery workflows.
+description: What Cadre 3.0 supports today and where its boundaries are.
 section: User Guide
 order: 40
 ---
 
 # Capabilities
 
-Cadre is a packet-led coordination runtime for AI-assisted development. It
-combines durable project context, spec-first work, review policy, code
-intelligence, and publication evidence without asking agents to reconstruct
-control-plane state from Markdown.
+Cadre 3.0 is a focused, single-repository delivery harness for OpenAI Codex and
+Claude Code. It governs work from project context through archived learning.
 
-## Capability Matrix
+## Supported Today
 
-| Area | Capability | Operational boundary |
-|---|---|---|
-| Clients | Thin Codex, Claude Code, GitHub Copilot, and Google Antigravity integrations | Clients activate the same packaged MCP runtime; platform shells do not own workflow logic. |
-| Project context | Product, workflow, patterns, tech stack, style guides, and project skills | Canonical JSON and packet state are authoritative; Markdown is a projection. |
-| Planning | Specs, acceptance criteria, tasks, dependencies, phases, file annotations, and verification | New or revised plans use staged human approval. |
-| Durable memory | Tasks, notes, blockers, handoffs, events, messages, journals, and local formula wisps | Cadre packets own writes and derived indexes. |
-| Review | Commit-pinned review evidence, test results, diagnostics, manual verification, and policy gates | Ship and land fail closed when configured evidence is missing. |
-| Teams | Owners, advisory leases, collision scans, review queues, team boards, and next actions | Leases coordinate work but do not replace Git isolation. |
-| Topology | Single repository, monorepo, and polyrepo control repository | Polyrepo operations resolve each product repository explicitly. |
-| Parallel work | Dependency-aware phases, worker payloads, file claims, result evidence, and merge-back | Sequential execution remains the default when safety is unclear. |
-| Intelligence | Repo maps, dependency graphs, test impact, diagnostics, LSP review, and DAP recommendations | Missing optional language services degrade visibly rather than blocking every workflow. |
-| Providers | Local-only mode plus hosted provider evidence for GitHub and GitLab | Hosted evidence comes through provider integrations, not invented CLI fallbacks. |
-| Traceability | Product/control commits, native events, journals, and Git notes | Each trace feature is independently configurable. |
-| Repository rules | Workflow- and repo-targeted project skills with lazy references | Skills are repository-owned, bounded, and never execute scripts automatically. |
+| Area | Capability |
+|---|---|
+| Clients | Native user plugins for Codex and Claude Code. |
+| Project creation | Greenfield/brownfield classification, optional Git initialization, approved context, workflow, styleguides, and patterns. |
+| Tracks | Feature and bug specifications, acceptance criteria, dependencies, phased plans, and learning seeds. |
+| Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |
+| Implementation | Parallel-by-default or explicitly sequential execution with resumable journals. |
+| Isolation | Phase and task workers in Cadre-managed sibling Git worktrees. |
+| Governance | Human approval before artifacts, commits, integrations, manual verification, lifecycle transitions, and archive batches. |
+| Review | Evidence-backed findings, approved remediation cycles, accepted-risk recording, and clean completion. |
+| Change control | Lifecycle-aware revision, project-context refresh, and additive Git-aware revert. |
+| Learning | Dependency-phase learning, pattern seeds, pattern distillation, and active-track reseeding. |
+| Recovery | Setup, execution, revision, review, refresh, revert, and archive reconciliation after interruption. |
+| Exploration | Stateless `wisp` investigations outside tracked delivery state. |
 
-## Supported Workflow Lifecycle
+## Built-In Styleguides
 
-```mermaid
-flowchart LR
-  A["setup"] --> B["newtrack"]
-  B --> C["implement"]
-  C --> D["review"]
-  D --> E{"Repository topology"}
-  E -->|"single or monorepo"| F["ship"]
-  E -->|"polyrepo"| G["land"]
-  F --> H["archive"]
-  G --> H
-  H --> I["release"]
-```
+Cadre bundles idiomatic defaults for:
 
-Supporting workflows cover debugging, status, validation, flags, revisions,
-handoffs, context refresh, revert, formulas, artifacts, and project-skill
-management. See [Workflow Reference](workflow-reference.md) for the complete
-contract.
+- Go, Java, Kotlin, JavaScript, TypeScript, Dart, Python, and Swift;
+- React, Flutter, SwiftUI, and HTML/CSS;
+- Maven and Gradle;
+- general repository engineering guidance.
 
-## Supported Operating Models
+During `create`, applicable guides are resolved from the approved technology
+list. Each can be accepted, amended, or replaced before project initialization.
 
-### Solo And Local-First
+## Safety Boundaries
 
-Use `sync_mode:"local"` and `provider_mode:"local"` when Cadre state does not
-need to move between contributors and hosted pull-request evidence is outside
-the workflow. Review and traceability still work locally.
+Cadre's MCP runtime is intentionally constrained:
 
-### Shared Repository Team
+- It exposes immutable versioned templates and typed state operations.
+- Deterministic mutations use paired preview/apply calls with stale-state
+  digests.
+- Git support is limited to derived worktree creation, non-squash integration,
+  status, and verified cleanup.
+- It does not run arbitrary shell commands, edit product files for workers,
+  approve its own proposals, resolve conflicts, or commit on a worker's behalf.
+- It rejects broad project roots and validates managed paths and lifecycle
+  invariants.
 
-Use shared sync when the repository's Cadre control plane must move through a
-dedicated branch. Configure ownership, review policy, provider evidence, and
-trace-note behavior deliberately before enabling automation.
+Agent skills still perform explicitly approved artifact writes and Git commits
+where the MCP does not own that mutation. Multi-step changes are journaled
+before the first artifact or Git mutation.
 
-### Polyrepo Product
+## Not In The Current Release
 
-A control repository owns shared Cadre context and `cadre/repos.json`; product
-changes live in the declared repositories. `cadre-land` coordinates the
-cross-repository publication plan and provider evidence.
+Cadre 3.0 does not currently provide:
 
-## Safety Properties
+- GitHub Copilot or Google Antigravity plugins;
+- project-scoped client installation;
+- hosted provider evidence, ship/land/release workflows, or merge trains;
+- project-owned executable skills;
+- LSP/DAP orchestration or a general code-intelligence service;
+- a generic `cadre_workflow` packet API;
+- multi-repository orchestration.
 
-- Only explicit human approval advances staged review output.
-- Target-path previews are reviewable worktree changes, not silent execution.
-- Drift between approved preview content and final execution fails closed.
-- Project roots are resolved on every project-scoped call.
-- Provider evidence is required only when policy and provider mode require it.
-- Required project-skill rules are not silently truncated.
-- Parallel work is bounded by dependencies, file claims, worker evidence, and
-  merge-back checks.
-
-## What Cadre Does Not Do
-
-Cadre does not replace Git, a hosted code provider, a coding agent, or a test
-runner. It coordinates them. It also does not treat generated Markdown as
-canonical state, execute arbitrary project-skill scripts, or turn optional MCP
-integrations into universal installation requirements.
+Polyrepo delivery is planned. See [Polyrepo Mode](team-and-polyrepo.md) for the
+current boundary and intended direction.

@@ -1,191 +1,139 @@
 ---
 title: Parallel Execution
-description: Phase annotations, worker waves, file claims, merge-back, and failure recovery.
+description: Dependency scheduling, isolated worktrees, approval gates, integration, and recovery.
 section: User Guide
 order: 80
 ---
 
 # Parallel Execution
 
-Cadre can run safe portions of a plan in parallel. The scheduler is conservative
-by design: it dispatches only work that has explicit dependencies satisfied and
-non-overlapping file claims.
+Cadre executes an approved plan as a dependency DAG. Parallel is the default
+mode, but parallelism is used only when it provides safe, bounded benefit.
 
-## Sequential Default
+## Execution Modes
 
-Without annotations, phases run sequentially and each phase runs one unfinished
-task at a time:
+| Mode | Behavior |
+|---|---|
+| `parallel` | Create workers only when at least two safe nodes are ready; otherwise execute the node in main. |
+| `sequential` | Execute one ready node at a time in main unless the workflow needs an integration boundary. |
 
-```text
-Phase 1 -> Phase 2 -> Phase 3
-Task 1 -> Task 2 -> Task 3
-```
+The execution journal records requested mode, effective mode, maximum workers,
+plan revision, plan commit, graph digest, base commit, and every node. Changing
+mode mid-execution requires a clean safe boundary and approval.
 
-This keeps existing plans compatible.
+## Scheduler Ownership
 
-## Parallel Plan Annotations
+The main agent is the only scheduler and Cadre-state owner. It:
 
-Phases can opt into parallel task execution:
+- derives ready nodes from MCP execution status;
+- creates all worktrees and workers;
+- supplies exact context, allowed paths, dependencies, and verification;
+- presents worker diffs and evidence to the human;
+- directs task commits after approval;
+- integrates task branches into phase parents and phase branches into main;
+- resolves and re-verifies conflicts;
+- records learning, manual verification, state, and provenance;
+- cleans worktrees only after integration is proven.
 
-```markdown
-## Phase 1: Core Auth
-<!-- execution: parallel -->
+Workers never spawn workers, edit `.cadre/**`, merge branches, resolve
+integration conflicts, remove worktrees, or record human approval.
 
-- [ ] Task 1: Add OAuth provider module
-  <!-- files: src/auth/oauth.ts, src/auth/oauth.test.ts -->
+## Phase And Task Strategies
 
-- [ ] Task 2: Add session module
-  <!-- files: src/auth/session.ts, src/auth/session.test.ts -->
+A phase uses exactly one strategy:
 
-- [ ] Task 3: Add auth config
-  <!-- files: src/config/auth.ts -->
-  <!-- depends: task1 -->
-```
+1. A **phase worker** owns the phase worktree and executes its tasks internally
+   in dependency order, stopping after every regular task for approval and a
+   distinct commit.
+2. The **main agent coordinates task workers**, each with its own task worktree
+   whose branch integrates into a phase worktree or directly into the canonical
+   branch.
 
-Phase annotations:
+A phase cannot simultaneously have a phase worker and independent task workers.
+A phase integration worktree without a phase worker ID is coordination state,
+not worker ownership.
 
-| Annotation | Purpose |
-|------------|---------|
-| `<!-- execution: parallel -->` | Tasks in the phase can dispatch concurrently when safe. |
-| `<!-- execution: sequential -->` | Tasks in the phase run one at a time. |
-| `<!-- depends: phase1, phase2 -->` | Phase waits for specific previous phases. |
-| `<!-- depends: -->` | Phase has no phase dependency and can start as soon as its own tasks are ready. |
+## Worktree Layout
 
-Task annotations:
-
-| Annotation | Purpose |
-|------------|---------|
-| `<!-- files: path1, path2 -->` | Files the task expects to modify. |
-| `<!-- depends: task1, task2 -->` | Same-phase task dependencies. |
-| `<!-- repo: api -->` | Polyrepo product repo ownership. |
-
-If a phase omits `<!-- depends: -->`, it depends on all previous phases.
-
-## Scheduler
-
-`cadre-implement` calls Cadre packets for scheduling. The agent does not parse
-the Markdown and spawn workers on its own.
-
-The coordinator loop is:
+Git worktrees cannot be safely nested, so Cadre uses sibling paths:
 
 ```text
-cadre_workflow {"root":"/path/to/project","workflow":"implement","input":{"trackId":"checkout","agentIdentifier":"codex"},"execute":false}
-invoke exactly response.next.tool with response.next.arguments when next is non-null
-when a response contains data.workers, dispatch exactly those packet-owned payloads
-submit each worker result once through that worker's data.workers[].dispatch.record_finish_packet
-when Cadre returns data.worker_callbacks, use those exact reissued completion or recovery callbacks
-after every response, invoke only its newly returned next call when non-null
+.cadre/.worktrees/<track-id>/<execution-id>/
+├── phases/P1
+└── tasks/P1--T1.1
 ```
 
-Cadre returns ready groups only when dependencies, file claims, repo routing,
-worker state, and plan integrity are safe.
-Worker setup requires `agentIdentifier` and returns a single
-`selected_dispatch` adapter for that caller. Valid identifiers are `codex`,
-`claude`, `copilot`, and `antigravity`. The coordinator never derives merge or
-cleanup actions from this guide; Cadre returns each safe immediate operation in
-the preceding call's `next` field.
+Branches and paths are derived from the track, execution, and node identity.
+Creation is digest-gated against an exact base commit.
 
-Dispatch adapters are client-specific:
+## Task Checkpoint
 
-| Client | Adapter |
-|--------|---------|
-| Codex | `multi_agent_v1.spawn_agent` |
-| Claude | `Task` |
-| Copilot | Copilot CLI custom agent; `/fleet` is allowed only when each worker still returns Cadre evidence. |
-| Antigravity | `invoke_subagent` or a dynamically defined Cadre worker subagent. |
+For each regular worker task:
 
-## Worker Payloads
+1. The worker reads the assigned context and product files.
+2. It edits only product files in its worktree.
+3. It runs focused verification.
+4. It stops with changes uncommitted and returns the diff, checks, risks,
+   learning candidates, and proposed commit message.
+5. Main records `awaiting_approval` and presents the evidence.
+6. After approval, the worker commits only that task.
+7. Main verifies the clean worktree and records the commit SHA.
+8. Main previews and applies integration when a branch boundary exists.
 
-Each worker receives a bounded payload:
+Every regular task receives a distinct Conventional Commit and recorded SHA,
+including tasks handled sequentially by one phase worker.
 
-```text
-Track: <track_id>
-Phase: <phase_name>
-Task: <task_description>
-Repo root/worktree: <worker_worktree>
-Owned files:
-  <files>
-```
+## Integration And Cleanup
 
-Workers follow canonical `cadre/workflow.json`, modify only their owned files,
-keep commits local, and return evidence to the coordinator:
+Task branches merge without squashing into their derived parent. Phase branches
+merge without squashing into the canonical branch. Before integration the MCP
+verifies clean source/target worktrees, protected Cadre paths, branch tips, and
+changed files.
 
-```json
-{
-  "worker_id": "worker_1_auth",
-  "task_key": "phase1_task1",
-  "commit_sha": "abc1234",
-  "tests": ["npm test -- auth"],
-  "coverage": 84.2,
-  "files_changed": ["src/auth/oauth.ts", "src/auth/oauth.test.ts"],
-  "notes": ["Added token refresh edge case"]
-}
-```
+If a merge conflicts:
 
-Workers do not edit Cadre state directly.
-For each returned worker, map its structured result into that worker's exact
-`dispatch.record_finish_packet` placeholders and invoke the packet once. Do not
-construct a finish action from the example result or reuse one worker's callback
-for another worker. If other workers remain incomplete or enter `blocked`,
-`failed`, or `conflict`, the latest response is self-contained: it returns exact
-completion or recovery calls under `data.worker_callbacks[].record_finish_packet`.
-Cadre returns merge and cleanup through `next` only after the resulting worker
-state proves every worker is ready for that transition.
+- task conflicts are resolved in the owning phase worktree;
+- phase conflicts are resolved in the canonical worktree;
+- all conflicted files and both sides are read;
+- combined verification is rerun;
+- the resolution is presented before its merge commit is recorded.
 
-The callback's `status` placeholder must be filled from the worker result as
-either `awaiting_merge` or `blocked`. `awaiting_merge` requires a commit SHA;
-`blocked` may use a null commit and must retain the worker's blockers.
+Cleanup refuses dirty, conflicted, or unintegrated workers. It removes only a
+worktree whose branch ancestry proves that its work exists in the parent.
 
-## File Claims
+## Manual Verification
 
-File claims prevent two workers from changing the same file at the same time.
-Cadre compares task-level `<!-- files: -->` annotations before dispatch.
+Each delivery phase ends with a derived `User Manual Verification` barrier over
+all sibling tasks. Technical evidence is prepared in the phase context, but the
+main agent presents and records the human decision.
 
-If two ready tasks claim the same file, Cadre does not dispatch them together.
-The plan can be revised, dependencies can be made explicit, or the phase can
-fall back to sequential execution.
+The final track-level manual verification depends on every delivery phase and
+runs only in the main agent against the fully integrated canonical worktree.
+Manual-verification nodes can record current commit/merge evidence instead of
+creating empty commits.
 
-In polyrepo mode, claims are repo-scoped. `api/src/user.ts` and
-`web/src/user.ts` are different claims because their `(repo, file)` tuples
-differ.
+## Host Permission Preflight
 
-## Worker States
+Before spawning workers, main inspects scripts, lockfiles, likely checks, and
+required external operations. Shared dependency installs, registry access,
+image pulls, and code generation are centralized before workers start.
 
-Parallel worker records move through states such as:
+Host permission authorizes only the operation requested. It does not approve a
+Cadre artifact, task commit, integration, verification result, or lifecycle
+transition. A worker that encounters an unexpected permission prompt stops and
+reports the exact command to main.
 
-- `in_progress`
-- `awaiting_merge`
-- `merged`
-- `failed`
-- `conflict`
+## Resume And Failure
 
-After successful cleanup, a worker remains `merged` for scheduling history, but
-its live `worktree` and `worker_ref` fields are cleared. Cadre retains
-`cleaned_worktree`, `cleaned_worker_ref`, and cleanup timestamps for auditability,
-so later waves do not retry already-completed cleanup commands.
+Cadre reconciles journal nodes with worker IDs, Git worktree registrations,
+branch tips, dirty files, commits, and merges before scheduling:
 
-The audit file is packet-owned. Agents should inspect packet output and compact
-resources instead of editing worker state.
+- committed or integrated nodes are not repeated;
+- newly ready nodes run after durable transitions;
+- a clean branch containing the expected commit advances bookkeeping;
+- a conflict remains explicit until resolved and approved;
+- an unknown or contradictory state stops rather than being guessed away.
 
-## Merge-Back
-
-Each worker's typed finish callback records its evidence. The callback response
-decides whether another worker is still outstanding, recovery is required, or
-a merge is now safe. The coordinator invokes only a non-null `next` returned by
-that response. A later packet may similarly return cleanup through `next` after
-a clean merge; callers never precompute either operation. Failed or conflicted
-workers remain available for packet-directed recovery.
-
-## Failure Recovery
-
-Typical failure handling:
-
-| Failure | Cadre behavior |
-|---------|----------------|
-| Worker timeout | Records timeout, releases or blocks ownership according to packet result, and reports retry steps. |
-| Worker error | Records failure evidence and blocks dependent work. |
-| Runtime file conflict | Marks conflict and returns recovery options. |
-| Merge conflict | Leaves worker state for human or coordinator recovery. |
-| Missing evidence | Refuses completion until required commit, test, or coverage evidence exists. |
-
-Recovery should always go through Cadre packets.
+A revision or refresh that changes execution-governing context first quiesces
+and reconciles active workers. A changed graph starts a new execution identity;
+the prior journal remains historical.
