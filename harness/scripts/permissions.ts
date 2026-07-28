@@ -1,4 +1,10 @@
-import { applyEdits, modify, parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
+import {
+  applyEdits,
+  modify,
+  parse as parseJsonc,
+  printParseErrorCode,
+  type ParseError
+} from "jsonc-parser/lib/esm/main.js";
 import {
   chmodSync,
   existsSync,

@@ -28,6 +28,30 @@ for (const manifest of [
   }
 }
 
+interface PackageManifest {
+  name?: string;
+  version?: string;
+  private?: boolean;
+  bin?: Record<string, string>;
+  files?: string[];
+  dependencies?: Record<string, string>;
+}
+
+const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.0.0") {
+  errors.push("package: expected publish identity cadre-ai@3.0.0");
+}
+if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
+if (packageManifest.bin?.cadre !== "dist/cadre-cli.mjs" || packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs") {
+  errors.push("package: cadre and cadre-ai bins must point at dist/cadre-cli.mjs");
+}
+for (const entry of ["dist/", "skills/", "templates/", ".codex-plugin/", ".claude-plugin/"]) {
+  if (!packageManifest.files?.includes(entry)) errors.push(`package: files must include ${entry}`);
+}
+if (packageManifest.dependencies && Object.keys(packageManifest.dependencies).length > 0) {
+  errors.push("package: self-contained runtime must not have production dependencies");
+}
+
 interface Marketplace {
   name?: string;
   plugins?: Array<{ name?: string; source?: string | { path?: string } }>;
@@ -157,7 +181,7 @@ for (const name of [
 for (const file of [
   "src/mcp/server.ts", "src/domain/templates.ts", "src/domain/init.ts", "src/domain/state.ts",
   "src/domain/plan.ts", "src/domain/execution.ts", "src/domain/worktrees.ts",
-  "scripts/permissions.ts", "dist/cadre-mcp.mjs"
+  "scripts/permissions.ts", "dist/cadre-cli.mjs", "dist/cadre-mcp.mjs"
 ]) {
   if (!existsSync(join(root, file))) errors.push(`runtime: missing ${file}`);
 }

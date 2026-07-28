@@ -2,13 +2,54 @@
   "name": "cadre-ai",
   "version": "3.0.0",
   "description": "Cross-agent, human-governed software delivery harness",
+  "author": {
+    "name": "Vishal Kumar",
+    "url": "https://github.com/vishal-kr-barnwal"
+  },
+  "homepage": "https://cadre-docs.pages.dev/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vishal-kr-barnwal/cadre.git",
+    "directory": "harness"
+  },
+  "license": "MIT",
+  "keywords": [
+    "cadre",
+    "cadre-ai",
+    "agent-workflows",
+    "mcp",
+    "codex",
+    "claude"
+  ],
   "type": "module",
+  "packageManager": "pnpm@11.4.0",
+  "bin": {
+    "cadre": "dist/cadre-cli.mjs",
+    "cadre-ai": "dist/cadre-cli.mjs"
+  },
+  "files": [
+    ".claude-plugin/",
+    ".codex-plugin/",
+    ".mcp.codex.json",
+    ".mcp.json",
+    "agents/",
+    "dist/",
+    "LICENSE",
+    "marketplace/",
+    "README.md",
+    "skills/",
+    "templates/"
+  ],
   "scripts": {
     "build": "node --import tsx scripts/build.ts",
     "check": "tsc --noEmit",
-    "install:plugin": "node --import tsx scripts/install.ts --agent all",
-    "test": "npm run build && node --import tsx --test test/*.test.ts",
-    "validate": "npm run build && node --import tsx scripts/validate.ts"
+    "install:plugin": "pnpm build && node dist/cadre-cli.mjs install --target all",
+    "prepack": "pnpm build && node --import tsx scripts/validate.ts",
+    "test": "pnpm build && node --import tsx --test test/*.test.ts",
+    "validate": "pnpm build && node --import tsx scripts/validate.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=18"

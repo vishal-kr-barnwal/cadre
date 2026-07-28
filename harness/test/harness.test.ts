@@ -1132,7 +1132,7 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
   const target = join(parent, "cadre");
   execFileSync(process.execPath, [
-    "--import", "tsx", join(root, "scripts", "install.ts"), "--agent", "all", "--prepare-only",
+    join(root, "dist", "cadre-cli.mjs"), "install", "--agent", "all", "--prepare-only",
     "--marketplace-root", target, "--cachebuster", "test-build"
   ]);
 
@@ -1179,7 +1179,7 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   assert.equal(claudeMarketplace.plugins[0].source, "./plugins/cadre");
 
   execFileSync(process.execPath, [
-    "--import", "tsx", join(root, "scripts", "install.ts"), "--agent", "all", "--prepare-only",
+    join(root, "dist", "cadre-cli.mjs"), "install", "--agent", "all", "--prepare-only",
     "--marketplace-root", target, "--cachebuster", "second-build"
   ]);
   const backups = readdirSync(parent).filter((entry) => entry.startsWith("cadre.backup-"));
