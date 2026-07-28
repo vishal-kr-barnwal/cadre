@@ -279,7 +279,7 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
 | `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
-| `execution_node_preview` / `execution_node_apply` | Preview/apply | Persist one legal, dependency-gated execution-node transition. |
+| `execution_node_preview` / `execution_node_apply` | Preview/apply | Persist one legal, dependency-gated execution-node transition and return its derived execution status. |
 | `execution_status` | No | Derive ready phases, ready tasks within running phases, active nodes, and blockers. |
 | `execution_finish_preview` / `execution_finish_apply` | Preview/apply | Require completed nodes, current plan evidence, and removed worktrees before `ready_for_review`. |
 | `worktree_create_preview` / `worktree_create_apply` | Preview/apply | Create or reconcile one derived phase/task worktree and branch. |

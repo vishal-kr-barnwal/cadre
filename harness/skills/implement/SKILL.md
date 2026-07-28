@@ -17,7 +17,7 @@ Call `project_status`, `execution_graph_validate`, and `worktree_status` before 
 - Bound worker count by ready nodes, host capacity, and the workflow maximum.
 - Persist requested/effective mode in the execution journal. Changing it during execution requires a clean safe boundary, a presented proposal, and approval.
 
-For a new execution, call `execution_start_preview`, show the exact journal/state proposal, obtain approval, and pass the unchanged digest to `execution_start_apply`. Commit `cadre(implement): start <track-id>`. For an existing `implement` operation, reconcile it instead of creating another execution.
+For a new execution, call `execution_start_preview`, show the exact journal/state proposal, obtain approval, and pass the unchanged digest to `execution_start_apply`. Then preview and apply the derived `tracks.md` update through its digest gate, verify `derivedStateCurrent`, and commit `cadre(implement): start <track-id>`. For an existing `implement` operation, reconcile it instead of creating another execution.
 
 ## Resume before scheduling
 
@@ -28,7 +28,7 @@ For a new execution, call `execution_start_preview`, show the exact journal/stat
 
 ## Schedule the DAG
 
-Call `execution_status` after every durable transition. Plan display order breaks ties only.
+Call `execution_status` when resuming an execution or when no mutation response is available. After a successful `execution_start_apply` or `execution_node_apply`, use its returned `derivedStatus` instead of making a redundant status call. Plan display order breaks ties only.
 
 - A root phase reads the Pattern Seed. Any other phase reads learning from all declared dependency phases.
 - A phase is either assigned to one phase worker for internally sequential work or coordinated by main through task workers; never both simultaneously. A phase integration worktree without a phase `workerId` is coordination state, not phase-worker ownership.

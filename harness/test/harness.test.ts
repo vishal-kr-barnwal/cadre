@@ -223,7 +223,8 @@ test("execution journal gates tasks behind their running phase and validates per
     approvedAt: "2026-07-28T01:00:00.000Z"
   };
   const preview = previewExecutionStart(input);
-  applyExecutionStart(input, preview.digest);
+  const started = applyExecutionStart(input, preview.digest);
+  assert.deepEqual(started.derivedStatus.readyPhases, ["P1"]);
   assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyPhases, ["P1"]);
   assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyTasks, []);
   assert.throws(() => previewExecutionNodeUpdate({
@@ -234,7 +235,8 @@ test("execution journal gates tasks behind their running phase and validates per
     projectRoot, trackId: input.trackId, executionId: input.executionId, nodeId: "P1", status: "running" as const
   };
   const phasePreview = previewExecutionNodeUpdate(phaseUpdate);
-  applyExecutionNodeUpdate(phaseUpdate, phasePreview.digest);
+  const phaseApplied = applyExecutionNodeUpdate(phaseUpdate, phasePreview.digest);
+  assert.deepEqual(phaseApplied.derivedStatus.readyTasks, ["T1.1"]);
   assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyTasks, ["T1.1"]);
 
   const journalPath = join(trackRoot, "executions", `execution-${input.executionId}.json`);

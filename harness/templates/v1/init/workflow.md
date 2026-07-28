@@ -47,6 +47,8 @@ During `create`, detect an existing worktree with `git rev-parse --show-toplevel
 
 For deterministic MCP mutations, call the read-only preview immediately before apply, show the exact proposal to the human, and pass its digest unchanged. A changed digest requires a new proposal and approval. The MCP never grants approval or replaces required repository inspection. Its Git surface is limited to constrained, digest-gated Cadre worktree creation, integration, and safe cleanup; it accepts no arbitrary command, path, force deletion, or automatic conflict resolution.
 
+When a command skill explicitly instructs direct writes for approved Cadre artifacts and no corresponding MCP mutation tool is declared, those direct writes are intentional. Do not search the global tool list for an undeclared operation. Journal the change first, use the available MCP validation and derived-render gates, and stop if the resulting state does not match the approved proposal.
+
 ### Sources of truth
 
 - `plan.md` is the execution source of truth for phase/task identities, dependencies, verification barriers, completion, and commit provenance. Display order is only a deterministic scheduling tie-breaker.

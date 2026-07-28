@@ -89,6 +89,13 @@ export interface ExecutionProposal {
   digest: string;
 }
 
+export interface ExecutionDerivedStatus {
+  readyPhases: string[];
+  readyTasks: string[];
+  active: string[];
+  blocked: string[];
+}
+
 const SHA = /^[0-9a-f]{7,40}$/;
 const TRACK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EXECUTION_ID = /^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/;
@@ -238,7 +245,10 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   };
 }
 
-export function applyExecutionStart(input: ExecutionStartInput, proposalDigest: string): ExecutionProposal {
+export function applyExecutionStart(
+  input: ExecutionStartInput,
+  proposalDigest: string
+): ExecutionProposal & { derivedStatus: ExecutionDerivedStatus } {
   const proposal = previewExecutionStart(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution proposal is stale; preview it again");
   if (lstatSync(proposal.statePath).isSymbolicLink()) throw new Error("refusing to start execution through a state symbolic link");
@@ -247,7 +257,7 @@ export function applyExecutionStart(input: ExecutionStartInput, proposalDigest: 
     writeFileSync(proposal.journalPath, `${JSON.stringify(proposal.journal, null, 2)}\n`);
   }
   writeFileSync(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
-  return proposal;
+  return { ...proposal, derivedStatus: deriveExecutionStatus(proposal.journal) };
 }
 
 function executionPaths(projectRoot: string, trackId: string, executionId: string): {
@@ -370,27 +380,24 @@ export function previewExecutionNodeUpdate(input: ExecutionNodeUpdateInput): {
 export function applyExecutionNodeUpdate(input: ExecutionNodeUpdateInput, proposalDigest: string): {
   path: string;
   journal: ExecutionJournal;
+  derivedStatus: ExecutionDerivedStatus;
 } {
   const proposal = previewExecutionNodeUpdate(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution node proposal is stale; preview it again");
   writeFileSync(proposal.path, `${JSON.stringify(proposal.journal, null, 2)}\n`);
-  return { path: proposal.path, journal: proposal.journal };
+  return {
+    path: proposal.path,
+    journal: proposal.journal,
+    derivedStatus: deriveExecutionStatus(proposal.journal)
+  };
 }
 
-export function executionStatus(projectRoot: string, trackId: string, executionId: string): {
-  journal: ExecutionJournal;
-  readyPhases: string[];
-  readyTasks: string[];
-  active: string[];
-  blocked: string[];
-} {
-  const journal = readExecution(projectRoot, trackId, executionId);
+function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatus {
   const completed = new Set(Object.values(journal.nodes).filter((node) => node.status === "completed").map((node) => node.id));
   const ready = Object.values(journal.nodes).filter(
     (node) => node.status === "pending" && node.dependencies.every((dependency) => completed.has(dependency))
   );
   return {
-    journal,
     readyPhases: ready.filter((node) => node.kind === "phase").map((node) => node.id),
     readyTasks: ready.filter(
       (node) => node.kind !== "phase" && journal.nodes[node.phaseId]?.status === "running"
@@ -398,6 +405,13 @@ export function executionStatus(projectRoot: string, trackId: string, executionI
     active: Object.values(journal.nodes).filter((node) => !["pending", "completed", "blocked"].includes(node.status)).map((node) => node.id),
     blocked: Object.values(journal.nodes).filter((node) => node.status === "blocked").map((node) => node.id)
   };
+}
+
+export function executionStatus(projectRoot: string, trackId: string, executionId: string): {
+  journal: ExecutionJournal;
+} & ExecutionDerivedStatus {
+  const journal = readExecution(projectRoot, trackId, executionId);
+  return { journal, ...deriveExecutionStatus(journal) };
 }
 
 export interface ExecutionFinishInput {
