@@ -97,6 +97,24 @@ try {
 } catch (error) {
   errors.push(`template provider: archive-operation.json: ${errorMessage(error)}`);
 }
+const refreshOperationTemplate = join(templateRoot, "project", "refresh-operation.json");
+try {
+  const operation = readJson<{ action?: string; operationId?: string }>(refreshOperationTemplate);
+  if (operation.action !== "refresh" || !operation.operationId) {
+    errors.push("template provider: invalid refresh-operation.json");
+  }
+} catch (error) {
+  errors.push(`template provider: refresh-operation.json: ${errorMessage(error)}`);
+}
+const revertOperationTemplate = join(templateRoot, "track", "revert-operation.json");
+try {
+  const operation = readJson<{ action?: string; commits?: unknown[] }>(revertOperationTemplate);
+  if (operation.action !== "revert" || !Array.isArray(operation.commits)) {
+    errors.push("template provider: invalid revert-operation.json");
+  }
+} catch (error) {
+  errors.push(`template provider: revert-operation.json: ${errorMessage(error)}`);
+}
 
 const projectStateTemplate = readJson<{
   runtimeVersion?: string;

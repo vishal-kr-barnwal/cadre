@@ -185,6 +185,33 @@ function validateImplementOperation(state: TrackState, owner: string, errors: st
   if (!Number.isInteger(operation.planRevision) || Number(operation.planRevision) < 1) errors.push(`${owner}: implement planRevision is invalid`);
 }
 
+function validateRevertOperation(state: TrackState, owner: string, errors: string[]): void {
+  const operation = state.operation;
+  if (operation?.action !== "revert") return;
+  if (!operation.checkpoint) errors.push(`${owner}: revert checkpoint is required`);
+  if (!Array.isArray(operation.artifactProgress)) errors.push(`${owner}: revert artifactProgress must be an array`);
+  if (!/^[0-9a-f]{7,40}$/.test(operation.baseCommit ?? "")) {
+    errors.push(`${owner}: revert baseCommit must be a Git commit SHA`);
+  }
+  if (operation.expectedCommit !== `cadre(revert): reconcile ${state.trackId}`) {
+    errors.push(`${owner}: revert expectedCommit must target ${state.trackId}`);
+  }
+  if (!["task", "phase", "track"].includes(String(operation.targetKind ?? ""))) {
+    errors.push(`${owner}: revert targetKind must be task, phase, or track`);
+  }
+  if (!operation.targetId || typeof operation.targetId !== "string") {
+    errors.push(`${owner}: revert targetId is required`);
+  }
+  if (!Array.isArray(operation.commits) || !operation.commits.length
+    || operation.commits.some((commit) => !/^[0-9a-f]{7,40}$/.test(String(commit)))) {
+    errors.push(`${owner}: revert commits must be a non-empty array of Git commit SHAs`);
+  }
+  if (!Array.isArray(operation.revertCommits)
+    || operation.revertCommits.some((commit) => !/^[0-9a-f]{7,40}$/.test(String(commit)))) {
+    errors.push(`${owner}: revert revertCommits must be an array of Git commit SHAs`);
+  }
+}
+
 function validateLearning(path: string, required: boolean, errors: string[]): void {
   if (!existsSync(path)) {
     if (required) errors.push(`${path}: missing learning file`);
@@ -212,30 +239,58 @@ function validateSpec(path: string, errors: string[]): void {
   }
 }
 
-function validateArchiveOperations(root: string, byId: Map<string, DiscoveredTrack>, errors: string[]): void {
+function validateProjectOperations(root: string, byId: Map<string, DiscoveredTrack>, errors: string[]): void {
   const operationsRoot = join(root, "operations");
   if (!existsSync(operationsRoot)) return;
-  let activeCount = 0;
+  let activeProjectOperations = 0;
   for (const file of readdirSync(operationsRoot).filter((name) => name.endsWith(".json"))) {
     const owner = `operations/${file}`;
     const operation = readJson<OperationState & {
       action?: string;
       batchId?: string;
+      operationId?: string;
       status?: string;
       selectedTracks?: string[];
       completedTracks?: string[];
       archiveCommit?: string | null;
+      refreshPath?: string;
+      refreshCommit?: string | null;
     }>(join(operationsRoot, file), errors);
     if (!operation) continue;
-    if (operation.action !== "archive") errors.push(`${owner}: unsupported action ${operation.action ?? "<missing>"}`);
     validateOperation(operation, owner, errors);
-    if (!operation.batchId || file !== `${operation.batchId}.json`) {
-      errors.push(`${owner}: filename must match batchId`);
-    }
     if (!operation.status || !["in_progress", "completed"].includes(operation.status)) {
       errors.push(`${owner}: status must be in_progress or completed`);
     }
-    if (operation.status === "in_progress") activeCount += 1;
+    if (operation.status === "in_progress") activeProjectOperations += 1;
+
+    if (operation.action === "refresh") {
+      if (!operation.operationId || file !== `${operation.operationId}.json`
+        || !/^refresh-[^/]+$/.test(operation.operationId)) {
+        errors.push(`${owner}: filename must match its refresh operationId`);
+      }
+      const expectedPath = operation.operationId ? `refreshes/${operation.operationId}.md` : "";
+      if (operation.refreshPath !== expectedPath || !operation.approvedArtifacts?.includes(expectedPath)) {
+        errors.push(`${owner}: refreshPath must match an approved refresh artifact`);
+      }
+      if (operation.expectedCommit !== "cadre(refresh): update project context") {
+        errors.push(`${owner}: refresh expectedCommit is invalid`);
+      }
+      if (operation.status === "completed" && !/^[0-9a-f]{7,40}$/.test(operation.refreshCommit ?? "")) {
+        errors.push(`${owner}: completed refresh requires a refresh commit SHA`);
+      } else if (operation.status === "in_progress" && operation.refreshCommit != null
+        && !/^[0-9a-f]{7,40}$/.test(operation.refreshCommit)) {
+        errors.push(`${owner}: refreshCommit must be null or a commit SHA`);
+      }
+      continue;
+    }
+
+    if (operation.action !== "archive") {
+      errors.push(`${owner}: unsupported action ${operation.action ?? "<missing>"}`);
+      continue;
+    }
+    if (!operation.batchId || file !== `${operation.batchId}.json`) {
+      errors.push(`${owner}: filename must match batchId`);
+    }
     if (!Array.isArray(operation.selectedTracks) || !operation.selectedTracks.length) {
       errors.push(`${owner}: selectedTracks must be a non-empty array`);
       continue;
@@ -269,7 +324,7 @@ function validateArchiveOperations(root: string, byId: Map<string, DiscoveredTra
       errors.push(`${owner}: archiveCommit must be null or a commit SHA`);
     }
   }
-  if (activeCount > 1) errors.push("operations: more than one archive batch is in progress");
+  if (activeProjectOperations > 1) errors.push("operations: more than one project operation is in progress");
 }
 
 function discoverTracks(root: string, errors: string[]): {
@@ -384,6 +439,7 @@ export function validateProject(projectRoot: string): ValidationResult {
       validateOperation(state.operation, `${track.id} state`, errors);
       validateRevisionOperation(state, `${track.id} state`, errors);
       validateImplementOperation(state, `${track.id} state`, errors);
+      validateRevertOperation(state, `${track.id} state`, errors);
     }
     if (Object.hasOwn(state, "activePhase") || Object.hasOwn(state, "activeTask")) {
       errors.push(`${track.id}: activePhase and activeTask are redundant; derive active nodes from the execution journal`);
@@ -436,7 +492,7 @@ export function validateProject(projectRoot: string): ValidationResult {
       }
     }
   }
-  validateArchiveOperations(root, byId, errors);
+  validateProjectOperations(root, byId, errors);
   for (const track of tracks) {
     for (const dependency of track.dependencies ?? []) {
       if (!byId.has(dependency)) errors.push(`${track.id}: unknown dependency ${dependency}`);

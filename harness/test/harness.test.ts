@@ -698,6 +698,59 @@ None.
   assert.match(invalid.stderr, /revise sourceStatus must have an approved active baseline/);
 });
 
+test("approved refresh and revert operations remain valid while interrupted", () => {
+  const projectRoot = fixture();
+  const refreshId = "refresh-20260728T000000Z";
+  const refreshPath = `refreshes/${refreshId}.md`;
+  const refreshOperationPath = join(projectRoot, ".cadre", "operations", `${refreshId}.json`);
+  writeFileSync(refreshOperationPath, `${JSON.stringify({
+    schemaVersion: 1,
+    action: "refresh",
+    operationId: refreshId,
+    status: "in_progress",
+    checkpoint: "context-writing",
+    baseCommit: "1111111",
+    expectedCommit: "cadre(refresh): update project context",
+    refreshPath,
+    approvedArtifacts: [refreshPath, "product.md"],
+    artifactProgress: [refreshPath],
+    approvedAt: "2026-07-28T00:00:00Z",
+    refreshCommit: null
+  }, null, 2)}\n`);
+
+  const trackRoot = writePlannedTrack(projectRoot, "revertable");
+  const statePath = join(trackRoot, "state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  state.checkpoint = "reverting";
+  state.operation = {
+    action: "revert",
+    checkpoint: "git-revert",
+    baseCommit: "1111111",
+    expectedCommit: "cadre(revert): reconcile revertable",
+    approvedArtifacts: ["plan.md", "learning.md", "state.json"],
+    artifactProgress: [],
+    approvedAt: "2026-07-28T00:00:00Z",
+    targetKind: "task",
+    targetId: "T1.1",
+    commits: ["aaaaaaa"],
+    revertCommits: ["bbbbbbb"]
+  };
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  runState(projectRoot, "render");
+  assert.equal(runState(projectRoot, "validate").status, 0);
+  assert.match(runState(projectRoot, "status").stdout, /operation=revert/);
+
+  state.operation.expectedCommit = "cadre(revert): reconcile another-track";
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  const invalid = runState(projectRoot, "validate", true);
+  assert.match(invalid.stderr, /revert expectedCommit must target revertable/);
+
+  const refresh = JSON.parse(readFileSync(refreshOperationPath, "utf8"));
+  refresh.status = "completed";
+  writeFileSync(refreshOperationPath, `${JSON.stringify(refresh, null, 2)}\n`);
+  assert.match(runState(projectRoot, "validate", true).stderr, /completed refresh requires a refresh commit SHA/);
+});
+
 test("installer prepares a dual-product user plugin marketplace", async () => {
   const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
   const target = join(parent, "cadre");
@@ -833,6 +886,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.ok(resources.resources.some(
       (resource) => resource.uri === "cadre://templates/v1/track/revise-operation"
     ));
+    assert.ok(resources.resources.some(
+      (resource) => resource.uri === "cadre://templates/v1/project/refresh-operation"
+    ));
+    assert.ok(resources.resources.some(
+      (resource) => resource.uri === "cadre://templates/v1/track/revert-operation"
+    ));
 
     const workflow = await client.callTool({ name: "template_get", arguments: { id: "project/workflow" } });
     assert.equal(workflow.isError, undefined);
@@ -905,6 +964,25 @@ test("every post-create command loads the shared workflow", () => {
   ]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /\.cadre\/workflow\.md/, `${skill} must load the shared workflow`);
+  }
+});
+
+test("commands reuse status validation and batch related template reads", () => {
+  for (const skill of [
+    "track", "implement", "review", "revise", "archive",
+    "refresh", "revert", "status"
+  ]) {
+    const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+    assert.match(body, /project_status/, `${skill} must read project status once at entry`);
+    assert.match(body, /embedded[^;\n]*validation|validation embedded/, `${skill} must reuse status validation`);
+    assert.match(body, /do not repeat `state_validate`|do not repeat `state_validate` at command entry/,
+      `${skill} must not repeat full validation at entry`);
+  }
+
+  for (const skill of ["create", "track", "review", "revise", "archive", "refresh", "revert"]) {
+    const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+    assert.match(body, /template_get_many/, `${skill} must batch related template reads`);
+    assert.doesNotMatch(body, /`template_get`(?!_many)/, `${skill} must not request templates one at a time`);
   }
 });
 

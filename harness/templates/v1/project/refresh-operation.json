@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "action": "refresh",
+  "operationId": "refresh-{{REFRESH_TS}}",
+  "status": "in_progress",
+  "checkpoint": "approved",
+  "baseCommit": "{{BASE_COMMIT}}",
+  "expectedCommit": "cadre(refresh): update project context",
+  "refreshPath": "refreshes/refresh-{{REFRESH_TS}}.md",
+  "approvedArtifacts": ["refreshes/refresh-{{REFRESH_TS}}.md"],
+  "artifactProgress": [],
+  "approvedAt": "{{APPROVED_AT}}",
+  "refreshCommit": null
+}

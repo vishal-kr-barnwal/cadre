@@ -8,7 +8,7 @@ Cadre is installed as a user plugin. Its bundled TypeScript MCP server provides 
 
 - Greenfield and brownfield project onboarding, with an explicit classification gate when the repository is ambiguous.
 - Human approval of every generated artifact and lifecycle state transition.
-- Resumable create, specification, planning, implementation, review, revision, and archive flows.
+- Resumable create, specification, planning, implementation, review, revision, refresh, revert, and archive flows.
 - Parallel-by-default implementation of dependency DAGs, with an explicit sequential mode.
 - Isolated phase and task workers in Cadre-managed Git worktrees, coordinated and integrated only by the main agent.
 - Feature and bug tracks with functional requirements, non-functional requirements, acceptance criteria, dependencies, phased tasks, and manual-verification gates.
@@ -262,6 +262,7 @@ Important sources of truth:
 - `executions/execution-<id>.json` is the resumable runtime journal. Ready and active nodes are derived from it; track state does not duplicate an active phase or task.
 - Track-local `state.json` defines identity, type, lifecycle status, track dependencies, revision, checkpoints, operation history, and the last completed execution reference.
 - `project.json` contains project setup and refresh history; it does not duplicate track records.
+- `.cadre/operations/refresh-<id>.json` and archive operation files preserve project-wide mutation checkpoints.
 - `tracks.md` is generated from track-local state and is never hand-edited.
 - Track directory paths are derived from status and ID. A path is never persisted in track state.
 
@@ -311,11 +312,12 @@ Codex uses implementation subagents when parallel nodes are available. Claude Co
 
 ## Resumability and safety
 
-Multi-step state changes—including revisions and implementation executions—write an operation or execution journal before artifact mutation. On the next invocation, Cadre reconciles that journal with files, worker identities, registered worktrees, branches, dirty state, commits, and merges:
+Multi-step state changes—including revisions, refreshes, reverts, archive batches, and implementation executions—write an operation or execution journal before artifact or Git mutation. On the next invocation, Cadre reconciles that journal with files, worker identities, registered worktrees, branches, dirty state, commits, and merges:
 
 - matching dirty work resumes at the first incomplete checkpoint;
 - a clean tree with the expected commit records the commit instead of repeating work;
 - completed artifact work with pending bookkeeping finishes only the state-record commit;
+- refresh and revert resumes reuse the approved artifact set and never repeat a recorded Git commit;
 - committed or integrated DAG nodes are not repeated, and newly ready nodes are scheduled immediately after durable transitions;
 - any mismatch stops and is presented to the human rather than guessed, discarded, reset, or restarted.
 
