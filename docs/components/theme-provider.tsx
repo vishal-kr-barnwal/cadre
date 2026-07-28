@@ -6,6 +6,7 @@ type Theme = "system" | "light" | "dark"
 type ResolvedTheme = Exclude<Theme, "system">
 
 type ThemeContextValue = {
+  mounted: boolean
   theme: Theme
   resolvedTheme: ResolvedTheme
   setTheme: (theme: Theme) => void
@@ -14,6 +15,7 @@ type ThemeContextValue = {
 const THEME_STORAGE_KEY = "cadre-docs-theme"
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)"
 const ThemeContext = React.createContext<ThemeContextValue | null>(null)
+const subscribeToHydration = () => () => undefined
 
 const themeScript = `
 (() => {
@@ -38,20 +40,18 @@ const themeScript = `
 `
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = React.useState<Theme>("system")
-  const [systemTheme, setSystemTheme] = React.useState<ResolvedTheme>("light")
-  const [ready, setReady] = React.useState(false)
+  const [theme, setThemeState] = React.useState<Theme>(readStoredTheme)
+  const [systemTheme, setSystemTheme] =
+    React.useState<ResolvedTheme>(getSystemTheme)
+  const mounted = React.useSyncExternalStore(
+    subscribeToHydration,
+    () => true,
+    () => false
+  )
   const resolvedTheme = theme === "system" ? systemTheme : theme
 
   React.useEffect(() => {
     const mediaQuery = window.matchMedia(SYSTEM_THEME_QUERY)
-    const storedTheme = readStoredTheme()
-    const initialSystemTheme = getSystemTheme(mediaQuery)
-
-    setThemeState(storedTheme)
-    setSystemTheme(initialSystemTheme)
-    applyTheme(storedTheme === "system" ? initialSystemTheme : storedTheme)
-    setReady(true)
 
     function onSystemThemeChange(event: MediaQueryListEvent) {
       setSystemTheme(event.matches ? "dark" : "light")
@@ -62,10 +62,8 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   React.useEffect(() => {
-    if (ready) {
-      applyTheme(resolvedTheme)
-    }
-  }, [ready, resolvedTheme])
+    applyTheme(resolvedTheme)
+  }, [resolvedTheme])
 
   const setTheme = React.useCallback((nextTheme: Theme) => {
     setThemeState(nextTheme)
@@ -78,8 +76,8 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = React.useMemo(
-    () => ({ theme, resolvedTheme, setTheme }),
-    [resolvedTheme, setTheme, theme]
+    () => ({ mounted, theme, resolvedTheme, setTheme }),
+    [mounted, resolvedTheme, setTheme, theme]
   )
 
   return (
@@ -102,9 +100,17 @@ function useTheme() {
 }
 
 function readStoredTheme(): Theme {
+  if (typeof window === "undefined") {
+    return "system"
+  }
+
   try {
     const storedTheme = window.sessionStorage.getItem(THEME_STORAGE_KEY)
-    if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") {
+    if (
+      storedTheme === "light" ||
+      storedTheme === "dark" ||
+      storedTheme === "system"
+    ) {
       return storedTheme
     }
   } catch {
@@ -114,8 +120,12 @@ function readStoredTheme(): Theme {
   return "system"
 }
 
-function getSystemTheme(mediaQuery = window.matchMedia(SYSTEM_THEME_QUERY)): ResolvedTheme {
-  return mediaQuery.matches ? "dark" : "light"
+function getSystemTheme(): ResolvedTheme {
+  if (typeof window === "undefined") {
+    return "light"
+  }
+
+  return window.matchMedia(SYSTEM_THEME_QUERY).matches ? "dark" : "light"
 }
 
 function applyTheme(theme: ResolvedTheme) {
