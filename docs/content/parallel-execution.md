@@ -45,7 +45,8 @@ of ready nodes has no effect.
 
 Increase the approved project worker bound only when the plan exposes enough
 independent work and the repository can tolerate the additional CPU, memory,
-test, port, approval, and merge pressure.
+test, port, approval, and merge pressure. Use the sizing and rollout procedure
+in [Choose The Worker Bound](tuning.md#choose-the-worker-bound).
 
 ## Scheduler Ownership
 

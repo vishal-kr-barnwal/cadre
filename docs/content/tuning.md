@@ -44,17 +44,83 @@ workflow default; the runtime accepts an approved `maxWorkers` value from `1`
 through `32`. Actual concurrency is always the minimum of safe ready nodes, the
 execution bound, and available host worker slots.
 
-Raise the bound when phases or tasks have clear dependency and file boundaries,
-checks can run concurrently, and the host has spare CPU and memory. Keep it low
-when workers compete for shared ports, databases, generated files, package
-caches, or expensive test infrastructure. More workers can also move the
-bottleneck to human approval and serialized phase integration.
+### Preconditions
+
+Increase the bound only when all of these are true:
+
+- the global ready queue regularly contains more safe nodes than the current
+  bound;
+- concurrent tasks have clear dependency and file boundaries;
+- checks can run independently without sharing writable generated output;
+- services, databases, and listeners can use isolated names or ports;
+- the host has unused child-agent slots, CPU, and memory;
+- approvals and serialized phase merges are not already the bottleneck.
+
+More workers do not help a mostly sequential DAG. They can make a tightly
+coupled repository slower by increasing conflicts, cache contention, duplicate
+setup, and approval backlog.
+
+### Calculate A Starting Ceiling
+
+Measure one representative worker's peak memory and identify the host's child
+agent limit. Reserve at least 25% of system memory for main, Git, the operating
+system, editors, and integration checks. Use this conservative estimate:
+
+```text
+memory ceiling = floor((total memory - reserved memory) / peak worker memory)
+
+candidate maxWorkers = min(
+  available child-agent slots,
+  memory ceiling,
+  typical safe ready-node count
+)
+```
+
+CPU-heavy compilers and test suites may require a lower value even when memory
+permits more. If every worker runs a heavy build, begin near one worker per two
+available CPU cores. I/O-bound or mostly independent editing tasks can usually
+use more slots.
+
+Use these ranges as operational guidance, not guarantees:
+
+| Bound | Appropriate use |
+|---|---|
+| `1` | Explicitly sequential work or shared-resource constraints. |
+| `2–3` | Default for ordinary repositories and mixed task graphs. |
+| `4–6` | Independent modules on a host with measured spare capacity. |
+| `7–12` | Large repositories with strong test, service, and file isolation. |
+| `13–32` | Exceptional automation-heavy workloads after staged measurement. |
+
+### Increase Incrementally
+
+1. Run a representative execution at the current bound and record wall time,
+   peak memory, check duration, conflicts, failed retries, and approval wait.
+2. Raise the bound by one or two workers for a new execution.
+3. Compare throughput and failure evidence across at least two representative
+   phases rather than one unusually parallel phase.
+4. Continue only while total wall time improves materially and integration or
+   approval backlog remains stable.
+5. Stop increasing when another increment produces little improvement. A useful
+   heuristic is less than roughly 10% wall-time improvement across two
+   successive trials.
+
+Return to the previous bound when memory pressure causes swapping or process
+termination, checks slow down under contention, workers collide on shared
+resources, merge conflicts rise, or completed work waits longer for approval
+and integration than it spent executing.
+
+### Apply The Change
 
 Change the project workflow through `refresh`, approve the new policy, and use
 the resulting bound for a new execution. An active execution retains the
 `maxWorkers` value recorded in its journal. If that bound must change during an
 active track, quiesce work at a clean boundary and create an approved replacement
 execution instead of rewriting the existing journal.
+
+```text
+$cadre:refresh increase the implementation worker maximum to 6
+/cadre:refresh increase the implementation worker maximum to 6
+```
 
 ## Select Sequential Mode When Useful
 
