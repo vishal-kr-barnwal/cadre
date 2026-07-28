@@ -96,6 +96,9 @@ digest remains current.
 ## execution_node_preview
 
 Validates and previews one legal phase/task node transition and its evidence.
+For a running phase, it can also preview a worker-lease release or reassignment
+without advancing the phase status. Releasing a phase worker requires explicit
+clean-checkpoint verification and is rejected while task workers are active.
 Read-only.
 
 ## execution_node_apply

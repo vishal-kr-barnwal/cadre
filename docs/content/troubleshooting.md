@@ -109,7 +109,8 @@ ready node executes in main. Also inspect:
 - phase/task dependencies;
 - active or conflicted nodes;
 - the workflow worker bound and host capacity;
-- whether a phase already has a phase worker strategy.
+- whether a phase has an active phase-worker lease that must reach a clean
+  handoff before task-worker fan-out.
 
 This is expected scheduling behavior, not necessarily a failure.
 

@@ -48,9 +48,11 @@ resumed rather than replaced.
 Use `implement` for `planned` or `in_progress` tracks.
 
 Parallel execution is the default, but workers are created only when at least
-two safe nodes are ready. Explicit sequential mode avoids worker worktrees.
-Declared track dependencies must already be completed or archived after
-completion.
+two safe nodes are ready. Main allocates one global worker bound across active
+phases and their phase-local task waves; an individual phase can move between a
+sequential worker and task fan-out only at a clean checkpoint. Explicit
+sequential mode avoids worker worktrees. Declared track dependencies must
+already be completed or archived after completion.
 
 Each regular task is read, implemented, verified, presented, approved, and
 committed separately. Derived phase and track manual-verification barriers

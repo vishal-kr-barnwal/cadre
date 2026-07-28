@@ -38,20 +38,39 @@ The main agent is the only scheduler and Cadre-state owner. It:
 Workers never spawn workers, edit `.cadre/**`, merge branches, resolve
 integration conflicts, remove worktrees, or record human approval.
 
-## Phase And Task Strategies
+## Hierarchical Scheduling
 
-A phase uses exactly one strategy:
+Cadre treats a track as two connected dependency graphs:
 
-1. A **phase worker** owns the phase worktree and executes its tasks internally
-   in dependency order, stopping after every regular task for approval and a
-   distinct commit.
-2. The **main agent coordinates task workers**, each with its own task worktree
-   whose branch integrates into a phase worktree or directly into the canonical
-   branch.
+- phase dependencies determine which phases may run;
+- task dependencies determine which work is ready inside every running phase.
 
-A phase cannot simultaneously have a phase worker and independent task workers.
-A phase integration worktree without a phase worker ID is coordination state,
-not worker ownership.
+Main combines ready tasks from all running phases into one global queue and
+allocates the execution's bounded worker slots. Independent phases can therefore
+run concurrently while each phase also moves through sequential and parallel
+task waves.
+
+## Phase Execution Modes
+
+Every non-trivial active phase has a main-owned integration worktree. Within
+that phase, main selects one mutating mode at a time:
+
+| Mode | Use |
+|---|---|
+| Direct main | One ready task where delegation provides no benefit. |
+| Sequential phase worker | A tightly coupled task chain where retaining worker context is useful. |
+| Task-worker fan-out | Two or more independent ready tasks that can safely execute from one phase snapshot. |
+
+Different phases may use different modes concurrently. One phase may also
+change modes, but only at a clean, journaled checkpoint. A phase worker finishes
+and records its current task, reports a clean phase HEAD, releases its temporary
+execution lease, and remains inactive before task workers start. A new phase
+worker may be assigned only after active task workers have completed and their
+integration and cleanup are recorded.
+
+Task workers in one dependency wave all branch from the same clean phase HEAD.
+Main merges their approved branches into the phase worktree one at a time, then
+derives the next wave from the updated phase HEAD. Workers never spawn workers.
 
 ## Worktree Layout
 
@@ -85,10 +104,12 @@ including tasks handled sequentially by one phase worker.
 
 ## Integration And Cleanup
 
-Task branches merge without squashing into their derived parent. Phase branches
-merge without squashing into the canonical branch. Before integration the MCP
-verifies clean source/target worktrees, protected Cadre paths, branch tips, and
-changed files.
+Task branches merge without squashing into their derived parent. Delegated work
+in a multi-task or phase-verified delivery phase uses a phase integration
+worktree; direct canonical integration is reserved for an explicitly direct
+single-task phase. Phase branches merge without squashing into the canonical
+branch. Before integration the MCP verifies clean source/target worktrees,
+protected Cadre paths, branch tips, and changed files.
 
 If a merge conflicts:
 

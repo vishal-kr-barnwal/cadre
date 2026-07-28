@@ -81,10 +81,12 @@ $cadre:implement passwordless-login sequentially
 /cadre:implement passwordless-login sequentially
 ```
 
-Cadre starts a digest-gated execution journal, derives ready nodes from the
-plan, and creates workers only when at least two safe nodes can run. Workers use
-isolated Git worktrees and stop after each regular task so the main agent can
-present its diff and verification for human approval.
+Cadre starts a digest-gated execution journal, derives a global queue from ready
+phases and phase-local tasks, and creates workers only when at least two safe
+nodes can run. A phase can move between sequential execution and task fan-out
+only at a clean checkpoint. Workers use isolated Git worktrees and stop after
+each regular task so the main agent can present its diff and verification for
+human approval.
 
 The main agent alone records state, directs commits, integrates branches,
 resolves conflicts, removes worktrees, and records manual verification. When

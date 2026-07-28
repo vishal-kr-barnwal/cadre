@@ -23,6 +23,8 @@ create-to-archive lifecycle for OpenAI Codex and Claude Code.
   derived manual-verification barriers.
 - Makes parallel implementation the default when multiple safe nodes are ready,
   with explicit sequential mode available.
+- Supports clean, journaled handoffs between sequential phase execution and
+  task-worker fan-out while retaining worker history and one main scheduler.
 - Preserves completed/archived history by routing changed intent to successor
   tracks.
 
@@ -43,6 +45,8 @@ create-to-archive lifecycle for OpenAI Codex and Claude Code.
 - Keeps phase and task worktrees as safe sibling paths.
 - Makes the main agent the sole scheduler, state owner, integrator, conflict
   resolver, cleanup owner, and recorder of human approval.
+- Allocates one global worker bound across parallel phases and phase-local task
+  waves without concurrent mutating modes inside the same phase.
 - Adds constrained preview/apply worktree creation, non-squash integration, and
   ancestry-proven cleanup.
 

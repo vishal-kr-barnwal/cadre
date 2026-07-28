@@ -75,8 +75,10 @@ Paths and active phase/task are derived; they are not duplicated in state.
 - base/head commits and start/completion timestamps;
 - one entry per phase/task node.
 
-Node entries record status, dependencies, worker/worktree/branch identity,
-worker and merge commits, verification, approval, and blockers. Legal statuses
+Node entries record status, dependencies, the active worker and retained worker
+history, worktree/branch identity, worker and merge commits, verification,
+approval, and blockers. Phase-worker release and reassignment preserve that
+history across clean execution-mode handoffs. Legal statuses
 are `pending`, `running`, `awaiting_approval`, `committed`, `integrating`,
 `conflicted`, `integrated`, `awaiting_manual_verification`, `completed`, and
 `blocked`.

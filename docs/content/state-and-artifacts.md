@@ -52,8 +52,9 @@ The installed plugin owns the runtime and immutable template catalog.
 - `spec.md` owns requirements, scope, acceptance, and dependency impact.
 - `plan.md` owns the phase/task graph, completion markers, and commit
   provenance.
-- `executions/execution-<id>.json` owns runtime node status, worker identity,
-  worktree/branch data, verification, approval, commits, merges, and blockers.
+- `executions/execution-<id>.json` owns runtime node status, active and
+  historical worker identity, worktree/branch data, verification, approval,
+  commits, merges, and blockers.
 - `learning.md` owns the marked Pattern Seed plus phase/task learning.
 - `tracks.md` is a generated index derived from track-local state. Never edit
   it by hand.

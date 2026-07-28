@@ -34,7 +34,8 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 ## implement
 
 - **Use for:** a `planned` or `in_progress` track whose dependencies are done.
-- **Mode:** parallel by default; sequential only when requested.
+- **Mode:** parallel by default with a global ready queue and clean phase-mode
+  handoffs; sequential only when requested.
 - **Primary MCP:** execution start/node/status/finish, graph validation,
   worktree create/integrate/cleanup, project/worktree status, and derived index.
 - **Writes:** execution journal, task commits, plan/learning provenance, and
