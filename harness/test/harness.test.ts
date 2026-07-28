@@ -13,7 +13,7 @@ import { formatStatus, renderTracksPreview, validateProject, writeTracks } from 
 import { parsePlan, validatePlanGraph } from "../src/domain/plan.js";
 import {
   applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionStart, executionStatus,
-  previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionStart
+  previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionStart, type ExecutionNodeStatus
 } from "../src/domain/execution.js";
 import {
   applyWorktreeCleanup, applyWorktreeCreate, applyWorktreeIntegration, managedWorktreeStatus,
@@ -140,7 +140,7 @@ function gitText(projectRoot: string, args: string[]): string {
 function gitFixture(): { projectRoot: string; head: string } {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-worktree-"));
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
-  writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
+  writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n/tracks/\n");
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
   writeFileSync(join(projectRoot, "app.txt"), "base\n");
   execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
@@ -150,6 +150,50 @@ function gitFixture(): { projectRoot: string; head: string } {
   gitText(projectRoot, ["add", "."]);
   gitText(projectRoot, ["commit", "-m", "chore: initialize fixture"]);
   return { projectRoot, head: gitText(projectRoot, ["rev-parse", "HEAD"]) };
+}
+
+function writeWorktreeJournal(
+  projectRoot: string,
+  trackId: string,
+  executionId: string,
+  phaseStatus: ExecutionNodeStatus,
+  taskStatus: ExecutionNodeStatus
+): void {
+  const path = join(projectRoot, ".cadre", "tracks", trackId, "executions", `execution-${executionId}.json`);
+  mkdirSync(dirname(path), { recursive: true });
+  const node = (
+    id: string,
+    kind: "phase" | "task",
+    phaseId: string,
+    status: ExecutionNodeStatus
+  ) => ({
+    id, kind, phaseId, dependencies: [], status, workerId: null, worktreePath: null, branch: null,
+    workerCommit: status === "committed" || status === "completed" ? "abcdef1" : null,
+    mergeCommit: status === "integrated" || status === "completed" ? "abcdef2" : null,
+    verification: null, approval: status === "committed" || status === "completed" ? "approved" : null,
+    blocker: null
+  });
+  writeFileSync(path, `${JSON.stringify({
+    schemaVersion: 1,
+    executionId,
+    trackId,
+    status: "in_progress",
+    checkpoint: "test",
+    requestedMode: "parallel",
+    effectiveMode: "parallel",
+    maxWorkers: 2,
+    planRevision: 1,
+    planCommit: "aaaaaaa",
+    graphDigest: "test",
+    baseCommit: "bbbbbbb",
+    startedAt: "2026-07-28T00:00:00.000Z",
+    completedAt: null,
+    headCommit: null,
+    nodes: {
+      P1: node("P1", "phase", "P1", phaseStatus),
+      "T1.1": node("T1.1", "task", "P1", taskStatus)
+    }
+  }, null, 2)}\n`);
 }
 
 test("empty initialized project validates", () => {
@@ -238,6 +282,9 @@ test("execution journal gates tasks behind their running phase and validates per
   const phaseApplied = applyExecutionNodeUpdate(phaseUpdate, phasePreview.digest);
   assert.deepEqual(phaseApplied.derivedStatus.readyTasks, ["T1.1"]);
   assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyTasks, ["T1.1"]);
+  assert.throws(() => previewExecutionNodeUpdate({
+    projectRoot, trackId: input.trackId, executionId: input.executionId, nodeId: "P1", status: "awaiting_approval"
+  }), /P1 has incomplete tasks: T1.1, T1.2/);
 
   const journalPath = join(trackRoot, "executions", `execution-${input.executionId}.json`);
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
@@ -251,6 +298,76 @@ test("execution journal gates tasks behind their running phase and validates per
     requestedMode: "sequential",
     effectiveMode: "parallel"
   }), /cannot become parallel/);
+  assert.throws(() => previewExecutionStart({
+    ...input,
+    executionId: "execution-prefixed"
+  }), /must omit the execution- journal filename prefix/);
+});
+
+test("execution transitions require distinct task commits and clear resolved blockers", () => {
+  const projectRoot = fixture();
+  const trackRoot = writePlannedTrack(projectRoot, "provenance-track");
+  writeFileSync(join(trackRoot, "plan.md"), `# Plan: Provenance track
+
+- Spec revision: 1
+- Plan revision: 1
+
+## Phase 1: Deliver
+- Phase dependencies: none
+
+- [ ] T1.1 First implementation task
+  - Task dependencies: none
+- [ ] T1.2 Second implementation task
+  - Task dependencies: none
+- [ ] T1.3 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 2: Track-level User Manual Verification
+- [ ] T2.1 User Manual Verification
+- Phase completion commit: pending
+`);
+  runState(projectRoot, "render");
+  const input = {
+    projectRoot,
+    trackId: "provenance-track",
+    executionId: "provenance-1",
+    requestedMode: "sequential" as const,
+    effectiveMode: "sequential" as const,
+    maxWorkers: 1,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T01:30:00.000Z"
+  };
+  const start = previewExecutionStart(input);
+  applyExecutionStart(input, start.digest);
+  const journalPath = join(trackRoot, "executions", "execution-provenance-1.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  journal.nodes.P1.status = "running";
+  journal.nodes["T1.1"].status = "awaiting_approval";
+  journal.nodes["T1.1"].blocker = "resolved dependency issue";
+  journal.nodes["T1.2"].status = "completed";
+  journal.nodes["T1.2"].workerCommit = "abcdef1";
+  writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+
+  assert.throws(() => previewExecutionNodeUpdate({
+    projectRoot,
+    trackId: input.trackId,
+    executionId: input.executionId,
+    nodeId: "T1.1",
+    status: "committed",
+    workerCommit: "abcdef1",
+    approval: "approved"
+  }), /distinct worker commit from T1.2/);
+
+  const proposal = previewExecutionNodeUpdate({
+    projectRoot,
+    trackId: input.trackId,
+    executionId: input.executionId,
+    nodeId: "T1.1",
+    status: "committed",
+    workerCommit: "abcdef2",
+    approval: "approved"
+  });
+  assert.equal(proposal.journal.nodes["T1.1"]?.blocker, null);
 });
 
 test("replacement executions carry completed plan provenance forward", () => {
@@ -352,6 +469,7 @@ test("execution start and finish resume across their two-file checkpoints", () =
 
 test("worktree tools integrate task-to-phase and phase-to-main, then clean up safely", () => {
   const { projectRoot, head } = gitFixture();
+  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "running", "committed");
   const phaseInput = {
     projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1", baseCommit: head
   };
@@ -369,6 +487,7 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   const taskIntegration = previewWorktreeIntegration(taskInput);
   assert.deepEqual(taskIntegration.changedFiles, ["app.txt"]);
   assert.equal(applyWorktreeIntegration(taskInput, taskIntegration.digest).status, "integrated");
+  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "running", "integrated");
   const taskCleanup = previewWorktreeCleanup(taskInput);
   applyWorktreeCleanup(taskInput, taskCleanup.digest);
   assert.equal(existsSync(task.path), false);
@@ -376,8 +495,11 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   const phaseIntegrationInput = {
     projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1"
   };
+  assert.throws(() => previewWorktreeIntegration(phaseIntegrationInput), /must be committed or integrating/);
+  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "committed", "completed");
   const phaseIntegration = previewWorktreeIntegration(phaseIntegrationInput);
   assert.equal(applyWorktreeIntegration(phaseIntegrationInput, phaseIntegration.digest).status, "integrated");
+  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "integrated", "completed");
   const phaseCleanup = previewWorktreeCleanup(phaseIntegrationInput);
   applyWorktreeCleanup(phaseIntegrationInput, phaseCleanup.digest);
 
@@ -391,6 +513,7 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
 
 test("a main-coordinated task worker integrates directly into the canonical worktree", () => {
   const { projectRoot, head } = gitFixture();
+  writeWorktreeJournal(projectRoot, "main-phase", "run-1", "running", "committed");
   const input = {
     projectRoot, trackId: "main-phase", executionId: "run-1", nodeId: "T1.1", phaseId: "P1", baseCommit: head
   };
@@ -403,6 +526,7 @@ test("a main-coordinated task worker integrates directly into the canonical work
   const integration = previewWorktreeIntegration(input);
   assert.equal(integration.targetPath, realpathSync(projectRoot));
   assert.equal(applyWorktreeIntegration(input, integration.digest).status, "integrated");
+  writeWorktreeJournal(projectRoot, "main-phase", "run-1", "running", "integrated");
   const cleanup = previewWorktreeCleanup(input);
   applyWorktreeCleanup(input, cleanup.digest);
   assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "main-coordinated task\n");
@@ -410,6 +534,7 @@ test("a main-coordinated task worker integrates directly into the canonical work
 
 test("worktree integration reports conflicts without resolving them", () => {
   const { projectRoot, head } = gitFixture();
+  writeWorktreeJournal(projectRoot, "conflict-track", "run-1", "committed", "completed");
   const input = {
     projectRoot, trackId: "conflict-track", executionId: "run-1", nodeId: "P1", baseCommit: head
   };
@@ -427,11 +552,12 @@ test("worktree integration reports conflicts without resolving them", () => {
   assert.equal(result.status, "conflicted");
   assert.deepEqual(result.conflicts, ["app.txt"]);
   assert.match(readFileSync(join(projectRoot, "app.txt"), "utf8"), /<<<<<<< HEAD/);
-  assert.throws(() => previewWorktreeCleanup(input), /not integrated/);
+  assert.throws(() => previewWorktreeCleanup(input), /must be integrated in the execution journal/);
 });
 
 test("worker branches cannot integrate protected Cadre state", () => {
   const { projectRoot, head } = gitFixture();
+  writeWorktreeJournal(projectRoot, "protected-track", "run-1", "committed", "completed");
   const input = {
     projectRoot, trackId: "protected-track", executionId: "run-1", nodeId: "P1", baseCommit: head
   };

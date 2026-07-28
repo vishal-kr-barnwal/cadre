@@ -162,6 +162,9 @@ function buildNodes(graph: PlanGraph): Record<string, ExecutionNode> {
 
 export function previewExecutionStart(input: ExecutionStartInput): ExecutionProposal {
   assertIdentifiers(input.trackId, input.executionId);
+  if (input.executionId.startsWith("execution-")) {
+    throw new Error("executionId must omit the execution- journal filename prefix");
+  }
   if (!SHA.test(input.baseCommit)) throw new Error("baseCommit must be a Git commit SHA");
   if (!Number.isFinite(Date.parse(input.approvedAt))) throw new Error("approvedAt must be an ISO timestamp");
   if (!Number.isInteger(input.maxWorkers) || input.maxWorkers < 1 || input.maxWorkers > 32) {
@@ -329,12 +332,24 @@ export function previewExecutionNodeUpdate(input: ExecutionNodeUpdateInput): {
       throw new Error(`${node.id} cannot start until phase ${node.phaseId} is running`);
     }
   }
+  if (node.kind === "phase" && [
+    "awaiting_approval", "committed", "integrating", "integrated", "completed"
+  ].includes(input.status)) {
+    const incompleteTasks = Object.values(journal.nodes)
+      .filter((candidate) => candidate.phaseId === node.id && candidate.kind !== "phase" && candidate.status !== "completed")
+      .map((candidate) => candidate.id);
+    if (incompleteTasks.length) throw new Error(`${node.id} has incomplete tasks: ${incompleteTasks.join(", ")}`);
+  }
   const updated: ExecutionNode = { ...node, status: input.status };
   for (const field of [
     "workerId", "worktreePath", "branch", "workerCommit", "mergeCommit",
     "verification", "approval", "blocker"
   ] as const) {
     if (Object.hasOwn(input, field)) updated[field] = input[field] ?? null;
+  }
+  if (!["blocked", "conflicted"].includes(input.status)) updated.blocker = null;
+  if (["blocked", "conflicted"].includes(input.status) && !updated.blocker) {
+    throw new Error(`${node.id} requires a blocker description while ${input.status}`);
   }
   if (updated.workerCommit != null && !SHA.test(updated.workerCommit)) throw new Error("workerCommit must be a Git commit SHA");
   if (updated.mergeCommit != null && !SHA.test(updated.mergeCommit)) throw new Error("mergeCommit must be a Git commit SHA");
@@ -343,6 +358,17 @@ export function previewExecutionNodeUpdate(input: ExecutionNodeUpdateInput): {
   }
   if (input.status === "committed" && !updated.approval) {
     throw new Error(`${node.id} requires recorded human approval before commit`);
+  }
+  if (input.status === "committed" && node.kind === "task") {
+    const duplicate = Object.values(journal.nodes).find(
+      (candidate) => candidate.id !== node.id
+        && candidate.kind === "task"
+        && candidate.phaseId === node.phaseId
+        && candidate.workerCommit === updated.workerCommit
+    );
+    if (duplicate) {
+      throw new Error(`${node.id} must use a distinct worker commit from ${duplicate.id}`);
+    }
   }
   if (input.status === "integrated" && !updated.mergeCommit) {
     throw new Error(`${node.id} requires a merge commit before it can be marked integrated`);

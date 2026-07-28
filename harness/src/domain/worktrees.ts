@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, realpathSync, rmdirSync } from "nod
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { safeProjectRoot } from "./paths.js";
+import { readExecution, type ExecutionNode } from "./execution.js";
 
 const SHA = /^[0-9a-f]{7,40}$/;
 const TRACK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -156,6 +157,38 @@ function targetIdentity(root: string, input: { trackId: string; executionId: str
   return { path: root, branch };
 }
 
+function journalNode(input: WorktreeIntegrationInput): { node: ExecutionNode; nodes: Record<string, ExecutionNode> } {
+  const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
+  const node = journal.nodes[input.nodeId];
+  if (!node) throw new Error(`execution journal has no node ${input.nodeId}`);
+  if (node.phaseId !== (input.phaseId ?? input.nodeId)) {
+    throw new Error(`execution journal identity disagrees for ${input.nodeId}`);
+  }
+  return { node, nodes: journal.nodes };
+}
+
+function assertJournalAllowsIntegration(input: WorktreeIntegrationInput): void {
+  const { node, nodes } = journalNode(input);
+  if (!["committed", "integrating"].includes(node.status)) {
+    throw new Error(`${input.nodeId} must be committed or integrating in the execution journal before integration`);
+  }
+  if (node.kind === "phase") {
+    const incompleteTasks = Object.values(nodes)
+      .filter((candidate) => candidate.phaseId === node.id && candidate.kind !== "phase" && candidate.status !== "completed")
+      .map((candidate) => candidate.id);
+    if (incompleteTasks.length) {
+      throw new Error(`${node.id} has incomplete tasks: ${incompleteTasks.join(", ")}`);
+    }
+  }
+}
+
+function assertJournalAllowsCleanup(input: WorktreeIntegrationInput): void {
+  const { node } = journalNode(input);
+  if (node.status !== "integrated") {
+    throw new Error(`${input.nodeId} must be integrated in the execution journal before cleanup`);
+  }
+}
+
 export interface WorktreeIntegrationInput {
   projectRoot: string;
   trackId: string;
@@ -175,6 +208,7 @@ export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
   alreadyIntegrated: boolean;
   digest: string;
 } {
+  assertJournalAllowsIntegration(input);
   const root = assertRepository(input.projectRoot);
   const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId, input.phaseId);
   const target = targetIdentity(root, input);
@@ -239,6 +273,7 @@ export function previewWorktreeCleanup(input: WorktreeIntegrationInput): {
   head: string;
   digest: string;
 } {
+  assertJournalAllowsCleanup(input);
   const root = assertRepository(input.projectRoot);
   const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId, input.phaseId);
   const target = targetIdentity(root, input);
