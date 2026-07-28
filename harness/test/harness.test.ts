@@ -26,6 +26,7 @@ import {
 } from "../src/domain/governance.js";
 import {
   CLAUDE_APPROVAL,
+  CLAUDE_SERVER_APPROVAL,
   configureClaudeMcpApproval,
   configureCodexMcpApproval
 } from "../scripts/permissions.js";
@@ -1192,7 +1193,7 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   assert.equal(updatedManifest.version, "3.0.0+codex.second-build");
 });
 
-test("installer permission helpers narrowly pre-approve Cadre MCP tools", () => {
+test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
   const directory = mkdtempSync(join(tmpdir(), "cadre-permissions-"));
   const codexConfig = join(directory, "codex", "config.toml");
   mkdirSync(dirname(codexConfig), { recursive: true });
@@ -1217,6 +1218,7 @@ test("installer permission helpers narrowly pre-approve Cadre MCP tools", () => 
   mkdirSync(dirname(claudeSettings), { recursive: true });
   writeFileSync(claudeSettings, `{
   // Preserve this comment
+  "enabledMcpjsonServers": ["memory"],
   "permissions": {
     "allow": ["Read"]
   }
@@ -1227,7 +1229,17 @@ test("installer permission helpers narrowly pre-approve Cadre MCP tools", () => 
   const claudeBody = readFileSync(claudeSettings, "utf8");
   assert.match(claudeBody, /\/\/ Preserve this comment/);
   assert.match(claudeBody, new RegExp(CLAUDE_APPROVAL.replaceAll("*", "\\*")));
+  const claudeParsed = JSON.parse(claudeBody.replace(/\/\/.*\n/g, ""));
+  assert.deepEqual(claudeParsed.enabledMcpjsonServers, ["memory", CLAUDE_SERVER_APPROVAL]);
   assert.equal(configureClaudeMcpApproval(claudeSettings).changed, false);
+
+  const toolOnlySettings = join(directory, "claude-tool-only.json");
+  writeFileSync(toolOnlySettings, `{"permissions":{"allow":["${CLAUDE_APPROVAL}"]}}\n`);
+  assert.equal(configureClaudeMcpApproval(toolOnlySettings).changed, true);
+  assert.deepEqual(
+    JSON.parse(readFileSync(toolOnlySettings, "utf8")).enabledMcpjsonServers,
+    [CLAUDE_SERVER_APPROVAL]
+  );
 
   const deniedSettings = join(directory, "claude-denied.json");
   writeFileSync(deniedSettings, '{"permissions":{"deny":["mcp__cadre__*"]}}\n');

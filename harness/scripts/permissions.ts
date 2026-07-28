@@ -29,6 +29,7 @@ export interface PermissionUpdate {
 const CODEX_SECTION = "[plugins.\"cadre@cadre\".mcp_servers.cadre]";
 const CODEX_APPROVAL = "default_tools_approval_mode = \"approve\"";
 export const CLAUDE_APPROVAL = "mcp__cadre__*";
+export const CLAUDE_SERVER_APPROVAL = "cadre";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -130,7 +131,7 @@ function stringArray(value: unknown): string[] {
 function assertStringArray(value: unknown, field: string, settingsPath: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-    throw new Error(`${settingsPath}: permissions.${field} must be an array of strings`);
+    throw new Error(`${settingsPath}: ${field} must be an array of strings`);
   }
   return value as string[];
 }
@@ -153,26 +154,50 @@ export function configureClaudeMcpApproval(settingsPath: string): PermissionUpda
   if (root.permissions !== undefined && !isRecord(root.permissions)) {
     throw new Error(`${settingsPath}: permissions must be an object`);
   }
-  const deny = assertStringArray(permissions.deny, "deny", settingsPath);
+  const deny = assertStringArray(permissions.deny, "permissions.deny", settingsPath);
   const conflict = deny.find(deniesCadre);
   if (conflict) {
     throw new Error(`Claude deny rule ${JSON.stringify(conflict)} blocks Cadre MCP tools; remove it before installation`);
   }
-  const allow = assertStringArray(permissions.allow, "allow", settingsPath);
-  if (allow.includes(CLAUDE_APPROVAL)) {
+  const allow = assertStringArray(permissions.allow, "permissions.allow", settingsPath);
+  const enabledServers = assertStringArray(
+    root.enabledMcpjsonServers,
+    "enabledMcpjsonServers",
+    settingsPath
+  );
+  const hasToolApproval = allow.includes(CLAUDE_APPROVAL);
+  const hasServerApproval = enabledServers.includes(CLAUDE_SERVER_APPROVAL);
+  if (hasToolApproval && hasServerApproval) {
     return { path: settingsPath, changed: false, rule: CLAUDE_APPROVAL };
   }
-  const proposed = applyEdits(existing, modify(
-    existing,
-    ["permissions", "allow"],
-    [...allow, CLAUDE_APPROVAL],
-    { formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" } }
-  ));
+  const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" };
+  let proposed = existing;
+  if (!hasToolApproval) {
+    proposed = applyEdits(proposed, modify(
+      proposed,
+      ["permissions", "allow"],
+      [...allow, CLAUDE_APPROVAL],
+      { formattingOptions }
+    ));
+  }
+  if (!hasServerApproval) {
+    proposed = applyEdits(proposed, modify(
+      proposed,
+      ["enabledMcpjsonServers"],
+      [...enabledServers, CLAUDE_SERVER_APPROVAL],
+      { formattingOptions }
+    ));
+  }
   const verificationErrors: ParseError[] = [];
   const verified = parseJsonc(proposed, verificationErrors, { allowTrailingComma: true }) as unknown;
   const verifiedPermissions = isRecord(verified) && isRecord(verified.permissions) ? verified.permissions : {};
-  if (verificationErrors.length || !stringArray(verifiedPermissions.allow).includes(CLAUDE_APPROVAL)) {
-    throw new Error("Generated Claude settings did not contain the Cadre MCP approval rule");
+  const verifiedServers = isRecord(verified) ? stringArray(verified.enabledMcpjsonServers) : [];
+  if (
+    verificationErrors.length
+    || !stringArray(verifiedPermissions.allow).includes(CLAUDE_APPROVAL)
+    || !verifiedServers.includes(CLAUDE_SERVER_APPROVAL)
+  ) {
+    throw new Error("Generated Claude settings did not contain the Cadre MCP server and tool approval rules");
   }
   atomicWrite(settingsPath, proposed.endsWith("\n") ? proposed : `${proposed}\n`);
   return { path: settingsPath, changed: true, rule: CLAUDE_APPROVAL };
