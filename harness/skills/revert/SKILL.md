@@ -7,7 +7,7 @@ description: Prepare and execute a human-approved Git-aware revert of a Cadre ta
 
 Load `.cadre/workflow.md`, project/track state, spec, plan, learning, review/revision history, recorded task commits, Git history, working tree, and dependent tracks. Read every affected file and relevant later diff before proposing a revert.
 
-Call `project_status` and `state_validate` first. If the Cadre MCP is unavailable, stop without beginning the revert.
+Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP is unavailable, stop without beginning the revert.
 
 1. Resolve the exact task, phase, or track and its worker commits, task-to-phase merge commits, phase-to-canonical merge commits, and execution journal. Detect shared commits, later overlapping edits, active workers/worktrees, dirty changes, and dependent work.
 2. Build a revert proposal: commits in safe reverse order, conflicts/overlaps, expected file changes, state rollback, invalidated learning/patterns/marked learning seeds, and downstream impacts.

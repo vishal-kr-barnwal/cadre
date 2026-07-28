@@ -7,7 +7,7 @@ description: Execute or resume an approved Cadre plan as a dependency DAG, using
 
 Treat the approved `plan.md` as the source of truth. Implement only `planned` or `in_progress` tracks. The main agent is the sole scheduler and Cadre-state owner: workers must never spawn workers, edit `.cadre/**`, merge branches, resolve integration conflicts, remove worktrees, or record human approval.
 
-Call `project_status`, `state_validate`, `execution_graph_validate`, and `worktree_status` before selecting work. If the required Cadre MCP is unavailable, stop at the current checkpoint.
+Call `project_status`, `execution_graph_validate`, and `worktree_status` before selecting work. Use the structured validation embedded in `project_status`; do not repeat `state_validate` at command entry. If the required Cadre MCP is unavailable, stop at the current checkpoint.
 
 ## Select and persist execution mode
 

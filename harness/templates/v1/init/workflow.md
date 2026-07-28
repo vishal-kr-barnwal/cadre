@@ -30,6 +30,8 @@ Always propose `styleguides/general.md`. Match the approved tech stack against t
 
 ### Interruption-safe operations
 
+At command entry, call `project_status` once and use its embedded structured validation. Reserve a separate `state_validate` call for final mutation gates or focused diagnostics; do not perform redundant full-project validation scans. Derived-state warnings such as a stale generated `tracks.md` are resumable drift, not canonical corruption. Present and repair them through the approved MCP render gate before a final commit.
+
 For every multi-step state mutation—and specifically `create`, both spec/plan stages of `track`, `implement`, finding-bearing `review`, `revise`, and archive batches—write an operation journal immediately after approval and before artifact writes. Use `project.json.setup.operation` for create, track `state.json.operation` plus `executions/execution-<ts>.json` for implementation, track `state.json.operation` for other track-local flows, and a file rendered from the MCP template `project/archive-operation` under `.cadre/operations/` for archive batches. Record the action, durable checkpoint, base commit, expected commit message, approved artifact paths, and per-artifact progress.
 
 On every command entry, reconcile an existing journal before starting new work:

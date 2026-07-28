@@ -815,7 +815,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   try {
     const tools = await client.listTools();
     for (const name of [
-      "template_catalog", "template_get", "styleguide_resolve", "project_status",
+      "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
       "state_validate", "project_init_preview", "project_init_apply",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
       "execution_graph_validate", "execution_start_preview", "execution_start_apply",
@@ -835,6 +835,16 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const workflow = await client.callTool({ name: "template_get", arguments: { id: "project/workflow" } });
     assert.equal(workflow.isError, undefined);
     assert.equal((workflow.structuredContent as { id?: string }).id, "project/workflow");
+
+    const bundle = await client.callTool({
+      name: "template_get_many",
+      arguments: { ids: ["track/spec", "track/state"] }
+    });
+    assert.equal(bundle.isError, undefined);
+    assert.deepEqual(
+      (bundle.structuredContent as { templates?: Array<{ id?: string }> }).templates?.map((template) => template.id),
+      ["track/spec", "track/state"]
+    );
 
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
     const files = [

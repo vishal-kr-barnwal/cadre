@@ -5,7 +5,7 @@ description: Perform lightweight exploration, investigation, spikes, or question
 
 # Cadre Wisp
 
-If `.cadre/workflow.md` exists, read it first and retain its safety, repository, human-review, and read-before-edit rules while bypassing its delivery-state mutations. You may call the read-only `project_status` and `state_validate` tools for context, but MCP availability is not required for a stateless exploration. Keep the exploration outside Cadre state: except for ignored disposable output under `.cadre/wisps/`, do not change `.cadre/`, track status, learning, patterns, or Cadre history.
+If `.cadre/workflow.md` exists, read it first and retain its safety, repository, human-review, and read-before-edit rules while bypassing its delivery-state mutations. You may call the read-only `project_status` tool and use its embedded validation for context, but MCP availability is not required for a stateless exploration. Keep the exploration outside Cadre state: except for ignored disposable output under `.cadre/wisps/`, do not change `.cadre/`, track status, learning, patterns, or Cadre history.
 
 1. Define the exploration question and expected disposable output. When persistent disposable output is useful, use `.cadre/wisps/<timestamp>-<slug>/`; `.cadre/.gitignore` must exclude it from Git.
 2. Inspect relevant repository files. Before editing any existing file, read it and its directly relevant context; inspect the directory before creating a file.

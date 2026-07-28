@@ -70,9 +70,16 @@ export function templateCatalog(): TemplateRecord[] {
 }
 
 export function getTemplate(id: string): TemplateRecord {
-  const template = templateCatalog().find((entry) => entry.id === id);
-  if (!template) throw new Error(`Unknown Cadre template: ${id}`);
-  return template;
+  return getTemplates([id])[0]!;
+}
+
+export function getTemplates(ids: string[]): TemplateRecord[] {
+  const byId = new Map(templateCatalog().map((template) => [template.id, template]));
+  return ids.map((id) => {
+    const template = byId.get(id);
+    if (!template) throw new Error(`Unknown Cadre template: ${id}`);
+    return template;
+  });
 }
 
 const STYLEGUIDE_RULES: Array<[RegExp, string[]]> = [
@@ -98,7 +105,7 @@ export function resolveStyleguides(technologies: string[]): TemplateRecord[] {
   for (const [pattern, matches] of STYLEGUIDE_RULES) {
     if (pattern.test(joined)) matches.forEach((name) => names.add(name));
   }
-  return [...names].map((name) => getTemplate(
+  return getTemplates([...names].map((name) => (
     name === "general" ? "project/styleguides/general" : `styleguide/${name}`
-  ));
+  )));
 }

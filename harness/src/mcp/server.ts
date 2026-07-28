@@ -20,6 +20,7 @@ import {
 } from "../domain/state.js";
 import {
   getTemplate,
+  getTemplates,
   resolveStyleguides,
   TEMPLATE_SET_VERSION,
   templateCatalog
@@ -88,7 +89,7 @@ export function createCadreServer(): McpServer {
         "Read every existing artifact before proposing edits. Never infer file contents.",
         "For any mutation, present the complete proposed artifacts to the human and obtain approval first.",
         "Call a preview tool immediately before its matching apply tool and pass the returned digest unchanged.",
-        "Cadre state is resumable: inspect project_status and state_validate before continuing an interrupted command.",
+        "Cadre state is resumable: inspect project_status once at command entry and reserve state_validate for final mutation gates.",
         "The plan is the implementation source of truth. Cadre MCP exposes only constrained, digest-gated Git worktree operations and never approves its own changes."
       ].join(" ")
     }
@@ -124,6 +125,19 @@ export function createCadreServer(): McpServer {
   }, async ({ id }) => {
     try {
       return result(getTemplate(id));
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  server.registerTool("template_get_many", {
+    title: "Get multiple Cadre templates",
+    description: "Read an ordered set of immutable, versioned Cadre templates in one call.",
+    inputSchema: { ids: z.array(z.string().min(1)).min(1) },
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async ({ ids }) => {
+    try {
+      return result({ templateSetVersion: TEMPLATE_SET_VERSION, templates: getTemplates(ids) });
     } catch (error) {
       return failure(error);
     }
