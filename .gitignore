@@ -217,3 +217,4 @@ tmp/
 
 # Node / PNPM
 node_modules/
+.pnpm-store/
