@@ -4,6 +4,7 @@ import { ArrowRightIcon, BookOpenIcon, GitBranchIcon, Layers3Icon, LifeBuoyIcon,
 import { Brand } from "@/components/brand"
 import { WorkflowVisual } from "@/components/home/workflow-visual"
 import { SearchCommand } from "@/components/search-command"
+import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -74,6 +75,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <SearchCommand docs={docs} mode="responsive" />
+            <ThemeSwitcher />
             <Button className="hidden bg-cadre-teal text-white hover:bg-cadre-teal/90 xl:inline-flex" render={<Link href="/getting-started" />}>Install</Button>
             <Sheet>
               <SheetTrigger

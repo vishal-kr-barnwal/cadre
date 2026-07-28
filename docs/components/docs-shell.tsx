@@ -8,6 +8,7 @@ import { MenuIcon } from "lucide-react"
 import { Brand } from "@/components/brand"
 import { OnThisPageRail } from "@/components/on-this-page"
 import { SearchCommand } from "@/components/search-command"
+import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -52,6 +53,7 @@ export function DocsShell({ docs, headings = [], children }: DocsShellProps) {
 
           <div className="ml-auto flex items-center gap-2">
             <SearchCommand docs={docs} mode="responsive" />
+            <ThemeSwitcher />
 
             <Button className="hidden bg-cadre-teal text-white hover:bg-cadre-teal/90 xl:inline-flex" render={<Link href="/getting-started" />}>
               Install
