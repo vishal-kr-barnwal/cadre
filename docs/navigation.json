@@ -2,7 +2,13 @@
   { "section": "Start Here", "slugs": ["overview", "getting-started", "quickstart"] },
   {
     "section": "User Guide",
-    "slugs": ["capabilities", "how-cadre-works", "workflows", "parallel-execution"]
+    "slugs": [
+      "capabilities",
+      "how-cadre-works",
+      "workflows",
+      "parallel-execution",
+      "parallel-execution-walkthrough"
+    ]
   },
   {
     "section": "Operations",

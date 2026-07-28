@@ -79,4 +79,6 @@ tracked lifecycle.
   the MCP boundary.
 - [Workflows](workflows.md) describes when to use each skill.
 - [Parallel Execution](parallel-execution.md) explains workers and worktrees.
+- [Complex Parallel Execution Walkthrough](parallel-execution-walkthrough.md)
+  follows worker fan-out and phase integration end to end.
 - [Troubleshooting](troubleshooting.md) covers common recovery paths.

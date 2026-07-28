@@ -72,6 +72,9 @@ Task workers in one dependency wave all branch from the same clean phase HEAD.
 Main merges their approved branches into the phase worktree one at a time, then
 derives the next wave from the updated phase HEAD. Workers never spawn workers.
 
+See the [Complex Parallel Execution Walkthrough](parallel-execution-walkthrough.md)
+for a complete mixed sequential/parallel example.
+
 ## Worktree Layout
 
 Git worktrees cannot be safely nested, so Cadre uses sibling paths:
