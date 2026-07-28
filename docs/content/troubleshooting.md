@@ -112,6 +112,11 @@ ready node executes in main. Also inspect:
 - whether a phase has an active phase-worker lease that must reach a clean
   handoff before task-worker fan-out.
 
+The generated workflow defaults to three delegated workers, while the runtime
+accepts `maxWorkers` values from `1` through `32`. A higher value does not create
+workers when the host exposes fewer child slots or the DAG has fewer safe ready
+nodes. A retained worktree is not necessarily an active worker slot.
+
 This is expected scheduling behavior, not necessarily a failure.
 
 ## Integration Or Cleanup Is Refused

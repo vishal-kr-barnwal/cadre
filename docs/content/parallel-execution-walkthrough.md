@@ -12,6 +12,11 @@ This example follows one track containing independent phases, sequential task
 chains, parallel task waves, convergence tasks, and manual-verification
 barriers. The execution uses a global maximum of three workers.
 
+Three is used because it is Cadre's conservative generated-workflow default and
+matches a host with four total agent slots when one slot is reserved for main.
+It is not a harness ceiling: the runtime accepts `1` through `32`, while actual
+concurrency remains limited by safe ready work and available host worker slots.
+
 ## The Track DAG
 
 The track delivers a UI and API independently, then connects them:

@@ -37,6 +37,25 @@ Parallelism follows dependencies. To expose safe work:
 Do not create artificial parallelism. When only one node is ready, Cadre runs it
 in main without worktree overhead.
 
+## Choose The Worker Bound
+
+New projects use a conservative maximum of three delegated workers. This is a
+workflow default; the runtime accepts an approved `maxWorkers` value from `1`
+through `32`. Actual concurrency is always the minimum of safe ready nodes, the
+execution bound, and available host worker slots.
+
+Raise the bound when phases or tasks have clear dependency and file boundaries,
+checks can run concurrently, and the host has spare CPU and memory. Keep it low
+when workers compete for shared ports, databases, generated files, package
+caches, or expensive test infrastructure. More workers can also move the
+bottleneck to human approval and serialized phase integration.
+
+Change the project workflow through `refresh`, approve the new policy, and use
+the resulting bound for a new execution. An active execution retains the
+`maxWorkers` value recorded in its journal. If that bound must change during an
+active track, quiesce work at a clean boundary and create an approved replacement
+execution instead of rewriting the existing journal.
+
 ## Select Sequential Mode When Useful
 
 Sequential mode is appropriate when work is highly coupled, the repository has

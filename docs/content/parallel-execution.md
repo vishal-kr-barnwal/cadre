@@ -21,6 +21,32 @@ The execution journal records requested mode, effective mode, maximum workers,
 plan revision, plan commit, graph digest, base commit, and every node. Changing
 mode mid-execution requires a clean safe boundary and approval.
 
+## Worker Capacity
+
+The generated workflow uses `3` as a conservative default, not an architectural
+limit. The execution runtime accepts `maxWorkers` values from `1` through `32`.
+At each scheduling checkpoint, the effective delegated concurrency is:
+
+```text
+min(safe ready nodes, execution maxWorkers, available host worker slots)
+```
+
+A phase worker consumes one slot, and every active task worker consumes one
+slot. A phase worker whose lease has been released does not consume scheduler
+capacity. A task worker waiting for approval remains an active assignment until
+its checkpoint is committed and completed. Worktrees by themselves do not
+consume worker slots.
+
+Main is the coordinator and is not counted as a delegated worker in
+`maxWorkers`, although the host may reserve one of its total agent slots for
+main. Consequently, a host exposing four total agent slots commonly leaves
+three child-worker slots. Raising `maxWorkers` above host capacity or the number
+of ready nodes has no effect.
+
+Increase the approved project worker bound only when the plan exposes enough
+independent work and the repository can tolerate the additional CPU, memory,
+test, port, approval, and merge pressure.
+
 ## Scheduler Ownership
 
 The main agent is the only scheduler and Cadre-state owner. It:
