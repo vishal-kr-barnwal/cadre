@@ -1,215 +1,203 @@
 ---
 title: MCP Reference
-description: Public tool schemas, root resolution, workflow envelopes, actions, and Cadre resource families.
+description: All immutable resources and registered Cadre 3.0 MCP tools.
 section: Reference
-order: 220
+order: 210
 ---
 
 # MCP Reference
 
-Cadre exposes exactly three public MCP tools. The installed skill shim directs
-agents to start with a workflow, execute only the exact call in `next`, and read
-only a relevant resource URI. Retired direct packet tools are not public
-aliases.
+The `cadre` stdio server exposes immutable template resources and 35
+purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
+arbitrary filesystem/shell operations.
 
-## cadre_workflow
+## Template Resources
 
-Starts or continues a workflow.
+Every bundled template is readable at
+`cadre://templates/v1/<relative-template-path>`. Resource metadata includes the
+template-set version, media type, and content hash.
 
-```json
-{
-  "root": "/absolute/project/path",
-  "workflow": "review",
-  "input": {},
-  "execute": false
-}
-```
+## template_catalog
 
-| Field | Required | Meaning |
-|---|---|---|
-| `root` | yes | Project root candidate or a path inside the project. |
-| `workflow` | yes | A supported Cadre workflow ID such as `setup`, `implement`, or `review`. |
-| `input` | no | Workflow-specific structured input. |
-| `execute` | no | `false` previews/decides; `true` requests the confirmed mutation path. |
-| `approval` | no | Nested staged-session control carried by packet-issued calls. Invoke the exact returned `decision.resume` or `decision.amend` for non-approval continuation. After explicit approval, add the exact `decision.stage`, `decision.stage_hash`, `decision.stage_revision`, and cumulative `approved_stages` prefix. |
+Lists logical template IDs, resource URIs, paths, media types, and SHA-256
+hashes. Read-only. Prefer known `template_get_many` bundles in workflow skills.
 
-For example, a clarification returns a complete call like this. Fill only the
-paths listed beside it in `decision.writable_paths`, then invoke it:
+## template_get
 
-```json
-{
-  "decision": {
-    "kind": "clarification",
-    "resume": {
-      "tool": "cadre_workflow",
-      "arguments": {
-        "root": "/project",
-        "workflow": "setup",
-        "input": {},
-        "execute": false,
-        "approval": {
-          "session_id": "0123456789abcdef01234567"
-        }
-      }
-    },
-    "writable_paths": [
-      "/arguments/input/techStack"
-    ]
-  }
-}
-```
+Returns one immutable template by logical `id`. Read-only.
 
-After the user explicitly approves the active `product` stage, the approval
-fragment records exactly that next prefix:
+## template_get_many
 
-```json
-{
-  "approval": {
-    "session_id": "returned-session-id",
-    "stage": "product",
-    "stage_hash": "returned-stage-hash",
-    "stage_revision": 1,
-    "approved_stages": ["product"]
-  }
-}
-```
+Returns an ordered non-empty array of immutable templates for `ids`. Read-only
+and used to avoid repeated template calls.
 
-Do not add `stage`, `stage_hash`, `stage_revision`, `approved_stages`, or
-`complete` to a session-only resume or amendment.
-`complete:true` is valid only when every stage is included in the exact
-cumulative prefix. Canonical/projection pairs and grouped stage files are
-approved atomically. `decision.current_stage` identifies work during
-clarification or formatting; never substitute it for `decision.stage` in an
-approval.
+## styleguide_resolve
 
-The response contains the current decision, compact evidence, and at most one
-deterministic next call. `next` is the sole immediate single-agent Cadre
-continuation. When it is non-null, invoke exactly `next.tool` with
-`next.arguments` once for that packet; do not infer a different continuation.
+Maps an approved non-empty technology list to bundled default styleguide
+templates. Read-only and always paired with human selection/amendment during
+project creation.
 
-The typed callbacks outside `next` are limited to:
+## project_status
 
-- After collecting requested clarification or formatted reference content,
-  change only `decision.writable_paths` in the returned `decision.resume`, then
-  invoke that complete call.
-- After the user explicitly requests an edit to the active review stage, change
-  only `decision.writable_paths` in the returned `decision.amend`, then invoke
-  that complete call.
-- After collecting requested evidence from an external provider integration,
-  invoke `decision.required.write_back` with that evidence.
-- For parallel fan-out, invoke each
-  `data.workers[].dispatch.record_finish_packet` once with that worker's result.
-- If worker completion or recovery remains pending, invoke only the exact calls
-  reissued under `data.worker_callbacks[].record_finish_packet`.
+Reads a project root, discovers active/archived tracks, performs centralized
+validation, and returns both structured state and a human-readable summary.
 
-For a native prompt, transform the selection through its `responseTarget`:
-`value_map` merges the exact object for each selected ID, `selected_id` sets the
-single ID at `argument`, and `selected_ids` sets the ID array, including `[]`.
-Preserve mapped `false` and empty values. Apply custom text only when
-`allowCustom:true`, at `customArgument` using `customMode` (`replace` or
-`append_unique`). Every write must remain inside `decision.writable_paths`.
-A structured value written at one of those paths replaces the previous value,
-so an artifact amendment must include the complete artifact object. Namespace
-members such as `proposedContext.techStack` or one `formattedReferences` entry
-replace only that named member and preserve their siblings.
+## state_validate
 
-These callbacks are not permission to derive other actions from response data
-or prose. Merge, cleanup, polling, and every other immediate continuation must
-arrive in a subsequent packet's `next` field.
+Returns all project, track, plan, learning, dependency, execution, review,
+archive, and derived-index validation errors. Read-only.
 
-`execute:true` is execution authorization for mutations and external side
-effects. It does not stand in for document approval, and read-only workflows do
-not require either field. In a staged workflow, Cadre returns an execution
-continuation only after every stage is approved; invoke only that exact `next`.
+## execution_graph_validate
 
-## cadre_action
+Parses one active track's `plan.md`, validates dependencies/cycles/barriers
+against lifecycle state, and returns the derived graph and errors. Read-only.
 
-Executes a namespaced action returned by a workflow packet.
+## review_complete_preview
 
-```json
-{
-  "root": "/absolute/project/path",
-  "action": "task.complete",
-  "input": {},
-  "execute": true
-}
-```
+Previews a clean review cycle, completed track state, and exact derived index.
+Inputs include reviewed timestamp/HEAD, commit range, approval, and optional
+accepted risks. Read-only.
 
-Do not invent action names or use actions as an alternate workflow entry point.
-The preceding packet owns action selection and required input. Conditions that
-inspect an action continuation use `next.arguments.action`, not `next.action`.
+## review_complete_apply
 
-## cadre_read
+Applies the clean-review completion only when the unchanged proposal digest is
+still current.
 
-Reads one targeted Cadre resource:
+## archive_batch_preview
 
-```json
-{
-  "uri": "cadre://workspace-health?root=/absolute/project/path"
-}
-```
+Previews ordered selected-track moves, completed→archived states, pattern/seed
+updates, operation journal, expected commits, and post-archive index. Read-only.
 
-`cadre://template-inventory` is the only fixed, rootless resource. Project
-resources validate their required query parameters, including `root`.
+## archive_batch_apply
 
-## MCP Lifecycle
+Journals and applies the complete approved archive batch behind its unchanged
+digest.
 
-The stdio server supports MCP protocol versions `2025-11-25` and `2025-06-18`.
-A client sends `initialize`, accepts the negotiated version in the response,
-then sends `notifications/initialized` before listing or calling tools and
-resources. The server version is read from the installed `cadre-ai` package.
+## archive_batch_record_preview
 
-## Root Contract
+Previews the follow-up state that records an existing archive commit across
+selected tracks, project history, and batch journal. Read-only.
 
-Project-scoped calls require a root on every call. Cadre resolves the active
-control repository internally. Setup-safe operations accept candidates before
-`cadre/` exists. Callers must not cache a guessed root across unrelated tasks.
+## archive_batch_record_apply
 
-## Workflow Envelope
+Records archive commit provenance and completes the batch journal behind a
+stale-state digest.
 
-The compact v1 envelope contains:
+## execution_start_preview
 
-- `ok`, `workflow`, `phase`, and `decision`;
-- `required` input or evidence names;
-- one immediate single-agent `next` tool call or `null`;
-- bounded `artifacts` and relevant `resources`;
-- workflow-specific summary fields under `data`;
-- `warnings` and structured `errors`.
+Previews a new execution journal and track operation for an approved plan,
+mode, worker bound, base commit, and timestamp. Read-only.
 
-## Resource Families
+## execution_start_apply
 
-| Family | Representative resources |
-|---|---|
-| Packaged templates | `cadre://template-inventory` |
-| Team and status | `cadre://team-board`, `cadre://fleet-board`, `cadre://my-next-actions`, `cadre://review-queue`, `cadre://handoff-inbox` |
-| Workspace intelligence | `cadre://workspace-health`, `cadre://repo-map`, `cadre://workspace-diagnostics`, `cadre://test-impact`, `cadre://collisions` |
-| Integrations | `cadre://integrations`, `cadre://mcp-readiness`, `cadre://lsp-status`, `cadre://dap-status` |
-| Track and review | `cadre://track-context`, `cadre://track-plan`, `cadre://track-spec`, `cadre://review-evidence`, `cadre://quality-gate` |
-| Delivery | `cadre://provider-actions`, `cadre://ship-plan`, `cadre://land-plan` |
-| Parallel and jobs | `cadre://parallel-state`, `cadre://job-result` |
-| Artifacts | `cadre://artifact-catalog`, `cadre://artifact-schema`, `cadre://artifact-preview`, `cadre://artifact-sync-plan` |
-| Project skills | `cadre://project-skills`, `cadre://project-skill`, `cadre://project-skill-source`, `cadre://styleguide-selection` |
+Creates the execution journal and enters `in_progress` only while the preview
+digest remains current.
 
-Resource responses are JSON and may be intentionally bounded. Follow returned
-pagination, selectors, or narrower resource links rather than requesting an
-unbounded control-plane dump.
+## execution_node_preview
 
-MCP discovery keeps the two resource kinds separate. `resources/list` returns
-fixed URIs, currently only `cadre://template-inventory`.
-`resources/templates/list` returns parameterized URI templates for
-project-scoped resources. The source workflow protocols and agent guidance are
-maintainer inputs; they are not MCP resources.
+Validates and previews one legal phase/task node transition and its evidence.
+Read-only.
 
-`cadre://project-skill-source` is capability-bound. Use only the short-lived,
-tokenized URI returned by a `skill` workflow packet; callers cannot construct a
-source URI from a project path alone or retarget its token to another file.
-Authorization also fails if the source is symlinked or changes after the token
-is issued.
+## execution_node_apply
 
-## Compatibility Notes
+Applies one approved node transition with an unchanged digest.
 
-The token-efficient v1 contract replaces older direct Cadre tool families; the
-retired flat names are not compatibility aliases. Re-run `cadre install` after
-upgrading so the client shim and MCP configuration match the packaged runtime.
-Automation should branch on structured decisions and invoke only the returned
-`next` call.
+## execution_nodes_preview
+
+Validates and previews an ordered atomic batch of 1–128 immediately legal node
+transitions. It must not span unavailable approval, commit, verification,
+integration, or conflict evidence. Read-only.
+
+## execution_nodes_apply
+
+Applies the ordered transition batch behind one unchanged digest.
+
+## execution_status
+
+Reads an execution journal and derives ready phases, ready tasks within running
+phases, active nodes, blockers, and overall execution status. Read-only.
+
+## execution_finish_preview
+
+Verifies completed nodes, current plan evidence, removed worktrees, and final
+head before previewing `ready_for_review`. Read-only.
+
+## execution_finish_apply
+
+Finalizes the approved execution and track transition behind its digest.
+
+## worktree_create_preview
+
+Derives one constrained phase/task worktree path, branch, parent, and exact base
+commit. Read-only.
+
+## worktree_create_apply
+
+Creates or reconciles the approved derived worktree. Digest-gated and
+idempotent for the same state.
+
+## integration_preview
+
+Verifies clean source/target worktrees, protected `.cadre/` state, branch tips,
+and changed files before a derived merge. Read-only.
+
+## integration_apply
+
+Performs the approved non-squash merge. Conflicts are reported and left for the
+main agent; the MCP does not resolve them.
+
+## worktree_cleanup_preview
+
+Verifies a worker is clean and its branch fully integrated before proposing
+worktree/branch removal. Read-only.
+
+## worktree_cleanup_apply
+
+Removes only the approved clean, integrated worktree and safely deletable
+branch. This is the only tool annotated as destructive.
+
+## worktree_status
+
+Lists registered Cadre-managed worktrees and orphaned empty runtime
+directories. Read-only.
+
+## project_init_preview
+
+Validates approved rendered project files, project identity/context, Git
+disposition, base commit, and timestamp; returns the exact `.cadre/` file set
+and digest. Read-only.
+
+## project_init_apply
+
+Atomically creates `.cadre/` only when inputs and preview digest are unchanged.
+It never copies runtime code or templates into the project.
+
+## setup_record_commit
+
+Records the already-created setup commit SHA and completes the pending create
+operation.
+
+## setup_record_git_initialized
+
+Idempotently records that the caller verified Git initialization at the exact
+approved project root.
+
+## tracks_render_preview
+
+Reads every track-local state record and returns exact generated `tracks.md`
+content plus a digest. Read-only.
+
+## tracks_render_apply
+
+Writes `tracks.md` only when current track state still matches the approved
+preview digest.
+
+## Common Guarantees
+
+- Project roots must be existing directories and cannot be `/` or the user's
+  home directory.
+- Track, execution, batch, node, commit, digest, and timestamp formats are
+  validated at the MCP boundary.
+- Preview output is not approval.
+- Apply never accepts a stale digest.
+- Tool errors return a structured failure rather than partial success.

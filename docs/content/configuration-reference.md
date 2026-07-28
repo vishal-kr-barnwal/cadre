@@ -1,79 +1,101 @@
 ---
-title: Configuration Reference
-description: Every generated cadre/config.json key, its default, behavior, affected workflows, and operating cautions.
+title: Project Artifact Reference
+navTitle: Artifact Reference
+description: Current project, track, execution, operation, styleguide, pattern, and derived artifacts.
 section: Reference
-order: 200
+order: 190
 ---
 
-# Configuration Reference
+# Project Artifact Reference
 
-This reference matches `harness/templates/config.json` for Cadre 2.2.0. Unless
-noted otherwise, setup generates these values and maintainers may tune them in
-the target project's `cadre/config.json`.
+Cadre 3.0 configuration and state are distributed across explicit approved
+artifacts. There is no current `cadre/config.json`.
 
-## Core And Sync Keys
+## Project Artifacts
 
-| Key | Type / default | Accepted values and effect | Caution |
-|---|---|---|---|
-| `sync_mode` | string / `"local"` | `local` keeps the control plane local; `shared` enables shared-sync behavior. Affects workflow start sync, reviews, status, ship, and land. | Configure the control remote and branch before using shared mode. |
-| `auto_open` | boolean / `false` | Setup-generated compatibility preference for opening generated artifacts. The current packet runtime does not use it as a publication gate. | Do not depend on it for review or approval. |
-| `control_remote` | string / `"origin"` | Git remote used for shared control-plane operations. | Must identify the control repository remote, not a polyrepo product remote. |
-| `control_branch` | string / `"main"` | Branch used for shared control-plane sync. | Coordinate branch protection and contributor access. |
-| `pull_on_command_start` | boolean / `true` | Setup-generated sync preference. Current workflow response logic gates actual sync by `sync_mode` and packet behavior. | Treat packet evidence as authoritative rather than assuming every command pulls. |
+| Path | Ownership and content |
+|---|---|
+| `.cadre/project.json` | Runtime/template versions, project identity/context, setup checkpoint/operation/commit, last refresh, and project history. |
+| `.cadre/product.md` | Product problem, users, behavior, scope, constraints, and success context. |
+| `.cadre/guidelines.md` | Engineering principles, trust boundaries, non-goals, decision rules, and review expectations. |
+| `.cadre/tech-stack.md` | Languages, frameworks, platforms, package/build tools, and verification commands. |
+| `.cadre/workflow.md` | Lifecycle, approval, testing, review, commit, and delivery rules read by every stateful skill. |
+| `.cadre/tracks.md` | Generated project-level index derived from track-local state. |
+| `.cadre/patterns/index.md` | Durable, evidenced patterns and provenance. |
+| `.cadre/styleguides/*.md` | Approved general and technology-specific conventions. |
 
-## Review And Publication Keys
+`project.json` includes `schemaVersion`, `runtimeVersion`, and
+`templateSetVersion`. Setup state contains status, checkpoint, commit,
+artifact progress, and an operation with repository root and Git disposition.
 
-| Key | Type / default | Effect | Caution |
-|---|---|---|---|
-| `require_second_reviewer` | boolean / `false` | A self-reviewed record is insufficient for publication when true. | Enable for protected delivery paths only after reviewer identity is reliable. |
-| `allow_unreviewed_ship` | boolean / `false` | Allows publication without a recorded review verdict and emits a warning. | This weakens a core safety gate; keep false by default. |
-| `allow_unpinned_review_ship` | boolean / `false` | Allows publication when review evidence lacks reviewed commit SHA data and emits a warning. | Can permit stale review evidence; keep false by default. |
+## Track State
 
-## Provider Keys
+Each active track lives under `.cadre/tracks/<track-id>/`; each archived track
+lives under `.cadre/archive/<track-id>/`.
 
-| Key | Type / default | Accepted values and effect | Caution |
-|---|---|---|---|
-| `provider_mode` | string / `"local"` | `local`, `github`, or `gitlab`. Hosted modes require provider-aware publication evidence. | Use explicit configuration when remotes are ambiguous. |
-| `provider_mcp_required` | boolean / `false` | Records whether provider MCP evidence is required. Setup sets it for GitHub/GitLab modes. | Provider policy is also derived from provider mode; do not use this key alone to bypass evidence. |
-| `remote_host` | string / `""` | Explicit host used when selecting provider behavior. | Set it when multiple remotes prevent unambiguous detection. |
+Track `state.json` includes:
 
-## Verification Keys
+| Field | Meaning |
+|---|---|
+| `schemaVersion` | State schema version. |
+| `trackId`, `title`, `type` | Stable identity; type is `feature` or `bug`. |
+| `status` | Lifecycle state. |
+| `checkpoint` | Durable workflow checkpoint. |
+| `revision` | Track baseline revision. |
+| `dependencies` | Other track IDs required before implementation. |
+| `commits.spec`, `commits.plan` | Approved artifact commit provenance. |
+| `artifactProgress` | Completed writes in the pending operation. |
+| `operation` | Current journaled mutation or `null`. |
+| `lastExecution` | Last execution identity and review-bound evidence. |
+| `reviewCycles` | Finding/clean-review history and accepted risks. |
+| `history` | Lifecycle and operation history. |
 
-| Key | Type / default | Effect | Caution |
-|---|---|---|---|
-| `coverage_command` | string / `""` | Command used to gather configured coverage evidence. The runtime also recognizes compatibility aliases at the boundary. | Keep it deterministic, non-interactive, and valid from the resolved repository root. |
+Paths and active phase/task are derived; they are not duplicated in state.
 
-## Project-Skill Keys
+## Track Documents
 
-| Key | Type / default | Effect | Caution |
-|---|---|---|---|
-| `project_skills.inline_rule_budget` | integer / `2400` | Bounds optional inline project-skill rule context returned in workflow packets. | Required rules are not silently truncated; narrow selectors before raising the budget. |
+| Path | Meaning |
+|---|---|
+| `spec.md` | Goal, scope, functional/non-functional requirements, acceptance criteria, dependencies, additional information, and impact. |
+| `plan.md` | Revisioned phase/task DAG, manual barriers, completion markers, and commit SHAs. |
+| `learning.md` | Marked Pattern Seed plus phase/task learning and provenance. |
+| `bugs/` | Approved review finding artifacts. |
+| `revisions/` | Approved semantic revision records. |
+| `executions/` | Immutable/resumable execution journals. |
 
-The runtime reports the effective budget, source, and requested value in
-project-skill diagnostics when relevant.
+## Execution Journal
 
-## Traceability Keys
+`executions/execution-<id>.json` contains:
 
-| Key | Type / default | Effect | Caution |
-|---|---|---|---|
-| `traceability.auto_product_commits` | boolean / `true` | Permits packet-owned product commits at supported completion boundaries. | Align with the repository's commit policy. |
-| `traceability.auto_control_commits` | boolean / `true` | Permits packet-owned Cadre control-plane commits. | Review shared-sync behavior before disabling. |
-| `traceability.auto_automation_commits` | boolean / `true` | Permits commits for supported packet-owned maintenance. | Audit unexpected automation changes rather than broadly disabling traceability. |
-| `traceability.commit_local_wisps` | boolean / `false` | Includes local formula wisp runs in committed state when true. | Wisps are local and ignored by default. |
-| `traceability.git_notes` | boolean / `true` | Records supported trace metadata as Git notes. | Ensure tools and hosting policy preserve the notes ref. |
-| `traceability.notes_ref` | string / `"refs/notes/cadre"` | Selects the Git notes namespace. | Changing it splits trace history across refs. |
-| `traceability.push_notes` | boolean / `true` | Allows supported publication flows to push the configured notes ref. | Confirm remote permissions and team expectations. |
+- execution and track identity;
+- `status` and `checkpoint`;
+- `requestedMode` and `effectiveMode` (`parallel` or `sequential`);
+- `maxWorkers`;
+- plan revision, plan commit, and graph digest;
+- base/head commits and start/completion timestamps;
+- one entry per phase/task node.
 
-## Merge Train Keys
+Node entries record status, dependencies, worker/worktree/branch identity,
+worker and merge commits, verification, approval, and blockers. Legal statuses
+are `pending`, `running`, `awaiting_approval`, `committed`, `integrating`,
+`conflicted`, `integrated`, `awaiting_manual_verification`, `completed`, and
+`blocked`.
 
-| Key | Type / default | Effect | Caution |
-|---|---|---|---|
-| `merge_train.enabled` | boolean / `true` | Enables merge-train planning for supported team/polyrepo delivery. | Disable when the provider workflow does not use grouped publication. |
-| `merge_train.auto_fire` | boolean / `true` | Allows an eligible train to advance automatically through packet-owned provider actions. | Provider and review gates still apply. |
-| `merge_train.group_label_prefix` | string / `"cadre-track"` | Prefix used to group related provider work by track. | Keep stable so existing groups remain discoverable. |
+## Operation Journals
 
-## Recommended Baseline
+- `.cadre/operations/refresh-<id>.json` records a project refresh.
+- `.cadre/operations/archive-<id>.json` records an archive batch.
+- Track `state.json.operation` records specification, planning, revision,
+  review remediation, or revert work.
 
-Keep the generated template for most projects. Change sync, provider, and review
-policy only after validating the target topology. Tune project-skill budget and
-traceability from observed diagnostics, not hypothetical context pressure.
+All record approved artifact membership, durable progress, expected Git
+provenance, and the resulting commit when known.
+
+## Ignored Runtime Paths
+
+`.cadre/.gitignore` excludes:
+
+- `.worktrees/` — temporary Cadre-managed execution worktrees;
+- `wisps/` — disposable untracked exploration output.
+
+Neither path is durable delivery state.
