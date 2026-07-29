@@ -7,7 +7,7 @@ order: 230
 
 # Release Notes
 
-## 3.0.2 - Unreleased
+## 3.0.2 - 2026-07-29
 
 Compared with 3.0.1, Cadre 3.0.2 validates proposed execution graphs directly
 from plan Markdown so approval workflows no longer need temporary project
@@ -38,6 +38,16 @@ copies or premature writes to canonical `.cadre/` state.
 There are no project state-schema, template, command-name, or migration changes
 from 3.0.1. Existing initialized projects and approved plan validation remain
 compatible.
+
+### Install Or Upgrade
+
+```bash
+npm install -g cadre-ai@3.0.2
+cadre-ai doctor
+cadre-ai install
+```
+
+Start a new Codex conversation or reload Claude Code plugins after upgrading.
 
 ## 3.0.1 - 2026-07-29
 
