@@ -7,6 +7,49 @@ order: 230
 
 # Release Notes
 
+## 3.0.1 - 2026-07-29
+
+Cadre 3.0.1 fixes project creation in the published npm package and adds
+package-boundary safeguards for every native workflow and immutable template.
+
+### Fixed
+
+- Restores the logical `project/gitignore` template required by
+  `project_init_preview`. npm treated the former nested `.gitignore` source
+  file as packlist configuration, omitted the template itself, and also
+  suppressed the disposable `wisps/` placeholder from the package.
+- Stores the provider asset under the packaging-safe physical name
+  `gitignore.template` while preserving the public template ID, content hash,
+  generated `.cadre/.gitignore` path, and initialization behavior.
+- Makes both `cadre-ai doctor` and `cadre-ai install` reject an incomplete
+  immutable template catalog before a marketplace is changed.
+
+### Packaging And Documentation
+
+- Defines the complete 38-template `v1` catalog as an explicit runtime
+  contract and rejects missing, unexpected, or duplicate template IDs.
+- Adds npm packlist regression coverage for all ten workflow skills, both
+  worker definitions, both runtime bundles, native plugin manifests, MCP
+  configurations, and every immutable template.
+- Audits `track`, `implement`, `review`, `revise`, `archive`, `refresh`,
+  `revert`, `status`, and `wisp`; no other workflow asset was missing from the
+  published package.
+- Points both the repository README and the npm package README to the canonical
+  [Cadre documentation](https://cadre-docs.pages.dev/).
+
+There are no command, state-schema, template-content, or migration changes from
+3.0.0. Existing initialized projects remain compatible.
+
+### Install Or Upgrade
+
+```bash
+npm install -g cadre-ai@3.0.1
+cadre-ai doctor
+cadre-ai install
+```
+
+Start a new Codex conversation or reload Claude Code plugins after upgrading.
+
 ## 3.0.0 - 2026-07-28
 
 Cadre 3.0 is a major simplification around a human-governed, Git-aware

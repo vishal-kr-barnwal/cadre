@@ -1,6 +1,6 @@
 {
   "name": "cadre",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "A human-governed, Git-aware product delivery harness for Codex and Claude Code.",
   "author": {
     "name": "Cadre contributors"
