@@ -30,6 +30,7 @@ import {
   configureClaudeMcpApproval,
   configureCodexMcpApproval
 } from "../scripts/permissions.js";
+import { TEMPLATE_IDS } from "../src/domain/templates.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateRoot = join(root, "templates", "v1", "init");
@@ -38,6 +39,10 @@ const providerRoot = join(root, "templates", "v1");
 function fixture() {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-test-"));
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
+  renameSync(
+    join(projectRoot, ".cadre", "gitignore.template"),
+    join(projectRoot, ".cadre", ".gitignore")
+  );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
   project.runtimeVersion = "3.0.0";
@@ -885,6 +890,10 @@ test("worker branches cannot integrate protected Cadre state", () => {
 test("approved create operation remains valid before its artifact commit", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-setup-resume-"));
   cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
+  renameSync(
+    join(projectRoot, ".cadre", "gitignore.template"),
+    join(projectRoot, ".cadre", ".gitignore")
+  );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
   project.runtimeVersion = "3.0.0";
@@ -1206,6 +1215,7 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   assert.equal(claudeManifest.version, "3.0.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v1", "init", "gitignore.template")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
@@ -1231,6 +1241,11 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   try {
     const tools = await client.listTools();
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
+    const catalog = await client.callTool({ name: "template_catalog", arguments: {} });
+    assert.deepEqual(
+      (catalog.structuredContent as { templates?: Array<{ id?: string }> }).templates?.map((template) => template.id),
+      [...TEMPLATE_IDS]
+    );
   } finally {
     await client.close();
   }
@@ -1340,6 +1355,9 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     ));
     assert.ok(resources.resources.some(
       (resource) => resource.uri === "cadre://templates/v1/project/refresh-operation"
+    ));
+    assert.ok(resources.resources.some(
+      (resource) => resource.uri === "cadre://templates/v1/project/gitignore"
     ));
     assert.ok(resources.resources.some(
       (resource) => resource.uri === "cadre://templates/v1/track/revert-operation"

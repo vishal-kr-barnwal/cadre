@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skills = [
@@ -84,15 +85,26 @@ for (const skill of skills) {
 
 const templateRoot = join(root, "templates", "v1");
 const projectTemplate = join(templateRoot, "init");
-for (const file of [".gitignore", "workflow.md", "product.md", "guidelines.md", "tech-stack.md", "project.json", "operations/.gitkeep"]) {
+for (const file of [
+  "gitignore.template", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
+  "project.json", "operations/.gitkeep"
+]) {
   if (!existsSync(join(projectTemplate, file))) errors.push(`project template: missing ${file}`);
 }
 for (const forbidden of ["bin", "templates"]) {
   if (existsSync(join(projectTemplate, forbidden))) errors.push(`project template: must not ship .cadre/${forbidden}`);
 }
-const cadreGitignore = readFileSync(join(projectTemplate, ".gitignore"), "utf8");
+const cadreGitignore = readFileSync(join(projectTemplate, "gitignore.template"), "utf8");
 if (!cadreGitignore.includes("/.worktrees/") || !cadreGitignore.includes("/wisps/")) {
   errors.push("project template: .gitignore must exclude worktrees and wisps");
+}
+try {
+  const catalog = templateCatalog();
+  if (catalog.length !== TEMPLATE_IDS.length) {
+    errors.push(`template provider: expected ${TEMPLATE_IDS.length} templates, found ${catalog.length}`);
+  }
+} catch (error) {
+  errors.push(`template provider: ${errorMessage(error)}`);
 }
 const providerLearningTemplate = join(templateRoot, "track", "learning.md");
 if (!existsSync(providerLearningTemplate)

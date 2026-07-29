@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { templateCatalog } from "../src/domain/templates.js";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requiredEntries = [
@@ -38,6 +39,7 @@ export function packagePluginMarketplace(
   outputRoot: string,
   requestedCachebuster = defaultCachebuster()
 ): PackageResult {
+  templateCatalog();
   const targetRoot = resolve(outputRoot);
   const cachebuster = requestedCachebuster.trim();
   if (!/^[0-9A-Za-z-]+$/.test(cachebuster)) {

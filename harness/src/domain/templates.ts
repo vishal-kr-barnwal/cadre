@@ -15,6 +15,47 @@ export interface TemplateRecord {
   sha256: string;
 }
 
+export const TEMPLATE_IDS = [
+  "project/archive-operation",
+  "project/gitignore",
+  "project/guidelines",
+  "project/pattern",
+  "project/patterns/index",
+  "project/product",
+  "project/project",
+  "project/refresh",
+  "project/refresh-operation",
+  "project/styleguides/general",
+  "project/styleguides/language",
+  "project/tech-stack",
+  "project/tracks",
+  "project/workflow",
+  "styleguide/dart",
+  "styleguide/flutter",
+  "styleguide/go",
+  "styleguide/gradle",
+  "styleguide/html-css",
+  "styleguide/index",
+  "styleguide/java",
+  "styleguide/javascript",
+  "styleguide/kotlin",
+  "styleguide/maven",
+  "styleguide/python",
+  "styleguide/react",
+  "styleguide/swift",
+  "styleguide/swiftui",
+  "styleguide/typescript",
+  "track/bug",
+  "track/execution",
+  "track/learning",
+  "track/plan",
+  "track/revert-operation",
+  "track/revise-operation",
+  "track/revision",
+  "track/spec",
+  "track/state"
+] as const;
+
 let catalogCache: readonly TemplateRecord[] | null = null;
 
 function locateTemplateRoot(): string {
@@ -38,7 +79,7 @@ function walk(root: string, directory = root): string[] {
 
 function templateId(path: string): string | null {
   if (path.endsWith("/.gitkeep")) return null;
-  if (path === "init/.gitignore") return "project/gitignore";
+  if (path === "init/gitignore.template") return "project/gitignore";
   const withoutExtension = path.slice(0, -extname(path).length);
   const styleguidePrefix = "styleguides/";
   if (path.startsWith(styleguidePrefix)) return `styleguide/${withoutExtension.slice(styleguidePrefix.length)}`;
@@ -47,14 +88,29 @@ function templateId(path: string): string | null {
 }
 
 function mimeType(path: string): string {
-  if (path.endsWith(".gitignore")) return "text/plain";
+  if (path === "init/gitignore.template") return "text/plain";
   return path.endsWith(".json") ? "application/json" : "text/markdown";
+}
+
+function assertCompleteCatalog(catalog: readonly TemplateRecord[]): void {
+  const actual = new Set(catalog.map((template) => template.id));
+  if (actual.size !== catalog.length) throw new Error(`Cadre template set ${TEMPLATE_SET_VERSION} has duplicate identifiers`);
+  const expected = new Set<string>(TEMPLATE_IDS);
+  const missing = TEMPLATE_IDS.filter((id) => !actual.has(id));
+  const unexpected = [...actual].filter((id) => !expected.has(id)).sort();
+  if (missing.length || unexpected.length) {
+    const details = [
+      missing.length ? `missing ${missing.join(", ")}` : "",
+      unexpected.length ? `unexpected ${unexpected.join(", ")}` : ""
+    ].filter(Boolean).join("; ");
+    throw new Error(`Cadre template set ${TEMPLATE_SET_VERSION} is incomplete: ${details}`);
+  }
 }
 
 export function templateCatalog(): TemplateRecord[] {
   if (!catalogCache) {
     const root = locateTemplateRoot();
-    catalogCache = walk(root)
+    const catalog = walk(root)
       .map((relativePath): TemplateRecord | null => {
         const id = templateId(relativePath);
         if (!id) return null;
@@ -70,6 +126,8 @@ export function templateCatalog(): TemplateRecord[] {
       })
       .filter((entry): entry is TemplateRecord => entry !== null)
       .sort((left, right) => left.id.localeCompare(right.id));
+    assertCompleteCatalog(catalog);
+    catalogCache = catalog;
   }
   return catalogCache.map((template) => ({ ...template }));
 }

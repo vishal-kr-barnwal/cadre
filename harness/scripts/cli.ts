@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInstall } from "./install.js";
 import { runUninstall } from "./uninstall.js";
+import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
 import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 
 function usage(): string {
@@ -42,6 +43,13 @@ function runDoctor(): number {
   process.stdout.write(`${identity}\npackage root: ${root}\n`);
   if (missing.length) {
     process.stderr.write(`Missing packaged runtime assets: ${missing.join(", ")}\n`);
+    return 1;
+  }
+  try {
+    const templates = templateCatalog();
+    process.stdout.write(`template catalog: ${templates.length}/${TEMPLATE_IDS.length} required templates\n`);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
   process.stdout.write("self-contained runtime: ok\n");
