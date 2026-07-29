@@ -15,7 +15,7 @@ provenance without asking an agent to invent workflow state.
 
 **Documentation:** [cadre-docs.pages.dev](https://cadre-docs.pages.dev/) ·
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
-[Review the 3.0.1 notes](https://cadre-docs.pages.dev/release-notes/)
+[Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
 ## What Cadre Provides
 

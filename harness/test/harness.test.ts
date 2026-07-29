@@ -10,7 +10,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
-import { parsePlan, validatePlanGraph } from "../src/domain/plan.js";
+import { parsePlan, parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
 import {
   applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionNodesUpdate, applyExecutionStart, executionStatus,
   previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionNodesUpdate, previewExecutionStart,
@@ -375,6 +375,36 @@ test("plan DAG validation derives manual barriers and rejects dependency cycles"
   assert.ok(errors.some((error) => error.includes("dependency cycle")));
   assert.deepEqual(graph.phases[0]!.tasks.at(-1)!.dependencies, ["T1.1"]);
   assert.deepEqual(graph.phases.at(-1)!.dependencies, ["P1", "P2"]);
+});
+
+test("draft plan content validation is file-free and uses the intended target status", () => {
+  const planMarkdown = `# Plan: Draft
+
+- Spec revision: 1
+- Plan revision: 2
+
+## Phase 1: Deliver
+- Phase dependencies: none
+- [ ] T1.1 Implement
+  - Task dependencies: none
+- [ ] T1.2 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 2: Track-level User Manual Verification
+- [ ] T2.1 User Manual Verification
+- Phase completion commit: pending
+`;
+  const plannedErrors: string[] = [];
+  const plannedGraph = parsePlanContent(planMarkdown, "proposed-plan.md", plannedErrors);
+  validatePlanGraph("proposed-plan.md", plannedGraph, "planned", plannedErrors);
+  assert.deepEqual(plannedErrors, []);
+  assert.deepEqual(plannedGraph.phases[0]!.tasks.at(-1)!.dependencies, ["T1.1"]);
+  assert.deepEqual(plannedGraph.phases.at(-1)!.dependencies, ["P1"]);
+
+  const reviewErrors: string[] = [];
+  const reviewGraph = parsePlanContent(planMarkdown, "review-remediation.md", reviewErrors);
+  validatePlanGraph("review-remediation.md", reviewGraph, "ready_for_review", reviewErrors);
+  assert.ok(reviewErrors.some((error) => error.includes("ready_for_review track has 3 pending task(s)")));
 });
 
 test("execution journal gates tasks behind their running phase and validates persisted graph identity", () => {
@@ -1338,7 +1368,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
       "state_validate", "project_init_preview", "project_init_apply",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
-      "execution_graph_validate", "review_complete_preview", "review_complete_apply",
+      "execution_graph_validate", "execution_graph_validate_draft", "review_complete_preview", "review_complete_apply",
       "archive_batch_preview", "archive_batch_apply", "archive_batch_record_preview", "archive_batch_record_apply",
       "execution_start_preview", "execution_start_apply",
       "execution_node_preview", "execution_node_apply", "execution_nodes_preview", "execution_nodes_apply", "execution_status",
@@ -1376,6 +1406,48 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (bundle.structuredContent as { templates?: Array<{ id?: string }> }).templates?.map((template) => template.id),
       ["track/spec", "track/state"]
     );
+
+    const untouchedRoot = mkdtempSync(join(tmpdir(), "cadre-draft-validator-"));
+    const sentinelPath = join(untouchedRoot, "sentinel.txt");
+    writeFileSync(sentinelPath, "unchanged\n");
+    const draftPlan = `# Plan: MCP draft
+
+- Spec revision: 1
+- Plan revision: 1
+
+## Phase 1: Deliver
+- Phase dependencies: none
+- [ ] T1.1 Implement
+  - Task dependencies: none
+- [ ] T1.2 User Manual Verification
+- Phase completion commit: pending
+
+## Phase 2: Track-level User Manual Verification
+- [ ] T2.1 User Manual Verification
+- Phase completion commit: pending
+`;
+    const draftValidation = await client.callTool({
+      name: "execution_graph_validate_draft",
+      arguments: { planMarkdown: draftPlan, targetStatus: "in_progress", sourceLabel: "review-proposal.md" }
+    });
+    assert.equal(draftValidation.isError, undefined);
+    const draftResult = draftValidation.structuredContent as {
+      valid?: boolean;
+      errors?: string[];
+      graph?: { phases?: Array<{ dependencies?: string[]; tasks?: Array<{ dependencies?: string[] }> }> };
+    };
+    assert.equal(draftResult.valid, true);
+    assert.deepEqual(draftResult.errors, []);
+    assert.deepEqual(draftResult.graph?.phases?.[0]?.tasks?.at(-1)?.dependencies, ["T1.1"]);
+    assert.deepEqual(draftResult.graph?.phases?.at(-1)?.dependencies, ["P1"]);
+    assert.equal(readFileSync(sentinelPath, "utf8"), "unchanged\n");
+    assert.deepEqual(readdirSync(untouchedRoot), ["sentinel.txt"]);
+
+    const oversizedDraft = await client.callTool({
+      name: "execution_graph_validate_draft",
+      arguments: { planMarkdown: "x".repeat((256 * 1024) + 1), targetStatus: "planned" }
+    });
+    assert.equal(oversizedDraft.isError, true);
 
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
     const files = [
@@ -1435,6 +1507,22 @@ test("every post-create command loads the shared workflow", () => {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /\.cadre\/workflow\.md/, `${skill} must load the shared workflow`);
   }
+});
+
+test("proposal workflows validate draft plan content without temporary project copies", () => {
+  for (const skill of ["track", "review", "revise"]) {
+    const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+    assert.match(body, /execution_graph_validate_draft/, `${skill} must validate proposed plan Markdown`);
+    assert.match(body, /temporary project copy/, `${skill} must prohibit the filesystem workaround`);
+  }
+
+  const track = readFileSync(join(root, "skills", "track", "SKILL.md"), "utf8");
+  const review = readFileSync(join(root, "skills", "review", "SKILL.md"), "utf8");
+  const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
+  assert.match(track, /target status `planned`/);
+  assert.match(review, /target status `in_progress`/);
+  assert.match(implement, /execution_graph_validate/);
+  assert.doesNotMatch(implement, /execution_graph_validate_draft/);
 });
 
 test("implementation guidance preserves approval, permission, batching, and task-commit boundaries", () => {

@@ -26,7 +26,7 @@ import {
   templateCatalog
 } from "../domain/templates.js";
 import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
-import { parsePlan, validatePlanGraph } from "../domain/plan.js";
+import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
   EXECUTION_NODE_STATUSES,
   applyExecutionFinish,
@@ -93,6 +93,12 @@ function serializableValidation(validation: ReturnType<typeof validateProject>) 
     warnings: validation.warnings
   };
 }
+
+const PLAN_VALIDATION_STATUSES = [
+  "drafting-spec", "drafting-plan", "planned", "in_progress",
+  "ready_for_review", "completed", "archived"
+] as const;
+const MAX_DRAFT_PLAN_CHARACTERS = 256 * 1024;
 
 export function createCadreServer(): McpServer {
   const server = new McpServer(
@@ -214,6 +220,27 @@ export function createCadreServer(): McpServer {
       const errors: string[] = [];
       const graph = parsePlan(planPath, errors);
       validatePlanGraph(planPath, graph, state.status ?? "planned", errors);
+      return result({ valid: errors.length === 0, graph, errors });
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
+  server.registerTool("execution_graph_validate_draft", {
+    title: "Validate a draft execution graph",
+    description: "Compile and validate an unapproved plan supplied as Markdown without reading or writing project files.",
+    inputSchema: {
+      planMarkdown: z.string().min(1).max(MAX_DRAFT_PLAN_CHARACTERS),
+      targetStatus: z.enum(PLAN_VALIDATION_STATUSES),
+      sourceLabel: z.string().min(1).max(200).regex(/^[^\r\n]+$/).optional()
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async ({ planMarkdown, targetStatus, sourceLabel }) => {
+    try {
+      const label = sourceLabel ?? "<draft-plan>";
+      const errors: string[] = [];
+      const graph = parsePlanContent(planMarkdown, label, errors);
+      validatePlanGraph(label, graph, targetStatus, errors);
       return result({ valid: errors.length === 0, graph, errors });
     } catch (error) {
       return failure(error);
