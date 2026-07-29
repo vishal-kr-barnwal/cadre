@@ -4,6 +4,10 @@ Cadre is a human-governed, Git-aware delivery harness for Codex and Claude Code.
 
 Cadre is installed as a user plugin. Its bundled TypeScript MCP server provides deterministic state operations and immutable, versioned templates. A project keeps only approved, mutable delivery state under `.cadre/`; runtime code and template catalogs are not copied into the project.
 
+**Documentation:** [cadre-docs.pages.dev](https://cadre-docs.pages.dev/) ·
+[Quickstart](https://cadre-docs.pages.dev/quickstart/) ·
+[Release notes](https://cadre-docs.pages.dev/release-notes/)
+
 ## Capabilities
 
 - Greenfield and brownfield project onboarding, with an explicit classification gate when the repository is ambiguous.

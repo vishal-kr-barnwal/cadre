@@ -13,7 +13,7 @@ combines specification, dependency-aware planning, parallel implementation,
 manual verification, review, revision, refresh, revert, archive, and Git
 provenance without asking an agent to invent workflow state.
 
-[Read the documentation](https://cadre-docs.pages.dev/) ·
+**Documentation:** [cadre-docs.pages.dev](https://cadre-docs.pages.dev/) ·
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review the 3.0.0 notes](https://cadre-docs.pages.dev/release-notes/)
 
