@@ -1,11 +1,43 @@
 ---
 title: Release Notes
-description: Cadre 3.0 release changes and migration guidance.
+description: Cadre 3.x release changes and migration guidance.
 section: Reference
 order: 230
 ---
 
 # Release Notes
+
+## 3.0.2 - Unreleased
+
+Compared with 3.0.1, Cadre 3.0.2 validates proposed execution graphs directly
+from plan Markdown so approval workflows no longer need temporary project
+copies or premature writes to canonical `.cadre/` state.
+
+### Fixed
+
+- Adds the read-only `execution_graph_validate_draft` MCP tool for validating
+  an exact unapproved proposal with an explicit target lifecycle status.
+- Updates `track` to validate the proposed plan as `planned`, and updates
+  review remediation to validate the replacement graph as `in_progress` rather
+  than checking the stale approved plan under `ready_for_review` rules.
+- Updates `revise` to validate changed plan content against its intended
+  post-approval status before any approved artifact is replaced.
+- Eliminates the temporary control-plane copy workaround and its associated
+  cleanup prompts and residue risk.
+
+### Runtime And Compatibility
+
+- Extracts a reusable content parser while preserving the existing file-backed
+  parser and canonical `execution_graph_validate` contract for approved plans.
+- Bounds draft Markdown input at 256 KiB and accepts an optional diagnostic
+  source label without granting the tool access to project paths.
+- Adds coverage for derived manual-verification barriers, lifecycle-sensitive
+  validation, oversized input rejection, compiled MCP exposure, and zero
+  filesystem mutation.
+
+There are no project state-schema, template, command-name, or migration changes
+from 3.0.1. Existing initialized projects and approved plan validation remain
+compatible.
 
 ## 3.0.1 - 2026-07-29
 

@@ -7,7 +7,7 @@ order: 210
 
 # MCP Reference
 
-The `cadre` stdio server exposes immutable template resources and 35
+The `cadre` stdio server exposes immutable template resources and 36
 purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
 arbitrary filesystem/shell operations.
 
@@ -51,6 +51,14 @@ archive, and derived-index validation errors. Read-only.
 
 Parses one active track's `plan.md`, validates dependencies/cycles/barriers
 against lifecycle state, and returns the derived graph and errors. Read-only.
+
+## execution_graph_validate_draft
+
+Parses an unapproved plan supplied directly as bounded Markdown, validates its
+dependencies, cycles, derived manual-verification barriers, and intended target
+lifecycle status, and returns the derived graph and errors. It accepts an
+optional diagnostic source label but no project root or track path, so it
+neither reads nor writes project files. Read-only.
 
 ## review_complete_preview
 

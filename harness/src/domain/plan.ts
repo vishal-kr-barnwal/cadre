@@ -58,16 +58,12 @@ function graphDigest(graph: Omit<PlanGraph, "digest">): string {
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
-export function parsePlan(path: string, errors: string[] = []): PlanGraph {
-  if (!existsSync(path)) {
-    errors.push(`${path}: missing plan`);
-    return { specRevision: null, planRevision: null, phases: [], digest: graphDigest({ specRevision: null, planRevision: null, phases: [] }) };
-  }
+export function parsePlanContent(content: string, sourceLabel: string, errors: string[] = []): PlanGraph {
   const phases: PlanPhase[] = [];
   let specRevision: number | null = null;
   let planRevision: number | null = null;
   let currentTask: PlanTask | null = null;
-  const lines = readFileSync(path, "utf8").split(/\r?\n/);
+  const lines = content.split(/\r?\n/);
   for (const [index, line] of lines.entries()) {
     const lineNumber = index + 1;
     const spec = line.match(/^- Spec revision: (\d+)$/);
@@ -96,8 +92,8 @@ export function parsePlan(path: string, errors: string[] = []): PlanGraph {
     const phaseDependencies = line.match(/^- Phase dependencies: (.+)$/);
     if (phaseDependencies) {
       const phase = phases.at(-1);
-      if (!phase) errors.push(`${path}:${lineNumber}: phase dependencies appear before a phase`);
-      else if (phase.dependencyDeclared) errors.push(`${path}:${lineNumber}: ${phase.id} has duplicate phase dependencies`);
+      if (!phase) errors.push(`${sourceLabel}:${lineNumber}: phase dependencies appear before a phase`);
+      else if (phase.dependencyDeclared) errors.push(`${sourceLabel}:${lineNumber}: ${phase.id} has duplicate phase dependencies`);
       else {
         phase.dependencies = dependencyList(phaseDependencies[1]!);
         phase.dependencyDeclared = true;
@@ -108,7 +104,7 @@ export function parsePlan(path: string, errors: string[] = []): PlanGraph {
     const phaseCommit = line.match(/^- Phase completion commit: (pending|`([0-9a-f]{7,40})`)$/);
     if (phaseCommit) {
       const phase = phases.at(-1);
-      if (!phase) errors.push(`${path}:${lineNumber}: phase completion commit appears before a phase`);
+      if (!phase) errors.push(`${sourceLabel}:${lineNumber}: phase completion commit appears before a phase`);
       else phase.completionCommit = phaseCommit[1] === "pending" ? null : phaseCommit[2]!;
       continue;
     }
@@ -117,7 +113,7 @@ export function parsePlan(path: string, errors: string[] = []): PlanGraph {
     if (taskMatch) {
       const phase = phases.at(-1);
       if (!phase) {
-        errors.push(`${path}:${lineNumber}: task appears before a phase`);
+        errors.push(`${sourceLabel}:${lineNumber}: task appears before a phase`);
         continue;
       }
       let title = taskMatch[5]!.trim();
@@ -145,8 +141,8 @@ export function parsePlan(path: string, errors: string[] = []): PlanGraph {
 
     const taskDependencies = line.match(/^  - Task dependencies: (.+)$/);
     if (taskDependencies) {
-      if (!currentTask) errors.push(`${path}:${lineNumber}: task dependencies do not follow a task`);
-      else if (currentTask.dependencyDeclared) errors.push(`${path}:${lineNumber}: ${currentTask.id} has duplicate task dependencies`);
+      if (!currentTask) errors.push(`${sourceLabel}:${lineNumber}: task dependencies do not follow a task`);
+      else if (currentTask.dependencyDeclared) errors.push(`${sourceLabel}:${lineNumber}: ${currentTask.id} has duplicate task dependencies`);
       else {
         currentTask.dependencies = dependencyList(taskDependencies[1]!);
         currentTask.dependencyDeclared = true;
@@ -156,6 +152,14 @@ export function parsePlan(path: string, errors: string[] = []): PlanGraph {
 
   const graphWithoutDigest = { specRevision, planRevision, phases };
   return { ...graphWithoutDigest, digest: graphDigest(graphWithoutDigest) };
+}
+
+export function parsePlan(path: string, errors: string[] = []): PlanGraph {
+  if (!existsSync(path)) {
+    errors.push(`${path}: missing plan`);
+    return { specRevision: null, planRevision: null, phases: [], digest: graphDigest({ specRevision: null, planRevision: null, phases: [] }) };
+  }
+  return parsePlanContent(readFileSync(path, "utf8"), path, errors);
 }
 
 function findCycles(nodes: Array<{ id: string; dependencies: string[] }>, owner: string, errors: string[]): void {

@@ -46,7 +46,7 @@ discovery is unnecessary when the logical IDs are already declared.
 |---|---|
 | Templates | `template_catalog`, `template_get`, `template_get_many`, `styleguide_resolve` |
 | Project health | `project_status`, `state_validate` |
-| Plan graph | `execution_graph_validate` |
+| Plan graph | `execution_graph_validate`, `execution_graph_validate_draft` |
 | Review governance | `review_complete_preview`, `review_complete_apply` |
 | Archive governance | `archive_batch_preview`, `archive_batch_apply`, `archive_batch_record_preview`, `archive_batch_record_apply` |
 | Execution lifecycle | `execution_start_*`, `execution_node_*`, `execution_nodes_*`, `execution_status`, `execution_finish_*` |
