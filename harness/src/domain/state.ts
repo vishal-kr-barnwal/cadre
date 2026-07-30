@@ -45,6 +45,7 @@ export interface TrackState {
   lastExecution?: {
     executionId?: string;
     journal?: string;
+    approvalMode?: string;
     planRevision?: number;
     graphDigest?: string;
     headCommit?: string;
@@ -181,6 +182,9 @@ function validateImplementOperation(state: TrackState, owner: string, errors: st
     errors.push(`${owner}: implement journal path is invalid`);
   }
   if (!["parallel", "sequential"].includes(String(operation.mode ?? ""))) errors.push(`${owner}: implement mode is invalid`);
+  if (!["governed", "phase", "autonomous"].includes(String(operation.approvalMode ?? "governed"))) {
+    errors.push(`${owner}: implement approvalMode is invalid`);
+  }
   if (!/^[0-9a-f]{64}$/.test(String(operation.graphDigest ?? ""))) errors.push(`${owner}: implement graphDigest is invalid`);
   if (!Number.isInteger(operation.planRevision) || Number(operation.planRevision) < 1) errors.push(`${owner}: implement planRevision is invalid`);
 }
@@ -575,8 +579,10 @@ export function formatStatus(projectRoot: string): { text: string; result: Valid
     const dependencies = track.dependencies?.length ? track.dependencies.join(",") : "none";
     const state = result.states.get(track.id);
     const execution = state?.operation?.action === "implement"
-      ? `${String(state.operation.executionId ?? "unknown")}/${String(state.operation.mode ?? "unknown")}`
-      : state?.lastExecution?.executionId ?? "none";
+      ? `${String(state.operation.executionId ?? "unknown")}/${String(state.operation.mode ?? "unknown")}/${String(state.operation.approvalMode ?? "governed")}`
+      : state?.lastExecution
+        ? `${String(state.lastExecution.executionId ?? "unknown")}/completed/${String(state.lastExecution.approvalMode ?? "governed")}`
+        : "none";
     lines.push(`${track.id} [${track.type}] ${track.status}; checkpoint=${state?.checkpoint ?? "none"}; operation=${state?.operation?.action ?? "none"}; execution=${execution}; deps=${dependencies}; revision=${track.revision ?? 1}; reviews=${state?.reviewCycles?.length ?? 0}; next=${nextCommand(track)}`);
   }
   const counts = result.tracks.reduce<Record<string, number>>((summary, track) => {

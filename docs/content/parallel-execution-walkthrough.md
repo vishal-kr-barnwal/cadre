@@ -234,5 +234,8 @@ from an uncertain base.
 - Workers never spawn workers or merge branches.
 - Parallel task workers in one wave share one recorded phase base.
 - Downstream waves begin only after dependency commits are integrated.
-- Every regular task retains its own approval and Conventional Commit.
-- Phase and track manual-verification barriers remain explicit.
+- Every regular task retains its own approval-mode authorization and
+  Conventional Commit.
+- Phase and track manual-verification barriers remain explicit at the boundary
+  selected by the persisted approval mode; track-level verification is always
+  human-approved.

@@ -46,6 +46,15 @@ function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function proposalFileHash(file: ProposedFile): string {
+  if (file.path !== "project.json") return file.sha256;
+  const state = JSON.parse(file.content) as {
+    setup?: { operation?: { approvedAt?: string } | null };
+  };
+  if (state.setup?.operation) state.setup.operation.approvedAt = "<audit-timestamp>";
+  return hash(`${JSON.stringify(state, null, 2)}\n`);
+}
+
 function normalizeCadrePath(input: string): string {
   if (isAbsolute(input)) throw new Error(`Cadre artifact path must be relative: ${input}`);
   const normalized = input.replaceAll("\\", "/").replace(/^\.\//, "");
@@ -137,7 +146,7 @@ export function previewProjectInit(input: ProjectInitInput): ProjectInitProposal
   const digest = hash(JSON.stringify({
     runtimeVersion: CADRE_RUNTIME_VERSION,
     templateSetVersion: TEMPLATE_SET_VERSION,
-    files: files.map(({ path, sha256 }) => ({ path, sha256 }))
+    files: files.map((file) => ({ path: file.path, sha256: proposalFileHash(file) }))
   }));
   return { runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, files, digest };
 }

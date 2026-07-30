@@ -422,6 +422,15 @@ test("execution journal gates tasks behind their running phase and validates per
     approvedAt: "2026-07-28T01:00:00.000Z"
   };
   const preview = previewExecutionStart(input);
+  assert.equal(preview.journal.approvalMode, "phase");
+  assert.equal((preview.state.operation as { approvalMode?: string }).approvalMode, "phase");
+  const governedPreview = previewExecutionStart({ ...input, approvalMode: "governed" });
+  assert.equal(governedPreview.journal.approvalMode, "governed");
+  assert.notEqual(governedPreview.digest, preview.digest);
+  assert.throws(() => previewExecutionStart({
+    ...input,
+    approvalMode: "invalid" as never
+  }), /approvalMode must be governed, phase, or autonomous/);
   const started = applyExecutionStart(input, preview.digest);
   assert.deepEqual(started.derivedStatus.readyPhases, ["P1"]);
   assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyPhases, ["P1"]);
@@ -443,6 +452,10 @@ test("execution journal gates tasks behind their running phase and validates per
 
   const journalPath = join(trackRoot, "executions", `execution-${input.executionId}.json`);
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  journal.approvalMode = "invalid";
+  writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  assert.ok(validateProject(projectRoot).errors.some((error) => error.includes("invalid execution approval mode")));
+  journal.approvalMode = "phase";
   delete journal.nodes["T1.2"];
   writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
   assert.ok(validateProject(projectRoot).errors.some((error) => error.includes("do not exactly match")));
@@ -1470,12 +1483,21 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal(preview.isError, undefined);
     const digest = (preview.structuredContent as { digest?: string }).digest;
     assert.match(digest ?? "", /^[0-9a-f]{64}$/);
+    const approvedAt = "2026-07-28T00:05:00.000Z";
+    const refreshedPreview = await client.callTool({
+      name: "project_init_preview",
+      arguments: { ...input, approvedAt }
+    });
+    assert.equal(refreshedPreview.isError, undefined);
+    assert.equal((refreshedPreview.structuredContent as { digest?: string }).digest, digest);
     const applied = await client.callTool({
       name: "project_init_apply",
-      arguments: { ...input, proposalDigest: digest }
+      arguments: { ...input, approvedAt, proposalDigest: digest }
     });
     assert.equal(applied.isError, undefined);
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
+    const initializedProject = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
+    assert.equal(initializedProject.setup.operation.approvedAt, approvedAt);
     assert.equal(
       readFileSync(join(projectRoot, ".cadre", ".gitignore"), "utf8"),
       "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n"
@@ -1528,6 +1550,7 @@ test("proposal workflows validate draft plan content without temporary project c
 test("implementation guidance preserves approval, permission, batching, and task-commit boundaries", () => {
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
+  const executionTemplate = JSON.parse(readFileSync(join(providerRoot, "track", "execution.json"), "utf8"));
   const phaseWorker = readFileSync(join(root, "agents", "cadre-phase-worker.md"), "utf8");
   const taskWorker = readFileSync(join(root, "agents", "cadre-task-worker.md"), "utf8");
 
@@ -1536,9 +1559,20 @@ test("implementation guidance preserves approval, permission, batching, and task
     assert.match(body, /execution_nodes_preview/);
     assert.match(body, /Never batch across a human approval/i);
     assert.match(body, /distinct recorded SHA|distinct SHA/);
+    assert.match(body, /`governed`/);
+    assert.match(body, /`phase` \(default\)|`phase` is the default/);
+    assert.match(body, /`autonomous`/);
+    assert.match(body, /Track-level User Manual Verification/);
   }
+  assert.match(implement, /Pause exactly once for that phase's final `User Manual Verification` task/);
+  assert.match(implement, /run all regular work inside a phase autonomously/);
+  assert.match(implement, /Pause only for the `Track-level User Manual Verification` task/);
+  assert.match(implement, /do not add an execution-start approval prompt/);
+  assert.match(workflow, /deterministic worktree, clean integration, cleanup, journal, index, and bookkeeping mutations/);
+  assert.match(workflow, /does not require a separate approval prompt/);
+  assert.equal(executionTemplate.approvalMode, "{{governed|phase|autonomous}}");
   assert.match(phaseWorker, /one regular task at a time/);
-  assert.match(phaseWorker, /commit only that task/);
+  assert.match(phaseWorker, /commit only that task/i);
   assert.match(phaseWorker, /unexpected host permission/);
   assert.match(taskWorker, /unexpected host permission/);
 });
@@ -1641,7 +1675,9 @@ test("create bootstraps Git only when no worktree exists", () => {
 
 test("create requires separate workflow and styleguide acceptance", () => {
   const create = readFileSync(join(root, "skills", "create", "SKILL.md"), "utf8");
-  assert.match(create, /whether the default workflow is acceptable or the human wants changes/);
+  assert.match(create, /Do not print the complete unchanged bundled workflow unless the human asks/);
+  assert.match(create, /This single approval replaces a separate pre-preview manifest approval/);
+  assert.match(create, /Do not pass `patterns\/index\.md`/);
   assert.match(create, /use the default, amend it, or use a user-provided replacement/);
 
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");

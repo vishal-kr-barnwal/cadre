@@ -18,8 +18,23 @@ mode, but parallelism is used only when it provides safe, bounded benefit.
 | `sequential` | Execute one ready node at a time in main unless the workflow needs an integration boundary. |
 
 The execution journal records requested mode, effective mode, maximum workers,
-plan revision, plan commit, graph digest, base commit, and every node. Changing
-mode mid-execution requires a clean safe boundary and approval.
+approval mode, plan revision, plan commit, graph digest, base commit, and every
+node. Changing either mode mid-execution requires a clean safe boundary and
+approval.
+
+## Approval Modes
+
+| Mode | Human approval boundary |
+|---|---|
+| `governed` | Every regular task diff and material mutation, plus all manual-verification barriers. |
+| `phase` | Default. One approval at each phase's final User Manual Verification task; other in-scope work is autonomous. |
+| `autonomous` | Only Track-level User Manual Verification; phase-level barriers are verified and recorded autonomously. |
+
+Approval modes never authorize scope expansion, waived required checks,
+destructive or remote actions, or guessing through a material ambiguity. Those
+conditions stop as blockers or clarification requests rather than routine
+approval prompts. Legacy execution journals without `approvalMode` retain the
+conservative `governed` behavior.
 
 ## Worker Capacity
 
@@ -55,8 +70,9 @@ The main agent is the only scheduler and Cadre-state owner. It:
 - derives ready nodes from MCP execution status;
 - creates all worktrees and workers;
 - supplies exact context, allowed paths, dependencies, and verification;
-- presents worker diffs and evidence to the human;
-- directs task commits after approval;
+- reviews every worker diff and evidence, presenting it at the boundary selected
+  by the persisted approval mode;
+- directs task commits after human approval or approval-mode authorization;
 - integrates task branches into phase parents and phase branches into main;
 - resolves and re-verifies conflicts;
 - records learning, manual verification, state, and provenance;

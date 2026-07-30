@@ -65,6 +65,19 @@ The execution journal persists requested/effective mode and its worker bound.
 Changing mode after execution starts requires a clean safe boundary and
 approval.
 
+Approval prompts are configured independently. `phase` is the default;
+explicitly request `governed` for task-by-task approval or `autonomous` to pause
+only at track-level verification:
+
+```text
+$cadre:implement checkout governed
+$cadre:implement checkout autonomous
+```
+
+The selected `approvalMode` is persisted in the execution journal and active
+track operation. Changing it after execution starts also requires a clean safe
+boundary and approval.
+
 ## Change Styleguides
 
 `create` resolves defaults from the approved technology list and asks whether

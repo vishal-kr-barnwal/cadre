@@ -10,6 +10,9 @@ export const EXECUTION_NODE_STATUSES = [
 ] as const;
 export type ExecutionNodeStatus = typeof EXECUTION_NODE_STATUSES[number];
 
+export const EXECUTION_APPROVAL_MODES = ["governed", "phase", "autonomous"] as const;
+export type ExecutionApprovalMode = typeof EXECUTION_APPROVAL_MODES[number];
+
 export interface ExecutionNode {
   id: string;
   kind: "phase" | "task" | "manual-verification";
@@ -35,6 +38,7 @@ export interface ExecutionJournal {
   checkpoint: string;
   requestedMode: "parallel" | "sequential";
   effectiveMode: "parallel" | "sequential";
+  approvalMode: ExecutionApprovalMode;
   maxWorkers: number;
   planRevision: number;
   planCommit: string;
@@ -57,6 +61,7 @@ interface ExecutionOperation {
   executionId: string;
   journal: string;
   mode: "parallel" | "sequential";
+  approvalMode: ExecutionApprovalMode;
   graphDigest: string;
   planRevision: number;
 }
@@ -77,6 +82,7 @@ export interface ExecutionStartInput {
   executionId: string;
   requestedMode: "parallel" | "sequential";
   effectiveMode: "parallel" | "sequential";
+  approvalMode?: ExecutionApprovalMode;
   maxWorkers: number;
   baseCommit: string;
   approvedAt: string;
@@ -186,6 +192,8 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   if (input.requestedMode === "sequential" && input.effectiveMode !== "sequential") {
     throw new Error("an explicitly sequential execution cannot become parallel");
   }
+  const approvalMode = input.approvalMode ?? "phase";
+  if (!EXECUTION_APPROVAL_MODES.includes(approvalMode)) throw new Error("approvalMode must be governed, phase, or autonomous");
   const trackRoot = activeTrackRoot(input.projectRoot, input.trackId);
   const statePath = join(trackRoot, "state.json");
   const planPath = join(trackRoot, "plan.md");
@@ -210,6 +218,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     checkpoint: "approved",
     requestedMode: input.requestedMode,
     effectiveMode: input.effectiveMode,
+    approvalMode,
     maxWorkers: input.maxWorkers,
     planRevision,
     planCommit: state.commits!.plan!,
@@ -243,6 +252,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     executionId: input.executionId,
     journal: relativeJournal,
     mode: input.effectiveMode,
+    approvalMode,
     graphDigest: graph.digest,
     planRevision
   };
@@ -388,7 +398,7 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
     throw new Error(`${node.id} requires a commit before it can be marked committed`);
   }
   if (input.status === "committed" && !updated.approval) {
-    throw new Error(`${node.id} requires recorded human approval before commit`);
+    throw new Error(`${node.id} requires recorded approval authorization before commit`);
   }
   if (input.status === "committed" && node.kind === "task") {
     const duplicate = Object.values(journal.nodes).find(
@@ -412,7 +422,7 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
       if (incompleteTasks.length) throw new Error(`${node.id} has incomplete tasks: ${incompleteTasks.join(", ")}`);
     }
     if (node.kind === "manual-verification" && !updated.approval) {
-      throw new Error(`${node.id} requires recorded human approval`);
+      throw new Error(`${node.id} requires recorded verification authorization`);
     }
   }
   if (updated.workerId != null) {
@@ -564,6 +574,7 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionPr
     lastExecution: {
       executionId: input.executionId,
       journal: journalRelative(input.executionId),
+      approvalMode: journal.approvalMode,
       planRevision: journal.planRevision,
       graphDigest: journal.graphDigest,
       headCommit: input.headCommit,
@@ -631,6 +642,9 @@ export function validateExecutionJournal(
   }
   if (journal.requestedMode === "sequential" && journal.effectiveMode !== "sequential") {
     errors.push(`${state.trackId}: sequential request became parallel`);
+  }
+  if (!EXECUTION_APPROVAL_MODES.includes(journal.approvalMode ?? "governed")) {
+    errors.push(`${state.trackId}: invalid execution approval mode`);
   }
   if (!Number.isInteger(journal.maxWorkers) || journal.maxWorkers < 1 || journal.maxWorkers > 32) errors.push(`${state.trackId}: invalid maxWorkers`);
   const requireCurrentGraph = operation?.action === "implement"
@@ -703,14 +717,16 @@ export function validateExecutionJournal(
   if (operation?.action === "implement") {
     if (operation.executionId !== journal.executionId
       || operation.graphDigest !== journal.graphDigest
-      || operation.planRevision !== journal.planRevision) {
+      || operation.planRevision !== journal.planRevision
+      || String(operation.approvalMode ?? "governed") !== String(journal.approvalMode ?? "governed")) {
       errors.push(`${state.trackId}: implement operation does not match its execution journal`);
     }
   } else if (state.lastExecution) {
     if (state.lastExecution.executionId !== journal.executionId
       || state.lastExecution.graphDigest !== journal.graphDigest
       || state.lastExecution.planRevision !== journal.planRevision
-      || state.lastExecution.headCommit !== journal.headCommit) {
+      || state.lastExecution.headCommit !== journal.headCommit
+      || String(state.lastExecution.approvalMode ?? "governed") !== String(journal.approvalMode ?? "governed")) {
       errors.push(`${state.trackId}: lastExecution does not match its execution journal`);
     }
   }

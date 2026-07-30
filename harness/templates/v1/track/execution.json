@@ -6,6 +6,7 @@
   "checkpoint": "approved",
   "requestedMode": "{{parallel|sequential}}",
   "effectiveMode": "{{parallel|sequential}}",
+  "approvalMode": "{{governed|phase|autonomous}}",
   "maxWorkers": 3,
   "planRevision": 1,
   "planCommit": "{{PLAN_COMMIT}}",

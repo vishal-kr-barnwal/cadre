@@ -54,10 +54,20 @@ sequential worker and task fan-out only at a clean checkpoint. Explicit
 sequential mode avoids worker worktrees. Declared track dependencies must
 already be completed or archived after completion.
 
-Each regular task is read, implemented, verified, presented, approved, and
-committed separately. Derived phase and track manual-verification barriers
-require explicit human evidence. An approved execution finish moves the track
-to `ready_for_review`, never directly to `completed`.
+Approval mode is independent of parallel/sequential scheduling:
+
+- `governed` presents each regular task and material integration transition;
+- `phase` is the default and runs a phase autonomously until its final User
+  Manual Verification task;
+- `autonomous` runs through phase barriers and pauses only at Track-level User
+  Manual Verification.
+
+The `implement` invocation authorizes execution start with the requested modes
+or their defaults. `phase` and `autonomous` do not add a separate start prompt.
+All modes stop for material ambiguity, scope divergence, unsafe state, or a
+required-check exception. Track-level verification always requires the human.
+An approved execution finish moves the track to `ready_for_review`, never
+directly to `completed`.
 
 ## review
 

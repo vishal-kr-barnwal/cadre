@@ -94,7 +94,8 @@ stale-state digest.
 ## execution_start_preview
 
 Previews a new execution journal and track operation for an approved plan,
-mode, worker bound, base commit, and timestamp. Read-only.
+scheduling mode, approval mode, worker bound, base commit, and timestamp.
+Approval mode defaults to `phase`. Read-only.
 
 ## execution_start_apply
 
@@ -175,13 +176,15 @@ directories. Read-only.
 ## project_init_preview
 
 Validates approved rendered project files, project identity/context, Git
-disposition, base commit, and timestamp; returns the exact `.cadre/` file set
-and digest. Read-only.
+disposition, and base commit; returns the proposed `.cadre/` file set and
+semantic digest. The `approvedAt` audit timestamp is shown and recorded but
+does not affect the digest. Read-only.
 
 ## project_init_apply
 
-Atomically creates `.cadre/` only when inputs and preview digest are unchanged.
-It never copies runtime code or templates into the project.
+Atomically creates `.cadre/` only when semantic inputs and preview digest are
+unchanged, while recording the supplied `approvedAt` audit timestamp. It never
+copies runtime code or templates into the project.
 
 ## setup_record_commit
 

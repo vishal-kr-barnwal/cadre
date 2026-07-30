@@ -28,6 +28,7 @@ import {
 import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
+  EXECUTION_APPROVAL_MODES,
   EXECUTION_NODE_STATUSES,
   applyExecutionFinish,
   applyExecutionNodeUpdate,
@@ -356,6 +357,7 @@ export function createCadreServer(): McpServer {
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
     requestedMode: z.enum(["parallel", "sequential"]),
     effectiveMode: z.enum(["parallel", "sequential"]),
+    approvalMode: z.enum(EXECUTION_APPROVAL_MODES).optional().default("phase"),
     maxWorkers: z.number().int().min(1).max(32),
     baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/),
     approvedAt: z.iso.datetime()
@@ -630,7 +632,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("project_init_preview", {
     title: "Preview Cadre project initialization",
-    description: "Validate approved rendered artifacts and return the exact proposed .cadre file set and digest without writing.",
+    description: "Validate approved rendered artifacts and return the proposed .cadre file set and semantic digest without writing; approvedAt is audit metadata and does not affect the digest.",
     inputSchema: initSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
@@ -643,7 +645,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("project_init_apply", {
     title: "Apply approved Cadre project initialization",
-    description: "Atomically create .cadre only when the current proposal matches an approved preview digest.",
+    description: "Atomically create .cadre only when the semantic proposal matches an approved preview digest; records approvedAt as audit metadata.",
     inputSchema: { ...initSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalDigest, ...input }) => {

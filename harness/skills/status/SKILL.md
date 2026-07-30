@@ -12,7 +12,7 @@ Call `project_status` and `worktree_status` with the exact project root. Use the
 Present:
 
 - project setup checkpoint, pending operation journal, setup commit, and last-refresh commit;
-- each track's type, status, durable checkpoint, pending operation, execution mode, ready/running/awaiting-approval/blocked/conflicted/integrated nodes, dependencies, revision, and next legal command;
+- each track's type, status, durable checkpoint, pending operation, scheduling mode, approval mode, ready/running/awaiting-approval/blocked/conflicted/integrated nodes, dependencies, revision, and next legal command;
 - registered Cadre worktrees, worker branches, dirty/conflicted worktrees, and orphaned runtime directories;
 - blockers and stale dependent-track assessments;
 - ready-for-review, completed-not-archived, and archived counts;

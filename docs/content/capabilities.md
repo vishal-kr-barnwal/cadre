@@ -20,7 +20,7 @@ Claude Code. It governs work from project context through archived learning.
 | Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |
 | Implementation | Parallel-by-default or explicitly sequential execution, with a global ready queue, phase-local task waves, clean mode handoffs, and resumable journals. |
 | Isolation | Phase and task workers in Cadre-managed sibling Git worktrees. |
-| Governance | Human approval before artifacts, commits, integrations, manual verification, lifecycle transitions, and archive batches. |
+| Governance | Persisted governed, phase-default, or autonomous implementation approval boundaries, with explicit artifact, track-level verification, review, and archive decisions. |
 | Review | Evidence-backed findings, approved remediation cycles, accepted-risk recording, and clean completion. |
 | Change control | Lifecycle-aware revision, project-context refresh, and additive Git-aware revert. |
 | Learning | Dependency-phase learning, pattern seeds, pattern distillation, and active-track reseeding. |

@@ -81,12 +81,17 @@ $cadre:implement passwordless-login sequentially
 /cadre:implement passwordless-login sequentially
 ```
 
+Phase approval is also the default: Cadre runs regular work autonomously and
+pauses once at each phase's final verification task. Request `governed` for
+task-by-task gates or `autonomous` to pause only at track-level verification.
+The implement command itself authorizes execution start, so phase and
+autonomous modes do not add a start-approval prompt.
+
 Cadre starts a digest-gated execution journal, derives a global queue from ready
 phases and phase-local tasks, and creates workers only when at least two safe
 nodes can run. A phase can move between sequential execution and task fan-out
-only at a clean checkpoint. Workers use isolated Git worktrees and stop after
-each regular task so the main agent can present its diff and verification for
-human approval.
+only at a clean checkpoint. Workers use isolated Git worktrees; main reviews
+every diff and presents it according to the persisted approval mode.
 
 The main agent alone records state, directs commits, integrates branches,
 resolves conflicts, removes worktrees, and records manual verification. When

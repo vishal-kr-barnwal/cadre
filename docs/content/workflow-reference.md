@@ -14,6 +14,10 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Use for:** project onboarding and interrupted setup.
 - **Requires:** exact root, greenfield/brownfield classification, approved
   project context, workflow, styleguides, and Git disposition.
+- **Approval UX:** identifies an unchanged bundled workflow by version/hash and
+  a concise summary, then combines the generated path/hash manifest and digest
+  into one final initialization approval. Full defaults remain available on
+  request; amendments are presented as focused diffs.
 - **Primary MCP:** template bundle, styleguide resolution,
   `project_init_preview/apply`, setup checkpoint tools, validation, and derived
   tracks index.
@@ -34,8 +38,10 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 ## implement
 
 - **Use for:** a `planned` or `in_progress` track whose dependencies are done.
-- **Mode:** parallel by default with a global ready queue and clean phase-mode
-  handoffs; sequential only when requested.
+- **Scheduling:** parallel by default with a global ready queue and clean
+  phase-mode handoffs; sequential only when requested.
+- **Approvals:** `phase` by default, `governed` for task-by-task gates, or
+  `autonomous` until track-level manual verification.
 - **Primary MCP:** execution start/node/status/finish, graph validation,
   worktree create/integrate/cleanup, project/worktree status, and derived index.
 - **Writes:** execution journal, task commits, plan/learning provenance, and

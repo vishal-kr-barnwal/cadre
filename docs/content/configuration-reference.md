@@ -70,6 +70,8 @@ Paths and active phase/task are derived; they are not duplicated in state.
 - execution and track identity;
 - `status` and `checkpoint`;
 - `requestedMode` and `effectiveMode` (`parallel` or `sequential`);
+- `approvalMode` (`governed`, `phase`, or `autonomous`), defaulting to `phase`
+  for new executions; legacy journals without it retain governed behavior;
 - `maxWorkers`, an approved delegated-worker bound from `1` through `32` (the
   generated workflow defaults to `3`, and host capacity may reduce it);
 - plan revision, plan commit, and graph digest;
