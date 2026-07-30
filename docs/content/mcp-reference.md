@@ -26,11 +26,15 @@ optional notes, and require a proposal digest or immutable verification
 checkpoint binding.
 
 This tool is read-only: it records no approval and mutates no Cadre state. It
-normalizes accept, request-changes, decline, and cancel outcomes. If the client
-does not advertise form elicitation or its active policy rejects the request,
-it returns `fallback_required` so the skill asks the same concise question once
-in chat. Form mode must never request passwords, API keys, access tokens,
-payment credentials, or other secrets.
+normalizes accept, request-changes, decline, and cancel outcomes. Skills inspect
+active task policy before calling it: under a non-interactive policy such as
+Codex Full Access, they skip the tool and ask the same concise question once in
+chat. The tool returns `fallback_required` when the client does not advertise
+form elicitation or rejects the request as an error. If Codex instead returns an
+immediate protocol decline while task context explicitly reports policy
+`never`, the skill treats it as policy rejection rather than human input and
+uses the same single chat fallback. Form mode must never request passwords, API
+keys, access tokens, payment credentials, or other secrets.
 
 ## template_catalog
 

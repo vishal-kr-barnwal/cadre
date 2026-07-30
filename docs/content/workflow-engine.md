@@ -40,11 +40,14 @@ Questions occur before artifacts or state are written. A plausible guess is not
 a substitute for user authority when it changes approved scope or invalidates
 work.
 
-When the client advertises MCP form elicitation, the main agent presents the
-minimum context needed and calls `workflow_elicit`. Codex and Claude then render
-the same structured clarification form. If the capability is absent, cancelled,
-or rejected by client policy, the tool returns a deterministic fallback and the
-agent asks the same short question once in chat.
+The main agent presents the minimum context needed, then inspects the active
+host policy before calling `workflow_elicit`. When task context reports a
+non-interactive policy such as Codex Full Access, it skips the form and asks the
+same short question once in chat. Otherwise, a client that advertises MCP form
+elicitation renders the structured form. Missing capability or an explicit
+`fallback_required` result also uses the single chat fallback. A decline or
+cancel from a form that was actually displayed remains a negative human
+response.
 
 ## Decision Boundary
 

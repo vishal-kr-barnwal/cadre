@@ -81,8 +81,10 @@ filesystem, container, dependency, or server operations.
 Cadre uses MCP form elicitation for concise clarifications and bound human
 decisions when the client supports it. Claude Code displays these forms without
 additional configuration. Codex displays them under an interactive approval
-policy; a policy that rejects MCP elicitations causes Cadre to fall back to one
-short chat question. Tool pre-approval and form elicitation policy are separate.
+policy. Codex Full Access reports the non-interactive `never` policy, so Cadre
+does not attempt a form there and asks the same short question once in chat.
+Other unsupported or policy-rejected form requests use the same fallback. Tool
+pre-approval and form elicitation policy are separate.
 
 To retain per-call MCP prompts:
 

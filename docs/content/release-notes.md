@@ -31,6 +31,9 @@ single-question chat fallback when forms are unsupported or policy-rejected.
 - Adds the read-only `workflow_elicit` MCP tool. It supports fixed approval
   forms, up to three flat clarification fields, normalized outcomes, and no
   state mutation or server-side self-approval.
+- Skips form elicitation when active task context reports a non-interactive
+  policy such as Codex Full Access, asks the same concise question once in chat,
+  and does not misreport an immediate policy rejection as a human decline.
 - Keeps large unchanged workflows and defaults out of the conversation: skills
   present concise summaries or focused diffs before opening the decision form.
 
