@@ -14,10 +14,10 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Use for:** project onboarding and interrupted setup.
 - **Requires:** exact root, greenfield/brownfield classification, approved
   project context, workflow, styleguides, and Git disposition.
-- **Approval UX:** identifies an unchanged bundled workflow by version/hash and
-  a concise summary, then combines the generated path/hash manifest and digest
-  into one final initialization approval. Full defaults remain available on
-  request; amendments are presented as focused diffs.
+- **Approval UX:** one final authorization envelope combines concise project
+  context, bundled workflow/styleguide identities, amendments, generated
+  path/hash manifest, Git disposition, digest, commits, and provenance. Full
+  defaults remain available on request.
 - **Primary MCP:** template bundle, styleguide resolution,
   `project_init_preview/apply`, setup checkpoint tools, validation, and derived
   tracks index.
@@ -31,8 +31,10 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Requires:** substantive scope, acceptance, dependencies, and plan evidence.
 - **Primary MCP:** project status, template bundles, graph validation, state
   validation, and tracks index preview/apply.
-- **Writes:** `state.json`, `spec.md`, `plan.md`, and `learning.md` in separate
-  approved specification and planning stages.
+- **Approvals:** one combined specification-and-plan decision by default;
+  staged review only when explicitly requested.
+- **Writes:** `state.json`, `spec.md`, `plan.md`, and `learning.md` with separate
+  provenance commits inside the combined authorization envelope.
 - **Stops at:** `planned` with recorded spec/plan commits.
 
 ## implement
@@ -64,6 +66,8 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Use for:** changed desired scope, behavior, acceptance, dependency, or plan.
 - **Requires:** lifecycle routing, worker quiescence, partial-work disposition,
   and transitive dependent-track impact.
+- **Approvals:** one combined revision and cascading-impact decision when
+  partial-work disposition can be assessed safely in advance.
 - **Writes:** revision record and exact approved artifact/state changes with
   preserved commit provenance.
 - **Completed/archived behavior:** propose a successor; never reopen history.
@@ -87,7 +91,8 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Writes:** approved project context, refresh record/journal, affected seeds,
   derived index, and provenance commits.
 - **Active work:** execution-governing changes wait for a safe boundary and
-  affected tracks follow revision rules.
+  affected tracks follow revision impact analysis inside the same refresh
+  approval envelope.
 
 ## revert
 
@@ -97,6 +102,8 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Git behavior:** `git revert`; merge commits use the correct mainline parent.
 - **Writes:** revert commits, reconciled plan/state/learning, derived index, and
   provenance.
+- **Approvals:** one on the clean path; a corrected proposal only for material
+  conflict-resolution changes.
 - **Stops when:** conflicts or mixed/missing provenance require manual recovery.
 
 ## status

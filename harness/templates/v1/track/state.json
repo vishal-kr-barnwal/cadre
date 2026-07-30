@@ -16,7 +16,7 @@
     "action": "specify",
     "baseCommit": "{{BASE_COMMIT_OR_NULL}}",
     "expectedCommit": "cadre(track): specify {{TRACK_ID}}",
-    "approvedArtifacts": ["spec.md"],
+    "approvedArtifacts": ["spec.md", "plan.md", "learning.md"],
     "approvedAt": "{{APPROVED_AT}}"
   },
   "lastExecution": null,

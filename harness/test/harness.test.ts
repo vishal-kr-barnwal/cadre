@@ -1587,7 +1587,7 @@ test("review and archive guidance coalesces exact approval decisions", () => {
   assert.match(archive, /exactly one track is eligible/);
   assert.match(archive, /without a selection-only approval/);
   assert.match(archive, /generated `tracks\.md`/);
-  assert.match(workflow, /Combine related decisions into one approval/);
+  assert.match(workflow, /Combine related decisions whenever their complete artifacts and consequences are available together/);
   assert.match(review, /review_complete_preview/);
   assert.match(review, /Do not inspect the installed runtime/);
   assert.match(archive, /archive_batch_preview/);
@@ -1673,16 +1673,41 @@ test("create bootstraps Git only when no worktree exists", () => {
   assert.ok(project.setup.operation.gitDisposition);
 });
 
-test("create requires separate workflow and styleguide acceptance", () => {
+test("create uses one final configuration and initialization approval envelope", () => {
   const create = readFileSync(join(root, "skills", "create", "SKILL.md"), "utf8");
   assert.match(create, /Do not print the complete unchanged bundled workflow unless the human asks/);
-  assert.match(create, /This single approval replaces a separate pre-preview manifest approval/);
+  assert.match(create, /Expected human decision count is one/);
+  assert.match(create, /do not ask the human to accept each default guide/i);
+  assert.match(create, /do not add later approval prompts/i);
   assert.match(create, /Do not pass `patterns\/index\.md`/);
-  assert.match(create, /use the default, amend it, or use a user-provided replacement/);
 
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
-  assert.match(workflow, /Create-time workflow and styleguide acceptance/);
-  assert.match(workflow, /Do not infer workflow acceptance/);
+  assert.match(workflow, /Create-time configuration envelope/);
+  assert.match(workflow, /Do not create separate workflow, styleguide-selection, manifest, Git-initialization, validation, or commit approvals/);
+});
+
+test("semantic authorization envelopes remove deterministic follow-up approvals", () => {
+  const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
+  const track = readFileSync(join(root, "skills", "track", "SKILL.md"), "utf8");
+  const revise = readFileSync(join(root, "skills", "revise", "SKILL.md"), "utf8");
+  const refresh = readFileSync(join(root, "skills", "refresh", "SKILL.md"), "utf8");
+  const revert = readFileSync(join(root, "skills", "revert", "SKILL.md"), "utf8");
+  const wisp = readFileSync(join(root, "skills", "wisp", "SKILL.md"), "utf8");
+  const trackState = JSON.parse(readFileSync(join(providerRoot, "track", "state.json"), "utf8"));
+
+  assert.match(workflow, /One approval creates an authorization envelope/);
+  assert.match(workflow, /Those mechanics do not become separate human decisions/);
+  assert.match(track, /Expected human decision count is one for a clear new track/);
+  assert.match(track, /do not create a specification-only approval prompt/);
+  assert.match(track, /write all three exact approved artifacts to the durable worktree before the first commit/);
+  assert.deepEqual(trackState.operation.approvedArtifacts, ["spec.md", "plan.md", "learning.md"]);
+  assert.match(revise, /Expected human decision count is one/);
+  assert.match(revise, /without another prompt/);
+  assert.match(refresh, /Expected human decision count is one/);
+  assert.match(refresh, /instead of starting separate approval cycles/);
+  assert.match(revert, /Expected human decision count is one on the clean path/);
+  assert.match(revert, /Do not turn these deterministic consequences into a second approval/);
+  assert.match(wisp, /Standard Wisp has zero approval prompts/);
 });
 
 test("default styleguide catalog covers the supported stack", () => {

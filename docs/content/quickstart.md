@@ -27,9 +27,11 @@ and explicitly classifies the project as greenfield or brownfield. When the
 evidence is ambiguous, it asks before drafting.
 
 Review the proposed product, engineering guidelines, technology stack,
-workflow, styleguides, patterns, and project state. Workflow and styleguides
-receive explicit approval. Only after the full file set and project/Git choices
-are approved does Cadre create `.cadre/`, validate it, and record setup commits.
+workflow, styleguides, patterns, project state, and Git disposition in one final
+authorization envelope. Cadre identifies unchanged bundled defaults concisely
+and asks separately only when a material choice is unresolved. After approval,
+it creates `.cadre/`, validates it, and records setup commits without more
+approval prompts.
 
 ## 2. Create A Feature Or Bug Track
 
@@ -41,9 +43,10 @@ $cadre:track Add passwordless login as a feature
 /cadre:track Add passwordless login as a feature
 ```
 
-Cadre first proposes `spec.md` with functional requirements, non-functional
-requirements, acceptance criteria, dependencies, and additional information.
-After spec approval and commit, it proposes `plan.md` and `learning.md`.
+Cadre proposes `spec.md`, `plan.md`, and `learning.md` together when the request
+is clear. One approval covers the specification, validated plan graph, pattern
+seed, lifecycle transition, generated state, and separate provenance commits.
+Ask for staged specification/plan review explicitly when desired.
 
 The plan is an acyclic dependency graph:
 

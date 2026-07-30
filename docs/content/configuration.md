@@ -40,10 +40,13 @@ $cadre:refresh
 
 Refresh inspects user input, repository changes since setup or the last
 refresh, completed-track outcomes, and current code/manifests. It proposes
-focused diffs and a refresh record before writing.
+focused diffs and a refresh record before writing. Exact cascading changes to
+active tracks join the same authorization envelope rather than requiring
+separate revision approvals.
 
 Changes that affect active execution wait for a safe boundary. Changes that
-affect track scope or plans follow `revise` impact and approval rules.
+affect track scope or plans follow `revise` impact analysis inside the same
+refresh approval envelope.
 
 ## Change A Track
 
@@ -80,10 +83,11 @@ boundary and approval.
 
 ## Change Styleguides
 
-`create` resolves defaults from the approved technology list and asks whether
-to accept, amend, or replace each one. Later changes belong in `refresh` so the
-technology list, styleguide set, active-track impact, and Git record stay
-consistent.
+`create` resolves a complete default set from the proposed technology list and
+includes it in the single final initialization approval. It asks only when a
+material convention cannot be inferred, rather than requesting acceptance for
+each guide. Later changes belong in `refresh` so the technology list,
+styleguide set, active-track impact, and Git record stay consistent.
 
 ## Safe Editing Rule
 

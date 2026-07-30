@@ -21,18 +21,19 @@ The workflow:
 2. Classifies the project as greenfield or brownfield with evidence.
 3. Drafts product, guidelines, technology, workflow, styleguide, pattern, and
    state artifacts from versioned templates.
-4. Obtains separate workflow and styleguide acceptance.
-5. Presents the complete `.cadre/` proposal.
+4. Identifies bundled workflow/styleguide defaults concisely and asks only
+   about unresolved material choices.
+5. Presents one complete initialization authorization envelope.
 6. Applies initialization atomically behind a preview digest.
-7. Initializes Git only when explicitly approved and no enclosing repository
-   exists.
-8. Validates and records setup commits.
+7. Initializes Git when included in that envelope and no repository exists.
+8. Validates, commits, and records provenance without follow-up approvals.
 
 An existing `.cadre/project.json` is resumed, never overwritten.
 
 ## track
 
-Use `track` for a new feature or bug. It has two approval/commit stages:
+Use `track` for a new feature or bug. A clear track defaults to one combined
+approval covering:
 
 - Specification: scope, requirements, acceptance criteria, additional
   information, track dependencies, and dependent-track impact.
@@ -41,7 +42,9 @@ Use `track` for a new feature or bug. It has two approval/commit stages:
 
 Cadre asks when feature versus bug, scope, interfaces, compatibility,
 acceptance, or dependencies remain materially ambiguous. A drafting track is
-resumed rather than replaced.
+resumed rather than replaced. Specification and plan still receive separate
+provenance commits, but commits, generated state, and bookkeeping inherit the
+combined approval. The human can explicitly request staged spec/plan review.
 
 ## implement
 
@@ -102,7 +105,8 @@ Behavior depends on lifecycle state:
 | `completed` or `archived` | Keep history immutable and propose a successor track. |
 
 Revisions assess transitive dependent tracks and never erase completed commit
-provenance.
+provenance. When partial-work disposition can be assessed in advance, it is
+included with all cascading changes in one revision approval.
 
 ## archive
 
@@ -124,7 +128,8 @@ changes, or completed-track learning.
 It can update product, guidelines, workflow, technology, general styleguide,
 language/framework styleguides, patterns, and affected active-track seeds.
 Execution-governing changes wait for a safe worker boundary. Cascading track
-changes follow `revise` rules and require approval.
+changes follow `revise` impact analysis but join the same refresh approval
+instead of creating separate approval cycles.
 
 ## revert
 
@@ -132,8 +137,9 @@ Use `revert` to reverse a Cadre task, phase, or track while preserving history.
 
 Cadre identifies exact task, merge, and phase commits; later overlaps; active
 worktrees; learning impact; and dependent work. It proposes safe reverse order
-and uses additive `git revert` by default. Conflicts stop for human-guided
-resolution and combined verification.
+and uses additive `git revert` by default. One clean-path approval also covers
+tests, reconciliation, generated state, and provenance. A conflict asks again
+only when its resolution introduces a material choice or changes the proposal.
 
 ## status
 
@@ -146,8 +152,9 @@ uncommitted Cadre state, and the next legal command without normalizing files.
 
 Use `wisp` for a lightweight investigation, question, or spike that should not
 enter Cadre lifecycle state. Disposable output may live under ignored
-`.cadre/wisps/`; product edits require explicit scope approval and are not
-committed automatically.
+`.cadre/wisps/`; ordinary exploration has zero approvals. Persistent product
+changes should be promoted to `track`; explicitly requested untracked edits
+receive one exact scope approval and are not committed automatically.
 
 Promote durable implementation work into `track` rather than retroactively
 turning a wisp into Cadre state.
