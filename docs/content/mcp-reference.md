@@ -161,12 +161,14 @@ main agent; the MCP does not resolve them.
 ## worktree_cleanup_preview
 
 Verifies a worker is clean and its branch fully integrated before proposing
-worktree/branch removal. Read-only.
+worktree/branch removal. It also supports interruption recovery when the node
+was already marked `completed`. Read-only.
 
 ## worktree_cleanup_apply
 
-Removes only the approved clean, integrated worktree and safely deletable
-branch. This is the only tool annotated as destructive.
+Removes only the approved clean, fully integrated worktree and safely deletable
+branch when the journal node is `integrated` or already `completed`. This is the
+only tool annotated as destructive.
 
 ## worktree_status
 

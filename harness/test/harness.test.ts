@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync
+  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -857,10 +857,15 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
     projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1"
   };
   assert.throws(() => previewWorktreeIntegration(phaseIntegrationInput), /must be committed or integrating/);
+  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "completed", "completed");
+  assert.throws(() => previewWorktreeCleanup(phaseIntegrationInput), /is not integrated into/);
   writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "committed", "completed");
   const phaseIntegration = previewWorktreeIntegration(phaseIntegrationInput);
   assert.equal(applyWorktreeIntegration(phaseIntegrationInput, phaseIntegration.digest).status, "integrated");
-  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "integrated", "completed");
+  writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "completed", "completed");
+  writeFileSync(join(phase.path, "dirty.txt"), "dirty\n");
+  assert.throws(() => previewWorktreeCleanup(phaseIntegrationInput), /worktree is not clean/);
+  unlinkSync(join(phase.path, "dirty.txt"));
   const phaseCleanup = previewWorktreeCleanup(phaseIntegrationInput);
   applyWorktreeCleanup(phaseIntegrationInput, phaseCleanup.digest);
 
@@ -913,7 +918,7 @@ test("worktree integration reports conflicts without resolving them", () => {
   assert.equal(result.status, "conflicted");
   assert.deepEqual(result.conflicts, ["app.txt"]);
   assert.match(readFileSync(join(projectRoot, "app.txt"), "utf8"), /<<<<<<< HEAD/);
-  assert.throws(() => previewWorktreeCleanup(input), /must be integrated in the execution journal/);
+  assert.throws(() => previewWorktreeCleanup(input), /must be integrated or completed in the execution journal/);
 });
 
 test("worker branches cannot integrate protected Cadre state", () => {
@@ -1568,6 +1573,8 @@ test("implementation guidance preserves approval, permission, batching, and task
   assert.match(implement, /run all regular work inside a phase autonomously/);
   assert.match(implement, /Pause only for the `Track-level User Manual Verification` task/);
   assert.match(implement, /do not add an execution-start approval prompt/);
+  assert.match(implement, /Keep the phase node `integrated`, clean its worktree, and only then mark the phase `completed`/);
+  assert.match(implement, /already-`completed` node as interruption recovery/);
   assert.match(workflow, /deterministic worktree, clean integration, cleanup, journal, index, and bookkeeping mutations/);
   assert.match(workflow, /does not require a separate approval prompt/);
   assert.equal(executionTemplate.approvalMode, "{{governed|phase|autonomous}}");

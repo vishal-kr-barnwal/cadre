@@ -582,7 +582,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("worktree_cleanup_preview", {
     title: "Preview worker cleanup",
-    description: "Verify a clean worker branch is fully integrated before proposing worktree and branch removal.",
+    description: "Verify a clean worker branch is fully integrated before proposing worktree and branch removal, including recovery after its node was already completed.",
     inputSchema: worktreeSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
@@ -595,7 +595,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("worktree_cleanup_apply", {
     title: "Clean up an integrated worker",
-    description: "Remove only a clean, integrated Cadre worktree and its safely deletable branch.",
+    description: "Remove only a clean, fully integrated Cadre worktree and its safely deletable branch, whether its journal node is integrated or already completed.",
     inputSchema: { ...worktreeSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalDigest, ...input }) => {

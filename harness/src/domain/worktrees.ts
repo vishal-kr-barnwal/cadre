@@ -184,8 +184,8 @@ function assertJournalAllowsIntegration(input: WorktreeIntegrationInput): void {
 
 function assertJournalAllowsCleanup(input: WorktreeIntegrationInput): void {
   const { node } = journalNode(input);
-  if (node.status !== "integrated") {
-    throw new Error(`${input.nodeId} must be integrated in the execution journal before cleanup`);
+  if (!["integrated", "completed"].includes(node.status)) {
+    throw new Error(`${input.nodeId} must be integrated or completed in the execution journal before cleanup`);
   }
 }
 

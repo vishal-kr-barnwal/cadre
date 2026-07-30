@@ -115,6 +115,11 @@ Task workers in one dependency wave all branch from the same clean phase HEAD.
 Main merges their approved branches into the phase worktree one at a time, then
 derives the next wave from the updated phase HEAD. Workers never spawn workers.
 
+After phase verification, main integrates and records the phase, keeps its
+execution node `integrated` through safe worktree cleanup, and only then marks
+it `completed` and starts dependent phases. Cleanup also accepts an already
+`completed` node as interruption recovery without reopening terminal state.
+
 See the [Complex Parallel Execution Walkthrough](parallel-execution-walkthrough.md)
 for a complete mixed sequential/parallel example.
 
