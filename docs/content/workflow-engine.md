@@ -15,7 +15,7 @@ deterministic MCP operations. There is no generic workflow dispatcher.
 | Owner | Responsibilities |
 |---|---|
 | Workflow skill | Context discovery, repository reasoning, clarification, artifact drafting, presenting decisions, host commands, commits, conflict resolution, and recovery procedure. |
-| MCP runtime | Versioned templates, centralized validation, graph derivation, digest-gated state transitions, derived index, and constrained worktree Git operations. |
+| MCP runtime | Client-native workflow forms, versioned templates, centralized validation, graph derivation, digest-gated state transitions, derived index, and constrained worktree Git operations. |
 | Main agent | Sole scheduler, worker creator, integrator, Cadre-state coordinator, and presenter of human decisions. |
 | Worker | Bounded product-file implementation and focused verification in one assigned worktree. |
 | Human | Approval of artifacts, mutations, commits, integrations, verification, findings, accepted risks, and lifecycle transitions. |
@@ -40,6 +40,12 @@ Questions occur before artifacts or state are written. A plausible guess is not
 a substitute for user authority when it changes approved scope or invalidates
 work.
 
+When the client advertises MCP form elicitation, the main agent presents the
+minimum context needed and calls `workflow_elicit`. Codex and Claude then render
+the same structured clarification form. If the capability is absent, cancelled,
+or rejected by client policy, the tool returns a deterministic fallback and the
+agent asks the same short question once in chat.
+
 ## Decision Boundary
 
 A decision-ready proposal contains exact artifacts, paths, state consequences,
@@ -48,6 +54,12 @@ Git consequences, verification, and risks. Approval binds only that proposal.
 When content or consequences change, the workflow rebuilds the proposal and
 asks again. Where a deterministic MCP preview exists, its digest binds the
 approval to current state.
+
+Approval forms are bound to that preview digest or to an immutable verification
+checkpoint containing the relevant track, execution/node, and commit. The form
+does not mutate state or approve on the MCP server's behalf. Only an explicit
+`approved` response authorizes the already-presented binding; request-changes,
+decline, cancel, and fallback responses do not.
 
 ## Mutation And Commit Boundary
 

@@ -7,7 +7,7 @@ order: 210
 
 # MCP Reference
 
-The `cadre` stdio server exposes immutable template resources and 36
+The `cadre` stdio server exposes immutable template resources and 37
 purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
 arbitrary filesystem/shell operations.
 
@@ -16,6 +16,21 @@ arbitrary filesystem/shell operations.
 Every bundled template is readable at
 `cadre://templates/v1/<relative-template-path>`. Resource metadata includes the
 template-set version, media type, and content hash.
+
+## workflow_elicit
+
+Presents one client-native MCP form for a Cadre clarification or approval.
+Clarification forms contain at most three flat text, boolean, number,
+single-select, or multi-select fields. Approval forms have a fixed decision and
+optional notes, and require a proposal digest or immutable verification
+checkpoint binding.
+
+This tool is read-only: it records no approval and mutates no Cadre state. It
+normalizes accept, request-changes, decline, and cancel outcomes. If the client
+does not advertise form elicitation or its active policy rejects the request,
+it returns `fallback_required` so the skill asks the same concise question once
+in chat. Form mode must never request passwords, API keys, access tokens,
+payment credentials, or other secrets.
 
 ## template_catalog
 

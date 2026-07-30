@@ -78,6 +78,12 @@ These client settings suppress repetitive prompts for Cadre's own MCP calls.
 They do not approve Cadre lifecycle proposals or unrelated shell, network,
 filesystem, container, dependency, or server operations.
 
+Cadre uses MCP form elicitation for concise clarifications and bound human
+decisions when the client supports it. Claude Code displays these forms without
+additional configuration. Codex displays them under an interactive approval
+policy; a policy that rejects MCP elicitations causes Cadre to fall back to one
+short chat question. Tool pre-approval and form elicitation policy are separate.
+
 To retain per-call MCP prompts:
 
 ```bash

@@ -13,6 +13,10 @@ Compared with 3.0.1, Cadre 3.0.2 validates proposed execution graphs directly
 from plan Markdown so approval workflows no longer need temporary project
 copies or premature writes to canonical `.cadre/` state.
 
+It also adds client-native MCP forms for concise clarifications and
+digest/checkpoint-bound approvals in Codex and Claude, with a deterministic
+single-question chat fallback when forms are unsupported or policy-rejected.
+
 ### Fixed
 
 - Adds the read-only `execution_graph_validate_draft` MCP tool for validating
@@ -24,6 +28,11 @@ copies or premature writes to canonical `.cadre/` state.
   post-approval status before any approved artifact is replaced.
 - Eliminates the temporary control-plane copy workaround and its associated
   cleanup prompts and residue risk.
+- Adds the read-only `workflow_elicit` MCP tool. It supports fixed approval
+  forms, up to three flat clarification fields, normalized outcomes, and no
+  state mutation or server-side self-approval.
+- Keeps large unchanged workflows and defaults out of the conversation: skills
+  present concise summaries or focused diffs before opening the decision form.
 
 ### Runtime And Compatibility
 
@@ -34,10 +43,13 @@ copies or premature writes to canonical `.cadre/` state.
 - Adds coverage for derived manual-verification barriers, lifecycle-sensitive
   validation, oversized input rejection, compiled MCP exposure, and zero
   filesystem mutation.
+- Adds protocol-level coverage for supported form clients and deterministic
+  fallback coverage for clients without elicitation capability.
 
-There are no project state-schema, template, command-name, or migration changes
-from 3.0.1. Existing initialized projects and approved plan validation remain
-compatible.
+There are no project state-schema or migration changes from 3.0.1. Existing
+initialized projects and approved plan validation remain compatible. Run
+`refresh` to copy the new form-interaction guidance into an existing project's
+mutable `.cadre/workflow.md`; newly created projects receive it automatically.
 
 ### Install Or Upgrade
 
