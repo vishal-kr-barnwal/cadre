@@ -7,6 +7,8 @@ description: Create or resume a Cadre feature or bug track, including a function
 
 Create only `feature` or `bug` tracks. Resume an existing drafting track instead of replacing it.
 
+At every required clarification or approval boundary, show a concise summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the current proposal digest. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+
 ## Required context
 
 Read `.cadre/workflow.md`, `project.json`, `product.md`, `guidelines.md`, `tech-stack.md`, relevant styleguides, `patterns/index.md`, and every declared dependency. Before editing an existing artifact, read it and its directly relevant context; never guess its contents.

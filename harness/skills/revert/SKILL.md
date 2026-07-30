@@ -7,6 +7,8 @@ description: Prepare and execute a human-approved Git-aware revert of a Cadre ta
 
 Load `.cadre/workflow.md`, project/track state, spec, plan, learning, review/revision history, recorded task commits, Git history, working tree, and dependent tracks. Read every affected file and relevant later diff before proposing a revert.
 
+At every required clarification or approval boundary, show a concise impact summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the exact revert proposal checkpoint. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+
 Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP is unavailable, stop without beginning the revert.
 
 Expected human decision count is one on the clean path. The exact revert proposal authorizes additive Git reversals, tests, plan/state/learning reconciliation, generated indexes, commits, and provenance bookkeeping when their content and consequences remain unchanged.

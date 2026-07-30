@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
 import {
@@ -31,6 +32,11 @@ import {
   configureCodexMcpApproval
 } from "../scripts/permissions.js";
 import { TEMPLATE_IDS } from "../src/domain/templates.js";
+import {
+  buildWorkflowElicitation,
+  normalizeWorkflowElicitation,
+  supportsFormElicitation
+} from "../src/mcp/elicitation.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateRoot = join(root, "templates", "v1", "init");
@@ -1373,6 +1379,86 @@ test("installer permission helpers narrowly pre-approve the Cadre MCP server and
   );
 });
 
+test("workflow elicitation builds bounded approval and clarification forms", () => {
+  assert.equal(supportsFormElicitation(undefined), false);
+  assert.equal(supportsFormElicitation({ elicitation: {} }), true);
+  assert.equal(supportsFormElicitation({ elicitation: { form: {} } }), true);
+  assert.equal(supportsFormElicitation({ elicitation: { url: {} } }), false);
+
+  const approval = buildWorkflowElicitation({
+    kind: "approval",
+    message: "Approve the summarized proposal?",
+    binding: "digest:abc123"
+  });
+  assert.match(approval.message, /Approval binding: digest:abc123/);
+  assert.deepEqual(approval.requestedSchema.required, ["decision"]);
+  assert.deepEqual(
+    (approval.requestedSchema.properties.decision as { oneOf?: Array<{ const?: string }> }).oneOf
+      ?.map((option) => option.const),
+    ["approve", "request_changes", "cancel"]
+  );
+  assert.throws(
+    () => buildWorkflowElicitation({ kind: "approval", message: "Approve?" }),
+    /requires a proposal or checkpoint binding/
+  );
+
+  const clarification = buildWorkflowElicitation({
+    kind: "clarification",
+    message: "Choose the execution settings.",
+    questions: [
+      {
+        id: "approval_mode",
+        type: "single_select",
+        label: "Approval mode",
+        required: true,
+        options: [
+          { value: "phase", label: "Phase" },
+          { value: "governed", label: "Governed" },
+          { value: "autonomous", label: "Autonomous" }
+        ],
+        default: "phase"
+      },
+      {
+        id: "parallel",
+        type: "boolean",
+        label: "Run independent tasks in parallel",
+        default: true
+      }
+    ]
+  });
+  assert.deepEqual(clarification.requestedSchema.required, ["approval_mode"]);
+  assert.equal(clarification.requestedSchema.properties.parallel!.type, "boolean");
+  assert.throws(
+    () => buildWorkflowElicitation({
+      kind: "clarification",
+      message: "Choose.",
+      questions: [
+        {
+          id: "mode",
+          type: "single_select",
+          label: "Mode",
+          options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
+          default: "c"
+        }
+      ]
+    }),
+    /default must match an option value/
+  );
+
+  assert.deepEqual(
+    normalizeWorkflowElicitation(
+      { kind: "approval", message: "Approve?", binding: "digest:abc123" },
+      { action: "accept", content: { decision: "approve", notes: "Looks good" } }
+    ),
+    {
+      kind: "approval",
+      status: "approved",
+      binding: "digest:abc123",
+      answers: { decision: "approve", notes: "Looks good" }
+    }
+  );
+});
+
 test("compiled MCP exposes versioned templates and initializes projects without copied runtime", async () => {
   const client = new Client({ name: "cadre-test", version: "1.0.0" });
   const transport = new StdioClientTransport({
@@ -1383,7 +1469,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   try {
     const tools = await client.listTools();
     for (const name of [
-      "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
+      "workflow_elicit", "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
       "state_validate", "project_init_preview", "project_init_apply",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
       "execution_graph_validate", "execution_graph_validate_draft", "review_complete_preview", "review_complete_apply",
@@ -1396,6 +1482,23 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     ]) {
       assert.ok(tools.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`);
     }
+    const fallback = await client.callTool({
+      name: "workflow_elicit",
+      arguments: {
+        kind: "clarification",
+        message: "Choose a mode.",
+        questions: [{
+          id: "mode",
+          type: "single_select",
+          label: "Mode",
+          options: [{ value: "phase", label: "Phase" }, { value: "governed", label: "Governed" }]
+        }]
+      }
+    });
+    assert.equal(
+      (fallback.structuredContent as { status?: string }).status,
+      "fallback_required"
+    );
     const resources = await client.listResources();
     assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v1/track/spec"));
     assert.ok(resources.resources.some(
@@ -1515,6 +1618,49 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   }
 });
 
+test("compiled MCP presents and normalizes a client-native workflow form", async () => {
+  const client = new Client(
+    { name: "cadre-elicitation-test", version: "1.0.0" },
+    { capabilities: { elicitation: { form: {} } } }
+  );
+  let requestedMessage = "";
+  let requestedProperties: Record<string, unknown> = {};
+  client.setRequestHandler(ElicitRequestSchema, async (request) => {
+    if (request.params.mode !== "form") throw new Error("expected form elicitation");
+    requestedMessage = request.params.message;
+    requestedProperties = request.params.requestedSchema.properties;
+    return {
+      action: "accept",
+      content: { decision: "approve", notes: "Verified in the native form" }
+    };
+  });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(root, "dist", "cadre-mcp.mjs")]
+  });
+  await client.connect(transport);
+  try {
+    const response = await client.callTool({
+      name: "workflow_elicit",
+      arguments: {
+        kind: "approval",
+        message: "Approve the concise phase verification summary?",
+        binding: "execution:run-1/node:T1.2/head:abcdef1"
+      }
+    });
+    assert.match(requestedMessage, /execution:run-1\/node:T1\.2\/head:abcdef1/);
+    assert.deepEqual(Object.keys(requestedProperties), ["decision", "notes"]);
+    assert.deepEqual(response.structuredContent, {
+      kind: "approval",
+      status: "approved",
+      binding: "execution:run-1/node:T1.2/head:abcdef1",
+      answers: { decision: "approve", notes: "Verified in the native form" }
+    });
+  } finally {
+    await client.close();
+  }
+});
+
 test("plugin namespace is not repeated in skill identities", () => {
   for (const skill of [
     "create", "track", "implement", "review", "revise",
@@ -1534,6 +1680,25 @@ test("every post-create command loads the shared workflow", () => {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /\.cadre\/workflow\.md/, `${skill} must load the shared workflow`);
   }
+});
+
+test("interactive workflows prefer bounded client-native forms with one chat fallback", () => {
+  for (const skill of [
+    "create", "track", "implement", "review", "revise",
+    "archive", "refresh", "revert", "wisp"
+  ]) {
+    const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+    assert.match(body, /workflow_elicit/, `${skill} must prefer the shared form tool`);
+    assert.match(body, /fallback_required/, `${skill} must preserve chat fallback`);
+    assert.match(body, /never request secrets|never request secrets or retry the form/i,
+      `${skill} must forbid secret collection`);
+  }
+
+  const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
+  assert.match(workflow, /Human interaction forms/);
+  assert.match(workflow, /bind it to the current preview digest or an immutable checkpoint/);
+  assert.match(workflow, /Do not print a complete unchanged workflow/);
+  assert.match(workflow, /ask the same short question once in chat and do not retry the form/);
 });
 
 test("proposal workflows validate draft plan content without temporary project copies", () => {

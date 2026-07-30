@@ -18,6 +18,12 @@ Present exact content or focused diffs, consequences, unknowns, and verification
 
 An `implement` invocation authorizes execution using its persisted `approvalMode`: `governed`, `phase`, or `autonomous`. This is scoped authorization for work already bounded by the approved specification and plan, not permission to guess through material ambiguity, expand scope, waive required checks, perform destructive or remote actions, or conceal conflicts and exceptions. `phase` is the default unless the human explicitly requests another approval mode. Starting a `phase` or `autonomous` execution from that invocation does not require a separate approval prompt.
 
+### Human interaction forms
+
+For a required clarification or human decision, first show only the concise context, focused diff, consequences, and evidence needed to decide. Then prefer the read-only `workflow_elicit` MCP tool so Codex and Claude can render the same client-native form. Use `clarification` with at most three flat questions. Use `approval` only after the exact proposal or verification evidence is ready, and bind it to the current preview digest or an immutable checkpoint containing the relevant track, execution/node, and commit. An `approved` result is explicit human approval of that binding; `changes_requested`, `declined`, and `cancelled` are not approval.
+
+If the client does not advertise form elicitation or its active policy rejects the request, `workflow_elicit` returns `fallback_required`; ask the same short question once in chat and do not retry the form. Never use form elicitation for passwords, API keys, access tokens, payment credentials, or other secrets. Do not print a complete unchanged workflow or other large default artifact merely to create context for a form; identify it by path/version/hash and summarize it unless the human asks for the full content.
+
 ### Clarification gate
 
 Inspect available files, history, state, and approved artifacts before asking. If a material choice remains ambiguous and different answers would change scope, requirements, acceptance criteria, dependencies, compatibility, architecture, plans, or cascading state, ask the human a concise targeted question and pause that branch of work. Do not guess, choose a convenient default, or treat silence as approval. Continue without asking only when evidence resolves the choice or the assumption is immaterial and is explicitly disclosed.

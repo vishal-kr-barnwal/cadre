@@ -7,6 +7,8 @@ description: Archive one or more completed Cadre tracks in one approved, resumab
 
 Archive one or more `completed` tracks in a single batch. Read `.cadre/workflow.md`, every artifact and recorded commit for every selected track, the full pattern catalog, all active track specs/plans and marked learning seeds, and relevant implementation files. Read existing pattern and learning files before proposing changes.
 
+At every required selection or approval boundary, show a concise batch summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the archive preview digest. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+
 Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP is unavailable, stop without starting or advancing an archive batch.
 
 Build one bounded archive inventory after selection. Read every selected artifact exactly once, summarize execution journals structurally in one pass, and verify recorded commit reachability in one Git pass. Do not precede reads with line counts, rediscover the same paths, or restart full reads after truncation; continue from the first unread line. Reuse unchanged workflow/product/styleguide context already loaded in the same flow. Fetch known pattern templates directly with one `template_get_many` call; do not call `template_catalog`. The declared mutation surface is `archive_batch_preview`/`archive_batch_apply` followed by `archive_batch_record_preview`/`archive_batch_record_apply`; do not inspect the installed runtime or tool catalog for alternatives.

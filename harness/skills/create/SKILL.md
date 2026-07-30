@@ -7,6 +7,8 @@ description: Initialize or resume Cadre in a greenfield or brownfield repository
 
 Use the Cadre MCP as the authoritative runtime and template provider. Do not copy runtime code or templates into the project. Treat every rendered artifact and state mutation as a proposal until the human approves it. If required Cadre MCP tools are unavailable, stop and report that the plugin runtime is unavailable; never reconstruct templates from memory.
 
+At every required clarification or approval boundary, show a concise summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the current proposal digest. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+
 ## Procedure
 
 1. Resolve the exact project root. Inspect its manifests, source layout, tests, agent guidance, Git status, and recent history. Run `git rev-parse --show-toplevel`: if it succeeds, never initialize a nested repository; if it fails, record that the approved root requires `git init`. Ask which root to use if the boundary is materially ambiguous. Read every existing file before proposing an edit.

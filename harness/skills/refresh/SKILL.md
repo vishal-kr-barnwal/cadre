@@ -7,6 +7,8 @@ description: Refresh Cadre product, guidelines, workflow, styleguides, and tech-
 
 Read `.cadre/workflow.md`, `project.json`, all project context files, the last refresh record, Git history since the recorded setup/refresh commit, completed-track outcomes, and current repository manifests/code. Read every target context file before editing it.
 
+At every required clarification or approval boundary, show a concise context/impact summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the exact refresh proposal checkpoint. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+
 Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP or required versioned template is unavailable, stop without changing project context.
 
 1. Determine evidence sources: user input, committed repository changes, completed tracks, or a combination.
