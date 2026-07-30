@@ -7,15 +7,73 @@ order: 230
 
 # Release Notes
 
+## 3.1.0 - 2026-07-30
+
+Compared with 3.0.2, Cadre 3.1.0 makes approval frequency an explicit,
+persisted execution policy and reduces routine implementation overhead without
+weakening digest-gated mutations or manual verification.
+
+### Approval Governance
+
+- Adds `governed`, `phase`, and `autonomous` implementation approval modes.
+  `phase` is the default: regular phase work runs autonomously and pauses once
+  at the phase's final manual-verification task. `autonomous` pauses only at
+  track-level verification; `governed` retains task-by-task gates.
+- Treats one approved semantic proposal as an authorization envelope over its
+  unchanged deterministic journals, indexes, validation, commits, lifecycle
+  transitions, and provenance. Create, track, review, revise, refresh, revert,
+  and archive no longer split one decision into mechanical follow-up prompts.
+- Keeps material ambiguity, scope changes, failed required checks, unsafe
+  state, destructive work, and remote publication outside those envelopes.
+
+### Native Interaction
+
+- Adds the read-only `workflow_elicit` MCP tool for bounded client-native
+  clarification and approval forms in Codex and Claude Code.
+- Binds approval forms to a proposal digest or immutable verification
+  checkpoint and normalizes approval, requested changes, decline, and cancel.
+- Uses one concise text question when form elicitation is unsupported or the
+  active host policy is non-interactive, including Codex Full Access. Policy
+  rejection is not reported as a human decline.
+- Summarizes unchanged workflows and defaults instead of printing their full
+  content into the conversation.
+
+### Execution Runtime And Efficiency
+
+- Makes `execution_status` self-describing with legal next transitions and
+  required evidence. MCP failures now return structured errors, and every
+  mutation preview exposes a uniform `proposalDigest` alias.
+- Adds ordered execution-node batching guidance, avoids global tool-catalog
+  discovery and speculative previews, runs independent read-only checks in
+  parallel, and reuses verification when only `.cadre/**` bookkeeping changed.
+- Infers task worktree phase identity from its task node ID and makes cleanup
+  interruption-safe after an integrated node was already marked complete.
+- Finalizes the execution journal, `ready_for_review` state, and derived
+  `tracks.md` under one digest, eliminating a separate index-repair step.
+- Keeps distinct product-task commits while reducing Cadre-only Git commits to
+  phase and final readiness checkpoints.
+
+### Compatibility And Upgrade
+
+Existing 3.0.x projects and execution journals remain readable; missing legacy
+approval-mode fields are interpreted as `governed`. Run `refresh` to adopt the
+new project workflow guidance. New executions default to `phase` unless the
+human explicitly selects another mode.
+
+```bash
+npm install -g cadre-ai@3.1.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex conversation and run `/reload-plugins` in Claude Code after
+upgrading.
+
 ## 3.0.2 - 2026-07-29
 
 Compared with 3.0.1, Cadre 3.0.2 validates proposed execution graphs directly
 from plan Markdown so approval workflows no longer need temporary project
 copies or premature writes to canonical `.cadre/` state.
-
-It also adds client-native MCP forms for concise clarifications and
-digest/checkpoint-bound approvals in Codex and Claude, with a deterministic
-single-question chat fallback when forms are unsupported or policy-rejected.
 
 ### Fixed
 
@@ -28,24 +86,6 @@ single-question chat fallback when forms are unsupported or policy-rejected.
   post-approval status before any approved artifact is replaced.
 - Eliminates the temporary control-plane copy workaround and its associated
   cleanup prompts and residue risk.
-- Adds the read-only `workflow_elicit` MCP tool. It supports fixed approval
-  forms, up to three flat clarification fields, normalized outcomes, and no
-  state mutation or server-side self-approval.
-- Skips form elicitation when active task context reports a non-interactive
-  policy such as Codex Full Access, asks the same concise question once in chat,
-  and does not misreport an immediate policy rejection as a human decline.
-- Keeps large unchanged workflows and defaults out of the conversation: skills
-  present concise summaries or focused diffs before opening the decision form.
-- Makes execution status self-describing with legal next transitions and
-  required evidence, returns structured MCP errors, and gives every mutation
-  preview a uniform `proposalDigest` alias.
-- Infers task worktree phase identity from the task node ID and accepts a
-  matching redundant phase value for compatibility.
-- Finalizes the execution journal, `ready_for_review` state, and derived
-  `tracks.md` under one digest so finish cannot leave an index-repair step.
-- Batches already-evidenced journal transitions, reuses unchanged product
-  verification, limits Cadre-only commits to durability checkpoints, and runs
-  independent read-only inspections in parallel.
 
 ### Runtime And Compatibility
 
@@ -56,13 +96,10 @@ single-question chat fallback when forms are unsupported or policy-rejected.
 - Adds coverage for derived manual-verification barriers, lifecycle-sensitive
   validation, oversized input rejection, compiled MCP exposure, and zero
   filesystem mutation.
-- Adds protocol-level coverage for supported form clients and deterministic
-  fallback coverage for clients without elicitation capability.
 
-There are no project state-schema or migration changes from 3.0.1. Existing
-initialized projects and approved plan validation remain compatible. Run
-`refresh` to copy the new form-interaction guidance into an existing project's
-mutable `.cadre/workflow.md`; newly created projects receive it automatically.
+There are no project state-schema, template, command-name, or migration changes
+from 3.0.1. Existing initialized projects and approved plan validation remain
+compatible.
 
 ### Install Or Upgrade
 

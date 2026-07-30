@@ -1,6 +1,6 @@
 {
   "name": "cadre-ai",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "Cross-agent, human-governed software delivery harness",
   "author": {
     "name": "Vishal Kumar",
@@ -33,6 +33,7 @@
     ".mcp.json",
     "agents/",
     "dist/",
+    "CHANGELOG.md",
     "LICENSE",
     "marketplace/",
     "README.md",
