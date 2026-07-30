@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { CadreError } from "./errors.js";
 import { safeProjectRoot } from "./paths.js";
 import { parsePlan, validatePlanGraph, type PlanGraph } from "./plan.js";
 
@@ -101,6 +102,13 @@ export interface ExecutionDerivedStatus {
   readyTasks: string[];
   active: string[];
   blocked: string[];
+  transitionGuidance: Record<string, {
+    currentStatus: ExecutionNodeStatus;
+    allowed: Array<{
+      status: ExecutionNodeStatus;
+      requiredFields: string[];
+    }>;
+  }>;
 }
 
 const SHA = /^[0-9a-f]{7,40}$/;
@@ -350,7 +358,16 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
     && workerAssignmentChanged
     && (node.workerId == null || input.workerId == null);
   if (!ALLOWED_TRANSITIONS[node.status]?.includes(input.status) && !phaseWorkerHandoff) {
-    throw new Error(`illegal execution transition ${node.status} -> ${input.status}`);
+    throw new CadreError(
+      "ILLEGAL_EXECUTION_TRANSITION",
+      `illegal execution transition ${node.status} -> ${input.status}`,
+      {
+        nodeId: node.id,
+        currentStatus: node.status,
+        requestedStatus: input.status,
+        allowedNextStatuses: ALLOWED_TRANSITIONS[node.status]
+      }
+    );
   }
   if (phaseWorkerHandoff && node.workerId != null && input.workerId == null && !input.verification) {
     throw new Error(`${node.id} requires clean-checkpoint verification before releasing its phase worker`);
@@ -509,7 +526,22 @@ function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatu
       (node) => node.kind !== "phase" && journal.nodes[node.phaseId]?.status === "running"
     ).map((node) => node.id),
     active: Object.values(journal.nodes).filter((node) => !["pending", "completed", "blocked"].includes(node.status)).map((node) => node.id),
-    blocked: Object.values(journal.nodes).filter((node) => node.status === "blocked").map((node) => node.id)
+    blocked: Object.values(journal.nodes).filter((node) => node.status === "blocked").map((node) => node.id),
+    transitionGuidance: Object.fromEntries(Object.values(journal.nodes).map((node) => [
+      node.id,
+      {
+        currentStatus: node.status,
+        allowed: ALLOWED_TRANSITIONS[node.status].map((status) => ({
+          status,
+          requiredFields: [
+            ...(["blocked", "conflicted"].includes(status) ? ["blocker"] : []),
+            ...(status === "committed" ? ["workerCommit", "approval"] : []),
+            ...(status === "integrated" ? ["mergeCommit"] : []),
+            ...(status === "completed" && node.kind === "manual-verification" ? ["approval"] : [])
+          ]
+        }))
+      }
+    ]))
   };
 }
 

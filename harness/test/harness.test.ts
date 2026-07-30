@@ -439,8 +439,16 @@ test("execution journal gates tasks behind their running phase and validates per
   }), /approvalMode must be governed, phase, or autonomous/);
   const started = applyExecutionStart(input, preview.digest);
   assert.deepEqual(started.derivedStatus.readyPhases, ["P1"]);
-  assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyPhases, ["P1"]);
-  assert.deepEqual(executionStatus(projectRoot, input.trackId, input.executionId).readyTasks, []);
+  const initialStatus = executionStatus(projectRoot, input.trackId, input.executionId);
+  assert.deepEqual(initialStatus.readyPhases, ["P1"]);
+  assert.deepEqual(initialStatus.readyTasks, []);
+  assert.deepEqual(initialStatus.transitionGuidance.P1, {
+    currentStatus: "pending",
+    allowed: [
+      { status: "running", requiredFields: [] },
+      { status: "blocked", requiredFields: ["blocker"] }
+    ]
+  });
   assert.throws(() => previewExecutionNodeUpdate({
     projectRoot, trackId: input.trackId, executionId: input.executionId, nodeId: "T1.1", status: "running"
   }), /until phase P1 is running/);
@@ -843,7 +851,7 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   const phasePreview = previewWorktreeCreate(phaseInput);
   const phase = applyWorktreeCreate(phaseInput, phasePreview.digest);
   const taskInput = {
-    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "T1.1", phaseId: "P1", baseCommit: head
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "T1.1", baseCommit: head
   };
   const taskPreview = previewWorktreeCreate(taskInput);
   const task = applyWorktreeCreate(taskInput, taskPreview.digest);
@@ -860,7 +868,7 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   assert.equal(existsSync(task.path), false);
 
   const phaseIntegrationInput = {
-    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1"
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1", phaseId: "P1"
   };
   assert.throws(() => previewWorktreeIntegration(phaseIntegrationInput), /must be committed or integrating/);
   writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "completed", "completed");
@@ -1570,6 +1578,45 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(oversizedDraft.isError, true);
 
+    const transitionRoot = fixture();
+    writePlannedTrack(transitionRoot, "mcp-transition");
+    runState(transitionRoot, "render");
+    const transitionStartInput = {
+      projectRoot: transitionRoot,
+      trackId: "mcp-transition",
+      executionId: "mcp-transition-1",
+      requestedMode: "sequential" as const,
+      effectiveMode: "sequential" as const,
+      maxWorkers: 1,
+      baseCommit: "1111111",
+      approvedAt: "2026-07-28T00:00:00.000Z"
+    };
+    const transitionStart = previewExecutionStart(transitionStartInput);
+    applyExecutionStart(transitionStartInput, transitionStart.digest);
+    const illegalTransition = await client.callTool({
+      name: "execution_node_preview",
+      arguments: {
+        projectRoot: transitionRoot,
+        trackId: "mcp-transition",
+        executionId: "mcp-transition-1",
+        nodeId: "P1",
+        status: "completed"
+      }
+    });
+    assert.equal(illegalTransition.isError, true);
+    assert.deepEqual(illegalTransition.structuredContent, {
+      error: {
+        code: "ILLEGAL_EXECUTION_TRANSITION",
+        message: "illegal execution transition pending -> completed",
+        details: {
+          nodeId: "P1",
+          currentStatus: "pending",
+          requestedStatus: "completed",
+          allowedNextStatuses: ["running", "blocked"]
+        }
+      }
+    });
+
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
     const files = [
       ["product.md", "# Product\n"],
@@ -1591,6 +1638,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal(preview.isError, undefined);
     const digest = (preview.structuredContent as { digest?: string }).digest;
     assert.match(digest ?? "", /^[0-9a-f]{64}$/);
+    assert.equal((preview.structuredContent as { proposalDigest?: string }).proposalDigest, digest);
     const approvedAt = "2026-07-28T00:05:00.000Z";
     const refreshedPreview = await client.callTool({
       name: "project_init_preview",

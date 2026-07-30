@@ -73,6 +73,7 @@ import {
   supportsFormElicitation,
   workflowElicitationInputSchema
 } from "./elicitation.js";
+import { serializeCadreError } from "../domain/errors.js";
 
 function result<T extends object>(value: T, summary?: string) {
   return {
@@ -81,13 +82,19 @@ function result<T extends object>(value: T, summary?: string) {
   };
 }
 
+function proposalResult<T extends object & { digest: string }>(value: T) {
+  return result({ ...value, proposalDigest: value.digest });
+}
+
 function failure(error: unknown) {
+  const serialized = serializeCadreError(error);
   return {
     isError: true,
     content: [{
       type: "text" as const,
-      text: error instanceof Error ? error.message : String(error)
-    }]
+      text: serialized.message
+    }],
+    structuredContent: { error: serialized }
   };
 }
 
@@ -295,7 +302,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewReviewComplete(input as ReviewCompleteInput));
+      return proposalResult(previewReviewComplete(input as ReviewCompleteInput));
     } catch (error) {
       return failure(error);
     }
@@ -330,7 +337,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewArchiveBatch(input as ArchiveBatchInput));
+      return proposalResult(previewArchiveBatch(input as ArchiveBatchInput));
     } catch (error) {
       return failure(error);
     }
@@ -362,7 +369,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewArchiveBatchRecord(input as ArchiveBatchRecordInput));
+      return proposalResult(previewArchiveBatchRecord(input as ArchiveBatchRecordInput));
     } catch (error) {
       return failure(error);
     }
@@ -400,7 +407,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewExecutionStart(input as ExecutionStartInput));
+      return proposalResult(previewExecutionStart(input as ExecutionStartInput));
     } catch (error) {
       return failure(error);
     }
@@ -445,7 +452,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewExecutionNodeUpdate(input as ExecutionNodeUpdateInput));
+      return proposalResult(previewExecutionNodeUpdate(input as ExecutionNodeUpdateInput));
     } catch (error) {
       return failure(error);
     }
@@ -476,7 +483,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewExecutionNodesUpdate(input as ExecutionNodesUpdateInput));
+      return proposalResult(previewExecutionNodesUpdate(input as ExecutionNodesUpdateInput));
     } catch (error) {
       return failure(error);
     }
@@ -527,7 +534,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewExecutionFinish(input as ExecutionFinishInput));
+      return proposalResult(previewExecutionFinish(input as ExecutionFinishInput));
     } catch (error) {
       return failure(error);
     }
@@ -561,7 +568,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewWorktreeCreate(input as WorktreeCreateInput));
+      return proposalResult(previewWorktreeCreate(input as WorktreeCreateInput));
     } catch (error) {
       return failure(error);
     }
@@ -591,7 +598,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewWorktreeIntegration(input as WorktreeIntegrationInput));
+      return proposalResult(previewWorktreeIntegration(input as WorktreeIntegrationInput));
     } catch (error) {
       return failure(error);
     }
@@ -617,7 +624,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewWorktreeCleanup(input as WorktreeIntegrationInput));
+      return proposalResult(previewWorktreeCleanup(input as WorktreeIntegrationInput));
     } catch (error) {
       return failure(error);
     }
@@ -667,7 +674,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(previewProjectInit(input as ProjectInitInput));
+      return proposalResult(previewProjectInit(input as ProjectInitInput));
     } catch (error) {
       return failure(error);
     }
@@ -722,7 +729,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
-      return result(renderTracksPreview(safeProjectRoot(projectRoot)));
+      return proposalResult(renderTracksPreview(safeProjectRoot(projectRoot)));
     } catch (error) {
       return failure(error);
     }

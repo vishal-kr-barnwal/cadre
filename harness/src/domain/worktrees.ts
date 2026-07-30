@@ -37,8 +37,13 @@ function assertIds(trackId: string, executionId: string, nodeId: string, phaseId
   if (!PHASE_ID.test(nodeId) && !TASK_ID.test(nodeId)) throw new Error("nodeId must be a phase or task ID");
   if (phaseId != null && !PHASE_ID.test(phaseId)) throw new Error("invalid phaseId");
   const task = nodeId.match(TASK_ID);
-  if (task && phaseId !== `P${task[1]}`) throw new Error(`${nodeId} does not belong to ${phaseId ?? "a phase"}`);
-  if (!task && phaseId != null) throw new Error("phase nodes must not supply phaseId");
+  if (task && phaseId != null && phaseId !== `P${task[1]}`) throw new Error(`${nodeId} does not belong to ${phaseId}`);
+  if (!task && phaseId != null && phaseId !== nodeId) throw new Error(`${nodeId} does not belong to ${phaseId}`);
+}
+
+function phaseForNode(nodeId: string): string {
+  const task = nodeId.match(TASK_ID);
+  return task ? `P${task[1]}` : nodeId;
 }
 
 function nodeSlug(nodeId: string): string {
@@ -52,8 +57,9 @@ function worktreeIdentity(root: string, trackId: string, executionId: string, no
 } {
   assertIds(trackId, executionId, nodeId, phaseId);
   const task = TASK_ID.test(nodeId);
+  const resolvedPhaseId = phaseForNode(nodeId);
   const relativePath = task
-    ? `.cadre/.worktrees/${trackId}/${executionId}/tasks/${phaseId}--${nodeSlug(nodeId)}`
+    ? `.cadre/.worktrees/${trackId}/${executionId}/tasks/${resolvedPhaseId}--${nodeSlug(nodeId)}`
     : `.cadre/.worktrees/${trackId}/${executionId}/phases/${nodeId}`;
   const branch = `cadre/${trackId}/${executionId}/${task ? "task" : "phase"}-${nodeSlug(nodeId)}`;
   return { path: join(root, relativePath), relativePath, branch };
@@ -143,8 +149,7 @@ function targetIdentity(root: string, input: { trackId: string; executionId: str
   branch: string;
 } {
   if (TASK_ID.test(input.nodeId)) {
-    const phaseId = input.phaseId;
-    if (!phaseId) throw new Error("task integration requires phaseId");
+    const phaseId = phaseForNode(input.nodeId);
     const phase = worktreeIdentity(root, input.trackId, input.executionId, phaseId, null);
     const phaseWorktree = registeredWorktrees(root).find((entry) => entry.path === resolve(phase.path));
     if (phaseWorktree) {
@@ -161,7 +166,8 @@ function journalNode(input: WorktreeIntegrationInput): { node: ExecutionNode; no
   const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
   const node = journal.nodes[input.nodeId];
   if (!node) throw new Error(`execution journal has no node ${input.nodeId}`);
-  if (node.phaseId !== (input.phaseId ?? input.nodeId)) {
+  assertIds(input.trackId, input.executionId, input.nodeId, input.phaseId);
+  if (node.phaseId !== phaseForNode(input.nodeId)) {
     throw new Error(`execution journal identity disagrees for ${input.nodeId}`);
   }
   return { node, nodes: journal.nodes };
