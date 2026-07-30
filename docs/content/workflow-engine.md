@@ -85,6 +85,19 @@ bookkeeping can use `execution_nodes_*`, but a batch cannot cross a boundary
 whose evidence does not yet exist: approval, commit, test, integration,
 conflict resolution, or manual verification.
 
+`execution_status` reports each node's current status, legal next statuses, and
+required evidence fields. A workflow constructs transitions from that guidance
+instead of issuing speculative previews. After an external boundary produces
+its evidence, all consecutive transitions unlocked by that evidence are sent
+as one ordered batch. Mutation responses supply the next derived status, so a
+separate status read is unnecessary.
+
+Product verification is reusable while the verified product tree, test inputs,
+and policy remain unchanged; `.cadre/**`-only bookkeeping does not trigger the
+same full suite again. Product-task commits remain distinct, while Cadre-only
+journal, plan, learning, and index changes are checkpointed once per phase and
+once at final readiness instead of once per node status.
+
 ## Finality
 
 - `implement` can reach only `ready_for_review`.

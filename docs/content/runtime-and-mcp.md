@@ -58,9 +58,11 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 
 ## Result Shape
 
-Successful tools return JSON content under a consistent `{ ok: true, ... }`
-envelope. Failures return `{ ok: false, error }` and mark the MCP result as an
-error. `project_status` also returns its human-readable summary as text.
+Successful tools return their typed value as structured content.
+Mutation previews expose the same SHA-256 value as both `digest` and the
+uniform apply-ready `proposalDigest` alias. Failures mark the MCP result as an
+error and return structured `{ error: { code, message, details? } }` content.
+`project_status` also returns its human-readable summary as text.
 
 Inputs are validated with Zod before reaching domain behavior. Track, phase,
 task, execution, batch, commit, digest, and timestamp formats are constrained at
@@ -71,6 +73,10 @@ the tool boundary.
 A preview computes all consequences and a proposal digest without mutating.
 Apply receives the same semantic input plus that digest. Domain code recomputes
 the proposal and refuses stale state.
+
+Execution status returns legal transition guidance and required evidence per
+node. Skills use that contract to build ordered batches; previews validate
+those batches and are not used as state-machine probes.
 
 Read-only previews are not approval. Skill contracts remain responsible for
 presenting the exact proposal and obtaining explicit human acceptance before

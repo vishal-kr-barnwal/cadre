@@ -11,6 +11,11 @@ The `cadre` stdio server exposes immutable template resources and 37
 purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
 arbitrary filesystem/shell operations.
 
+Every mutation preview returns both the legacy `digest` field and the uniform
+apply-ready `proposalDigest` alias. Tool failures set the MCP error flag and
+return structured `{ error: { code, message, details? } }` content; callers do
+not need to parse human-readable text to recover transition guidance.
+
 ## Template Resources
 
 Every bundled template is readable at
@@ -146,21 +151,26 @@ Applies the ordered transition batch behind one unchanged digest.
 ## execution_status
 
 Reads an execution journal and derives ready phases, ready tasks within running
-phases, active nodes, blockers, and overall execution status. Read-only.
+phases, active nodes, blockers, and per-node `transitionGuidance`. Guidance
+contains current status, legal next statuses, and required evidence fields so
+callers can construct a valid batch without speculative previews. Read-only.
 
 ## execution_finish_preview
 
 Verifies completed nodes, current plan evidence, removed worktrees, and final
-head before previewing `ready_for_review`. Read-only.
+head before previewing the completed journal, `ready_for_review` state, and
+derived `tracks.md` content under one digest. Read-only.
 
 ## execution_finish_apply
 
-Finalizes the approved execution and track transition behind its digest.
+Finalizes the approved execution, track transition, and derived index together
+behind its digest.
 
 ## worktree_create_preview
 
 Derives one constrained phase/task worktree path, branch, parent, and exact base
-commit. Read-only.
+commit. Task phase identity is inferred from `T<phase>.<task>`; a matching
+redundant `phaseId` remains accepted for compatibility. Read-only.
 
 ## worktree_create_apply
 

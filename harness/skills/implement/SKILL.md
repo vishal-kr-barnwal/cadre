@@ -43,12 +43,15 @@ Before creating workers, inspect the approved plan, repository scripts, lockfile
 - Use already-approved commands and prefixes without asking again. Never request permission speculatively or retry equivalent command spellings to obtain a different prompt.
 - Centralize shared dependency installation, registry access, image pulls, code generation, and other network preparation in main before workers start. Workers should use locked/offline modes when the repository supports them.
 - Prefer existing repository scripts and narrowly scoped commands. Do not combine unrelated or differently privileged shell segments into one command, because the host evaluates each segment independently.
+- Run independent read-only repository inspections and checks in parallel when the host supports parallel tool calls. Keep only commands with a real data, mutation, or Git dependency sequential.
 - Avoid scaffolding modes that create nested repositories or require deleting generated `.git` directories. Inspect generator options and target directories first.
 - When a required permission is not already available, request one narrow reusable command prefix with the exact reason. If a worker encounters an unexpected prompt, it stops and reports the exact blocked command to main instead of issuing repeated variants.
 
 ## Schedule the DAG
 
-Call `execution_status` when resuming an execution or when no mutation response is available. After a successful execution mutation, use its returned `derivedStatus` instead of making a redundant status call. Use `execution_nodes_preview` and `execution_nodes_apply` when one already-approved scheduling or bookkeeping decision produces multiple immediately valid transitions. The ordered batch is a transport optimization only: never batch across a human approval, commit, verification, integration, conflict resolution, or other external action whose evidence does not exist at preview time. Plan display order breaks ties only.
+The Cadre tools named in this skill are declared contracts: call them directly. Do not list the global tool catalog, rediscover schemas, or probe previews to learn legal transitions. Call `execution_status` when resuming an execution or when no mutation response is available, then use its `transitionGuidance` to construct legal transitions with the required evidence. After a successful execution mutation, use its returned `derivedStatus` instead of making a redundant status call. Every preview exposes the apply-ready digest as `proposalDigest`; pass that value unchanged instead of guessing field names.
+
+Use `execution_nodes_preview` and `execution_nodes_apply` when one already-approved scheduling or bookkeeping decision produces multiple immediately valid transitions. Never batch across a human approval, commit, verification, integration, conflict resolution, or other external action whose evidence does not exist at preview time. Once that evidence exists, batch the consecutive journal transitions it unlocks: for example, record verified/authorized task progress through `committed` in one batch after the commit exists, record `integrated` through `completed` after merge evidence exists, and complete a cleaned phase while starting already-ready dependents in one batch. Preview validates a constructed transition; it is never a trial request used to discover the state machine. Plan display order breaks ties only.
 
 - A root phase reads the Pattern Seed. Any other phase reads learning from all declared dependency phases.
 - Treat the track as a hierarchical DAG: phase dependencies determine active phases, task dependencies determine ready work inside each running phase, and main schedules one global ready queue subject to `maxWorkers`. Different phases may use different execution modes concurrently.
@@ -57,7 +60,7 @@ Call `execution_status` when resuming an execution or when no mutation response 
 - Create every task-worker wave from the same recorded clean phase HEAD. Merge ready tasks into the phase worktree one at a time; derive the next wave only after those merges, so downstream tasks start from the updated phase HEAD.
 - The main agent creates every worker. On Codex, use an available implementation worker subagent with the bounded prompt below. On Claude Code, prefer the plugin-provided `cadre-phase-worker` and `cadre-task-worker`. Do not use Claude agent teams.
 - If only one safe execution node is ready, execute it in main.
-- Phase and task worktrees are siblings. Use `worktree_create_preview` and `worktree_create_apply`; record the returned absolute path/branch through `execution_node_preview` and `execution_node_apply` before spawning. In `phase` and `autonomous`, these deterministic worktree and journal mutations run under the implementation authorization without another approval. In `governed`, present them when the current workflow requires an explicit mutation approval.
+- Phase and task worktrees are siblings. Use `worktree_create_preview` and `worktree_create_apply`; the MCP derives a task's phase from its `T<phase>.<task>` node ID, so omit redundant `phaseId`. Record the returned absolute path/branch through an execution-node batch before spawning. In `phase` and `autonomous`, these deterministic worktree and journal mutations run under the implementation authorization without another approval. In `governed`, present them when the current workflow requires an explicit mutation approval.
 
 ### Worker prompt contract
 
@@ -84,9 +87,12 @@ Provide the exact absolute worktree, track/execution/node IDs, approved outcome,
 
 Every regular task in a phase has its own Conventional Commit and distinct recorded SHA, including tasks executed sequentially by one phase worker. Manual-verification nodes may record the approved phase-head or merge evidence instead of inventing an empty commit. A phase must remain `running` until every sibling task and its manual-verification barrier are `completed`; only then may it advance to approval, commit, integration, and cleanup.
 
+Git commits are durability and provenance boundaries, not journal-transition boundaries. Keep each product task's required Conventional Commit, but combine Cadre-only plan, learning, journal, and index bookkeeping once per phase checkpoint and once at the final ready-for-review checkpoint. Do not create a Git commit for each intermediate execution status or for worktree create/integrate/cleanup metadata alone.
+
 ## Verification barriers and learning
 
 - Phase `User Manual Verification` is a derived barrier over all sibling tasks. After task workers are quiescent, prepare technical evidence in the phase worktree through an active phase worker when present, otherwise through main. In `governed` and `phase`, present this final phase task once and record the human approval. In `autonomous`, verify and record it under the persisted mode without a human prompt.
+- Record verification evidence with its command, working directory, result, and verified product HEAD/tree. Reuse a passing result while product files, test inputs, and required verification policy are unchanged. A commit that changes only `.cadre/**` bookkeeping does not invalidate product verification and must not trigger the same full suite again.
 - After the barrier is approved or authorized, automatically checkpoint the journal, integrate the phase branch, record every task commit, the phase completion merge SHA, and dependency-aware phase learning in canonical `plan.md`/`learning.md`, and commit `cadre(implement): record <track-id> <phase-id>`. Keep the phase node `integrated`, clean its worktree, and only then mark the phase `completed` and start dependents. Cleanup also accepts an already-`completed` node as interruption recovery, without reopening that terminal state. Do not split those deterministic consequences into additional approvals in `phase` or `autonomous`.
 - Track-level `User Manual Verification` is a derived barrier over every phase. Execute it only in main, against the fully integrated canonical worktree, and obtain explicit human approval in all modes.
 
@@ -95,6 +101,6 @@ Every regular task in a phase has its own Conventional Commit and distinct recor
 When all journal nodes and plan tasks are complete, all phase learning/provenance is recorded, all worktrees are removed, and track verification is approved:
 
 1. Run the relevant full checks and inspect the final diff/history.
-2. Call `execution_finish_preview` after the approved track-level verification. Its completed journal, `ready_for_review` transition, derived `tracks.md` update, validation, and `cadre(implement): ready <track-id>` commit are deterministic consequences of that approval; apply them without another prompt when unchanged.
+2. Call `execution_finish_preview` after the approved track-level verification. Its completed journal, `ready_for_review` transition, and derived `tracks.md` update share one digest and apply together; do not call `tracks_render_preview` as a repair step. Validation and the single `cadre(implement): ready <track-id>` checkpoint are deterministic consequences of that approval, so complete them without another prompt when unchanged.
 
 Never mark a track `completed`; only an approved clean `review` may do that.

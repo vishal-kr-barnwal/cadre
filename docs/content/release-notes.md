@@ -36,6 +36,16 @@ single-question chat fallback when forms are unsupported or policy-rejected.
   and does not misreport an immediate policy rejection as a human decline.
 - Keeps large unchanged workflows and defaults out of the conversation: skills
   present concise summaries or focused diffs before opening the decision form.
+- Makes execution status self-describing with legal next transitions and
+  required evidence, returns structured MCP errors, and gives every mutation
+  preview a uniform `proposalDigest` alias.
+- Infers task worktree phase identity from the task node ID and accepts a
+  matching redundant phase value for compatibility.
+- Finalizes the execution journal, `ready_for_review` state, and derived
+  `tracks.md` under one digest so finish cannot leave an index-repair step.
+- Batches already-evidenced journal transitions, reuses unchanged product
+  verification, limits Cadre-only commits to durability checkpoints, and runs
+  independent read-only inspections in parallel.
 
 ### Runtime And Compatibility
 

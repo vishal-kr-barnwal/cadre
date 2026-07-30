@@ -1795,6 +1795,13 @@ test("implementation guidance preserves approval, permission, batching, and task
     assert.match(body, /`phase` \(default\)|`phase` is the default/);
     assert.match(body, /`autonomous`/);
     assert.match(body, /Track-level User Manual Verification/);
+    assert.match(body, /transitionGuidance/);
+    assert.match(body, /global tool catalog/);
+    assert.match(body, /proposalDigest/);
+    assert.match(body, /state-machine probe|probe previews to learn legal transitions/);
+    assert.match(body, /independent read-only .* parallel/i);
+    assert.match(body, /\.cadre\/\*\*.*does not invalidate product verification/);
+    assert.match(body, /once per phase checkpoint/);
   }
   assert.match(implement, /Pause exactly once for that phase's final `User Manual Verification` task/);
   assert.match(implement, /run all regular work inside a phase autonomously/);
@@ -1802,6 +1809,7 @@ test("implementation guidance preserves approval, permission, batching, and task
   assert.match(implement, /do not add an execution-start approval prompt/);
   assert.match(implement, /Keep the phase node `integrated`, clean its worktree, and only then mark the phase `completed`/);
   assert.match(implement, /already-`completed` node as interruption recovery/);
+  assert.match(implement, /do not call `tracks_render_preview` as a repair step/);
   assert.match(workflow, /deterministic worktree, clean integration, cleanup, journal, index, and bookkeeping mutations/);
   assert.match(workflow, /does not require a separate approval prompt/);
   assert.equal(executionTemplate.approvalMode, "{{governed|phase|autonomous}}");
