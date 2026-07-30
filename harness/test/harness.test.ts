@@ -1690,6 +1690,11 @@ test("interactive workflows prefer bounded client-native forms with one chat fal
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /workflow_elicit/, `${skill} must prefer the shared form tool`);
     assert.match(body, /fallback_required/, `${skill} must preserve chat fallback`);
+    assert.match(body, /approval policy `never`/, `${skill} must detect non-interactive host policy`);
+    assert.match(body, /skip the form and ask the same short question once in chat/,
+      `${skill} must bypass elicitation under non-interactive host policy`);
+    assert.match(body, /policy rejection, not a human decline/,
+      `${skill} must not misreport automatic policy rejection as human input`);
     assert.match(body, /never request secrets|never request secrets or retry the form/i,
       `${skill} must forbid secret collection`);
   }
@@ -1699,6 +1704,8 @@ test("interactive workflows prefer bounded client-native forms with one chat fal
   assert.match(workflow, /bind it to the current preview digest or an immutable checkpoint/);
   assert.match(workflow, /Do not print a complete unchanged workflow/);
   assert.match(workflow, /ask the same short question once in chat and do not retry the form/);
+  assert.match(workflow, /approval policy `never`, including Codex Full Access/);
+  assert.match(workflow, /do not report it as a human decline/);
 });
 
 test("proposal workflows validate draft plan content without temporary project copies", () => {

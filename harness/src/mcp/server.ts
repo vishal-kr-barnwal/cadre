@@ -116,7 +116,7 @@ export function createCadreServer(): McpServer {
         "Cadre provides deterministic, versioned templates and narrow project-state operations.",
         "Read every existing artifact before proposing edits. Never infer file contents.",
         "For any mutation, present the complete proposed artifacts to the human and obtain approval first.",
-        "Use workflow_elicit for concise approval or clarification forms when supported; fall back to one short chat question when requested.",
+        "Use workflow_elicit for concise approval or clarification forms when supported. When active task context reports a non-interactive approval policy such as Codex Full Access, skip the form and ask one short chat question.",
         "Call a preview tool immediately before its matching apply tool and pass the returned digest unchanged.",
         "Cadre state is resumable: inspect project_status once at command entry and reserve state_validate for final mutation gates.",
         "The plan is the implementation source of truth. Cadre MCP exposes only constrained, digest-gated Git worktree operations and never approves its own changes."
@@ -126,7 +126,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("workflow_elicit", {
     title: "Collect Cadre workflow input",
-    description: "Present one client-native Cadre approval or clarification form. This read-only tool never grants approval or mutates state. Bind approval forms to the current proposal digest or immutable verification checkpoint, never request secrets, and use its chat fallback exactly once when form elicitation is unavailable.",
+    description: "Present one client-native Cadre approval or clarification form. This read-only tool never grants approval or mutates state. Do not call it when active task context reports approval policy never, including Codex Full Access; ask one short chat question instead. Otherwise bind approval forms to the current proposal digest or immutable verification checkpoint, never request secrets, and use its chat fallback exactly once when form elicitation is unavailable.",
     inputSchema: workflowElicitationInputSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {

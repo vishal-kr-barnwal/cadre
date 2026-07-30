@@ -7,7 +7,7 @@ description: Create or resume a Cadre feature or bug track, including a function
 
 Create only `feature` or `bug` tracks. Resume an existing drafting track instead of replacing it.
 
-At every required clarification or approval boundary, show a concise summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the current proposal digest. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+At every required clarification or approval boundary, show a concise summary or focused diff. Inspect the active host policy before calling `workflow_elicit`: if the task context reports approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise prefer `workflow_elicit`, using `clarification` for at most three questions and `approval` bound to the current proposal digest. Treat only an `approved` result as approval. If it returns `fallback_required`, or immediately returns `declined` while the task explicitly reports policy `never`, ask the same short question once in chat; the latter is policy rejection, not a human decline. Never request secrets or retry the form.
 
 ## Required context
 

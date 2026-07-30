@@ -7,7 +7,7 @@ description: Archive one or more completed Cadre tracks in one approved, resumab
 
 Archive one or more `completed` tracks in a single batch. Read `.cadre/workflow.md`, every artifact and recorded commit for every selected track, the full pattern catalog, all active track specs/plans and marked learning seeds, and relevant implementation files. Read existing pattern and learning files before proposing changes.
 
-At every required selection or approval boundary, show a concise batch summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the archive preview digest. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+At every required selection or approval boundary, show a concise batch summary or focused diff. Inspect the active host policy before calling `workflow_elicit`: if the task context reports approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise prefer `workflow_elicit`, using `clarification` for at most three questions and `approval` bound to the archive preview digest. Treat only an `approved` result as approval. If it returns `fallback_required`, or immediately returns `declined` while the task explicitly reports policy `never`, ask the same short question once in chat; the latter is policy rejection, not a human decline. Never request secrets or retry the form.
 
 Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP is unavailable, stop without starting or advancing an archive batch.
 

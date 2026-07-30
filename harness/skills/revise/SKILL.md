@@ -7,7 +7,7 @@ description: Route a requested track change according to lifecycle state, revise
 
 Read `.cadre/workflow.md`, the full target track, its dependencies, all tracks that depend on it, relevant repository files, and applicable patterns. Read each artifact before editing; never propose a revision from guessed contents.
 
-At every required clarification or approval boundary, show a concise impact summary or focused diff and prefer `workflow_elicit`: use `clarification` for at most three questions and `approval` bound to the exact revision proposal checkpoint. Treat only an `approved` result as approval. If it returns `fallback_required`, ask the same short question once in chat; never request secrets or retry the form.
+At every required clarification or approval boundary, show a concise impact summary or focused diff. Inspect the active host policy before calling `workflow_elicit`: if the task context reports approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise prefer `workflow_elicit`, using `clarification` for at most three questions and `approval` bound to the exact revision proposal checkpoint. Treat only an `approved` result as approval. If it returns `fallback_required`, or immediately returns `declined` while the task explicitly reports policy `never`, ask the same short question once in chat; the latter is policy rejection, not a human decline. Never request secrets or retry the form.
 
 Call `project_status` first and use its embedded structured validation; do not repeat `state_validate` at command entry. If the Cadre MCP is unavailable, stop without modifying the track.
 
