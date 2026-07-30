@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { CadreError } from "./errors.js";
 import { safeProjectRoot } from "./paths.js";
 import { parsePlan, validatePlanGraph, type PlanGraph } from "./plan.js";
+import { renderTracksWithState } from "./tracks-index.js";
 
 export const EXECUTION_NODE_STATUSES = [
   "pending", "running", "awaiting_approval", "committed", "integrating",
@@ -95,6 +96,11 @@ export interface ExecutionProposal {
   statePath: string;
   state: ExecutionTrackState;
   digest: string;
+}
+
+export interface ExecutionFinishProposal extends ExecutionProposal {
+  tracksPath: string;
+  tracksContent: string;
 }
 
 export interface ExecutionDerivedStatus {
@@ -560,7 +566,7 @@ export interface ExecutionFinishInput {
   completedAt: string;
 }
 
-export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionProposal {
+export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFinishProposal {
   if (!SHA.test(input.headCommit)) throw new Error("headCommit must be a Git commit SHA");
   if (!Number.isFinite(Date.parse(input.completedAt))) throw new Error("completedAt must be an ISO timestamp");
   const { statePath, journalPath } = executionPaths(input.projectRoot, input.trackId, input.executionId);
@@ -613,23 +619,52 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionPr
       completedAt: input.completedAt
     }
   };
+  const { tracksPath, tracksBody, tracksContent } = renderTracksWithState(
+    input.projectRoot,
+    statePath,
+    completedState
+  );
   return {
     journalPath,
     journal: completedJournal,
     statePath,
     state: completedState,
-    digest: hash({ stateBody, journalBody, journal: completedJournal, state: completedState })
+    tracksPath,
+    tracksContent,
+    digest: hash({
+      stateBody,
+      journalBody,
+      tracksBody,
+      journal: completedJournal,
+      state: completedState,
+      tracksContent
+    })
   };
 }
 
-export function applyExecutionFinish(input: ExecutionFinishInput, proposalDigest: string): ExecutionProposal {
+export function applyExecutionFinish(input: ExecutionFinishInput, proposalDigest: string): ExecutionFinishProposal {
   const proposal = previewExecutionFinish(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution completion proposal is stale; preview it again");
-  if (lstatSync(proposal.journalPath).isSymbolicLink() || lstatSync(proposal.statePath).isSymbolicLink()) {
+  if (lstatSync(proposal.journalPath).isSymbolicLink()
+    || lstatSync(proposal.statePath).isSymbolicLink()
+    || lstatSync(proposal.tracksPath).isSymbolicLink()) {
     throw new Error("refusing to complete execution through a symbolic link");
   }
-  writeFileSync(proposal.journalPath, `${JSON.stringify(proposal.journal, null, 2)}\n`);
-  writeFileSync(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
+  const journalTemporaryPath = join(dirname(proposal.journalPath), `.${basename(proposal.journalPath)}.${process.pid}.${randomUUID()}.tmp`);
+  const stateTemporaryPath = join(dirname(proposal.statePath), `.${basename(proposal.statePath)}.${process.pid}.${randomUUID()}.tmp`);
+  const tracksTemporaryPath = join(dirname(proposal.tracksPath), `.${basename(proposal.tracksPath)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(journalTemporaryPath, `${JSON.stringify(proposal.journal, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(stateTemporaryPath, `${JSON.stringify(proposal.state, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(tracksTemporaryPath, proposal.tracksContent, { flag: "wx" });
+    renameSync(journalTemporaryPath, proposal.journalPath);
+    renameSync(stateTemporaryPath, proposal.statePath);
+    renameSync(tracksTemporaryPath, proposal.tracksPath);
+  } finally {
+    if (existsSync(journalTemporaryPath)) unlinkSync(journalTemporaryPath);
+    if (existsSync(stateTemporaryPath)) unlinkSync(stateTemporaryPath);
+    if (existsSync(tracksTemporaryPath)) unlinkSync(tracksTemporaryPath);
+  }
   return proposal;
 }
 

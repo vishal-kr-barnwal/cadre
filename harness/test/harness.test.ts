@@ -719,7 +719,7 @@ test("replacement executions carry completed plan provenance forward", () => {
   assert.deepEqual(status.readyTasks, []);
 });
 
-test("execution start and finish resume across their two-file checkpoints", () => {
+test("execution start and finish resume while keeping the derived index current", () => {
   const projectRoot = fixture();
   const trackRoot = writePlannedTrack(projectRoot, "checkpoint-track");
   writeFileSync(join(trackRoot, "plan.md"), `# Plan: Checkpoint track
@@ -761,13 +761,20 @@ test("execution start and finish resume across their two-file checkpoints", () =
     completedAt: "2026-07-28T04:00:00.000Z"
   };
   const finish = previewExecutionFinish(finishInput);
+  assert.match(finish.tracksContent, /checkpoint-track.*ready_for_review/);
   writeFileSync(finish.journalPath, `${JSON.stringify(finish.journal, null, 2)}\n`);
   const resumedFinish = previewExecutionFinish(finishInput);
-  applyExecutionFinish(finishInput, resumedFinish.digest);
+  const currentTracks = readFileSync(resumedFinish.tracksPath, "utf8");
+  writeFileSync(resumedFinish.tracksPath, `${currentTracks}\n`);
+  assert.throws(() => applyExecutionFinish(finishInput, resumedFinish.digest), /proposal is stale/);
+  writeFileSync(resumedFinish.tracksPath, currentTracks);
+  const freshFinish = previewExecutionFinish(finishInput);
+  applyExecutionFinish(finishInput, freshFinish.digest);
   const state = JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8"));
   assert.equal(state.status, "ready_for_review");
   assert.equal(state.operation, null);
   assert.equal(state.lastExecution.executionId, startInput.executionId);
+  assert.deepEqual(validateProject(projectRoot).warnings, []);
 });
 
 test("clean review completion previews and applies its exact state and derived index together", () => {

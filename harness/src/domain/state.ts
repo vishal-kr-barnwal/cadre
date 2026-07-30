@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
+import { buildTracks } from "./tracks-index.js";
+export { buildTracks } from "./tracks-index.js";
 
 export interface OperationState {
   action?: string;
@@ -368,21 +370,6 @@ function discoverTracks(root: string, errors: string[]): {
   }
   tracks.sort((left, right) => left.id.localeCompare(right.id));
   return { tracks, states, byId };
-}
-
-export function buildTracks(tracks: DiscoveredTrack[]): string {
-  const lines = [
-    "# Tracks",
-    "",
-    "Generated from track-local `state.json` files by the Cadre MCP server.",
-    "",
-    "| Track | Type | Status | Revision |",
-    "| --- | --- | --- | ---: |"
-  ];
-  for (const track of tracks) {
-    lines.push(`| \`${track.id}\` ${track.title ?? ""} | ${track.type} | ${track.status} | ${track.revision ?? 1} |`);
-  }
-  return `${lines.join("\n")}\n`;
 }
 
 export function validateProject(projectRoot: string): ValidationResult {

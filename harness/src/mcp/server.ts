@@ -529,7 +529,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("execution_finish_preview", {
     title: "Preview completed implementation execution",
-    description: "Verify all DAG nodes, plan evidence, and worktree cleanup before proposing ready-for-review state.",
+    description: "Verify all DAG nodes, plan evidence, and worktree cleanup before proposing ready-for-review state and its derived tracks index under one digest.",
     inputSchema: executionFinishSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
@@ -542,7 +542,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool("execution_finish_apply", {
     title: "Complete implementation execution",
-    description: "Finalize an approved execution and mark it ready for review only when the preview is unchanged.",
+    description: "Finalize an approved execution, ready-for-review state, and derived tracks index together only when the preview is unchanged.",
     inputSchema: { ...executionFinishSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalDigest, ...input }) => {
