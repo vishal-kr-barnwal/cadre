@@ -80,13 +80,13 @@ Execution nodes use explicit legal statuses such as `pending`, `running`,
 `awaiting_approval`, `committed`, `integrating`, `conflicted`, `integrated`,
 `awaiting_manual_verification`, `completed`, and `blocked`.
 
-Single transitions use `execution_node_*`. Immediately valid ordered
-bookkeeping can use `execution_nodes_*`, but a batch cannot cross a boundary
+Semantic events use `execution_checkpoint_*`, which expands each event into its
+complete legal transition sequence. A checkpoint cannot cross a boundary
 whose evidence does not yet exist: approval, commit, test, integration,
 conflict resolution, or manual verification.
 
-`execution_status` reports each node's current status, legal next statuses, and
-required evidence fields. A workflow constructs transitions from that guidance
+`execution_status` reports each node's current status, legal semantic events, and
+required evidence fields. A workflow selects an event from that guidance
 instead of issuing speculative previews. After an external boundary produces
 its evidence, all consecutive transitions unlocked by that evidence are sent
 as one ordered batch. Mutation responses supply the next derived status, so a

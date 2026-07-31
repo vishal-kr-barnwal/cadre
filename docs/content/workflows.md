@@ -60,10 +60,8 @@ already be completed or archived after completion.
 Approval mode is independent of parallel/sequential scheduling:
 
 - `governed` presents each regular task and material integration transition;
-- `phase` is the default and runs a phase autonomously until its final User
-  Manual Verification task;
-- `autonomous` runs through phase barriers and pauses only at Track-level User
-  Manual Verification.
+- `phase` is the default and runs a phase autonomously until its final User Manual Verification task;
+- `autonomous` pauses only at Track-level User Manual Verification.
 
 The `implement` invocation authorizes execution start with the requested modes
 or their defaults. `phase` and `autonomous` do not add a separate start prompt.

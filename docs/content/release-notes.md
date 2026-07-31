@@ -16,9 +16,8 @@ weakening digest-gated mutations or manual verification.
 ### Approval Governance
 
 - Adds `governed`, `phase`, and `autonomous` implementation approval modes.
-  `phase` is the default: regular phase work runs autonomously and pauses once
-  at the phase's final manual-verification task. `autonomous` pauses only at
-  track-level verification; `governed` retains task-by-task gates.
+  `phase` is the default and pauses once per phase; `autonomous` pauses only at
+  track-level verification and `governed` retains task-by-task gates.
 - Treats one approved semantic proposal as an authorization envelope over its
   unchanged deterministic journals, indexes, validation, commits, lifecycle
   transitions, and provenance. Create, track, review, revise, refresh, revert,
@@ -42,7 +41,7 @@ weakening digest-gated mutations or manual verification.
 
 - Makes `execution_status` self-describing with legal next transitions and
   required evidence. MCP failures now return structured errors, and every
-  mutation preview exposes a uniform `proposalDigest` alias.
+  mutation preview exposes an opaque apply-ready `proposalToken`.
 - Adds ordered execution-node batching guidance, avoids global tool-catalog
   discovery and speculative previews, runs independent read-only checks in
   parallel, and reuses verification when only `.cadre/**` bookkeeping changed.

@@ -3,8 +3,9 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync
 import { basename, dirname, join, resolve } from "node:path";
 import { CadreError } from "./errors.js";
 import { safeProjectRoot } from "./paths.js";
-import { parsePlan, validatePlanGraph, type PlanGraph } from "./plan.js";
+import { parsePlan, parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
 import { renderTracksWithState } from "./tracks-index.js";
+import { reachableGitCommits, resolveGitCommit } from "./git.js";
 
 export const EXECUTION_NODE_STATUSES = [
   "pending", "running", "awaiting_approval", "committed", "integrating",
@@ -74,7 +75,7 @@ interface ExecutionTrackState {
   checkpoint?: string;
   commits?: { plan?: string | null };
   operation?: ExecutionOperation | Record<string, unknown> | null;
-  lastExecution?: Record<string, unknown> | null;
+  lastExecution?: ({ approvalMode?: ExecutionApprovalMode } & Record<string, unknown>) | null;
   [key: string]: unknown;
 }
 
@@ -90,6 +91,30 @@ export interface ExecutionStartInput {
   approvedAt: string;
 }
 
+export interface ExecutionStartRequest {
+  projectRoot: string;
+  trackId: string;
+  requestedMode?: "parallel" | "sequential";
+  approvalMode?: ExecutionApprovalMode;
+  maxWorkers?: number;
+}
+
+export function deriveExecutionStartInput(input: ExecutionStartRequest): ExecutionStartInput {
+  const startedAt = new Date().toISOString();
+  const requestedMode = input.requestedMode ?? "parallel";
+  return {
+    projectRoot: input.projectRoot,
+    trackId: input.trackId,
+    executionId: startedAt.replace(/[:.]/g, "-"),
+    requestedMode,
+    effectiveMode: requestedMode,
+    ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
+    maxWorkers: input.maxWorkers ?? 3,
+    baseCommit: resolveGitCommit(input.projectRoot),
+    approvedAt: startedAt
+  };
+}
+
 export interface ExecutionProposal {
   journalPath: string;
   journal: ExecutionJournal;
@@ -99,6 +124,8 @@ export interface ExecutionProposal {
 }
 
 export interface ExecutionFinishProposal extends ExecutionProposal {
+  planPath: string;
+  planContent: string;
   tracksPath: string;
   tracksContent: string;
 }
@@ -108,10 +135,10 @@ export interface ExecutionDerivedStatus {
   readyTasks: string[];
   active: string[];
   blocked: string[];
-  transitionGuidance: Record<string, {
+  eventGuidance: Record<string, {
     currentStatus: ExecutionNodeStatus;
     allowed: Array<{
-      status: ExecutionNodeStatus;
+      event: ExecutionCheckpointEvent;
       requiredFields: string[];
     }>;
   }>;
@@ -206,17 +233,21 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   if (input.requestedMode === "sequential" && input.effectiveMode !== "sequential") {
     throw new Error("an explicitly sequential execution cannot become parallel");
   }
-  const approvalMode = input.approvalMode ?? "phase";
-  if (!EXECUTION_APPROVAL_MODES.includes(approvalMode)) throw new Error("approvalMode must be governed, phase, or autonomous");
   const trackRoot = activeTrackRoot(input.projectRoot, input.trackId);
   const statePath = join(trackRoot, "state.json");
   const planPath = join(trackRoot, "plan.md");
   const stateBody = readFileSync(statePath, "utf8");
   const state = JSON.parse(stateBody) as ExecutionTrackState;
+  const approvalMode = input.approvalMode ?? state.lastExecution?.approvalMode ?? "phase";
+  if (!EXECUTION_APPROVAL_MODES.includes(approvalMode)) throw new Error("approvalMode must be governed, phase, or autonomous");
   if (state.trackId !== input.trackId) throw new Error("track state does not match trackId");
   if (!["planned", "in_progress"].includes(state.status)) throw new Error(`track ${input.trackId} is not implementable from ${state.status}`);
   if (state.operation != null) throw new Error(`track ${input.trackId} already has an active operation`);
   if (!SHA.test(state.commits?.plan ?? "")) throw new Error("track has no approved plan commit");
+  const planReachability = reachableGitCommits(input.projectRoot, [state.commits!.plan!]);
+  if (planReachability?.get(state.commits!.plan!) === false) {
+    throw new Error(`approved plan commit is not reachable: ${state.commits!.plan!}`);
+  }
   const planErrors: string[] = [];
   const graph = parsePlan(planPath, planErrors);
   validatePlanGraph(planPath, graph, state.status, planErrors);
@@ -526,6 +557,33 @@ function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatu
   const ready = Object.values(journal.nodes).filter(
     (node) => node.status === "pending" && node.dependencies.every((dependency) => completed.has(dependency))
   );
+  const eventGuidance = Object.fromEntries(Object.values(journal.nodes).map((node) => {
+    const allowed: Array<{ event: ExecutionCheckpointEvent; requiredFields: string[] }> = [];
+    if (node.status === "pending") allowed.push({ event: "start", requiredFields: [] });
+    if (node.status === "running") {
+      allowed.push(node.kind === "manual-verification"
+        ? { event: "record_verification", requiredFields: ["commit", "verification", "authorization"] }
+        : { event: "record_commit", requiredFields: ["commit", "verification", "authorization"] });
+    }
+    if (node.status === "awaiting_approval") {
+      allowed.push({ event: "record_commit", requiredFields: ["commit", "verification", "authorization"] });
+    }
+    if (node.status === "committed") {
+      allowed.push(
+        { event: "record_integration", requiredFields: ["commit", "verification"] },
+        { event: "complete", requiredFields: [] }
+      );
+    }
+    if (["integrating", "conflicted", "integrated"].includes(node.status)) {
+      allowed.push({ event: "record_integration", requiredFields: ["commit", "verification"] });
+    }
+    if (node.status === "awaiting_manual_verification") {
+      allowed.push({ event: "record_verification", requiredFields: ["commit", "verification", "authorization"] });
+    }
+    if (node.status === "blocked") allowed.push({ event: "resume", requiredFields: [] });
+    if (node.status !== "completed") allowed.push({ event: "block", requiredFields: ["blocker"] });
+    return [node.id, { currentStatus: node.status, allowed }];
+  }));
   return {
     readyPhases: ready.filter((node) => node.kind === "phase").map((node) => node.id),
     readyTasks: ready.filter(
@@ -533,21 +591,7 @@ function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatu
     ).map((node) => node.id),
     active: Object.values(journal.nodes).filter((node) => !["pending", "completed", "blocked"].includes(node.status)).map((node) => node.id),
     blocked: Object.values(journal.nodes).filter((node) => node.status === "blocked").map((node) => node.id),
-    transitionGuidance: Object.fromEntries(Object.values(journal.nodes).map((node) => [
-      node.id,
-      {
-        currentStatus: node.status,
-        allowed: ALLOWED_TRANSITIONS[node.status].map((status) => ({
-          status,
-          requiredFields: [
-            ...(["blocked", "conflicted"].includes(status) ? ["blocker"] : []),
-            ...(status === "committed" ? ["workerCommit", "approval"] : []),
-            ...(status === "integrated" ? ["mergeCommit"] : []),
-            ...(status === "completed" && node.kind === "manual-verification" ? ["approval"] : [])
-          ]
-        }))
-      }
-    ]))
+    eventGuidance
   };
 }
 
@@ -558,12 +602,191 @@ export function executionStatus(projectRoot: string, trackId: string, executionI
   return { journal, ...deriveExecutionStatus(journal) };
 }
 
+export const EXECUTION_CHECKPOINT_EVENTS = [
+  "start", "record_commit", "record_integration", "record_verification", "complete", "block", "resume"
+] as const;
+export type ExecutionCheckpointEvent = typeof EXECUTION_CHECKPOINT_EVENTS[number];
+
+export interface ExecutionCheckpointInput {
+  projectRoot: string;
+  trackId: string;
+  executionId: string;
+  nodeId: string;
+  event: ExecutionCheckpointEvent;
+  workerId?: string | null;
+  worktreePath?: string | null;
+  branch?: string | null;
+  commit?: string;
+  verification?: string;
+  authorization?: string;
+  blocker?: string;
+}
+
+function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpointInput): ExecutionNodeUpdate[] {
+  const node = journal.nodes[input.nodeId];
+  if (!node) throw new Error(`unknown execution node ${input.nodeId}`);
+  const evidence = input.verification?.trim();
+  const authorization = input.authorization?.trim();
+  const commit = input.commit;
+  const updates: ExecutionNodeUpdate[] = [];
+  const start = () => {
+    if (node.status === "pending" || node.status === "blocked") {
+      updates.push({
+        nodeId: node.id,
+        status: "running",
+        ...(Object.hasOwn(input, "workerId") ? { workerId: input.workerId ?? null } : {}),
+        ...(Object.hasOwn(input, "worktreePath") ? { worktreePath: input.worktreePath ?? null } : {}),
+        ...(Object.hasOwn(input, "branch") ? { branch: input.branch ?? null } : {})
+      });
+    } else if (node.status === "running" && Object.hasOwn(input, "workerId")) {
+      updates.push({
+        nodeId: node.id,
+        status: "running",
+        workerId: input.workerId ?? null,
+        ...(evidence ? { verification: evidence } : {})
+      });
+    } else if (node.status !== "running") {
+      throw new Error(`${node.id} cannot start from ${node.status}`);
+    }
+  };
+
+  switch (input.event) {
+    case "start":
+      start();
+      break;
+    case "record_commit":
+      if (!commit || !evidence || !authorization) {
+        throw new Error("record_commit requires commit, verification, and authorization");
+      }
+      if (node.status === "running") {
+        updates.push({ nodeId: node.id, status: "awaiting_approval", verification: evidence });
+      } else if (node.status !== "awaiting_approval") {
+        throw new Error(`${node.id} cannot record a commit from ${node.status}`);
+      }
+      updates.push({ nodeId: node.id, status: "committed", workerCommit: commit, approval: authorization });
+      break;
+    case "record_integration":
+      if (!commit || !evidence) throw new Error("record_integration requires commit and verification");
+      if (node.status === "committed") updates.push({ nodeId: node.id, status: "integrating" });
+      else if (node.status !== "integrating" && node.status !== "conflicted" && node.status !== "integrated") {
+        throw new Error(`${node.id} cannot record integration from ${node.status}`);
+      }
+      if (node.status !== "integrated") {
+        updates.push({ nodeId: node.id, status: "integrated", mergeCommit: commit, verification: evidence });
+      }
+      updates.push({ nodeId: node.id, status: "completed" });
+      break;
+    case "record_verification":
+      if (node.kind !== "manual-verification" || !commit || !evidence || !authorization) {
+        throw new Error("record_verification requires a manual-verification node, commit, verification, and authorization");
+      }
+      if (node.status === "pending") updates.push({ nodeId: node.id, status: "running" });
+      else if (node.status !== "running" && node.status !== "awaiting_manual_verification") {
+        throw new Error(`${node.id} cannot record verification from ${node.status}`);
+      }
+      if (node.status !== "awaiting_manual_verification") {
+        updates.push({ nodeId: node.id, status: "awaiting_manual_verification", verification: evidence, workerCommit: commit });
+      }
+      updates.push({ nodeId: node.id, status: "completed", workerCommit: commit, approval: authorization });
+      break;
+    case "complete":
+      if (node.status === "committed") updates.push({
+        nodeId: node.id,
+        status: "completed",
+        ...(evidence ? { verification: evidence } : {})
+      });
+      else if (node.status === "integrated") updates.push({
+        nodeId: node.id,
+        status: "completed",
+        ...(evidence ? { verification: evidence } : {})
+      });
+      else if (node.kind === "phase" && node.status === "running") {
+        if (!commit || !evidence || !authorization) {
+          throw new Error("completing a running phase requires commit, verification, and authorization");
+        }
+        updates.push(
+          { nodeId: node.id, status: "awaiting_approval", verification: evidence },
+          { nodeId: node.id, status: "committed", workerCommit: commit, approval: authorization },
+          { nodeId: node.id, status: "integrating" },
+          { nodeId: node.id, status: "integrated", mergeCommit: commit },
+          { nodeId: node.id, status: "completed" }
+        );
+      } else throw new Error(`${node.id} cannot complete from ${node.status}`);
+      break;
+    case "block":
+      if (!input.blocker?.trim()) throw new Error("block requires a blocker description");
+      updates.push({ nodeId: node.id, status: "blocked", blocker: input.blocker.trim() });
+      break;
+    case "resume":
+      if (node.status !== "blocked") throw new Error(`${node.id} is not blocked`);
+      updates.push({ nodeId: node.id, status: "pending" });
+      break;
+  }
+  if (!updates.length) throw new Error(`${input.event} produced no change for ${node.id}`);
+  return updates;
+}
+
+export function previewExecutionCheckpoint(input: ExecutionCheckpointInput) {
+  const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
+  return previewExecutionNodesUpdate({
+    projectRoot: input.projectRoot,
+    trackId: input.trackId,
+    executionId: input.executionId,
+    updates: checkpointUpdates(journal, input)
+  });
+}
+
+export function applyExecutionCheckpoint(input: ExecutionCheckpointInput, proposalDigest: string) {
+  const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
+  return applyExecutionNodesUpdate({
+    projectRoot: input.projectRoot,
+    trackId: input.trackId,
+    executionId: input.executionId,
+    updates: checkpointUpdates(journal, input)
+  }, proposalDigest);
+}
+
 export interface ExecutionFinishInput {
   projectRoot: string;
   trackId: string;
   executionId: string;
   headCommit: string;
   completedAt: string;
+}
+
+export type ExecutionFinishRequest = Pick<ExecutionFinishInput, "projectRoot" | "trackId" | "executionId">;
+
+export function deriveExecutionFinishInput(input: ExecutionFinishRequest): ExecutionFinishInput {
+  return {
+    ...input,
+    headCommit: resolveGitCommit(input.projectRoot),
+    completedAt: new Date().toISOString()
+  };
+}
+
+function renderCompletedPlan(planBody: string, graph: PlanGraph, journal: ExecutionJournal): string {
+  const lines = planBody.split(/\r?\n/);
+  for (const phase of graph.phases) {
+    const phaseNode = journal.nodes[phase.id];
+    const phaseCommit = phaseNode?.mergeCommit ?? phaseNode?.workerCommit;
+    if (!phaseCommit) throw new Error(`${phase.id} lacks completion commit evidence`);
+    for (const task of phase.tasks) {
+      const taskNode = journal.nodes[task.id];
+      const taskCommit = taskNode?.workerCommit ?? taskNode?.mergeCommit;
+      if (!taskNode || taskNode.status !== "completed" || !taskCommit) {
+        throw new Error(`${task.id} lacks completed commit evidence`);
+      }
+      lines[task.line - 1] = `- [x] ${task.id} ${task.title} <!-- commit: ${taskCommit} -->`;
+    }
+    const nextPhaseLine = graph.phases[phase.number]?.line ?? lines.length + 1;
+    const commitLine = lines.findIndex(
+      (line, index) => index >= phase.line - 1 && index < nextPhaseLine - 1
+        && line.startsWith("- Phase completion commit:")
+    );
+    if (commitLine < 0) throw new Error(`${phase.id} lacks a completion commit field`);
+    lines[commitLine] = `- Phase completion commit: \`${phaseCommit}\``;
+  }
+  return lines.join("\n");
 }
 
 export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFinishProposal {
@@ -585,14 +808,32 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
   }
   const unfinished = Object.values(journal.nodes).filter((node) => node.status !== "completed");
   if (unfinished.length) throw new Error(`execution has unfinished nodes: ${unfinished.map((node) => node.id).join(", ")}`);
+  const commits = [
+    input.headCommit,
+    journal.baseCommit,
+    journal.planCommit,
+    ...Object.values(journal.nodes).flatMap((node) => [node.workerCommit, node.mergeCommit].filter(Boolean) as string[])
+  ];
+  const reachability = reachableGitCommits(input.projectRoot, commits);
+  const unreachable = reachability
+    ? commits.filter((commit) => reachability.get(commit) === false)
+    : [];
+  if (unreachable.length) throw new Error(`execution contains unreachable commits: ${[...new Set(unreachable)].join(", ")}`);
   const planPath = join(dirname(statePath), "plan.md");
+  const planBody = readFileSync(planPath, "utf8");
   const planErrors: string[] = [];
-  const graph = parsePlan(planPath, planErrors);
-  validatePlanGraph(planPath, graph, "ready_for_review", planErrors);
+  const graph = parsePlanContent(planBody, planPath, planErrors);
+  validatePlanGraph(planPath, graph, "in_progress", planErrors);
   if (planErrors.length) throw new Error(planErrors.join("\n"));
   if (graph.digest !== journal.graphDigest || graph.planRevision !== journal.planRevision) {
     throw new Error("approved plan changed during execution");
   }
+  const planContent = renderCompletedPlan(planBody, graph, journal);
+  const completedPlanErrors: string[] = [];
+  const completedGraph = parsePlanContent(planContent, planPath, completedPlanErrors);
+  validatePlanGraph(planPath, completedGraph, "ready_for_review", completedPlanErrors);
+  if (completedPlanErrors.length) throw new Error(completedPlanErrors.join("\n"));
+  if (completedGraph.digest !== journal.graphDigest) throw new Error("completed plan changed the approved execution graph");
   const worktreeRoot = join(safeProjectRoot(input.projectRoot), ".cadre", ".worktrees", input.trackId, input.executionId);
   if (existsSync(worktreeRoot) && readdirSync(worktreeRoot).length) {
     throw new Error(`execution still has managed worktrees under ${worktreeRoot}`);
@@ -629,14 +870,18 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
     journal: completedJournal,
     statePath,
     state: completedState,
+    planPath,
+    planContent,
     tracksPath,
     tracksContent,
     digest: hash({
       stateBody,
       journalBody,
+      planBody,
       tracksBody,
       journal: completedJournal,
       state: completedState,
+      planContent,
       tracksContent
     })
   };
@@ -647,22 +892,27 @@ export function applyExecutionFinish(input: ExecutionFinishInput, proposalDigest
   if (proposal.digest !== proposalDigest) throw new Error("execution completion proposal is stale; preview it again");
   if (lstatSync(proposal.journalPath).isSymbolicLink()
     || lstatSync(proposal.statePath).isSymbolicLink()
+    || lstatSync(proposal.planPath).isSymbolicLink()
     || lstatSync(proposal.tracksPath).isSymbolicLink()) {
     throw new Error("refusing to complete execution through a symbolic link");
   }
   const journalTemporaryPath = join(dirname(proposal.journalPath), `.${basename(proposal.journalPath)}.${process.pid}.${randomUUID()}.tmp`);
   const stateTemporaryPath = join(dirname(proposal.statePath), `.${basename(proposal.statePath)}.${process.pid}.${randomUUID()}.tmp`);
+  const planTemporaryPath = join(dirname(proposal.planPath), `.${basename(proposal.planPath)}.${process.pid}.${randomUUID()}.tmp`);
   const tracksTemporaryPath = join(dirname(proposal.tracksPath), `.${basename(proposal.tracksPath)}.${process.pid}.${randomUUID()}.tmp`);
   try {
     writeFileSync(journalTemporaryPath, `${JSON.stringify(proposal.journal, null, 2)}\n`, { flag: "wx" });
     writeFileSync(stateTemporaryPath, `${JSON.stringify(proposal.state, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(planTemporaryPath, proposal.planContent, { flag: "wx" });
     writeFileSync(tracksTemporaryPath, proposal.tracksContent, { flag: "wx" });
     renameSync(journalTemporaryPath, proposal.journalPath);
     renameSync(stateTemporaryPath, proposal.statePath);
+    renameSync(planTemporaryPath, proposal.planPath);
     renameSync(tracksTemporaryPath, proposal.tracksPath);
   } finally {
     if (existsSync(journalTemporaryPath)) unlinkSync(journalTemporaryPath);
     if (existsSync(stateTemporaryPath)) unlinkSync(stateTemporaryPath);
+    if (existsSync(planTemporaryPath)) unlinkSync(planTemporaryPath);
     if (existsSync(tracksTemporaryPath)) unlinkSync(tracksTemporaryPath);
   }
   return proposal;

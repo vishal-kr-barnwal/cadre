@@ -4,7 +4,7 @@ import {
   cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,8 +13,9 @@ import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { formatStatus, renderTracksPreview, validateProject, writeTracks } from "../src/domain/state.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
 import {
-  applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionNodesUpdate, applyExecutionStart, executionStatus,
-  previewExecutionFinish, previewExecutionNodeUpdate, previewExecutionNodesUpdate, previewExecutionStart,
+  applyExecutionCheckpoint, applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionNodesUpdate,
+  applyExecutionStart, executionStatus, previewExecutionCheckpoint, previewExecutionFinish,
+  previewExecutionNodeUpdate, previewExecutionNodesUpdate, previewExecutionStart,
   type ExecutionNodeStatus
 } from "../src/domain/execution.js";
 import {
@@ -271,7 +272,7 @@ function gitText(projectRoot: string, args: string[]): string {
 function gitFixture(): { projectRoot: string; head: string } {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-worktree-"));
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
-  writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n/tracks/\n");
+  writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
   writeFileSync(join(projectRoot, "app.txt"), "base\n");
   execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
@@ -325,6 +326,11 @@ function writeWorktreeJournal(
       "T1.1": node("T1.1", "task", "P1", taskStatus)
     }
   }, null, 2)}\n`);
+  const relativePath = relative(projectRoot, path);
+  if (gitText(projectRoot, ["ls-files", "--", relativePath]) !== relativePath) {
+    gitText(projectRoot, ["add", relativePath]);
+    gitText(projectRoot, ["commit", "-m", `cadre(test): seed ${trackId} journal`]);
+  }
 }
 
 test("empty initialized project validates", () => {
@@ -347,6 +353,19 @@ test("stale tracks index is repairable derived drift, not an invariant failure",
   const preview = renderTracksPreview(projectRoot);
   writeTracks(projectRoot, preview.digest);
   assert.deepEqual(validateProject(projectRoot).warnings, []);
+});
+
+test("central validation rejects syntactically valid but unreachable provenance", () => {
+  const projectRoot = fixture();
+  execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
+  gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
+  gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
+  gitText(projectRoot, ["add", "."]);
+  gitText(projectRoot, ["commit", "-m", "chore: initialize fixture"]);
+  const validation = validateProject(projectRoot);
+  assert.ok(validation.errors.some((error) =>
+    error.includes("project.json.setup.commit: commit is not reachable: 1111111")
+  ));
 });
 
 test("plan DAG validation derives manual barriers and rejects dependency cycles", () => {
@@ -442,11 +461,11 @@ test("execution journal gates tasks behind their running phase and validates per
   const initialStatus = executionStatus(projectRoot, input.trackId, input.executionId);
   assert.deepEqual(initialStatus.readyPhases, ["P1"]);
   assert.deepEqual(initialStatus.readyTasks, []);
-  assert.deepEqual(initialStatus.transitionGuidance.P1, {
+  assert.deepEqual(initialStatus.eventGuidance.P1, {
     currentStatus: "pending",
     allowed: [
-      { status: "running", requiredFields: [] },
-      { status: "blocked", requiredFields: ["blocker"] }
+      { event: "start", requiredFields: [] },
+      { event: "block", requiredFields: ["blocker"] }
     ]
   });
   assert.throws(() => previewExecutionNodeUpdate({
@@ -673,6 +692,38 @@ test("ordered execution-node batches are atomic, digest-gated, and preserve lega
   assert.equal(finished.journal.checkpoint, "P1:completed");
 });
 
+test("semantic execution checkpoints expand and apply complete transition sequences", () => {
+  const projectRoot = fixture();
+  writePlannedTrack(projectRoot, "semantic-track");
+  const startInput = {
+    projectRoot,
+    trackId: "semantic-track",
+    executionId: "semantic-1",
+    requestedMode: "sequential" as const,
+    effectiveMode: "sequential" as const,
+    maxWorkers: 1,
+    baseCommit: "1111111",
+    approvedAt: "2026-07-28T01:00:00.000Z"
+  };
+  const start = previewExecutionStart(startInput);
+  applyExecutionStart(startInput, start.digest);
+  const checkpoint = (nodeId: string, event: "start" | "record_commit" | "complete", extra = {}) => {
+    const input = { projectRoot, trackId: "semantic-track", executionId: "semantic-1", nodeId, event, ...extra };
+    const preview = previewExecutionCheckpoint(input);
+    return applyExecutionCheckpoint(input, preview.digest);
+  };
+  checkpoint("P1", "start");
+  checkpoint("T1.1", "start");
+  const committed = checkpoint("T1.1", "record_commit", {
+    commit: "abcdef1",
+    verification: "focused tests passed",
+    authorization: "autonomous mode"
+  });
+  assert.equal(committed.journal.nodes["T1.1"]?.status, "committed");
+  const completed = checkpoint("T1.1", "complete");
+  assert.equal(completed.journal.nodes["T1.1"]?.status, "completed");
+});
+
 test("replacement executions carry completed plan provenance forward", () => {
   const projectRoot = fixture();
   const trackRoot = writePlannedTrack(projectRoot, "remediation-track");
@@ -729,14 +780,14 @@ test("execution start and finish resume while keeping the derived index current"
 
 ## Phase 1: Deliver
 - Phase dependencies: none
-- [x] T1.1 Implement <!-- commit: abcdef1 -->
+- [ ] T1.1 Implement
   - Task dependencies: none
-- [x] T1.2 User Manual Verification <!-- commit: abcdef2 -->
-- Phase completion commit: \`abcdef2\`
+- [ ] T1.2 User Manual Verification
+- Phase completion commit: pending
 
 ## Phase 2: Track-level User Manual Verification
-- [x] T2.1 User Manual Verification <!-- commit: abcdef3 -->
-- Phase completion commit: \`abcdef3\`
+- [ ] T2.1 User Manual Verification
+- Phase completion commit: pending
 `);
   const startInput = {
     projectRoot,
@@ -750,8 +801,17 @@ test("execution start and finish resume while keeping the derived index current"
   };
   const start = previewExecutionStart(startInput);
   mkdirSync(dirname(start.journalPath), { recursive: true });
-  writeFileSync(start.journalPath, `${JSON.stringify(start.journal, null, 2)}\n`);
   applyExecutionStart(startInput, start.digest);
+  const completedJournal = JSON.parse(readFileSync(start.journalPath, "utf8"));
+  for (const [nodeId, commit] of [["T1.1", "abcdef1"], ["T1.2", "abcdef2"], ["P1", "abcdef2"],
+    ["T2.1", "abcdef3"], ["P2", "abcdef3"]] as const) {
+    completedJournal.nodes[nodeId].status = "completed";
+    completedJournal.nodes[nodeId].workerCommit = commit;
+    completedJournal.nodes[nodeId].mergeCommit = nodeId.startsWith("P") ? commit : null;
+    completedJournal.nodes[nodeId].verification = "verified";
+    completedJournal.nodes[nodeId].approval = "authorized";
+  }
+  writeFileSync(start.journalPath, `${JSON.stringify(completedJournal, null, 2)}\n`);
 
   const finishInput = {
     projectRoot,
@@ -770,6 +830,7 @@ test("execution start and finish resume while keeping the derived index current"
   writeFileSync(resumedFinish.tracksPath, currentTracks);
   const freshFinish = previewExecutionFinish(finishInput);
   applyExecutionFinish(finishInput, freshFinish.digest);
+  assert.match(readFileSync(join(trackRoot, "plan.md"), "utf8"), /\[x\] T2\.1.*commit: abcdef3/);
   const state = JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8"));
   assert.equal(state.status, "ready_for_review");
   assert.equal(state.operation, null);
@@ -853,12 +914,12 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   const { projectRoot, head } = gitFixture();
   writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "running", "committed");
   const phaseInput = {
-    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1", baseCommit: head
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1"
   };
   const phasePreview = previewWorktreeCreate(phaseInput);
   const phase = applyWorktreeCreate(phaseInput, phasePreview.digest);
   const taskInput = {
-    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "T1.1", baseCommit: head
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "T1.1"
   };
   const taskPreview = previewWorktreeCreate(taskInput);
   const task = applyWorktreeCreate(taskInput, taskPreview.digest);
@@ -875,7 +936,7 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   assert.equal(existsSync(task.path), false);
 
   const phaseIntegrationInput = {
-    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1", phaseId: "P1"
+    projectRoot, trackId: "parallel-track", executionId: "run-1", nodeId: "P1"
   };
   assert.throws(() => previewWorktreeIntegration(phaseIntegrationInput), /must be committed or integrating/);
   writeWorktreeJournal(projectRoot, "parallel-track", "run-1", "completed", "completed");
@@ -891,7 +952,7 @@ test("worktree tools integrate task-to-phase and phase-to-main, then clean up sa
   applyWorktreeCleanup(phaseIntegrationInput, phaseCleanup.digest);
 
   assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "implemented by task\n");
-  assert.equal(gitText(projectRoot, ["status", "--porcelain"]), "");
+  assert.match(gitText(projectRoot, ["status", "--porcelain"]), /execution-run-1\.json/);
   const status = managedWorktreeStatus(projectRoot);
   assert.equal(status.worktrees.filter((worktree) => worktree.managed).length, 0);
   assert.deepEqual(status.orphanedDirectories, []);
@@ -902,7 +963,7 @@ test("a main-coordinated task worker integrates directly into the canonical work
   const { projectRoot, head } = gitFixture();
   writeWorktreeJournal(projectRoot, "main-phase", "run-1", "running", "committed");
   const input = {
-    projectRoot, trackId: "main-phase", executionId: "run-1", nodeId: "T1.1", phaseId: "P1", baseCommit: head
+    projectRoot, trackId: "main-phase", executionId: "run-1", nodeId: "T1.1"
   };
   const create = previewWorktreeCreate(input);
   const worker = applyWorktreeCreate(input, create.digest);
@@ -923,7 +984,7 @@ test("worktree integration reports conflicts without resolving them", () => {
   const { projectRoot, head } = gitFixture();
   writeWorktreeJournal(projectRoot, "conflict-track", "run-1", "committed", "completed");
   const input = {
-    projectRoot, trackId: "conflict-track", executionId: "run-1", nodeId: "P1", baseCommit: head
+    projectRoot, trackId: "conflict-track", executionId: "run-1", nodeId: "P1"
   };
   const create = previewWorktreeCreate(input);
   const worker = applyWorktreeCreate(input, create.digest);
@@ -946,7 +1007,7 @@ test("worker branches cannot integrate protected Cadre state", () => {
   const { projectRoot, head } = gitFixture();
   writeWorktreeJournal(projectRoot, "protected-track", "run-1", "committed", "completed");
   const input = {
-    projectRoot, trackId: "protected-track", executionId: "run-1", nodeId: "P1", baseCommit: head
+    projectRoot, trackId: "protected-track", executionId: "run-1", nodeId: "P1"
   };
   const create = previewWorktreeCreate(input);
   const worker = applyWorktreeCreate(input, create.digest);
@@ -1490,7 +1551,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       "execution_graph_validate", "execution_graph_validate_draft", "review_complete_preview", "review_complete_apply",
       "archive_batch_preview", "archive_batch_apply", "archive_batch_record_preview", "archive_batch_record_apply",
       "execution_start_preview", "execution_start_apply",
-      "execution_node_preview", "execution_node_apply", "execution_nodes_preview", "execution_nodes_apply", "execution_status",
+      "execution_checkpoint_preview", "execution_checkpoint_apply", "execution_status",
       "execution_finish_preview", "execution_finish_apply", "worktree_create_preview",
       "worktree_create_apply", "integration_preview", "integration_apply",
       "worktree_cleanup_preview", "worktree_cleanup_apply", "worktree_status"
@@ -1601,28 +1662,20 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const transitionStart = previewExecutionStart(transitionStartInput);
     applyExecutionStart(transitionStartInput, transitionStart.digest);
     const illegalTransition = await client.callTool({
-      name: "execution_node_preview",
+      name: "execution_checkpoint_preview",
       arguments: {
         projectRoot: transitionRoot,
         trackId: "mcp-transition",
         executionId: "mcp-transition-1",
         nodeId: "P1",
-        status: "completed"
+        event: "complete"
       }
     });
     assert.equal(illegalTransition.isError, true);
-    assert.deepEqual(illegalTransition.structuredContent, {
-      error: {
-        code: "ILLEGAL_EXECUTION_TRANSITION",
-        message: "illegal execution transition pending -> completed",
-        details: {
-          nodeId: "P1",
-          currentStatus: "pending",
-          requestedStatus: "completed",
-          allowedNextStatuses: ["running", "blocked"]
-        }
-      }
-    });
+    assert.match(
+      (illegalTransition.structuredContent as { error?: { message?: string } }).error?.message ?? "",
+      /cannot complete from pending/
+    );
 
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
     const files = [
@@ -1645,7 +1698,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal(preview.isError, undefined);
     const digest = (preview.structuredContent as { digest?: string }).digest;
     assert.match(digest ?? "", /^[0-9a-f]{64}$/);
-    assert.equal((preview.structuredContent as { proposalDigest?: string }).proposalDigest, digest);
+    assert.equal(Object.hasOwn(preview.structuredContent ?? {}, "proposalDigest"), false);
     const approvedAt = "2026-07-28T00:05:00.000Z";
     const refreshedPreview = await client.callTool({
       name: "project_init_preview",
@@ -1653,9 +1706,16 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(refreshedPreview.isError, undefined);
     assert.equal((refreshedPreview.structuredContent as { digest?: string }).digest, digest);
+    const proposalToken = (refreshedPreview.structuredContent as { proposalToken?: string }).proposalToken;
+    assert.ok(proposalToken);
+    const wrongApply = await client.callTool({
+      name: "tracks_render_apply",
+      arguments: { proposalToken }
+    });
+    assert.equal(wrongApply.isError, true);
     const applied = await client.callTool({
       name: "project_init_apply",
-      arguments: { ...input, approvedAt, proposalDigest: digest }
+      arguments: { proposalToken }
     });
     assert.equal(applied.isError, undefined);
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
@@ -1779,7 +1839,7 @@ test("proposal workflows validate draft plan content without temporary project c
   assert.doesNotMatch(implement, /execution_graph_validate_draft/);
 });
 
-test("implementation guidance preserves approval, permission, batching, and task-commit boundaries", () => {
+test("implementation guidance preserves approval, permission, semantic checkpoints, and task-commit boundaries", () => {
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
   const executionTemplate = JSON.parse(readFileSync(join(providerRoot, "track", "execution.json"), "utf8"));
@@ -1788,28 +1848,25 @@ test("implementation guidance preserves approval, permission, batching, and task
 
   for (const body of [implement, workflow]) {
     assert.match(body, /host security permission/i);
-    assert.match(body, /execution_nodes_preview/);
-    assert.match(body, /Never batch across a human approval/i);
+    assert.match(body, /execution_checkpoint_preview/);
+    assert.match(body, /evidence (?:does not yet exist|exists|before it exists)/i);
     assert.match(body, /distinct recorded SHA|distinct SHA/);
     assert.match(body, /`governed`/);
     assert.match(body, /`phase` \(default\)|`phase` is the default/);
-    assert.match(body, /`autonomous`/);
     assert.match(body, /Track-level User Manual Verification/);
-    assert.match(body, /transitionGuidance/);
     assert.match(body, /global tool catalog/);
-    assert.match(body, /proposalDigest/);
-    assert.match(body, /state-machine probe|probe previews to learn legal transitions/);
+    assert.match(body, /proposalToken|proposal token/);
+    assert.match(body, /state-machine probe|probe previews to (?:learn legal transitions|rediscover declared contracts)/);
     assert.match(body, /independent read-only .* parallel/i);
     assert.match(body, /\.cadre\/\*\*.*does not invalidate product verification/);
-    assert.match(body, /once per phase checkpoint/);
   }
-  assert.match(implement, /Pause exactly once for that phase's final `User Manual Verification` task/);
+  assert.match(implement, /pause once for each phase's final `User Manual Verification` task/i);
   assert.match(implement, /run all regular work inside a phase autonomously/);
   assert.match(implement, /Pause only for the `Track-level User Manual Verification` task/);
-  assert.match(implement, /do not add an execution-start approval prompt/);
+  assert.match(implement, /Do not add an execution-start approval prompt outside `governed`/);
   assert.match(implement, /Keep the phase node `integrated`, clean its worktree, and only then mark the phase `completed`/);
   assert.match(implement, /already-`completed` node as interruption recovery/);
-  assert.match(implement, /do not call `tracks_render_preview` as a repair step/);
+  assert.match(implement, /Do not repair markers or the index separately/);
   assert.match(workflow, /deterministic worktree, clean integration, cleanup, journal, index, and bookkeeping mutations/);
   assert.match(workflow, /does not require a separate approval prompt/);
   assert.equal(executionTemplate.approvalMode, "{{governed|phase|autonomous}}");
@@ -1826,18 +1883,18 @@ test("review and archive guidance coalesces exact approval decisions", () => {
 
   assert.match(review, /One response may approve both the finding disposition and the unchanged exact artifacts/);
   assert.match(review, /reject all findings while explicitly accepting their risks and approve clean completion/);
-  assert.match(archive, /exactly one track is eligible/);
-  assert.match(archive, /without a selection-only approval/);
-  assert.match(archive, /generated `tracks\.md`/);
+  assert.match(archive, /server selects every eligible completed track in dependency order/);
+  assert.match(archive, /Expected human decision count is one for the complete batch/);
+  assert.match(archive, /generated index/);
   assert.match(workflow, /Combine related decisions whenever their complete artifacts and consequences are available together/);
   assert.match(review, /review_complete_preview/);
   assert.match(review, /Do not inspect the installed runtime/);
   assert.match(archive, /archive_batch_preview/);
   assert.match(archive, /do not call `template_catalog`/);
-  assert.match(archive, /needs no second human approval/);
+  assert.match(archive, /needs no second approval/);
   assert.doesNotMatch(archive, /call `tracks_render_preview`/);
   assert.match(review, /Expected human decision count is one per review cycle/);
-  assert.match(archive, /Expected human decision count is one for an explicit or uniquely eligible selection/);
+  assert.match(archive, /Expected human decision count is one for the complete batch/);
   assert.match(workflow, /same approval\/content digest/);
 });
 
@@ -1971,7 +2028,7 @@ test("archive supports a resumable multi-track batch", () => {
   assert.match(archive, /all completed/);
   assert.match(archive, /Reject the batch without partial mutation/);
   assert.match(archive, /archive_batch_preview/);
-  assert.match(archive, /commit all approved archive moves and derived changes together/i);
+  assert.match(archive, /Commit all approved moves and derived changes together/i);
 
   const operation = JSON.parse(readFileSync(join(providerRoot, "project", "archive-operation.json"), "utf8"));
   assert.equal(operation.action, "archive");

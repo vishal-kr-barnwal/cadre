@@ -7,12 +7,12 @@ order: 210
 
 # MCP Reference
 
-The `cadre` stdio server exposes immutable template resources and 37
+The `cadre` stdio server exposes immutable template resources and 35
 purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
 arbitrary filesystem/shell operations.
 
-Every mutation preview returns both the legacy `digest` field and the uniform
-apply-ready `proposalDigest` alias. Tool failures set the MCP error flag and
+Every mutation preview returns an opaque, apply-ready `proposalToken` that binds
+the normalized input and digest. Apply tools accept only that token. Tool failures set the MCP error flag and
 return structured `{ error: { code, message, details? } }` content; callers do
 not need to parse human-readable text to recover transition guidance.
 
@@ -87,8 +87,8 @@ neither reads nor writes project files. Read-only.
 ## review_complete_preview
 
 Previews a clean review cycle, completed track state, and exact derived index.
-Inputs include reviewed timestamp/HEAD, commit range, approval, and optional
-accepted risks. Read-only.
+Inputs include the range start, approval, and optional accepted risks; the
+server derives and verifies the execution HEAD, range end, and timestamp. Read-only.
 
 ## review_complete_apply
 
@@ -97,8 +97,10 @@ still current.
 
 ## archive_batch_preview
 
-Previews ordered selected-track moves, completed→archived states, pattern/seed
-updates, operation journal, expected commits, and post-archive index. Read-only.
+Previews selected-track moves, completed→archived states, structured
+pattern/index/seed updates, operation journal, expected commits, and post-archive
+index. Omit selection to archive all eligible completed tracks in dependency order.
+The server derives the batch ID, base commit, and timestamp. Read-only.
 
 ## archive_batch_apply
 
@@ -117,49 +119,36 @@ stale-state digest.
 
 ## execution_start_preview
 
-Previews a new execution journal and track operation for an approved plan,
-scheduling mode, approval mode, worker bound, base commit, and timestamp.
-Approval mode defaults to `phase`. Read-only.
+Previews a new execution journal and track operation for an approved plan. The
+server derives its ID, current base commit, and timestamp. Approval mode defaults
+to `phase` and resumes inherit the prior mode. Read-only.
 
 ## execution_start_apply
 
 Creates the execution journal and enters `in_progress` only while the preview
 digest remains current.
 
-## execution_node_preview
+## execution_checkpoint_preview
 
-Validates and previews one legal phase/task node transition and its evidence.
-For a running phase, it can also preview a worker-lease release or reassignment
-without advancing the phase status. Releasing a phase worker requires explicit
-clean-checkpoint verification and is rejected while task workers are active.
-Read-only.
+Accepts one semantic event—`start`, `record_commit`, `record_integration`,
+`record_verification`, `complete`, `block`, or `resume`—and expands it into the
+complete legal node-transition sequence with required evidence. Read-only.
 
-## execution_node_apply
+## execution_checkpoint_apply
 
-Applies one approved node transition with an unchanged digest.
-
-## execution_nodes_preview
-
-Validates and previews an ordered atomic batch of 1–128 immediately legal node
-transitions. It must not span unavailable approval, commit, verification,
-integration, or conflict evidence. Read-only.
-
-## execution_nodes_apply
-
-Applies the ordered transition batch behind one unchanged digest.
+Applies the previewed semantic checkpoint atomically from its proposal token.
 
 ## execution_status
 
 Reads an execution journal and derives ready phases, ready tasks within running
-phases, active nodes, blockers, and per-node `transitionGuidance`. Guidance
-contains current status, legal next statuses, and required evidence fields so
-callers can construct a valid batch without speculative previews. Read-only.
+phases, active nodes, blockers, and per-node semantic `eventGuidance` with
+required evidence fields. Read-only.
 
 ## execution_finish_preview
 
-Verifies completed nodes, current plan evidence, removed worktrees, and final
-head before previewing the completed journal, `ready_for_review` state, and
-derived `tracks.md` content under one digest. Read-only.
+Verifies completed nodes, current journal evidence, reachable commits, and
+removed worktrees; derives HEAD/time and previews plan commit markers, the
+completed journal, `ready_for_review` state, and `tracks.md` atomically. Read-only.
 
 ## execution_finish_apply
 
@@ -169,8 +158,8 @@ behind its digest.
 ## worktree_create_preview
 
 Derives one constrained phase/task worktree path, branch, parent, and exact base
-commit. Task phase identity is inferred from `T<phase>.<task>`; a matching
-redundant `phaseId` remains accepted for compatibility. Read-only.
+commit. Task phase identity and ancestry are inferred from the node ID and the
+current registered phase or canonical worktree. Read-only.
 
 ## worktree_create_apply
 

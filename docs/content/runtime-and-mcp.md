@@ -18,7 +18,7 @@ The server tells clients to:
 - read existing artifacts before proposing edits;
 - present complete proposed artifacts before mutation;
 - call preview immediately before its matching apply;
-- pass proposal digests unchanged;
+- pass only opaque proposal tokens to apply tools;
 - inspect `project_status` once at command entry and reserve
   `state_validate` for final mutation gates;
 - treat the plan as the implementation source of truth.
@@ -49,7 +49,7 @@ discovery is unnecessary when the logical IDs are already declared.
 | Plan graph | `execution_graph_validate`, `execution_graph_validate_draft` |
 | Review governance | `review_complete_preview`, `review_complete_apply` |
 | Archive governance | `archive_batch_preview`, `archive_batch_apply`, `archive_batch_record_preview`, `archive_batch_record_apply` |
-| Execution lifecycle | `execution_start_*`, `execution_node_*`, `execution_nodes_*`, `execution_status`, `execution_finish_*` |
+| Execution lifecycle | `execution_start_*`, `execution_checkpoint_*`, `execution_status`, `execution_finish_*` |
 | Worktrees | `worktree_create_*`, `integration_*`, `worktree_cleanup_*`, `worktree_status` |
 | Project initialization | `project_init_preview`, `project_init_apply`, `setup_record_git_initialized`, `setup_record_commit` |
 | Derived index | `tracks_render_preview`, `tracks_render_apply` |
@@ -59,8 +59,8 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 ## Result Shape
 
 Successful tools return their typed value as structured content.
-Mutation previews expose the same SHA-256 value as both `digest` and the
-uniform apply-ready `proposalDigest` alias. Failures mark the MCP result as an
+Mutation previews expose an opaque `proposalToken` that binds normalized input
+to its SHA-256 digest; apply tools accept only that token. Failures mark the MCP result as an
 error and return structured `{ error: { code, message, details? } }` content.
 `project_status` also returns its human-readable summary as text.
 
@@ -70,9 +70,9 @@ the tool boundary.
 
 ## Preview/Apply Contract
 
-A preview computes all consequences and a proposal digest without mutating.
-Apply receives the same semantic input plus that digest. Domain code recomputes
-the proposal and refuses stale state.
+A preview computes all consequences without mutating and returns an opaque
+proposal token. Apply decodes the bound input and digest, recomputes the
+proposal, and refuses stale state.
 
 Execution status returns legal transition guidance and required evidence per
 node. Skills use that contract to build ordered batches; previews validate

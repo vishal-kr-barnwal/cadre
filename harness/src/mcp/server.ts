@@ -22,6 +22,7 @@ import {
   getTemplate,
   getTemplates,
   resolveStyleguides,
+  TEMPLATE_IDS,
   TEMPLATE_SET_VERSION,
   templateCatalog
 } from "../domain/templates.js";
@@ -29,20 +30,21 @@ import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
   EXECUTION_APPROVAL_MODES,
-  EXECUTION_NODE_STATUSES,
+  EXECUTION_CHECKPOINT_EVENTS,
+  applyExecutionCheckpoint,
   applyExecutionFinish,
-  applyExecutionNodeUpdate,
-  applyExecutionNodesUpdate,
   applyExecutionStart,
+  deriveExecutionFinishInput,
+  deriveExecutionStartInput,
   executionStatus,
+  previewExecutionCheckpoint,
   previewExecutionFinish,
-  previewExecutionNodeUpdate,
-  previewExecutionNodesUpdate,
   previewExecutionStart,
+  type ExecutionCheckpointInput,
   type ExecutionFinishInput,
-  type ExecutionNodeUpdateInput,
-  type ExecutionNodesUpdateInput,
-  type ExecutionStartInput
+  type ExecutionFinishRequest,
+  type ExecutionStartInput,
+  type ExecutionStartRequest
 } from "../domain/execution.js";
 import {
   applyWorktreeCleanup,
@@ -59,12 +61,18 @@ import {
   applyArchiveBatch,
   applyArchiveBatchRecord,
   applyReviewComplete,
+  deriveArchiveBatchInput,
+  deriveArchiveBatchRecordInput,
+  deriveReviewCompleteInput,
   previewArchiveBatch,
   previewArchiveBatchRecord,
   previewReviewComplete,
   type ArchiveBatchInput,
+  type ArchiveBatchRequest,
   type ArchiveBatchRecordInput,
-  type ReviewCompleteInput
+  type ArchiveBatchRecordRequest,
+  type ReviewCompleteInput,
+  type ReviewCompleteRequest
 } from "../domain/governance.js";
 import {
   buildWorkflowElicitation,
@@ -74,6 +82,8 @@ import {
   workflowElicitationInputSchema
 } from "./elicitation.js";
 import { serializeCadreError } from "../domain/errors.js";
+import { resolveGitCommit } from "../domain/git.js";
+import { decodeProposalToken, encodeProposalToken, proposalTokenSchema } from "./proposals.js";
 
 function result<T extends object>(value: T, summary?: string) {
   return {
@@ -82,8 +92,15 @@ function result<T extends object>(value: T, summary?: string) {
   };
 }
 
-function proposalResult<T extends object & { digest: string }>(value: T) {
-  return result({ ...value, proposalDigest: value.digest });
+function proposalResult<T extends object & { digest: string }>(kind: string, input: unknown, value: T) {
+  return result({
+    ...value,
+    proposalToken: encodeProposalToken(kind, input, value.digest)
+  });
+}
+
+function proposalInputSchema() {
+  return { proposalToken: proposalTokenSchema };
 }
 
 function failure(error: unknown) {
@@ -124,7 +141,7 @@ export function createCadreServer(): McpServer {
         "Read every existing artifact before proposing edits. Never infer file contents.",
         "For any mutation, present the complete proposed artifacts to the human and obtain approval first.",
         "Use workflow_elicit for concise approval or clarification forms when supported. When active task context reports a non-interactive approval policy such as Codex Full Access, skip the form and ask one short chat question.",
-        "Call a preview tool immediately before its matching apply tool and pass the returned digest unchanged.",
+        "Call a preview tool immediately before its matching apply tool and pass only the returned proposal token.",
         "Cadre state is resumable: inspect project_status once at command entry and reserve state_validate for final mutation gates.",
         "The plan is the implementation source of truth. Cadre MCP exposes only constrained, digest-gated Git worktree operations and never approves its own changes."
       ].join(" ")
@@ -178,7 +195,7 @@ export function createCadreServer(): McpServer {
   server.registerTool("template_get", {
     title: "Get a Cadre template",
     description: "Read one immutable, versioned Cadre template by logical identifier.",
-    inputSchema: { id: z.string().min(1) },
+    inputSchema: { id: z.enum(TEMPLATE_IDS) },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ id }) => {
     try {
@@ -191,7 +208,7 @@ export function createCadreServer(): McpServer {
   server.registerTool("template_get_many", {
     title: "Get multiple Cadre templates",
     description: "Read an ordered set of immutable, versioned Cadre templates in one call.",
-    inputSchema: { ids: z.array(z.string().min(1)).min(1) },
+    inputSchema: { ids: z.array(z.enum(TEMPLATE_IDS)).min(1) },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ ids }) => {
     try {
@@ -288,9 +305,7 @@ export function createCadreServer(): McpServer {
   const reviewCompleteSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    reviewedAt: z.iso.datetime(),
-    reviewedHead: z.string().regex(/^[0-9a-f]{7,40}$/),
-    commitRange: z.string().regex(/^[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}$/),
+    commitRangeStart: z.string().min(1),
     approval: z.string().min(1),
     acceptedRisks: z.array(z.string().min(1)).optional()
   };
@@ -302,7 +317,8 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewReviewComplete(input as ReviewCompleteInput));
+      const derived = deriveReviewCompleteInput(input as ReviewCompleteRequest);
+      return proposalResult("review_complete", derived, previewReviewComplete(derived));
     } catch (error) {
       return failure(error);
     }
@@ -311,11 +327,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("review_complete_apply", {
     title: "Apply clean review completion",
     description: "Apply an approved clean-review transition only while its exact state and index preview remain current.",
-    inputSchema: { ...reviewCompleteSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyReviewComplete(input as ReviewCompleteInput, proposalDigest));
+      const proposal = decodeProposalToken<ReviewCompleteInput>("review_complete", proposalToken);
+      return result(applyReviewComplete(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -323,11 +340,16 @@ export function createCadreServer(): McpServer {
 
   const archiveBatchSchema = {
     projectRoot: z.string().min(1),
-    batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
-    selectedTracks: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).min(1),
-    baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/),
-    approvedAt: z.iso.datetime(),
-    updates: z.array(z.object({ path: z.string().min(1), content: z.string() }))
+    selectedTracks: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).min(1).optional(),
+    updates: z.array(z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("pattern"), slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), content: z.string() }),
+      z.object({ kind: z.literal("pattern_index"), content: z.string() }),
+      z.object({
+        kind: z.literal("active_track_seed"),
+        trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+        content: z.string()
+      })
+    ]))
   };
 
   server.registerTool("archive_batch_preview", {
@@ -337,7 +359,8 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewArchiveBatch(input as ArchiveBatchInput));
+      const derived = deriveArchiveBatchInput(input as ArchiveBatchRequest);
+      return proposalResult("archive_batch", derived, previewArchiveBatch(derived));
     } catch (error) {
       return failure(error);
     }
@@ -346,11 +369,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("archive_batch_apply", {
     title: "Apply complete archive batch",
     description: "Journal and apply one approved archive batch only while its complete preview remains current.",
-    inputSchema: { ...archiveBatchSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyArchiveBatch(input as ArchiveBatchInput, proposalDigest));
+      const proposal = decodeProposalToken<ArchiveBatchInput>("archive_batch", proposalToken);
+      return result(applyArchiveBatch(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -358,8 +382,7 @@ export function createCadreServer(): McpServer {
 
   const archiveRecordSchema = {
     projectRoot: z.string().min(1),
-    batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
-    archiveCommit: z.string().regex(/^[0-9a-f]{7,40}$/)
+    batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
   server.registerTool("archive_batch_record_preview", {
@@ -369,7 +392,8 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewArchiveBatchRecord(input as ArchiveBatchRecordInput));
+      const derived = deriveArchiveBatchRecordInput(input as ArchiveBatchRecordRequest);
+      return proposalResult("archive_batch_record", derived, previewArchiveBatchRecord(derived));
     } catch (error) {
       return failure(error);
     }
@@ -378,11 +402,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("archive_batch_record_apply", {
     title: "Record archive provenance",
     description: "Record an approved batch's immutable archive commit and complete its journal behind a stale-state digest.",
-    inputSchema: { ...archiveRecordSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyArchiveBatchRecord(input as ArchiveBatchRecordInput, proposalDigest));
+      const proposal = decodeProposalToken<ArchiveBatchRecordInput>("archive_batch_record", proposalToken);
+      return result(applyArchiveBatchRecord(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -391,13 +416,9 @@ export function createCadreServer(): McpServer {
   const executionStartSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
-    requestedMode: z.enum(["parallel", "sequential"]),
-    effectiveMode: z.enum(["parallel", "sequential"]),
-    approvalMode: z.enum(EXECUTION_APPROVAL_MODES).optional().default("phase"),
-    maxWorkers: z.number().int().min(1).max(32),
-    baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/),
-    approvedAt: z.iso.datetime()
+    requestedMode: z.enum(["parallel", "sequential"]).optional().default("parallel"),
+    approvalMode: z.enum(EXECUTION_APPROVAL_MODES).optional(),
+    maxWorkers: z.number().int().min(1).max(32).optional().default(3)
   };
 
   server.registerTool("execution_start_preview", {
@@ -407,7 +428,8 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewExecutionStart(input as ExecutionStartInput));
+      const derived = deriveExecutionStartInput(input as ExecutionStartRequest);
+      return proposalResult("execution_start", derived, previewExecutionStart(derived));
     } catch (error) {
       return failure(error);
     }
@@ -416,87 +438,61 @@ export function createCadreServer(): McpServer {
   server.registerTool("execution_start_apply", {
     title: "Start implementation execution",
     description: "Write the approved implementation journal and operation only when its preview digest is unchanged.",
-    inputSchema: { ...executionStartSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyExecutionStart(input as ExecutionStartInput, proposalDigest));
+      const proposal = decodeProposalToken<ExecutionStartInput>("execution_start", proposalToken);
+      return result(applyExecutionStart(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
   });
 
-  const executionNodeScopeSchema = {
+  const executionScopeSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
-  const executionNodeUpdateSchema = {
+  const executionCheckpointSchema = {
+    ...executionScopeSchema,
     nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/),
-    status: z.enum(EXECUTION_NODE_STATUSES),
+    event: z.enum(EXECUTION_CHECKPOINT_EVENTS),
     workerId: z.string().min(1).nullable().optional(),
     worktreePath: z.string().min(1).nullable().optional(),
     branch: z.string().min(1).nullable().optional(),
-    workerCommit: z.string().regex(/^[0-9a-f]{7,40}$/).nullable().optional(),
-    mergeCommit: z.string().regex(/^[0-9a-f]{7,40}$/).nullable().optional(),
-    verification: z.string().min(1).nullable().optional(),
-    approval: z.string().min(1).nullable().optional(),
-    blocker: z.string().min(1).nullable().optional()
+    commit: z.string().regex(/^[0-9a-f]{7,40}$/).optional(),
+    verification: z.string().min(1).optional(),
+    authorization: z.string().min(1).optional(),
+    blocker: z.string().min(1).optional()
   };
-  const executionNodeSchema = { ...executionNodeScopeSchema, ...executionNodeUpdateSchema };
 
-  server.registerTool("execution_node_preview", {
-    title: "Preview execution node transition",
-    description: "Validate and preview one legal runtime node transition without changing its journal.",
-    inputSchema: executionNodeSchema,
+  server.registerTool("execution_checkpoint_preview", {
+    title: "Preview an execution checkpoint",
+    description: "Translate one semantic execution event into the complete legal journal transition sequence.",
+    inputSchema: executionCheckpointSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewExecutionNodeUpdate(input as ExecutionNodeUpdateInput));
+      return proposalResult(
+        "execution_checkpoint",
+        input,
+        previewExecutionCheckpoint(input as ExecutionCheckpointInput)
+      );
     } catch (error) {
       return failure(error);
     }
   });
 
-  server.registerTool("execution_node_apply", {
-    title: "Apply execution node transition",
-    description: "Apply one approved execution node transition only when its preview digest is unchanged.",
-    inputSchema: { ...executionNodeSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+  server.registerTool("execution_checkpoint_apply", {
+    title: "Apply an execution checkpoint",
+    description: "Apply one previewed semantic execution event atomically.",
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyExecutionNodeUpdate(input as ExecutionNodeUpdateInput, proposalDigest));
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  const executionNodesSchema = {
-    ...executionNodeScopeSchema,
-    updates: z.array(z.object(executionNodeUpdateSchema)).min(1).max(128)
-  };
-
-  server.registerTool("execution_nodes_preview", {
-    title: "Preview ordered execution node transitions",
-    description: "Validate and preview an ordered, atomic batch of legal runtime node transitions without changing its journal.",
-    inputSchema: executionNodesSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
-  }, async (input) => {
-    try {
-      return proposalResult(previewExecutionNodesUpdate(input as ExecutionNodesUpdateInput));
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("execution_nodes_apply", {
-    title: "Apply ordered execution node transitions",
-    description: "Apply an approved ordered batch atomically only when its single preview digest is unchanged.",
-    inputSchema: { ...executionNodesSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
-    try {
-      return result(applyExecutionNodesUpdate(input as ExecutionNodesUpdateInput, proposalDigest));
+      const proposal = decodeProposalToken<ExecutionCheckpointInput>("execution_checkpoint", proposalToken);
+      return result(applyExecutionCheckpoint(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -522,9 +518,7 @@ export function createCadreServer(): McpServer {
   const executionFinishSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
-    headCommit: z.string().regex(/^[0-9a-f]{7,40}$/),
-    completedAt: z.iso.datetime()
+    executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
   server.registerTool("execution_finish_preview", {
@@ -534,7 +528,8 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewExecutionFinish(input as ExecutionFinishInput));
+      const derived = deriveExecutionFinishInput(input as ExecutionFinishRequest);
+      return proposalResult("execution_finish", derived, previewExecutionFinish(derived));
     } catch (error) {
       return failure(error);
     }
@@ -543,11 +538,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("execution_finish_apply", {
     title: "Complete implementation execution",
     description: "Finalize an approved execution, ready-for-review state, and derived tracks index together only when the preview is unchanged.",
-    inputSchema: { ...executionFinishSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyExecutionFinish(input as ExecutionFinishInput, proposalDigest));
+      const proposal = decodeProposalToken<ExecutionFinishInput>("execution_finish", proposalToken);
+      return result(applyExecutionFinish(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -557,18 +553,17 @@ export function createCadreServer(): McpServer {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
-    nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/),
-    phaseId: z.string().regex(/^P\d+$/).nullable().optional()
+    nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/)
   };
 
   server.registerTool("worktree_create_preview", {
     title: "Preview a Cadre worker worktree",
     description: "Resolve the constrained worker path, branch, and exact base commit without mutating Git.",
-    inputSchema: { ...worktreeSchema, baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/) },
+    inputSchema: worktreeSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewWorktreeCreate(input as WorktreeCreateInput));
+      return proposalResult("worktree_create", input, previewWorktreeCreate(input as WorktreeCreateInput));
     } catch (error) {
       return failure(error);
     }
@@ -577,15 +572,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("worktree_create_apply", {
     title: "Create a Cadre worker worktree",
     description: "Create or reconcile one approved constrained worker worktree using an unchanged preview digest.",
-    inputSchema: {
-      ...worktreeSchema,
-      baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/),
-      proposalDigest: z.string().regex(/^[0-9a-f]{64}$/)
-    },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyWorktreeCreate(input as WorktreeCreateInput, proposalDigest));
+      const proposal = decodeProposalToken<WorktreeCreateInput>("worktree_create", proposalToken);
+      return result(applyWorktreeCreate(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -598,7 +590,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewWorktreeIntegration(input as WorktreeIntegrationInput));
+      return proposalResult("worktree_integrate", input, previewWorktreeIntegration(input as WorktreeIntegrationInput));
     } catch (error) {
       return failure(error);
     }
@@ -607,11 +599,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("integration_apply", {
     title: "Integrate a worker branch",
     description: "Merge an approved worker branch without squashing; report conflicts without resolving them.",
-    inputSchema: { ...worktreeSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyWorktreeIntegration(input as WorktreeIntegrationInput, proposalDigest));
+      const proposal = decodeProposalToken<WorktreeIntegrationInput>("worktree_integrate", proposalToken);
+      return result(applyWorktreeIntegration(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -624,7 +617,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewWorktreeCleanup(input as WorktreeIntegrationInput));
+      return proposalResult("worktree_cleanup", input, previewWorktreeCleanup(input as WorktreeIntegrationInput));
     } catch (error) {
       return failure(error);
     }
@@ -633,11 +626,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("worktree_cleanup_apply", {
     title: "Clean up an integrated worker",
     description: "Remove only a clean, fully integrated Cadre worktree and its safely deletable branch, whether its journal node is integrated or already completed.",
-    inputSchema: { ...worktreeSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyWorktreeCleanup(input as WorktreeIntegrationInput, proposalDigest));
+      const proposal = decodeProposalToken<WorktreeIntegrationInput>("worktree_cleanup", proposalToken);
+      return result(applyWorktreeCleanup(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -674,7 +668,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult(previewProjectInit(input as ProjectInitInput));
+      return proposalResult("project_init", input, previewProjectInit(input as ProjectInitInput));
     } catch (error) {
       return failure(error);
     }
@@ -683,11 +677,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("project_init_apply", {
     title: "Apply approved Cadre project initialization",
     description: "Atomically create .cadre only when the semantic proposal matches an approved preview digest; records approvedAt as audit metadata.",
-    inputSchema: { ...initSchema, proposalDigest: z.string().regex(/^[0-9a-f]{64}$/) },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalDigest, ...input }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result(applyProjectInit(input as ProjectInitInput, proposalDigest));
+      const proposal = decodeProposalToken<ProjectInitInput>("project_init", proposalToken);
+      return result(applyProjectInit(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
     }
@@ -696,13 +691,11 @@ export function createCadreServer(): McpServer {
   server.registerTool("setup_record_commit", {
     title: "Record the project setup commit",
     description: "Complete a pending create operation by recording its already-created Git commit SHA.",
-    inputSchema: {
-      projectRoot: z.string().min(1),
-      commit: z.string().regex(/^[0-9a-f]{7,40}$/)
-    },
+    inputSchema: { projectRoot: z.string().min(1) },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ projectRoot, commit }) => {
+  }, async ({ projectRoot }) => {
     try {
+      const commit = resolveGitCommit(projectRoot);
       return result({ path: recordSetupCommit(projectRoot, commit), commit });
     } catch (error) {
       return failure(error);
@@ -729,7 +722,8 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
-      return proposalResult(renderTracksPreview(safeProjectRoot(projectRoot)));
+      const input = { projectRoot: safeProjectRoot(projectRoot) };
+      return proposalResult("tracks_render", input, renderTracksPreview(input.projectRoot));
     } catch (error) {
       return failure(error);
     }
@@ -738,14 +732,12 @@ export function createCadreServer(): McpServer {
   server.registerTool("tracks_render_apply", {
     title: "Apply the derived tracks index",
     description: "Rewrite tracks.md only when current state matches a human-approved preview digest.",
-    inputSchema: {
-      projectRoot: z.string().min(1),
-      proposalDigest: z.string().regex(/^[0-9a-f]{64}$/)
-    },
+    inputSchema: proposalInputSchema(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ projectRoot, proposalDigest }) => {
+  }, async ({ proposalToken }) => {
     try {
-      return result({ path: writeTracks(safeProjectRoot(projectRoot), proposalDigest) });
+      const proposal = decodeProposalToken<{ projectRoot: string }>("tracks_render", proposalToken);
+      return result({ path: writeTracks(proposal.input.projectRoot, proposal.digest) });
     } catch (error) {
       return failure(error);
     }

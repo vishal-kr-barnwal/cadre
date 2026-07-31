@@ -51,13 +51,13 @@ Deterministic MCP mutations generally come in pairs:
 ```text
 preview(current inputs) -> exact proposal + SHA-256 digest
 human approval
-apply(same inputs + unchanged digest)
+apply(opaque proposal token)
 ```
 
 Apply recomputes the proposal against current state. Any changed file, state,
 branch, commit, selection, or input invalidates the digest and requires a new
 preview. Important pairs cover project initialization, execution start and
-finish, execution-node transitions, worktree creation/integration/cleanup,
+finish, semantic execution checkpoints, worktree creation/integration/cleanup,
 clean review completion, archive batches, and the derived track index.
 
 The MCP server cannot infer approval from a prior conversation or approve a

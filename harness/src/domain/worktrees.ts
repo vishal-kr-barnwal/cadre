@@ -91,8 +91,6 @@ export interface WorktreeCreateInput {
   trackId: string;
   executionId: string;
   nodeId: string;
-  phaseId?: string | null;
-  baseCommit: string;
 }
 
 export function previewWorktreeCreate(input: WorktreeCreateInput): {
@@ -105,9 +103,10 @@ export function previewWorktreeCreate(input: WorktreeCreateInput): {
   digest: string;
 } {
   const root = assertRepository(input.projectRoot);
-  const baseCommit = git(root, ["rev-parse", `${input.baseCommit}^{commit}`]).stdout.trim();
+  const target = targetIdentity(root, input);
+  const baseCommit = git(target.path, ["rev-parse", "HEAD^{commit}"]).stdout.trim();
   if (!SHA.test(baseCommit)) throw new Error("baseCommit does not resolve to a commit");
-  const identity = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId, input.phaseId);
+  const identity = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId);
   const registered = registeredWorktrees(root).find((entry) => entry.path === resolve(identity.path));
   const existingBranchHead = branchHead(root, identity.branch);
   if (registered && (registered.branch !== identity.branch || registered.head !== existingBranchHead)) {
@@ -139,12 +138,18 @@ export function applyWorktreeCreate(input: WorktreeCreateInput, proposalDigest: 
   return previewWorktreeCreate(input);
 }
 
-function cleanWorktree(path: string): void {
-  const status = git(path, ["status", "--porcelain"]).stdout.trim();
-  if (status) throw new Error(`worktree is not clean: ${path}\n${status}`);
+function cleanWorktree(path: string, allowedPaths: ReadonlySet<string> = new Set()): void {
+  const lines = git(path, ["status", "--porcelain", "--untracked-files=all"]).stdout
+    .split(/\r?\n/)
+    .filter(Boolean);
+  const unexpected = lines.filter((line) => {
+    const changedPath = line.slice(3).split(" -> ").at(-1) ?? "";
+    return !allowedPaths.has(changedPath);
+  });
+  if (unexpected.length) throw new Error(`worktree is not clean: ${path}\n${unexpected.join("\n")}`);
 }
 
-function targetIdentity(root: string, input: { trackId: string; executionId: string; nodeId: string; phaseId?: string | null }): {
+function targetIdentity(root: string, input: { trackId: string; executionId: string; nodeId: string }): {
   path: string;
   branch: string;
 } {
@@ -166,7 +171,7 @@ function journalNode(input: WorktreeIntegrationInput): { node: ExecutionNode; no
   const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
   const node = journal.nodes[input.nodeId];
   if (!node) throw new Error(`execution journal has no node ${input.nodeId}`);
-  assertIds(input.trackId, input.executionId, input.nodeId, input.phaseId);
+  assertIds(input.trackId, input.executionId, input.nodeId);
   if (node.phaseId !== phaseForNode(input.nodeId)) {
     throw new Error(`execution journal identity disagrees for ${input.nodeId}`);
   }
@@ -200,7 +205,6 @@ export interface WorktreeIntegrationInput {
   trackId: string;
   executionId: string;
   nodeId: string;
-  phaseId?: string | null;
 }
 
 export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
@@ -216,12 +220,13 @@ export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
 } {
   assertJournalAllowsIntegration(input);
   const root = assertRepository(input.projectRoot);
-  const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId, input.phaseId);
+  const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId);
   const target = targetIdentity(root, input);
   if (!existsSync(source.path)) throw new Error(`source worktree is missing: ${source.path}`);
   if (!existsSync(target.path)) throw new Error(`target worktree is missing: ${target.path}`);
   cleanWorktree(source.path);
-  cleanWorktree(target.path);
+  const journalPath = `.cadre/tracks/${input.trackId}/executions/execution-${input.executionId}.json`;
+  cleanWorktree(target.path, target.path === root ? new Set([journalPath]) : new Set());
   const checkedSource = git(source.path, ["symbolic-ref", "--short", "HEAD"]).stdout.trim();
   const checkedTarget = git(target.path, ["symbolic-ref", "--short", "HEAD"]).stdout.trim();
   if (checkedSource !== source.branch) throw new Error(`source worktree is on ${checkedSource}, expected ${source.branch}`);
@@ -281,7 +286,7 @@ export function previewWorktreeCleanup(input: WorktreeIntegrationInput): {
 } {
   assertJournalAllowsCleanup(input);
   const root = assertRepository(input.projectRoot);
-  const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId, input.phaseId);
+  const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId);
   const target = targetIdentity(root, input);
   if (!existsSync(source.path)) throw new Error(`worktree is missing: ${source.path}`);
   if (lstatSync(source.path).isSymbolicLink()) throw new Error("refusing to clean up a symbolic-link worktree");

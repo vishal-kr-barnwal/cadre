@@ -303,8 +303,7 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `archive_batch_preview` / `archive_batch_apply` | Preview/apply | Preview and apply selected moves, lifecycle states, patterns, seeds, journal, and post-archive index as one approved batch. |
 | `archive_batch_record_preview` / `archive_batch_record_apply` | Preview/apply | Record the resulting archive commit in track, project, and batch provenance without a second batch decision. |
 | `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
-| `execution_node_preview` / `execution_node_apply` | Preview/apply | Persist one legal, dependency-gated execution-node transition and return its derived execution status. |
-| `execution_nodes_preview` / `execution_nodes_apply` | Preview/apply | Atomically persist an ordered batch of legal transitions behind one stale-state digest without crossing evidence or approval boundaries. |
+| `execution_checkpoint_preview` / `execution_checkpoint_apply` | Preview/apply | Expand one semantic execution event into its complete legal, evidence-gated transition sequence and apply it atomically. |
 | `execution_status` | No | Derive ready phases, ready tasks within running phases, active nodes, and blockers. |
 | `execution_finish_preview` / `execution_finish_apply` | Preview/apply | Require completed nodes, current plan evidence, and removed worktrees before `ready_for_review`. |
 | `worktree_create_preview` / `worktree_create_apply` | Preview/apply | Create or reconcile one derived phase/task worktree and branch. |

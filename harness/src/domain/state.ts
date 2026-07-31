@@ -5,6 +5,7 @@ import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
 import { buildTracks } from "./tracks-index.js";
+import { reachableGitCommits } from "./git.js";
 export { buildTracks } from "./tracks-index.js";
 
 export interface OperationState {
@@ -87,6 +88,25 @@ export interface ValidationResult {
   states: Map<string, TrackState>;
   errors: string[];
   warnings: string[];
+}
+
+interface CommitReference { owner: string; commit: string }
+
+function collectCommitReferences(value: unknown, owner: string, references: CommitReference[], commitContext = false): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => collectCommitReferences(entry, `${owner}[${index}]`, references, commitContext));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    const childOwner = `${owner}.${key}`;
+    const isCommit = commitContext || /^(?:commit|.*Commit|reviewedHead)$/.test(key);
+    if (isCommit && typeof child === "string" && /^[0-9a-f]{7,40}$/.test(child)) {
+      references.push({ owner: childOwner, commit: child });
+    } else {
+      collectCommitReferences(child, childOwner, references, key === "commits");
+    }
+  }
 }
 
 const TRACK_STATUSES = new Set([
@@ -391,6 +411,8 @@ export function validateProject(projectRoot: string): ValidationResult {
   }
   const project = readJson<ProjectState>(join(root, "project.json"), errors);
   if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors, warnings };
+  const commitReferences: CommitReference[] = [];
+  collectCommitReferences(project, "project.json", commitReferences);
   if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
   if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) errors.push(`project.json: runtimeVersion must be ${CADRE_RUNTIME_VERSION}`);
   if (project.templateSetVersion !== TEMPLATE_SET_VERSION) errors.push(`project.json: templateSetVersion must be ${TEMPLATE_SET_VERSION}`);
@@ -417,6 +439,7 @@ export function validateProject(projectRoot: string): ValidationResult {
   const { tracks, states, byId } = discoverTracks(root, errors);
   for (const track of tracks) {
     const state = states.get(track.id)!;
+    collectCommitReferences(state, `${track.id}/state.json`, commitReferences);
     const trackRoot = join(root, track.location);
     if (state.schemaVersion !== 1) errors.push(`${track.id}: unsupported state schemaVersion`);
     if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
@@ -454,7 +477,19 @@ export function validateProject(projectRoot: string): ValidationResult {
     if (existsSync(specPath)) validateSpec(specPath, errors);
     else if (track.status !== "drafting-spec" && state?.operation?.action !== "specify") errors.push(`${track.id}: missing spec.md`);
     let planGraph: PlanGraph | null = null;
-    if (existsSync(planPath)) planGraph = readAndValidatePlan(planPath, track.status, errors);
+    if (existsSync(planPath)) {
+      planGraph = readAndValidatePlan(planPath, track.status, errors);
+      for (const phase of planGraph.phases) {
+        if (phase.completionCommit) commitReferences.push({
+          owner: `${track.id}/plan.md:${phase.id}`,
+          commit: phase.completionCommit
+        });
+        for (const task of phase.tasks) if (task.commit) commitReferences.push({
+          owner: `${track.id}/plan.md:${task.id}`,
+          commit: task.commit
+        });
+      }
+    }
     else if (["planned", "in_progress", "ready_for_review", "completed", "archived"].includes(track.status)
       && state?.operation?.action !== "plan") errors.push(`${track.id}: missing plan.md`);
     validateLearning(
@@ -464,6 +499,27 @@ export function validateProject(projectRoot: string): ValidationResult {
       errors
     );
     validateExecutionJournal(trackRoot, state, planGraph, errors);
+    const executionReference = state.operation?.action === "implement" ? state.operation : state.lastExecution;
+    const journalRelative = typeof executionReference?.journal === "string" ? executionReference.journal : null;
+    if (journalRelative && /^executions\/execution-[0-9A-Za-z-]+\.json$/.test(journalRelative)) {
+      const journalPath = join(trackRoot, journalRelative);
+      if (existsSync(journalPath)) {
+        try {
+          collectCommitReferences(JSON.parse(readFileSync(journalPath, "utf8")), `${track.id}/${journalRelative}`, commitReferences);
+        } catch {
+          // The journal validator reports malformed JSON with richer context.
+        }
+      }
+    }
+    const revisionsPath = join(trackRoot, "revisions");
+    if (existsSync(revisionsPath)) {
+      for (const file of readdirSync(revisionsPath).filter((entry) => entry.endsWith(".md"))) {
+        const content = readFileSync(join(revisionsPath, file), "utf8");
+        for (const match of content.matchAll(/^- Revision commit: `([0-9a-f]{7,40})`$/gm)) {
+          commitReferences.push({ owner: `${track.id}/revisions/${file}`, commit: match[1]! });
+        }
+      }
+    }
     if (["ready_for_review", "completed", "archived"].includes(track.status)) {
       const managedRoot = join(root, ".worktrees", track.id);
       if (existsSync(managedRoot) && readdirSync(managedRoot).length) {
@@ -509,6 +565,14 @@ export function validateProject(projectRoot: string): ValidationResult {
     visited.add(id);
   }
   for (const id of byId.keys()) visit(id, []);
+  const reachability = reachableGitCommits(projectRoot, commitReferences.map((reference) => reference.commit));
+  if (reachability) {
+    for (const reference of commitReferences) {
+      if (reachability.get(reference.commit) === false) {
+        errors.push(`${reference.owner}: commit is not reachable: ${reference.commit}`);
+      }
+    }
+  }
   const tracksPath = join(root, "tracks.md");
   if (existsSync(tracksPath) && readFileSync(tracksPath, "utf8") !== buildTracks(tracks)) {
     warnings.push("TRACKS_INDEX_STALE: tracks.md is stale; regenerate it after approved state changes");

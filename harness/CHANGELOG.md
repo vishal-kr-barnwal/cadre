@@ -12,10 +12,8 @@ runtime.
   approval modes, with `phase` as the default for new executions.
 - Added `workflow_elicit` for bounded Codex and Claude clarification and
   digest/checkpoint-bound approval forms.
-- Added structured MCP error content, per-node legal transition guidance, and
-  a uniform `proposalDigest` alias on mutation previews.
-- Added ordered execution-node batches and protocol coverage for supported,
-  unsupported, and policy-rejected form elicitation.
+- Added structured MCP error content, semantic execution checkpoints, and
+  opaque proposal tokens that bind preview input to apply.
 
 ### Changed
 
