@@ -39,8 +39,8 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.1.0") {
-  errors.push("package: expected publish identity cadre-ai@3.1.0");
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.2.0") {
+  errors.push("package: expected publish identity cadre-ai@3.2.0");
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {

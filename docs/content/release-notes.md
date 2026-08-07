@@ -7,6 +7,63 @@ order: 230
 
 # Release Notes
 
+## 3.2.0 - 2026-08-07
+
+Cadre 3.2.0 is a breaking simplification of the MCP execution and governance
+surface, based on failure and approval-flow analysis from a complete production
+delivery session. It removes compatibility aliases and shifts deterministic
+identity, Git, and bookkeeping decisions into the runtime.
+
+### Smaller Execution Contract
+
+- Replaces `execution_node_*` and `execution_nodes_*` with
+  `execution_checkpoint_preview` and `execution_checkpoint_apply`.
+- Uses semantic events—`start`, `record_commit`, `record_integration`,
+  `record_verification`, `complete`, `block`, and `resume`—that expand into
+  complete legal transition sequences.
+- Changes `execution_status` from low-level next-status guidance to semantic
+  event guidance with the evidence required by each event.
+- Keeps `phase` as the default approval mode and inherits the recorded mode
+  when an execution resumes.
+
+### Opaque Preview/Apply Binding
+
+- Every mutation preview returns an opaque `proposalToken`; apply accepts only
+  that token.
+- Removes repeated apply arguments, caller-supplied proposal digests, and the
+  `proposalDigest` compatibility alias.
+- Derives execution IDs, timestamps, Git bases and heads, review heads, archive
+  IDs and commits, and worktree ancestry from authoritative local state.
+- Restricts template inputs to catalog IDs and archive writes to structured
+  pattern, pattern-index, and active-track-seed updates.
+
+### Git And Finalization Reliability
+
+- Validates that persisted project, track, plan, execution, review, revision,
+  and archive commit references are reachable from repository history.
+- Allows canonical integration when only its exact active execution journal is
+  dirty while continuing to reject unrelated product or Cadre changes.
+- Atomically writes completed plan markers, the execution journal,
+  `ready_for_review` state, and the generated `tracks.md` index at finish.
+- Derives clean-review evidence with ancestry checks and selects all eligible
+  completed tracks in dependency order for a bare archive command.
+
+### Compatibility And Upgrade
+
+The removed 3.1.x MCP tools, repeated apply inputs, and digest alias are not
+retained. Existing persisted project state remains validated by the 3.2.0
+runtime, but active clients must reinstall the plugin to receive the new tool
+schemas.
+
+```bash
+npm install -g cadre-ai@3.2.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex conversation and run `/reload-plugins` in Claude Code after
+upgrading.
+
 ## 3.1.0 - 2026-07-30
 
 Compared with 3.0.2, Cadre 3.1.0 makes approval frequency an explicit,
@@ -16,8 +73,9 @@ weakening digest-gated mutations or manual verification.
 ### Approval Governance
 
 - Adds `governed`, `phase`, and `autonomous` implementation approval modes.
-  `phase` is the default and pauses once per phase; `autonomous` pauses only at
-  track-level verification and `governed` retains task-by-task gates.
+  `phase` is the default: regular phase work runs autonomously and pauses once
+  at the phase's final manual-verification task. `autonomous` pauses only at
+  track-level verification; `governed` retains task-by-task gates.
 - Treats one approved semantic proposal as an authorization envelope over its
   unchanged deterministic journals, indexes, validation, commits, lifecycle
   transitions, and provenance. Create, track, review, revise, refresh, revert,
@@ -41,7 +99,7 @@ weakening digest-gated mutations or manual verification.
 
 - Makes `execution_status` self-describing with legal next transitions and
   required evidence. MCP failures now return structured errors, and every
-  mutation preview exposes an opaque apply-ready `proposalToken`.
+  mutation preview exposes a uniform `proposalDigest` alias.
 - Adds ordered execution-node batching guidance, avoids global tool-catalog
   discovery and speculative previews, runs independent read-only checks in
   parallel, and reuses verification when only `.cadre/**` bookkeeping changed.

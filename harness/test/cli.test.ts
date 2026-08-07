@@ -53,11 +53,11 @@ function runCli(args: string[], env = process.env) {
 test("global CLI exposes publish identity and self-contained runtime diagnostics", () => {
   const version = runCli(["--version"]);
   assert.equal(version.status, 0, version.stderr);
-  assert.equal(version.stdout.trim(), "3.1.0");
+  assert.equal(version.stdout.trim(), "3.2.0");
 
   const doctor = runCli(["doctor"]);
   assert.equal(doctor.status, 0, doctor.stderr);
-  assert.match(doctor.stdout, /cadre-ai@3\.1\.0/);
+  assert.match(doctor.stdout, /cadre-ai@3\.2\.0/);
   assert.match(doctor.stdout, new RegExp(`template catalog: ${TEMPLATE_IDS.length}/${TEMPLATE_IDS.length}`));
   assert.match(doctor.stdout, /self-contained runtime: ok/);
 

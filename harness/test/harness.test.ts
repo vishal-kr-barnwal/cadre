@@ -52,7 +52,7 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.1.0";
+  project.runtimeVersion = "3.2.0";
   project.templateSetVersion = "v1";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
@@ -1026,7 +1026,7 @@ test("approved create operation remains valid before its artifact commit", () =>
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.1.0";
+  project.runtimeVersion = "3.2.0";
   project.templateSetVersion = "v1";
   project.project.name = "Interrupted setup";
   project.project.context = "greenfield";
@@ -1341,8 +1341,8 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.1.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.1.0+claude.test-build");
+  assert.equal(codexManifest.version, "3.2.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.2.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "init", "gitignore.template")));
@@ -1394,9 +1394,9 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.1.0+codex.test-build");
+  assert.equal(previousManifest.version, "3.2.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.1.0+codex.second-build");
+  assert.equal(updatedManifest.version, "3.2.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
