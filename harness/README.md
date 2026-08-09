@@ -303,14 +303,14 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `archive_batch_preview` / `archive_batch_apply` | Preview/apply | Preview and apply selected moves, lifecycle states, patterns, seeds, journal, and post-archive index as one approved batch. |
 | `archive_batch_record_preview` / `archive_batch_record_apply` | Preview/apply | Record the resulting archive commit in track, project, and batch provenance without a second batch decision. |
 | `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
-| `execution_checkpoint_preview` / `execution_checkpoint_apply` | Preview/apply | Expand one semantic execution event into its complete legal, evidence-gated transition sequence and apply it atomically. |
-| `execution_status` | No | Derive ready phases, ready tasks within running phases, active nodes, and blockers. |
+| `execution_checkpoint_preview` / `execution_checkpoint_apply` | Preview/apply | Expand one semantic execution event into its complete legal, evidence-gated transition sequence, apply it atomically, and return a compact transition receipt. |
+| `execution_status` | No | Return a compact ready/active/blocked scheduler view, with optional focused node detail. |
 | `execution_finish_preview` / `execution_finish_apply` | Preview/apply | Require completed nodes, current plan evidence, and removed worktrees before `ready_for_review`. |
 | `worktree_create_preview` / `worktree_create_apply` | Preview/apply | Create or reconcile one derived phase/task worktree and branch. |
 | `integration_preview` / `integration_apply` | Preview/apply | Inspect and merge a clean worker branch into its derived parent, reporting conflicts without resolving them. |
 | `worktree_cleanup_preview` / `worktree_cleanup_apply` | Preview/apply | Remove only a clean worker whose branch is proven integrated into its parent. |
 | `worktree_status` | No | Report Cadre-managed worktrees and orphaned runtime directories. |
-| `project_init_preview` | No | Return the complete proposed initialization file set and digest. |
+| `project_init_preview` | No | Return the complete proposed initialization path/hash manifest and digest without echoing file contents. |
 | `project_init_apply` | Yes | Atomically create `.cadre` only when inputs match the approved preview digest. |
 | `setup_record_git_initialized` | Yes | Record the verified Git-initialization checkpoint. |
 | `setup_record_commit` | Yes | Record the already-created setup commit SHA and complete setup state. |

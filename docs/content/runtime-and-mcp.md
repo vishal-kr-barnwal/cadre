@@ -59,8 +59,11 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 ## Result Shape
 
 Successful tools return their typed value as structured content.
-Mutation previews expose an opaque `proposalToken` that binds normalized input
-to its SHA-256 digest; apply tools accept only that token. Failures mark the MCP result as an
+Mutation previews expose a compact opaque `proposalToken` that resolves to
+normalized input and its SHA-256 digest retained in Cadre's bounded user-local
+runtime cache; apply tools accept only that token. Tokens survive MCP restarts
+until expiry or bounded oldest-first eviction.
+Failures mark the MCP result as an
 error and return structured `{ error: { code, message, details? } }` content.
 `project_status` also returns its human-readable summary as text.
 
@@ -70,13 +73,16 @@ the tool boundary.
 
 ## Preview/Apply Contract
 
-A preview computes all consequences without mutating and returns an opaque
-proposal token. Apply decodes the bound input and digest, recomputes the
-proposal, and refuses stale state.
+A preview computes all consequences without mutating project or Git state,
+retains the normalized proposal in an MCP-owned runtime record, and returns an
+opaque capability token. Apply resolves the bound input and digest, recomputes
+the proposal, and refuses stale state. Callers never provide proposal paths.
 
-Execution status returns legal transition guidance and required evidence per
-node. Skills use that contract to build ordered batches; previews validate
-those batches and are not used as state-machine probes.
+Execution checkpoints return compact changed-node receipts and scheduler state.
+Execution status returns ready/active/blocked summaries by default and accepts
+an optional node ID for focused guidance. Skills use that contract to build
+ordered batches; previews validate those batches and are not used as
+state-machine probes.
 
 Read-only previews are not approval. Skill contracts remain responsible for
 presenting the exact proposal and obtaining explicit human acceptance before

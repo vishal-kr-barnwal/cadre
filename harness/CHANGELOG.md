@@ -1,5 +1,89 @@
 # Changelog
 
+## [3.3.0] - 2026-08-09
+
+Cadre 3.3.0 makes long-running MCP delivery sessions durable across server
+restarts and substantially reduces repeated protocol payloads. It keeps
+project-local state and execution journals compatible while changing several
+MCP response shapes from complete canonical artifacts to compact receipts and
+path/SHA-256 manifests.
+
+### Breaking Changes
+
+- Changed `execution_checkpoint_preview` and `execution_checkpoint_apply` to
+  return a changed-node transition receipt instead of the complete execution
+  journal. Apply retains compact `derivedStatus` scheduling arrays and focused
+  guidance for changed, active, or blocked nodes.
+- Changed `execution_status` to return execution metadata, node-status counts,
+  ready/active/blocked scheduling state, and minimal actionable-node records.
+  It no longer echoes the complete journal or guidance for every completed and
+  pending node; pass optional `nodeId` for focused full-node detail.
+- Changed initialization, review, archive, execution start/finish, and derived
+  track-index responses to return outcome metadata and path/SHA-256 manifests
+  instead of full proposed or written artifact contents.
+- Changed proposal tokens from self-contained gzip/base64 payloads to 42-byte
+  opaque capabilities backed by the local Cadre runtime cache. Outstanding
+  3.2.0 tokens must be previewed again after upgrading.
+
+### Added
+
+- Added durable proposal records under
+  `${CADRE_HOME:-~/.cadre}/runtime/proposals`, allowing a preview produced by
+  one MCP process to be applied safely after Codex or Claude restarts it.
+- Added seven-day proposal expiry, a 256-record and 32 MiB retained-cache
+  bound, an 8 MiB per-proposal bound, and oldest-first cleanup.
+- Added optional focused `nodeId` lookup to `execution_status` without adding a
+  separate arbitrary journal-reading tool.
+- Added explicit checkpoint receipts recording the semantic event, source
+  status, intermediate transition sequence, target status, and checkpoint.
+
+### Changed
+
+- Kept full execution journals as the canonical atomic validation and
+  persistence model while projecting only scheduler-relevant state at the MCP
+  transport boundary.
+- Kept `proposalToken`, preview/apply tool names, semantic digests, stale-state
+  recomputation, and compact `derivedStatus` scheduling arrays stable for
+  workflow skills.
+- Updated implementation guidance to reuse checkpoint apply results, request
+  focused node detail only when needed, and avoid re-reading the journal after
+  each event.
+
+### Security And Reliability
+
+- Proposal filenames are derived only from validated 192-bit random tokens;
+  callers never supply runtime paths.
+- Runtime proposal directories and records are permission-restricted, written
+  with exclusive creation and fsync, and checked for ownership, file type,
+  symlinks, size, kind, expiry, and schema before use.
+- Proposal resolution remains digest-gated: every apply recomputes current
+  state and rejects a stale proposal even when its runtime record is valid.
+- Concurrent cleanup tolerates records already removed by another Codex or
+  Claude MCP process, and lost-response retries can reuse retained tokens until
+  normal domain idempotency or stale-state checks resolve them.
+
+### Performance
+
+- Reduced the live 46-node `execution_status` result from roughly 19.5 KiB of
+  minified domain data to a 3.1 KiB complete MCP response with no embedded
+  journal.
+- Added response-budget regression checks requiring checkpoint preview/apply
+  results below 4 KiB and a 50-node default status view below 8 KiB.
+- Removed repeated full workflow, plan, journal, state, pattern, and generated
+  index content from mutation responses when an exact digest-bound manifest is
+  sufficient.
+
+### Compatibility And Upgrade
+
+- Existing 3.2.0 `.cadre` projects, track states, operation journals, and
+  execution journals require no migration.
+- Direct MCP consumers that read complete artifacts from preview/apply results
+  must adopt the compact receipt and manifest shapes. Canonical artifacts
+  remain available at their reported project paths.
+- Reinstall the package and native plugins, start a new Codex conversation,
+  and run `/reload-plugins` in Claude Code so both clients load the 3.3.0 tool
+  schemas. Re-run preview for any proposal token created by 3.2.0.
+
 ## [3.2.0] - 2026-08-07
 
 Cadre 3.2.0 simplifies the execution and governance contracts after analysis

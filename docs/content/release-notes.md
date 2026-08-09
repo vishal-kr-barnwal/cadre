@@ -7,6 +7,89 @@ order: 230
 
 # Release Notes
 
+## 3.3.0 - 2026-08-09
+
+Cadre 3.3.0 is an MCP reliability and context-efficiency release. Compared
+with 3.2.0, it makes preview/apply proposals restart-safe and replaces repeated
+full-journal and full-artifact responses with compact, digest-bound receipts
+and manifests. Existing `.cadre` project state remains compatible.
+
+### Durable Proposal Capabilities
+
+- Replaces self-contained gzip/base64 proposal tokens—which could exceed
+  27,000 characters during project initialization—with 42-character opaque
+  capabilities backed by Cadre-owned runtime records.
+- Stores normalized input, proposal kind, semantic digest, schema version, and
+  creation time under `${CADRE_HOME:-~/.cadre}/runtime/proposals` so apply can
+  continue after an MCP server restart.
+- Bounds retention to seven days, 256 records, 32 MiB total, and 8 MiB per
+  proposal, with oldest-first cleanup.
+- Uses 192-bit random identifiers, exclusive writes, fsync, restrictive file
+  permissions, ownership checks, and symlink/path protections. Callers never
+  provide a proposal filesystem path.
+- Preserves digest recomputation and stale-state rejection for every
+  preview/apply pair. A durable token is a capability to the approved input,
+  not permission to bypass current-state validation.
+
+### Compact Execution Protocol
+
+- `execution_checkpoint_preview` now returns the proposed event as a compact
+  `from` → `through` → `to` transition receipt plus its checkpoint, digest, and
+  proposal token.
+- `execution_checkpoint_apply` returns the applied receipt and compact
+  `derivedStatus`: ready phases, ready tasks, active nodes, blocked nodes, and
+  focused event guidance. The complete journal is no longer echoed after every
+  transition.
+- `execution_status` now defaults to a scheduler view with execution metadata,
+  counts, scheduling arrays, minimal active/blocked node records, and relevant
+  guidance. Optional `nodeId` returns full detail for one node.
+- Full execution journals remain unchanged on disk and remain the canonical
+  source for atomic transitions, validation, recovery, and provenance.
+
+In the production journal that exposed the issue, the execution contained 46
+nodes. The old derived status represented about 19.5 KiB before MCP framing;
+the installed 3.3.0 server returned a complete 3.1 KiB MCP status response with
+no embedded journal. Regression budgets cap checkpoint responses below 4 KiB
+and a 50-node default status view below 8 KiB.
+
+### Manifest-Based Mutation Results
+
+Large preview/apply families now return concise outcome metadata and
+path/SHA-256 manifests instead of repeating canonical content:
+
+- Project initialization returns the complete initialization path/hash
+  manifest without echoing the 30 KiB workflow template.
+- Execution start reports execution identity, modes, node count, and initial
+  scheduling state rather than its complete journal and track state.
+- Execution finish reports the final status and hashes for journal, state,
+  plan, and `tracks.md`.
+- Review and archive report lifecycle outcomes, moves, commits, and hashes
+  without repeating complete states, pattern content, seeds, or indexes.
+- Derived track-index preview reports its path and SHA-256 digest rather than
+  the complete rendered index.
+
+### Compatibility
+
+Existing 3.2.0 projects, operation journals, and execution journals require no
+migration. Tool names, `proposalToken` inputs, semantic event names, proposal
+digests, and scheduler arrays remain stable. Direct MCP clients must adapt to
+the compact response shapes and use reported paths when complete canonical
+artifacts are genuinely required.
+
+Proposal tokens created by 3.2.0 are not portable into 3.3.0. Re-run the
+matching preview after upgrading; no project mutation is repeated by doing so.
+
+### Upgrade
+
+```bash
+npm install -g cadre-ai@3.3.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex conversation and run `/reload-plugins` in Claude Code after
+upgrading so both clients load the 3.3.0 MCP response schemas.
+
 ## 3.2.0 - 2026-08-07
 
 Cadre 3.2.0 is a breaking simplification of the MCP execution and governance

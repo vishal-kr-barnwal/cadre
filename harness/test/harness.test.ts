@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync
+  cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, symlinkSync,
+  unlinkSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -14,9 +15,9 @@ import { formatStatus, renderTracksPreview, validateProject, writeTracks } from 
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
 import {
   applyExecutionCheckpoint, applyExecutionFinish, applyExecutionNodeUpdate, applyExecutionNodesUpdate,
-  applyExecutionStart, executionStatus, previewExecutionCheckpoint, previewExecutionFinish,
+  applyExecutionStart, compactExecutionStatus, executionStatus, previewExecutionCheckpoint, previewExecutionFinish,
   previewExecutionNodeUpdate, previewExecutionNodesUpdate, previewExecutionStart,
-  type ExecutionNodeStatus
+  type ExecutionJournal, type ExecutionNodeStatus
 } from "../src/domain/execution.js";
 import {
   applyWorktreeCleanup, applyWorktreeCreate, applyWorktreeIntegration, managedWorktreeStatus,
@@ -38,10 +39,17 @@ import {
   normalizeWorkflowElicitation,
   supportsFormElicitation
 } from "../src/mcp/elicitation.js";
+import { ProposalTokenStore } from "../src/mcp/proposals.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateRoot = join(root, "templates", "v1", "init");
 const providerRoot = join(root, "templates", "v1");
+
+function childEnvironment(overrides: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries({ ...process.env, ...overrides }).filter((entry): entry is [string, string] => entry[1] != null)
+  );
+}
 
 function fixture() {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-test-"));
@@ -52,7 +60,7 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.2.0";
+  project.runtimeVersion = "3.3.0";
   project.templateSetVersion = "v1";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
@@ -89,6 +97,79 @@ function runState(projectRoot: string, command: "render" | "validate" | "status"
   if (!expectFailure && status !== 0) throw new Error(stderr || stdout);
   return { status, stdout, stderr };
 }
+
+test("proposal tokens remain compact and bind server-retained input by kind", () => {
+  const proposalRoot = join(mkdtempSync(join(tmpdir(), "cadre-proposals-")), "runtime", "proposals");
+  let now = new Date("2026-08-08T00:00:00.000Z");
+  const options = { root: proposalRoot, now: () => now };
+  const proposals = new ProposalTokenStore(options);
+  const input = { content: "x".repeat(512 * 1024), nested: { approved: true } };
+  const digest = "a".repeat(64);
+  const token = proposals.issue("large_proposal", input, digest);
+
+  assert.ok(token.length < 64, `expected a compact proposal token, got ${token.length} characters`);
+  assert.deepEqual(new ProposalTokenStore(options).resolve("large_proposal", token), { input, digest });
+  assert.throws(() => proposals.resolve("other_proposal", token), /large_proposal, not other_proposal/);
+  assert.throws(
+    () => new ProposalTokenStore({ root: join(dirname(proposalRoot), "other") }).resolve("large_proposal", token),
+    /unknown or no longer retained/
+  );
+
+  const symlinkToken = proposals.issue("large_proposal", input, digest);
+  const symlinkPath = join(proposalRoot, `${symlinkToken}.json`);
+  unlinkSync(symlinkPath);
+  symlinkSync(join(proposalRoot, `${token}.json`), symlinkPath);
+  assert.throws(() => proposals.resolve("large_proposal", symlinkToken), /symbolic link/);
+
+  now = new Date("2026-08-16T00:00:00.000Z");
+  assert.throws(() => proposals.resolve("large_proposal", token), /expired/);
+  assert.equal(existsSync(join(proposalRoot, `${token}.json`)), false);
+});
+
+test("compact execution status scales with scheduling state instead of journal size", () => {
+  const nodes: ExecutionJournal["nodes"] = {
+    P1: {
+      id: "P1", kind: "phase", phaseId: "P1", dependencies: [], status: "running",
+      workerId: null, worktreePath: null, branch: null, workerCommit: null, mergeCommit: null,
+      verification: null, approval: null, blocker: null
+    }
+  };
+  for (let number = 1; number <= 49; number += 1) {
+    const id = `T1.${number}`;
+    nodes[id] = {
+      id, kind: "task", phaseId: "P1", dependencies: [], status: "pending",
+      workerId: null, worktreePath: null, branch: null, workerCommit: null, mergeCommit: null,
+      verification: null, approval: null, blocker: null
+    };
+  }
+  const journal: ExecutionJournal = {
+    schemaVersion: 1,
+    executionId: "large-1",
+    trackId: "large-track",
+    status: "in_progress",
+    checkpoint: "P1:running",
+    requestedMode: "parallel",
+    effectiveMode: "parallel",
+    approvalMode: "phase",
+    maxWorkers: 3,
+    planRevision: 1,
+    planCommit: "1111111",
+    graphDigest: "a".repeat(64),
+    baseCommit: "1111111",
+    startedAt: "2026-08-08T00:00:00.000Z",
+    completedAt: null,
+    headCommit: null,
+    nodes
+  };
+
+  const compact = compactExecutionStatus(journal);
+  assert.equal(compact.derivedStatus.readyTasks.length, 49);
+  assert.deepEqual(compact.actionableNodes.map((node) => node.id), ["P1"]);
+  assert.ok(Buffer.byteLength(JSON.stringify(compact)) < 8 * 1024);
+  const focused = compactExecutionStatus(journal, "T1.1");
+  assert.equal(focused.node?.id, "T1.1");
+  assert.equal(focused.derivedStatus.eventGuidance["T1.1"]?.currentStatus, "pending");
+});
 
 function writePlannedTrack(projectRoot: string, trackId = "parallel-track"): string {
   const trackRoot = join(projectRoot, ".cadre", "tracks", trackId);
@@ -1026,7 +1107,7 @@ test("approved create operation remains valid before its artifact commit", () =>
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.2.0";
+  project.runtimeVersion = "3.3.0";
   project.templateSetVersion = "v1";
   project.project.name = "Interrupted setup";
   project.project.context = "greenfield";
@@ -1341,8 +1422,8 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.2.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.2.0+claude.test-build");
+  assert.equal(codexManifest.version, "3.3.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.3.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v1", "init", "gitignore.template")));
@@ -1394,9 +1475,9 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.2.0+codex.test-build");
+  assert.equal(previousManifest.version, "3.3.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.2.0+codex.second-build");
+  assert.equal(updatedManifest.version, "3.3.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1536,10 +1617,12 @@ test("workflow elicitation builds bounded approval and clarification forms", () 
 });
 
 test("compiled MCP exposes versioned templates and initializes projects without copied runtime", async () => {
+  const proposalHome = mkdtempSync(join(tmpdir(), "cadre-mcp-home-"));
   const client = new Client({ name: "cadre-test", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [join(root, "dist", "cadre-mcp.mjs")]
+    args: [join(root, "dist", "cadre-mcp.mjs")],
+    env: childEnvironment({ CADRE_HOME: proposalHome })
   });
   await client.connect(transport);
   try {
@@ -1676,13 +1759,50 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (illegalTransition.structuredContent as { error?: { message?: string } }).error?.message ?? "",
       /cannot complete from pending/
     );
+    const checkpointPreview = await client.callTool({
+      name: "execution_checkpoint_preview",
+      arguments: {
+        projectRoot: transitionRoot,
+        trackId: "mcp-transition",
+        executionId: "mcp-transition-1",
+        nodeId: "P1",
+        event: "start"
+      }
+    });
+    assert.equal(checkpointPreview.isError, undefined);
+    assert.ok(Buffer.byteLength(JSON.stringify(checkpointPreview)) < 4 * 1024);
+    assert.equal(Object.hasOwn(checkpointPreview.structuredContent ?? {}, "journal"), false);
+    const checkpointToken = (checkpointPreview.structuredContent as { proposalToken?: string }).proposalToken;
+    assert.ok(checkpointToken);
+    const checkpointApply = await client.callTool({
+      name: "execution_checkpoint_apply",
+      arguments: { proposalToken: checkpointToken }
+    });
+    assert.equal(checkpointApply.isError, undefined);
+    assert.ok(Buffer.byteLength(JSON.stringify(checkpointApply)) < 4 * 1024);
+    assert.equal(Object.hasOwn(checkpointApply.structuredContent ?? {}, "journal"), false);
+    assert.equal(
+      (checkpointApply.structuredContent as { transition?: { to?: string } }).transition?.to,
+      "running"
+    );
+    const compactStatus = await client.callTool({
+      name: "execution_status",
+      arguments: {
+        projectRoot: transitionRoot,
+        trackId: "mcp-transition",
+        executionId: "mcp-transition-1"
+      }
+    });
+    assert.equal(compactStatus.isError, undefined);
+    assert.ok(Buffer.byteLength(JSON.stringify(compactStatus)) < 8 * 1024);
+    assert.equal(Object.hasOwn(compactStatus.structuredContent ?? {}, "journal"), false);
 
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
     const files = [
       ["product.md", "# Product\n"],
       ["guidelines.md", "# Guidelines\n"],
       ["tech-stack.md", "# Tech Stack\n- TypeScript\n"],
-      ["workflow.md", "# Workflow\nRead before edit.\n"],
+      ["workflow.md", readFileSync(join(templateRoot, "workflow.md"), "utf8")],
       ["styleguides/general.md", "# General Styleguide\n"]
     ].map(([path, content]) => ({ path: path!, content: content! }));
     const input = {
@@ -1708,16 +1828,32 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((refreshedPreview.structuredContent as { digest?: string }).digest, digest);
     const proposalToken = (refreshedPreview.structuredContent as { proposalToken?: string }).proposalToken;
     assert.ok(proposalToken);
+    assert.ok(
+      proposalToken.length < 64,
+      `expected a compact project initialization token, got ${proposalToken.length} characters`
+    );
     const wrongApply = await client.callTool({
       name: "tracks_render_apply",
       arguments: { proposalToken }
     });
     assert.equal(wrongApply.isError, true);
-    const applied = await client.callTool({
-      name: "project_init_apply",
-      arguments: { proposalToken }
+    const restartedClient = new Client({ name: "cadre-restart-test", version: "1.0.0" });
+    const restartedTransport = new StdioClientTransport({
+      command: process.execPath,
+      args: [join(root, "dist", "cadre-mcp.mjs")],
+      env: childEnvironment({ CADRE_HOME: proposalHome })
     });
-    assert.equal(applied.isError, undefined);
+    await restartedClient.connect(restartedTransport);
+    try {
+      const applied = await restartedClient.callTool({
+        name: "project_init_apply",
+        arguments: { proposalToken }
+      });
+      assert.equal(applied.isError, undefined);
+      assert.equal(Object.hasOwn(applied.structuredContent ?? {}, "content"), false);
+    } finally {
+      await restartedClient.close();
+    }
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
     const initializedProject = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
     assert.equal(initializedProject.setup.operation.approvedAt, approvedAt);

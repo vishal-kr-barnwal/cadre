@@ -49,7 +49,7 @@ Before creating workers, inspect the approved plan, repository scripts, lockfile
 
 ## Schedule the DAG
 
-The Cadre tools named in this skill are declared contracts: call them directly. Do not list the global tool catalog, rediscover schemas, or probe previews to learn legal transitions. Call `execution_status` when resuming or when no mutation response is available. Use `execution_checkpoint_preview` with a semantic event (`start`, `record_commit`, `record_integration`, `record_verification`, `complete`, `block`, or `resume`); it expands the event into all required legal transitions. Pass only its `proposalToken` to `execution_checkpoint_apply`, then reuse the returned `derivedStatus`.
+The Cadre tools named in this skill are declared contracts: call them directly. Do not list the global tool catalog, rediscover schemas, or probe previews to learn legal transitions. Call compact `execution_status` when resuming or when no mutation response is available; pass `nodeId` only when focused detail is required. Use `execution_checkpoint_preview` with a semantic event (`start`, `record_commit`, `record_integration`, `record_verification`, `complete`, `block`, or `resume`); it expands the event into all required legal transitions and returns a compact receipt. Pass only its `proposalToken` to `execution_checkpoint_apply`, then reuse the returned compact `derivedStatus`; do not request the complete journal after each event.
 
 Never checkpoint evidence before it exists. `record_commit` consumes the verified commit and its authorization; `record_integration` consumes the merge commit and post-merge verification; `record_verification` records a manual barrier. Plan display order breaks scheduling ties only.
 

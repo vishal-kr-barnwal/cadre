@@ -144,6 +144,53 @@ export interface ExecutionDerivedStatus {
   }>;
 }
 
+export interface ExecutionTransitionReceipt {
+  nodeId: string;
+  event: ExecutionCheckpointEvent;
+  from: ExecutionNodeStatus;
+  through: ExecutionNodeStatus[];
+  to: ExecutionNodeStatus;
+  checkpoint: string;
+}
+
+export interface ExecutionSchedulerView {
+  readyPhases: string[];
+  readyTasks: string[];
+  active: string[];
+  blocked: string[];
+  eventGuidance: ExecutionDerivedStatus["eventGuidance"];
+}
+
+export interface ExecutionStatusView {
+  execution: {
+    executionId: string;
+    trackId: string;
+    status: ExecutionJournal["status"];
+    checkpoint: string;
+    requestedMode: ExecutionJournal["requestedMode"];
+    effectiveMode: ExecutionJournal["effectiveMode"];
+    approvalMode: ExecutionApprovalMode;
+    maxWorkers: number;
+    planRevision: number;
+    startedAt: string;
+    completedAt: string | null;
+  };
+  counts: Partial<Record<ExecutionNodeStatus, number>>;
+  actionableNodes: Array<{
+    id: string;
+    kind: ExecutionNode["kind"];
+    phaseId: string;
+    status: ExecutionNodeStatus;
+    dependencies: string[];
+    workerId?: string;
+    worktreePath?: string;
+    branch?: string;
+    blocker?: string;
+  }>;
+  node?: ExecutionNode;
+  derivedStatus: ExecutionSchedulerView;
+}
+
 const SHA = /^[0-9a-f]{7,40}$/;
 const TRACK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EXECUTION_ID = /^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/;
@@ -595,6 +642,71 @@ function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatu
   };
 }
 
+export function executionSchedulerView(
+  journal: ExecutionJournal,
+  focusNodeIds: string[] = []
+): ExecutionSchedulerView {
+  const status = deriveExecutionStatus(journal);
+  const relevant = new Set([
+    ...status.active,
+    ...status.blocked,
+    ...focusNodeIds
+  ]);
+  return {
+    readyPhases: status.readyPhases,
+    readyTasks: status.readyTasks,
+    active: status.active,
+    blocked: status.blocked,
+    eventGuidance: Object.fromEntries(
+      Object.entries(status.eventGuidance).filter(([nodeId]) => relevant.has(nodeId))
+    )
+  };
+}
+
+export function compactExecutionStatus(journal: ExecutionJournal, nodeId?: string): ExecutionStatusView {
+  if (nodeId && !journal.nodes[nodeId]) throw new Error(`unknown execution node ${nodeId}`);
+  const derivedStatus = executionSchedulerView(journal, nodeId ? [nodeId] : []);
+  const actionableIds = new Set([
+    ...derivedStatus.active,
+    ...derivedStatus.blocked
+  ]);
+  const actionableNodes = [...actionableIds].map((id) => {
+    const node = journal.nodes[id]!;
+    return {
+      id: node.id,
+      kind: node.kind,
+      phaseId: node.phaseId,
+      status: node.status,
+      dependencies: node.dependencies,
+      ...(node.workerId ? { workerId: node.workerId } : {}),
+      ...(node.worktreePath ? { worktreePath: node.worktreePath } : {}),
+      ...(node.branch ? { branch: node.branch } : {}),
+      ...(node.blocker ? { blocker: node.blocker } : {})
+    };
+  });
+  const counts: Partial<Record<ExecutionNodeStatus, number>> = {};
+  for (const node of Object.values(journal.nodes)) counts[node.status] = (counts[node.status] ?? 0) + 1;
+  return {
+    execution: {
+      executionId: journal.executionId,
+      trackId: journal.trackId,
+      status: journal.status,
+      checkpoint: journal.checkpoint,
+      requestedMode: journal.requestedMode,
+      effectiveMode: journal.effectiveMode,
+      approvalMode: journal.approvalMode,
+      maxWorkers: journal.maxWorkers,
+      planRevision: journal.planRevision,
+      startedAt: journal.startedAt,
+      completedAt: journal.completedAt
+    },
+    counts,
+    actionableNodes,
+    ...(nodeId ? { node: journal.nodes[nodeId]! } : {}),
+    derivedStatus
+  };
+}
+
 export function executionStatus(projectRoot: string, trackId: string, executionId: string): {
   journal: ExecutionJournal;
 } & ExecutionDerivedStatus {
@@ -726,24 +838,59 @@ function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpoint
   return updates;
 }
 
-export function previewExecutionCheckpoint(input: ExecutionCheckpointInput) {
+export function previewExecutionCheckpoint(input: ExecutionCheckpointInput): ReturnType<typeof previewExecutionNodesUpdate> & {
+  transition: ExecutionTransitionReceipt;
+} {
   const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
-  return previewExecutionNodesUpdate({
+  const from = journal.nodes[input.nodeId]?.status;
+  if (!from) throw new Error(`unknown execution node ${input.nodeId}`);
+  const updates = checkpointUpdates(journal, input);
+  const proposal = previewExecutionNodesUpdate({
     projectRoot: input.projectRoot,
     trackId: input.trackId,
     executionId: input.executionId,
-    updates: checkpointUpdates(journal, input)
+    updates
   });
+  const statuses = updates.map((update) => update.status);
+  return {
+    ...proposal,
+    transition: {
+      nodeId: input.nodeId,
+      event: input.event,
+      from,
+      through: statuses.slice(0, -1),
+      to: statuses.at(-1)!,
+      checkpoint: proposal.journal.checkpoint
+    }
+  };
 }
 
-export function applyExecutionCheckpoint(input: ExecutionCheckpointInput, proposalDigest: string) {
+export function applyExecutionCheckpoint(
+  input: ExecutionCheckpointInput,
+  proposalDigest: string
+): ReturnType<typeof applyExecutionNodesUpdate> & { transition: ExecutionTransitionReceipt } {
   const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
-  return applyExecutionNodesUpdate({
+  const from = journal.nodes[input.nodeId]?.status;
+  if (!from) throw new Error(`unknown execution node ${input.nodeId}`);
+  const updates = checkpointUpdates(journal, input);
+  const applied = applyExecutionNodesUpdate({
     projectRoot: input.projectRoot,
     trackId: input.trackId,
     executionId: input.executionId,
-    updates: checkpointUpdates(journal, input)
+    updates
   }, proposalDigest);
+  const statuses = updates.map((update) => update.status);
+  return {
+    ...applied,
+    transition: {
+      nodeId: input.nodeId,
+      event: input.event,
+      from,
+      through: statuses.slice(0, -1),
+      to: statuses.at(-1)!,
+      checkpoint: applied.journal.checkpoint
+    }
+  };
 }
 
 export interface ExecutionFinishInput {

@@ -11,8 +11,10 @@ The `cadre` stdio server exposes immutable template resources and 35
 purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
 arbitrary filesystem/shell operations.
 
-Every mutation preview returns an opaque, apply-ready `proposalToken` that binds
-the normalized input and digest. Apply tools accept only that token. Tool failures set the MCP error flag and
+Every mutation preview returns a compact, opaque, apply-ready `proposalToken`
+that resolves to the normalized input and digest retained in Cadre's bounded
+user-local runtime cache. Apply tools accept only that token, and a token can
+survive an MCP server restart until it expires or is evicted. Tool failures set the MCP error flag and
 return structured `{ error: { code, message, details? } }` content; callers do
 not need to parse human-readable text to recover transition guidance.
 
@@ -132,17 +134,21 @@ digest remains current.
 
 Accepts one semantic event—`start`, `record_commit`, `record_integration`,
 `record_verification`, `complete`, `block`, or `resume`—and expands it into the
-complete legal node-transition sequence with required evidence. Read-only.
+complete legal node-transition sequence with required evidence. It returns a
+compact transition receipt rather than the complete execution journal. Read-only.
 
 ## execution_checkpoint_apply
 
-Applies the previewed semantic checkpoint atomically from its proposal token.
+Applies the previewed semantic checkpoint atomically from its proposal token
+and returns the changed-node receipt plus compact scheduling state.
 
 ## execution_status
 
-Reads an execution journal and derives ready phases, ready tasks within running
-phases, active nodes, blockers, and per-node semantic `eventGuidance` with
-required evidence fields. Read-only.
+Reads an execution journal and returns a compact scheduler view: execution
+metadata, status counts, ready phases/tasks, active nodes, blockers, and
+guidance for active or blocked nodes. Pass optional `nodeId` for complete detail
+and guidance about one node. The complete journal remains canonical on disk and
+is not echoed through this tool. Read-only.
 
 ## execution_finish_preview
 
@@ -197,7 +203,8 @@ directories. Read-only.
 
 Validates approved rendered project files, project identity/context, Git
 disposition, and base commit; returns the proposed `.cadre/` file set and
-semantic digest. The `approvedAt` audit timestamp is shown and recorded but
+semantic digest as a path/SHA-256 manifest without echoing file content. The
+`approvedAt` audit timestamp is shown and recorded but
 does not affect the digest. Read-only.
 
 ## project_init_apply

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,8 +35,10 @@ import {
   applyExecutionCheckpoint,
   applyExecutionFinish,
   applyExecutionStart,
+  compactExecutionStatus,
   deriveExecutionFinishInput,
   deriveExecutionStartInput,
+  executionSchedulerView,
   executionStatus,
   previewExecutionCheckpoint,
   previewExecutionFinish,
@@ -83,7 +86,7 @@ import {
 } from "./elicitation.js";
 import { serializeCadreError } from "../domain/errors.js";
 import { resolveGitCommit } from "../domain/git.js";
-import { decodeProposalToken, encodeProposalToken, proposalTokenSchema } from "./proposals.js";
+import { ProposalTokenStore, proposalTokenSchema } from "./proposals.js";
 
 function result<T extends object>(value: T, summary?: string) {
   return {
@@ -92,11 +95,16 @@ function result<T extends object>(value: T, summary?: string) {
   };
 }
 
-function proposalResult<T extends object & { digest: string }>(kind: string, input: unknown, value: T) {
-  return result({
-    ...value,
-    proposalToken: encodeProposalToken(kind, input, value.digest)
-  });
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function artifact(path: string, content: string) {
+  return { path, sha256: sha256(content) };
+}
+
+function jsonArtifact(path: string, value: unknown) {
+  return artifact(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function proposalInputSchema() {
@@ -133,6 +141,14 @@ const PLAN_VALIDATION_STATUSES = [
 const MAX_DRAFT_PLAN_CHARACTERS = 256 * 1024;
 
 export function createCadreServer(): McpServer {
+  const proposalTokens = new ProposalTokenStore();
+  function proposalResult<T extends object & { digest: string }>(kind: string, input: unknown, value: T) {
+    return result({
+      ...value,
+      proposalToken: proposalTokens.issue(kind, input, value.digest)
+    });
+  }
+
   const server = new McpServer(
     { name: "cadre", version: CADRE_RUNTIME_VERSION },
     {
@@ -318,7 +334,18 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const derived = deriveReviewCompleteInput(input as ReviewCompleteRequest);
-      return proposalResult("review_complete", derived, previewReviewComplete(derived));
+      const preview = previewReviewComplete(derived);
+      return proposalResult("review_complete", derived, {
+        digest: preview.digest,
+        trackId: derived.trackId,
+        reviewedHead: derived.reviewedHead,
+        commitRange: derived.commitRange,
+        targetStatus: preview.state.status,
+        files: [
+          jsonArtifact(preview.statePath, preview.state),
+          artifact(preview.tracksPath, preview.tracksContent)
+        ]
+      });
     } catch (error) {
       return failure(error);
     }
@@ -331,8 +358,18 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ReviewCompleteInput>("review_complete", proposalToken);
-      return result(applyReviewComplete(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ReviewCompleteInput>("review_complete", proposalToken);
+      const applied = applyReviewComplete(proposal.input, proposal.digest);
+      return result({
+        trackId: proposal.input.trackId,
+        status: applied.state.status,
+        files: [
+          jsonArtifact(applied.statePath, applied.state),
+          artifact(applied.tracksPath, applied.tracksContent)
+        ],
+        valid: applied.valid,
+        derivedStateCurrent: applied.derivedStateCurrent
+      });
     } catch (error) {
       return failure(error);
     }
@@ -360,7 +397,20 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const derived = deriveArchiveBatchInput(input as ArchiveBatchRequest);
-      return proposalResult("archive_batch", derived, previewArchiveBatch(derived));
+      const preview = previewArchiveBatch(derived);
+      return proposalResult("archive_batch", derived, {
+        digest: preview.digest,
+        batchId: derived.batchId,
+        selectedTracks: derived.selectedTracks,
+        operationPath: preview.operationPath,
+        checkpoint: preview.operation.checkpoint,
+        resuming: preview.resuming,
+        moves: preview.moves.map(({ trackId, sourcePath, targetPath, needsMove }) => ({
+          trackId, sourcePath, targetPath, needsMove
+        })),
+        writes: preview.writes.map((write) => artifact(write.path, write.content)),
+        tracks: artifact(preview.tracksPath, preview.tracksContent)
+      });
     } catch (error) {
       return failure(error);
     }
@@ -373,8 +423,19 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ArchiveBatchInput>("archive_batch", proposalToken);
-      return result(applyArchiveBatch(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ArchiveBatchInput>("archive_batch", proposalToken);
+      const applied = applyArchiveBatch(proposal.input, proposal.digest);
+      return result({
+        batchId: proposal.input.batchId,
+        selectedTracks: proposal.input.selectedTracks,
+        operationPath: applied.operationPath,
+        checkpoint: applied.operation.checkpoint,
+        moves: applied.moves.map(({ trackId, targetPath }) => ({ trackId, targetPath })),
+        writes: applied.writes.map((write) => artifact(write.path, write.content)),
+        tracks: artifact(applied.tracksPath, applied.tracksContent),
+        valid: applied.valid,
+        derivedStateCurrent: applied.derivedStateCurrent
+      });
     } catch (error) {
       return failure(error);
     }
@@ -393,7 +454,18 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const derived = deriveArchiveBatchRecordInput(input as ArchiveBatchRecordRequest);
-      return proposalResult("archive_batch_record", derived, previewArchiveBatchRecord(derived));
+      const preview = previewArchiveBatchRecord(derived);
+      return proposalResult("archive_batch_record", derived, {
+        digest: preview.digest,
+        batchId: derived.batchId,
+        archiveCommit: derived.archiveCommit,
+        checkpoint: preview.operation.checkpoint,
+        files: [
+          jsonArtifact(preview.operationPath, preview.operation),
+          jsonArtifact(preview.projectPath, preview.project),
+          ...preview.states.map((state) => jsonArtifact(state.path, state.state))
+        ]
+      });
     } catch (error) {
       return failure(error);
     }
@@ -406,8 +478,20 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ArchiveBatchRecordInput>("archive_batch_record", proposalToken);
-      return result(applyArchiveBatchRecord(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ArchiveBatchRecordInput>("archive_batch_record", proposalToken);
+      const applied = applyArchiveBatchRecord(proposal.input, proposal.digest);
+      return result({
+        batchId: proposal.input.batchId,
+        archiveCommit: proposal.input.archiveCommit,
+        checkpoint: applied.operation.checkpoint,
+        files: [
+          jsonArtifact(applied.operationPath, applied.operation),
+          jsonArtifact(applied.projectPath, applied.project),
+          ...applied.states.map((state) => jsonArtifact(state.path, state.state))
+        ],
+        valid: applied.valid,
+        derivedStateCurrent: applied.derivedStateCurrent
+      });
     } catch (error) {
       return failure(error);
     }
@@ -429,7 +513,23 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const derived = deriveExecutionStartInput(input as ExecutionStartRequest);
-      return proposalResult("execution_start", derived, previewExecutionStart(derived));
+      const preview = previewExecutionStart(derived);
+      return proposalResult("execution_start", derived, {
+        digest: preview.digest,
+        journalPath: preview.journalPath,
+        statePath: preview.statePath,
+        execution: {
+          executionId: preview.journal.executionId,
+          trackId: preview.journal.trackId,
+          checkpoint: preview.journal.checkpoint,
+          requestedMode: preview.journal.requestedMode,
+          effectiveMode: preview.journal.effectiveMode,
+          approvalMode: preview.journal.approvalMode,
+          maxWorkers: preview.journal.maxWorkers,
+          nodeCount: Object.keys(preview.journal.nodes).length
+        },
+        derivedStatus: executionSchedulerView(preview.journal)
+      });
     } catch (error) {
       return failure(error);
     }
@@ -442,8 +542,19 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ExecutionStartInput>("execution_start", proposalToken);
-      return result(applyExecutionStart(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ExecutionStartInput>("execution_start", proposalToken);
+      const applied = applyExecutionStart(proposal.input, proposal.digest);
+      return result({
+        journalPath: applied.journalPath,
+        statePath: applied.statePath,
+        execution: {
+          executionId: applied.journal.executionId,
+          trackId: applied.journal.trackId,
+          checkpoint: applied.journal.checkpoint,
+          nodeCount: Object.keys(applied.journal.nodes).length
+        },
+        derivedStatus: executionSchedulerView(applied.journal)
+      });
     } catch (error) {
       return failure(error);
     }
@@ -474,10 +585,16 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
+      const preview = previewExecutionCheckpoint(input as ExecutionCheckpointInput);
       return proposalResult(
         "execution_checkpoint",
         input,
-        previewExecutionCheckpoint(input as ExecutionCheckpointInput)
+        {
+          path: preview.path,
+          digest: preview.digest,
+          transition: preview.transition,
+          checkpoint: preview.journal.checkpoint
+        }
       );
     } catch (error) {
       return failure(error);
@@ -491,8 +608,14 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ExecutionCheckpointInput>("execution_checkpoint", proposalToken);
-      return result(applyExecutionCheckpoint(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ExecutionCheckpointInput>("execution_checkpoint", proposalToken);
+      const applied = applyExecutionCheckpoint(proposal.input, proposal.digest);
+      return result({
+        path: applied.path,
+        transition: applied.transition,
+        checkpoint: applied.journal.checkpoint,
+        derivedStatus: executionSchedulerView(applied.journal, [proposal.input.nodeId])
+      });
     } catch (error) {
       return failure(error);
     }
@@ -504,12 +627,14 @@ export function createCadreServer(): McpServer {
     inputSchema: {
       projectRoot: z.string().min(1),
       trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-      executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
+      executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
+      nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/).optional()
     },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return result(executionStatus(input.projectRoot, input.trackId, input.executionId));
+      const status = executionStatus(input.projectRoot, input.trackId, input.executionId);
+      return result(compactExecutionStatus(status.journal, input.nodeId));
     } catch (error) {
       return failure(error);
     }
@@ -529,7 +654,20 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const derived = deriveExecutionFinishInput(input as ExecutionFinishRequest);
-      return proposalResult("execution_finish", derived, previewExecutionFinish(derived));
+      const preview = previewExecutionFinish(derived);
+      return proposalResult("execution_finish", derived, {
+        digest: preview.digest,
+        executionId: derived.executionId,
+        targetStatus: preview.state.status,
+        headCommit: derived.headCommit,
+        completedAt: derived.completedAt,
+        files: [
+          jsonArtifact(preview.journalPath, preview.journal),
+          jsonArtifact(preview.statePath, preview.state),
+          artifact(preview.planPath, preview.planContent),
+          artifact(preview.tracksPath, preview.tracksContent)
+        ]
+      });
     } catch (error) {
       return failure(error);
     }
@@ -542,8 +680,20 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ExecutionFinishInput>("execution_finish", proposalToken);
-      return result(applyExecutionFinish(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ExecutionFinishInput>("execution_finish", proposalToken);
+      const applied = applyExecutionFinish(proposal.input, proposal.digest);
+      return result({
+        executionId: proposal.input.executionId,
+        status: applied.journal.status,
+        checkpoint: applied.journal.checkpoint,
+        headCommit: applied.journal.headCommit,
+        files: [
+          jsonArtifact(applied.journalPath, applied.journal),
+          jsonArtifact(applied.statePath, applied.state),
+          artifact(applied.planPath, applied.planContent),
+          artifact(applied.tracksPath, applied.tracksContent)
+        ]
+      });
     } catch (error) {
       return failure(error);
     }
@@ -576,7 +726,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<WorktreeCreateInput>("worktree_create", proposalToken);
+      const proposal = proposalTokens.resolve<WorktreeCreateInput>("worktree_create", proposalToken);
       return result(applyWorktreeCreate(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
@@ -603,7 +753,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<WorktreeIntegrationInput>("worktree_integrate", proposalToken);
+      const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_integrate", proposalToken);
       return result(applyWorktreeIntegration(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
@@ -630,7 +780,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<WorktreeIntegrationInput>("worktree_cleanup", proposalToken);
+      const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_cleanup", proposalToken);
       return result(applyWorktreeCleanup(proposal.input, proposal.digest));
     } catch (error) {
       return failure(error);
@@ -668,7 +818,13 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult("project_init", input, previewProjectInit(input as ProjectInitInput));
+      const preview = previewProjectInit(input as ProjectInitInput);
+      return proposalResult("project_init", input, {
+        runtimeVersion: preview.runtimeVersion,
+        templateSetVersion: preview.templateSetVersion,
+        files: preview.files.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
+        digest: preview.digest
+      });
     } catch (error) {
       return failure(error);
     }
@@ -681,8 +837,14 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<ProjectInitInput>("project_init", proposalToken);
-      return result(applyProjectInit(proposal.input, proposal.digest));
+      const proposal = proposalTokens.resolve<ProjectInitInput>("project_init", proposalToken);
+      const applied = applyProjectInit(proposal.input, proposal.digest);
+      return result({
+        runtimeVersion: applied.runtimeVersion,
+        templateSetVersion: applied.templateSetVersion,
+        files: applied.files.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
+        digest: applied.digest
+      });
     } catch (error) {
       return failure(error);
     }
@@ -723,7 +885,12 @@ export function createCadreServer(): McpServer {
   }, async ({ projectRoot }) => {
     try {
       const input = { projectRoot: safeProjectRoot(projectRoot) };
-      return proposalResult("tracks_render", input, renderTracksPreview(input.projectRoot));
+      const preview = renderTracksPreview(input.projectRoot);
+      return proposalResult("tracks_render", input, {
+        path: preview.path,
+        sha256: sha256(preview.content),
+        digest: preview.digest
+      });
     } catch (error) {
       return failure(error);
     }
@@ -736,7 +903,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async ({ proposalToken }) => {
     try {
-      const proposal = decodeProposalToken<{ projectRoot: string }>("tracks_render", proposalToken);
+      const proposal = proposalTokens.resolve<{ projectRoot: string }>("tracks_render", proposalToken);
       return result({ path: writeTracks(proposal.input.projectRoot, proposal.digest) });
     } catch (error) {
       return failure(error);
