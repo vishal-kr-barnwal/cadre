@@ -126,8 +126,12 @@ export function previewWorktreeCreate(input: WorktreeCreateInput): {
   return { ...proposal, digest: hash(proposal) };
 }
 
-export function applyWorktreeCreate(input: WorktreeCreateInput, proposalDigest: string): ReturnType<typeof previewWorktreeCreate> {
-  const proposal = previewWorktreeCreate(input);
+export function applyWorktreeCreate(
+  input: WorktreeCreateInput,
+  proposalDigest: string,
+  preparedProposal?: ReturnType<typeof previewWorktreeCreate>
+): ReturnType<typeof previewWorktreeCreate> {
+  const proposal = preparedProposal ?? previewWorktreeCreate(input);
   if (proposal.digest !== proposalDigest) throw new Error("worktree proposal is stale; preview it again");
   if (proposal.existing) return proposal;
   const existingBranch = branchHead(proposal.projectRoot, proposal.branch);
@@ -251,13 +255,17 @@ export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
   return { ...proposal, digest: hash(proposal) };
 }
 
-export function applyWorktreeIntegration(input: WorktreeIntegrationInput, proposalDigest: string): {
+export function applyWorktreeIntegration(
+  input: WorktreeIntegrationInput,
+  proposalDigest: string,
+  preparedProposal?: ReturnType<typeof previewWorktreeIntegration>
+): {
   status: "integrated" | "conflicted";
   mergeCommit: string | null;
   conflicts: string[];
   targetPath: string;
 } {
-  const proposal = previewWorktreeIntegration(input);
+  const proposal = preparedProposal ?? previewWorktreeIntegration(input);
   if (proposal.digest !== proposalDigest) throw new Error("integration proposal is stale; preview it again");
   if (proposal.alreadyIntegrated) {
     return { status: "integrated", mergeCommit: proposal.targetHead, conflicts: [], targetPath: proposal.targetPath };
@@ -304,11 +312,15 @@ export function previewWorktreeCleanup(input: WorktreeIntegrationInput): {
   return { ...proposal, digest: hash(proposal) };
 }
 
-export function applyWorktreeCleanup(input: WorktreeIntegrationInput, proposalDigest: string): {
+export function applyWorktreeCleanup(
+  input: WorktreeIntegrationInput,
+  proposalDigest: string,
+  preparedProposal?: ReturnType<typeof previewWorktreeCleanup>
+): {
   removedPath: string;
   removedBranch: string;
 } {
-  const proposal = previewWorktreeCleanup(input);
+  const proposal = preparedProposal ?? previewWorktreeCleanup(input);
   if (proposal.digest !== proposalDigest) throw new Error("cleanup proposal is stale; preview it again");
   const root = assertRepository(input.projectRoot);
   git(root, ["worktree", "remove", proposal.path]);
@@ -321,6 +333,10 @@ export function applyWorktreeCleanup(input: WorktreeIntegrationInput, proposalDi
     directory = dirname(directory);
   }
   return { removedPath: proposal.path, removedBranch: proposal.branch };
+}
+
+export function integrationRequiresApproval(input: WorktreeIntegrationInput): boolean {
+  return (readExecution(input.projectRoot, input.trackId, input.executionId).approvalMode ?? "governed") === "governed";
 }
 
 export function managedWorktreeStatus(projectRoot: string): {

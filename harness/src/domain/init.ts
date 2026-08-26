@@ -5,29 +5,41 @@ import {
 import { dirname } from "node:path";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { buildTracks } from "./state.js";
+import { candidateStageRoot, listCandidatePaths, readCandidateFiles } from "./staging.js";
 import { getTemplates } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { safeProjectRoot } from "./paths.js";
+import { readGitFileAtCommit } from "./git.js";
 
 export { CADRE_RUNTIME_VERSION } from "./version.js";
 export { safeProjectRoot } from "./paths.js";
 
-export interface ApprovedFile {
+interface MaterializedArtifact {
   path: string;
   content: string;
 }
 
-export interface ProjectInitInput {
+interface MaterializedProjectInit {
   projectRoot: string;
   projectName: string;
   context: "greenfield" | "brownfield";
   gitDisposition: "existing" | "initialize";
   baseCommit: string | null;
   approvedAt: string;
-  files: ApprovedFile[];
+  files: MaterializedArtifact[];
 }
 
-export interface ProposedFile extends ApprovedFile {
+export interface ProjectInitCandidateInput {
+  projectRoot: string;
+  projectName: string;
+  context: "greenfield" | "brownfield";
+  gitDisposition: "existing" | "initialize";
+  baseCommit: string | null;
+  approvedAt: string;
+  stagedFiles: string[];
+}
+
+export interface ProposedFile extends MaterializedArtifact {
   sha256: string;
 }
 
@@ -61,6 +73,11 @@ function normalizeCadrePath(input: string): string {
   if (normalized.startsWith("../") || normalized.includes("/../") || normalized === "..") {
     throw new Error(`Cadre artifact path escapes the project: ${input}`);
   }
+  if (normalized.startsWith("init/")) {
+    throw new Error(
+      `Initialization artifacts are relative to .cadre-stage/create; use ${normalized.slice("init/".length)} instead of ${normalized}`
+    );
+  }
   if (!REQUIRED_APPROVED_FILES.has(normalized) && !/^styleguides\/[a-z0-9-]+\.md$/.test(normalized)) {
     throw new Error(`Unsupported initialization artifact: ${input}`);
   }
@@ -71,7 +88,12 @@ function assertRendered(content: string, path: string): void {
   if (/\{\{[^}]+\}\}/.test(content)) throw new Error(`${path} contains unresolved template placeholders`);
 }
 
-function projectState(input: ProjectInitInput, approvedPaths: string[], template: string): string {
+function projectState(
+  input: MaterializedProjectInit,
+  approvedPaths: string[],
+  approvedArtifactHashes: Array<{ path: string; sha256: string }>,
+  template: string
+): string {
   const state = JSON.parse(template) as {
     runtimeVersion?: string;
     templateSetVersion?: string;
@@ -86,6 +108,7 @@ function projectState(input: ProjectInitInput, approvedPaths: string[], template
         repositoryRoot: string;
         gitDisposition: string;
         approvedArtifacts: string[];
+        approvedArtifactHashes: Array<{ path: string; sha256: string }>;
         approvedAt: string;
       };
     };
@@ -101,11 +124,12 @@ function projectState(input: ProjectInitInput, approvedPaths: string[], template
   state.setup.operation.repositoryRoot = safeProjectRoot(input.projectRoot);
   state.setup.operation.gitDisposition = input.gitDisposition;
   state.setup.operation.approvedArtifacts = approvedPaths;
+  state.setup.operation.approvedArtifactHashes = approvedArtifactHashes;
   state.setup.operation.approvedAt = input.approvedAt;
   return `${JSON.stringify(state, null, 2)}\n`;
 }
 
-export function previewProjectInit(input: ProjectInitInput): ProjectInitProposal {
+function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitProposal {
   const root = safeProjectRoot(input.projectRoot);
   if (existsSync(join(root, ".cadre"))) throw new Error(`${root}/.cadre already exists`);
   if (!input.projectName.trim()) throw new Error("Project name is required");
@@ -126,13 +150,14 @@ export function previewProjectInit(input: ProjectInitInput): ProjectInitProposal
   }
 
   const approvedPaths = [...approved.keys()].sort();
+  const approvedArtifactHashes = approvedPaths.map((path) => ({ path, sha256: hash(approved.get(path)!) }));
   const [gitignoreTemplate, projectTemplate, patternIndexTemplate] = getTemplates([
     "project/gitignore", "project/project", "project/patterns/index"
   ]);
   const generated = new Map<string, string>([
     ...approved.entries(),
     [".gitignore", gitignoreTemplate!.content],
-    ["project.json", projectState(input, approvedPaths, projectTemplate!.content)],
+    ["project.json", projectState(input, approvedPaths, approvedArtifactHashes, projectTemplate!.content)],
     ["patterns/index.md", patternIndexTemplate!.content],
     ["tracks.md", buildTracks([])],
     ["operations/.gitkeep", ""],
@@ -149,6 +174,23 @@ export function previewProjectInit(input: ProjectInitInput): ProjectInitProposal
     files: files.map((file) => ({ path: file.path, sha256: proposalFileHash(file) }))
   }));
   return { runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, files, digest };
+}
+
+function loadProjectInitCandidate(input: ProjectInitCandidateInput): MaterializedProjectInit {
+  const stagedFiles = input.stagedFiles.map(normalizeCadrePath).sort();
+  const actualFiles = listCandidatePaths(input.projectRoot, "create");
+  if (JSON.stringify(actualFiles) !== JSON.stringify(stagedFiles)) {
+    throw new Error(
+      `Initialization candidate manifest differs from staged files; expected ${stagedFiles.join(", ")}, found ${actualFiles.join(", ")}`
+    );
+  }
+  const files = readCandidateFiles(input.projectRoot, "create", stagedFiles)
+    .map(({ path, content }) => ({ path, content }));
+  return { ...input, files };
+}
+
+export function previewProjectInitCandidate(input: ProjectInitCandidateInput): ProjectInitProposal {
+  return buildProjectInitProposal(loadProjectInitCandidate(input));
 }
 
 function targetWithin(root: string, relativePath: string): string {
@@ -168,11 +210,13 @@ function assertNoSymlinkPath(root: string, target: string): void {
   }
 }
 
-export function applyProjectInit(input: ProjectInitInput, proposalDigest: string): ProjectInitProposal {
-  const proposal = previewProjectInit(input);
-  if (proposal.digest !== proposalDigest) throw new Error("Initialization proposal digest does not match; preview again");
+function applyProjectInitAtStage(
+  input: MaterializedProjectInit,
+  proposal: ProjectInitProposal,
+  stage: string,
+  replaceablePaths: Set<string> = new Set()
+): ProjectInitProposal {
   const projectRoot = safeProjectRoot(input.projectRoot);
-  const stage = join(projectRoot, `.cadre-init-${proposal.digest.slice(0, 12)}`);
   if (existsSync(stage) && (!lstatSync(stage).isDirectory() || lstatSync(stage).isSymbolicLink())) {
     throw new Error(`Initialization stage is not a regular directory: ${stage}`);
   }
@@ -183,7 +227,10 @@ export function applyProjectInit(input: ProjectInitInput, proposalDigest: string
     mkdirSync(dirname(target), { recursive: true });
     if (existsSync(target)) {
       const current = readFileSync(target, "utf8");
-      if (current !== file.content) throw new Error(`Interrupted initialization disagrees at ${file.path}`);
+      if (current !== file.content) {
+        if (!replaceablePaths.has(file.path)) throw new Error(`Interrupted initialization disagrees at ${file.path}`);
+        writeFileSync(target, file.content);
+      }
     } else writeFileSync(target, file.content);
   }
   const finalRoot = join(projectRoot, ".cadre");
@@ -192,16 +239,49 @@ export function applyProjectInit(input: ProjectInitInput, proposalDigest: string
   return proposal;
 }
 
+export function applyProjectInitCandidate(
+  input: ProjectInitCandidateInput,
+  proposalDigest: string
+): ProjectInitProposal {
+  const materialized = loadProjectInitCandidate(input);
+  const proposal = buildProjectInitProposal(materialized);
+  if (proposal.digest !== proposalDigest) {
+    throw new Error("Initialization candidate changed after preview; preview it again");
+  }
+  const stage = candidateStageRoot(input.projectRoot, "create");
+  const replaceablePaths = new Set(materialized.files.map((file) => normalizeCadrePath(file.path)));
+  return applyProjectInitAtStage(materialized, proposal, stage, replaceablePaths);
+}
+
 export function recordSetupCommit(projectRootInput: string, commit: string): string {
   if (!/^[0-9a-f]{7,40}$/.test(commit)) throw new Error("commit must be a hexadecimal Git commit SHA");
   const root = safeProjectRoot(projectRootInput);
   const path = join(root, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & {
-    setup?: Record<string, unknown> & { operation?: Record<string, unknown> | null };
+    setup?: Record<string, unknown> & {
+      operation?: (Record<string, unknown> & {
+        approvedArtifactHashes?: Array<{ path: string; sha256: string }>;
+      }) | null;
+    };
     history?: unknown[];
   };
   if (project.setup?.status !== "in_progress" || project.setup.operation?.action !== "create") {
     throw new Error("Project setup is not awaiting its create commit");
+  }
+  if (project.setup.checkpoint !== "commit-pending") {
+    throw new Error(`Project setup checkpoint is ${String(project.setup.checkpoint)}, not commit-pending`);
+  }
+  for (const artifact of project.setup.operation.approvedArtifactHashes ?? []) {
+    const artifactPath = targetWithin(join(root, ".cadre"), normalizeCadrePath(artifact.path));
+    if (!existsSync(artifactPath) || lstatSync(artifactPath).isSymbolicLink()) {
+      throw new Error(`Approved setup artifact is unavailable: ${artifact.path}`);
+    }
+    if (hash(readFileSync(artifactPath, "utf8")) !== artifact.sha256) {
+      throw new Error(`Approved setup artifact changed before commit recording: ${artifact.path}`);
+    }
+    if (hash(readGitFileAtCommit(root, commit, `.cadre/${artifact.path}`)) !== artifact.sha256) {
+      throw new Error(`Setup commit does not contain the approved artifact: ${artifact.path}`);
+    }
   }
   project.setup.status = "completed";
   project.setup.checkpoint = "completed";

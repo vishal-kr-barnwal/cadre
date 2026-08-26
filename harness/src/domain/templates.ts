@@ -15,6 +15,10 @@ export interface TemplateRecord {
   sha256: string;
 }
 
+export interface TemplateDescriptor extends Omit<TemplateRecord, "relativePath"> {
+  artifactPath?: string;
+}
+
 export const TEMPLATE_IDS = [
   "project/archive-operation",
   "project/gitignore",
@@ -55,6 +59,34 @@ export const TEMPLATE_IDS = [
   "track/spec",
   "track/state"
 ] as const;
+
+const TEMPLATE_ARTIFACT_PATHS: Partial<Record<(typeof TEMPLATE_IDS)[number], string>> = {
+  "project/gitignore": ".gitignore",
+  "project/guidelines": "guidelines.md",
+  "project/patterns/index": "patterns/index.md",
+  "project/product": "product.md",
+  "project/project": "project.json",
+  "project/styleguides/general": "styleguides/general.md",
+  "project/styleguides/language": "styleguides/<language>.md",
+  "project/tech-stack": "tech-stack.md",
+  "project/tracks": "tracks.md",
+  "project/workflow": "workflow.md",
+  "styleguide/dart": "styleguides/dart.md",
+  "styleguide/flutter": "styleguides/flutter.md",
+  "styleguide/go": "styleguides/go.md",
+  "styleguide/gradle": "styleguides/gradle.md",
+  "styleguide/html-css": "styleguides/html-css.md",
+  "styleguide/index": "styleguides/index.md",
+  "styleguide/java": "styleguides/java.md",
+  "styleguide/javascript": "styleguides/javascript.md",
+  "styleguide/kotlin": "styleguides/kotlin.md",
+  "styleguide/maven": "styleguides/maven.md",
+  "styleguide/python": "styleguides/python.md",
+  "styleguide/react": "styleguides/react.md",
+  "styleguide/swift": "styleguides/swift.md",
+  "styleguide/swiftui": "styleguides/swiftui.md",
+  "styleguide/typescript": "styleguides/typescript.md"
+};
 
 let catalogCache: readonly TemplateRecord[] | null = null;
 
@@ -143,6 +175,12 @@ export function getTemplates(ids: string[]): TemplateRecord[] {
     if (!template) throw new Error(`Unknown Cadre template: ${id}`);
     return template;
   });
+}
+
+export function describeTemplate(template: TemplateRecord): TemplateDescriptor {
+  const { relativePath: _sourcePath, ...descriptor } = template;
+  const artifactPath = TEMPLATE_ARTIFACT_PATHS[template.id as (typeof TEMPLATE_IDS)[number]];
+  return artifactPath ? { ...descriptor, artifactPath } : descriptor;
 }
 
 const STYLEGUIDE_RULES: Array<[RegExp, string[]]> = [

@@ -46,6 +46,7 @@ coordinate the `cadre-ai` and `cadre-docs` packages.
 | `agents/` | Claude phase/task worker isolation contracts. |
 | `src/domain/templates.ts` | Immutable template catalog and styleguide resolution. |
 | `src/domain/init.ts` | Digest-gated project initialization and setup checkpoints. |
+| `src/domain/staging.ts` | Safe project-local candidate paths, bounded reads, and manifest inputs. |
 | `src/domain/state.ts` | Project discovery, validation, status, and derived track index. |
 | `src/domain/plan.ts` | Plan parsing and DAG/manual-barrier validation. |
 | `src/domain/execution.ts` | Execution journals, node transitions, and finish gating. |

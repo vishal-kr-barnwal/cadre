@@ -8,6 +8,10 @@
   "expectedCommit": "cadre(refresh): update project context",
   "refreshPath": "refreshes/refresh-{{REFRESH_TS}}.md",
   "approvedArtifacts": ["refreshes/refresh-{{REFRESH_TS}}.md"],
+  "approvalDigest": "{{APPROVAL_DIGEST}}",
+  "approvedArtifactHashes": [
+    { "path": "{{APPROVED_ARTIFACT}}", "sha256": "{{ARTIFACT_SHA256}}" }
+  ],
   "artifactProgress": [],
   "approvedAt": "{{APPROVED_AT}}",
   "refreshCommit": null

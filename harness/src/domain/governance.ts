@@ -4,6 +4,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
+import { readCandidateFiles } from "./staging.js";
 import { isGitAncestor, resolveGitCommit } from "./git.js";
 import {
   buildTracks, cadreRoot, validateProject,
@@ -16,6 +17,10 @@ const BATCH_ID = /^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/;
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function contentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function json(value: unknown): string {
@@ -156,29 +161,51 @@ export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: 
   return { ...proposal, valid: true, derivedStateCurrent: true };
 }
 
-export interface ArchiveContentUpdate {
+interface MaterializedArchiveUpdate {
   path: string;
   content: string;
 }
 
-export interface ArchiveBatchInput {
+interface MaterializedArchiveBatch {
   projectRoot: string;
   batchId: string;
   selectedTracks: string[];
   baseCommit: string;
   approvedAt: string;
-  updates: ArchiveContentUpdate[];
+  updates: MaterializedArchiveUpdate[];
 }
 
-export type ArchiveContentRequest =
+type MaterializedArchiveDescriptor =
   | { kind: "pattern"; slug: string; content: string }
   | { kind: "pattern_index"; content: string }
   | { kind: "active_track_seed"; trackId: string; content: string };
 
-export interface ArchiveBatchRequest {
+export type ArchiveContentCandidate =
+  | { kind: "pattern"; slug: string }
+  | { kind: "pattern_index" }
+  | { kind: "active_track_seed"; trackId: string };
+
+interface MaterializedArchiveRequest {
   projectRoot: string;
   selectedTracks?: string[];
-  updates: ArchiveContentRequest[];
+  updates: MaterializedArchiveDescriptor[];
+}
+
+export interface ArchiveBatchCandidateRequest {
+  projectRoot: string;
+  candidateId: string;
+  selectedTracks?: string[];
+  updates: ArchiveContentCandidate[];
+}
+
+export interface ArchiveBatchCandidateInput {
+  projectRoot: string;
+  candidateId: string;
+  selectedTracks: string[];
+  batchId: string;
+  baseCommit: string;
+  approvedAt: string;
+  updates: ArchiveContentCandidate[];
 }
 
 interface ArchiveMove {
@@ -200,6 +227,7 @@ interface ArchiveOperation {
   selectedTracks: string[];
   completedTracks: string[];
   approvedArtifacts: string[];
+  approvedArtifactHashes: Array<{ path: string; sha256: string }>;
   artifactProgress: string[];
   approvedAt: string;
   approvalDigest: string;
@@ -227,7 +255,7 @@ function dependencyOrder(tracks: DiscoveredTrack[]): string[] {
   return ordered;
 }
 
-export function deriveArchiveBatchInput(input: ArchiveBatchRequest): ArchiveBatchInput {
+function deriveMaterializedArchiveBatch(input: MaterializedArchiveRequest): MaterializedArchiveBatch {
   const root = safeProjectRoot(input.projectRoot);
   const validation = requireCurrentProject(root);
   const operationsPath = join(cadreRoot(root), "operations");
@@ -246,7 +274,7 @@ export function deriveArchiveBatchInput(input: ArchiveBatchRequest): ArchiveBatc
     throw new Error(`active archive batch ${activeOperation.batchId} must be resumed with its original selection`);
   }
   const now = new Date().toISOString();
-  const updates = input.updates.map((update): ArchiveContentUpdate => {
+  const updates = input.updates.map((update): MaterializedArchiveUpdate => {
     if (update.kind === "pattern") {
       if (!TRACK_ID.test(update.slug)) throw new Error(`invalid pattern slug ${update.slug}`);
       return { path: `patterns/${update.slug}.md`, content: update.content };
@@ -263,6 +291,77 @@ export function deriveArchiveBatchInput(input: ArchiveBatchRequest): ArchiveBatc
     approvedAt: activeOperation?.approvedAt ?? now,
     updates
   };
+}
+
+function archiveCandidatePath(update: ArchiveContentCandidate): string {
+  if (update.kind === "pattern") {
+    if (!TRACK_ID.test(update.slug)) throw new Error(`invalid pattern slug ${update.slug}`);
+    return `patterns/${update.slug}.md`;
+  }
+  if (update.kind === "pattern_index") return "patterns/index.md";
+  if (!TRACK_ID.test(update.trackId)) throw new Error(`invalid active track ID ${update.trackId}`);
+  return `tracks/${update.trackId}/learning.md`;
+}
+
+function materializeArchiveCandidateUpdates(
+  projectRoot: string,
+  candidateId: string,
+  updates: ArchiveContentCandidate[]
+): MaterializedArchiveDescriptor[] {
+  const paths = updates.map(archiveCandidatePath);
+  const files = readCandidateFiles(projectRoot, candidateId, paths);
+  return updates.map((update, index): MaterializedArchiveDescriptor => {
+    const content = files[index]!.content;
+    if (update.kind === "pattern") return { ...update, content };
+    if (update.kind === "pattern_index") return { kind: "pattern_index", content };
+    return { ...update, content };
+  });
+}
+
+export function deriveArchiveBatchCandidateInput(
+  input: ArchiveBatchCandidateRequest
+): ArchiveBatchCandidateInput {
+  const materialized = deriveMaterializedArchiveBatch({
+    projectRoot: input.projectRoot,
+    ...(input.selectedTracks ? { selectedTracks: input.selectedTracks } : {}),
+    updates: materializeArchiveCandidateUpdates(input.projectRoot, input.candidateId, input.updates)
+  });
+  return {
+    projectRoot: materialized.projectRoot,
+    candidateId: input.candidateId,
+    selectedTracks: materialized.selectedTracks,
+    batchId: materialized.batchId,
+    baseCommit: materialized.baseCommit,
+    approvedAt: materialized.approvedAt,
+    updates: input.updates
+  };
+}
+
+function loadArchiveBatchCandidate(
+  input: ArchiveBatchCandidateInput
+): MaterializedArchiveBatch {
+  const updates = materializeArchiveCandidateUpdates(input.projectRoot, input.candidateId, input.updates)
+    .map((update): MaterializedArchiveUpdate => {
+      if (update.kind === "pattern") return { path: `patterns/${update.slug}.md`, content: update.content };
+      if (update.kind === "pattern_index") return { path: "patterns/index.md", content: update.content };
+      return { path: `tracks/${update.trackId}/learning.md`, content: update.content };
+    });
+  return {
+    projectRoot: input.projectRoot,
+    batchId: input.batchId,
+    selectedTracks: input.selectedTracks,
+    baseCommit: input.baseCommit,
+    approvedAt: input.approvedAt,
+    updates
+  };
+}
+
+export function previewArchiveBatchCandidate(input: ArchiveBatchCandidateInput) {
+  return previewMaterializedArchiveBatch(loadArchiveBatchCandidate(input));
+}
+
+export function applyArchiveBatchCandidate(input: ArchiveBatchCandidateInput, proposalDigest: string) {
+  return applyMaterializedArchiveBatch(loadArchiveBatchCandidate(input), proposalDigest);
 }
 
 function assertArchiveUpdate(path: string, selected: Set<string>): void {
@@ -287,12 +386,12 @@ function directorySnapshot(path: string): Array<{ path: string; content: string 
   return files;
 }
 
-export function previewArchiveBatch(input: ArchiveBatchInput): {
+function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
   operationPath: string;
   initialOperation: ArchiveOperation;
   operation: ArchiveOperation;
   moves: ArchiveMove[];
-  writes: ArchiveContentUpdate[];
+  writes: MaterializedArchiveUpdate[];
   tracksPath: string;
   tracksContent: string;
   resuming: boolean;
@@ -379,6 +478,7 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
     selectedTracks: [...input.selectedTracks],
     completedTracks: [],
     approvedArtifacts,
+    approvedArtifactHashes: updates.map((update) => ({ path: update.path, sha256: contentHash(update.content) })),
     artifactProgress: [],
     approvedAt: input.approvedAt,
     approvalDigest,
@@ -414,8 +514,8 @@ export function previewArchiveBatch(input: ArchiveBatchInput): {
   };
 }
 
-export function applyArchiveBatch(input: ArchiveBatchInput, proposalDigest: string) {
-  const proposal = previewArchiveBatch(input);
+function applyMaterializedArchiveBatch(input: MaterializedArchiveBatch, proposalDigest: string) {
+  const proposal = previewMaterializedArchiveBatch(input);
   if (proposal.digest !== proposalDigest) throw new Error("archive batch proposal is stale; preview it again");
   const currentOperation = existsSync(proposal.operationPath)
     ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation
@@ -527,8 +627,12 @@ export function previewArchiveBatchRecord(input: ArchiveBatchRecordInput): {
   };
 }
 
-export function applyArchiveBatchRecord(input: ArchiveBatchRecordInput, proposalDigest: string) {
-  const proposal = previewArchiveBatchRecord(input);
+export function applyArchiveBatchRecord(
+  input: ArchiveBatchRecordInput,
+  proposalDigest: string,
+  preparedProposal?: ReturnType<typeof previewArchiveBatchRecord>
+) {
+  const proposal = preparedProposal ?? previewArchiveBatchRecord(input);
   if (proposal.digest !== proposalDigest) throw new Error("archive record proposal is stale; preview it again");
   for (const state of proposal.states) writeApprovedFile(state.path, json(state.state));
   writeApprovedFile(proposal.projectPath, json(proposal.project));

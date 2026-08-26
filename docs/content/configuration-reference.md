@@ -11,6 +11,12 @@ order: 190
 Cadre 3.0 configuration and state are distributed across explicit approved
 artifacts. There is no current `cadre/config.json`.
 
+Unapproved artifact proposals live temporarily beneath
+`<project-root>/.cadre-stage/<candidate-id>/`. They are visible filesystem
+drafts, never canonical `.cadre/` state or Git history. Approval binds their
+path/SHA-256 manifest; the matching stage is retained through the artifact
+commit checkpoint and then removed.
+
 ## Project Artifacts
 
 | Path | Ownership and content |
@@ -27,6 +33,8 @@ artifacts. There is no current `cadre/config.json`.
 `project.json` includes `schemaVersion`, `runtimeVersion`, and
 `templateSetVersion`. Setup state contains status, checkpoint, commit,
 artifact progress, and an operation with repository root and Git disposition.
+In-progress operation journals may also record the approval digest and exact
+approved artifact path/hash entries used for recovery.
 
 ## Track State
 

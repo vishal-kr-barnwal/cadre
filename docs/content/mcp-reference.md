@@ -7,14 +7,16 @@ order: 210
 
 # MCP Reference
 
-The `cadre` stdio server exposes immutable template resources and 35
+The `cadre` stdio server exposes immutable template resources and 25
 purpose-built tools. It does not expose a generic `cadre_workflow` dispatcher or
 arbitrary filesystem/shell operations.
 
-Every mutation preview returns a compact, opaque, apply-ready `proposalToken`
-that resolves to the normalized input and digest retained in Cadre's bounded
-user-local runtime cache. Apply tools accept only that token, and a token can
-survive an MCP server restart until it expires or is evicted. Tool failures set the MCP error flag and
+Adaptive mutation commands validate and apply in one call when the current
+authorization envelope already covers the deterministic consequence. When a
+new human decision is required, the command returns `commandStatus:
+"approval_required"` plus a compact `proposalToken`; after approval, the same
+command accepts only that token. Tokens survive MCP restarts until expiry or
+bounded eviction. Tool failures set the MCP error flag and
 return structured `{ error: { code, message, details? } }` content; callers do
 not need to parse human-readable text to recover transition guidance.
 
@@ -45,12 +47,16 @@ keys, access tokens, payment credentials, or other secrets.
 
 ## template_catalog
 
-Lists logical template IDs, resource URIs, paths, media types, and SHA-256
-hashes. Read-only. Prefer known `template_get_many` bundles in workflow skills.
+Lists logical template IDs, resource URIs, eventual artifact paths when fixed,
+media types, and SHA-256 hashes. Provider package source paths are intentionally
+not exposed. Read-only. Prefer known `template_get_many` bundles in workflow
+skills.
 
 ## template_get
 
-Returns one immutable template by logical `id`. Read-only.
+Returns one immutable template by logical `id`. When the template has a fixed
+destination, `artifactPath` is relative to the relevant `.cadre/` project or
+track root. Provider package source paths are not returned. Read-only.
 
 ## template_get_many
 
@@ -73,74 +79,61 @@ validation, and returns both structured state and a human-readable summary.
 Returns all project, track, plan, learning, dependency, execution, review,
 archive, and derived-index validation errors. Read-only.
 
+## artifact_candidate_manifest
+
+Reads an exact relative file list beneath
+`<project-root>/.cadre-stage/<candidate-id>/` and returns only sorted paths,
+SHA-256 hashes, and an approval-binding digest. Candidate stages reject path
+traversal, symbolic links, non-files, files over 1 MiB, and sets over 8 MiB.
+Read-only.
+
 ## execution_graph_validate
 
 Parses one active track's `plan.md`, validates dependencies/cycles/barriers
 against lifecycle state, and returns the derived graph and errors. Read-only.
 
-## execution_graph_validate_draft
+## execution_graph_validate_candidate
 
-Parses an unapproved plan supplied directly as bounded Markdown, validates its
-dependencies, cycles, derived manual-verification barriers, and intended target
-lifecycle status, and returns the derived graph and errors. It accepts an
-optional diagnostic source label but no project root or track path, so it
-neither reads nor writes project files. Read-only.
+Reads `plan.md` beneath a project-local candidate stage, validates the same
+draft graph and target lifecycle rules, and returns its path and hash with the
+graph result. The Markdown is not transported through MCP. Read-only.
 
-## review_complete_preview
+## review_complete
 
-Previews a clean review cycle, completed track state, and exact derived index.
-Inputs include the range start, approval, and optional accepted risks; the
-server derives and verifies the execution HEAD, range end, and timestamp. Read-only.
+With review evidence, prepares a clean review cycle, completed track state, and
+derived index and returns `approval_required`. After the human decision, the
+same command accepts its token and applies only while the reviewed execution,
+HEAD, accepted risks, state, and index remain unchanged.
 
-## review_complete_apply
+## archive_batch_candidate
 
-Applies the clean-review completion only when the unchanged proposal digest is
-still current.
+Accepts only a candidate ID, selection, and body-free pattern/index/seed
+descriptors. It reads their eventual `.cadre/` relative paths from the
+project-local candidate stage, derives the complete archive proposal, and
+returns `approval_required` while storing only descriptors and metadata behind
+the proposal token. After approval, the same command re-reads every staged
+update and applies only when candidate bytes and project state match. Candidate
+files remain through the archive commit checkpoint for recovery.
 
-## archive_batch_preview
+## archive_batch_record
 
-Previews selected-track moves, completed→archived states, structured
-pattern/index/seed updates, operation journal, expected commits, and post-archive
-index. Omit selection to archive all eligible completed tracks in dependency order.
-The server derives the batch ID, base commit, and timestamp. Read-only.
+Derives the existing archive commit, validates the deterministic provenance
+update, and atomically records it across selected tracks, project history, and
+batch journal in one call.
 
-## archive_batch_apply
+## execution_start
 
-Journals and applies the complete approved archive batch behind its unchanged
-digest.
+Derives, validates, and atomically creates a new execution journal and track
+operation already authorized by the `implement` invocation. Approval mode
+defaults to `phase`; resumes inherit the prior mode.
 
-## archive_batch_record_preview
-
-Previews the follow-up state that records an existing archive commit across
-selected tracks, project history, and batch journal. Read-only.
-
-## archive_batch_record_apply
-
-Records archive commit provenance and completes the batch journal behind a
-stale-state digest.
-
-## execution_start_preview
-
-Previews a new execution journal and track operation for an approved plan. The
-server derives its ID, current base commit, and timestamp. Approval mode defaults
-to `phase` and resumes inherit the prior mode. Read-only.
-
-## execution_start_apply
-
-Creates the execution journal and enters `in_progress` only while the preview
-digest remains current.
-
-## execution_checkpoint_preview
+## execution_checkpoint
 
 Accepts one semantic event—`start`, `record_commit`, `record_integration`,
 `record_verification`, `complete`, `block`, or `resume`—and expands it into the
-complete legal node-transition sequence with required evidence. It returns a
-compact transition receipt rather than the complete execution journal. Read-only.
-
-## execution_checkpoint_apply
-
-Applies the previewed semantic checkpoint atomically from its proposal token
-and returns the changed-node receipt plus compact scheduling state.
+complete legal node-transition sequence with required evidence, applies it
+atomically, and returns the changed-node receipt plus compact scheduling state
+in one call.
 
 ## execution_status
 
@@ -150,68 +143,48 @@ guidance for active or blocked nodes. Pass optional `nodeId` for complete detail
 and guidance about one node. The complete journal remains canonical on disk and
 is not echoed through this tool. Read-only.
 
-## execution_finish_preview
+## execution_finish
 
-Verifies completed nodes, current journal evidence, reachable commits, and
-removed worktrees; derives HEAD/time and previews plan commit markers, the
-completed journal, `ready_for_review` state, and `tracks.md` atomically. Read-only.
+After required manual verification is recorded, verifies completed nodes,
+current journal evidence, reachable commits, and removed worktrees; derives
+HEAD/time and atomically writes plan commit markers, the completed journal,
+`ready_for_review` state, and `tracks.md`.
 
-## execution_finish_apply
-
-Finalizes the approved execution, track transition, and derived index together
-behind its digest.
-
-## worktree_create_preview
+## worktree_create
 
 Derives one constrained phase/task worktree path, branch, parent, and exact base
-commit. Task phase identity and ancestry are inferred from the node ID and the
-current registered phase or canonical worktree. Read-only.
+commit, then creates or reconciles the derived worktree atomically. Task phase
+identity and ancestry are inferred from the node ID and current registered
+phase or canonical worktree. Idempotent for the same state.
 
-## worktree_create_apply
-
-Creates or reconciles the approved derived worktree. Digest-gated and
-idempotent for the same state.
-
-## integration_preview
+## integration
 
 Verifies clean source/target worktrees, protected `.cadre/` state, branch tips,
-and changed files before a derived merge. Read-only.
+and changed files. In `phase` or `autonomous` mode it performs the non-squash
+merge atomically. In `governed` mode it returns `approval_required`, then
+accepts its unchanged token after the human decision. Conflicts are reported
+and left for the main agent; the MCP does not resolve them.
 
-## integration_apply
+## worktree_cleanup
 
-Performs the approved non-squash merge. Conflicts are reported and left for the
-main agent; the MCP does not resolve them.
-
-## worktree_cleanup_preview
-
-Verifies a worker is clean and its branch fully integrated before proposing
-worktree/branch removal. It also supports interruption recovery when the node
-was already marked `completed`. Read-only.
-
-## worktree_cleanup_apply
-
-Removes only the approved clean, fully integrated worktree and safely deletable
-branch when the journal node is `integrated` or already `completed`. This is the
-only tool annotated as destructive.
+Atomically verifies and removes only a clean, fully integrated worktree and
+safely deletable branch when its node is `integrated` or already `completed`.
+This is the only tool annotated as destructive.
 
 ## worktree_status
 
 Lists registered Cadre-managed worktrees and orphaned empty runtime
 directories. Read-only.
 
-## project_init_preview
+## project_init_candidate
 
-Validates approved rendered project files, project identity/context, Git
-disposition, and base commit; returns the proposed `.cadre/` file set and
-semantic digest as a path/SHA-256 manifest without echoing file content. The
-`approvedAt` audit timestamp is shown and recorded but
-does not affect the digest. Read-only.
-
-## project_init_apply
-
-Atomically creates `.cadre/` only when semantic inputs and preview digest are
-unchanged, while recording the supplied `approvedAt` audit timestamp. It never
-copies runtime code or templates into the project.
+Reads declared caller-rendered files from
+`<project-root>/.cadre-stage/create/`, requires the stage to contain exactly
+that supported file set, and returns `approval_required` with the complete
+generated initialization manifest and digest. Artifact bodies are not MCP
+inputs or proposal-record content. After approval, the same command accepts the
+token, re-reads the stage, rejects changed bytes, writes deterministic outputs,
+and atomically promotes it to `.cadre`.
 
 ## setup_record_commit
 
@@ -223,15 +196,10 @@ operation.
 Idempotently records that the caller verified Git initialization at the exact
 approved project root.
 
-## tracks_render_preview
+## tracks_render
 
-Reads every track-local state record and returns exact generated `tracks.md`
-content plus a digest. Read-only.
-
-## tracks_render_apply
-
-Writes `tracks.md` only when current track state still matches the approved
-preview digest.
+Reads every track-local state record, validates the exact deterministic
+`tracks.md` output, and writes it atomically in one idempotent call.
 
 ## Common Guarantees
 
@@ -239,6 +207,6 @@ preview digest.
   home directory.
 - Track, execution, batch, node, commit, digest, and timestamp formats are
   validated at the MCP boundary.
-- Preview output is not approval.
-- Apply never accepts a stale digest.
+- `approval_required` output is not approval.
+- Token-mode commands never accept a stale digest.
 - Tool errors return a structured failure rather than partial success.

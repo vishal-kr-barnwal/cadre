@@ -24,8 +24,8 @@ import {
   previewWorktreeCleanup, previewWorktreeCreate, previewWorktreeIntegration
 } from "../src/domain/worktrees.js";
 import {
-  applyArchiveBatch, applyArchiveBatchRecord, applyReviewComplete,
-  previewArchiveBatch, previewArchiveBatchRecord, previewReviewComplete
+  applyArchiveBatchCandidate, applyArchiveBatchRecord, applyReviewComplete,
+  previewArchiveBatchCandidate, previewArchiveBatchRecord, previewReviewComplete
 } from "../src/domain/governance.js";
 import {
   CLAUDE_APPROVAL,
@@ -40,6 +40,9 @@ import {
   supportsFormElicitation
 } from "../src/mcp/elicitation.js";
 import { ProposalTokenStore } from "../src/mcp/proposals.js";
+import {
+  applyProjectInitCandidate, previewProjectInitCandidate, recordGitInitialized, recordSetupCommit
+} from "../src/domain/init.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateRoot = join(root, "templates", "v1", "init");
@@ -370,7 +373,8 @@ function writeWorktreeJournal(
   trackId: string,
   executionId: string,
   phaseStatus: ExecutionNodeStatus,
-  taskStatus: ExecutionNodeStatus
+  taskStatus: ExecutionNodeStatus,
+  approvalMode?: "governed" | "phase" | "autonomous"
 ): void {
   const path = join(projectRoot, ".cadre", "tracks", trackId, "executions", `execution-${executionId}.json`);
   mkdirSync(dirname(path), { recursive: true });
@@ -394,6 +398,7 @@ function writeWorktreeJournal(
     checkpoint: "test",
     requestedMode: "parallel",
     effectiveMode: "parallel",
+    ...(approvalMode ? { approvalMode } : {}),
     maxWorkers: 2,
     planRevision: 1,
     planCommit: "aaaaaaa",
@@ -419,6 +424,60 @@ test("empty initialized project validates", () => {
   runState(projectRoot, "render");
   const result = runState(projectRoot, "validate");
   assert.match(result.stdout, /Cadre state is valid/);
+});
+
+test("setup commit recording verifies the approved file manifest against Git", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "cadre-candidate-commit-"));
+  const files = [
+    ["product.md", "# Product\n"],
+    ["guidelines.md", "# Guidelines\n"],
+    ["tech-stack.md", "# Tech Stack\n- TypeScript\n"],
+    ["workflow.md", readFileSync(join(templateRoot, "workflow.md"), "utf8")],
+    ["styleguides/general.md", "# General Styleguide\n"]
+  ] as const;
+  for (const [relativePath, content] of files) {
+    const path = join(projectRoot, ".cadre-stage", "create", relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+  }
+  const input = {
+    projectRoot,
+    projectName: "Commit manifest fixture",
+    context: "greenfield" as const,
+    gitDisposition: "initialize" as const,
+    baseCommit: null,
+    approvedAt: "2026-08-26T00:00:00.000Z",
+    stagedFiles: files.map(([path]) => path)
+  };
+  assert.throws(
+    () => previewProjectInitCandidate({
+      ...input,
+      stagedFiles: input.stagedFiles.map((path) => path === "product.md" ? "init/product.md" : path)
+    }),
+    /use product\.md instead of init\/product\.md/
+  );
+  const preview = previewProjectInitCandidate(input);
+  applyProjectInitCandidate(input, preview.digest);
+  execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
+  gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
+  gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
+  gitText(projectRoot, ["config", "commit.gpgsign", "false"]);
+  recordGitInitialized(projectRoot);
+  writeFileSync(join(projectRoot, ".cadre", "product.md"), "# Changed product\n");
+  gitText(projectRoot, ["add", ".cadre"]);
+  gitText(projectRoot, ["commit", "-m", "cadre(create): initialize wrong content"]);
+  assert.throws(
+    () => recordSetupCommit(projectRoot, gitText(projectRoot, ["rev-parse", "HEAD"])),
+    /Approved setup artifact changed/
+  );
+  writeFileSync(join(projectRoot, ".cadre", "product.md"), "# Product\n");
+  gitText(projectRoot, ["add", ".cadre/product.md"]);
+  gitText(projectRoot, ["commit", "-m", "cadre(create): initialize project harness"]);
+  const approvedCommit = gitText(projectRoot, ["rev-parse", "HEAD"]);
+  recordSetupCommit(projectRoot, approvedCommit);
+  const state = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
+  assert.equal(state.setup.commit, approvedCommit);
+  assert.equal(state.setup.operation, null);
 });
 
 test("stale tracks index is repairable derived drift, not an invariant failure", () => {
@@ -945,48 +1004,59 @@ test("clean review completion previews and applies its exact state and derived i
   assert.equal(runState(projectRoot, "validate").status, 0);
 });
 
-test("archive batch preview includes archived rows and records provenance without another batch decision", () => {
+test("archive candidate proposals reject changed content and record provenance", () => {
   const projectRoot = fixture();
-  writeFinalizedTrack(projectRoot, "archive-track", "completed");
+  writeFinalizedTrack(projectRoot, "archive-candidate", "completed");
   runState(projectRoot, "render");
+  const candidateId = "archive-candidate-proposal";
+  const candidateRoot = join(projectRoot, ".cadre-stage", candidateId);
+  mkdirSync(join(candidateRoot, "patterns"), { recursive: true });
+  const patternPath = join(candidateRoot, "patterns", "candidate-pattern.md");
+  const indexPath = join(candidateRoot, "patterns", "index.md");
+  const pattern = "# Pattern: Candidate pattern\n\n## Provenance\n- Track: `archive-candidate`\n";
+  const index = "# Pattern Catalog\n\n- [Candidate pattern](candidate-pattern.md)\n";
+  writeFileSync(patternPath, pattern);
+  writeFileSync(indexPath, index);
   const input = {
     projectRoot,
-    batchId: "archive-20260728T020000Z",
-    selectedTracks: ["archive-track"],
+    candidateId,
+    batchId: "archive-candidate-batch",
+    selectedTracks: ["archive-candidate"],
     baseCommit: "ddddddd",
     approvedAt: "2026-07-28T02:00:00.000Z",
-    updates: [{
-      path: "patterns/archive-pattern.md",
-      content: "# Pattern: Archive pattern\n\n## Provenance\n- Track: `archive-track`\n"
-    }, {
-      path: "patterns/index.md",
-      content: "# Pattern Catalog\n\n- [Archive pattern](archive-pattern.md)\n"
-    }]
+    updates: [
+      { kind: "pattern" as const, slug: "candidate-pattern" },
+      { kind: "pattern_index" as const }
+    ]
   };
-  const preview = previewArchiveBatch(input);
-  assert.match(preview.tracksContent, /archive-track.*archived/);
-  assert.doesNotMatch(preview.tracksContent, /archive-track.*completed/);
-  writeFileSync(preview.operationPath, `${JSON.stringify(preview.initialOperation, null, 2)}\n`);
-  assert.throws(() => previewArchiveBatch({
-    ...input,
-    updates: input.updates.map((update, index) => index === 0
-      ? { ...update, content: `${update.content}\nchanged after approval\n` }
-      : update)
-  }), /content differs from its approved journal/);
-  const resumed = previewArchiveBatch(input);
-  assert.equal(resumed.resuming, true);
-  applyArchiveBatch(input, resumed.digest);
-  assert.equal(existsSync(join(projectRoot, ".cadre", "tracks", "archive-track")), false);
-  assert.equal(existsSync(join(projectRoot, ".cadre", "archive", "archive-track")), true);
-
-  const recordInput = {
-    projectRoot,
-    batchId: input.batchId,
-    archiveCommit: "eeeeeee"
-  };
+  const preview = previewArchiveBatchCandidate(input);
+  assert.deepEqual(
+    preview.writes.map((write) => write.path),
+    ["patterns/candidate-pattern.md", "patterns/index.md"]
+  );
+  writeFileSync(patternPath, `${pattern}\nchanged after preview\n`);
+  assert.throws(
+    () => applyArchiveBatchCandidate(input, preview.digest),
+    /proposal is stale/
+  );
+  writeFileSync(patternPath, pattern);
+  const fresh = previewArchiveBatchCandidate(input);
+  applyArchiveBatchCandidate(input, fresh.digest);
+  const canonicalPatternPath = join(projectRoot, ".cadre", "patterns", "candidate-pattern.md");
+  assert.equal(readFileSync(canonicalPatternPath, "utf8"), pattern);
+  writeFileSync(canonicalPatternPath, `${pattern}\ntampered after promotion\n`);
+  assert.ok(validateProject(projectRoot).errors.some((error) => (
+    error.includes("promoted artifact differs from its approved hash: patterns/candidate-pattern.md")
+  )));
+  writeFileSync(canonicalPatternPath, pattern);
+  assert.equal(existsSync(candidateRoot), true, "candidate files remain available through the commit checkpoint");
+  const recordInput = { projectRoot, batchId: input.batchId, archiveCommit: "eeeeeee" };
   const record = previewArchiveBatchRecord(recordInput);
   applyArchiveBatchRecord(recordInput, record.digest);
-  const state = JSON.parse(readFileSync(join(projectRoot, ".cadre", "archive", "archive-track", "state.json"), "utf8"));
+  const state = JSON.parse(readFileSync(
+    join(projectRoot, ".cadre", "archive", "archive-candidate", "state.json"),
+    "utf8"
+  ));
   assert.equal(state.commits.archive, "eeeeeee");
   assert.equal(runState(projectRoot, "validate").status, 0);
 });
@@ -1113,6 +1183,7 @@ test("approved create operation remains valid before its artifact commit", () =>
   project.project.context = "greenfield";
   project.setup.operation.baseCommit = null;
   project.setup.operation.approvedArtifacts = ["product.md", "guidelines.md", "tech-stack.md", "workflow.md"];
+  delete project.setup.operation.approvedArtifactHashes;
   project.setup.operation.approvedAt = "2026-07-27T00:00:00Z";
   project.setup.artifactProgress = ["product.md", "guidelines.md"];
   project.setup.checkpoint = "context-writing";
@@ -1451,6 +1522,7 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
+    assert.equal(tools.tools.length, 25);
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
     const catalog = await client.callTool({ name: "template_catalog", arguments: {} });
     assert.deepEqual(
@@ -1629,15 +1701,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const tools = await client.listTools();
     for (const name of [
       "workflow_elicit", "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
-      "state_validate", "project_init_preview", "project_init_apply",
-      "setup_record_git_initialized", "setup_record_commit", "tracks_render_preview", "tracks_render_apply",
-      "execution_graph_validate", "execution_graph_validate_draft", "review_complete_preview", "review_complete_apply",
-      "archive_batch_preview", "archive_batch_apply", "archive_batch_record_preview", "archive_batch_record_apply",
-      "execution_start_preview", "execution_start_apply",
-      "execution_checkpoint_preview", "execution_checkpoint_apply", "execution_status",
-      "execution_finish_preview", "execution_finish_apply", "worktree_create_preview",
-      "worktree_create_apply", "integration_preview", "integration_apply",
-      "worktree_cleanup_preview", "worktree_cleanup_apply", "worktree_status"
+      "state_validate", "artifact_candidate_manifest", "project_init_candidate",
+      "setup_record_git_initialized", "setup_record_commit", "tracks_render",
+      "execution_graph_validate", "execution_graph_validate_candidate",
+      "review_complete", "archive_batch_record", "archive_batch_candidate",
+      "execution_start", "execution_checkpoint", "execution_status", "execution_finish", "worktree_create",
+      "integration", "worktree_cleanup", "worktree_status"
     ]) {
       assert.ok(tools.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`);
     }
@@ -1675,7 +1744,14 @@ test("compiled MCP exposes versioned templates and initializes projects without 
 
     const workflow = await client.callTool({ name: "template_get", arguments: { id: "project/workflow" } });
     assert.equal(workflow.isError, undefined);
-    assert.equal((workflow.structuredContent as { id?: string }).id, "project/workflow");
+    const workflowTemplate = workflow.structuredContent as {
+      id?: string;
+      artifactPath?: string;
+      relativePath?: string;
+    };
+    assert.equal(workflowTemplate.id, "project/workflow");
+    assert.equal(workflowTemplate.artifactPath, "workflow.md");
+    assert.equal(workflowTemplate.relativePath, undefined);
 
     const bundle = await client.callTool({
       name: "template_get_many",
@@ -1706,28 +1782,49 @@ test("compiled MCP exposes versioned templates and initializes projects without 
 - [ ] T2.1 User Manual Verification
 - Phase completion commit: pending
 `;
-    const draftValidation = await client.callTool({
-      name: "execution_graph_validate_draft",
-      arguments: { planMarkdown: draftPlan, targetStatus: "in_progress", sourceLabel: "review-proposal.md" }
+    const candidateId = "review-proposal";
+    const candidatePlanPath = join(untouchedRoot, ".cadre-stage", candidateId, "plan.md");
+    mkdirSync(dirname(candidatePlanPath), { recursive: true });
+    writeFileSync(candidatePlanPath, draftPlan);
+    const candidateValidation = await client.callTool({
+      name: "execution_graph_validate_candidate",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        targetStatus: "in_progress",
+        sourceLabel: "review-proposal.md"
+      }
     });
-    assert.equal(draftValidation.isError, undefined);
-    const draftResult = draftValidation.structuredContent as {
-      valid?: boolean;
-      errors?: string[];
-      graph?: { phases?: Array<{ dependencies?: string[]; tasks?: Array<{ dependencies?: string[] }> }> };
-    };
-    assert.equal(draftResult.valid, true);
-    assert.deepEqual(draftResult.errors, []);
-    assert.deepEqual(draftResult.graph?.phases?.[0]?.tasks?.at(-1)?.dependencies, ["T1.1"]);
-    assert.deepEqual(draftResult.graph?.phases?.at(-1)?.dependencies, ["P1"]);
+    assert.equal(candidateValidation.isError, undefined);
+    assert.equal((candidateValidation.structuredContent as { valid?: boolean }).valid, true);
+    assert.match(
+      (candidateValidation.structuredContent as { sha256?: string }).sha256 ?? "",
+      /^[0-9a-f]{64}$/
+    );
     assert.equal(readFileSync(sentinelPath, "utf8"), "unchanged\n");
-    assert.deepEqual(readdirSync(untouchedRoot), ["sentinel.txt"]);
-
-    const oversizedDraft = await client.callTool({
-      name: "execution_graph_validate_draft",
-      arguments: { planMarkdown: "x".repeat((256 * 1024) + 1), targetStatus: "planned" }
+    writeFileSync(candidatePlanPath, "x".repeat((256 * 1024) + 1));
+    const oversizedCandidate = await client.callTool({
+      name: "execution_graph_validate_candidate",
+      arguments: { projectRoot: untouchedRoot, candidateId, targetStatus: "planned" }
     });
-    assert.equal(oversizedDraft.isError, true);
+    assert.equal(oversizedCandidate.isError, true);
+    writeFileSync(candidatePlanPath, draftPlan);
+    const candidateManifest = await client.callTool({
+      name: "artifact_candidate_manifest",
+      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"] }
+    });
+    assert.equal(candidateManifest.isError, undefined);
+    assert.match(
+      (candidateManifest.structuredContent as { digest?: string }).digest ?? "",
+      /^[0-9a-f]{64}$/
+    );
+    assert.equal(Object.hasOwn(candidateManifest.structuredContent ?? {}, "content"), false);
+    symlinkSync(candidatePlanPath, join(untouchedRoot, ".cadre-stage", "linked-plan"));
+    const linkedValidation = await client.callTool({
+      name: "execution_graph_validate_candidate",
+      arguments: { projectRoot: untouchedRoot, candidateId: "linked-plan", targetStatus: "planned" }
+    });
+    assert.equal(linkedValidation.isError, true);
 
     const transitionRoot = fixture();
     writePlannedTrack(transitionRoot, "mcp-transition");
@@ -1745,7 +1842,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const transitionStart = previewExecutionStart(transitionStartInput);
     applyExecutionStart(transitionStartInput, transitionStart.digest);
     const illegalTransition = await client.callTool({
-      name: "execution_checkpoint_preview",
+      name: "execution_checkpoint",
       arguments: {
         projectRoot: transitionRoot,
         trackId: "mcp-transition",
@@ -1759,8 +1856,8 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (illegalTransition.structuredContent as { error?: { message?: string } }).error?.message ?? "",
       /cannot complete from pending/
     );
-    const checkpointPreview = await client.callTool({
-      name: "execution_checkpoint_preview",
+    const checkpointApply = await client.callTool({
+      name: "execution_checkpoint",
       arguments: {
         projectRoot: transitionRoot,
         trackId: "mcp-transition",
@@ -1769,18 +1866,11 @@ test("compiled MCP exposes versioned templates and initializes projects without 
         event: "start"
       }
     });
-    assert.equal(checkpointPreview.isError, undefined);
-    assert.ok(Buffer.byteLength(JSON.stringify(checkpointPreview)) < 4 * 1024);
-    assert.equal(Object.hasOwn(checkpointPreview.structuredContent ?? {}, "journal"), false);
-    const checkpointToken = (checkpointPreview.structuredContent as { proposalToken?: string }).proposalToken;
-    assert.ok(checkpointToken);
-    const checkpointApply = await client.callTool({
-      name: "execution_checkpoint_apply",
-      arguments: { proposalToken: checkpointToken }
-    });
     assert.equal(checkpointApply.isError, undefined);
     assert.ok(Buffer.byteLength(JSON.stringify(checkpointApply)) < 4 * 1024);
     assert.equal(Object.hasOwn(checkpointApply.structuredContent ?? {}, "journal"), false);
+    assert.equal(Object.hasOwn(checkpointApply.structuredContent ?? {}, "proposalToken"), false);
+    assert.equal((checkpointApply.structuredContent as { commandStatus?: string }).commandStatus, "applied");
     assert.equal(
       (checkpointApply.structuredContent as { transition?: { to?: string } }).transition?.to,
       "running"
@@ -1797,6 +1887,110 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.ok(Buffer.byteLength(JSON.stringify(compactStatus)) < 8 * 1024);
     assert.equal(Object.hasOwn(compactStatus.structuredContent ?? {}, "journal"), false);
 
+    const archiveRoot = fixture();
+    const archivedTrackRoot = writeFinalizedTrack(archiveRoot, "mcp-archive-candidate", "completed");
+    runState(archiveRoot, "render");
+    execFileSync("git", ["init", "-b", "main"], { cwd: archiveRoot });
+    gitText(archiveRoot, ["config", "user.name", "Cadre Test"]);
+    gitText(archiveRoot, ["config", "user.email", "cadre@example.test"]);
+    gitText(archiveRoot, ["config", "commit.gpgsign", "false"]);
+    gitText(archiveRoot, ["add", ".cadre"]);
+    gitText(archiveRoot, ["commit", "-m", "chore: initialize archive fixture"]);
+    const archiveBase = gitText(archiveRoot, ["rev-parse", "HEAD"]);
+    gitText(archiveRoot, ["commit", "--allow-empty", "-m", "feat: archive task one"]);
+    const archiveTaskOne = gitText(archiveRoot, ["rev-parse", "HEAD"]);
+    gitText(archiveRoot, ["commit", "--allow-empty", "-m", "feat: archive task two"]);
+    const archiveTaskTwo = gitText(archiveRoot, ["rev-parse", "HEAD"]);
+    gitText(archiveRoot, ["commit", "--allow-empty", "-m", "test: archive verification"]);
+    const archiveHead = gitText(archiveRoot, ["rev-parse", "HEAD"]);
+    const archiveProjectPath = join(archiveRoot, ".cadre", "project.json");
+    const archiveProject = JSON.parse(readFileSync(archiveProjectPath, "utf8"));
+    archiveProject.setup.commit = archiveBase;
+    writeFileSync(archiveProjectPath, `${JSON.stringify(archiveProject, null, 2)}\n`);
+    const archivedStatePath = join(archivedTrackRoot, "state.json");
+    const archivedState = JSON.parse(readFileSync(archivedStatePath, "utf8"));
+    archivedState.commits.spec = archiveBase;
+    archivedState.commits.plan = archiveBase;
+    archivedState.lastExecution.headCommit = archiveHead;
+    archivedState.reviewCycles[0].reviewedHead = archiveHead;
+    archivedState.reviewCycles[0].commitRange = `${archiveBase}..${archiveHead}`;
+    writeFileSync(archivedStatePath, `${JSON.stringify(archivedState, null, 2)}\n`);
+    const archivedPlanPath = join(archivedTrackRoot, "plan.md");
+    const archivedPlan = readFileSync(archivedPlanPath, "utf8")
+      .replaceAll("abcdef1", archiveTaskOne)
+      .replaceAll("abcdef2", archiveTaskTwo)
+      .replaceAll("abcdef3", archiveHead);
+    writeFileSync(archivedPlanPath, archivedPlan);
+    const archivedJournalPath = join(
+      archivedTrackRoot, "executions", "execution-mcp-archive-candidate-execution.json"
+    );
+    const archivedJournal = JSON.parse(readFileSync(archivedJournalPath, "utf8"));
+    archivedJournal.planCommit = archiveBase;
+    archivedJournal.baseCommit = archiveBase;
+    archivedJournal.headCommit = archiveHead;
+    archivedJournal.nodes["T1.1"].workerCommit = archiveTaskOne;
+    archivedJournal.nodes["T1.2"].workerCommit = archiveTaskTwo;
+    archivedJournal.nodes.P1.workerCommit = archiveTaskTwo;
+    archivedJournal.nodes["T2.1"].workerCommit = archiveHead;
+    archivedJournal.nodes.P2.workerCommit = archiveHead;
+    writeFileSync(archivedJournalPath, `${JSON.stringify(archivedJournal, null, 2)}\n`);
+    gitText(archiveRoot, ["add", ".cadre"]);
+    gitText(archiveRoot, ["commit", "-m", "cadre(test): record reachable archive provenance"]);
+    const archiveCandidateId = "archive-mcp-proposal";
+    const archivePattern = "# Pattern: MCP staged pattern\n\n## Provenance\n- Track: `mcp-archive-candidate`\n";
+    const archiveIndex = "# Pattern Catalog\n\n- [MCP staged pattern](mcp-staged-pattern.md)\n";
+    const archivePatternPath = join(
+      archiveRoot, ".cadre-stage", archiveCandidateId, "patterns", "mcp-staged-pattern.md"
+    );
+    const archiveIndexPath = join(archiveRoot, ".cadre-stage", archiveCandidateId, "patterns", "index.md");
+    mkdirSync(dirname(archivePatternPath), { recursive: true });
+    writeFileSync(archivePatternPath, archivePattern);
+    writeFileSync(archiveIndexPath, archiveIndex);
+    const archiveCandidatePreview = await client.callTool({
+      name: "archive_batch_candidate",
+      arguments: {
+        projectRoot: archiveRoot,
+        candidateId: archiveCandidateId,
+        selectedTracks: ["mcp-archive-candidate"],
+        updates: [
+          { kind: "pattern", slug: "mcp-staged-pattern" },
+          { kind: "pattern_index" }
+        ]
+      }
+    });
+    assert.equal(
+      archiveCandidatePreview.isError,
+      undefined,
+      JSON.stringify(archiveCandidatePreview.structuredContent)
+    );
+    assert.equal(
+      (archiveCandidatePreview.structuredContent as { commandStatus?: string }).commandStatus,
+      "approval_required"
+    );
+    const archiveCandidateToken = (
+      archiveCandidatePreview.structuredContent as { proposalToken?: string }
+    ).proposalToken;
+    assert.ok(archiveCandidateToken);
+    const archiveProposalRecord = readFileSync(
+      join(proposalHome, "runtime", "proposals", `${archiveCandidateToken}.json`),
+      "utf8"
+    );
+    assert.doesNotMatch(archiveProposalRecord, /MCP staged pattern/);
+    assert.doesNotMatch(archiveProposalRecord, /"content"/);
+    const archiveCandidateApply = await client.callTool({
+      name: "archive_batch_candidate",
+      arguments: { proposalToken: archiveCandidateToken }
+    });
+    assert.equal(archiveCandidateApply.isError, undefined);
+    assert.equal(
+      (archiveCandidateApply.structuredContent as { commandStatus?: string }).commandStatus,
+      "applied"
+    );
+    assert.equal(
+      readFileSync(join(archiveRoot, ".cadre", "patterns", "mcp-staged-pattern.md"), "utf8"),
+      archivePattern
+    );
+
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
     const files = [
       ["product.md", "# Product\n"],
@@ -1805,6 +1999,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       ["workflow.md", readFileSync(join(templateRoot, "workflow.md"), "utf8")],
       ["styleguides/general.md", "# General Styleguide\n"]
     ].map(([path, content]) => ({ path: path!, content: content! }));
+
+    for (const file of files) {
+      const path = join(projectRoot, ".cadre-stage", "create", file.path);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, file.content);
+    }
     const input = {
       projectRoot,
       projectName: "MCP fixture",
@@ -1812,16 +2012,25 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       gitDisposition: "existing",
       baseCommit: null,
       approvedAt: "2026-07-28T00:00:00.000Z",
-      files
+      stagedFiles: files.map((file) => file.path)
     };
-    const preview = await client.callTool({ name: "project_init_preview", arguments: input });
+    const unexpectedCandidatePath = join(projectRoot, ".cadre-stage", "create", "unexpected.md");
+    writeFileSync(unexpectedCandidatePath, "unexpected\n");
+    const unexpectedPreview = await client.callTool({
+      name: "project_init_candidate",
+      arguments: input
+    });
+    assert.equal(unexpectedPreview.isError, true);
+    unlinkSync(unexpectedCandidatePath);
+    const preview = await client.callTool({ name: "project_init_candidate", arguments: input });
     assert.equal(preview.isError, undefined);
+    assert.equal((preview.structuredContent as { commandStatus?: string }).commandStatus, "approval_required");
     const digest = (preview.structuredContent as { digest?: string }).digest;
     assert.match(digest ?? "", /^[0-9a-f]{64}$/);
     assert.equal(Object.hasOwn(preview.structuredContent ?? {}, "proposalDigest"), false);
     const approvedAt = "2026-07-28T00:05:00.000Z";
     const refreshedPreview = await client.callTool({
-      name: "project_init_preview",
+      name: "project_init_candidate",
       arguments: { ...input, approvedAt }
     });
     assert.equal(refreshedPreview.isError, undefined);
@@ -1832,11 +2041,33 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       proposalToken.length < 64,
       `expected a compact project initialization token, got ${proposalToken.length} characters`
     );
+    const proposalRecord = readFileSync(
+      join(proposalHome, "runtime", "proposals", `${proposalToken}.json`),
+      "utf8"
+    );
+    assert.doesNotMatch(proposalRecord, /# Workflow/);
+    assert.doesNotMatch(proposalRecord, /"content"/);
+    assert.match(proposalRecord, /"stagedFiles"/);
     const wrongApply = await client.callTool({
-      name: "tracks_render_apply",
+      name: "archive_batch_candidate",
       arguments: { proposalToken }
     });
     assert.equal(wrongApply.isError, true);
+    const productCandidatePath = join(projectRoot, ".cadre-stage", "create", "product.md");
+    writeFileSync(productCandidatePath, "# Product\n\nChanged after preview.\n");
+    const staleApply = await client.callTool({
+      name: "project_init_candidate",
+      arguments: { proposalToken }
+    });
+    assert.equal(staleApply.isError, true);
+    assert.equal(existsSync(join(projectRoot, ".cadre")), false);
+    writeFileSync(productCandidatePath, "# Product\n");
+    const finalPreview = await client.callTool({
+      name: "project_init_candidate",
+      arguments: { ...input, approvedAt }
+    });
+    const finalProposalToken = (finalPreview.structuredContent as { proposalToken?: string }).proposalToken;
+    assert.ok(finalProposalToken);
     const restartedClient = new Client({ name: "cadre-restart-test", version: "1.0.0" });
     const restartedTransport = new StdioClientTransport({
       command: process.execPath,
@@ -1846,10 +2077,11 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     await restartedClient.connect(restartedTransport);
     try {
       const applied = await restartedClient.callTool({
-        name: "project_init_apply",
-        arguments: { proposalToken }
+        name: "project_init_candidate",
+        arguments: { proposalToken: finalProposalToken }
       });
       assert.equal(applied.isError, undefined);
+      assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       assert.equal(Object.hasOwn(applied.structuredContent ?? {}, "content"), false);
     } finally {
       await restartedClient.close();
@@ -1857,6 +2089,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
     const initializedProject = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
     assert.equal(initializedProject.setup.operation.approvedAt, approvedAt);
+    assert.equal(initializedProject.setup.operation.approvedArtifactHashes.length, files.length);
     assert.equal(
       readFileSync(join(projectRoot, ".cadre", ".gitignore"), "utf8"),
       "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n"
@@ -1864,6 +2097,55 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal(existsSync(join(projectRoot, ".cadre", "wisps")), false);
     assert.equal(existsSync(join(projectRoot, ".cadre", "bin")), false);
     assert.equal(existsSync(join(projectRoot, ".cadre", "templates")), false);
+  } finally {
+    await client.close();
+  }
+});
+
+test("compiled MCP integration pauses only when the execution is governed", async () => {
+  const client = new Client({ name: "cadre-adaptive-test", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(root, "dist", "cadre-mcp.mjs")],
+    env: childEnvironment({ CADRE_HOME: mkdtempSync(join(tmpdir(), "cadre-adaptive-home-")) })
+  });
+  await client.connect(transport);
+  try {
+    for (const approvalMode of ["phase", "governed"] as const) {
+      const { projectRoot } = gitFixture();
+      const trackId = `adaptive-${approvalMode}`;
+      const executionId = "run-1";
+      writeWorktreeJournal(projectRoot, trackId, executionId, "running", "committed", approvalMode);
+      const scope = { projectRoot, trackId, executionId, nodeId: "T1.1" };
+      const created = await client.callTool({ name: "worktree_create", arguments: scope });
+      assert.equal(created.isError, undefined, JSON.stringify(created.structuredContent));
+      assert.equal((created.structuredContent as { commandStatus?: string }).commandStatus, "applied");
+      assert.equal(Object.hasOwn(created.structuredContent ?? {}, "proposalToken"), false);
+      const workerPath = (created.structuredContent as { path?: string }).path;
+      assert.ok(workerPath);
+      writeFileSync(join(workerPath, "app.txt"), `${approvalMode} integration\n`);
+      gitText(workerPath, ["add", "app.txt"]);
+      gitText(workerPath, ["commit", "-m", `feat: ${approvalMode} integration`]);
+
+      const first = await client.callTool({ name: "integration", arguments: scope });
+      assert.equal(first.isError, undefined, JSON.stringify(first.structuredContent));
+      if (approvalMode === "phase") {
+        assert.equal((first.structuredContent as { commandStatus?: string }).commandStatus, "applied");
+        assert.equal(Object.hasOwn(first.structuredContent ?? {}, "proposalToken"), false);
+      } else {
+        assert.equal(
+          (first.structuredContent as { commandStatus?: string }).commandStatus,
+          "approval_required"
+        );
+        assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "base\n");
+        const proposalToken = (first.structuredContent as { proposalToken?: string }).proposalToken;
+        assert.ok(proposalToken);
+        const applied = await client.callTool({ name: "integration", arguments: { proposalToken } });
+        assert.equal(applied.isError, undefined, JSON.stringify(applied.structuredContent));
+        assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
+      }
+      assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), `${approvalMode} integration\n`);
+    }
   } finally {
     await client.close();
   }
@@ -1959,11 +2241,14 @@ test("interactive workflows prefer bounded client-native forms with one chat fal
   assert.match(workflow, /do not report it as a human decline/);
 });
 
-test("proposal workflows validate draft plan content without temporary project copies", () => {
+test("proposal workflows validate staged plan files without transporting their content", () => {
   for (const skill of ["track", "review", "revise"]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
-    assert.match(body, /execution_graph_validate_draft/, `${skill} must validate proposed plan Markdown`);
+    assert.match(body, /execution_graph_validate_candidate/, `${skill} must validate staged plan Markdown`);
+    assert.match(body, /artifact_candidate_manifest/, `${skill} must bind approval to staged hashes`);
+    assert.match(body, /\.cadre-stage/, `${skill} must use the project-local candidate stage`);
     assert.match(body, /temporary project copy/, `${skill} must prohibit the filesystem workaround`);
+    assert.match(body, /do not pass the plan Markdown through MCP|without transporting/i);
   }
 
   const track = readFileSync(join(root, "skills", "track", "SKILL.md"), "utf8");
@@ -1972,7 +2257,7 @@ test("proposal workflows validate draft plan content without temporary project c
   assert.match(track, /target status `planned`/);
   assert.match(review, /target status `in_progress`/);
   assert.match(implement, /execution_graph_validate/);
-  assert.doesNotMatch(implement, /execution_graph_validate_draft/);
+  assert.doesNotMatch(implement, /execution_graph_validate_candidate/);
 });
 
 test("implementation guidance preserves approval, permission, semantic checkpoints, and task-commit boundaries", () => {
@@ -1984,7 +2269,7 @@ test("implementation guidance preserves approval, permission, semantic checkpoin
 
   for (const body of [implement, workflow]) {
     assert.match(body, /host security permission/i);
-    assert.match(body, /execution_checkpoint_preview/);
+    assert.match(body, /execution_checkpoint/);
     assert.match(body, /evidence (?:does not yet exist|exists|before it exists)/i);
     assert.match(body, /distinct recorded SHA|distinct SHA/);
     assert.match(body, /`governed`/);
@@ -1992,7 +2277,7 @@ test("implementation guidance preserves approval, permission, semantic checkpoin
     assert.match(body, /Track-level User Manual Verification/);
     assert.match(body, /global tool catalog/);
     assert.match(body, /proposalToken|proposal token/);
-    assert.match(body, /state-machine probe|probe previews to (?:learn legal transitions|rediscover declared contracts)/);
+    assert.match(body, /state-machine probe|probe (?:previews|commands) to (?:learn legal transitions|rediscover declared contracts)/);
     assert.match(body, /independent read-only .* parallel/i);
     assert.match(body, /\.cadre\/\*\*.*does not invalidate product verification/);
   }
@@ -2023,12 +2308,12 @@ test("review and archive guidance coalesces exact approval decisions", () => {
   assert.match(archive, /Expected human decision count is one for the complete batch/);
   assert.match(archive, /generated index/);
   assert.match(workflow, /Combine related decisions whenever their complete artifacts and consequences are available together/);
-  assert.match(review, /review_complete_preview/);
+  assert.match(review, /review_complete/);
   assert.match(review, /Do not inspect the installed runtime/);
-  assert.match(archive, /archive_batch_preview/);
+  assert.match(archive, /archive_batch_candidate/);
   assert.match(archive, /do not call `template_catalog`/);
-  assert.match(archive, /needs no second approval/);
-  assert.doesNotMatch(archive, /call `tracks_render_preview`/);
+  assert.match(archive, /(?:needs no second approval|without another approval)/);
+  assert.doesNotMatch(archive, /call `tracks_render`/);
   assert.match(review, /Expected human decision count is one per review cycle/);
   assert.match(archive, /Expected human decision count is one for the complete batch/);
   assert.match(workflow, /same approval\/content digest/);
@@ -2114,7 +2399,12 @@ test("create uses one final configuration and initialization approval envelope",
   assert.match(create, /Expected human decision count is one/);
   assert.match(create, /do not ask the human to accept each default guide/i);
   assert.match(create, /do not add later approval prompts/i);
-  assert.match(create, /Do not pass `patterns\/index\.md`/);
+  assert.match(create, /project_init_candidate/);
+  assert.match(create, /Never make these two calls consecutively without the human decision/);
+  assert.match(create, /do not .*pass artifact bodies through MCP/i);
+  assert.match(create, /\.cadre-stage\/create/);
+  assert.match(create, /\.cadre-stage\/create\/product\.md/);
+  assert.match(create, /Never create .*\.cadre\/init\//);
 
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
   assert.match(workflow, /Create-time configuration envelope/);
@@ -2134,7 +2424,7 @@ test("semantic authorization envelopes remove deterministic follow-up approvals"
   assert.match(workflow, /Those mechanics do not become separate human decisions/);
   assert.match(track, /Expected human decision count is one for a clear new track/);
   assert.match(track, /do not create a specification-only approval prompt/);
-  assert.match(track, /write all three exact approved artifacts to the durable worktree before the first commit/);
+  assert.match(track, /Copy all three exact staged artifacts into the durable/);
   assert.deepEqual(trackState.operation.approvedArtifacts, ["spec.md", "plan.md", "learning.md"]);
   assert.match(revise, /Expected human decision count is one/);
   assert.match(revise, /without another prompt/);
@@ -2163,7 +2453,7 @@ test("archive supports a resumable multi-track batch", () => {
   assert.match(archive, /one or more `completed` tracks in a single batch/);
   assert.match(archive, /all completed/);
   assert.match(archive, /Reject the batch without partial mutation/);
-  assert.match(archive, /archive_batch_preview/);
+  assert.match(archive, /archive_batch_candidate/);
   assert.match(archive, /Commit all approved moves and derived changes together/i);
 
   const operation = JSON.parse(readFileSync(join(providerRoot, "project", "archive-operation.json"), "utf8"));

@@ -7,6 +7,30 @@ order: 230
 
 # Release Notes
 
+## Unreleased
+
+### File-backed artifact proposals
+
+- Adds the visible project-local `.cadre-stage/<candidate-id>/` proposal area,
+  with traversal, symlink, entry-type, per-file, and total-size protections.
+- Adds `artifact_candidate_manifest`, `execution_graph_validate_candidate`,
+  adaptive `project_init_candidate`, and adaptive `archive_batch_candidate`.
+- Cadre skills now write proposed artifact bodies to files, bind approval to
+  path/SHA-256 manifests, and send only identifiers and metadata through MCP.
+- Candidate-backed proposal records remain restart-safe without duplicating
+  complete workflow, plan, pattern, index, or learning bodies in the MCP
+  runtime cache.
+- Removes the superseded content-bearing initialization, draft-plan, and
+  archive MCP tools. Direct clients must stage artifacts and use the candidate
+  tool family.
+- Template responses expose eventual artifact destinations instead of provider
+  package paths, so creation cannot misinterpret the internal `init/` template
+  directory as `.cadre/init/`.
+- Replaces eleven preview/apply pairs with one adaptive command per operation.
+  Already-authorized deterministic mutations now take one call; genuine human
+  boundaries return `approval_required` and use the same command with a token
+  only after approval. This reduces the MCP surface from 36 to 25 tools.
+
 ## 3.3.0 - 2026-08-09
 
 Cadre 3.3.0 is an MCP reliability and context-efficiency release. Compared
@@ -33,10 +57,9 @@ and manifests. Existing `.cadre` project state remains compatible.
 
 ### Compact Execution Protocol
 
-- `execution_checkpoint_preview` now returns the proposed event as a compact
-  `from` → `through` → `to` transition receipt plus its checkpoint, digest, and
-  proposal token.
-- `execution_checkpoint_apply` returns the applied receipt and compact
+- Execution checkpoint preparation now returns the proposed event as a compact
+  `from` → `through` → `to` transition receipt plus its checkpoint and digest.
+- Execution checkpoint mutation returns the applied receipt and compact
   `derivedStatus`: ready phases, ready tasks, active nodes, blocked nodes, and
   focused event guidance. The complete journal is no longer echoed after every
   transition.
@@ -99,8 +122,8 @@ identity, Git, and bookkeeping decisions into the runtime.
 
 ### Smaller Execution Contract
 
-- Replaces `execution_node_*` and `execution_nodes_*` with
-  `execution_checkpoint_preview` and `execution_checkpoint_apply`.
+- Replaces low-level execution node mutation tools with semantic checkpoint
+  commands.
 - Uses semantic events—`start`, `record_commit`, `record_integration`,
   `record_verification`, `complete`, `block`, and `resume`—that expand into
   complete legal transition sequences.
@@ -217,8 +240,8 @@ copies or premature writes to canonical `.cadre/` state.
 
 ### Fixed
 
-- Adds the read-only `execution_graph_validate_draft` MCP tool for validating
-  an exact unapproved proposal with an explicit target lifecycle status.
+- Adds read-only validation for an exact unapproved proposal with an explicit
+  target lifecycle status.
 - Updates `track` to validate the proposed plan as `planned`, and updates
   review remediation to validate the replacement graph as `in_progress` rather
   than checking the stale approved plan under `ready_for_review` rules.
@@ -258,8 +281,8 @@ package-boundary safeguards for every native workflow and immutable template.
 
 ### Fixed
 
-- Restores the logical `project/gitignore` template required by
-  `project_init_preview`. npm treated the former nested `.gitignore` source
+- Restores the logical `project/gitignore` template required by project
+  initialization. npm treated the former nested `.gitignore` source
   file as packlist configuration, omitted the template itself, and also
   suppressed the disposable `wisps/` placeholder from the package.
 - Stores the provider asset under the packaging-safe physical name

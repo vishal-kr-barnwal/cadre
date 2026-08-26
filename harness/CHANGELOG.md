@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added bounded, symlink-safe project-local artifact staging under
+  `.cadre-stage/<candidate-id>/`.
+- Added `artifact_candidate_manifest`, `execution_graph_validate_candidate`,
+  adaptive `project_init_candidate`, and adaptive `archive_batch_candidate`.
+- Added approved path/SHA-256 manifests to newly rendered operation journals
+  and setup commit-tree verification for initialization artifacts.
+
+### Changed
+
+- Cadre workflows now send artifact paths and metadata through MCP while
+  keeping complete proposal bodies in visible files through the commit
+  checkpoint.
+- Removed the superseded content-bearing initialization, draft-plan, and
+  archive MCP tools; direct clients must use candidate stages.
+- Template MCP responses now expose eventual `artifactPath` values instead of
+  provider package source paths, preventing `init/` from being mistaken for a
+  project directory during creation.
+- Replaced eleven external preview/apply pairs with adaptive commands. Seven
+  deterministic operations and phase/autonomous integration now validate and
+  mutate in one call; initialization, archive selection, clean review, and
+  governed integration return `approval_required` and accept a token only
+  after the human decision. The MCP surface is reduced from 36 to 25 tools.
+
 ## [3.3.0] - 2026-08-09
 
 Cadre 3.3.0 makes long-running MCP delivery sessions durable across server
@@ -10,8 +37,8 @@ path/SHA-256 manifests.
 
 ### Breaking Changes
 
-- Changed `execution_checkpoint_preview` and `execution_checkpoint_apply` to
-  return a changed-node transition receipt instead of the complete execution
+- Changed execution checkpoint responses to return a changed-node transition
+  receipt instead of the complete execution
   journal. Apply retains compact `derivedStatus` scheduling arrays and focused
   guidance for changed, active, or blocked nodes.
 - Changed `execution_status` to return execution metadata, node-status counts,

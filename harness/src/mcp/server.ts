@@ -6,12 +6,12 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod/v4";
 import {
-  applyProjectInit,
-  previewProjectInit,
+  applyProjectInitCandidate,
+  previewProjectInitCandidate,
   recordGitInitialized,
   recordSetupCommit,
   safeProjectRoot,
-  type ProjectInitInput
+  type ProjectInitCandidateInput
 } from "../domain/init.js";
 import {
   formatStatus,
@@ -22,6 +22,7 @@ import {
 import {
   getTemplate,
   getTemplates,
+  describeTemplate,
   resolveStyleguides,
   TEMPLATE_IDS,
   TEMPLATE_SET_VERSION,
@@ -44,15 +45,14 @@ import {
   previewExecutionFinish,
   previewExecutionStart,
   type ExecutionCheckpointInput,
-  type ExecutionFinishInput,
   type ExecutionFinishRequest,
-  type ExecutionStartInput,
   type ExecutionStartRequest
 } from "../domain/execution.js";
 import {
   applyWorktreeCleanup,
   applyWorktreeCreate,
   applyWorktreeIntegration,
+  integrationRequiresApproval,
   managedWorktreeStatus,
   previewWorktreeCleanup,
   previewWorktreeCreate,
@@ -61,18 +61,17 @@ import {
   type WorktreeIntegrationInput
 } from "../domain/worktrees.js";
 import {
-  applyArchiveBatch,
+  applyArchiveBatchCandidate,
   applyArchiveBatchRecord,
   applyReviewComplete,
-  deriveArchiveBatchInput,
+  deriveArchiveBatchCandidateInput,
   deriveArchiveBatchRecordInput,
   deriveReviewCompleteInput,
-  previewArchiveBatch,
+  previewArchiveBatchCandidate,
   previewArchiveBatchRecord,
   previewReviewComplete,
-  type ArchiveBatchInput,
-  type ArchiveBatchRequest,
-  type ArchiveBatchRecordInput,
+  type ArchiveBatchCandidateInput,
+  type ArchiveBatchCandidateRequest,
   type ArchiveBatchRecordRequest,
   type ReviewCompleteInput,
   type ReviewCompleteRequest
@@ -87,6 +86,7 @@ import {
 import { serializeCadreError } from "../domain/errors.js";
 import { resolveGitCommit } from "../domain/git.js";
 import { ProposalTokenStore, proposalTokenSchema } from "./proposals.js";
+import { readCandidateFiles } from "../domain/staging.js";
 
 function result<T extends object>(value: T, summary?: string) {
   return {
@@ -144,6 +144,7 @@ export function createCadreServer(): McpServer {
   const proposalTokens = new ProposalTokenStore();
   function proposalResult<T extends object & { digest: string }>(kind: string, input: unknown, value: T) {
     return result({
+      commandStatus: "approval_required" as const,
       ...value,
       proposalToken: proposalTokens.issue(kind, input, value.digest)
     });
@@ -156,8 +157,9 @@ export function createCadreServer(): McpServer {
         "Cadre provides deterministic, versioned templates and narrow project-state operations.",
         "Read every existing artifact before proposing edits. Never infer file contents.",
         "For any mutation, present the complete proposed artifacts to the human and obtain approval first.",
+        "Stage unapproved artifact bodies under the project-local .cadre-stage directory and use candidate manifest/command tools; do not transport those bodies through MCP when a candidate tool is available.",
         "Use workflow_elicit for concise approval or clarification forms when supported. When active task context reports a non-interactive approval policy such as Codex Full Access, skip the form and ask one short chat question.",
-        "Call a preview tool immediately before its matching apply tool and pass only the returned proposal token.",
+        "Use one adaptive command call when authorization already exists. A command returns approval_required with a proposal token only when a human decision is required; call that same command with the token only after approval.",
         "Cadre state is resumable: inspect project_status once at command entry and reserve state_validate for final mutation gates.",
         "The plan is the implementation source of truth. Cadre MCP exposes only constrained, digest-gated Git worktree operations and never approves its own changes."
       ].join(" ")
@@ -205,7 +207,10 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async () => result({
     templateSetVersion: TEMPLATE_SET_VERSION,
-    templates: templateCatalog().map(({ content: _content, ...template }) => template)
+    templates: templateCatalog().map((template) => {
+      const { content: _content, ...descriptor } = describeTemplate(template);
+      return descriptor;
+    })
   }));
 
   server.registerTool("template_get", {
@@ -215,7 +220,7 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ id }) => {
     try {
-      return result(getTemplate(id));
+      return result(describeTemplate(getTemplate(id)));
     } catch (error) {
       return failure(error);
     }
@@ -228,7 +233,10 @@ export function createCadreServer(): McpServer {
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ ids }) => {
     try {
-      return result({ templateSetVersion: TEMPLATE_SET_VERSION, templates: getTemplates(ids) });
+      return result({
+        templateSetVersion: TEMPLATE_SET_VERSION,
+        templates: getTemplates(ids).map(describeTemplate)
+      });
     } catch (error) {
       return failure(error);
     }
@@ -243,7 +251,7 @@ export function createCadreServer(): McpServer {
     try {
       return result({
         templateSetVersion: TEMPLATE_SET_VERSION,
-        templates: resolveStyleguides(technologies)
+        templates: resolveStyleguides(technologies).map(describeTemplate)
       });
     } catch (error) {
       return failure(error);
@@ -277,6 +285,31 @@ export function createCadreServer(): McpServer {
     }
   });
 
+  server.registerTool("artifact_candidate_manifest", {
+    title: "Manifest staged artifact candidates",
+    description: "Read an exact project-local candidate file set and return only its paths, SHA-256 hashes, and approval-binding digest.",
+    inputSchema: {
+      projectRoot: z.string().min(1),
+      candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      files: z.array(z.string().min(1)).min(1)
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async ({ projectRoot, candidateId, files }) => {
+    try {
+      const root = safeProjectRoot(projectRoot);
+      const manifest = readCandidateFiles(root, candidateId, files)
+        .map((file) => ({ path: file.path, sha256: sha256(file.content) }))
+        .sort((left, right) => left.path.localeCompare(right.path));
+      return result({
+        candidateId,
+        files: manifest,
+        digest: sha256(JSON.stringify({ projectRoot: root, candidateId, files: manifest }))
+      });
+    } catch (error) {
+      return failure(error);
+    }
+  });
+
   server.registerTool("execution_graph_validate", {
     title: "Validate a track execution graph",
     description: "Compile and validate phase/task dependencies and derived manual-verification barriers from an approved plan.",
@@ -297,22 +330,33 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("execution_graph_validate_draft", {
-    title: "Validate a draft execution graph",
-    description: "Compile and validate an unapproved plan supplied as Markdown without reading or writing project files.",
+  server.registerTool("execution_graph_validate_candidate", {
+    title: "Validate a staged draft execution graph",
+    description: "Read plan.md from a project-local candidate stage and validate the draft graph without transporting its Markdown through MCP.",
     inputSchema: {
-      planMarkdown: z.string().min(1).max(MAX_DRAFT_PLAN_CHARACTERS),
+      projectRoot: z.string().min(1),
+      candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
       targetStatus: z.enum(PLAN_VALIDATION_STATUSES),
       sourceLabel: z.string().min(1).max(200).regex(/^[^\r\n]+$/).optional()
     },
     annotations: { readOnlyHint: true, openWorldHint: false }
-  }, async ({ planMarkdown, targetStatus, sourceLabel }) => {
+  }, async ({ projectRoot, candidateId, targetStatus, sourceLabel }) => {
     try {
-      const label = sourceLabel ?? "<draft-plan>";
+      const candidate = readCandidateFiles(projectRoot, candidateId, ["plan.md"])[0]!;
+      if (Buffer.byteLength(candidate.content, "utf8") > MAX_DRAFT_PLAN_CHARACTERS) {
+        throw new Error(`Candidate plan exceeds ${MAX_DRAFT_PLAN_CHARACTERS} bytes`);
+      }
+      const label = sourceLabel ?? candidate.absolutePath;
       const errors: string[] = [];
-      const graph = parsePlanContent(planMarkdown, label, errors);
+      const graph = parsePlanContent(candidate.content, label, errors);
       validatePlanGraph(label, graph, targetStatus, errors);
-      return result({ valid: errors.length === 0, graph, errors });
+      return result({
+        valid: errors.length === 0,
+        path: candidate.absolutePath,
+        sha256: sha256(candidate.content),
+        graph,
+        errors
+      });
     } catch (error) {
       return failure(error);
     }
@@ -326,13 +370,28 @@ export function createCadreServer(): McpServer {
     acceptedRisks: z.array(z.string().min(1)).optional()
   };
 
-  server.registerTool("review_complete_preview", {
-    title: "Preview clean review completion",
-    description: "Preview the exact clean-review cycle, completed track state, and derived index behind one digest.",
-    inputSchema: reviewCompleteSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+  server.registerTool("review_complete", {
+    title: "Complete a clean review",
+    description: "Prepare the exact clean-review completion for human approval, or apply its unchanged proposal token after approval.",
+    inputSchema: z.union([z.object(reviewCompleteSchema), z.object(proposalInputSchema())]),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
+      if ("proposalToken" in input) {
+        const proposal = proposalTokens.resolve<ReviewCompleteInput>("review_complete", input.proposalToken);
+        const applied = applyReviewComplete(proposal.input, proposal.digest);
+        return result({
+          commandStatus: "applied" as const,
+          trackId: proposal.input.trackId,
+          status: applied.state.status,
+          files: [
+            jsonArtifact(applied.statePath, applied.state),
+            artifact(applied.tracksPath, applied.tracksContent)
+          ],
+          valid: applied.valid,
+          derivedStateCurrent: applied.derivedStateCurrent
+        });
+      }
       const derived = deriveReviewCompleteInput(input as ReviewCompleteRequest);
       const preview = previewReviewComplete(derived);
       return proposalResult("review_complete", derived, {
@@ -351,54 +410,50 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("review_complete_apply", {
-    title: "Apply clean review completion",
-    description: "Apply an approved clean-review transition only while its exact state and index preview remain current.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ReviewCompleteInput>("review_complete", proposalToken);
-      const applied = applyReviewComplete(proposal.input, proposal.digest);
-      return result({
-        trackId: proposal.input.trackId,
-        status: applied.state.status,
-        files: [
-          jsonArtifact(applied.statePath, applied.state),
-          artifact(applied.tracksPath, applied.tracksContent)
-        ],
-        valid: applied.valid,
-        derivedStateCurrent: applied.derivedStateCurrent
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  const archiveBatchSchema = {
+  const archiveCandidateUpdateSchema = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("pattern"), slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) }),
+    z.object({ kind: z.literal("pattern_index") }),
+    z.object({
+      kind: z.literal("active_track_seed"),
+      trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+    })
+  ]);
+  const archiveBatchCandidateSchema = {
     projectRoot: z.string().min(1),
+    candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     selectedTracks: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).min(1).optional(),
-    updates: z.array(z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("pattern"), slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), content: z.string() }),
-      z.object({ kind: z.literal("pattern_index"), content: z.string() }),
-      z.object({
-        kind: z.literal("active_track_seed"),
-        trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-        content: z.string()
-      })
-    ]))
+    updates: z.array(archiveCandidateUpdateSchema)
   };
 
-  server.registerTool("archive_batch_preview", {
-    title: "Preview complete archive batch",
-    description: "Preview selected moves, lifecycle states, pattern/seed writes, operation journal, and the post-archive track index together.",
-    inputSchema: archiveBatchSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+  server.registerTool("archive_batch_candidate", {
+    title: "Govern a staged archive batch",
+    description: "Prepare a staged archive batch for human approval, or apply its unchanged proposal token after approval.",
+    inputSchema: z.union([z.object(archiveBatchCandidateSchema), z.object(proposalInputSchema())]),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
-      const derived = deriveArchiveBatchInput(input as ArchiveBatchRequest);
-      const preview = previewArchiveBatch(derived);
-      return proposalResult("archive_batch", derived, {
+      if ("proposalToken" in input) {
+        const proposal = proposalTokens.resolve<ArchiveBatchCandidateInput>(
+          "archive_batch_candidate",
+          input.proposalToken
+        );
+        const applied = applyArchiveBatchCandidate(proposal.input, proposal.digest);
+        return result({
+          commandStatus: "applied" as const,
+          batchId: proposal.input.batchId,
+          selectedTracks: proposal.input.selectedTracks,
+          operationPath: applied.operationPath,
+          checkpoint: applied.operation.checkpoint,
+          moves: applied.moves.map(({ trackId, targetPath }) => ({ trackId, targetPath })),
+          writes: applied.writes.map((write) => artifact(write.path, write.content)),
+          tracks: artifact(applied.tracksPath, applied.tracksContent),
+          valid: applied.valid,
+          derivedStateCurrent: applied.derivedStateCurrent
+        });
+      }
+      const derived = deriveArchiveBatchCandidateInput(input as ArchiveBatchCandidateRequest);
+      const preview = previewArchiveBatchCandidate(derived);
+      return proposalResult("archive_batch_candidate", derived, {
         digest: preview.digest,
         batchId: derived.batchId,
         selectedTracks: derived.selectedTracks,
@@ -416,73 +471,25 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("archive_batch_apply", {
-    title: "Apply complete archive batch",
-    description: "Journal and apply one approved archive batch only while its complete preview remains current.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ArchiveBatchInput>("archive_batch", proposalToken);
-      const applied = applyArchiveBatch(proposal.input, proposal.digest);
-      return result({
-        batchId: proposal.input.batchId,
-        selectedTracks: proposal.input.selectedTracks,
-        operationPath: applied.operationPath,
-        checkpoint: applied.operation.checkpoint,
-        moves: applied.moves.map(({ trackId, targetPath }) => ({ trackId, targetPath })),
-        writes: applied.writes.map((write) => artifact(write.path, write.content)),
-        tracks: artifact(applied.tracksPath, applied.tracksContent),
-        valid: applied.valid,
-        derivedStateCurrent: applied.derivedStateCurrent
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
   const archiveRecordSchema = {
     projectRoot: z.string().min(1),
     batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
-  server.registerTool("archive_batch_record_preview", {
-    title: "Preview archive provenance record",
-    description: "Preview the authorized follow-up that records the archive commit in track, project, and batch state.",
+  server.registerTool("archive_batch_record", {
+    title: "Record archive provenance",
+    description: "Atomically validate and record the already-authorized archive commit in track, project, and batch state.",
     inputSchema: archiveRecordSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       const derived = deriveArchiveBatchRecordInput(input as ArchiveBatchRecordRequest);
       const preview = previewArchiveBatchRecord(derived);
-      return proposalResult("archive_batch_record", derived, {
-        digest: preview.digest,
+      const applied = applyArchiveBatchRecord(derived, preview.digest, preview);
+      return result({
+        commandStatus: "applied" as const,
         batchId: derived.batchId,
         archiveCommit: derived.archiveCommit,
-        checkpoint: preview.operation.checkpoint,
-        files: [
-          jsonArtifact(preview.operationPath, preview.operation),
-          jsonArtifact(preview.projectPath, preview.project),
-          ...preview.states.map((state) => jsonArtifact(state.path, state.state))
-        ]
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("archive_batch_record_apply", {
-    title: "Record archive provenance",
-    description: "Record an approved batch's immutable archive commit and complete its journal behind a stale-state digest.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ArchiveBatchRecordInput>("archive_batch_record", proposalToken);
-      const applied = applyArchiveBatchRecord(proposal.input, proposal.digest);
-      return result({
-        batchId: proposal.input.batchId,
-        archiveCommit: proposal.input.archiveCommit,
         checkpoint: applied.operation.checkpoint,
         files: [
           jsonArtifact(applied.operationPath, applied.operation),
@@ -505,52 +512,28 @@ export function createCadreServer(): McpServer {
     maxWorkers: z.number().int().min(1).max(32).optional().default(3)
   };
 
-  server.registerTool("execution_start_preview", {
-    title: "Preview implementation execution",
-    description: "Preview the exact resumable implementation journal and track operation for an approved plan DAG.",
+  server.registerTool("execution_start", {
+    title: "Start implementation execution",
+    description: "Atomically validate and start the implementation execution already authorized by the implement invocation.",
     inputSchema: executionStartSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       const derived = deriveExecutionStartInput(input as ExecutionStartRequest);
       const preview = previewExecutionStart(derived);
-      return proposalResult("execution_start", derived, {
-        digest: preview.digest,
-        journalPath: preview.journalPath,
-        statePath: preview.statePath,
-        execution: {
-          executionId: preview.journal.executionId,
-          trackId: preview.journal.trackId,
-          checkpoint: preview.journal.checkpoint,
-          requestedMode: preview.journal.requestedMode,
-          effectiveMode: preview.journal.effectiveMode,
-          approvalMode: preview.journal.approvalMode,
-          maxWorkers: preview.journal.maxWorkers,
-          nodeCount: Object.keys(preview.journal.nodes).length
-        },
-        derivedStatus: executionSchedulerView(preview.journal)
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("execution_start_apply", {
-    title: "Start implementation execution",
-    description: "Write the approved implementation journal and operation only when its preview digest is unchanged.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ExecutionStartInput>("execution_start", proposalToken);
-      const applied = applyExecutionStart(proposal.input, proposal.digest);
+      const applied = applyExecutionStart(derived, preview.digest, preview);
       return result({
+        commandStatus: "applied" as const,
         journalPath: applied.journalPath,
         statePath: applied.statePath,
         execution: {
           executionId: applied.journal.executionId,
           trackId: applied.journal.trackId,
           checkpoint: applied.journal.checkpoint,
+          requestedMode: applied.journal.requestedMode,
+          effectiveMode: applied.journal.effectiveMode,
+          approvalMode: applied.journal.approvalMode,
+          maxWorkers: applied.journal.maxWorkers,
           nodeCount: Object.keys(applied.journal.nodes).length
         },
         derivedStatus: executionSchedulerView(applied.journal)
@@ -578,43 +561,21 @@ export function createCadreServer(): McpServer {
     blocker: z.string().min(1).optional()
   };
 
-  server.registerTool("execution_checkpoint_preview", {
-    title: "Preview an execution checkpoint",
-    description: "Translate one semantic execution event into the complete legal journal transition sequence.",
+  server.registerTool("execution_checkpoint", {
+    title: "Apply an execution checkpoint",
+    description: "Atomically validate and apply one already-authorized semantic execution event.",
     inputSchema: executionCheckpointSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       const preview = previewExecutionCheckpoint(input as ExecutionCheckpointInput);
-      return proposalResult(
-        "execution_checkpoint",
-        input,
-        {
-          path: preview.path,
-          digest: preview.digest,
-          transition: preview.transition,
-          checkpoint: preview.journal.checkpoint
-        }
-      );
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("execution_checkpoint_apply", {
-    title: "Apply an execution checkpoint",
-    description: "Apply one previewed semantic execution event atomically.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ExecutionCheckpointInput>("execution_checkpoint", proposalToken);
-      const applied = applyExecutionCheckpoint(proposal.input, proposal.digest);
+      const applied = applyExecutionCheckpoint(input as ExecutionCheckpointInput, preview.digest, preview);
       return result({
+        commandStatus: "applied" as const,
         path: applied.path,
         transition: applied.transition,
         checkpoint: applied.journal.checkpoint,
-        derivedStatus: executionSchedulerView(applied.journal, [proposal.input.nodeId])
+        derivedStatus: executionSchedulerView(applied.journal, [input.nodeId])
       });
     } catch (error) {
       return failure(error);
@@ -646,44 +607,19 @@ export function createCadreServer(): McpServer {
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
-  server.registerTool("execution_finish_preview", {
-    title: "Preview completed implementation execution",
-    description: "Verify all DAG nodes, plan evidence, and worktree cleanup before proposing ready-for-review state and its derived tracks index under one digest.",
+  server.registerTool("execution_finish", {
+    title: "Complete implementation execution",
+    description: "Atomically verify and finalize an execution after its required manual verification is already recorded.",
     inputSchema: executionFinishSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       const derived = deriveExecutionFinishInput(input as ExecutionFinishRequest);
       const preview = previewExecutionFinish(derived);
-      return proposalResult("execution_finish", derived, {
-        digest: preview.digest,
-        executionId: derived.executionId,
-        targetStatus: preview.state.status,
-        headCommit: derived.headCommit,
-        completedAt: derived.completedAt,
-        files: [
-          jsonArtifact(preview.journalPath, preview.journal),
-          jsonArtifact(preview.statePath, preview.state),
-          artifact(preview.planPath, preview.planContent),
-          artifact(preview.tracksPath, preview.tracksContent)
-        ]
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("execution_finish_apply", {
-    title: "Complete implementation execution",
-    description: "Finalize an approved execution, ready-for-review state, and derived tracks index together only when the preview is unchanged.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ExecutionFinishInput>("execution_finish", proposalToken);
-      const applied = applyExecutionFinish(proposal.input, proposal.digest);
+      const applied = applyExecutionFinish(derived, preview.digest, preview);
       return result({
-        executionId: proposal.input.executionId,
+        commandStatus: "applied" as const,
+        executionId: derived.executionId,
         status: applied.journal.status,
         checkpoint: applied.journal.checkpoint,
         headCommit: applied.journal.headCommit,
@@ -706,82 +642,62 @@ export function createCadreServer(): McpServer {
     nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/)
   };
 
-  server.registerTool("worktree_create_preview", {
-    title: "Preview a Cadre worker worktree",
-    description: "Resolve the constrained worker path, branch, and exact base commit without mutating Git.",
-    inputSchema: worktreeSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
-  }, async (input) => {
-    try {
-      return proposalResult("worktree_create", input, previewWorktreeCreate(input as WorktreeCreateInput));
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("worktree_create_apply", {
+  server.registerTool("worktree_create", {
     title: "Create a Cadre worker worktree",
-    description: "Create or reconcile one approved constrained worker worktree using an unchanged preview digest.",
-    inputSchema: proposalInputSchema(),
+    description: "Atomically validate and create or reconcile one already-authorized constrained worker worktree.",
+    inputSchema: worktreeSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<WorktreeCreateInput>("worktree_create", proposalToken);
-      return result(applyWorktreeCreate(proposal.input, proposal.digest));
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("integration_preview", {
-    title: "Preview worker integration",
-    description: "Verify clean source/target worktrees, protected Cadre state, branch tips, and changed files before merge.",
-    inputSchema: worktreeSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult("worktree_integrate", input, previewWorktreeIntegration(input as WorktreeIntegrationInput));
+      const preview = previewWorktreeCreate(input as WorktreeCreateInput);
+      const applied = applyWorktreeCreate(input as WorktreeCreateInput, preview.digest, preview);
+      return result({ commandStatus: "applied" as const, ...applied });
     } catch (error) {
       return failure(error);
     }
   });
 
-  server.registerTool("integration_apply", {
+  server.registerTool("integration", {
     title: "Integrate a worker branch",
-    description: "Merge an approved worker branch without squashing; report conflicts without resolving them.",
-    inputSchema: proposalInputSchema(),
+    description: "Atomically merge in phase/autonomous mode; in governed mode return approval_required first, then accept the unchanged proposal token after human approval.",
+    inputSchema: z.union([z.object(worktreeSchema), z.object(proposalInputSchema())]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_integrate", proposalToken);
-      return result(applyWorktreeIntegration(proposal.input, proposal.digest));
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("worktree_cleanup_preview", {
-    title: "Preview worker cleanup",
-    description: "Verify a clean worker branch is fully integrated before proposing worktree and branch removal, including recovery after its node was already completed.",
-    inputSchema: worktreeSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      return proposalResult("worktree_cleanup", input, previewWorktreeCleanup(input as WorktreeIntegrationInput));
+      if ("proposalToken" in input) {
+        const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_integrate", input.proposalToken);
+        return result({
+          commandStatus: "applied" as const,
+          ...applyWorktreeIntegration(proposal.input, proposal.digest)
+        });
+      }
+      const integrationInput = input as WorktreeIntegrationInput;
+      const preview = previewWorktreeIntegration(integrationInput);
+      if (integrationRequiresApproval(integrationInput)) {
+        return proposalResult("worktree_integrate", integrationInput, preview);
+      }
+      return result({
+        commandStatus: "applied" as const,
+        ...applyWorktreeIntegration(integrationInput, preview.digest, preview)
+      });
     } catch (error) {
       return failure(error);
     }
   });
 
-  server.registerTool("worktree_cleanup_apply", {
+  server.registerTool("worktree_cleanup", {
     title: "Clean up an integrated worker",
-    description: "Remove only a clean, fully integrated Cadre worktree and its safely deletable branch, whether its journal node is integrated or already completed.",
-    inputSchema: proposalInputSchema(),
+    description: "Atomically verify and remove only a clean, fully integrated Cadre worktree and safely deletable branch.",
+    inputSchema: worktreeSchema,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
+  }, async (input) => {
     try {
-      const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_cleanup", proposalToken);
-      return result(applyWorktreeCleanup(proposal.input, proposal.digest));
+      const cleanupInput = input as WorktreeIntegrationInput;
+      const preview = previewWorktreeCleanup(cleanupInput);
+      return result({
+        commandStatus: "applied" as const,
+        ...applyWorktreeCleanup(cleanupInput, preview.digest, preview)
+      });
     } catch (error) {
       return failure(error);
     }
@@ -800,50 +716,43 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  const approvedFileSchema = z.object({ path: z.string().min(1), content: z.string() });
-  const initSchema = {
+  const initCandidateSchema = {
     projectRoot: z.string().min(1),
     projectName: z.string().min(1),
     context: z.enum(["greenfield", "brownfield"]),
     gitDisposition: z.enum(["existing", "initialize"]),
     baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/).nullable(),
     approvedAt: z.iso.datetime(),
-    files: z.array(approvedFileSchema).min(5)
+    stagedFiles: z.array(z.string().min(1)).min(5)
   };
 
-  server.registerTool("project_init_preview", {
-    title: "Preview Cadre project initialization",
-    description: "Validate approved rendered artifacts and return the proposed .cadre file set and semantic digest without writing; approvedAt is audit metadata and does not affect the digest.",
-    inputSchema: initSchema,
-    annotations: { readOnlyHint: true, openWorldHint: false }
+  server.registerTool("project_init_candidate", {
+    title: "Initialize from a staged Cadre candidate",
+    description: "Prepare staged initialization for human approval, or atomically promote its unchanged proposal token after approval.",
+    inputSchema: z.union([z.object(initCandidateSchema), z.object(proposalInputSchema())]),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
   }, async (input) => {
     try {
-      const preview = previewProjectInit(input as ProjectInitInput);
-      return proposalResult("project_init", input, {
+      if ("proposalToken" in input) {
+        const proposal = proposalTokens.resolve<ProjectInitCandidateInput>(
+          "project_init_candidate",
+          input.proposalToken
+        );
+        const applied = applyProjectInitCandidate(proposal.input, proposal.digest);
+        return result({
+          commandStatus: "applied" as const,
+          runtimeVersion: applied.runtimeVersion,
+          templateSetVersion: applied.templateSetVersion,
+          files: applied.files.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
+          digest: applied.digest
+        });
+      }
+      const preview = previewProjectInitCandidate(input as ProjectInitCandidateInput);
+      return proposalResult("project_init_candidate", input, {
         runtimeVersion: preview.runtimeVersion,
         templateSetVersion: preview.templateSetVersion,
         files: preview.files.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
         digest: preview.digest
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("project_init_apply", {
-    title: "Apply approved Cadre project initialization",
-    description: "Atomically create .cadre only when the semantic proposal matches an approved preview digest; records approvedAt as audit metadata.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<ProjectInitInput>("project_init", proposalToken);
-      const applied = applyProjectInit(proposal.input, proposal.digest);
-      return result({
-        runtimeVersion: applied.runtimeVersion,
-        templateSetVersion: applied.templateSetVersion,
-        files: applied.files.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
-        digest: applied.digest
       });
     } catch (error) {
       return failure(error);
@@ -877,34 +786,23 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("tracks_render_preview", {
-    title: "Preview the derived tracks index",
-    description: "Read all track-local state and return the exact derived tracks.md update and digest.",
+  server.registerTool("tracks_render", {
+    title: "Render the derived tracks index",
+    description: "Atomically validate and rewrite deterministic tracks.md from current track-local state.",
     inputSchema: { projectRoot: z.string().min(1) },
-    annotations: { readOnlyHint: true, openWorldHint: false }
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
       const input = { projectRoot: safeProjectRoot(projectRoot) };
       const preview = renderTracksPreview(input.projectRoot);
-      return proposalResult("tracks_render", input, {
+      const path = writeTracks(input.projectRoot, preview.digest, preview);
+      return result({
+        commandStatus: "applied" as const,
         path: preview.path,
         sha256: sha256(preview.content),
-        digest: preview.digest
+        changed: preview.changed,
+        writtenPath: path
       });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  server.registerTool("tracks_render_apply", {
-    title: "Apply the derived tracks index",
-    description: "Rewrite tracks.md only when current state matches a human-approved preview digest.",
-    inputSchema: proposalInputSchema(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ proposalToken }) => {
-    try {
-      const proposal = proposalTokens.resolve<{ projectRoot: string }>("tracks_render", proposalToken);
-      return result({ path: writeTracks(proposal.input.projectRoot, proposal.digest) });
     } catch (error) {
       return failure(error);
     }

@@ -298,26 +298,26 @@ The `cadre` stdio server exposes immutable resources at `cadre://templates/v1/..
 | `styleguide_resolve` | No | Resolve default styleguides for an approved technology list. |
 | `project_status` | No | Summarize project and track checkpoints, including resumable operations. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
+| `artifact_candidate_manifest` | No | Return the exact path/hash manifest for a guarded project-local candidate stage. |
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
-| `review_complete_preview` / `review_complete_apply` | Preview/apply | Bind a clean review and accepted risks to the current execution, then write completed state and the exact derived index together. |
-| `archive_batch_preview` / `archive_batch_apply` | Preview/apply | Preview and apply selected moves, lifecycle states, patterns, seeds, journal, and post-archive index as one approved batch. |
-| `archive_batch_record_preview` / `archive_batch_record_apply` | Preview/apply | Record the resulting archive commit in track, project, and batch provenance without a second batch decision. |
-| `execution_start_preview` / `execution_start_apply` | Preview/apply | Create an approved, digest-gated execution journal and enter `in_progress`. |
-| `execution_checkpoint_preview` / `execution_checkpoint_apply` | Preview/apply | Expand one semantic execution event into its complete legal, evidence-gated transition sequence, apply it atomically, and return a compact transition receipt. |
+| `execution_graph_validate_candidate` | No | Validate a staged unapproved plan without transporting its body through MCP. |
+| `review_complete` | Adaptive | Return `approval_required` for a clean-review decision, then apply the unchanged token after approval. |
+| `archive_batch_candidate` | Adaptive | Read staged pattern/seed files, return the complete batch for approval, then apply its unchanged token. |
+| `archive_batch_record` | Atomic | Record the resulting archive commit in track, project, and batch provenance without a second decision. |
+| `execution_start` | Atomic | Create the authorized execution journal and enter `in_progress` in one call. |
+| `execution_checkpoint` | Atomic | Expand and apply one semantic event as a complete legal, evidence-gated transition sequence. |
 | `execution_status` | No | Return a compact ready/active/blocked scheduler view, with optional focused node detail. |
-| `execution_finish_preview` / `execution_finish_apply` | Preview/apply | Require completed nodes, current plan evidence, and removed worktrees before `ready_for_review`. |
-| `worktree_create_preview` / `worktree_create_apply` | Preview/apply | Create or reconcile one derived phase/task worktree and branch. |
-| `integration_preview` / `integration_apply` | Preview/apply | Inspect and merge a clean worker branch into its derived parent, reporting conflicts without resolving them. |
-| `worktree_cleanup_preview` / `worktree_cleanup_apply` | Preview/apply | Remove only a clean worker whose branch is proven integrated into its parent. |
+| `execution_finish` | Atomic | Require completed nodes, current plan evidence, and removed worktrees before writing `ready_for_review`. |
+| `worktree_create` | Atomic | Create or reconcile one derived phase/task worktree and branch. |
+| `integration` | Adaptive | Merge atomically in phase/autonomous mode; require a token round trip only in governed mode. |
+| `worktree_cleanup` | Atomic | Remove only a clean worker whose branch is proven integrated into its parent. |
 | `worktree_status` | No | Report Cadre-managed worktrees and orphaned runtime directories. |
-| `project_init_preview` | No | Return the complete proposed initialization path/hash manifest and digest without echoing file contents. |
-| `project_init_apply` | Yes | Atomically create `.cadre` only when inputs match the approved preview digest. |
+| `project_init_candidate` | Adaptive | Return staged initialization for approval, then atomically promote its unchanged token to `.cadre`. |
 | `setup_record_git_initialized` | Yes | Record the verified Git-initialization checkpoint. |
 | `setup_record_commit` | Yes | Record the already-created setup commit SHA and complete setup state. |
-| `tracks_render_preview` | No | Preview the derived `tracks.md` content and digest. |
-| `tracks_render_apply` | Yes | Write `tracks.md` only when current state matches the approved preview digest. |
+| `tracks_render` | Atomic | Validate and write deterministic `tracks.md` from current track state. |
 
-The MCP server cannot approve its own proposals or run arbitrary shell commands. Its Git surface is limited to derived Cadre worktree creation, non-squash integration, status, and verified cleanup. It never force-deletes a branch, resolves a conflict, edits product files, or commits on behalf of a worker. Deterministic writes and Git mutations use preview/apply digests to reject stale proposals.
+The MCP server cannot approve its own proposals or run arbitrary shell commands. Its Git surface is limited to derived Cadre worktree creation, non-squash integration, status, and verified cleanup. It never force-deletes a branch, resolves a conflict, edits product files, or commits on behalf of a worker. Already-authorized deterministic writes and Git mutations validate and apply atomically; genuine decision boundaries retain digest-bound proposal tokens and stale-state rejection.
 
 Review and archive minimize approval fragmentation without weakening governance. A finding disposition and its exact remediation artifacts may share one approval; explicit reject-and-complete records accepted risks in the clean review; and a uniquely eligible archive target is included directly in the full batch proposal. The archive preview computes the post-move `tracks.md` before approval, including archived rows. Any changed content, selection, digest, or consequence requires a corrected proposal and renewed approval.
 

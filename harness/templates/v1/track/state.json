@@ -17,6 +17,12 @@
     "baseCommit": "{{BASE_COMMIT_OR_NULL}}",
     "expectedCommit": "cadre(track): specify {{TRACK_ID}}",
     "approvedArtifacts": ["spec.md", "plan.md", "learning.md"],
+    "approvalDigest": "{{APPROVAL_DIGEST}}",
+    "approvedArtifactHashes": [
+      { "path": "spec.md", "sha256": "{{SPEC_SHA256}}" },
+      { "path": "plan.md", "sha256": "{{PLAN_SHA256}}" },
+      { "path": "learning.md", "sha256": "{{LEARNING_SHA256}}" }
+    ],
     "approvedAt": "{{APPROVED_AT}}"
   },
   "lastExecution": null,

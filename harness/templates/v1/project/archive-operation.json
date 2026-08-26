@@ -9,6 +9,10 @@
   "selectedTracks": ["{{TRACK_ID}}"],
   "completedTracks": [],
   "approvedArtifacts": ["{{APPROVED_ARTIFACT}}"],
+  "approvalDigest": "{{APPROVAL_DIGEST}}",
+  "approvedArtifactHashes": [
+    { "path": "{{APPROVED_ARTIFACT}}", "sha256": "{{ARTIFACT_SHA256}}" }
+  ],
   "artifactProgress": [],
   "approvedAt": "{{APPROVED_AT}}",
   "archiveCommit": null

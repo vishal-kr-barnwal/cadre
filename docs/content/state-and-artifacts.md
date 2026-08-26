@@ -94,9 +94,8 @@ delete or replace it to make a blocked workflow appear fresh.
 
 ## Derived State
 
-`tracks_render_preview` reads all track-local state and produces the exact
-`tracks.md` content plus a digest. `tracks_render_apply` writes only when the
-same underlying state still produces that digest.
+`tracks_render` reads all track-local state, validates the exact deterministic
+`tracks.md` content, and writes it atomically in one idempotent call.
 
 Central validation checks both canonical state and whether derived state is
 current. A valid track with stale `tracks.md` is still an unhealthy project

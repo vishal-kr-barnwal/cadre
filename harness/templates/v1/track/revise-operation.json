@@ -4,6 +4,10 @@
   "baseCommit": "{{BASE_COMMIT}}",
   "expectedCommit": "cadre(revise): update {{TRACK_ID}}",
   "approvedArtifacts": ["{{REVISION_PATH}}"],
+  "approvalDigest": "{{APPROVAL_DIGEST}}",
+  "approvedArtifactHashes": [
+    { "path": "{{APPROVED_ARTIFACT}}", "sha256": "{{ARTIFACT_SHA256}}" }
+  ],
   "artifactProgress": [],
   "approvedAt": "{{APPROVED_AT}}",
   "sourceStatus": "{{SOURCE_STATUS}}",

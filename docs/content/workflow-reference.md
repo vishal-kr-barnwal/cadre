@@ -19,8 +19,12 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
   path/hash manifest, Git disposition, digest, commits, and provenance. Full
   defaults remain available on request.
 - **Primary MCP:** template bundle, styleguide resolution,
-  `project_init_preview/apply`, setup checkpoint tools, validation, and derived
-  tracks index.
+  adaptive `project_init_candidate`, setup checkpoint tools, validation,
+  and derived tracks index.
+- **Proposal transport:** rendered files live under `.cadre-stage/create/`;
+  MCP receives only their paths and metadata. Base files are staged directly as
+  `product.md`, `guidelines.md`, `tech-stack.md`, `workflow.md`, and
+  `styleguides/general.md`; there is no `.cadre/init/` directory.
 - **Writes:** initial `.cadre/` state and setup provenance commits.
 - **Stops when:** setup is complete; an initialized project routes to refresh
   or status.
@@ -29,8 +33,9 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 
 - **Use for:** a new/resumed feature or bug.
 - **Requires:** substantive scope, acceptance, dependencies, and plan evidence.
-- **Primary MCP:** project status, template bundles, graph validation, state
-  validation, and tracks index preview/apply.
+- **Primary MCP:** project status, template bundles,
+  `artifact_candidate_manifest`, staged graph validation, state validation, and
+  atomic tracks index rendering.
 - **Approvals:** one combined specification-and-plan decision by default;
   staged review only when explicitly requested.
 - **Writes:** `state.json`, `spec.md`, `plan.md`, and `learning.md` with separate
@@ -57,7 +62,7 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
   requirements, error/security/compatibility paths, and learning.
 - **Finding path:** exact approved bug/remediation artifacts return the track to
   implementation.
-- **Clean path:** `review_complete_preview/apply` binds approval to execution,
+- **Clean path:** adaptive `review_complete` binds approval to execution,
   plan revision, graph digest, reviewed HEAD, and accepted risks.
 - **Stops at:** `completed` only after a clean approved cycle.
 
@@ -75,8 +80,7 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 ## archive
 
 - **Use for:** one or more tracks already completed by clean review.
-- **Primary MCP:** archive batch preview/apply and provenance record
-  preview/apply.
+- **Primary MCP:** adaptive staged archive command and atomic provenance record.
 - **Writes:** track moves/status, consolidated patterns, relevant active-track
   seeds, operation journal, derived index, and two provenance commits.
 - **Atomicity:** one ineligible selection rejects the whole batch.

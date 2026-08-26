@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
@@ -14,6 +14,8 @@ export interface OperationState {
   baseCommit?: string | null;
   expectedCommit?: string;
   approvedArtifacts?: string[];
+  approvalDigest?: string;
+  approvedArtifactHashes?: Array<{ path: string; sha256: string }>;
   artifactProgress?: string[];
   approvedAt?: string;
   sourceStatus?: string;
@@ -133,7 +135,13 @@ function readJson<T>(path: string, errors: string[]): T | null {
   }
 }
 
-function validateOperation(operation: OperationState | null | undefined, owner: string, errors: string[]): void {
+function validateOperation(
+  operation: OperationState | null | undefined,
+  owner: string,
+  errors: string[],
+  artifactRoot?: string,
+  artifactProgress: string[] = operation?.artifactProgress ?? []
+): void {
   if (!operation || typeof operation !== "object") {
     errors.push(`${owner}: incomplete state requires an operation journal`);
     return;
@@ -144,6 +152,41 @@ function validateOperation(operation: OperationState | null | undefined, owner: 
     errors.push(`${owner}: operation approvedArtifacts must be a non-empty array`);
   }
   if (!operation.approvedAt) errors.push(`${owner}: operation approvedAt is required`);
+  if (operation.approvalDigest !== undefined && !/^[0-9a-f]{64}$/.test(operation.approvalDigest)) {
+    errors.push(`${owner}: operation approvalDigest must be a SHA-256 digest`);
+  }
+  if (operation.approvedArtifactHashes !== undefined) {
+    if (!Array.isArray(operation.approvedArtifactHashes) || !operation.approvedArtifactHashes.length) {
+      errors.push(`${owner}: operation approvedArtifactHashes must be a non-empty array`);
+    } else {
+      const seen = new Set<string>();
+      for (const artifact of operation.approvedArtifactHashes) {
+        if (!artifact || typeof artifact.path !== "string" || !operation.approvedArtifacts?.includes(artifact.path)) {
+          errors.push(`${owner}: operation artifact hash path must name an approved artifact`);
+          continue;
+        }
+        if (seen.has(artifact.path)) errors.push(`${owner}: duplicate operation artifact hash for ${artifact.path}`);
+        seen.add(artifact.path);
+        if (!/^[0-9a-f]{64}$/.test(artifact.sha256 ?? "")) {
+          errors.push(`${owner}: operation artifact hash for ${artifact.path} must be SHA-256`);
+        }
+        if (artifactRoot && artifactProgress.includes(artifact.path) && /^[0-9a-f]{64}$/.test(artifact.sha256 ?? "")) {
+          const target = resolve(artifactRoot, artifact.path);
+          const relation = relative(artifactRoot, target);
+          if (relation.startsWith("..") || isAbsolute(relation)) {
+            errors.push(`${owner}: approved artifact hash path escapes its operation root: ${artifact.path}`);
+          } else if (!existsSync(target) || lstatSync(target).isSymbolicLink() || !lstatSync(target).isFile()) {
+            errors.push(`${owner}: promoted approved artifact is unavailable: ${artifact.path}`);
+          } else {
+            const actual = createHash("sha256").update(readFileSync(target, "utf8")).digest("hex");
+            if (actual !== artifact.sha256) {
+              errors.push(`${owner}: promoted artifact differs from its approved hash: ${artifact.path}`);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 function validateRevisionOperation(state: TrackState, owner: string, errors: string[]): void {
@@ -283,7 +326,7 @@ function validateProjectOperations(root: string, byId: Map<string, DiscoveredTra
       refreshCommit?: string | null;
     }>(join(operationsRoot, file), errors);
     if (!operation) continue;
-    validateOperation(operation, owner, errors);
+    validateOperation(operation, owner, errors, root);
     if (!operation.status || !["in_progress", "completed"].includes(operation.status)) {
       errors.push(`${owner}: status must be in_progress or completed`);
     }
@@ -422,7 +465,13 @@ export function validateProject(projectRoot: string): ValidationResult {
   if (!project.setup?.checkpoint) errors.push("project.json: setup checkpoint is required");
   if (!Array.isArray(project.setup?.artifactProgress)) errors.push("project.json: setup artifactProgress must be an array");
   if (project.setup?.status === "in_progress") {
-    validateOperation(project.setup.operation, "project.json setup", errors);
+    validateOperation(
+      project.setup.operation,
+      "project.json setup",
+      errors,
+      root,
+      project.setup.artifactProgress
+    );
   } else if (project.setup?.status === "completed") {
     if (!/^[0-9a-f]{7,40}$/.test(project.setup?.commit ?? "")) {
       errors.push("project.json: completed setup requires a commit SHA");
@@ -450,7 +499,7 @@ export function validateProject(projectRoot: string): ValidationResult {
     if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
     if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
     if (state.operation != null) {
-      validateOperation(state.operation, `${track.id} state`, errors);
+      validateOperation(state.operation, `${track.id} state`, errors, trackRoot, state.artifactProgress);
       validateRevisionOperation(state, `${track.id} state`, errors);
       validateImplementOperation(state, `${track.id} state`, errors);
       validateRevertOperation(state, `${track.id} state`, errors);
@@ -604,8 +653,12 @@ export function renderTracksPreview(projectRoot: string): {
   return { path, content, previousContent, changed: previousContent !== content, digest };
 }
 
-export function writeTracks(projectRoot: string, proposalDigest: string): string {
-  const preview = renderTracksPreview(projectRoot);
+export function writeTracks(
+  projectRoot: string,
+  proposalDigest: string,
+  preparedPreview?: ReturnType<typeof renderTracksPreview>
+): string {
+  const preview = preparedPreview ?? renderTracksPreview(projectRoot);
   if (preview.digest !== proposalDigest) {
     throw new Error("tracks.md proposal is stale; preview it again before applying");
   }

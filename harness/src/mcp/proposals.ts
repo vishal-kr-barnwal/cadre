@@ -56,7 +56,7 @@ function defaultProposalRoot(): string {
 }
 
 /**
- * Persists opaque preview capabilities in an MCP-owned, bounded runtime cache.
+ * Persists opaque approval capabilities in an MCP-owned, bounded runtime cache.
  * Callers receive only a short random token and can never select a filesystem
  * path. The cache survives MCP restarts without mutating project or Git state.
  */
@@ -120,7 +120,7 @@ export class ProposalTokenStore {
     const path = this.pathFor(token);
     if (!existsSync(path)) {
       throw new Error(
-        "proposal token is unknown or no longer retained; call the matching preview tool again"
+        "proposal token is unknown or no longer retained; request a new proposal from the matching command"
       );
     }
 
@@ -139,7 +139,7 @@ export class ProposalTokenStore {
         closeSync(descriptor);
         descriptor = null;
         this.unlinkRecord(path);
-        throw new Error("proposal token has expired; call the matching preview tool again");
+        throw new Error("proposal token has expired; request a new proposal from the matching command");
       }
       if (envelope.kind !== kind) throw new Error(`proposal token is for ${envelope.kind}, not ${kind}`);
       return { input: envelope.input as T, digest: envelope.digest };
@@ -149,7 +149,7 @@ export class ProposalTokenStore {
       }
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(
-          "proposal token is unknown or no longer retained; call the matching preview tool again"
+          "proposal token is unknown or no longer retained; request a new proposal from the matching command"
         );
       }
       throw error;

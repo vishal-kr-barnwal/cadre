@@ -44,8 +44,8 @@ list. Each can be accepted, amended, or replaced before project initialization.
 Cadre's MCP runtime is intentionally constrained:
 
 - It exposes immutable versioned templates and typed state operations.
-- Deterministic mutations use paired preview/apply calls with stale-state
-  digests.
+- Already-authorized deterministic mutations validate and apply atomically in
+  one call; genuine decision boundaries return a digest-bound proposal token.
 - Git support is limited to derived worktree creation, non-squash integration,
   status, and verified cleanup.
 - It does not run arbitrary shell commands, edit product files for workers,

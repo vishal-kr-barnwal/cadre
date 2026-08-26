@@ -19,6 +19,18 @@ export function resolveGitCommit(projectRoot: string, revision = "HEAD"): string
   return result.stdout.trim();
 }
 
+export function readGitFileAtCommit(projectRoot: string, revision: string, path: string): string {
+  if (!path || path.startsWith("/") || path.includes("\\")
+    || path.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+    throw new Error(`Invalid Git file path: ${path}`);
+  }
+  const root = gitRoot(projectRoot);
+  const commit = resolveGitCommit(root, revision);
+  const result = spawnSync("git", ["show", `${commit}:${path}`], { cwd: root, encoding: "utf8" });
+  if (result.status !== 0) throw new Error(`Git commit ${commit} does not contain ${path}`);
+  return result.stdout;
+}
+
 export function isGitAncestor(projectRoot: string, ancestor: string, descendant = "HEAD"): boolean {
   const root = gitRoot(projectRoot);
   return spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {

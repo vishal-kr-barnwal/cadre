@@ -365,9 +365,10 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
 
 export function applyExecutionStart(
   input: ExecutionStartInput,
-  proposalDigest: string
+  proposalDigest: string,
+  preparedProposal?: ExecutionProposal
 ): ExecutionProposal & { derivedStatus: ExecutionDerivedStatus } {
-  const proposal = previewExecutionStart(input);
+  const proposal = preparedProposal ?? previewExecutionStart(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution proposal is stale; preview it again");
   if (lstatSync(proposal.statePath).isSymbolicLink()) throw new Error("refusing to start execution through a state symbolic link");
   mkdirSync(dirname(proposal.journalPath), { recursive: true });
@@ -867,8 +868,21 @@ export function previewExecutionCheckpoint(input: ExecutionCheckpointInput): Ret
 
 export function applyExecutionCheckpoint(
   input: ExecutionCheckpointInput,
-  proposalDigest: string
+  proposalDigest: string,
+  preparedProposal?: ReturnType<typeof previewExecutionCheckpoint>
 ): ReturnType<typeof applyExecutionNodesUpdate> & { transition: ExecutionTransitionReceipt } {
+  if (preparedProposal) {
+    if (preparedProposal.digest !== proposalDigest) {
+      throw new Error("execution nodes proposal is stale; preview it again");
+    }
+    writeJournalAtomically(preparedProposal.path, preparedProposal.journal);
+    return {
+      path: preparedProposal.path,
+      journal: preparedProposal.journal,
+      derivedStatus: deriveExecutionStatus(preparedProposal.journal),
+      transition: preparedProposal.transition
+    };
+  }
   const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
   const from = journal.nodes[input.nodeId]?.status;
   if (!from) throw new Error(`unknown execution node ${input.nodeId}`);
@@ -1034,8 +1048,12 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
   };
 }
 
-export function applyExecutionFinish(input: ExecutionFinishInput, proposalDigest: string): ExecutionFinishProposal {
-  const proposal = previewExecutionFinish(input);
+export function applyExecutionFinish(
+  input: ExecutionFinishInput,
+  proposalDigest: string,
+  preparedProposal?: ExecutionFinishProposal
+): ExecutionFinishProposal {
+  const proposal = preparedProposal ?? previewExecutionFinish(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution completion proposal is stale; preview it again");
   if (lstatSync(proposal.journalPath).isSymbolicLink()
     || lstatSync(proposal.statePath).isSymbolicLink()
